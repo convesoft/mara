@@ -54,17 +54,36 @@ the history of prior execution results.
 
 :::req m_01KY7YA2F1TK19HZFACJW6BNRS
 :id: REQ-EVIDENCE-HISTORY
-:title: Evidence corrections shall preserve the prior record
+:title: Invalid evidence shall identify its replacement
 :status: approved
 :level: system
 :kind: safety
 :priority: must
 :derives_from: GOAL-AUDITABLE
 
-Evidence is conceptually append-only. If a result is invalid or its provenance
-is wrong, a new evidence item shall supersede the old item and explain the
-correction. Existing released evidence shall not be silently edited into a
-different result.
+When evidence is marked `invalid` or `superseded`, it shall contain a non-empty
+`correction_reason` and at least one other evidence item shall supersede it. The
+prior item remains in the current project model with its original result and
+provenance. These invariants are enforceable from one worktree and do not claim
+to detect historical mutation. The schema's `supersedes` relation requires equal
+source and target flavours and rejects self-reference, so an incoming edge on an
+evidence target can only originate from a different evidence item.
+:::
+
+:::req m_01KY7YA2FFYDQJV9VTX4ZMQYMX
+:id: REQ-EVIDENCE-HISTORY-AUDIT
+:title: Mara shall detect mutation of released evidence
+:status: proposed
+:level: system
+:kind: safety
+:priority: should
+:derives_from: GOAL-AUDITABLE
+
+A future revision-aware audit shall compare released evidence by MID with its
+baseline Git revision and report changed result, provenance, target tests, body,
+or removal. Corrections shall be new evidence that supersedes the released item.
+This audit is outside v0.1 because current-worktree validation cannot prove that
+committed history was not rewritten.
 :::
 
 ## Verification layers and self-hosting gate
@@ -127,6 +146,7 @@ claim by default.
 :satisfies: REQ-TEST-DEFINITION-SEMANTICS
 :satisfies: REQ-EVIDENCE-SEPARATION
 :satisfies: REQ-EVIDENCE-HISTORY
+:satisfies: REQ-EVIDENCE-HISTORY-AUDIT
 :satisfies: REQ-VERIFICATION-LAYERS
 :satisfies: REQ-SELF-HOSTING-GATE
 :satisfies: REQ-EVIDENCE-REVISION-ANCHOR
@@ -227,8 +247,28 @@ and relation changes update gaps deterministically without claiming execution.
 :verifies: REQ-EVIDENCE-REVISION-ANCHOR
 
 Fixtures shall reject evidence without a test target, capture time, result, or
-commit/URI; preserve multiple runs of one test; resolve superseding corrections;
-and distinguish baseline commits from dirty or unknown working states.
+commit/URI; preserve multiple runs of one test; require an incoming `supersedes`
+edge and a non-empty `correction_reason` for invalid or superseded evidence;
+reject whitespace-only reasons, cross-flavour replacement edges, and
+self-replacement; accept a complete evidence-to-evidence correction pair; resolve
+correction chains; and distinguish baseline commits from dirty or unknown working
+states. Timestamp fixtures shall reject malformed `captured_at` values while
+accepting ordinary human correction text.
+:::
+
+:::test m_01KY7YA2FG3GR8X7JQWJ4EKZ9Z
+:id: TEST-EVIDENCE-HISTORY-AUDIT
+:title: Released evidence mutation audit test
+:status: draft
+:kind: verification
+:method: automated
+:level: integration
+:verifies: REQ-EVIDENCE-HISTORY-AUDIT
+
+Revision fixtures shall distinguish unchanged evidence, an explicit superseding
+correction, and silent edits or removal of released evidence at a selected
+baseline. This test becomes executable with the proposed semantic revision-diff
+capability and is not part of the v0.1 acceptance gate.
 :::
 
 :::test m_01KY7YA2FCQNXNSFWPRN22PBNT

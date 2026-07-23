@@ -45,7 +45,9 @@ uppercase 26-character ULID. The self-hosting schema uses the prefix `m_`.
 
 `mara mid` shall generate one valid MID using the project's configured prefix,
 the current ULID timestamp component, and operating-system randomness. It shall
+perform project discovery and load schema identity without loading content, and
 print only the MID in human mode so scripts and authors can insert it directly.
+Outside a valid Mara project it shall fail rather than assume an implicit prefix.
 :::
 
 :::req m_01KY7Y9R5WJP6Q1CYBMJ0HTWFM

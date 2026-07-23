@@ -28,6 +28,13 @@ are views over this corpus rather than independent sources of truth.
 - [System architecture](architecture/system.mara.md)
 - [Verification strategy](verification/strategy.mara.md)
 
+## Normative references
+
+- [Project format v1](reference/project-format.mara.md)
+- [Schema format v1](reference/schema-format.mara.md)
+- [Transaction journal v1](reference/transaction-journal.mara.md)
+- [Wire contracts v1](reference/wire-contracts.mara.md)
+
 The v0.1 implementation scope is the local deterministic CLI described by
 [[GOAL-BOOTSTRAP]] and its approved requirements. Proposed requirements in the
 agent-context specification preserve explicit post-v0.1 boundaries without

@@ -101,8 +101,14 @@ flavour schema determines whether body content is required.
 
 Mara shall not nest authored item blocks. Mara-like text inside fenced code,
 inline code, raw HTML, or an existing item body shall not open another item. A
-standalone closing-marker example inside body prose shall be fenced as code or
-escaped.
+closing marker is recognized only when the source line, excluding its LF or CRLF
+terminator, is exactly `:::` with no leading or trailing whitespace. To place
+that rendered text on its own body line, the author shall write `\:::` at byte
+column zero. The backslash remains in the raw body and source spans, does not
+close the item, and is interpreted by CommonMark as an escape so the rendered
+line is `:::`. To render a leading backslash followed by three colons, the author
+shall write `\\:::`. Fenced code remains the preferred form for multi-line syntax
+examples.
 :::
 
 ## Complete document model
@@ -315,7 +321,8 @@ flat metadata entries, and wiki-style inline references.
 
 Golden fixtures shall cover minimal and populated items, repeated keys, blank
 metadata values, body metadata lookalikes, nested-marker rejection, code-fenced
-examples, escaped closers, and missing closing markers.
+examples, exact `:::` closers, `\:::` rendered closers, `\\:::` literal escaped
+closers, leading or trailing whitespace, and missing closing markers.
 :::
 
 :::test m_01KY7Y9R5K6SW0Z2PMG0CHH8V8

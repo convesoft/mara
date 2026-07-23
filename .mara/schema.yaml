@@ -234,6 +234,10 @@ flavours:
         type: string
         required: true
         pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$'
+      correction_reason:
+        type: string
+        required: false
+        pattern: '^.*\S.*$'
       commit:
         type: string
       uri:
@@ -434,6 +438,29 @@ rules:
     applies_to:
       flavours: [evidence]
     field_any_of: [commit, uri]
+    min: 1
+
+  - name: invalid_evidence_has_replacement
+    kind: requires_relation
+    severity: error
+    applies_to:
+      flavours: [evidence]
+    when:
+      field: status
+      in: [invalid, superseded]
+    relation: supersedes
+    direction: incoming
+    min: 1
+
+  - name: invalid_evidence_explains_correction
+    kind: requires_field
+    severity: error
+    applies_to:
+      flavours: [evidence]
+    when:
+      field: status
+      in: [invalid, superseded]
+    field: correction_reason
     min: 1
 
   - name: completed_risk_has_mitigation

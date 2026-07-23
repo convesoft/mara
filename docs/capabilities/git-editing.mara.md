@@ -80,7 +80,9 @@ replacing any original file.
 Before replacement begins, Mara shall record a transaction journal under
 `.mara/transactions/` containing operation identity, affected project-relative
 paths, original content digests, staged content digests, backup locations, and
-per-file progress. Journal updates shall be durable enough to detect interruption.
+per-file progress. Journal shape, durable synchronization points, state
+transitions, and recovery decisions shall follow the versioned transaction
+journal contract.
 :::
 
 :::req m_01KY7YA2DHXPRFZK1JPCV1B5DA
@@ -109,7 +111,8 @@ It shall retain the journal whenever successful restoration cannot be proven.
 When an incomplete journal exists, every mutating command shall stop and explain
 the transaction state. `mara transaction recover --rollback` shall restore the
 recorded originals, while `--complete` shall apply the remaining staged files
-only when all recorded preconditions still hold.
+only when the transaction contract permits completion and every recorded digest,
+file identity, temporary file, and journal-state precondition still holds.
 :::
 
 :::req m_01KY7YA2DKG5P04ZDCHEMN44ZG
@@ -253,5 +256,18 @@ rollback with an accurate retained journal when restoration is uncertain.
 
 Process-interruption fixtures shall exercise rollback and completion from every
 journal progress state, changed preconditions, final full-project validation,
-absence of automatic commits, and cleanup only after proven success.
+absence of automatic commits, digest reconciliation at every replacement/journal
+crash window, and cleanup only after the versioned state machine proves success.
+For both forward replacement and rollback restoration, fault injection shall
+interrupt immediately after atomic replacement, permission application,
+destination flush, parent-directory flush, and the per-file journal update.
+Recovery shall prove that permissions are restored, the destination and parent
+are flushed again when completion was not durably recorded, and promotion to
+`applied` or `restored` occurs only after those idempotent steps succeed.
+Fixtures shall also interrupt every durable journal update before and after
+replacement of `journal.json`, covering valid both-file, valid initial next-only,
+empty transaction-directory, malformed next-file, and illegal next-only states.
+They shall verify authoritative-state selection, safe adoption or removal,
+directory flushing, and conflict behavior exactly as specified by the transaction
+protocol.
 :::

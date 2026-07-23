@@ -61,8 +61,11 @@ display ID when present, flavour, title, and project-relative source location.
 :derives_from: STORY-NAVIGATE-TRACE
 
 The list command shall accept repeated flavour filters and exact scalar field
-filters. Multiple filters shall combine predictably and the JSON result shall
-record the effective filter criteria.
+filters. Values within one flavour or field filter shall combine with OR;
+different field names and the flavour constraint shall combine with AND. The
+JSON result shall record normalized effective filters even when they are empty.
+A repeatable field shall match when any authored value equals any compiled filter
+value for the item's flavour; absent fields shall not match.
 :::
 
 ## Item inspection
@@ -108,8 +111,11 @@ relation used for each result.
 :derives_from: STORY-NAVIGATE-TRACE
 
 Trace shall default to direct neighbours and accept a bounded positive depth.
-It shall avoid infinite traversal, preserve distinct relation paths when useful,
-and order nodes and paths deterministically.
+It shall return every distinct simple canonical-edge path from the focus with one
+through the selected maximum number of steps, never repeat a MID within a path,
+exclude the zero-step focus path, and order nodes and paths deterministically.
+Different canonical relation names between the same endpoints are distinct paths;
+repeated authored occurrences of one canonical edge are not.
 :::
 
 ## Deterministic JSON projection
@@ -313,7 +319,11 @@ of a normalized Mara project.
 :verifies: REQ-SHOW-ITEM
 
 CLI fixtures shall cover MID and display-ID resolution, deterministic listing,
-combined filters, complete show output, human snapshots, and stable JSON data.
+OR within repeated flavour and field values, AND across field names, normalized
+effective filter JSON including empty and cross-flavour mixed-type filters,
+unknown and unconvertible filter errors, repeatable-field existential matching,
+absent fields, duplicate values, numeric negative-zero equality, self-contained
+show mentions, human snapshots, and stable JSON data.
 :::
 
 :::test m_01KY7YA2D4ZH3EBGK1FN9BBBYC
@@ -328,7 +338,12 @@ combined filters, complete show output, human snapshots, and stable JSON data.
 
 Graph fixtures containing branches, cycles, inverse authoring, and repeated
 paths shall verify direction, depth, path reporting, cycle safety, and stable
-ordering.
+ordering. Every JSON path step shall expose canonical source and target plus the
+actual incoming or outgoing traversal direction. Exact golden path sets shall
+cover a directed cycle, a diamond, and two different canonical relations between
+the same endpoints; they shall prove simple-path exclusion of repeated MIDs,
+absence of the zero-step focus path, occurrence deduplication, and relation-based
+parallel-path preservation.
 :::
 
 :::test m_01KY7YA2D55K5KDK24KXTBWJVF
@@ -346,7 +361,8 @@ ordering.
 
 Golden indexes shall cover complete document and graph content, clean and dirty
 Git states, unversioned directories, repeated rebuilds, changed filesystem
-enumeration order, and absence of machine-specific absolute paths.
+enumeration order, exact v1 key and collection ordering, null policy, canonical
+UTF-8 serialization, and absence of machine-specific absolute paths.
 :::
 
 :::test m_01KY7YA2D6CG9DXA8CBGGV3B5G

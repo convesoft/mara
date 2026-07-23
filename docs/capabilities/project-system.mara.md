@@ -236,9 +236,10 @@ operational discovery, indexing, validation, and Git write policy.
 :verifies: REQ-PROJECT-INIT
 :verifies: REQ-PROJECT-CONFIG-STRICT
 
-Fixtures shall cover initialization, nested working directories, nearest-root
-selection, strict configuration failures, and refusal to overwrite existing
-files.
+Fixtures shall cover every project-format table and key, process-neutral
+initialization with an empty flavour map, nested working directories,
+nearest-root selection, duplicate and unknown configuration, invalid path and
+glob values, and refusal to overwrite existing files.
 :::
 
 :::test m_01KY7Y9R4BY1FDYHZVMMKVNWRD
@@ -253,8 +254,9 @@ files.
 :verifies: REQ-CONTENT-UNTRACKED
 :verifies: REQ-CONTENT-SYMLINKS
 
-Fixtures shall demonstrate deterministic include/exclude precedence, ignored
-files, new untracked documents, directory symlinks, and permitted internal file
+Fixtures shall demonstrate every v1 glob token, platform-independent case and
+separator behaviour, deterministic include/exclude/Git-ignore precedence, new
+untracked documents, directory cycles, and permitted or rejected internal file
 symlinks.
 :::
 

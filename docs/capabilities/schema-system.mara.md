@@ -265,9 +265,10 @@ project relation vocabulary, and progressive validation rules.
 :verifies: REQ-SCHEMA-STRICT
 :verifies: REQ-SCHEMA-IDENTITY
 
-Fixtures shall cover supported and unsupported versions, duplicate YAML keys,
-unknown keys, invalid names, invalid identity settings, and source-located
-diagnostics.
+Fixtures shall cover supported and unsupported versions, the allowed YAML
+profile, an empty bootstrap flavour map, duplicate YAML keys, every unknown-key
+position, invalid names and regexes, invalid identity settings, and
+source-located diagnostics.
 :::
 
 :::test m_01KY7Y9R4YKEJKXCPZK3BFMYEZ
@@ -302,5 +303,6 @@ unsupported composition construct.
 
 Fixtures shall cover endpoint constraints, external schemes, inverse namespace
 collisions, symmetric relations, cardinality, self-reference, acyclicity,
-conditional requirements, and orphan-rule declarations.
+conditional requirements across shared and different enum domains, every closed
+rule shape, and orphan-rule declarations.
 :::
