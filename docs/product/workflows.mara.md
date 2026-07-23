@@ -196,8 +196,10 @@ body and semantic lifecycle remain owned by the Git corpus.
 :kind: user_flow
 :involves: ACT-WEB-USER
 :derives_from: STORY-WEB-AUTHORING
+:derives_from: GOAL-GIT-CANONICAL
+:uses_term: TERM-DERIVED-PROJECTION
 
 The web service opens an isolated Git branch or worktree, applies source-span-
-aware patches, validates the result, and creates a commit for review. The UI
-never treats a graph database as an authoring authority.
+aware patches, validates the result, and creates a commit for review while using
+the graph database only as a derived read view.
 :::

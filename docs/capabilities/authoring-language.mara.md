@@ -1,9 +1,9 @@
 # Authoring language
 
 Mara documents are Markdown documents with a small, versioned structural
-extension for typed items and wiki-style references. Unsupported renderers may
-show Mara markers as ordinary text, but they shall not turn complete items into
-opaque code blocks or destroy the readable narrative.
+extension for typed items and wiki-style references. The extension is designed
+to leave complete items and their surrounding narrative readable when an
+unsupported renderer shows Mara markers as ordinary text.
 
 ## Item blocks
 
@@ -113,8 +113,8 @@ examples.
 
 ## Complete document model
 
-Narrative is part of the product, not parse-time whitespace around extracted
-items. It must remain available to renderers, editors, and context assembly.
+The complete document model treats narrative as product content alongside its
+extracted items.
 
 :::req m_01KY7Y9R5A2RKWNHYW5VKNJFCK
 :id: REQ-LANGUAGE-DOCUMENT-MODEL
@@ -258,6 +258,7 @@ continue checking every other independently parseable project file.
 :satisfies: REQ-LANGUAGE-UTF8
 :satisfies: REQ-LANGUAGE-SOURCE-SPANS
 :satisfies: REQ-LANGUAGE-PARSE-RECOVERY
+:mitigates: RISK-MARKDOWN-AMBIGUITY
 
 The Rust parser shall extend Rushdown with Mara block and inline nodes, retain
 the complete Markdown AST and raw source spans, and immediately convert parsed
@@ -287,9 +288,9 @@ noise of `:::item req <mid>`.
 :affects: DES-DOCUMENT-PARSER
 :affects: REQ-LANGUAGE-TOP-LEVEL
 
-Other Markdown systems may also interpret colon containers or wiki links. Mara
-must use the complete opening grammar and Markdown context rather than raw text
-matching, and `.mara.md` remains the default discovery convention.
+Other Markdown systems may also interpret colon containers or wiki links. Raw
+text matching could therefore extract ordinary Markdown extensions as Mara
+items or suppress real Mara structures in supported Markdown contexts.
 :::
 
 :::artifact m_01KY7Y9R5RGT9P925P7YA3Q3SR

@@ -1,9 +1,8 @@
 # Exploration and indexing
 
-Mara's first read interface is the CLI. It must answer direct questions about
-the current working tree without a database, while also producing a stable JSON
-projection that later interfaces can consume or replace with another derived
-backend.
+Mara's first read interface is a CLI over the current working tree. It supports
+direct inspection without a database and can produce a stable JSON projection
+for later derived interfaces.
 
 ## Common query behaviour
 
@@ -112,10 +111,11 @@ relation used for each result.
 
 Trace shall default to direct neighbours and accept a bounded positive depth.
 It shall return every distinct simple canonical-edge path from the focus with one
-through the selected maximum number of steps, never repeat a MID within a path,
-exclude the zero-step focus path, and order nodes and paths deterministically.
-Different canonical relation names between the same endpoints are distinct paths;
-repeated authored occurrences of one canonical edge are not.
+through the selected maximum number of steps, never repeat an item, derived
+source-span, or external-node identity within a path, exclude the zero-step focus
+path, and order nodes and paths deterministically. Different canonical relation
+names between the same endpoints are distinct paths; repeated authored
+occurrences of one canonical edge are not.
 :::
 
 ## Deterministic JSON projection
@@ -131,8 +131,13 @@ repeated authored occurrences of one canonical edge are not.
 :uses_term: TERM-DERIVED-PROJECTION
 
 `mara index` shall validate the project and write the configured JSON index only
-when no error prevents a coherent normalized model. The index shall be a
-replaceable generated file and never an authoring input.
+when a coherent normalized model exists and no diagnostic fails the configured
+validation policy. Warning escalation therefore suppresses the write. Non-failing
+warning and information diagnostics may be included in the projection. The index
+shall be a replaceable generated file and never an authoring input. A successful
+write shall atomically replace the configured index with one complete canonical
+document; validation or write failure shall never expose a truncated or partially
+serialized index.
 :::
 
 :::req m_01KY7YA2CX018G0FHR43XYW4XM
@@ -147,8 +152,8 @@ replaceable generated file and never an authoring input.
 
 The index shall contain project and schema identity, documents, sections,
 narrative blocks, item placements, raw bodies, typed fields, canonical MID
-edges, inverse presentation, weak mentions, external nodes, source spans,
-relation provenance, and available Git provenance.
+edges, derived source-span nodes and edges, inverse presentation, weak mentions,
+external nodes, source spans, relation provenance, and available Git provenance.
 :::
 
 :::req m_01KY7YA2CYFMXA5JXG2PV7ADB8
@@ -174,6 +179,7 @@ and equivalent relevant Git state.
 :kind: functional
 :priority: should
 :derives_from: GOAL-AUDITABLE
+:mitigates: RISK-INDEX-AUTHORITY
 
 Inside a worktree, the index shall record HEAD commit, branch when available,
 the project path relative to repository root, and whether relevant project files
@@ -277,8 +283,7 @@ SQLite, or graph projections. Performance optimization follows measured need.
 :affects: REQ-INDEX-CONTENT
 
 Fast consumers may be tempted to mutate or preserve an index independently of
-source. Every backend and interface must expose its source revision and retain a
-clear rebuild path from Git-tracked files.
+source, allowing stale or modified derived state to appear authoritative.
 :::
 
 :::artifact m_01KY7YA2DANZ8F7690GGWEM9TS
@@ -323,7 +328,9 @@ OR within repeated flavour and field values, AND across field names, normalized
 effective filter JSON including empty and cross-flavour mixed-type filters,
 unknown and unconvertible filter errors, repeatable-field existential matching,
 absent fields, duplicate values, numeric negative-zero equality, self-contained
-show mentions, human snapshots, and stable JSON data.
+show mentions, human snapshots, and stable JSON data. Invalid filters and
+unresolved or ambiguous `show` references shall produce `status: invalid` with
+null `data` and null `error` while retaining exact diagnostics.
 :::
 
 :::test m_01KY7YA2D4ZH3EBGK1FN9BBBYC
@@ -341,9 +348,15 @@ paths shall verify direction, depth, path reporting, cycle safety, and stable
 ordering. Every JSON path step shall expose canonical source and target plus the
 actual incoming or outgoing traversal direction. Exact golden path sets shall
 cover a directed cycle, a diamond, and two different canonical relations between
-the same endpoints; they shall prove simple-path exclusion of repeated MIDs,
-absence of the zero-step focus path, occurrence deduplication, and relation-based
-parallel-path preservation.
+the same endpoints; they shall prove simple-path exclusion of repeated node
+identities, absence of the zero-step focus path, occurrence deduplication, and
+relation-based parallel-path preservation. Additional fixtures shall traverse
+from an item to an external target and from an item backlink to a derived
+source-span node, proving that non-item endpoint identities appear in path steps
+and terminate safely. The derived node shall be injected at the normalized-model
+fixture seam; this test does not require a configured source scanner.
+Unresolved or ambiguous focus references shall produce `status: invalid` with
+null `data` and null `error` while retaining exact diagnostics.
 :::
 
 :::test m_01KY7YA2D55K5KDK24KXTBWJVF
@@ -362,7 +375,20 @@ parallel-path preservation.
 Golden indexes shall cover complete document and graph content, clean and dirty
 Git states, unversioned directories, repeated rebuilds, changed filesystem
 enumeration order, exact v1 key and collection ordering, null policy, canonical
-UTF-8 serialization, and absence of machine-specific absolute paths.
+UTF-8 serialization, and absence of machine-specific absolute paths. Policy
+fixtures shall prove that non-failing warnings are serialized, warning escalation
+suppresses generation, every failing diagnostic leaves any existing index
+unchanged, and a later successful rebuild atomically replaces it. Independent
+normalized-model fixtures shall prove exact `source_nodes` projection, `NodeRef`
+endpoint encoding, incoming item backlinks, deterministic deduplication, and
+absence of invented MIDs for source spans. Scanner discovery and language-aware
+marker recognition remain in the future-adapter test. Fault-injected writer
+fixtures shall cover temporary serialization, file flush, atomic replacement,
+and parent-directory flush, proving that the configured path contains the
+complete previous or complete new index and never a partial document.
+When validation policy suppresses an index write, the JSON command envelope
+shall use `status: invalid`, null `data`, and null `error`, and the fixture shall
+prove that no new index or hash is reported and any previous index is unchanged.
 :::
 
 :::test m_01KY7YA2D6CG9DXA8CBGGV3B5G

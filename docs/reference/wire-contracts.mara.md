@@ -54,6 +54,7 @@ explicit null rather than omission.
 :satisfies: REQ-DIAGNOSTIC-MODEL
 :satisfies: REQ-DIAGNOSTIC-ORDER
 :satisfies: REQ-DIAGNOSTIC-OUTPUT
+:satisfies: REQ-REFERENCE-FAILURES
 
 ## Diagnostic model
 
@@ -129,6 +130,7 @@ placed in `details`; implementations shall not synthesize ad-hoc code strings.
 | `field.pattern_mismatch` | error | A string or display ID fails its full-match pattern. |
 | `field.repetition` | error | A non-repeatable field occurs more than once. |
 | `reference.unresolved` | error | An internal reference resolves to no active MID or display ID. |
+| `reference.ambiguous` | error | An internal reference matches more than one live item. |
 | `reference.external_scheme` | error | An external target scheme is not permitted. |
 | `relation.unknown` | error | A typed relation name is not authorable in this context. |
 | `relation.invalid_source` | error | Canonical source flavour or derived kind is not permitted. |
@@ -143,6 +145,26 @@ placed in `details`; implementations shall not synthesize ad-hoc code strings.
 | `edit.stale_source` | error | A planned edit no longer matches its parsed preimage. |
 | `transaction.incomplete` | error | A prior transaction requires explicit recovery. |
 | `transaction.recovery_failed` | error | Recovery could not prove restoration or completion. |
+
+For `reference.ambiguous`, `primary` is the exact authored reference occurrence
+and `details` has exactly these keys:
+
+```json
+{
+  "candidate_mids": [
+    "m_01KY0000000000000000000001",
+    "m_01KY0000000000000000000002"
+  ],
+  "reference": "REQ-DUPLICATE"
+}
+```
+
+`reference` preserves the target token exactly as authored, excluding inline
+delimiters, an optional relation qualifier, and an optional label.
+`candidate_mids` contains every distinct live candidate MID in ascending UTF-8
+byte order and therefore contains at least two entries.
+`related` contains one entry per candidate in that same order; its message is
+`candidate: <MID>` and its span is the candidate item's opening line.
 
 For `rule.failed`, the schema-selected severity replaces the catalogue default.
 An implementation that needs a new semantic category must introduce a later wire
@@ -204,35 +226,62 @@ always `.` and both paths are normalized project-relative strings.
 `transaction.incomplete`, `transaction.failed`, and `internal.failed`. Details
 keys are sorted; internal causes must not expose secrets or absolute host paths.
 
-Command data has these exact forms:
+The status-to-payload contract is exact: `ok` has the command-specific `data`
+below and null `error`; `invalid` has null `data` and null `error`, with all
+policy-failing validation results represented by `diagnostics`; `failed` has
+null `data` and a non-null operational `error`. No command emits a partial
+success payload for an `invalid` result.
+
+Successful command data has these exact forms:
 
 - `check` and `schema_check`: `{"summary": Summary}`;
 - `list`: `{"filters": ListFilters, "items": [ItemSummary]}`;
 - `show`: `{"item": Item}`;
 - `trace`: `{"focus_mid": string, "direction": string, "max_depth": integer,
-  "nodes": [ItemSummary], "paths": [TracePath]}`;
+  "nodes": [TraceNode], "paths": [TracePath]}`;
 - `index`: `{"path": string, "sha256": string, "summary": Summary}`.
 
-`Summary` keys are `documents`, `items`, `edges`, `mentions`, `external_nodes`,
-`errors`, `warnings`, and `info`, all non-negative integers. `ItemSummary` keys
-are `mid`, `id`, `flavour`, `title`, and `source`; `mid` and `flavour` are strings,
-`id` and `title` are strings or null, and `source` is a non-null `SourceSpan`.
+`Summary` keys are `documents`, `items`, `source_nodes`, `edges`, `mentions`,
+`external_nodes`, `errors`, `warnings`, and `info`, all non-negative integers.
+`ItemSummary` keys are `mid`, `id`, `flavour`, `title`, and `source`; `mid` and
+`flavour` are strings, `id` and `title` are strings or null, and `source` is a
+non-null `SourceSpan`.
 
-`TracePath` keys are `nodes` (ordered MID sequence) and `edges` (ordered
-`TraceStep` sequence). A `TraceStep` has `relation`, `traversal`, `source_mid`, and
-`target_mid`. All four are strings; source and target are the canonical edge
-endpoints, and `traversal` is `outgoing` when the path follows source to target
-or `incoming` when it moves from target to source.
+A graph endpoint is represented by the exact `NodeRef` tagged union:
+
+- item: `{"kind":"item","mid":string}`;
+- derived source: `{"kind":"source_span","source":SourceSpan,"symbol":string|null}`;
+- external object: `{"kind":"external","uri":string}`.
+
+Only item and source-span references may be canonical edge sources. Only item and
+external references may be canonical edge targets. A source-span node's identity
+is the tuple of source path, start byte, end byte, and symbol; line and column
+values must correspond to those bytes but do not create a different identity.
+
+A `TraceNode` is the corresponding exact tagged union with query details:
+
+- item: `{"kind":"item","item":ItemSummary}`;
+- derived source: `{"kind":"source_span","source":SourceSpan,"symbol":string|null}`;
+- external object: `{"kind":"external","uri":string,"scheme":string}`.
+
+`TracePath` keys are `nodes` (ordered `NodeRef` sequence) and `edges` (ordered
+`TraceStep` sequence). A `TraceStep` has `relation`, `traversal`, `source`, and
+`target`. `relation` and `traversal` are strings; `source` and `target` are the
+canonical `NodeRef` endpoints. `traversal` is `outgoing` when the path follows
+source to target or `incoming` when it moves from target to source.
 
 Trace returns every distinct simple canonical-edge path beginning at the focus
 and containing from one through `max_depth` steps allowed by the selected
-direction. A simple path never repeats a MID, so cycles terminate. The zero-step
-focus path is not returned. Authored occurrences do not create additional paths.
+direction. A simple path never repeats a `NodeRef` identity, so cycles terminate.
+The zero-step focus path is not returned. Authored occurrences do not create
+additional paths.
 Canonical edges with the same endpoints but different relation names create
 distinct paths; otherwise paths are deduplicated by their ordered `TraceStep`
 sequence including traversal. The `nodes` collection is the deduplicated union
-of the focus and all returned path nodes. Paths sort by step count, node MID
-sequence, then canonical JSON bytes of their steps.
+of the focus and all returned path nodes. It sorts by node kind and then item MID,
+source-span identity tuple, or external URI. Paths sort by step count, canonical
+JSON bytes of their node-reference sequence, then canonical JSON bytes of their
+steps.
 
 `mara list` accepts repeatable `--flavour <snake_name>` and repeatable
 `--field <snake_name>=<raw-value>` options. A field option splits at its first
@@ -307,6 +356,7 @@ The configured index is a canonical JSON object with these keys in order:
   "git": {},
   "documents": [],
   "items": [],
+  "source_nodes": [],
   "edges": [],
   "mentions": [],
   "external_nodes": [],
@@ -318,6 +368,17 @@ It is written only when the normalized project model exists and no diagnostic
 fails policy. It may contain non-failing warning and info diagnostics. It never
 contains the generation time, absolute paths, random values, or database-local
 identifiers.
+
+The index writer serializes the complete canonical document to an exclusively
+created sibling temporary file, flushes that file, atomically replaces the
+configured index in the same directory, and flushes the parent directory. A
+failure before replacement leaves any previous index untouched. A failure after
+replacement but before the directory flush reports an operational failure; after
+a crash, the destination may contain the complete previous or complete new index,
+never a partial document. The writer uses a uniquely named sibling temporary file
+created with no-follow and exclusive-create semantics. It removes that file on a
+handled pre-replacement failure; an abandoned temporary file is ignored as
+non-authoritative state and is never parsed as the configured index.
 
 ### Project and Git objects
 
@@ -391,26 +452,37 @@ objects in source order. This makes the same `Item` representation self-containe
 in `show` output; the index's global edge and mention arrays are flattened query
 collections, not object-identity tables.
 
-### Edges, mentions, and external nodes
+### Derived source nodes, edges, mentions, and external nodes
 
-Canonical edges sort by source MID, relation UTF-8 bytes, target kind, then target
-MID or URI. An edge has keys `source_mid`, `relation`, `inverse_name`, `target`,
-and `occurrences`. `source_mid` and `relation` are strings; `inverse_name` is a
-string or null. `Target` is exactly `{"kind":"item","mid":string}` or
-`{"kind":"external","uri":string}` with the shown key order and no other key.
-Occurrences sort by source path and start byte and contain `origin`,
-`authoring_name`, and `source`. `origin` and `authoring_name` are strings and
-`source` is a non-null `SourceSpan`. Origin is `canonical_metadata`,
-`inverse_metadata`, `typed_inline`, or `derived_source`. Repeated occurrences do
-not duplicate the canonical edge.
+A `SourceNode` has keys `source` and `symbol`. `source` is a non-null `SourceSpan`
+inside a project-contained source file supplied by a derived adapter and `symbol`
+is a string or null. Source nodes sort and deduplicate by the source-span identity
+tuple defined for `NodeRef`. They are derived projection nodes, not authored Mara
+items, and never receive a MID.
+
+Canonical edges sort by canonical JSON bytes of source `NodeRef`, relation UTF-8
+bytes, then canonical JSON bytes of target `NodeRef`. An edge has keys `source`,
+`relation`, `inverse_name`, `target`, and `occurrences`. `source` is an item or
+source-span `NodeRef`; `target` is an item or external `NodeRef`; `relation` is a
+string and `inverse_name` is a string or null. Occurrences sort by source path and
+start byte and contain `origin`, `authoring_name`, and `source`. `origin` and
+`authoring_name` are strings and occurrence `source` is a non-null `SourceSpan`.
+Origin is `canonical_metadata`, `inverse_metadata`, `typed_inline`, or
+`derived_source`. Repeated occurrences do not duplicate the canonical edge.
+
+An item's `outgoing` contains edges whose source is that item's `NodeRef`. Its
+`incoming` contains edges whose target is that item's `NodeRef`, including edges
+from derived source nodes. A source-node edge is therefore globally representable
+and appears as an incoming backlink without inventing a source MID.
 
 A mention has keys `document`, `source_item_mid`, `target`, `label`, and `source`.
 `document` is a normalized path, `source_item_mid` and `label` are strings or
-null, `target` is the exact `Target` union above, and `source` is a non-null
-`SourceSpan`. Mentions sort by document, start byte, target kind, and target
-identity. Embedded item and narrative mentions use this same complete shape. An
-external node has keys `uri` and `scheme`; both are strings, nodes sort by URI
-bytes, and nodes are deduplicated by exact URI.
+null, `target` is an item or external `NodeRef`, and `source` is a non-null
+`SourceSpan`; source-span mention targets are forbidden. Mentions sort by
+document, start byte, target kind, and target identity. Embedded item and
+narrative mentions use this same complete shape. An external node has keys `uri`
+and `scheme`; both are strings, nodes sort by URI bytes, and nodes are
+deduplicated by exact URI.
 
 Diagnostics use the model and ordering above. Because the index is derived, a
 consumer shall verify `format`, `version`, project identity, schema digest, and

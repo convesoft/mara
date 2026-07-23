@@ -59,8 +59,10 @@ wide rewrite.
 :title: Relation
 :status: accepted
 
-A relation is a schema-declared semantic edge between items or from an item to
-an allowed external object. Internal relation endpoints normalize to MIDs.
+A relation is a schema-declared semantic edge whose source is an item or a
+permitted derived node and whose target is an item or an allowed external
+object. Authored item endpoints normalize to MIDs; derived source endpoints
+retain their deterministic source-span identity.
 :::
 
 :::term m_01KY7Y9R30T88X4MM61RNBYFR4
@@ -177,8 +179,8 @@ through branch-based Git operations rather than direct database mutation.
 :priority: must
 :uses_term: TERM-DERIVED-PROJECTION
 
-Mara shall preserve auditable, branchable, mergeable source files as the only
-durable authority while allowing all indexes and interfaces to be rebuilt.
+Engineering knowledge remains in auditable, branchable, mergeable source files
+as the only durable authority, while every index and interface is rebuildable.
 :::
 
 :::goal m_01KY7Y9R3BXXE284ZJSHGEG9B0
@@ -190,8 +192,8 @@ durable authority while allowing all indexes and interfaces to be rebuilt.
 :uses_term: TERM-ITEM
 :uses_term: TERM-FLAVOUR
 
-Projects shall define their own flavours, fields, relations, and traceability
-rules without Mara hardcoding requirements, stories, designs, or tests.
+Projects define their own flavours, fields, relations, and traceability rules
+without inheriting hardcoded requirements, stories, designs, or tests.
 :::
 
 :::goal m_01KY7Y9R3CZJE18F0VHV2JNYEF
@@ -203,8 +205,8 @@ rules without Mara hardcoding requirements, stories, designs, or tests.
 :uses_term: TERM-RELATION
 :uses_term: TERM-MID
 
-Mara shall connect durable intent, requirements, rationale, design,
-implementation, verification, and evidence through validated semantic edges.
+Durable intent, requirements, rationale, design, implementation, verification,
+and evidence form a navigable set of validated semantic edges.
 :::
 
 :::goal m_01KY7Y9R3D26FMJ4VD1M0P2GKS
@@ -215,8 +217,8 @@ implementation, verification, and evidence through validated semantic edges.
 :priority: must
 :uses_term: TERM-DOCUMENT-MODEL
 
-Mara source shall remain understandable in generic Markdown tooling and shall
-produce small, reviewable Git diffs when structured content changes.
+Mara source remains understandable in generic Markdown tooling and produces
+small, reviewable Git diffs when structured content changes.
 :::
 
 :::goal m_01KY7Y9R3EM1W9G7QTEW2SVBXV
@@ -227,8 +229,8 @@ produce small, reviewable Git diffs when structured content changes.
 :priority: must
 :uses_term: TERM-CONTEXT-PACK
 
-Mara shall make project meaning, constraints, and provenance directly
-consumable by external agents without requiring an embedded language model.
+External agents can consume project meaning, constraints, and provenance
+directly without requiring Mara to embed a language model.
 :::
 
 :::goal m_01KY7Y9R3FH1BRMMNF16Z0P2VH
@@ -239,9 +241,9 @@ consumable by external agents without requiring an embedded language model.
 :priority: must
 :uses_term: TERM-DERIVED-PROJECTION
 
-Given the same source revision, schema, and relevant working-tree state, Mara
-shall produce deterministic semantic results and provenance suitable for review
-and regulated workflows.
+The same source revision, schema, and relevant working-tree state produces
+deterministic semantic results and provenance suitable for review and regulated
+workflows.
 :::
 
 :::goal m_01KY7Y9R3GSMSAPCQ5T2QQSN65
@@ -251,9 +253,9 @@ and regulated workflows.
 :kind: quality
 :priority: should
 
-Mara shall remain useful for dozens of artifacts while supporting repositories
-with thousands of items and large trace graphs without requiring a hosted
-service or graph database.
+The same local workflow remains useful from dozens of artifacts through
+repositories with thousands of items and large trace graphs, without requiring
+a hosted service or graph database.
 :::
 
 :::goal m_01KY7Y9R3HW4VGW1WE6Z9Y38RE
@@ -264,9 +266,9 @@ service or graph database.
 :priority: must
 :uses_term: TERM-ITEM
 
-Mara's own product, language, architecture, risks, and planned verification
-shall be authored as a valid Mara project before the initial parser exists. The
-first implementation increment is complete when it can validate this corpus.
+Mara's own product, language, architecture, risks, and planned verification form
+a valid Mara project before the initial parser exists. Validating this corpus is
+the completion outcome for the first implementation increment.
 :::
 
 ## Scope boundary

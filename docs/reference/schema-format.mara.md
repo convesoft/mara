@@ -216,6 +216,18 @@ endpoint shall contain at least one of `flavours` or `external`; each present
 sequence must be non-empty. Flavour names must resolve in the same schema.
 External entries are schemes without `://`. Unknown endpoint keys are errors.
 
+Declaring a derived source kind permits normalized edges supplied by an adapter;
+it does not configure or activate that adapter. Project format v1 has no source
+scanner configuration, so the v0.1 CLI does not discover source-span nodes. Core
+domain and wire-contract fixtures may construct normalized derived nodes directly;
+runtime scanner discovery remains owned by the proposed source-scanner capability.
+
+The union of `external` schemes across every relation target is the project-level
+allowlist for bare external mentions. A typed relation still accepts only the
+schemes on its own target declaration. An external scheme declared for one
+relation therefore permits a weak bare mention but does not permit that URI as a
+target of another relation.
+
 `inverse_authoring: true` requires `inverse`. A symmetric relation forbids
 `inverse` and `inverse_authoring`, and its source and target flavour sets must be
 identical; symmetric presentation uses the canonical name in both directions.
@@ -226,9 +238,16 @@ when `self_reference` is false before cardinality or cycle evaluation.
 The optional cardinality mapping contains `outgoing` and/or `incoming`. Each is
 a mapping with optional non-negative integer `min` and `max`; `max` may instead
 be the string `many`. Defaults are `min: 0` and `max: many`, and a numeric maximum
-must be greater than or equal to the minimum. Outgoing counts canonical targets
-per source item; incoming counts canonical sources per target item. Counts use
-deduplicated normalized edges, not repeated authoring occurrences.
+must be greater than or equal to the minimum. Outgoing counts distinct target
+`NodeRef` identities per materialized source `NodeRef`; incoming counts distinct
+source `NodeRef` identities per materialized target `NodeRef`. Item sources and
+targets are materialized from the authored corpus even when they have no edge, so
+minima apply to every item of a declared flavour. A derived source-span or
+external target is materialized only when supplied by an adapter or resolved
+reference; cardinality cannot require an unobserved derived or external node to
+exist. Each materialized source span is evaluated independently by its
+source-span identity. Counts use deduplicated normalized edges, not repeated
+authoring occurrences.
 
 For each flavour, fields and authorable relations share one namespace. A
 canonical relation name is authorable on every declared source flavour. An

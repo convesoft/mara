@@ -1,9 +1,9 @@
 # Git editing
 
 Mara v0.1 performs one repository-wide structured edit: display-ID renaming.
-That operation establishes the safety contract later web and agent editors must
-follow—precise patches, explicit preflight, recoverable writes, and no hidden
-commit.
+That operation demonstrates the source-editing pattern used by later web and
+agent editors: precise patches, explicit preflight, recoverable writes, and no
+hidden commit.
 
 ## Rename preflight
 
@@ -161,6 +161,7 @@ its canonical endpoints.
 :satisfies: REQ-EDIT-RECOVERY
 :satisfies: REQ-EDIT-NO-COMMIT
 :satisfies: REQ-EDIT-POSTCHECK
+:mitigates: RISK-PARTIAL-RENAME
 
 The editing service shall consume parsed source spans and immutable preimage
 bytes, build a complete patch plan, validate staged postimages, and execute
@@ -193,9 +194,8 @@ and external orchestration such as Linear or GitHub.
 :affects: DES-SOURCE-TRANSACTION
 
 Filesystem replacement cannot be globally atomic across multiple paths. A crash
-or storage error can leave only part of a rename visible, so staged content,
-backups, journaling, and mandatory recovery are part of correctness rather than
-optional convenience.
+or storage error can therefore leave only part of a rename visible and expose a
+mixed set of display IDs.
 :::
 
 :::artifact m_01KY7YA2DW3XSRD0509K8FM70R
@@ -241,6 +241,10 @@ metadata ordering, Unicode, file permissions, LF, and CRLF.
 Fault injection shall fail staging, journal persistence, and each replacement
 position. Tests shall prove either unchanged originals or successful in-process
 rollback with an accurate retained journal when restoration is uncertain.
+Canonical journal fixtures shall validate every documented JSON example and all
+phase-to-file-state invariants, including that an initial rename journal is
+`preparing`, contains at least one declared file, and has no stage or backup
+identity before preparation begins.
 :::
 
 :::test m_01KY7YA2DQNNG0Z8EAM4CBHZ8V

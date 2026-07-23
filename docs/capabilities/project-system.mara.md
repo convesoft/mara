@@ -69,8 +69,8 @@ unsupported versions shall be errors with source locations.
 
 ## Content-file discovery
 
-Projects must be able to distinguish authored Mara documents from ordinary
-Markdown while retaining explicit control over mixed repositories.
+Content discovery distinguishes authored Mara documents from ordinary Markdown
+while preserving project control over mixed repositories.
 
 :::req m_01KY7Y9R4493V79VHJRGKF59MS
 :id: REQ-CONTENT-GLOBS
@@ -140,6 +140,7 @@ becoming executable configuration.
 :kind: security
 :priority: must
 :derives_from: GOAL-AUDITABLE
+:mitigates: RISK-PATH-ESCAPE
 
 Mara shall reject schema, content, index, and output paths whose normalized
 targets escape the project root. Diagnostics shall report both the configured
@@ -207,8 +208,6 @@ independent of programming language or build system.
 :affects: DES-PROJECT-LOADER
 
 Symlinks, parent components, and platform-specific path forms could cause Mara
-to read or write files outside the repository content that a reviewer expects.
-Containment checks must operate on normalized resolved paths.
 :::
 
 :::artifact m_01KY7Y9R4ECF8K0F1HBZN4TY25

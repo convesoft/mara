@@ -150,6 +150,7 @@ claim by default.
 :satisfies: REQ-VERIFICATION-LAYERS
 :satisfies: REQ-SELF-HOSTING-GATE
 :satisfies: REQ-EVIDENCE-REVISION-ANCHOR
+:mitigates: RISK-SELF-VALIDATION-BIAS
 
 Feature documents own their planned test items. Versioned fixture projects and
 golden outputs exercise those definitions; CI and release workflows create or
@@ -181,10 +182,8 @@ mutable passed/failed status on specifications and preserve an auditable history
 :affects: REQ-SELF-HOSTING-GATE
 :affects: DES-VERIFICATION-CORPUS
 
-A parser can accept its own corpus while violating the written contract.
-Independent malformed fixtures, exact expected diagnostics, low-level grammar
-tests, property checks, and generic Markdown rendering inspection are required in
-addition to a successful self-check.
+A parser can accept its own corpus while violating the written contract, causing
+self-validation to reproduce rather than detect the same misunderstanding.
 :::
 
 ## Planned verification artifacts

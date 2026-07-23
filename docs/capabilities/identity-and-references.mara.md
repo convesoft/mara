@@ -101,6 +101,7 @@ whether an ID is required and may define its exact case-sensitive pattern.
 :kind: functional
 :priority: must
 :derives_from: STORY-VALIDATE-PROJECT
+:mitigates: RISK-DISPLAY-ID-COLLISION
 
 Every present display ID shall be unique across all flavours. Duplicate IDs
 shall be reported with every MID and source location because references to the
@@ -135,7 +136,9 @@ errors.
 
 `[[REF]]` and `[[REF|label]]` shall resolve an internal or permitted external
 target and create a weak mention. The optional label affects presentation but
-not target resolution.
+not target resolution. For a bare external reference, the permitted scheme set
+shall be the union of every external target scheme declared by any relation in
+the active project schema. A scheme absent from that union shall be rejected.
 :::
 
 :::req m_01KY7Y9R62X0VVEHY4K7361CVA
@@ -162,9 +165,12 @@ authorable inverse declared for the source flavour.
 :priority: must
 :derives_from: GOAL-TRACEABILITY
 
-Every resolved internal relation shall be stored in the schema-declared
+Every resolved authored internal relation shall be stored in the schema-declared
 canonical direction with MID source and target endpoints, regardless of whether
-the author used display IDs, MIDs, metadata, typed prose, or an inverse name.
+the author used display IDs, MIDs, metadata, typed prose, or an inverse name. A
+relation emitted by a permitted derived source scanner shall instead use its
+project-relative source-span identity as the canonical source and the resolved
+item MID as its target.
 :::
 
 :::req m_01KY7Y9R64EM55DZJGD7MRT8B9
@@ -205,6 +211,7 @@ duplicate metadata entry shall additionally produce a warning.
 :kind: interface
 :priority: should
 :derives_from: STORY-LINK-DELIVERY
+:mitigates: RISK-REFERENCE-AMBIGUITY
 
 External object identifiers shall use URI-shaped forms such as
 `linear://MARA-123` and `github://owner/repository/issues/42`. The `://`
@@ -220,9 +227,11 @@ separator shall distinguish an external URI from a typed relation qualifier.
 :priority: must
 :derives_from: STORY-LINK-DELIVERY
 
-Only relation declarations that explicitly permit external targets may resolve
-to external objects, and they may restrict accepted URI schemes. External
-objects shall be derived index nodes, not authored Mara items.
+A typed relation may resolve to an external object only when that relation's
+target declaration explicitly permits the object's URI scheme. Bare external
+mentions may use the project-level union of schemes permitted by at least one
+relation target. External objects shall be derived index nodes, not authored Mara
+items.
 :::
 
 ## Display-ID renaming contract
@@ -339,8 +348,8 @@ ever-growing alias namespace and keeps current documents internally consistent.
 :affects: REQ-DISPLAY-ID-RENAME
 
 Independent branches may each introduce a valid item with the same human ID.
-MIDs keep the items distinct, while merged validation must block the ambiguity
-until one display ID is renamed deliberately.
+The merge retains distinct MIDs but creates an ambiguous human handle until the
+collision is resolved.
 :::
 
 :::risk m_01KY7Y9R6M4T8S6HJVC45259Z0
@@ -353,8 +362,7 @@ until one display ID is renamed deliberately.
 :affects: REQ-EXTERNAL-URI
 
 A colon can qualify a typed relation while external identifiers also require a
-scheme. Mara must recognize `<scheme>://` as an external URI before applying the
-`relation:target` grammar.
+scheme, so the same compact token prefix can otherwise admit two interpretations.
 :::
 
 :::artifact m_01KY7Y9R6NAJXWG2HVCHD4QYG9
@@ -423,6 +431,12 @@ unrelated text, and failure of the old ID after rename.
 Fixtures shall combine MID and display-ID targets, labels, metadata and inline
 relations, inverse authoring, duplicate occurrences, broken targets, ambiguous
 IDs, invalid source flavours, and exact occurrence provenance.
+
+The ambiguous-reference oracle shall emit `reference.ambiguous`, preserve the
+ambiguous occurrence as its primary span, preserve the exact authored target
+token in `details.reference`, list every candidate MID in ascending UTF-8 byte
+order in `details.candidate_mids`, and list the corresponding item-header spans
+in `related` in the same order.
 :::
 
 :::test m_01KY7Y9R6EKT6JMX09K40WG7AF
@@ -435,7 +449,9 @@ IDs, invalid source flavours, and exact occurrence provenance.
 :verifies: REQ-EXTERNAL-URI
 :verifies: REQ-EXTERNAL-CONSTRAINTS
 
-Fixtures shall cover bare and typed Linear and GitHub URIs, unsupported schemes,
-relations that forbid external targets, and the distinction between URI schemes
-and relation qualifiers without performing network access.
+Fixtures shall derive the project-level bare-mention scheme allowlist as the
+union of all relation target schemes and cover bare and typed Linear and GitHub
+URIs, a scheme permitted only on another relation, a scheme absent from the
+union, relations that forbid external targets, and the distinction between URI
+schemes and relation qualifiers without performing network access.
 :::

@@ -210,6 +210,7 @@ for a later version and shall not be accepted silently.
 :satisfies: REQ-SCHEMA-INVERSES
 :satisfies: REQ-SCHEMA-RULES
 :satisfies: REQ-SCHEMA-NO-DEFAULTS
+:mitigates: RISK-SCHEMA-COMPLEXITY
 :satisfies: REQ-SCHEMA-SINGLE-FILE
 
 The engine shall deserialize YAML into a version-specific compiled meta-model,
@@ -240,8 +241,8 @@ objects belong to project schemas or future reusable schema packages.
 :affects: REQ-SCHEMA-RULES
 
 Unbounded expressions, inheritance, defaults, and executable extensions could
-make schemas difficult to review and produce non-deterministic behaviour. v0.1
-therefore uses a closed declarative meta-model.
+make schemas difficult to review and produce non-deterministic behaviour across
+implementations.
 :::
 
 :::artifact m_01KY7Y9R535A28YJAWCEH0Y51R
@@ -309,5 +310,7 @@ guidance, unknown distinction targets, and self-distinction.
 Fixtures shall cover endpoint constraints, external schemes, inverse namespace
 collisions, symmetric relations, cardinality, self-reference, acyclicity,
 conditional requirements across shared and different enum domains, every closed
-rule shape, and orphan-rule declarations.
+rule shape, and orphan-rule declarations. Cardinality fixtures shall combine item,
+derived source-span, and external `NodeRef` endpoints and verify counts per
+materialized node identity, including authored items with zero edges.
 :::

@@ -180,6 +180,7 @@ systems own assignment, priority, schedule, and delivery workflow.
 :satisfies: REQ-CONTEXT-OUTPUT
 :satisfies: REQ-CONTEXT-PROVENANCE
 :satisfies: REQ-SCHEMA-DEFINED-VIEWS
+:mitigates: RISK-CONTEXT-OMISSION
 
 The context compiler shall select from the normalized project model using only
 schema and command input, then render through output adapters. Selection records
@@ -213,10 +214,10 @@ by the CLI without bypassing source validation.
 :justifies: DES-CONTEXT-COMPILER
 :justifies: DES-SEMANTIC-ADAPTER-LAYER
 
-Mara must be reproducible in CI and usable by different agents and delivery
-systems. The engine therefore compiles trustworthy context and accepts explicit
-source changes, while probabilistic reasoning and operational workflow remain
-replaceable clients.
+Reproducibility in CI and compatibility with different agents and delivery
+systems require a deterministic boundary. The selected boundary keeps context
+compilation and explicit source changes in the engine while probabilistic
+reasoning and operational workflow remain replaceable clients.
 :::
 
 :::risk m_01KY7YA2EA5HKVWBFJ6T9WE3YY
@@ -230,9 +231,8 @@ replaceable clients.
 :affects: DES-CONTEXT-COMPILER
 
 A compact agent pack can appear complete while excluding a relevant upstream
-decision, risk, or requirement. Named profiles therefore need explicit mandatory
-relations, visible truncation, deterministic limits, and provenance suitable for
-independent review.
+decision, risk, or requirement, causing an agent to act without a governing
+constraint or awareness of omitted context.
 :::
 
 ## Planned future verification

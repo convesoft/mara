@@ -147,6 +147,7 @@ the process; the CLI shall map results to human or JSON output and exit status.
 :satisfies: REQ-ARCH-SOURCE-DERIVED-BOUNDARY
 :satisfies: REQ-ARCH-PURE-DOMAIN
 :satisfies: REQ-ARCH-STRUCTURED-FAILURES
+:mitigates: RISK-PARSER-COUPLING
 
 The workspace shall separate the domain kernel, Markdown adapter, application
 engine, and CLI. Dependency direction is CLI to engine, engine to domain and
@@ -181,8 +182,7 @@ library.
 
 Rushdown extensions are useful for precise Markdown parsing, but exposing those
 nodes beyond the adapter would make the domain and stored index inherit parser
-changes. Boundary conversion and Mara-owned source representations contain that
-risk.
+changes and couple durable contracts to a third-party AST.
 :::
 
 ## Planned workspace artifacts

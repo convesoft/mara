@@ -229,6 +229,7 @@ migrating or guessing.
 :satisfies: REQ-VALIDATE-ITEMS
 :satisfies: REQ-VALIDATE-RELATIONS
 :satisfies: REQ-VALIDATE-RULES
+:mitigates: RISK-DIAGNOSTIC-CASCADE
 :satisfies: REQ-VALIDATE-CYCLES
 :satisfies: REQ-VALIDATE-ORPHANS
 :satisfies: REQ-VALIDATION-COMPATIBILITY
@@ -263,8 +264,8 @@ incidental terminal strings.
 :affects: DES-VALIDATION-PIPELINE
 
 Continuing after failures can create noisy cascades if dependent checks run on
-an invalid partial model. The validation pipeline must distinguish an
-independent issue from a check skipped due to a broken prerequisite.
+an invalid partial model, obscuring independent issues behind misleading
+secondary diagnostics.
 :::
 
 ## Planned verification
@@ -301,6 +302,8 @@ diagnostics from unaffected inputs.
 
 Golden human and JSON outputs shall assert stable codes, fields, related spans,
 ordering, summary counts, warning escalation, and distinct process exit codes.
+Golden failing `check` and `schema check` results shall use `status: invalid`,
+null `data`, and null `error` while retaining every diagnostic.
 :::
 
 :::test m_01KY7Y9R764CRC9B6TCZ5A28DQ

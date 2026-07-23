@@ -26,16 +26,17 @@ and are not a built-in or default Mara process.
 :status: accepted
 :kind: process
 :justifies: DES-MARA-SELF-HOSTING-TRACE
+:justifies: REQ-PROJECT-INIT
+:justifies: REQ-SCHEMA-RULES
 
 The twelve flavours in `.mara/schema.yaml` belong to the Mara project profile.
 Their structured descriptions and selection guidance live beside their machine
 constraints in the schema so contributors, agents, generated references, and
 future interfaces consume one authoritative definition.
 
-The engine shall not assume that another project has these flavours, lifecycle
-values, relations, or traceability rules, and `mara init` shall not install them
-as a default process. Each project must define its own taxonomy, guidance, and
-traceability policy.
+The selected policy treats taxonomy, guidance, lifecycle values, relations, and
+traceability rules as project data. A newly initialized project is therefore
+process-neutral, and each project owns its complete semantic profile.
 :::
 
 :::design m_01KY83DZE4658A61YXV71WVRSM

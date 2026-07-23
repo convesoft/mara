@@ -44,15 +44,36 @@ Its keys and value shapes are:
   "version": 1,
   "id": "tx_01JX0TV1P2V1N0VJ3M3J6W9Y7R",
   "operation": "display_id_rename",
-  "phase": "prepared",
+  "phase": "preparing",
   "outcome": null,
   "allow_dirty": false,
   "source_mid": "m_01JX0TV1P2V1N0VJ3M3J6W9Y7R",
   "old_id": "REQ-OLD-001",
   "new_id": "REQ-NEW-001",
-  "files": []
+  "files": [
+    {
+      "ordinal": 0,
+      "path": "docs/capabilities/example.mara.md",
+      "file_identity": "device:2049;inode:123456",
+      "original_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "replacement_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "original_size": 1234,
+      "replacement_size": 1234,
+      "readonly": false,
+      "unix_mode": 420,
+      "stage_path": "docs/capabilities/.mara-tx_01JX0TV1P2V1N0VJ3M3J6W9Y7R-000000.stage",
+      "stage_identity": null,
+      "backup_path": "docs/capabilities/.mara-tx_01JX0TV1P2V1N0VJ3M3J6W9Y7R-000000.backup",
+      "backup_identity": null,
+      "state": "declared"
+    }
+  ]
 }
 ```
+
+This example is the initial durable journal written before any stage or backup
+file is created. A display-ID rename always has at least one affected file because
+the declaration of the renamed display ID is itself patched.
 
 The operation set contains only `display_id_rename` in v1. `outcome` is null
 until forward verification or rollback establishes `replacement` or `original`.
