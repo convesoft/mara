@@ -170,6 +170,37 @@ those clients from depending on CLI behaviour or a particular Markdown and Git
 library.
 :::
 
+:::decision m_01KY88VAA3BNP2CVWDR9PY144A
+:id: ADR-0013
+:title: Use petgraph for the private in-memory graph representation
+:status: accepted
+:kind: architecture
+:justifies: REQ-ARCH-DOMAIN-OWNERSHIP
+:justifies: REQ-ARCH-PURE-DOMAIN
+:justifies: REQ-TRACE-DIRECTION
+:justifies: REQ-TRACE-DEPTH
+
+Mara v0.1 shall use `petgraph::Graph` as the private in-memory representation
+used to execute graph algorithms. Mara-owned types remain authoritative for node
+identity, canonical relation identity, authored occurrences, provenance, schema
+constraints, query results, diagnostics, deterministic ordering, and serialized
+wire contracts. Petgraph node and edge indexes are process-local implementation
+details and shall not appear in public APIs or persisted projections.
+
+Each normalized canonical relation is represented by at most one petgraph edge
+whose weight identifies the Mara relation and its canonical-edge data. Canonical
+relations with the same endpoints but different relation names are represented
+as distinct parallel edges. Repeated authored occurrences contribute provenance
+to one canonical relation and shall not create additional graph edges.
+
+Trace traversal shall iterate directed edge references and accumulate
+relation-bearing edge steps rather than use a node-only simple-path result. Mara
+shall enforce its own depth bound, `NodeRef`-based simple-path rule, relation and
+direction filters, result deduplication, and deterministic ordering over that
+traversal. This adapter boundary permits petgraph or a future execution backend
+to be replaced without changing Mara's semantic graph contract.
+:::
+
 :::risk m_01KY7YA2EQ40653NKBNDH3GBGT
 :id: RISK-PARSER-COUPLING
 :title: Parser AST leakage may freeze third-party implementation details
