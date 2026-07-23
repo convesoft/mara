@@ -54,7 +54,7 @@ as an explicit compatibility boundary.
 
 :::req m_01KY7Y9R4MWTKBXTEXAY1E3SGJ
 :id: REQ-SCHEMA-FLAVOURS
-:title: Mara shall define item flavours entirely in the schema
+:title: Mara shall define item flavours and their authoring guidance in the schema
 :status: approved
 :level: system
 :kind: functional
@@ -62,9 +62,12 @@ as an explicit compatibility boundary.
 :derives_from: STORY-AUTHOR-KNOWLEDGE
 :uses_term: TERM-FLAVOUR
 
-The schema shall declare each permitted lowercase ASCII snake-case flavour.
-Adding or removing a project flavour shall require no parser or engine code
-change.
+The schema shall declare each permitted lowercase ASCII snake-case flavour and
+shall provide its human-facing label, semantic purpose, creation criteria,
+exclusions, and distinctions from confusable flavours. The compiled schema shall
+retain this structured guidance for human reference views, web interfaces, and
+agent context assembly. Adding, removing, or documenting a project flavour shall
+require no parser or engine code change.
 :::
 
 :::req m_01KY7Y9R4NDN5CCMK2YWC17QT5
@@ -286,8 +289,10 @@ source-located diagnostics.
 :verifies: REQ-SCHEMA-SINGLE-FILE
 
 Fixtures shall validate every scalar type, pattern, enum, required field,
-repeatable field, duplicate non-repeatable field, forbidden default, and
-unsupported composition construct.
+repeatable field, duplicate non-repeatable field, flavour label, description,
+creation criterion, exclusion, cross-flavour distinction, forbidden default,
+and unsupported composition construct. They shall reject missing or empty
+guidance, unknown distinction targets, and self-distinction.
 :::
 
 :::test m_01KY7Y9R4ZP3ZS5WPB2C9J2ZW4

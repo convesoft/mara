@@ -106,10 +106,33 @@ Each key of `flavours` is a unique `snake_name`. Its value contains only:
 
 | Key | Type | Required | Default |
 |---|---|---:|---|
+| `label` | non-empty string | yes | none |
+| `description` | non-empty Markdown string | yes | none |
+| `guidance` | flavour guidance declaration | yes | none |
 | `id` | built-in declaration | yes | none |
 | `title` | built-in declaration | yes | none |
 | `body` | built-in declaration | yes | none |
 | `fields` | mapping of field declarations | no | `{}` |
+
+`label` is the concise human-facing singular name shown by reference views and
+interfaces. `description` defines the flavour's semantic purpose. The compiled
+`FlavourDefinition` retains both strings and the structured guidance below with
+their schema source spans; they are schema data, not item fields and not
+hardcoded engine taxonomy.
+
+The `guidance` mapping contains exactly:
+
+| Key | Type | Required | Default |
+|---|---|---:|---|
+| `use_when` | non-empty sequence of unique non-empty Markdown strings | yes | none |
+| `avoid_when` | non-empty sequence of unique non-empty Markdown strings | yes | none |
+| `distinguish_from` | mapping from flavour name to non-empty Markdown string | no | `{}` |
+
+Every `distinguish_from` key shall name another flavour declared by the same
+schema. A flavour cannot distinguish itself. Guidance is descriptive authoring
+policy: it helps humans and agents choose an item flavour, but it does not create
+a traceability rule, validation rule, lifecycle transition, or implicit graph
+edge. Projects define those independently through their schema declarations.
 
 MID, flavour, source location, and document placement remain structural and
 cannot be declared. The names `mid`, `flavour`, `id`, `title`, `body`,

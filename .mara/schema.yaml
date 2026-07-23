@@ -11,6 +11,17 @@ identity:
 
 flavours:
   term:
+    label: Term
+    description: >-
+      Controlled project vocabulary with one stable meaning across authored items.
+    guidance:
+      use_when:
+        - A project concept needs a stable definition across multiple items.
+        - Ambiguity would harm review, traceability, or agent context.
+      avoid_when:
+        - The word has its ordinary meaning and needs no project-specific definition.
+        - The name is temporary implementation vocabulary or incidental prose.
+      distinguish_from: {}
     id:
       required: true
       pattern: '^TERM-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
@@ -28,6 +39,17 @@ flavours:
         repeatable: true
 
   actor:
+    label: Actor
+    description: >-
+      A durable human role, agent, service, or external system that participates in project behaviour.
+    guidance:
+      use_when:
+        - A role or external participant forms part of a story, scenario, or system boundary.
+        - The participant remains meaningful independently of current delivery ownership.
+      avoid_when:
+        - Recording a current assignee, individual contributor, or temporary team allocation.
+        - Tracking who owns a delivery task in an external work-management system.
+      distinguish_from: {}
     id:
       required: true
       pattern: '^ACT-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
@@ -46,6 +68,19 @@ flavours:
         values: [human_role, external_system, service, agent]
 
   goal:
+    label: Goal
+    description: >-
+      A durable product, capability, or quality outcome explaining why lower-level work exists.
+    guidance:
+      use_when:
+        - An outcome should remain valid across multiple implementations or releases.
+        - Lower-level stories, scenarios, or requirements need durable product intent.
+      avoid_when:
+        - Recording an implementation task, milestone, schedule, or selected technical solution.
+        - Capturing temporary delivery priority or workflow state.
+      distinguish_from:
+        story: A story states a durable outcome for a particular actor.
+        req: A requirement states an atomic normative obligation.
     id:
       required: true
       pattern: '^GOAL-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
@@ -68,6 +103,19 @@ flavours:
         values: [must, should, could]
 
   story:
+    label: Story
+    description: >-
+      A durable outcome desired by an actor that remains meaningful after its delivery work is complete.
+    guidance:
+      use_when:
+        - An actor-facing outcome needs identity, acceptance semantics, and long-lived traceability.
+        - One outcome may be delivered through multiple implementation issues or changes.
+      avoid_when:
+        - Copying a Linear or GitHub issue that describes bounded delivery work.
+        - Describing an ordered interaction flow or an atomic normative obligation.
+      distinguish_from:
+        scenario: A scenario describes a concrete behavioural flow.
+        req: A requirement states what must be true across applicable flows.
     id:
       required: true
       pattern: '^STORY-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
@@ -86,6 +134,19 @@ flavours:
         values: [must, should, could]
 
   scenario:
+    label: Scenario
+    description: >-
+      A concrete user, system, failure, or agent flow with its own identity and traceability.
+    guidance:
+      use_when:
+        - Ordered interactions or a distinct success or failure path need explicit traceability.
+        - A story or goal needs concrete behavioural elaboration.
+      avoid_when:
+        - Stating a normative obligation that must hold across applicable flows.
+        - Describing a durable actor outcome without a concrete flow.
+      distinguish_from:
+        story: A story states the durable outcome rather than one concrete flow.
+        req: A requirement states a normative obligation rather than an example flow.
     id:
       required: true
       pattern: '^SCN-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
@@ -104,6 +165,19 @@ flavours:
         values: [user_flow, failure_flow, system_flow, agent_workflow]
 
   req:
+    label: Requirement
+    description: >-
+      An atomic, normative, and verifiable obligation stating what must be true.
+    guidance:
+      use_when:
+        - Non-conformance can be determined by verification or validation.
+        - Durable intent must be refined into an explicit behavioural or quality obligation.
+      avoid_when:
+        - Recording rationale, solution structure, temporary work, or descriptive observation.
+        - Combining independent obligations that can change or be verified separately.
+      distinguish_from:
+        design: A design describes how requirements are satisfied.
+        decision: A decision records why an approach or policy was selected.
     id:
       required: true
       pattern: '^REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
@@ -130,6 +204,19 @@ flavours:
         values: [must, should, could]
 
   design:
+    label: Design
+    description: >-
+      Solution structure or a precise implementation-facing contract that satisfies requirements.
+    guidance:
+      use_when:
+        - Architecture, a component, interface, data model, algorithm, command, storage protocol, or UI contract needs identity.
+        - Implementers need a durable, precise description of how accepted requirements are satisfied.
+      avoid_when:
+        - Recording why one option was selected over alternatives.
+        - Stating a product obligation without prescribing solution structure.
+      distinguish_from:
+        req: A requirement states what must be true without defining the solution.
+        decision: A decision preserves selection rationale and consequences.
     id:
       required: true
       pattern: '^DES-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
@@ -148,6 +235,19 @@ flavours:
         values: [architecture, component, module, interface, data_model, algorithm, cli, storage, ui]
 
   decision:
+    label: Decision
+    description: >-
+      A selected option, policy, trade-off, or process rule whose rationale must survive implementation.
+    guidance:
+      use_when:
+        - A consequential choice and its rationale need durable identity and history.
+        - A requirement or design needs justification or an earlier choice is superseded.
+      avoid_when:
+        - Defining the selected solution contract itself or recording a chronological work log.
+        - Tracking a reversible implementation detail with no durable rationale.
+      distinguish_from:
+        design: A design defines the selected solution rather than why it was selected.
+        risk: A risk records an uncertain adverse condition rather than its chosen treatment.
     id:
       required: true
       pattern: '^ADR-[0-9]{4}$'
@@ -166,6 +266,18 @@ flavours:
         values: [architecture, syntax, schema, process, tooling, storage, llm_workflow]
 
   risk:
+    label: Risk
+    description: >-
+      A material uncertain condition that could harm product, delivery, safety, compatibility, or maintainability.
+    guidance:
+      use_when:
+        - Uncertainty and potential impact should influence requirements, design, verification, or planning.
+        - Mitigation and residual exposure need durable traceability.
+      avoid_when:
+        - Recording every known defect, active task, or already-certain problem.
+        - Replacing delivery-system blockers with long-lived knowledge items.
+      distinguish_from:
+        decision: A decision may select a treatment for a risk but is not the uncertainty itself.
     id:
       required: true
       pattern: '^RISK-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
@@ -188,6 +300,18 @@ flavours:
         values: [low, medium, high]
 
   test:
+    label: Test
+    description: >-
+      A reusable definition of how an item is verified or validated independently of one execution.
+    guidance:
+      use_when:
+        - Method, level, inputs, and observable expectations should be repeatable.
+        - A requirement or design needs verification, or an outcome or flow needs validation.
+      avoid_when:
+        - Recording the result and provenance of one concrete execution.
+        - Describing implementation work whose purpose is merely to add a test.
+      distinguish_from:
+        evidence: Evidence records one concrete execution outcome and its provenance.
     id:
       required: true
       pattern: '^TEST-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
@@ -214,6 +338,18 @@ flavours:
         values: [unit, integration, system, acceptance, static_analysis]
 
   evidence:
+    label: Evidence
+    description: >-
+      One concrete verification or validation outcome with capture time and reproducible provenance.
+    guidance:
+      use_when:
+        - A passed, failed, or inconclusive execution must support an auditable claim.
+        - The result can identify its test and commit or external source.
+      avoid_when:
+        - Defining expected behaviour, reusable test procedure, or planned verification.
+        - Rewriting a prior result instead of superseding it with corrected evidence.
+      distinguish_from:
+        test: A test defines repeatable verification or validation independently of an execution.
     id:
       required: true
       pattern: '^EVD-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
@@ -244,6 +380,18 @@ flavours:
         type: string
 
   artifact:
+    label: Artifact
+    description: >-
+      An independently meaningful engineering output whose identity matters beyond its storage location.
+    guidance:
+      use_when:
+        - A crate, executable, command, API, schema, generated index, service, report, or external standard needs authored identity.
+        - The output implements a requirement or design at a useful coarse granularity.
+      avoid_when:
+        - A Mara document merely contains items or a source file merely contains implementation.
+        - A document, section, source symbol, or span is adequately represented as a structural or derived node.
+      distinguish_from:
+        design: A design describes solution intent while an artifact identifies a concrete output.
     id:
       required: true
       pattern: '^ART-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
