@@ -1,8 +1,18 @@
 # Mara schema format v1
 
-This document is the normative reference for `format_version: 1` schema files.
-The words **must**, **must not**, **shall**, and **shall not** are requirements.
-Anything not admitted below is invalid; v1 has no extension keys.
+This reference groups the typed design contracts for schema format version 1.
+Each contract below is independently addressable in the Mara graph.
+
+:::design m_01KY82WX4K6CV6S8RJJPAQ39Z8
+:id: DES-SCHEMA-DOCUMENT-PROFILE
+:title: Schema document profile, root mapping, and identity
+:status: accepted
+:kind: data_model
+:satisfies: REQ-SCHEMA-VERSION
+:satisfies: REQ-SCHEMA-STRICT
+:satisfies: REQ-SCHEMA-IDENTITY
+:satisfies: REQ-SCHEMA-NO-DEFAULTS
+:satisfies: REQ-SCHEMA-SINGLE-FILE
 
 ## YAML profile
 
@@ -78,6 +88,18 @@ Crockford Base32 ULID characters. The ULID alphabet excludes `I`, `L`, `O`, and
 immutability, and project-wide uniqueness are platform invariants and are not
 configurable schema keys.
 
+:::
+
+:::design m_01KY82WX4M0P3TW4KGNGCDCRD1
+:id: DES-SCHEMA-FLAVOUR-DECLARATIONS
+:title: Flavour, built-in, and field declaration model
+:status: accepted
+:kind: data_model
+:satisfies: REQ-SCHEMA-FLAVOURS
+:satisfies: REQ-SCHEMA-BUILTINS
+:satisfies: REQ-SCHEMA-FIELDS
+:satisfies: REQ-SCHEMA-REPEATED-FIELDS
+
 ## Flavour declarations
 
 Each key of `flavours` is a unique `snake_name`. Its value contains only:
@@ -138,6 +160,16 @@ A non-repeatable field may occur zero or one time. A repeatable field may occur
 zero or more times. `required: true` changes the minimum occurrence count to one.
 Repeated semantic values retain source order and are not deduplicated.
 
+:::
+
+:::design m_01KY82WX4NJZSTBQNM2P2N06YM
+:id: DES-SCHEMA-RELATION-DECLARATIONS
+:title: Relation declaration and authoring namespace model
+:status: accepted
+:kind: data_model
+:satisfies: REQ-SCHEMA-RELATIONS
+:satisfies: REQ-SCHEMA-INVERSES
+
 ## Relation declarations
 
 Each relation key is its canonical `snake_name`. A relation mapping contains
@@ -180,6 +212,15 @@ canonical relation name is authorable on every declared source flavour. An
 inverse name is authorable on every declared target flavour only when
 `inverse_authoring` is true. These names must not collide with built-ins, fields,
 another canonical authoring name, or another enabled inverse on that flavour.
+
+:::
+
+:::design m_01KY82WX4PXWE6Y9EF4HJ5ADE0
+:id: DES-SCHEMA-RULE-DECLARATIONS
+:title: Validation rule declarations and compilation order
+:status: accepted
+:kind: data_model
+:satisfies: REQ-SCHEMA-RULES
 
 ## Validation rule declarations
 
@@ -240,27 +281,4 @@ definitions, relation endpoint references and namespaces, then rule references.
 It reports all independent schema defects. A schema with any error does not
 produce a compiled semantic model, so content validation that depends on that
 model is skipped rather than guessed.
-
-:::artifact m_01KY7YA2FDYW42NDTF40F99914
-:id: ART-SCHEMA-FORMAT-V1
-:title: Mara schema format version 1 reference
-:status: active
-:kind: document
-:uri: docs/reference/schema-format.mara.md
-:implements: REQ-SCHEMA-VERSION
-:implements: REQ-SCHEMA-STRICT
-:implements: REQ-SCHEMA-IDENTITY
-:implements: REQ-SCHEMA-FLAVOURS
-:implements: REQ-SCHEMA-BUILTINS
-:implements: REQ-SCHEMA-FIELDS
-:implements: REQ-SCHEMA-REPEATED-FIELDS
-:implements: REQ-SCHEMA-RELATIONS
-:implements: REQ-SCHEMA-INVERSES
-:implements: REQ-SCHEMA-RULES
-:implements: REQ-SCHEMA-NO-DEFAULTS
-:implements: REQ-SCHEMA-SINGLE-FILE
-
-This document is the implementation and compatibility contract for the strict
-v1 schema loader. The self-hosting YAML schema is a conforming instance, not a
-substitute for this format definition.
 :::

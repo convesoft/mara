@@ -1,9 +1,21 @@
 # Mara source transaction protocol v1
 
-This document is the normative crash-safety contract for v0.1 multi-file source
-edits. A conforming implementation shall refuse to begin a mutation when the
-filesystem cannot provide durable file flush, atomic same-filesystem replacement,
-and a durable parent-directory or platform-equivalent metadata flush.
+This reference groups the typed design contracts for v0.1 multi-file source
+transactions. Each contract below is independently addressable in the Mara graph.
+
+:::design m_01KY82WX4Q2767NS30BXX5R16Q
+:id: DES-TRANSACTION-JOURNAL-STORAGE
+:title: Transaction layout, journal data, and durable journal updates
+:status: accepted
+:kind: storage
+:satisfies: REQ-EDIT-RENAME-PREFLIGHT
+:satisfies: REQ-EDIT-STAGING
+:satisfies: REQ-EDIT-JOURNAL
+:depends_on: DES-SOURCE-TRANSACTION
+
+A conforming implementation shall refuse to begin a mutation when the filesystem
+cannot provide durable file flush, atomic same-filesystem replacement, and a
+durable parent-directory or platform-equivalent metadata flush.
 
 ## Layout and identifiers
 
@@ -107,6 +119,17 @@ an unrecorded source change. Removing a recognized interrupted `journal.next`
 never advances the state machine; only the committed journal plus idempotent
 filesystem reconciliation can do so.
 
+:::
+
+:::design m_01KY82WX4RBJDT8Z7GY0W3JZVP
+:id: DES-TRANSACTION-FORWARD-PROTOCOL
+:title: Forward source transaction state machine
+:status: accepted
+:kind: algorithm
+:satisfies: REQ-EDIT-MINIMAL-PATCHES
+:satisfies: REQ-EDIT-POSTCHECK
+:depends_on: DES-TRANSACTION-JOURNAL-STORAGE
+
 ## Forward state machine
 
 The complete forward phase sequence is:
@@ -154,6 +177,17 @@ The protocol is:
 Failure before `verified` initiates rollback. Failure during `cleaning` retains
 the journal and can only complete cleanup; the verified replacement is already
 the authoritative result.
+
+:::
+
+:::design m_01KY82WX4SKVQGTV57FH5RKBSM
+:id: DES-TRANSACTION-RECOVERY-PROTOCOL
+:title: Rollback and interrupted transaction recovery state machines
+:status: accepted
+:kind: algorithm
+:satisfies: REQ-EDIT-ROLLBACK
+:satisfies: REQ-EDIT-RECOVERY
+:depends_on: DES-TRANSACTION-JOURNAL-STORAGE
 
 ## Rollback state machine
 
@@ -249,6 +283,16 @@ required backup remains valid. It is forbidden in `cleaning` or `complete`, wher
 backups may already be gone. Both modes first perform reconciliation and stop on
 conflict. There is no force flag that overwrites unrecognized user content.
 
+:::
+
+:::design m_01KY82WX4TAQJWA07PWXZGFKPD
+:id: DES-TRANSACTION-SECURITY
+:title: Transaction path, link, and recovery-material security
+:status: accepted
+:kind: storage
+:satisfies: REQ-EDIT-WORKTREE-POLICY
+:depends_on: DES-TRANSACTION-JOURNAL-STORAGE
+
 ## Security and ownership
 
 Journal and temporary files are local derived recovery data and are ignored by
@@ -256,23 +300,4 @@ Git. Mara shall reject links at any recorded control or temporary path, verify
 file identity after opening handles, and never follow a journal path outside the
 project. Cleanup removes only paths exactly recorded by a valid journal with the
 expected transaction-specific name.
-
-:::artifact m_01KY7YA2FHSZEAW502G0DHRRE2
-:id: ART-TRANSACTION-PROTOCOL-V1
-:title: Mara source transaction protocol version 1
-:status: active
-:kind: document
-:uri: docs/reference/transaction-journal.mara.md
-:implements: REQ-EDIT-RENAME-PREFLIGHT
-:implements: REQ-EDIT-WORKTREE-POLICY
-:implements: REQ-EDIT-MINIMAL-PATCHES
-:implements: REQ-EDIT-STAGING
-:implements: REQ-EDIT-JOURNAL
-:implements: REQ-EDIT-ROLLBACK
-:implements: REQ-EDIT-RECOVERY
-:implements: REQ-EDIT-POSTCHECK
-:implements: DES-SOURCE-TRANSACTION
-
-This state machine defines the exact durability and recovery behaviour exercised
-by fault-injected rename and recovery tests.
 :::

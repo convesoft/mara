@@ -1,9 +1,14 @@
 # Mara wire contracts v1
 
-This document fixes the machine-facing compatibility contracts for Mara v0.1.
-It is normative for source spans, diagnostic codes, JSON command output, process
-exit status, and the generated index. Human prose output is intentionally not a
-stable wire format unless stated below.
+This reference groups the typed machine-interface design contracts for Mara
+v0.1. Each contract below is independently addressable in the Mara graph.
+
+:::design m_01KY82WX4VM6TY9W0AADC1VJHP
+:id: DES-WIRE-SOURCE-SPANS
+:title: Source position and span wire representation
+:status: accepted
+:kind: interface
+:satisfies: REQ-LANGUAGE-SOURCE-SPANS
 
 ## Source positions and spans
 
@@ -38,6 +43,17 @@ normalization. A `SourceSpan` has this exact JSON shape and key order:
 Source edits use bytes as authority. Human diagnostics render the one-based line
 and column. Every optional span in the JSON contracts below is represented by
 explicit null rather than omission.
+
+:::
+
+:::design m_01KY82WX4WQK4QD88SQMD9MBDH
+:id: DES-WIRE-DIAGNOSTICS
+:title: Diagnostic wire model, catalogue, and ordering
+:status: accepted
+:kind: interface
+:satisfies: REQ-DIAGNOSTIC-MODEL
+:satisfies: REQ-DIAGNOSTIC-ORDER
+:satisfies: REQ-DIAGNOSTIC-OUTPUT
 
 ## Diagnostic model
 
@@ -131,6 +147,16 @@ placed in `details`; implementations shall not synthesize ad-hoc code strings.
 For `rule.failed`, the schema-selected severity replaces the catalogue default.
 An implementation that needs a new semantic category must introduce a later wire
 format version or first add the code to this reference.
+
+:::
+
+:::design m_01KY82WX4X96E7YBD6HYMEVKDG
+:id: DES-WIRE-COMMAND-OUTPUT
+:title: Command status, JSON envelope, and query contracts
+:status: accepted
+:kind: interface
+:satisfies: REQ-VALIDATION-EXIT-CODES
+:satisfies: REQ-QUERY-FORMATS
 
 ## Process exit status
 
@@ -246,6 +272,17 @@ project it exits `2`. On success its human interface writes exactly one MID with
 the configured prefix followed by LF to stdout. Mutating commands in v0.1 have
 review-oriented human output only; that wording is not a compatibility surface.
 Their exit status still follows the table above.
+
+:::
+
+:::design m_01KY82WX4Y5ATY4W0WN3W76FA0
+:id: DES-WIRE-INDEX-PROJECTION
+:title: Canonical JSON and generated index representation
+:status: accepted
+:kind: data_model
+:satisfies: REQ-INDEX-CONTENT
+:satisfies: REQ-INDEX-DETERMINISTIC
+:satisfies: REQ-INDEX-GIT-PROVENANCE
 
 ## Canonical JSON encoding
 
@@ -378,23 +415,4 @@ bytes, and nodes are deduplicated by exact URI.
 Diagnostics use the model and ordering above. Because the index is derived, a
 consumer shall verify `format`, `version`, project identity, schema digest, and
 Git provenance before using it as context for a selected repository state.
-
-:::artifact m_01KY7YA2FEKFZWHG4J1P9PV2WE
-:id: ART-WIRE-CONTRACTS-V1
-:title: Mara machine-interface contracts version 1
-:status: active
-:kind: document
-:uri: docs/reference/wire-contracts.mara.md
-:implements: REQ-LANGUAGE-SOURCE-SPANS
-:implements: REQ-DIAGNOSTIC-MODEL
-:implements: REQ-DIAGNOSTIC-ORDER
-:implements: REQ-DIAGNOSTIC-OUTPUT
-:implements: REQ-VALIDATION-EXIT-CODES
-:implements: REQ-QUERY-FORMATS
-:implements: REQ-INDEX-CONTENT
-:implements: REQ-INDEX-DETERMINISTIC
-:implements: REQ-INDEX-GIT-PROVENANCE
-
-This document is the exact v0.1 compatibility contract used by CLI golden tests,
-index consumers, diagnostics, source patches, and future API adapters.
 :::

@@ -11,6 +11,7 @@ are views over this corpus rather than independent sources of truth.
 
 - [Product charter](product/charter.mara.md)
 - [Human and agent workflows](product/workflows.mara.md)
+- [Mara self-hosting flavour profile](product/self-hosting-profile.mara.md)
 
 ## Capability specifications
 

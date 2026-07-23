@@ -1,8 +1,15 @@
 # Mara project format v1
 
-This document is the normative contract for `.mara/project.toml` with
-`format_version = 1`. Unknown root keys, tables, table keys, and value types are
-errors; there is no extension namespace in v1.
+This reference groups the typed design contracts for `.mara/project.toml` format
+version 1. Each contract below is independently addressable in the Mara graph.
+
+:::design m_01KY82WX4F42MN861CDCNZ9TGK
+:id: DES-PROJECT-FORMAT-ROOT
+:title: Project format root and TOML profile
+:status: accepted
+:kind: interface
+:satisfies: REQ-PROJECT-ROOT
+:satisfies: REQ-PROJECT-CONFIG-STRICT
 
 ## TOML profile
 
@@ -25,6 +32,18 @@ integer `1` and not a string or float. Table and key order has no semantic effec
 | `schema` | path string | yes | existing readable regular file |
 
 `schema` resolves from project root and normally names `.mara/schema.yaml`.
+
+:::
+
+:::design m_01KY82WX4G28E30KBD8GE93SWC
+:id: DES-PROJECT-CONTENT-DISCOVERY
+:title: Project content discovery configuration
+:status: accepted
+:kind: interface
+:satisfies: REQ-CONTENT-GLOBS
+:satisfies: REQ-CONTENT-GITIGNORE
+:satisfies: REQ-CONTENT-UNTRACKED
+:satisfies: REQ-CONTENT-SYMLINKS
 
 ### `[content]`
 
@@ -64,6 +83,16 @@ resolved target is an internal regular file, and no other selected logical path
 resolves to that file identity. Read diagnostics use the selected logical path.
 v0.1 structured writes reject an affected symlinked source during edit preflight
 rather than mutating through the link.
+
+:::
+
+:::design m_01KY82WX4HPJY45C49EZRAVXVZ
+:id: DES-PROJECT-RUNTIME-CONFIG
+:title: Project runtime, validation, Git, and path configuration
+:status: accepted
+:kind: interface
+:satisfies: REQ-PROJECT-CONFIG-STRICT
+:satisfies: REQ-PATH-CONTAINMENT
 
 ### `[index]`
 
@@ -107,6 +136,15 @@ Opening existing project inputs shall use no-follow or equivalent handle-based
 verification where the platform provides it. A path passing lexical checks but
 failing filesystem containment is invalid.
 
+:::
+
+:::design m_01KY82WX4J6P2M1F7E5H4AEESR
+:id: DES-PROJECT-INIT-OUTPUT
+:title: Initial project configuration and empty schema output
+:status: accepted
+:kind: interface
+:satisfies: REQ-PROJECT-INIT
+
 ## Initialization output
 
 `mara init` writes all required v1 tables and keys explicitly. Its initial
@@ -119,22 +157,4 @@ The generated schema is valid format v1 with configured ULID identity and empty
 `flavours: {}`, `relations: {}`, and `rules: []`. An empty flavour map is valid
 for a newly initialized process-neutral project; content items cannot validate
 until the author adds at least one flavour.
-
-:::artifact m_01KY7YA2FJR7ZETHK5WVXY3XA0
-:id: ART-PROJECT-FORMAT-V1
-:title: Mara project configuration format version 1
-:status: active
-:kind: document
-:uri: docs/reference/project-format.mara.md
-:implements: REQ-PROJECT-ROOT
-:implements: REQ-PROJECT-INIT
-:implements: REQ-PROJECT-CONFIG-STRICT
-:implements: REQ-CONTENT-GLOBS
-:implements: REQ-CONTENT-GITIGNORE
-:implements: REQ-CONTENT-UNTRACKED
-:implements: REQ-CONTENT-SYMLINKS
-:implements: REQ-PATH-CONTAINMENT
-
-This document closes the v1 configuration compatibility surface and defines the
-portable discovery inputs consumed before schema or content loading.
 :::
