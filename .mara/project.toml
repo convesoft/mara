@@ -1,0 +1,21 @@
+format_version = 1
+
+[project]
+name = "mara"
+schema = ".mara/schema.yaml"
+
+[content]
+include = ["docs/**/*.mara.md"]
+exclude = []
+respect_gitignore = true
+follow_directory_symlinks = false
+allow_internal_file_symlinks = true
+
+[index]
+path = ".mara/index.json"
+
+[validation]
+warnings_as_errors = false
+
+[git]
+require_clean_worktree_for_writes = true

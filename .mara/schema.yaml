@@ -1,0 +1,531 @@
+format_version: 1
+
+schema:
+  name: mara-self-hosting
+  version: 0.1.0
+
+identity:
+  mid:
+    format: ulid
+    prefix: m_
+
+flavours:
+  term:
+    id:
+      required: true
+      pattern: '^TERM-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
+    title:
+      required: true
+    body:
+      required: true
+    fields:
+      status:
+        type: enum
+        required: true
+        values: [draft, accepted, deprecated]
+      synonym:
+        type: string
+        repeatable: true
+
+  actor:
+    id:
+      required: true
+      pattern: '^ACT-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
+    title:
+      required: true
+    body:
+      required: true
+    fields:
+      status:
+        type: enum
+        required: true
+        values: [draft, active, deprecated]
+      kind:
+        type: enum
+        required: true
+        values: [human_role, external_system, service, agent]
+
+  goal:
+    id:
+      required: true
+      pattern: '^GOAL-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
+    title:
+      required: true
+    body:
+      required: true
+    fields:
+      status:
+        type: enum
+        required: true
+        values: [draft, accepted, rejected, retired]
+      kind:
+        type: enum
+        required: true
+        values: [product, capability, quality]
+      priority:
+        type: enum
+        required: true
+        values: [must, should, could]
+
+  story:
+    id:
+      required: true
+      pattern: '^STORY-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
+    title:
+      required: true
+    body:
+      required: true
+    fields:
+      status:
+        type: enum
+        required: true
+        values: [draft, accepted, rejected, deprecated]
+      priority:
+        type: enum
+        required: true
+        values: [must, should, could]
+
+  scenario:
+    id:
+      required: true
+      pattern: '^SCN-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
+    title:
+      required: true
+    body:
+      required: true
+    fields:
+      status:
+        type: enum
+        required: true
+        values: [draft, accepted, rejected, deprecated]
+      kind:
+        type: enum
+        required: true
+        values: [user_flow, failure_flow, system_flow, agent_workflow]
+
+  req:
+    id:
+      required: true
+      pattern: '^REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
+    title:
+      required: true
+    body:
+      required: true
+    fields:
+      status:
+        type: enum
+        required: true
+        values: [draft, proposed, approved, rejected, obsolete]
+      level:
+        type: enum
+        required: true
+        values: [stakeholder, system, software, component]
+      kind:
+        type: enum
+        required: true
+        values: [functional, quality, constraint, interface, security, safety, performance, usability]
+      priority:
+        type: enum
+        required: true
+        values: [must, should, could]
+
+  design:
+    id:
+      required: true
+      pattern: '^DES-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
+    title:
+      required: true
+    body:
+      required: true
+    fields:
+      status:
+        type: enum
+        required: true
+        values: [draft, proposed, accepted, rejected, superseded]
+      kind:
+        type: enum
+        required: true
+        values: [architecture, component, module, interface, data_model, algorithm, cli, storage, ui]
+
+  decision:
+    id:
+      required: true
+      pattern: '^ADR-[0-9]{4}$'
+    title:
+      required: true
+    body:
+      required: true
+    fields:
+      status:
+        type: enum
+        required: true
+        values: [proposed, accepted, rejected, superseded]
+      kind:
+        type: enum
+        required: true
+        values: [architecture, syntax, schema, process, tooling, storage, llm_workflow]
+
+  risk:
+    id:
+      required: true
+      pattern: '^RISK-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
+    title:
+      required: true
+    body:
+      required: true
+    fields:
+      status:
+        type: enum
+        required: true
+        values: [open, accepted, mitigated, closed]
+      severity:
+        type: enum
+        required: true
+        values: [low, medium, high, critical]
+      likelihood:
+        type: enum
+        required: true
+        values: [low, medium, high]
+
+  test:
+    id:
+      required: true
+      pattern: '^TEST-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
+    title:
+      required: true
+    body:
+      required: true
+    fields:
+      status:
+        type: enum
+        required: true
+        values: [draft, approved, deprecated]
+      kind:
+        type: enum
+        required: true
+        values: [verification, validation]
+      method:
+        type: enum
+        required: true
+        values: [automated, manual, inspection, analysis, demonstration]
+      level:
+        type: enum
+        required: true
+        values: [unit, integration, system, acceptance, static_analysis]
+
+  evidence:
+    id:
+      required: true
+      pattern: '^EVD-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
+    title:
+      required: true
+    body:
+      required: false
+    fields:
+      status:
+        type: enum
+        required: true
+        values: [valid, invalid, superseded]
+      result:
+        type: enum
+        required: true
+        values: [passed, failed, inconclusive]
+      captured_at:
+        type: string
+        required: true
+        pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$'
+      commit:
+        type: string
+      uri:
+        type: string
+
+  artifact:
+    id:
+      required: true
+      pattern: '^ART-[A-Z0-9]+(?:-[A-Z0-9]+)*$'
+    title:
+      required: true
+    body:
+      required: false
+    fields:
+      status:
+        type: enum
+        required: true
+        values: [proposed, active, deprecated, retired]
+      kind:
+        type: enum
+        required: true
+        values: [crate, module, command, api, ui, schema, document, file_format, index, service, external]
+      uri:
+        type: string
+        required: true
+
+relations:
+  uses_term:
+    source:
+      flavours: [actor, goal, story, scenario, req, design, decision, risk, test, evidence, artifact]
+    target:
+      flavours: [term]
+    inverse: used_by
+    inverse_authoring: true
+    self_reference: false
+
+  involves:
+    source:
+      flavours: [story, scenario]
+    target:
+      flavours: [actor]
+    inverse: participates_in
+    inverse_authoring: true
+    self_reference: false
+
+  derives_from:
+    source:
+      flavours: [story, scenario, req]
+    target:
+      flavours: [goal, story, scenario, req]
+    inverse: derived_by
+    inverse_authoring: true
+    self_reference: false
+    acyclic: true
+
+  refines:
+    source:
+      flavours: [goal, story, scenario, req, design]
+    target:
+      flavours: [goal, story, scenario, req, design]
+    inverse: refined_by
+    inverse_authoring: true
+    self_reference: false
+    acyclic: true
+
+  depends_on:
+    source:
+      flavours: [term, actor, goal, story, scenario, req, design, decision, risk, test, evidence, artifact]
+    target:
+      flavours: [term, actor, goal, story, scenario, req, design, decision, risk, test, evidence, artifact]
+    inverse: required_by
+    inverse_authoring: true
+    self_reference: false
+    acyclic: true
+
+  satisfies:
+    source:
+      flavours: [design]
+    target:
+      flavours: [req]
+    inverse: satisfied_by
+    inverse_authoring: true
+    self_reference: false
+
+  justifies:
+    source:
+      flavours: [decision]
+    target:
+      flavours: [design, req]
+    inverse: justified_by
+    inverse_authoring: true
+    self_reference: false
+
+  implements:
+    source:
+      flavours: [artifact]
+      derived: [source_span]
+    target:
+      flavours: [design, req]
+    inverse: implemented_by
+    inverse_authoring: true
+    self_reference: false
+
+  verifies:
+    source:
+      flavours: [test]
+      derived: [source_span]
+    target:
+      flavours: [req, design]
+    inverse: verified_by
+    inverse_authoring: true
+    self_reference: false
+
+  validates:
+    source:
+      flavours: [test]
+    target:
+      flavours: [goal, story, scenario]
+    inverse: validated_by
+    inverse_authoring: true
+    self_reference: false
+
+  evidences:
+    source:
+      flavours: [evidence]
+    target:
+      flavours: [test]
+    inverse: evidenced_by
+    inverse_authoring: true
+    self_reference: false
+
+  affects:
+    source:
+      flavours: [risk]
+    target:
+      flavours: [term, actor, goal, story, scenario, req, design, decision, risk, test, evidence, artifact]
+    inverse: affected_by
+    inverse_authoring: true
+    self_reference: false
+
+  mitigates:
+    source:
+      flavours: [req, design, decision, test]
+    target:
+      flavours: [risk]
+    inverse: mitigated_by
+    inverse_authoring: true
+    self_reference: false
+
+  supersedes:
+    source:
+      flavours: [term, actor, goal, story, scenario, req, design, decision, risk, test, evidence, artifact]
+    target:
+      flavours: [term, actor, goal, story, scenario, req, design, decision, risk, test, evidence, artifact]
+    inverse: superseded_by
+    inverse_authoring: true
+    same_flavour: true
+    self_reference: false
+    acyclic: true
+
+  relates_to:
+    source:
+      flavours: [term, actor, goal, story, scenario, req, design, decision, risk, test, evidence, artifact]
+    target:
+      flavours: [term, actor, goal, story, scenario, req, design, decision, risk, test, evidence, artifact]
+    symmetric: true
+    self_reference: false
+
+  delivered_by:
+    source:
+      flavours: [goal, story, scenario, req, design, decision, risk, test, artifact]
+    target:
+      external: [linear, github]
+    self_reference: false
+
+rules:
+  - name: test_has_target
+    kind: requires_relation
+    severity: error
+    applies_to:
+      flavours: [test]
+    relation_any_of: [verifies, validates]
+    direction: outgoing
+    min: 1
+
+  - name: evidence_has_test
+    kind: requires_relation
+    severity: error
+    applies_to:
+      flavours: [evidence]
+    relation: evidences
+    direction: outgoing
+    min: 1
+
+  - name: evidence_has_provenance
+    kind: requires_field
+    severity: error
+    applies_to:
+      flavours: [evidence]
+    field_any_of: [commit, uri]
+    min: 1
+
+  - name: completed_risk_has_mitigation
+    kind: requires_relation
+    severity: error
+    applies_to:
+      flavours: [risk]
+    when:
+      field: status
+      in: [mitigated, closed]
+    relation: mitigates
+    direction: incoming
+    min: 1
+
+  - name: approved_requirement_has_origin
+    kind: requires_relation
+    severity: warning
+    applies_to:
+      flavours: [req]
+    when:
+      field: status
+      in: [approved]
+    relation_any_of: [derives_from, refines]
+    direction: outgoing
+    min: 1
+
+  - name: approved_requirement_has_test
+    kind: requires_relation
+    severity: warning
+    applies_to:
+      flavours: [req]
+    when:
+      field: status
+      in: [approved]
+    relation: verifies
+    direction: incoming
+    min: 1
+
+  - name: accepted_design_has_requirement
+    kind: requires_relation
+    severity: warning
+    applies_to:
+      flavours: [design]
+    when:
+      field: status
+      in: [accepted]
+    relation: satisfies
+    direction: outgoing
+    min: 1
+
+  - name: accepted_decision_has_subject
+    kind: requires_relation
+    severity: warning
+    applies_to:
+      flavours: [decision]
+    when:
+      field: status
+      in: [accepted]
+    relation: justifies
+    direction: outgoing
+    min: 1
+
+  - name: accepted_story_is_elaborated
+    kind: requires_relation
+    severity: warning
+    applies_to:
+      flavours: [story]
+    when:
+      field: status
+      in: [accepted]
+    relation: derives_from
+    direction: incoming
+    min: 1
+
+  - name: active_artifact_implements_subject
+    kind: requires_relation
+    severity: warning
+    applies_to:
+      flavours: [artifact]
+    when:
+      field: status
+      in: [active]
+    relation: implements
+    direction: outgoing
+    min: 1
+
+  - name: semantic_item_is_not_orphaned
+    kind: orphan
+    severity: warning
+    applies_to:
+      flavours: [term, actor, goal, story, scenario, req, design, decision, risk, test, artifact]
+    when:
+      field: status
+      in: [accepted, active, approved, open, mitigated, closed]
+    relations: [uses_term, involves, derives_from, refines, depends_on, satisfies, justifies, implements, verifies, validates, affects, mitigates, supersedes, relates_to, delivered_by]
