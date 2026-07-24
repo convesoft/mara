@@ -306,6 +306,16 @@ fn rejects_unsupported_versions_and_invalid_project_names() {
     fixture.write_config(valid_config().replace("format_version = 1", "format_version = 2"));
     assert_invalid_field(load_from_root(&fixture.root).unwrap_err(), "format_version");
 
+    let future = Fixture::new();
+    future.write_config("format_version = 2\n[future]\nnew_shape = true\n");
+    let future_error = load_from_root(&future.root).unwrap_err();
+    assert!(
+        future_error
+            .to_string()
+            .contains("unsupported format version 2")
+    );
+    assert_invalid_field(future_error, "format_version");
+
     for name in ["", "Mara", "1mara", "mara_kit", "mara--kit", "mara-"] {
         let fixture = Fixture::new();
         fixture.write_config(valid_config().replace("mara-test", name));

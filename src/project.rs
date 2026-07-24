@@ -425,17 +425,17 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
         };
         configuration_decode_error(&location.config_path, source_text, error, code)
     })?;
-    let raw: RawProjectConfig = toml::from_str(source_text).map_err(|error: toml::de::Error| {
-        let code = if error.message().starts_with("unknown field ") {
-            ProjectLoadErrorCode::ConfigUnknownKey
-        } else {
-            ProjectLoadErrorCode::ConfigInvalidValue
-        };
-        configuration_decode_error(&location.config_path, source_text, error, code)
-    })?;
-
-    let format_location = location_for_span(source_text, &raw.format_version);
-    let format_version = raw.format_version.into_inner();
+    let version: FormatVersionProbe =
+        toml::from_str(source_text).map_err(|error: toml::de::Error| {
+            configuration_decode_error(
+                &location.config_path,
+                source_text,
+                error,
+                ProjectLoadErrorCode::ConfigInvalidValue,
+            )
+        })?;
+    let format_location = location_for_span(source_text, &version.format_version);
+    let format_version = version.format_version.into_inner();
     if format_version != 1 {
         return Err(invalid_value(
             &location.config_path,
@@ -444,6 +444,16 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
             format_location,
         ));
     }
+
+    let raw: RawProjectConfig = toml::from_str(source_text).map_err(|error: toml::de::Error| {
+        let code = if error.message().starts_with("unknown field ") {
+            ProjectLoadErrorCode::ConfigUnknownKey
+        } else {
+            ProjectLoadErrorCode::ConfigInvalidValue
+        };
+        configuration_decode_error(&location.config_path, source_text, error, code)
+    })?;
+    debug_assert_eq!(raw.format_version.into_inner(), 1);
 
     let name_location = location_for_span(source_text, &raw.project.name);
     let name = raw.project.name.into_inner();
@@ -1334,6 +1344,11 @@ fn file_identity(_file: &fs::File) -> io::Result<Option<FileIdentity>> {
 #[cfg(not(any(unix, windows)))]
 fn path_identity(_path: &Path, _metadata: &fs::Metadata) -> io::Result<Option<FileIdentity>> {
     Ok(None)
+}
+
+#[derive(Debug, Deserialize)]
+struct FormatVersionProbe {
+    format_version: Spanned<i64>,
 }
 
 #[derive(Debug, Deserialize)]
