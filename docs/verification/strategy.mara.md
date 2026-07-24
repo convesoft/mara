@@ -102,6 +102,44 @@ parser fixtures and source-span round trips, schema and graph integration tests,
 CLI golden and exit-code tests, fault-injected edit transactions, property tests
 for identities and normalization, cross-platform cases, and the documented
 performance corpus.
+
+Each verification claim shall use the lowest authoritative mechanism sufficient
+to observe its contract:
+
+- Cargo manifests and `cargo metadata` own workspace membership, package targets,
+  features, dependency kinds, and dependency direction.
+- The Rust compiler and rustdoc own name resolution, type and visibility rules,
+  trait bounds, configuration and target compilation, and doctests.
+- Narrowly selected rustc or Clippy lints may enforce explicitly forbidden
+  language or library constructs. Broad restriction sets shall not be enabled
+  without a named Mara contract.
+- Unit, integration, property, fixture, and golden tests own observable runtime
+  semantics and supported library or CLI behaviour.
+- CI and platform jobs own toolchain and operating-system behaviour.
+
+Custom source analysis, custom linting, a bespoke test framework, a generator,
+or comparable verification infrastructure may be used only when an approved Mara
+contract states a current invariant that the mechanisms above cannot observe,
+the delivery acceptance criteria identify that gap, and the proposed tool is
+bounded to the current syntax or API surface. Such tooling shall not duplicate
+Cargo, compiler, rustdoc, lint, or ordinary test behaviour, and shall not
+anticipate hypothetical future APIs.
+
+The need for bespoke verification infrastructure shall be identified during
+issue readiness, before implementation starts. An issue shall not become READY
+until it records the current invariant, why existing mechanisms are insufficient,
+the expected bounded maintenance scope, the proposed bounded tool, explicit
+human approval recorded in the delivery issue, and an accepted applicable Mara
+contract. If the need emerges after work starts, the task shall stop and return
+for clarification and approval; implementation and review shall not add the
+tooling incidentally. Review findings may require satisfying the accepted
+contract but shall not broaden the accepted scope into new verification
+infrastructure without this gate.
+
+Test and helper code is maintained implementation scope. If its complexity
+approaches or exceeds the production change, implementation shall stop and
+re-evaluate the mechanism or split or clarify the contract unless that complexity
+was explicitly approved.
 :::
 
 :::req m_01KY7YA2F3PSV7FQJFX827X6QG
