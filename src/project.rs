@@ -13,6 +13,12 @@ use toml::Spanned;
 pub const PROJECT_DIRECTORY: &str = ".mara";
 pub const PROJECT_CONFIG_FILE: &str = "project.toml";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FileIdentity {
+    volume: u64,
+    file: u64,
+}
+
 /// The discovered location of one Mara project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectLocation {
@@ -293,7 +299,7 @@ pub fn load_from_root(root: impl AsRef<Path>) -> Result<LoadedProject, ProjectLo
 }
 
 fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoadError> {
-    let (mut config_file, resolved_config_path, config_metadata) = open_project_input(
+    let (mut config_file, resolved_config_path, config_identity) = open_project_input(
         &location.root,
         &location.config_path,
         &location.config_path,
@@ -378,7 +384,7 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
 
     let schema_location = location_for_span(source_text, &raw.project.schema);
     let schema_value = raw.project.schema.into_inner();
-    let (schema_path, schema_metadata) = resolve_existing_input(
+    let (schema_path, schema_identity) = resolve_existing_input(
         &location.root,
         &location.config_path,
         "project.schema",
@@ -395,9 +401,8 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
         &index_value,
         index_location,
     )?;
-    let index_aliases_input = existing_metadata(&index_path)?.is_some_and(|index_metadata| {
-        same_file_identity(&index_metadata, &config_metadata) == Some(true)
-            || same_file_identity(&index_metadata, &schema_metadata) == Some(true)
+    let index_aliases_input = existing_file_identity(&index_path)?.is_some_and(|index_identity| {
+        config_identity == Some(index_identity) || schema_identity == Some(index_identity)
     });
     if index_path == resolved_config_path || index_path == schema_path || index_aliases_input {
         return Err(unsafe_path(
@@ -439,10 +444,10 @@ fn resolve_existing_input(
     field: &'static str,
     configured: &str,
     location: Option<SourceLocation>,
-) -> Result<(PathBuf, fs::Metadata), ProjectLoadError> {
+) -> Result<(PathBuf, Option<FileIdentity>), ProjectLoadError> {
     validate_relative_path(config_path, field, configured, location)?;
     let logical_path = root.join(configured);
-    let (_, resolved_path, metadata) = open_project_input(
+    let (_, resolved_path, identity) = open_project_input(
         root,
         config_path,
         &logical_path,
@@ -450,7 +455,7 @@ fn resolve_existing_input(
         configured,
         location,
     )?;
-    Ok((resolved_path, metadata))
+    Ok((resolved_path, identity))
 }
 
 fn open_project_input(
@@ -460,7 +465,7 @@ fn open_project_input(
     field: &'static str,
     configured: &str,
     location: Option<SourceLocation>,
-) -> Result<(fs::File, PathBuf, fs::Metadata), ProjectLoadError> {
+) -> Result<(fs::File, PathBuf, Option<FileIdentity>), ProjectLoadError> {
     let resolved_path = match fs::canonicalize(logical_path) {
         Ok(path) => path,
         Err(error) if error.kind() == io::ErrorKind::NotFound && location.is_some() => {
@@ -513,15 +518,31 @@ fn open_project_input(
         field,
         configured,
         &resolved_path,
-        &metadata,
+        &file,
         location,
     )?;
-    Ok((file, resolved_path, metadata))
+    let identity = file_identity(&file).map_err(|source| ProjectLoadError::Io {
+        operation: "read opened project input identity",
+        path: resolved_path.clone(),
+        source,
+    })?;
+    Ok((file, resolved_path, identity))
 }
 
-fn existing_metadata(path: &Path) -> Result<Option<fs::Metadata>, ProjectLoadError> {
+fn existing_file_identity(path: &Path) -> Result<Option<FileIdentity>, ProjectLoadError> {
     match fs::metadata(path) {
-        Ok(metadata) => Ok(Some(metadata)),
+        Ok(_) => {
+            let file = open_read_no_follow(path).map_err(|source| ProjectLoadError::Io {
+                operation: "open existing output for identity check",
+                path: path.to_path_buf(),
+                source,
+            })?;
+            file_identity(&file).map_err(|source| ProjectLoadError::Io {
+                operation: "read existing output identity",
+                path: path.to_path_buf(),
+                source,
+            })
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(source) => Err(ProjectLoadError::Io {
             operation: "inspect existing output identity",
@@ -538,7 +559,7 @@ fn verify_opened_input(
     field: &'static str,
     configured: &str,
     expected_path: &Path,
-    opened_metadata: &fs::Metadata,
+    opened_file: &fs::File,
     location: Option<SourceLocation>,
 ) -> Result<(), ProjectLoadError> {
     let rechecked_path =
@@ -555,14 +576,25 @@ fn verify_opened_input(
         &rechecked_path,
         location,
     )?;
-    let rechecked_metadata =
-        fs::metadata(&rechecked_path).map_err(|source| ProjectLoadError::Io {
-            operation: "recheck project input identity",
+    let rechecked_file =
+        open_read_no_follow(&rechecked_path).map_err(|source| ProjectLoadError::Io {
+            operation: "reopen project input for identity check",
+            path: rechecked_path.clone(),
+            source,
+        })?;
+    let opened_identity = file_identity(opened_file).map_err(|source| ProjectLoadError::Io {
+        operation: "read opened project input identity",
+        path: expected_path.to_path_buf(),
+        source,
+    })?;
+    let rechecked_identity =
+        file_identity(&rechecked_file).map_err(|source| ProjectLoadError::Io {
+            operation: "read rechecked project input identity",
             path: rechecked_path.clone(),
             source,
         })?;
     if rechecked_path != expected_path
-        || same_file_identity(opened_metadata, &rechecked_metadata) == Some(false)
+        || matches!((opened_identity, rechecked_identity), (Some(left), Some(right)) if left != right)
     {
         return Err(unsafe_path(
             config_path,
@@ -945,10 +977,14 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(unix)]
-fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> Option<bool> {
+fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
     use std::os::unix::fs::MetadataExt;
 
-    Some(left.dev() == right.dev() && left.ino() == right.ino())
+    let metadata = file.metadata()?;
+    Ok(Some(FileIdentity {
+        volume: metadata.dev(),
+        file: metadata.ino(),
+    }))
 }
 
 #[cfg(windows)]
@@ -963,14 +999,24 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(windows)]
-fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> Option<bool> {
-    use std::os::windows::fs::MetadataExt;
+fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
 
-    Some(
-        left.volume_serial_number() == right.volume_serial_number()
-            && left.file_index() == right.file_index()
-            && left.file_index().is_some(),
-    )
+    let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: `file` owns a valid handle and `information` is writable for the
+    // duration of the call.
+    let succeeded =
+        unsafe { GetFileInformationByHandle(file.as_raw_handle().cast(), &mut information) };
+    if succeeded == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(Some(FileIdentity {
+        volume: u64::from(information.dwVolumeSerialNumber),
+        file: (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow),
+    }))
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -983,8 +1029,8 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> Option<bool> {
-    None
+fn file_identity(_file: &fs::File) -> io::Result<Option<FileIdentity>> {
+    Ok(None)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1033,7 +1079,7 @@ struct RawGit {
     require_clean_worktree_for_writes: bool,
 }
 
-#[cfg(all(test, unix))]
+#[cfg(all(test, any(unix, windows)))]
 mod tests {
     use super::*;
 
@@ -1047,7 +1093,6 @@ mod tests {
         fs::write(&inside, "inside").unwrap();
         fs::write(&outside, "outside").unwrap();
         let opened_outside = fs::File::open(&outside).unwrap();
-        let opened_metadata = opened_outside.metadata().unwrap();
         let expected_path = inside.canonicalize().unwrap();
 
         let error = verify_opened_input(
@@ -1056,7 +1101,7 @@ mod tests {
             "project.schema",
             ".mara/schema.yaml",
             &expected_path,
-            &opened_metadata,
+            &opened_outside,
             None,
         )
         .unwrap_err();

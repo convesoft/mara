@@ -60,6 +60,26 @@ require_clean_worktree_for_writes = true
     )
 }
 
+#[cfg(unix)]
+fn symlink_file(original: impl AsRef<Path>, link: impl AsRef<Path>) {
+    std::os::unix::fs::symlink(original, link).unwrap();
+}
+
+#[cfg(windows)]
+fn symlink_file(original: impl AsRef<Path>, link: impl AsRef<Path>) {
+    std::os::windows::fs::symlink_file(original, link).unwrap();
+}
+
+#[cfg(unix)]
+fn symlink_directory(original: impl AsRef<Path>, link: impl AsRef<Path>) {
+    std::os::unix::fs::symlink(original, link).unwrap();
+}
+
+#[cfg(windows)]
+fn symlink_directory(original: impl AsRef<Path>, link: impl AsRef<Path>) {
+    std::os::windows::fs::symlink_dir(original, link).unwrap();
+}
+
 fn assert_invalid_field(error: ProjectLoadError, expected_field: &str) {
     match error {
         ProjectLoadError::InvalidConfiguration {
@@ -423,29 +443,26 @@ fn an_existing_index_destination_must_be_a_regular_file() {
     assert_unsafe_field(load_from_root(&fixture.root).unwrap_err(), "index.path");
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn rejects_schema_and_index_paths_that_escape_through_symlinks() {
-    use std::os::unix::fs::symlink;
-
     let outside = tempfile::tempdir().unwrap();
     let outside_schema = outside.path().join("schema.yaml");
     fs::write(&outside_schema, "format_version: 1\n").unwrap();
 
     let schema_fixture = Fixture::new();
     fs::remove_file(schema_fixture.root.join(".mara/schema.yaml")).unwrap();
-    symlink(
+    symlink_file(
         &outside_schema,
         schema_fixture.root.join(".mara/schema.yaml"),
-    )
-    .unwrap();
+    );
     assert_unsafe_field(
         load_from_root(&schema_fixture.root).unwrap_err(),
         "project.schema",
     );
 
     let index_fixture = Fixture::new();
-    symlink(outside.path(), index_fixture.root.join("external")).unwrap();
+    symlink_directory(outside.path(), index_fixture.root.join("external"));
     index_fixture.write_config(config_with(
         ".mara/schema.yaml",
         "external/index.json",
@@ -458,24 +475,21 @@ fn rejects_schema_and_index_paths_that_escape_through_symlinks() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn normalizes_internal_symlinks_and_rejects_index_aliases_to_inputs() {
-    use std::os::unix::fs::symlink;
-
     let schema_fixture = Fixture::new();
     let real_schema = schema_fixture.root.join(".mara/real-schema.yaml");
     fs::rename(schema_fixture.root.join(".mara/schema.yaml"), &real_schema).unwrap();
-    symlink(&real_schema, schema_fixture.root.join(".mara/schema.yaml")).unwrap();
+    symlink_file(&real_schema, schema_fixture.root.join(".mara/schema.yaml"));
     let loaded = load_from_root(&schema_fixture.root).unwrap();
     assert_eq!(loaded.schema_path, real_schema.canonicalize().unwrap());
 
     let alias_fixture = Fixture::new();
-    symlink(
+    symlink_file(
         alias_fixture.root.join(".mara/schema.yaml"),
         alias_fixture.root.join(".mara/index-alias"),
-    )
-    .unwrap();
+    );
     alias_fixture.write_config(config_with(
         ".mara/schema.yaml",
         ".mara/index-alias",
@@ -522,18 +536,15 @@ fn rejects_hard_linked_index_aliases_to_configuration_or_schema() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn normalizes_a_missing_output_beneath_an_internal_symlinked_directory() {
-    use std::os::unix::fs::symlink;
-
     let fixture = Fixture::new();
     fs::create_dir(fixture.root.join("real-output")).unwrap();
-    symlink(
+    symlink_directory(
         fixture.root.join("real-output"),
         fixture.root.join("output"),
-    )
-    .unwrap();
+    );
     fixture.write_config(config_with(
         ".mara/schema.yaml",
         "output/generated/index.json",
@@ -549,17 +560,15 @@ fn normalizes_a_missing_output_beneath_an_internal_symlinked_directory() {
     );
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn rejects_a_project_configuration_marker_that_resolves_outside_the_root() {
-    use std::os::unix::fs::symlink;
-
     let fixture = Fixture::new();
     let outside = tempfile::tempdir().unwrap();
     let outside_config = outside.path().join("project.toml");
     fs::write(&outside_config, valid_config()).unwrap();
     fs::remove_file(fixture.config_path()).unwrap();
-    symlink(&outside_config, fixture.config_path()).unwrap();
+    symlink_file(&outside_config, fixture.config_path());
 
     let error = load_from_root(&fixture.root).unwrap_err();
 
