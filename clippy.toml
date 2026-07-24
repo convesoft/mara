@@ -1,4 +1,5 @@
 disallowed-methods = [
+    { path = "std::path::absolute", reason = "filesystem path resolution belongs in mara-engine" },
     { path = "std::path::Path::canonicalize", reason = "filesystem I/O belongs in mara-engine" },
     { path = "std::path::Path::exists", reason = "filesystem I/O belongs in mara-engine" },
     { path = "std::path::Path::is_dir", reason = "filesystem I/O belongs in mara-engine" },

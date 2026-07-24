@@ -409,24 +409,7 @@ fn forbidden_macro_token_path(tokens: &TokenStream) -> Option<String> {
         .cloned()
 }
 
-struct UseCollector<'ast> {
-    trees: Vec<&'ast UseTree>,
-    extern_crates: Vec<&'ast ItemExternCrate>,
-}
-
-impl<'ast> Visit<'ast> for UseCollector<'ast> {
-    fn visit_item_use(&mut self, item: &'ast ItemUse) {
-        self.trees.push(&item.tree);
-        visit::visit_item_use(self, item);
-    }
-
-    fn visit_item_extern_crate(&mut self, item: &'ast ItemExternCrate) {
-        self.extern_crates.push(item);
-        visit::visit_item_extern_crate(self, item);
-    }
-}
-
-fn petgraph_aliases(file: &syn::File) -> (HashSet<String>, bool) {
+fn petgraph_aliases(items: &[syn::Item]) -> (HashSet<String>, bool) {
     fn collect(
         tree: &UseTree,
         under_petgraph: bool,
@@ -461,26 +444,30 @@ fn petgraph_aliases(file: &syn::File) -> (HashSet<String>, bool) {
         }
     }
 
-    let mut collector = UseCollector {
-        trees: Vec::new(),
-        extern_crates: Vec::new(),
-    };
-    collector.visit_file(file);
+    let trees: Vec<_> = items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Use(item) => Some(&item.tree),
+            _ => None,
+        })
+        .collect();
     let mut aliases = HashSet::from(["petgraph".to_owned()]);
-    for item in &collector.extern_crates {
-        if item.ident == "petgraph" {
-            aliases.insert(
-                item.rename
-                    .as_ref()
-                    .map_or_else(|| item.ident.to_string(), |(_, rename)| rename.to_string()),
-            );
+    for item in items {
+        if let syn::Item::ExternCrate(item) = item
+            && item.ident == "petgraph"
+        {
+            let alias = item
+                .rename
+                .as_ref()
+                .map_or_else(|| item.ident.to_string(), |(_, rename)| rename.to_string());
+            aliases.insert(alias);
         }
     }
     let mut wildcard = false;
     loop {
         let before = aliases.len();
         let known = aliases.clone();
-        for tree in &collector.trees {
+        for tree in &trees {
             collect(tree, false, &known, &mut aliases, &mut wildcard);
         }
         if aliases.len() == before {
@@ -495,20 +482,25 @@ struct PetgraphPathVisitor<'a> {
     paths: BTreeSet<String>,
 }
 
+fn path_matches_alias(path: &str, aliases: &HashSet<String>) -> bool {
+    aliases.iter().any(|alias| {
+        path == alias
+            || path
+                .strip_prefix(alias)
+                .is_some_and(|remainder| remainder.starts_with("::"))
+    })
+}
+
 impl<'ast> Visit<'ast> for PetgraphPathVisitor<'_> {
     fn visit_path(&mut self, path: &'ast syn::Path) {
-        if path
+        let rendered = path
             .segments
-            .first()
-            .is_some_and(|segment| self.aliases.contains(segment.ident.to_string().as_str()))
-        {
-            self.paths.insert(
-                path.segments
-                    .iter()
-                    .map(|segment| segment.ident.to_string())
-                    .collect::<Vec<_>>()
-                    .join("::"),
-            );
+            .iter()
+            .map(|segment| segment.ident.to_string())
+            .collect::<Vec<_>>()
+            .join("::");
+        if path_matches_alias(&rendered, self.aliases) {
+            self.paths.insert(rendered);
         }
         visit::visit_path(self, path);
     }
@@ -582,20 +574,18 @@ impl PublicPetgraphVisitor<'_> {
     ) {
         match tree {
             UseTree::Path(path) => {
-                let at_root = segments.is_empty();
                 let segment = path.ident.to_string();
-                let under_petgraph =
-                    under_petgraph || (at_root && self.aliases.contains(segment.as_str()));
                 segments.push(segment);
+                let rendered = segments.join("::");
+                let under_petgraph = under_petgraph || path_matches_alias(&rendered, self.aliases);
                 self.inspect_public_use_tree(&path.tree, under_petgraph, segments);
                 segments.pop();
             }
             UseTree::Name(name) => {
-                let at_root = segments.is_empty();
                 let segment = name.ident.to_string();
-                let exposes_petgraph =
-                    under_petgraph || (at_root && self.aliases.contains(segment.as_str()));
                 segments.push(segment);
+                let exposes_petgraph =
+                    under_petgraph || path_matches_alias(&segments.join("::"), self.aliases);
                 if exposes_petgraph {
                     self.violations
                         .insert(format!("public use {}", segments.join(" :: ")));
@@ -603,11 +593,10 @@ impl PublicPetgraphVisitor<'_> {
                 segments.pop();
             }
             UseTree::Rename(rename) => {
-                let at_root = segments.is_empty();
                 let segment = rename.ident.to_string();
-                let exposes_petgraph =
-                    under_petgraph || (at_root && self.aliases.contains(segment.as_str()));
                 segments.push(segment);
+                let exposes_petgraph =
+                    under_petgraph || path_matches_alias(&segments.join("::"), self.aliases);
                 if exposes_petgraph {
                     self.violations.insert(format!(
                         "public use {} as {}",
@@ -742,26 +731,33 @@ impl<'ast> Visit<'ast> for PublicPetgraphVisitor<'_> {
     }
 
     fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
+        let trait_implementation = item.trait_.is_some();
         if let Some((trait_path, _)) = &item.trait_ {
             self.inspect_generics(&item.generics);
             self.inspect_path(trait_path);
             self.inspect_type(&item.self_ty);
-            for impl_item in &item.items {
-                match impl_item {
-                    syn::ImplItem::Fn(function) => self.inspect_signature(&function.sig),
-                    syn::ImplItem::Type(item_type) => {
-                        self.inspect_generics(&item_type.generics);
-                        self.inspect_type(&item_type.ty);
-                    }
-                    syn::ImplItem::Const(item_const) => {
-                        self.inspect_generics(&item_const.generics);
-                        self.inspect_type(&item_const.ty);
-                    }
-                    syn::ImplItem::Macro(item_macro) => {
-                        self.inspect_macro_tokens(&item_macro.mac);
-                    }
-                    _ => {}
+        }
+        for impl_item in &item.items {
+            match impl_item {
+                syn::ImplItem::Fn(function) if trait_implementation || is_public(&function.vis) => {
+                    self.inspect_signature(&function.sig);
                 }
+                syn::ImplItem::Type(item_type)
+                    if trait_implementation || is_public(&item_type.vis) =>
+                {
+                    self.inspect_generics(&item_type.generics);
+                    self.inspect_type(&item_type.ty);
+                }
+                syn::ImplItem::Const(item_const)
+                    if trait_implementation || is_public(&item_const.vis) =>
+                {
+                    self.inspect_generics(&item_const.generics);
+                    self.inspect_type(&item_const.ty);
+                }
+                syn::ImplItem::Macro(item_macro) if trait_implementation => {
+                    self.inspect_macro_tokens(&item_macro.mac);
+                }
+                _ => {}
             }
         }
         visit::visit_item_impl(self, item);
@@ -793,18 +789,48 @@ impl<'ast> Visit<'ast> for PublicPetgraphVisitor<'_> {
 }
 
 fn public_petgraph_violations(file: &syn::File) -> BTreeSet<String> {
-    let (aliases, wildcard) = petgraph_aliases(file);
-    let mut visitor = PublicPetgraphVisitor {
-        aliases: &aliases,
-        violations: BTreeSet::new(),
-    };
-    if wildcard {
-        visitor
-            .violations
-            .insert("petgraph glob imports obscure exported types".into());
+    fn inspect_module(
+        items: &[syn::Item],
+        parent_aliases: Option<&HashSet<String>>,
+        root_aliases: Option<&HashSet<String>>,
+        violations: &mut BTreeSet<String>,
+    ) {
+        let (mut aliases, wildcard) = petgraph_aliases(items);
+        if let Some(parent_aliases) = parent_aliases {
+            aliases.extend(parent_aliases.iter().map(|alias| format!("super::{alias}")));
+        }
+        if let Some(root_aliases) = root_aliases {
+            aliases.extend(root_aliases.iter().map(|alias| format!("crate::{alias}")));
+        }
+        let root_aliases = root_aliases.cloned().unwrap_or_else(|| aliases.clone());
+        let mut visitor = PublicPetgraphVisitor {
+            aliases: &aliases,
+            violations: BTreeSet::new(),
+        };
+        if wildcard {
+            visitor
+                .violations
+                .insert("petgraph glob imports obscure exported types".into());
+        }
+        for item in items {
+            if !matches!(item, syn::Item::Mod(_)) {
+                visitor.visit_item(item);
+            }
+        }
+        violations.extend(visitor.violations);
+
+        for item in items {
+            if let syn::Item::Mod(module) = item
+                && let Some((_, items)) = &module.content
+            {
+                inspect_module(items, Some(&aliases), Some(&root_aliases), violations);
+            }
+        }
     }
-    visitor.visit_file(file);
-    visitor.violations
+
+    let mut violations = BTreeSet::new();
+    inspect_module(&file.items, None, None, &mut violations);
+    violations
 }
 
 #[test]
@@ -1037,6 +1063,7 @@ fn core_clippy_policy_covers_path_filesystem_capabilities() {
         .map(|entry| entry["path"].as_str().expect("disallowed method path"))
         .collect();
     let expected = BTreeSet::from([
+        "std::path::absolute",
         "std::path::Path::canonicalize",
         "std::path::Path::exists",
         "std::path::Path::is_dir",
@@ -1266,6 +1293,60 @@ fn public_api_inspection_rejects_root_grouped_petgraph_reexports() {
 
     assert!(violations.contains("public use petgraph :: Graph as PublicGraph"));
     assert!(violations.contains("public use petgraph :: Direction"));
+}
+
+#[test]
+fn public_api_inspection_rejects_inherent_associated_constants() {
+    let syntax = syn::parse_file(
+        r#"use petgraph::Graph as BackendGraph;
+        pub struct MaraGraph;
+        impl MaraGraph {
+            pub const LEAK: BackendGraph<(), ()> = todo!();
+        }"#,
+    )
+    .expect("parse fixture");
+    let violations = public_petgraph_violations(&syntax);
+
+    assert!(violations.contains("BackendGraph"));
+}
+
+#[test]
+fn public_api_inspection_scopes_petgraph_aliases_to_modules() {
+    let syntax = syn::parse_file(
+        r#"use petgraph::Graph as RootGraph;
+        mod private_backend {
+            use petgraph::Graph;
+            fn graph() -> Graph<(), ()> { todo!() }
+        }
+        mod domain {
+            use domain_types::Graph;
+            pub fn graph() -> Graph { todo!() }
+        }
+        mod leaking {
+            use petgraph::Graph as BackendGraph;
+            pub fn graph() -> BackendGraph<(), ()> { todo!() }
+        }
+        mod parent {
+            use petgraph::Graph as ParentGraph;
+            mod child {
+                pub fn graph() -> super::ParentGraph<(), ()> { todo!() }
+            }
+        }
+        mod root_child {
+            pub fn graph() -> crate::RootGraph<(), ()> { todo!() }
+        }"#,
+    )
+    .expect("parse fixture");
+    let violations = public_petgraph_violations(&syntax);
+
+    assert_eq!(
+        violations,
+        BTreeSet::from([
+            "BackendGraph".into(),
+            "crate::RootGraph".into(),
+            "super::ParentGraph".into(),
+        ])
+    );
 }
 
 #[test]
