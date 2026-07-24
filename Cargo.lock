@@ -100,7 +100,6 @@ dependencies = [
  "mara-core",
  "mara-markdown",
  "proc-macro2",
- "quote",
  "serde",
  "serde_json",
  "syn",

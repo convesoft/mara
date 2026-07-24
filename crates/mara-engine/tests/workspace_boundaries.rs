@@ -6,7 +6,6 @@ use std::{
 };
 
 use proc_macro2::{TokenStream, TokenTree};
-use quote::ToTokens;
 use serde::Deserialize;
 use syn::{
     ItemExternCrate, ItemUse, UseTree,
@@ -574,6 +573,62 @@ impl PublicPetgraphVisitor<'_> {
             ));
         }
     }
+
+    fn inspect_public_use_tree(
+        &mut self,
+        tree: &UseTree,
+        under_petgraph: bool,
+        segments: &mut Vec<String>,
+    ) {
+        match tree {
+            UseTree::Path(path) => {
+                let at_root = segments.is_empty();
+                let segment = path.ident.to_string();
+                let under_petgraph =
+                    under_petgraph || (at_root && self.aliases.contains(segment.as_str()));
+                segments.push(segment);
+                self.inspect_public_use_tree(&path.tree, under_petgraph, segments);
+                segments.pop();
+            }
+            UseTree::Name(name) => {
+                let at_root = segments.is_empty();
+                let segment = name.ident.to_string();
+                let exposes_petgraph =
+                    under_petgraph || (at_root && self.aliases.contains(segment.as_str()));
+                segments.push(segment);
+                if exposes_petgraph {
+                    self.violations
+                        .insert(format!("public use {}", segments.join(" :: ")));
+                }
+                segments.pop();
+            }
+            UseTree::Rename(rename) => {
+                let at_root = segments.is_empty();
+                let segment = rename.ident.to_string();
+                let exposes_petgraph =
+                    under_petgraph || (at_root && self.aliases.contains(segment.as_str()));
+                segments.push(segment);
+                if exposes_petgraph {
+                    self.violations.insert(format!(
+                        "public use {} as {}",
+                        segments.join(" :: "),
+                        rename.rename
+                    ));
+                }
+                segments.pop();
+            }
+            UseTree::Glob(_) if under_petgraph => {
+                self.violations
+                    .insert(format!("public use {} :: *", segments.join(" :: ")));
+            }
+            UseTree::Group(group) => {
+                for item in &group.items {
+                    self.inspect_public_use_tree(item, under_petgraph, segments);
+                }
+            }
+            UseTree::Glob(_) => {}
+        }
+    }
 }
 
 fn is_public(visibility: &syn::Visibility) -> bool {
@@ -731,14 +786,7 @@ impl<'ast> Visit<'ast> for PublicPetgraphVisitor<'_> {
 
     fn visit_item_use(&mut self, item: &'ast ItemUse) {
         if is_public(&item.vis) {
-            let text = item.tree.to_token_stream().to_string();
-            if self.aliases.iter().any(|alias| {
-                text == *alias
-                    || text.starts_with(format!("{alias} ::").as_str())
-                    || text.starts_with(format!("{alias} as").as_str())
-            }) {
-                self.violations.insert(format!("public use {text}"));
-            }
+            self.inspect_public_use_tree(&item.tree, false, &mut Vec::new());
         }
         visit::visit_item_use(self, item);
     }
@@ -1203,6 +1251,21 @@ fn public_api_inspection_rejects_petgraph_types_and_reexports() {
             .iter()
             .any(|violation| violation.starts_with("public use petgraph :: graph :: NodeIndex"))
     );
+}
+
+#[test]
+fn public_api_inspection_rejects_root_grouped_petgraph_reexports() {
+    let syntax = syn::parse_file(
+        r#"pub use {
+            petgraph::Graph as PublicGraph,
+            petgraph::Direction,
+        };"#,
+    )
+    .expect("parse fixture");
+    let violations = public_petgraph_violations(&syntax);
+
+    assert!(violations.contains("public use petgraph :: Graph as PublicGraph"));
+    assert!(violations.contains("public use petgraph :: Direction"));
 }
 
 #[test]
