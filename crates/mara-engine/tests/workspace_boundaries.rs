@@ -17,18 +17,29 @@ const WORKSPACE_PACKAGES: [&str; 4] = ["mara-core", "mara-markdown", "mara-engin
 struct CargoMetadata {
     packages: Vec<CargoPackage>,
     workspace_members: BTreeSet<String>,
+    resolve: CargoResolve,
 }
 
 #[derive(Deserialize)]
 struct CargoPackage {
     id: String,
     name: String,
-    dependencies: Vec<CargoDependency>,
 }
 
 #[derive(Deserialize)]
-struct CargoDependency {
-    name: String,
+struct CargoResolve {
+    nodes: Vec<CargoNode>,
+}
+
+#[derive(Deserialize)]
+struct CargoNode {
+    id: String,
+    deps: Vec<CargoNodeDependency>,
+}
+
+#[derive(Deserialize)]
+struct CargoNodeDependency {
+    pkg: String,
 }
 
 fn workspace_root() -> PathBuf {
@@ -40,7 +51,13 @@ fn workspace_root() -> PathBuf {
 
 fn cargo_metadata() -> CargoMetadata {
     let output = Command::new(env!("CARGO"))
-        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .args([
+            "metadata",
+            "--locked",
+            "--all-features",
+            "--format-version",
+            "1",
+        ])
         .current_dir(workspace_root())
         .output()
         .expect("run cargo metadata");
@@ -61,12 +78,25 @@ fn workspace_packages(metadata: &CargoMetadata) -> BTreeMap<&str, &CargoPackage>
         .collect()
 }
 
-fn internal_dependencies(package: &CargoPackage) -> BTreeSet<&str> {
-    package
-        .dependencies
+fn resolved_workspace_dependencies<'a>(
+    metadata: &'a CargoMetadata,
+    package_name: &str,
+) -> BTreeSet<&'a str> {
+    let packages = workspace_packages(metadata);
+    let package = packages[package_name];
+    let workspace_names_by_id: BTreeMap<_, _> = packages
+        .values()
+        .map(|package| (package.id.as_str(), package.name.as_str()))
+        .collect();
+    metadata
+        .resolve
+        .nodes
         .iter()
-        .map(|dependency| dependency.name.as_str())
-        .filter(|dependency| WORKSPACE_PACKAGES.contains(dependency))
+        .find(|node| node.id == package.id)
+        .unwrap_or_else(|| panic!("missing resolve node for {package_name}"))
+        .deps
+        .iter()
+        .filter_map(|dependency| workspace_names_by_id.get(dependency.pkg.as_str()).copied())
         .collect()
 }
 
@@ -122,7 +152,14 @@ impl CoreBoundaryVisitor {
             UseTree::Rename(rename) => {
                 segments.push(rename.ident.to_string());
                 self.check_path(segments);
-                if segments.len() == 1 && segments[0] == "std" {
+                let aliases_std_root = matches!(
+                    segments.as_slice(),
+                    [standard] if standard == "std"
+                ) || matches!(
+                    segments.as_slice(),
+                    [standard, current] if standard == "std" && current == "self"
+                );
+                if aliases_std_root {
                     self.violations
                         .push("renaming the std root can hide infrastructure paths".into());
                 }
@@ -179,22 +216,21 @@ fn workspace_contains_exactly_the_four_accepted_packages() {
 #[test]
 fn workspace_dependencies_follow_the_accepted_layer_direction() {
     let metadata = cargo_metadata();
-    let packages = workspace_packages(&metadata);
 
     assert_eq!(
-        internal_dependencies(packages["mara-core"]),
+        resolved_workspace_dependencies(&metadata, "mara-core"),
         BTreeSet::new()
     );
     assert_eq!(
-        internal_dependencies(packages["mara-markdown"]),
+        resolved_workspace_dependencies(&metadata, "mara-markdown"),
         BTreeSet::from(["mara-core"])
     );
     assert_eq!(
-        internal_dependencies(packages["mara-engine"]),
+        resolved_workspace_dependencies(&metadata, "mara-engine"),
         BTreeSet::from(["mara-core", "mara-markdown"])
     );
     assert_eq!(
-        internal_dependencies(packages["mara-cli"]),
+        resolved_workspace_dependencies(&metadata, "mara-cli"),
         BTreeSet::from(["mara-engine"])
     );
 }
@@ -203,7 +239,14 @@ fn workspace_dependencies_follow_the_accepted_layer_direction() {
 fn core_has_no_dependencies_or_infrastructure_coupling() {
     let metadata = cargo_metadata();
     let packages = workspace_packages(&metadata);
-    assert!(packages["mara-core"].dependencies.is_empty());
+    let core = packages["mara-core"];
+    let core_node = metadata
+        .resolve
+        .nodes
+        .iter()
+        .find(|node| node.id == core.id)
+        .expect("resolve node for mara-core");
+    assert!(core_node.deps.is_empty());
 
     let core_source = workspace_root().join("crates/mara-core/src");
     let mut sources = Vec::new();
@@ -225,26 +268,40 @@ fn core_has_no_dependencies_or_infrastructure_coupling() {
 }
 
 #[test]
-fn resolved_dependency_names_defeat_manifest_aliases() {
+fn same_name_external_packages_do_not_count_as_workspace_edges() {
     let metadata: CargoMetadata = serde_json::from_str(
         r#"{
-            "packages": [{
-                "id": "mara-markdown-id",
-                "name": "mara-markdown",
-                "dependencies": [{
-                    "name": "mara-core",
-                    "rename": "domain"
+            "packages": [
+                {
+                    "id": "workspace-core-id",
+                    "name": "mara-core"
+                },
+                {
+                    "id": "mara-markdown-id",
+                    "name": "mara-markdown"
+                },
+                {
+                    "id": "external-core-id",
+                    "name": "mara-core"
+                }
+            ],
+            "workspace_members": ["workspace-core-id", "mara-markdown-id"],
+            "resolve": {
+                "nodes": [{
+                    "id": "mara-markdown-id",
+                    "deps": [{
+                        "name": "domain",
+                        "pkg": "external-core-id"
+                    }]
                 }]
-            }],
-            "workspace_members": ["mara-markdown-id"]
+            }
         }"#,
     )
     .expect("decode metadata fixture");
-    let packages = workspace_packages(&metadata);
 
     assert_eq!(
-        internal_dependencies(packages["mara-markdown"]),
-        BTreeSet::from(["mara-core"])
+        resolved_workspace_dependencies(&metadata, "mara-markdown"),
+        BTreeSet::new()
     );
 }
 
@@ -256,4 +313,19 @@ fn syntax_inspection_rejects_grouped_infrastructure_imports() {
     visitor.visit_file(&syntax);
 
     assert_eq!(visitor.violations, ["std::fs", "std::io"]);
+}
+
+#[test]
+fn syntax_inspection_rejects_grouped_std_root_aliases() {
+    let syntax = syn::parse_file(
+        r#"use std::{self as platform}; fn read() { let _ = platform::fs::read("input"); }"#,
+    )
+    .expect("parse fixture");
+    let mut visitor = CoreBoundaryVisitor::default();
+    visitor.visit_file(&syntax);
+
+    assert_eq!(
+        visitor.violations,
+        ["renaming the std root can hide infrastructure paths"]
+    );
 }
