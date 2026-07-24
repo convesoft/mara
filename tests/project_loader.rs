@@ -482,6 +482,21 @@ fn an_existing_index_destination_must_be_a_regular_file() {
     assert_unsafe_field(load_from_root(&fixture.root).unwrap_err(), "index.path");
 }
 
+#[cfg(unix)]
+#[test]
+fn an_existing_write_only_index_does_not_require_read_access() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new();
+    let index_path = fixture.root.join(".mara/index.json");
+    fs::write(&index_path, "derived").unwrap();
+    fs::set_permissions(&index_path, fs::Permissions::from_mode(0o200)).unwrap();
+
+    let project = load_from_root(&fixture.root).unwrap();
+
+    assert_eq!(project.index_path, index_path);
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_schema_and_index_paths_that_escape_through_symlinks() {

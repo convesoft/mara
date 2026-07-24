@@ -600,20 +600,12 @@ fn open_project_input(
 
 fn existing_file_identity(path: &Path) -> Result<Option<FileIdentity>, ProjectLoadError> {
     match fs::metadata(path) {
-        Ok(_) => {
-            let file = open_read_no_follow(path).map_err(|source| ProjectLoadError::Io {
-                code: ProjectLoadErrorCode::IoFailed,
-                operation: "open existing output for identity check",
-                path: path.to_path_buf(),
-                source,
-            })?;
-            file_identity(&file).map_err(|source| ProjectLoadError::Io {
-                code: ProjectLoadErrorCode::IoFailed,
-                operation: "read existing output identity",
-                path: path.to_path_buf(),
-                source,
-            })
-        }
+        Ok(metadata) => path_identity(path, &metadata).map_err(|source| ProjectLoadError::Io {
+            code: ProjectLoadErrorCode::IoFailed,
+            operation: "read existing output metadata identity",
+            path: path.to_path_buf(),
+            source,
+        }),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(source) => Err(ProjectLoadError::Io {
             code: ProjectLoadErrorCode::IoFailed,
@@ -1123,6 +1115,16 @@ fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
     }))
 }
 
+#[cfg(unix)]
+fn path_identity(_path: &Path, metadata: &fs::Metadata) -> io::Result<Option<FileIdentity>> {
+    use std::os::unix::fs::MetadataExt;
+
+    Ok(Some(FileIdentity {
+        volume: metadata.dev(),
+        file: metadata.ino(),
+    }))
+}
+
 #[cfg(windows)]
 fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
     use std::os::windows::fs::OpenOptionsExt;
@@ -1155,6 +1157,18 @@ fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
     }))
 }
 
+#[cfg(windows)]
+fn path_identity(path: &Path, _metadata: &fs::Metadata) -> io::Result<Option<FileIdentity>> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    let file = fs::OpenOptions::new()
+        .access_mode(0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    file_identity(&file)
+}
+
 #[cfg(not(any(unix, windows)))]
 fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
     let metadata = fs::symlink_metadata(path)?;
@@ -1166,6 +1180,11 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 
 #[cfg(not(any(unix, windows)))]
 fn file_identity(_file: &fs::File) -> io::Result<Option<FileIdentity>> {
+    Ok(None)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn path_identity(_path: &Path, _metadata: &fs::Metadata) -> io::Result<Option<FileIdentity>> {
     Ok(None)
 }
 
