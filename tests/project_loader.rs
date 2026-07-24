@@ -1,7 +1,8 @@
 use std::{fs, path::Path};
 
 use mara::project::{
-    ProjectLoadError, ProjectLoadErrorCode, discover_and_load, discover_project, load_from_root,
+    ProjectLoadError, ProjectLoadErrorCode, ProjectLoadOperationalErrorCode, discover_and_load,
+    discover_project, load_from_root,
 };
 use tempfile::TempDir;
 
@@ -82,7 +83,10 @@ fn symlink_directory(original: impl AsRef<Path>, link: impl AsRef<Path>) {
 }
 
 fn assert_invalid_field(error: ProjectLoadError, expected_field: &str) {
-    assert_eq!(error.code(), ProjectLoadErrorCode::ConfigInvalidValue);
+    assert_eq!(
+        error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ConfigInvalidValue)
+    );
     match error {
         ProjectLoadError::InvalidConfiguration {
             field, location, ..
@@ -166,7 +170,10 @@ fn a_malformed_nearest_configuration_does_not_fall_back_to_an_outer_project() {
     fs::write(inner_root.join(".mara/project.toml"), inner_config).unwrap();
 
     let error = discover_and_load(inner_root.join(".mara/deep")).unwrap_err();
-    assert_eq!(error.code(), ProjectLoadErrorCode::ConfigUnknownKey);
+    assert_eq!(
+        error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ConfigUnknownKey)
+    );
 
     match error {
         ProjectLoadError::InvalidConfiguration { path, .. } => {
@@ -180,8 +187,11 @@ fn a_malformed_nearest_configuration_does_not_fall_back_to_an_outer_project() {
 fn reports_when_no_project_marker_exists() {
     let temp = tempfile::tempdir().unwrap();
     let error = discover_project(temp.path()).unwrap_err();
-    assert_eq!(error.code(), ProjectLoadErrorCode::ProjectNotFound);
-    assert_eq!(error.code().as_str(), "project.not_found");
+    assert_eq!(
+        error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ProjectNotFound)
+    );
+    assert_eq!(error.class().as_str(), "project.not_found");
     assert!(matches!(error, ProjectLoadError::ProjectNotFound { .. }));
 }
 
@@ -197,7 +207,10 @@ fn rejects_unknown_keys_in_root_and_nested_tables() {
         let fixture = Fixture::new();
         fixture.write_config(source);
         let error = load_from_root(&fixture.root).unwrap_err();
-        assert_eq!(error.code(), ProjectLoadErrorCode::ConfigUnknownKey);
+        assert_eq!(
+            error.diagnostic_code(),
+            Some(ProjectLoadErrorCode::ConfigUnknownKey)
+        );
         match error {
             ProjectLoadError::InvalidConfiguration {
                 field: None,
@@ -235,7 +248,7 @@ fn rejects_duplicate_assignments_and_malformed_types_with_locations() {
         let fixture = Fixture::new();
         fixture.write_config(source);
         let error = load_from_root(&fixture.root).unwrap_err();
-        assert_eq!(error.code(), expected_code);
+        assert_eq!(error.diagnostic_code(), Some(expected_code));
         match error {
             ProjectLoadError::InvalidConfiguration {
                 location: Some(location),
@@ -253,8 +266,11 @@ fn rejects_malformed_toml_with_the_catalogue_syntax_code() {
 
     let error = load_from_root(&fixture.root).unwrap_err();
 
-    assert_eq!(error.code(), ProjectLoadErrorCode::ConfigSyntax);
-    assert_eq!(error.code().as_str(), "config.syntax");
+    assert_eq!(
+        error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ConfigSyntax)
+    );
+    assert_eq!(error.class().as_str(), "config.syntax");
     assert!(matches!(
         error,
         ProjectLoadError::InvalidConfiguration {
@@ -273,7 +289,10 @@ fn rejects_missing_required_fields_and_tables() {
         let fixture = Fixture::new();
         fixture.write_config(source);
         let error = load_from_root(&fixture.root).unwrap_err();
-        assert_eq!(error.code(), ProjectLoadErrorCode::ConfigInvalidValue);
+        assert_eq!(
+            error.diagnostic_code(),
+            Some(ProjectLoadErrorCode::ConfigInvalidValue)
+        );
         assert!(matches!(
             error,
             ProjectLoadError::InvalidConfiguration { .. }
@@ -301,12 +320,18 @@ fn rejects_utf8_bom_and_invalid_utf8() {
     bom.extend(valid_config().into_bytes());
     fixture.write_config(bom);
     let bom_error = load_from_root(&fixture.root).unwrap_err();
-    assert_eq!(bom_error.code(), ProjectLoadErrorCode::ConfigSyntax);
+    assert_eq!(
+        bom_error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ConfigSyntax)
+    );
     assert!(bom_error.to_string().contains("byte-order mark"));
 
     fixture.write_config([0xff, 0xfe, 0xfd]);
     let utf8_error = load_from_root(&fixture.root).unwrap_err();
-    assert_eq!(utf8_error.code(), ProjectLoadErrorCode::ConfigSyntax);
+    assert_eq!(
+        utf8_error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ConfigSyntax)
+    );
     assert!(utf8_error.to_string().contains("not valid UTF-8"));
 }
 
@@ -497,6 +522,59 @@ fn an_existing_write_only_index_does_not_require_read_access() {
     assert_eq!(project.index_path, index_path);
 }
 
+#[cfg(unix)]
+#[test]
+fn rejects_non_writable_existing_index_and_missing_index_parent() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let existing = Fixture::new();
+    let existing_index = existing.root.join(".mara/index.json");
+    fs::write(&existing_index, "derived").unwrap();
+    fs::set_permissions(&existing_index, fs::Permissions::from_mode(0o400)).unwrap();
+    let existing_error = load_from_root(&existing.root).unwrap_err();
+    assert_eq!(
+        existing_error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ConfigInvalidValue)
+    );
+    assert!(existing_error.to_string().contains("not writable"));
+
+    let missing = Fixture::new();
+    let output_parent = missing.root.join("generated");
+    fs::create_dir(&output_parent).unwrap();
+    missing.write_config(config_with(
+        ".mara/schema.yaml",
+        "generated/index.json",
+        &["**/*.mara.md"],
+        &[],
+    ));
+    fs::set_permissions(&output_parent, fs::Permissions::from_mode(0o500)).unwrap();
+    let missing_error = load_from_root(&missing.root).unwrap_err();
+    fs::set_permissions(&output_parent, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(
+        missing_error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ConfigInvalidValue)
+    );
+    assert!(missing_error.to_string().contains("not writable"));
+}
+
+#[cfg(windows)]
+#[test]
+fn rejects_a_read_only_existing_index_on_windows() {
+    let fixture = Fixture::new();
+    let index_path = fixture.root.join(".mara/index.json");
+    fs::write(&index_path, "derived").unwrap();
+    let mut permissions = fs::metadata(&index_path).unwrap().permissions();
+    permissions.set_readonly(true);
+    fs::set_permissions(&index_path, permissions).unwrap();
+
+    let error = load_from_root(&fixture.root).unwrap_err();
+
+    assert_eq!(
+        error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ConfigInvalidValue)
+    );
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn rejects_schema_and_index_paths_that_escape_through_symlinks() {
@@ -569,8 +647,8 @@ fn rejects_hard_linked_index_aliases_to_configuration_or_schema() {
     ));
     let config_alias_error = load_from_root(&config_alias.root).unwrap_err();
     assert_eq!(
-        config_alias_error.code(),
-        ProjectLoadErrorCode::ProjectDuplicateFile
+        config_alias_error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ProjectDuplicateFile)
     );
     assert_unsafe_field(config_alias_error, "index.path");
 
@@ -627,7 +705,10 @@ fn rejects_a_project_configuration_marker_that_resolves_outside_the_root() {
     symlink_file(&outside_config, fixture.config_path());
 
     let error = load_from_root(&fixture.root).unwrap_err();
-    assert_eq!(error.code(), ProjectLoadErrorCode::ProjectPathOutsideRoot);
+    assert_eq!(
+        error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ProjectPathOutsideRoot)
+    );
 
     match error {
         ProjectLoadError::UnsafePath {
@@ -652,10 +733,10 @@ fn diagnostics_are_deterministic_and_actionable() {
     let first_error = load_from_root(&fixture.root).unwrap_err();
     let second_error = load_from_root(&fixture.root).unwrap_err();
     assert_eq!(
-        first_error.code(),
-        ProjectLoadErrorCode::ProjectPathOutsideRoot
+        first_error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ProjectPathOutsideRoot)
     );
-    assert_eq!(first_error.code().as_str(), "project.path_outside_root");
+    assert_eq!(first_error.class().as_str(), "project.path_outside_root");
     let first = first_error.to_string();
     let second = second_error.to_string();
 
@@ -681,6 +762,12 @@ fn an_explicit_root_must_be_a_directory() {
     let file = temp.path().join("file");
     fs::write(&file, "not a root").unwrap();
     let error = load_from_root(&file).unwrap_err();
+    assert_eq!(error.diagnostic_code(), None);
+    assert_eq!(
+        error.operational_code(),
+        Some(ProjectLoadOperationalErrorCode::ProjectUnavailable)
+    );
+    assert_eq!(error.class().as_str(), "project.unavailable");
     assert!(matches!(
         error,
         ProjectLoadError::InvalidConfiguration { .. }

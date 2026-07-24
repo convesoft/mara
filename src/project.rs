@@ -74,11 +74,10 @@ pub struct SourceLocation {
     pub column: usize,
 }
 
-/// Stable Mara v1 diagnostic or operational code for a loading failure.
+/// Stable Mara v1 diagnostic catalogue code for a loading failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProjectLoadErrorCode {
     ProjectNotFound,
-    ProjectUnavailable,
     ProjectPathOutsideRoot,
     ProjectSymlinkRejected,
     ProjectDuplicateFile,
@@ -88,14 +87,12 @@ pub enum ProjectLoadErrorCode {
     ConfigUnknownKey,
     ConfigInvalidValue,
     SchemaIo,
-    IoFailed,
 }
 
 impl ProjectLoadErrorCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ProjectNotFound => "project.not_found",
-            Self::ProjectUnavailable => "project.unavailable",
             Self::ProjectPathOutsideRoot => "project.path_outside_root",
             Self::ProjectSymlinkRejected => "project.symlink_rejected",
             Self::ProjectDuplicateFile => "project.duplicate_file",
@@ -105,7 +102,38 @@ impl ProjectLoadErrorCode {
             Self::ConfigUnknownKey => "config.unknown_key",
             Self::ConfigInvalidValue => "config.invalid_value",
             Self::SchemaIo => "schema.io",
+        }
+    }
+}
+
+/// Stable Mara v1 command-level operational code for a loading failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProjectLoadOperationalErrorCode {
+    ProjectUnavailable,
+    IoFailed,
+}
+
+impl ProjectLoadOperationalErrorCode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ProjectUnavailable => "project.unavailable",
             Self::IoFailed => "io.failed",
+        }
+    }
+}
+
+/// Identifies whether a failure belongs to the diagnostic or operational wire domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProjectLoadErrorClass {
+    Diagnostic(ProjectLoadErrorCode),
+    Operational(ProjectLoadOperationalErrorCode),
+}
+
+impl ProjectLoadErrorClass {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Diagnostic(code) => code.as_str(),
+            Self::Operational(code) => code.as_str(),
         }
     }
 }
@@ -117,20 +145,20 @@ pub enum ProjectLoadError {
         start: PathBuf,
     },
     Io {
-        code: ProjectLoadErrorCode,
+        class: ProjectLoadErrorClass,
         operation: &'static str,
         path: PathBuf,
         source: io::Error,
     },
     InvalidConfiguration {
-        code: ProjectLoadErrorCode,
+        class: ProjectLoadErrorClass,
         path: PathBuf,
         field: Option<&'static str>,
         message: String,
         location: Option<SourceLocation>,
     },
     UnsafePath {
-        code: ProjectLoadErrorCode,
+        class: ProjectLoadErrorClass,
         config_path: Box<Path>,
         field: &'static str,
         configured: Box<str>,
@@ -141,13 +169,29 @@ pub enum ProjectLoadError {
 }
 
 impl ProjectLoadError {
-    /// Returns a stable code without requiring callers to parse display text.
-    pub const fn code(&self) -> ProjectLoadErrorCode {
+    /// Returns the stable wire-domain classification without parsing display text.
+    pub const fn class(&self) -> ProjectLoadErrorClass {
         match self {
-            Self::ProjectNotFound { .. } => ProjectLoadErrorCode::ProjectNotFound,
-            Self::Io { code, .. }
-            | Self::InvalidConfiguration { code, .. }
-            | Self::UnsafePath { code, .. } => *code,
+            Self::ProjectNotFound { .. } => {
+                ProjectLoadErrorClass::Diagnostic(ProjectLoadErrorCode::ProjectNotFound)
+            }
+            Self::Io { class, .. }
+            | Self::InvalidConfiguration { class, .. }
+            | Self::UnsafePath { class, .. } => *class,
+        }
+    }
+
+    pub const fn diagnostic_code(&self) -> Option<ProjectLoadErrorCode> {
+        match self.class() {
+            ProjectLoadErrorClass::Diagnostic(code) => Some(code),
+            ProjectLoadErrorClass::Operational(_) => None,
+        }
+    }
+
+    pub const fn operational_code(&self) -> Option<ProjectLoadOperationalErrorCode> {
+        match self.class() {
+            ProjectLoadErrorClass::Diagnostic(_) => None,
+            ProjectLoadErrorClass::Operational(code) => Some(code),
         }
     }
 }
@@ -231,13 +275,13 @@ pub fn discover_project(start: impl AsRef<Path>) -> Result<ProjectLocation, Proj
     let requested_start = start.as_ref().to_path_buf();
     let resolved_start =
         fs::canonicalize(&requested_start).map_err(|source| ProjectLoadError::Io {
-            code: ProjectLoadErrorCode::IoFailed,
+            class: ProjectLoadErrorClass::Operational(ProjectLoadOperationalErrorCode::IoFailed),
             operation: "resolve discovery start",
             path: requested_start.clone(),
             source,
         })?;
     let metadata = fs::metadata(&resolved_start).map_err(|source| ProjectLoadError::Io {
-        code: ProjectLoadErrorCode::IoFailed,
+        class: ProjectLoadErrorClass::Operational(ProjectLoadOperationalErrorCode::IoFailed),
         operation: "inspect discovery start",
         path: resolved_start.clone(),
         source,
@@ -251,7 +295,9 @@ pub fn discover_project(start: impl AsRef<Path>) -> Result<ProjectLocation, Proj
         resolved_start
     } else {
         return Err(ProjectLoadError::InvalidConfiguration {
-            code: ProjectLoadErrorCode::ProjectUnavailable,
+            class: ProjectLoadErrorClass::Operational(
+                ProjectLoadOperationalErrorCode::ProjectUnavailable,
+            ),
             path: requested_start,
             field: None,
             message: "project discovery must start from a directory or regular file".into(),
@@ -271,7 +317,7 @@ pub fn discover_project(start: impl AsRef<Path>) -> Result<ProjectLocation, Proj
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(source) => {
                 return Err(ProjectLoadError::Io {
-                    code: ProjectLoadErrorCode::ConfigIo,
+                    class: ProjectLoadErrorClass::Diagnostic(ProjectLoadErrorCode::ConfigIo),
                     operation: "inspect project marker",
                     path: config_path,
                     source,
@@ -298,20 +344,22 @@ pub fn load_from_root(root: impl AsRef<Path>) -> Result<LoadedProject, ProjectLo
     let requested_root = root.as_ref().to_path_buf();
     let resolved_root =
         fs::canonicalize(&requested_root).map_err(|source| ProjectLoadError::Io {
-            code: ProjectLoadErrorCode::IoFailed,
+            class: ProjectLoadErrorClass::Operational(ProjectLoadOperationalErrorCode::IoFailed),
             operation: "resolve project root",
             path: requested_root.clone(),
             source,
         })?;
     let metadata = fs::metadata(&resolved_root).map_err(|source| ProjectLoadError::Io {
-        code: ProjectLoadErrorCode::IoFailed,
+        class: ProjectLoadErrorClass::Operational(ProjectLoadOperationalErrorCode::IoFailed),
         operation: "inspect project root",
         path: resolved_root.clone(),
         source,
     })?;
     if !metadata.is_dir() {
         return Err(ProjectLoadError::InvalidConfiguration {
-            code: ProjectLoadErrorCode::ProjectUnavailable,
+            class: ProjectLoadErrorClass::Operational(
+                ProjectLoadOperationalErrorCode::ProjectUnavailable,
+            ),
             path: requested_root,
             field: None,
             message: "explicit project root is not a directory".into(),
@@ -341,14 +389,14 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
     config_file
         .read_to_end(&mut bytes)
         .map_err(|source| ProjectLoadError::Io {
-            code: ProjectLoadErrorCode::ConfigIo,
+            class: ProjectLoadErrorClass::Diagnostic(ProjectLoadErrorCode::ConfigIo),
             operation: "read project configuration",
             path: resolved_config_path.clone(),
             source,
         })?;
     if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
         return Err(ProjectLoadError::InvalidConfiguration {
-            code: ProjectLoadErrorCode::ConfigSyntax,
+            class: ProjectLoadErrorClass::Diagnostic(ProjectLoadErrorCode::ConfigSyntax),
             path: location.config_path,
             field: None,
             message: "UTF-8 byte-order marks are not permitted".into(),
@@ -361,7 +409,7 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
     }
     let source_text =
         std::str::from_utf8(&bytes).map_err(|error| ProjectLoadError::InvalidConfiguration {
-            code: ProjectLoadErrorCode::ConfigSyntax,
+            class: ProjectLoadErrorClass::Diagnostic(ProjectLoadErrorCode::ConfigSyntax),
             path: location.config_path.clone(),
             field: None,
             message: "configuration is not valid UTF-8".into(),
@@ -524,7 +572,7 @@ fn open_project_input(
         }
         Err(source) => {
             return Err(ProjectLoadError::Io {
-                code: io_code,
+                class: ProjectLoadErrorClass::Diagnostic(io_code),
                 operation: "resolve project input",
                 path: logical_path.to_path_buf(),
                 source,
@@ -540,7 +588,7 @@ fn open_project_input(
         location,
     )?;
     let metadata = fs::metadata(&resolved_path).map_err(|source| ProjectLoadError::Io {
-        code: io_code,
+        class: ProjectLoadErrorClass::Diagnostic(io_code),
         operation: "inspect project input before opening",
         path: resolved_path.clone(),
         source,
@@ -557,13 +605,13 @@ fn open_project_input(
         ));
     }
     let file = open_read_no_follow(&resolved_path).map_err(|source| ProjectLoadError::Io {
-        code: io_code,
+        class: ProjectLoadErrorClass::Diagnostic(io_code),
         operation: "open project input",
         path: resolved_path.clone(),
         source,
     })?;
     let metadata = file.metadata().map_err(|source| ProjectLoadError::Io {
-        code: io_code,
+        class: ProjectLoadErrorClass::Diagnostic(io_code),
         operation: "inspect opened project input",
         path: resolved_path.clone(),
         source,
@@ -590,7 +638,7 @@ fn open_project_input(
         io_code,
     )?;
     let identity = file_identity(&file).map_err(|source| ProjectLoadError::Io {
-        code: io_code,
+        class: ProjectLoadErrorClass::Diagnostic(io_code),
         operation: "read opened project input identity",
         path: resolved_path.clone(),
         source,
@@ -601,14 +649,14 @@ fn open_project_input(
 fn existing_file_identity(path: &Path) -> Result<Option<FileIdentity>, ProjectLoadError> {
     match fs::metadata(path) {
         Ok(metadata) => path_identity(path, &metadata).map_err(|source| ProjectLoadError::Io {
-            code: ProjectLoadErrorCode::IoFailed,
+            class: ProjectLoadErrorClass::Operational(ProjectLoadOperationalErrorCode::IoFailed),
             operation: "read existing output metadata identity",
             path: path.to_path_buf(),
             source,
         }),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(source) => Err(ProjectLoadError::Io {
-            code: ProjectLoadErrorCode::IoFailed,
+            class: ProjectLoadErrorClass::Operational(ProjectLoadOperationalErrorCode::IoFailed),
             operation: "inspect existing output identity",
             path: path.to_path_buf(),
             source,
@@ -629,7 +677,7 @@ fn verify_opened_input(
 ) -> Result<(), ProjectLoadError> {
     let rechecked_path =
         fs::canonicalize(expected_path).map_err(|source| ProjectLoadError::Io {
-            code: io_code,
+            class: ProjectLoadErrorClass::Diagnostic(io_code),
             operation: "recheck opened project input",
             path: expected_path.to_path_buf(),
             source,
@@ -644,20 +692,20 @@ fn verify_opened_input(
     )?;
     let rechecked_file =
         open_read_no_follow(&rechecked_path).map_err(|source| ProjectLoadError::Io {
-            code: io_code,
+            class: ProjectLoadErrorClass::Diagnostic(io_code),
             operation: "reopen project input for identity check",
             path: rechecked_path.clone(),
             source,
         })?;
     let opened_identity = file_identity(opened_file).map_err(|source| ProjectLoadError::Io {
-        code: io_code,
+        class: ProjectLoadErrorClass::Diagnostic(io_code),
         operation: "read opened project input identity",
         path: expected_path.to_path_buf(),
         source,
     })?;
     let rechecked_identity =
         file_identity(&rechecked_file).map_err(|source| ProjectLoadError::Io {
-            code: io_code,
+            class: ProjectLoadErrorClass::Diagnostic(io_code),
             operation: "read rechecked project input identity",
             path: rechecked_path.clone(),
             source,
@@ -690,7 +738,7 @@ fn resolve_output_path(
     let (existing_ancestor, suffix) = nearest_existing_ancestor(&target)?;
     let resolved_ancestor =
         fs::canonicalize(&existing_ancestor).map_err(|source| ProjectLoadError::Io {
-            code: ProjectLoadErrorCode::IoFailed,
+            class: ProjectLoadErrorClass::Operational(ProjectLoadOperationalErrorCode::IoFailed),
             operation: "resolve output ancestor",
             path: existing_ancestor,
             source,
@@ -705,7 +753,7 @@ fn resolve_output_path(
     )?;
     if !suffix.is_empty() {
         let metadata = fs::metadata(&resolved_ancestor).map_err(|source| ProjectLoadError::Io {
-            code: ProjectLoadErrorCode::IoFailed,
+            class: ProjectLoadErrorClass::Operational(ProjectLoadOperationalErrorCode::IoFailed),
             operation: "inspect output ancestor",
             path: resolved_ancestor.clone(),
             source,
@@ -717,6 +765,17 @@ fn resolve_output_path(
                 field,
                 configured,
                 "nearest existing output ancestor is not a directory",
+                Some(resolved_ancestor),
+                location,
+            ));
+        }
+        if check_output_write_access(&resolved_ancestor, true).is_err() {
+            return Err(unsafe_path(
+                ProjectLoadErrorCode::ConfigInvalidValue,
+                config_path,
+                field,
+                configured,
+                "nearest existing output ancestor is not writable",
                 Some(resolved_ancestor),
                 location,
             ));
@@ -735,7 +794,7 @@ fn resolve_output_path(
     )?;
     if suffix.is_empty() {
         let metadata = fs::metadata(&resolved_target).map_err(|source| ProjectLoadError::Io {
-            code: ProjectLoadErrorCode::IoFailed,
+            class: ProjectLoadErrorClass::Operational(ProjectLoadOperationalErrorCode::IoFailed),
             operation: "inspect output destination",
             path: resolved_target.clone(),
             source,
@@ -747,6 +806,17 @@ fn resolve_output_path(
                 field,
                 configured,
                 "existing output destination is not a regular file",
+                Some(resolved_target),
+                location,
+            ));
+        }
+        if check_output_write_access(&resolved_target, false).is_err() {
+            return Err(unsafe_path(
+                ProjectLoadErrorCode::ConfigInvalidValue,
+                config_path,
+                field,
+                configured,
+                "existing output destination is not writable",
                 Some(resolved_target),
                 location,
             ));
@@ -763,7 +833,9 @@ fn nearest_existing_ancestor(path: &Path) -> Result<(PathBuf, Vec<PathBuf>), Pro
             Ok(_) => break,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 let segment = current.file_name().ok_or_else(|| ProjectLoadError::Io {
-                    code: ProjectLoadErrorCode::IoFailed,
+                    class: ProjectLoadErrorClass::Operational(
+                        ProjectLoadOperationalErrorCode::IoFailed,
+                    ),
                     operation: "find existing output ancestor",
                     path: path.to_path_buf(),
                     source: io::Error::new(
@@ -776,7 +848,9 @@ fn nearest_existing_ancestor(path: &Path) -> Result<(PathBuf, Vec<PathBuf>), Pro
             }
             Err(source) => {
                 return Err(ProjectLoadError::Io {
-                    code: ProjectLoadErrorCode::IoFailed,
+                    class: ProjectLoadErrorClass::Operational(
+                        ProjectLoadOperationalErrorCode::IoFailed,
+                    ),
                     operation: "inspect output ancestor",
                     path: current,
                     source,
@@ -1027,7 +1101,7 @@ fn invalid_value(
     location: Option<SourceLocation>,
 ) -> ProjectLoadError {
     ProjectLoadError::InvalidConfiguration {
-        code: ProjectLoadErrorCode::ConfigInvalidValue,
+        class: ProjectLoadErrorClass::Diagnostic(ProjectLoadErrorCode::ConfigInvalidValue),
         path: path.to_path_buf(),
         field: Some(field),
         message,
@@ -1042,7 +1116,7 @@ fn configuration_decode_error(
     code: ProjectLoadErrorCode,
 ) -> ProjectLoadError {
     ProjectLoadError::InvalidConfiguration {
-        code,
+        class: ProjectLoadErrorClass::Diagnostic(code),
         path: path.to_path_buf(),
         field: None,
         message: error.message().to_owned(),
@@ -1062,7 +1136,7 @@ fn unsafe_path(
     location: Option<SourceLocation>,
 ) -> ProjectLoadError {
     ProjectLoadError::UnsafePath {
-        code,
+        class: ProjectLoadErrorClass::Diagnostic(code),
         config_path: config_path.into(),
         field,
         configured: configured.into(),
@@ -1091,6 +1165,80 @@ fn source_location(source: &[u8], offset: usize) -> SourceLocation {
         byte_offset: offset,
         line,
         column,
+    }
+}
+
+#[cfg(unix)]
+fn check_output_write_access(path: &Path, directory: bool) -> io::Result<()> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+    let path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL"))?;
+    let mode = libc::W_OK | if directory { libc::X_OK } else { 0 };
+    // SAFETY: `path` is NUL-terminated and remains valid for the call.
+    let result = unsafe { libc::faccessat(libc::AT_FDCWD, path.as_ptr(), mode, libc::AT_EACCESS) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(windows)]
+fn check_output_write_access(path: &Path, directory: bool) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        Storage::FileSystem::{
+            CreateFileW, FILE_ADD_FILE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_WRITE_DATA, OPEN_EXISTING,
+        },
+    };
+
+    let path: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let access = if directory {
+        FILE_ADD_FILE
+    } else {
+        FILE_WRITE_DATA
+    };
+    let flags = FILE_FLAG_OPEN_REPARSE_POINT
+        | if directory {
+            FILE_FLAG_BACKUP_SEMANTICS
+        } else {
+            0
+        };
+    // SAFETY: `path` is NUL-terminated, the optional pointer arguments are
+    // null, and the returned handle is closed before returning.
+    let handle = unsafe {
+        CreateFileW(
+            path.as_ptr(),
+            access,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            flags,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: `handle` was returned by `CreateFileW` and is still owned here.
+    if unsafe { CloseHandle(handle) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn check_output_write_access(path: &Path, _directory: bool) -> io::Result<()> {
+    if fs::metadata(path)?.permissions().readonly() {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "output location is read-only",
+        ))
+    } else {
+        Ok(())
     }
 }
 
@@ -1262,7 +1410,10 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(error.code(), ProjectLoadErrorCode::ProjectSymlinkRejected);
+        assert_eq!(
+            error.diagnostic_code(),
+            Some(ProjectLoadErrorCode::ProjectSymlinkRejected)
+        );
         assert!(matches!(error, ProjectLoadError::UnsafePath { .. }));
     }
 }
