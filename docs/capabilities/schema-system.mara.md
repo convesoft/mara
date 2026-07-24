@@ -174,8 +174,10 @@ hardcode a process or mandatory trace path.
 :derives_from: GOAL-READABLE-SOURCE
 
 v0.1 schemas shall not define implicit field defaults. A semantically relevant
-value shall be visible in source, and an absent optional value shall remain
-absent in the normalized model.
+authored value shall be visible in source, and an absent optional configuration
+key shall remain absent in the source-preserving decoded representation. A
+compiler may assign explicitly specified effective semantics to omission without
+manufacturing an authored value or source span.
 :::
 
 :::req m_01KY7Y9R4WY8FBM94N4AHJ1EQJ
