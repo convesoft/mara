@@ -45,7 +45,7 @@ a schema error at the pattern value.
 
 The root mapping has exactly these keys in v1:
 
-| Key | Type | Required | Default |
+| Key | Type | Required | Effective when omitted |
 |---|---|---:|---|
 | `format_version` | integer | yes | none |
 | `schema` | mapping | yes | none |
@@ -56,6 +56,11 @@ The root mapping has exactly these keys in v1:
 
 `imports`, `extends`, defaults, scripts, plugins, environment interpolation, and
 every other top-level key are errors in v1.
+
+Optional root collections remain absent in the source-preserving decoded
+representation when omitted. During compilation, absent `relations` and `rules`
+have the same effective behaviour as explicit `{}` and `[]`, respectively. Mara
+shall not synthesize an authored value or source span for either omission.
 
 ### Format and schema identity
 
