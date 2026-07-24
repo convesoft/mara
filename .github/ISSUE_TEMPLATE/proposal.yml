@@ -1,0 +1,42 @@
+name: Product proposal
+description: Propose a product outcome or contract change for triage.
+title: "proposal: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form captures public intake, not the authoritative specification.
+        If accepted, durable goals, scenarios, requirements, decisions, risks, and
+        verification intent are added to the Mara documents before delivery work.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What should a user, integration, or agent be able to accomplish?
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What problem does this solve, and who experiences it?
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Related Mara contract
+      description: Cite any relevant goal, story, requirement, decision, risk, test, or term IDs.
+      placeholder: GOAL-..., STORY-..., REQ-..., ADR-...
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Acceptance evidence
+      description: What observable evidence would demonstrate that the outcome is satisfied?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and constraints
+      description: Note approaches considered, compatibility constraints, or important non-goals.
