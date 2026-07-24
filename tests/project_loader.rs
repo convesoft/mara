@@ -82,6 +82,7 @@ fn symlink_directory(original: impl AsRef<Path>, link: impl AsRef<Path>) {
 }
 
 fn assert_invalid_field(error: ProjectLoadError, expected_field: &str) {
+    assert_eq!(error.code(), ProjectLoadErrorCode::ConfigInvalidValue);
     match error {
         ProjectLoadError::InvalidConfiguration {
             field, location, ..
@@ -165,6 +166,7 @@ fn a_malformed_nearest_configuration_does_not_fall_back_to_an_outer_project() {
     fs::write(inner_root.join(".mara/project.toml"), inner_config).unwrap();
 
     let error = discover_and_load(inner_root.join(".mara/deep")).unwrap_err();
+    assert_eq!(error.code(), ProjectLoadErrorCode::ConfigUnknownKey);
 
     match error {
         ProjectLoadError::InvalidConfiguration { path, .. } => {
@@ -178,6 +180,8 @@ fn a_malformed_nearest_configuration_does_not_fall_back_to_an_outer_project() {
 fn reports_when_no_project_marker_exists() {
     let temp = tempfile::tempdir().unwrap();
     let error = discover_project(temp.path()).unwrap_err();
+    assert_eq!(error.code(), ProjectLoadErrorCode::ProjectNotFound);
+    assert_eq!(error.code().as_str(), "project.not_found");
     assert!(matches!(error, ProjectLoadError::ProjectNotFound { .. }));
 }
 
@@ -193,6 +197,7 @@ fn rejects_unknown_keys_in_root_and_nested_tables() {
         let fixture = Fixture::new();
         fixture.write_config(source);
         let error = load_from_root(&fixture.root).unwrap_err();
+        assert_eq!(error.code(), ProjectLoadErrorCode::ConfigUnknownKey);
         match error {
             ProjectLoadError::InvalidConfiguration {
                 field: None,
@@ -211,19 +216,27 @@ fn rejects_unknown_keys_in_root_and_nested_tables() {
 #[test]
 fn rejects_duplicate_assignments_and_malformed_types_with_locations() {
     let cases = [
-        valid_config().replace(
-            "format_version = 1",
-            "format_version = 1\nformat_version = 1",
+        (
+            valid_config().replace(
+                "format_version = 1",
+                "format_version = 1\nformat_version = 1",
+            ),
+            ProjectLoadErrorCode::ConfigDuplicateKey,
         ),
-        valid_config().replace(
-            "warnings_as_errors = false",
-            "warnings_as_errors = \"false\"",
+        (
+            valid_config().replace(
+                "warnings_as_errors = false",
+                "warnings_as_errors = \"false\"",
+            ),
+            ProjectLoadErrorCode::ConfigInvalidValue,
         ),
     ];
-    for source in cases {
+    for (source, expected_code) in cases {
         let fixture = Fixture::new();
         fixture.write_config(source);
-        match load_from_root(&fixture.root).unwrap_err() {
+        let error = load_from_root(&fixture.root).unwrap_err();
+        assert_eq!(error.code(), expected_code);
+        match error {
             ProjectLoadError::InvalidConfiguration {
                 location: Some(location),
                 ..
@@ -234,6 +247,24 @@ fn rejects_duplicate_assignments_and_malformed_types_with_locations() {
 }
 
 #[test]
+fn rejects_malformed_toml_with_the_catalogue_syntax_code() {
+    let fixture = Fixture::new();
+    fixture.write_config(valid_config().replace("name = \"mara-test\"", "name = \"unterminated"));
+
+    let error = load_from_root(&fixture.root).unwrap_err();
+
+    assert_eq!(error.code(), ProjectLoadErrorCode::ConfigSyntax);
+    assert_eq!(error.code().as_str(), "config.syntax");
+    assert!(matches!(
+        error,
+        ProjectLoadError::InvalidConfiguration {
+            location: Some(_),
+            ..
+        }
+    ));
+}
+
+#[test]
 fn rejects_missing_required_fields_and_tables() {
     for source in [
         valid_config().replace("name = \"mara-test\"\n", ""),
@@ -241,9 +272,11 @@ fn rejects_missing_required_fields_and_tables() {
     ] {
         let fixture = Fixture::new();
         fixture.write_config(source);
+        let error = load_from_root(&fixture.root).unwrap_err();
+        assert_eq!(error.code(), ProjectLoadErrorCode::ConfigInvalidValue);
         assert!(matches!(
-            load_from_root(&fixture.root),
-            Err(ProjectLoadError::InvalidConfiguration { .. })
+            error,
+            ProjectLoadError::InvalidConfiguration { .. }
         ));
     }
 }
@@ -268,10 +301,12 @@ fn rejects_utf8_bom_and_invalid_utf8() {
     bom.extend(valid_config().into_bytes());
     fixture.write_config(bom);
     let bom_error = load_from_root(&fixture.root).unwrap_err();
+    assert_eq!(bom_error.code(), ProjectLoadErrorCode::ConfigSyntax);
     assert!(bom_error.to_string().contains("byte-order mark"));
 
     fixture.write_config([0xff, 0xfe, 0xfd]);
     let utf8_error = load_from_root(&fixture.root).unwrap_err();
+    assert_eq!(utf8_error.code(), ProjectLoadErrorCode::ConfigSyntax);
     assert!(utf8_error.to_string().contains("not valid UTF-8"));
 }
 
@@ -517,10 +552,12 @@ fn rejects_hard_linked_index_aliases_to_configuration_or_schema() {
         &["**/*.mara.md"],
         &[],
     ));
-    assert_unsafe_field(
-        load_from_root(&config_alias.root).unwrap_err(),
-        "index.path",
+    let config_alias_error = load_from_root(&config_alias.root).unwrap_err();
+    assert_eq!(
+        config_alias_error.code(),
+        ProjectLoadErrorCode::ProjectDuplicateFile
     );
+    assert_unsafe_field(config_alias_error, "index.path");
 
     let schema_alias = Fixture::new();
     fs::hard_link(
@@ -575,6 +612,7 @@ fn rejects_a_project_configuration_marker_that_resolves_outside_the_root() {
     symlink_file(&outside_config, fixture.config_path());
 
     let error = load_from_root(&fixture.root).unwrap_err();
+    assert_eq!(error.code(), ProjectLoadErrorCode::ProjectPathOutsideRoot);
 
     match error {
         ProjectLoadError::UnsafePath {
@@ -598,8 +636,11 @@ fn diagnostics_are_deterministic_and_actionable() {
 
     let first_error = load_from_root(&fixture.root).unwrap_err();
     let second_error = load_from_root(&fixture.root).unwrap_err();
-    assert_eq!(first_error.code(), ProjectLoadErrorCode::UnsafePath);
-    assert_eq!(first_error.code().as_str(), "project.path.unsafe");
+    assert_eq!(
+        first_error.code(),
+        ProjectLoadErrorCode::ProjectPathOutsideRoot
+    );
+    assert_eq!(first_error.code().as_str(), "project.path_outside_root");
     let first = first_error.to_string();
     let second = second_error.to_string();
 

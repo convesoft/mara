@@ -74,22 +74,38 @@ pub struct SourceLocation {
     pub column: usize,
 }
 
-/// Stable machine classification for project discovery and loading failures.
+/// Stable Mara v1 diagnostic or operational code for a loading failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ProjectLoadErrorCode {
     ProjectNotFound,
-    Io,
-    InvalidConfiguration,
-    UnsafePath,
+    ProjectUnavailable,
+    ProjectPathOutsideRoot,
+    ProjectSymlinkRejected,
+    ProjectDuplicateFile,
+    ConfigIo,
+    ConfigSyntax,
+    ConfigDuplicateKey,
+    ConfigUnknownKey,
+    ConfigInvalidValue,
+    SchemaIo,
+    IoFailed,
 }
 
 impl ProjectLoadErrorCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::ProjectNotFound => "project.not_found",
-            Self::Io => "project.io",
-            Self::InvalidConfiguration => "project.configuration.invalid",
-            Self::UnsafePath => "project.path.unsafe",
+            Self::ProjectUnavailable => "project.unavailable",
+            Self::ProjectPathOutsideRoot => "project.path_outside_root",
+            Self::ProjectSymlinkRejected => "project.symlink_rejected",
+            Self::ProjectDuplicateFile => "project.duplicate_file",
+            Self::ConfigIo => "config.io",
+            Self::ConfigSyntax => "config.syntax",
+            Self::ConfigDuplicateKey => "config.duplicate_key",
+            Self::ConfigUnknownKey => "config.unknown_key",
+            Self::ConfigInvalidValue => "config.invalid_value",
+            Self::SchemaIo => "schema.io",
+            Self::IoFailed => "io.failed",
         }
     }
 }
@@ -101,17 +117,20 @@ pub enum ProjectLoadError {
         start: PathBuf,
     },
     Io {
+        code: ProjectLoadErrorCode,
         operation: &'static str,
         path: PathBuf,
         source: io::Error,
     },
     InvalidConfiguration {
+        code: ProjectLoadErrorCode,
         path: PathBuf,
         field: Option<&'static str>,
         message: String,
         location: Option<SourceLocation>,
     },
     UnsafePath {
+        code: ProjectLoadErrorCode,
         config_path: Box<Path>,
         field: &'static str,
         configured: Box<str>,
@@ -126,9 +145,9 @@ impl ProjectLoadError {
     pub const fn code(&self) -> ProjectLoadErrorCode {
         match self {
             Self::ProjectNotFound { .. } => ProjectLoadErrorCode::ProjectNotFound,
-            Self::Io { .. } => ProjectLoadErrorCode::Io,
-            Self::InvalidConfiguration { .. } => ProjectLoadErrorCode::InvalidConfiguration,
-            Self::UnsafePath { .. } => ProjectLoadErrorCode::UnsafePath,
+            Self::Io { code, .. }
+            | Self::InvalidConfiguration { code, .. }
+            | Self::UnsafePath { code, .. } => *code,
         }
     }
 }
@@ -145,6 +164,7 @@ impl fmt::Display for ProjectLoadError {
                 operation,
                 path,
                 source,
+                ..
             } => write!(
                 formatter,
                 "could not {operation} {}: {source}",
@@ -155,6 +175,7 @@ impl fmt::Display for ProjectLoadError {
                 field,
                 message,
                 location,
+                ..
             } => {
                 write!(
                     formatter,
@@ -176,6 +197,7 @@ impl fmt::Display for ProjectLoadError {
                 reason,
                 resolved,
                 location,
+                ..
             } => {
                 write!(formatter, "unsafe path in {}", config_path.display())?;
                 if let Some(location) = location {
@@ -209,11 +231,13 @@ pub fn discover_project(start: impl AsRef<Path>) -> Result<ProjectLocation, Proj
     let requested_start = start.as_ref().to_path_buf();
     let resolved_start =
         fs::canonicalize(&requested_start).map_err(|source| ProjectLoadError::Io {
+            code: ProjectLoadErrorCode::IoFailed,
             operation: "resolve discovery start",
             path: requested_start.clone(),
             source,
         })?;
     let metadata = fs::metadata(&resolved_start).map_err(|source| ProjectLoadError::Io {
+        code: ProjectLoadErrorCode::IoFailed,
         operation: "inspect discovery start",
         path: resolved_start.clone(),
         source,
@@ -227,6 +251,7 @@ pub fn discover_project(start: impl AsRef<Path>) -> Result<ProjectLocation, Proj
         resolved_start
     } else {
         return Err(ProjectLoadError::InvalidConfiguration {
+            code: ProjectLoadErrorCode::ProjectUnavailable,
             path: requested_start,
             field: None,
             message: "project discovery must start from a directory or regular file".into(),
@@ -246,6 +271,7 @@ pub fn discover_project(start: impl AsRef<Path>) -> Result<ProjectLocation, Proj
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(source) => {
                 return Err(ProjectLoadError::Io {
+                    code: ProjectLoadErrorCode::ConfigIo,
                     operation: "inspect project marker",
                     path: config_path,
                     source,
@@ -272,17 +298,20 @@ pub fn load_from_root(root: impl AsRef<Path>) -> Result<LoadedProject, ProjectLo
     let requested_root = root.as_ref().to_path_buf();
     let resolved_root =
         fs::canonicalize(&requested_root).map_err(|source| ProjectLoadError::Io {
+            code: ProjectLoadErrorCode::IoFailed,
             operation: "resolve project root",
             path: requested_root.clone(),
             source,
         })?;
     let metadata = fs::metadata(&resolved_root).map_err(|source| ProjectLoadError::Io {
+        code: ProjectLoadErrorCode::IoFailed,
         operation: "inspect project root",
         path: resolved_root.clone(),
         source,
     })?;
     if !metadata.is_dir() {
         return Err(ProjectLoadError::InvalidConfiguration {
+            code: ProjectLoadErrorCode::ProjectUnavailable,
             path: requested_root,
             field: None,
             message: "explicit project root is not a directory".into(),
@@ -306,17 +335,20 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
         "project configuration",
         ".mara/project.toml",
         None,
+        ProjectLoadErrorCode::ConfigIo,
     )?;
     let mut bytes = Vec::new();
     config_file
         .read_to_end(&mut bytes)
         .map_err(|source| ProjectLoadError::Io {
+            code: ProjectLoadErrorCode::ConfigIo,
             operation: "read project configuration",
             path: resolved_config_path.clone(),
             source,
         })?;
     if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
         return Err(ProjectLoadError::InvalidConfiguration {
+            code: ProjectLoadErrorCode::ConfigSyntax,
             path: location.config_path,
             field: None,
             message: "UTF-8 byte-order marks are not permitted".into(),
@@ -329,20 +361,29 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
     }
     let source_text =
         std::str::from_utf8(&bytes).map_err(|error| ProjectLoadError::InvalidConfiguration {
+            code: ProjectLoadErrorCode::ConfigSyntax,
             path: location.config_path.clone(),
             field: None,
             message: "configuration is not valid UTF-8".into(),
             location: Some(source_location(&bytes, error.valid_up_to())),
         })?;
+    // Parse the document independently of the v1 shape first, so syntax and
+    // duplicate-key failures cannot be conflated with schema-value failures.
+    toml::from_str::<toml::Value>(source_text).map_err(|error: toml::de::Error| {
+        let code = if error.message().contains("duplicate key") {
+            ProjectLoadErrorCode::ConfigDuplicateKey
+        } else {
+            ProjectLoadErrorCode::ConfigSyntax
+        };
+        configuration_decode_error(&location.config_path, source_text, error, code)
+    })?;
     let raw: RawProjectConfig = toml::from_str(source_text).map_err(|error: toml::de::Error| {
-        ProjectLoadError::InvalidConfiguration {
-            path: location.config_path.clone(),
-            field: None,
-            message: error.message().to_owned(),
-            location: error
-                .span()
-                .map(|span| source_location(source_text.as_bytes(), span.start)),
-        }
+        let code = if error.message().starts_with("unknown field ") {
+            ProjectLoadErrorCode::ConfigUnknownKey
+        } else {
+            ProjectLoadErrorCode::ConfigInvalidValue
+        };
+        configuration_decode_error(&location.config_path, source_text, error, code)
     })?;
 
     let format_location = location_for_span(source_text, &raw.format_version);
@@ -390,6 +431,7 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
         "project.schema",
         &schema_value,
         schema_location,
+        ProjectLoadErrorCode::SchemaIo,
     )?;
 
     let index_location = location_for_span(source_text, &raw.index.path);
@@ -406,6 +448,7 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
     });
     if index_path == resolved_config_path || index_path == schema_path || index_aliases_input {
         return Err(unsafe_path(
+            ProjectLoadErrorCode::ProjectDuplicateFile,
             &location.config_path,
             "index.path",
             &index_value,
@@ -444,6 +487,7 @@ fn resolve_existing_input(
     field: &'static str,
     configured: &str,
     location: Option<SourceLocation>,
+    io_code: ProjectLoadErrorCode,
 ) -> Result<(PathBuf, Option<FileIdentity>), ProjectLoadError> {
     validate_relative_path(config_path, field, configured, location)?;
     let logical_path = root.join(configured);
@@ -454,6 +498,7 @@ fn resolve_existing_input(
         field,
         configured,
         location,
+        io_code,
     )?;
     Ok((resolved_path, identity))
 }
@@ -465,6 +510,7 @@ fn open_project_input(
     field: &'static str,
     configured: &str,
     location: Option<SourceLocation>,
+    io_code: ProjectLoadErrorCode,
 ) -> Result<(fs::File, PathBuf, Option<FileIdentity>), ProjectLoadError> {
     let resolved_path = match fs::canonicalize(logical_path) {
         Ok(path) => path,
@@ -478,6 +524,7 @@ fn open_project_input(
         }
         Err(source) => {
             return Err(ProjectLoadError::Io {
+                code: io_code,
                 operation: "resolve project input",
                 path: logical_path.to_path_buf(),
                 source,
@@ -493,12 +540,14 @@ fn open_project_input(
         location,
     )?;
     let metadata = fs::metadata(&resolved_path).map_err(|source| ProjectLoadError::Io {
+        code: io_code,
         operation: "inspect project input before opening",
         path: resolved_path.clone(),
         source,
     })?;
     if !metadata.is_file() {
         return Err(unsafe_path(
+            ProjectLoadErrorCode::ConfigInvalidValue,
             config_path,
             field,
             configured,
@@ -508,17 +557,20 @@ fn open_project_input(
         ));
     }
     let file = open_read_no_follow(&resolved_path).map_err(|source| ProjectLoadError::Io {
+        code: io_code,
         operation: "open project input",
         path: resolved_path.clone(),
         source,
     })?;
     let metadata = file.metadata().map_err(|source| ProjectLoadError::Io {
+        code: io_code,
         operation: "inspect opened project input",
         path: resolved_path.clone(),
         source,
     })?;
     if !metadata.is_file() {
         return Err(unsafe_path(
+            ProjectLoadErrorCode::ConfigInvalidValue,
             config_path,
             field,
             configured,
@@ -535,8 +587,10 @@ fn open_project_input(
         &resolved_path,
         &file,
         location,
+        io_code,
     )?;
     let identity = file_identity(&file).map_err(|source| ProjectLoadError::Io {
+        code: io_code,
         operation: "read opened project input identity",
         path: resolved_path.clone(),
         source,
@@ -548,11 +602,13 @@ fn existing_file_identity(path: &Path) -> Result<Option<FileIdentity>, ProjectLo
     match fs::metadata(path) {
         Ok(_) => {
             let file = open_read_no_follow(path).map_err(|source| ProjectLoadError::Io {
+                code: ProjectLoadErrorCode::IoFailed,
                 operation: "open existing output for identity check",
                 path: path.to_path_buf(),
                 source,
             })?;
             file_identity(&file).map_err(|source| ProjectLoadError::Io {
+                code: ProjectLoadErrorCode::IoFailed,
                 operation: "read existing output identity",
                 path: path.to_path_buf(),
                 source,
@@ -560,6 +616,7 @@ fn existing_file_identity(path: &Path) -> Result<Option<FileIdentity>, ProjectLo
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(source) => Err(ProjectLoadError::Io {
+            code: ProjectLoadErrorCode::IoFailed,
             operation: "inspect existing output identity",
             path: path.to_path_buf(),
             source,
@@ -576,9 +633,11 @@ fn verify_opened_input(
     expected_path: &Path,
     opened_file: &fs::File,
     location: Option<SourceLocation>,
+    io_code: ProjectLoadErrorCode,
 ) -> Result<(), ProjectLoadError> {
     let rechecked_path =
         fs::canonicalize(expected_path).map_err(|source| ProjectLoadError::Io {
+            code: io_code,
             operation: "recheck opened project input",
             path: expected_path.to_path_buf(),
             source,
@@ -593,17 +652,20 @@ fn verify_opened_input(
     )?;
     let rechecked_file =
         open_read_no_follow(&rechecked_path).map_err(|source| ProjectLoadError::Io {
+            code: io_code,
             operation: "reopen project input for identity check",
             path: rechecked_path.clone(),
             source,
         })?;
     let opened_identity = file_identity(opened_file).map_err(|source| ProjectLoadError::Io {
+        code: io_code,
         operation: "read opened project input identity",
         path: expected_path.to_path_buf(),
         source,
     })?;
     let rechecked_identity =
         file_identity(&rechecked_file).map_err(|source| ProjectLoadError::Io {
+            code: io_code,
             operation: "read rechecked project input identity",
             path: rechecked_path.clone(),
             source,
@@ -612,6 +674,7 @@ fn verify_opened_input(
         || matches!((opened_identity, rechecked_identity), (Some(left), Some(right)) if left != right)
     {
         return Err(unsafe_path(
+            ProjectLoadErrorCode::ProjectSymlinkRejected,
             config_path,
             field,
             configured,
@@ -635,6 +698,7 @@ fn resolve_output_path(
     let (existing_ancestor, suffix) = nearest_existing_ancestor(&target)?;
     let resolved_ancestor =
         fs::canonicalize(&existing_ancestor).map_err(|source| ProjectLoadError::Io {
+            code: ProjectLoadErrorCode::IoFailed,
             operation: "resolve output ancestor",
             path: existing_ancestor,
             source,
@@ -649,12 +713,14 @@ fn resolve_output_path(
     )?;
     if !suffix.is_empty() {
         let metadata = fs::metadata(&resolved_ancestor).map_err(|source| ProjectLoadError::Io {
+            code: ProjectLoadErrorCode::IoFailed,
             operation: "inspect output ancestor",
             path: resolved_ancestor.clone(),
             source,
         })?;
         if !metadata.is_dir() {
             return Err(unsafe_path(
+                ProjectLoadErrorCode::ConfigInvalidValue,
                 config_path,
                 field,
                 configured,
@@ -677,12 +743,14 @@ fn resolve_output_path(
     )?;
     if suffix.is_empty() {
         let metadata = fs::metadata(&resolved_target).map_err(|source| ProjectLoadError::Io {
+            code: ProjectLoadErrorCode::IoFailed,
             operation: "inspect output destination",
             path: resolved_target.clone(),
             source,
         })?;
         if !metadata.is_file() {
             return Err(unsafe_path(
+                ProjectLoadErrorCode::ConfigInvalidValue,
                 config_path,
                 field,
                 configured,
@@ -703,6 +771,7 @@ fn nearest_existing_ancestor(path: &Path) -> Result<(PathBuf, Vec<PathBuf>), Pro
             Ok(_) => break,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 let segment = current.file_name().ok_or_else(|| ProjectLoadError::Io {
+                    code: ProjectLoadErrorCode::IoFailed,
                     operation: "find existing output ancestor",
                     path: path.to_path_buf(),
                     source: io::Error::new(
@@ -715,6 +784,7 @@ fn nearest_existing_ancestor(path: &Path) -> Result<(PathBuf, Vec<PathBuf>), Pro
             }
             Err(source) => {
                 return Err(ProjectLoadError::Io {
+                    code: ProjectLoadErrorCode::IoFailed,
                     operation: "inspect output ancestor",
                     path: current,
                     source,
@@ -732,27 +802,51 @@ fn validate_relative_path(
     configured: &str,
     location: Option<SourceLocation>,
 ) -> Result<(), ProjectLoadError> {
-    let reason = if configured.is_empty() {
-        Some("path must not be empty")
+    let rejection = if configured.is_empty() {
+        Some((
+            ProjectLoadErrorCode::ConfigInvalidValue,
+            "path must not be empty",
+        ))
     } else if configured.contains('\0') {
-        Some("path must not contain NUL")
+        Some((
+            ProjectLoadErrorCode::ConfigInvalidValue,
+            "path must not contain NUL",
+        ))
     } else if configured.contains('\\') {
-        Some("path must use `/`, not backslashes")
+        Some((
+            ProjectLoadErrorCode::ConfigInvalidValue,
+            "path must use `/`, not backslashes",
+        ))
     } else if Path::new(configured).is_absolute() || is_windows_drive_path(configured) {
-        Some("path must be project-relative and have no drive prefix")
+        Some((
+            ProjectLoadErrorCode::ProjectPathOutsideRoot,
+            "path must be project-relative and have no drive prefix",
+        ))
     } else if has_uri_scheme(configured) {
-        Some("path must not contain a URI scheme")
+        Some((
+            ProjectLoadErrorCode::ConfigInvalidValue,
+            "path must not contain a URI scheme",
+        ))
+    } else if configured.split('/').any(|segment| segment == "..") {
+        Some((
+            ProjectLoadErrorCode::ProjectPathOutsideRoot,
+            "path must not contain `..` segments",
+        ))
     } else if configured
         .split('/')
-        .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+        .any(|segment| segment.is_empty() || segment == ".")
     {
-        Some("path must not contain empty, `.` or `..` segments")
+        Some((
+            ProjectLoadErrorCode::ConfigInvalidValue,
+            "path must not contain empty or `.` segments",
+        ))
     } else {
         None
     };
 
-    match reason {
-        Some(reason) => Err(unsafe_path(
+    match rejection {
+        Some((code, reason)) => Err(unsafe_path(
+            code,
             config_path,
             field,
             configured,
@@ -776,6 +870,7 @@ fn ensure_contained(
         Ok(())
     } else {
         Err(unsafe_path(
+            ProjectLoadErrorCode::ProjectPathOutsideRoot,
             config_path,
             field,
             configured,
@@ -940,6 +1035,7 @@ fn invalid_value(
     location: Option<SourceLocation>,
 ) -> ProjectLoadError {
     ProjectLoadError::InvalidConfiguration {
+        code: ProjectLoadErrorCode::ConfigInvalidValue,
         path: path.to_path_buf(),
         field: Some(field),
         message,
@@ -947,7 +1043,25 @@ fn invalid_value(
     }
 }
 
+fn configuration_decode_error(
+    path: &Path,
+    source_text: &str,
+    error: toml::de::Error,
+    code: ProjectLoadErrorCode,
+) -> ProjectLoadError {
+    ProjectLoadError::InvalidConfiguration {
+        code,
+        path: path.to_path_buf(),
+        field: None,
+        message: error.message().to_owned(),
+        location: error
+            .span()
+            .map(|span| source_location(source_text.as_bytes(), span.start)),
+    }
+}
+
 fn unsafe_path(
+    code: ProjectLoadErrorCode,
     config_path: &Path,
     field: &'static str,
     configured: &str,
@@ -956,6 +1070,7 @@ fn unsafe_path(
     location: Option<SourceLocation>,
 ) -> ProjectLoadError {
     ProjectLoadError::UnsafePath {
+        code,
         config_path: config_path.into(),
         field,
         configured: configured.into(),
@@ -1124,9 +1239,11 @@ mod tests {
             &expected_path,
             &opened_outside,
             None,
+            ProjectLoadErrorCode::SchemaIo,
         )
         .unwrap_err();
 
+        assert_eq!(error.code(), ProjectLoadErrorCode::ProjectSymlinkRejected);
         assert!(matches!(error, ProjectLoadError::UnsafePath { .. }));
     }
 }
