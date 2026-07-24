@@ -790,7 +790,10 @@ fn core_has_no_dependencies_or_infrastructure_coupling() {
     assert_eq!(core_production_targets(&metadata), (1, BTreeSet::new()));
 
     let expected_library = workspace_root().join("crates/mara-core/src/lib.rs");
-    assert_eq!(core_library_source(&metadata), expected_library);
+    let actual_library = core_library_source(&metadata)
+        .canonicalize()
+        .expect("resolve mara-core library source");
+    assert_eq!(actual_library, expected_library);
     let core_source = expected_library.parent().expect("core source directory");
     let mut sources = Vec::new();
     rust_sources(core_source, &mut sources);
