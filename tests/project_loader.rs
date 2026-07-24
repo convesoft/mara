@@ -622,6 +622,34 @@ fn rejects_a_read_only_existing_index_on_windows() {
 
 #[cfg(any(unix, windows))]
 #[test]
+fn rejects_a_dangling_output_symlink_with_source_context() {
+    let fixture = Fixture::new();
+    symlink_file(
+        fixture.root.join(".mara/missing-index-target"),
+        fixture.root.join(".mara/index.json"),
+    );
+
+    let error = load_from_root(&fixture.root).unwrap_err();
+
+    assert_eq!(
+        error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ProjectSymlinkRejected)
+    );
+    match error {
+        ProjectLoadError::UnsafePath {
+            field,
+            location: Some(location),
+            ..
+        } => {
+            assert_eq!(field, "index.path");
+            assert_eq!(location.line, 12);
+        }
+        other => panic!("expected source-aware dangling symlink error, got {other}"),
+    }
+}
+
+#[cfg(any(unix, windows))]
+#[test]
 fn rejects_schema_and_index_paths_that_escape_through_symlinks() {
     let outside = tempfile::tempdir().unwrap();
     let outside_schema = outside.path().join("schema.yaml");

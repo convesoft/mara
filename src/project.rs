@@ -746,13 +746,33 @@ fn resolve_output_path(
     validate_relative_path(config_path, field, configured, location)?;
     let target = root.join(configured);
     let (existing_ancestor, suffix) = nearest_existing_ancestor(&target)?;
-    let resolved_ancestor =
-        fs::canonicalize(&existing_ancestor).map_err(|source| ProjectLoadError::Io {
-            class: ProjectLoadErrorClass::Operational(ProjectLoadOperationalErrorCode::IoFailed),
-            operation: "resolve output ancestor",
-            path: existing_ancestor,
-            source,
-        })?;
+    let resolved_ancestor = match fs::canonicalize(&existing_ancestor) {
+        Ok(path) => path,
+        Err(_)
+            if fs::symlink_metadata(&existing_ancestor)
+                .is_ok_and(|metadata| metadata.file_type().is_symlink()) =>
+        {
+            return Err(unsafe_path(
+                ProjectLoadErrorCode::ProjectSymlinkRejected,
+                config_path,
+                field,
+                configured,
+                "output path contains a dangling symlink",
+                Some(existing_ancestor),
+                location,
+            ));
+        }
+        Err(source) => {
+            return Err(ProjectLoadError::Io {
+                class: ProjectLoadErrorClass::Operational(
+                    ProjectLoadOperationalErrorCode::IoFailed,
+                ),
+                operation: "resolve output ancestor",
+                path: existing_ancestor,
+                source,
+            });
+        }
+    };
     ensure_contained(
         root,
         config_path,
