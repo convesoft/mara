@@ -881,6 +881,12 @@ fn validate_glob(glob: &str) -> Result<(), &'static str> {
     if glob.split('/').any(str::is_empty) {
         return Err("glob must not contain an empty path segment");
     }
+    if glob
+        .split('/')
+        .any(|segment| segment == "." || segment == "..")
+    {
+        return Err("glob must not contain `.` or `..` path segments");
+    }
     for segment in glob.split('/') {
         if segment.contains("**") && segment != "**" {
             return Err("`**` must occupy a complete path segment");
