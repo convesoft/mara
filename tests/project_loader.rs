@@ -646,6 +646,33 @@ fn rejects_a_dangling_output_symlink_with_source_context() {
         }
         other => panic!("expected source-aware dangling symlink error, got {other}"),
     }
+
+    let intermediate = Fixture::new();
+    symlink_directory(
+        intermediate.root.join("missing-output-target"),
+        intermediate.root.join("output"),
+    );
+    intermediate.write_config(config_with(
+        ".mara/schema.yaml",
+        "output/generated/index.json",
+        &["**/*.mara.md"],
+        &[],
+    ));
+
+    let intermediate_error = load_from_root(&intermediate.root).unwrap_err();
+
+    assert_eq!(
+        intermediate_error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ProjectSymlinkRejected)
+    );
+    assert!(matches!(
+        intermediate_error,
+        ProjectLoadError::UnsafePath {
+            field: "index.path",
+            location: Some(_),
+            ..
+        }
+    ));
 }
 
 #[cfg(any(unix, windows))]
