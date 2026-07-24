@@ -1,17 +1,35 @@
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 
-const WORKSPACE_MEMBERS: [&str; 4] = [
-    "crates/mara-core",
-    "crates/mara-markdown",
-    "crates/mara-engine",
-    "crates/mara-cli",
-];
+use serde::Deserialize;
+use syn::{
+    ItemExternCrate, ItemUse, UseTree,
+    visit::{self, Visit},
+};
 
 const WORKSPACE_PACKAGES: [&str; 4] = ["mara-core", "mara-markdown", "mara-engine", "mara-cli"];
+
+#[derive(Deserialize)]
+struct CargoMetadata {
+    packages: Vec<CargoPackage>,
+    workspace_members: BTreeSet<String>,
+}
+
+#[derive(Deserialize)]
+struct CargoPackage {
+    id: String,
+    name: String,
+    dependencies: Vec<CargoDependency>,
+}
+
+#[derive(Deserialize)]
+struct CargoDependency {
+    name: String,
+}
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -20,52 +38,35 @@ fn workspace_root() -> PathBuf {
         .expect("resolve workspace root")
 }
 
-fn read_manifest(path: &Path) -> toml::Value {
-    fs::read_to_string(path)
-        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
-        .parse()
-        .unwrap_or_else(|error| panic!("parse {}: {error}", path.display()))
-}
-
-fn collect_dependencies(value: &toml::Value, dependencies: &mut BTreeSet<String>) {
-    let Some(table) = value.as_table() else {
-        return;
-    };
-
-    for (key, child) in table {
-        if matches!(
-            key.as_str(),
-            "dependencies" | "dev-dependencies" | "build-dependencies"
-        ) {
-            dependencies.extend(
-                child
-                    .as_table()
-                    .unwrap_or_else(|| panic!("{key} must be a table"))
-                    .keys()
-                    .cloned(),
-            );
-        } else {
-            collect_dependencies(child, dependencies);
-        }
-    }
-}
-
-fn package_dependencies(package: &str) -> BTreeSet<String> {
-    let manifest = read_manifest(
-        &workspace_root()
-            .join("crates")
-            .join(package)
-            .join("Cargo.toml"),
+fn cargo_metadata() -> CargoMetadata {
+    let output = Command::new(env!("CARGO"))
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(workspace_root())
+        .output()
+        .expect("run cargo metadata");
+    assert!(
+        output.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let mut dependencies = BTreeSet::new();
-    collect_dependencies(&manifest, &mut dependencies);
-    dependencies
+    serde_json::from_slice(&output.stdout).expect("decode cargo metadata")
 }
 
-fn internal_dependencies(package: &str) -> BTreeSet<String> {
-    package_dependencies(package)
-        .into_iter()
-        .filter(|dependency| WORKSPACE_PACKAGES.contains(&dependency.as_str()))
+fn workspace_packages(metadata: &CargoMetadata) -> BTreeMap<&str, &CargoPackage> {
+    metadata
+        .packages
+        .iter()
+        .filter(|package| metadata.workspace_members.contains(&package.id))
+        .map(|package| (package.name.as_str(), package))
+        .collect()
+}
+
+fn internal_dependencies(package: &CargoPackage) -> BTreeSet<&str> {
+    package
+        .dependencies
+        .iter()
+        .map(|dependency| dependency.name.as_str())
+        .filter(|dependency| WORKSPACE_PACKAGES.contains(dependency))
         .collect()
 }
 
@@ -82,65 +83,177 @@ fn rust_sources(directory: &Path, sources: &mut Vec<PathBuf>) {
     }
 }
 
+#[derive(Default)]
+struct CoreBoundaryVisitor {
+    violations: Vec<String>,
+}
+
+impl CoreBoundaryVisitor {
+    fn check_path(&mut self, segments: &[String]) {
+        let higher_layer_or_adapter = segments.first().is_some_and(|segment| {
+            matches!(
+                segment.as_str(),
+                "mara_cli" | "mara_engine" | "mara_markdown" | "clap" | "rushdown"
+            )
+        });
+        let infrastructure = matches!(
+            segments,
+            [standard, module, ..]
+                if standard == "std"
+                    && matches!(module.as_str(), "env" | "fs" | "io" | "net" | "process")
+        );
+        if higher_layer_or_adapter || infrastructure {
+            self.violations.push(segments.join("::"));
+        }
+    }
+
+    fn visit_use_tree(&mut self, tree: &UseTree, segments: &mut Vec<String>) {
+        match tree {
+            UseTree::Path(path) => {
+                segments.push(path.ident.to_string());
+                self.visit_use_tree(&path.tree, segments);
+                segments.pop();
+            }
+            UseTree::Name(name) => {
+                segments.push(name.ident.to_string());
+                self.check_path(segments);
+                segments.pop();
+            }
+            UseTree::Rename(rename) => {
+                segments.push(rename.ident.to_string());
+                self.check_path(segments);
+                if segments.len() == 1 && segments[0] == "std" {
+                    self.violations
+                        .push("renaming the std root can hide infrastructure paths".into());
+                }
+                segments.pop();
+            }
+            UseTree::Glob(_) => self.check_path(segments),
+            UseTree::Group(group) => {
+                for tree in &group.items {
+                    self.visit_use_tree(tree, segments);
+                }
+            }
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for CoreBoundaryVisitor {
+    fn visit_path(&mut self, path: &'ast syn::Path) {
+        let segments: Vec<_> = path
+            .segments
+            .iter()
+            .map(|segment| segment.ident.to_string())
+            .collect();
+        self.check_path(&segments);
+        visit::visit_path(self, path);
+    }
+
+    fn visit_item_use(&mut self, item: &'ast ItemUse) {
+        self.visit_use_tree(&item.tree, &mut Vec::new());
+        visit::visit_item_use(self, item);
+    }
+
+    fn visit_item_extern_crate(&mut self, item: &'ast ItemExternCrate) {
+        let crate_name = item.ident.to_string();
+        self.check_path(std::slice::from_ref(&crate_name));
+        if crate_name == "std" && item.rename.is_some() {
+            self.violations
+                .push("renaming the std crate can hide infrastructure paths".into());
+        }
+        visit::visit_item_extern_crate(self, item);
+    }
+}
+
 #[test]
 fn workspace_contains_exactly_the_four_accepted_packages() {
-    let manifest = read_manifest(&workspace_root().join("Cargo.toml"));
-    let members: Vec<_> = manifest["workspace"]["members"]
-        .as_array()
-        .expect("workspace.members must be an array")
-        .iter()
-        .map(|member| member.as_str().expect("workspace member must be a string"))
-        .collect();
+    let metadata = cargo_metadata();
+    let packages = workspace_packages(&metadata);
+    let actual: BTreeSet<_> = packages.keys().copied().collect();
+    let expected = BTreeSet::from(WORKSPACE_PACKAGES);
 
-    assert_eq!(members, WORKSPACE_MEMBERS);
+    assert_eq!(actual, expected);
+    assert_eq!(metadata.workspace_members.len(), WORKSPACE_PACKAGES.len());
 }
 
 #[test]
 fn workspace_dependencies_follow_the_accepted_layer_direction() {
-    assert_eq!(internal_dependencies("mara-core"), BTreeSet::new());
+    let metadata = cargo_metadata();
+    let packages = workspace_packages(&metadata);
+
     assert_eq!(
-        internal_dependencies("mara-markdown"),
-        BTreeSet::from(["mara-core".to_owned()])
+        internal_dependencies(packages["mara-core"]),
+        BTreeSet::new()
     );
     assert_eq!(
-        internal_dependencies("mara-engine"),
-        BTreeSet::from(["mara-core".to_owned(), "mara-markdown".to_owned()])
+        internal_dependencies(packages["mara-markdown"]),
+        BTreeSet::from(["mara-core"])
     );
     assert_eq!(
-        internal_dependencies("mara-cli"),
-        BTreeSet::from(["mara-engine".to_owned()])
+        internal_dependencies(packages["mara-engine"]),
+        BTreeSet::from(["mara-core", "mara-markdown"])
+    );
+    assert_eq!(
+        internal_dependencies(packages["mara-cli"]),
+        BTreeSet::from(["mara-engine"])
     );
 }
 
 #[test]
 fn core_has_no_dependencies_or_infrastructure_coupling() {
-    assert_eq!(package_dependencies("mara-core"), BTreeSet::new());
+    let metadata = cargo_metadata();
+    let packages = workspace_packages(&metadata);
+    assert!(packages["mara-core"].dependencies.is_empty());
 
     let core_source = workspace_root().join("crates/mara-core/src");
     let mut sources = Vec::new();
     rust_sources(&core_source, &mut sources);
-    let forbidden = [
-        "std::env",
-        "std::fs",
-        "std::io",
-        "std::net",
-        "std::process",
-        "mara_cli",
-        "mara_engine",
-        "mara_markdown",
-        "clap::",
-        "rushdown",
-    ];
-
     for source in sources {
         let contents = fs::read_to_string(&source)
             .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
-        for rejected in forbidden {
-            assert!(
-                !contents.contains(rejected),
-                "{} must not expose or use {rejected}",
-                source.display()
-            );
-        }
+        let syntax = syn::parse_file(&contents)
+            .unwrap_or_else(|error| panic!("parse {}: {error}", source.display()));
+        let mut visitor = CoreBoundaryVisitor::default();
+        visitor.visit_file(&syntax);
+        assert!(
+            visitor.violations.is_empty(),
+            "{} contains forbidden core coupling: {}",
+            source.display(),
+            visitor.violations.join(", ")
+        );
     }
+}
+
+#[test]
+fn resolved_dependency_names_defeat_manifest_aliases() {
+    let metadata: CargoMetadata = serde_json::from_str(
+        r#"{
+            "packages": [{
+                "id": "mara-markdown-id",
+                "name": "mara-markdown",
+                "dependencies": [{
+                    "name": "mara-core",
+                    "rename": "domain"
+                }]
+            }],
+            "workspace_members": ["mara-markdown-id"]
+        }"#,
+    )
+    .expect("decode metadata fixture");
+    let packages = workspace_packages(&metadata);
+
+    assert_eq!(
+        internal_dependencies(packages["mara-markdown"]),
+        BTreeSet::from(["mara-core"])
+    );
+}
+
+#[test]
+fn syntax_inspection_rejects_grouped_infrastructure_imports() {
+    let syntax =
+        syn::parse_file("use std::{collections::BTreeSet, fs, io};").expect("parse fixture");
+    let mut visitor = CoreBoundaryVisitor::default();
+    visitor.visit_file(&syntax);
+
+    assert_eq!(visitor.violations, ["std::fs", "std::io"]);
 }
