@@ -803,7 +803,7 @@ fn parser_library_details_do_not_escape_the_public_schema_result() {
 
 #[cfg(unix)]
 #[test]
-fn rejects_canonical_schema_paths_that_are_not_wire_safe_without_panicking() {
+fn preserves_the_logical_source_path_for_internal_schema_symlinks() {
     use std::os::unix::fs::symlink;
 
     for (target_relative, symlink_target) in [
@@ -817,10 +817,11 @@ fn rejects_canonical_schema_paths_that_are_not_wire_safe_without_panicking() {
         symlink(symlink_target, fixture.schema_path()).unwrap();
         let project = fixture.loaded_project();
 
-        let error = load_schema(&project).unwrap_err();
+        let document = load_schema(&project).unwrap();
+        let prefix = document.identity().value().mid().value().prefix();
 
-        assert_code(only_diagnostic(&error), SchemaDiagnosticCode::Io);
-        assert_eq!(error.path(), Some(project.schema_path.as_path()));
-        assert!(error.io_source().is_some());
+        assert_eq!(project.schema_source_path, ".mara/schema.yaml");
+        assert_eq!(document.source().path(), ".mara/schema.yaml");
+        assert_eq!(prefix.value_source().path(), ".mara/schema.yaml");
     }
 }

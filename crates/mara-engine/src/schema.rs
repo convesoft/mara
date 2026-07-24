@@ -5,7 +5,7 @@ use std::{
     error::Error,
     fmt,
     io::{self, Read},
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::OnceLock,
 };
 
@@ -142,37 +142,9 @@ pub fn load_schema(project: &LoadedProject) -> Result<SchemaDocument, SchemaLoad
 }
 
 fn schema_source_path(project: &LoadedProject) -> Result<String, io::Error> {
-    let relative = project
-        .schema_path
-        .strip_prefix(&project.root)
-        .map_err(|_| io::Error::other("loaded schema path is outside the project root"))?;
-    let mut components = Vec::new();
-    for component in relative.components() {
-        match component {
-            Component::Normal(value) => {
-                let value = value
-                    .to_str()
-                    .ok_or_else(|| io::Error::other("loaded schema path is not UTF-8"))?;
-                if value.contains('\\') {
-                    return Err(io::Error::other(
-                        "loaded schema path cannot be represented by a Mara source span",
-                    ));
-                }
-                components.push(value);
-            }
-            _ => {
-                return Err(io::Error::other(
-                    "loaded schema path is not normalized and project-relative",
-                ));
-            }
-        }
-    }
-    if components.is_empty() {
-        return Err(io::Error::other("loaded schema path has no file name"));
-    }
-    let source_path = components.join("/");
+    let source_path = project.schema_source_path.clone();
     SourceSpan::try_new(source_path.as_str(), 0, 0, 1, 1, 1, 1).map_err(|_| {
-        io::Error::other("loaded schema path cannot be represented by a Mara source span")
+        io::Error::other("configured schema path cannot be represented by a Mara source span")
     })?;
     Ok(source_path)
 }

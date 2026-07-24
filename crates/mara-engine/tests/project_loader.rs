@@ -120,6 +120,7 @@ fn loads_the_complete_normative_v1_shape() {
     assert_eq!(project.config_path, fixture.config_path());
     assert_eq!(project.format_version, 1);
     assert_eq!(project.name, "mara-test");
+    assert_eq!(project.schema_source_path, ".mara/schema.yaml");
     assert_eq!(
         project.schema_path,
         fixture
@@ -715,6 +716,7 @@ fn normalizes_internal_symlinks_and_rejects_index_aliases_to_inputs() {
     fs::rename(schema_fixture.root.join(".mara/schema.yaml"), &real_schema).unwrap();
     symlink_file(&real_schema, schema_fixture.root.join(".mara/schema.yaml"));
     let loaded = load_from_root(&schema_fixture.root).unwrap();
+    assert_eq!(loaded.schema_source_path, ".mara/schema.yaml");
     assert_eq!(loaded.schema_path, real_schema.canonicalize().unwrap());
 
     let alias_fixture = Fixture::new();
