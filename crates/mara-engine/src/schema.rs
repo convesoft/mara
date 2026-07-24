@@ -390,6 +390,25 @@ impl<'source> SourceMap<'source> {
             };
         }
     }
+
+    fn anchor_span(&self, span: Span, anchor: usize) -> Option<ParsedSpan> {
+        if anchor == 0 {
+            return None;
+        }
+        let parser_span = self.span(span);
+        let Some((start, end)) = preceding_anchor_range(self.source, parser_span.start.byte) else {
+            return Some(parser_span);
+        };
+        Some(ParsedSpan {
+            start: self.position_at_byte(start),
+            end: self.position_at_byte(end),
+        })
+    }
+
+    fn position_at_byte(&self, byte: usize) -> ParsedPosition {
+        let (line, column) = position_at_valid_prefix(&self.source.as_bytes()[..byte]);
+        ParsedPosition { byte, line, column }
+    }
 }
 
 fn preceding_block_scalar_start(
@@ -432,17 +451,33 @@ fn block_scalar_prefix_only(source: &str) -> bool {
 fn preceding_tag_start(source: &str, node_start: usize) -> Option<usize> {
     let mut search_end = node_start;
     let mut earliest = None;
-    let mut line_start = 0;
     while let Some(start) = source[..search_end].rfind('!') {
-        if earliest.is_some() && start < line_start {
-            break;
+        if tag_start_boundary(source, start) {
+            if let Some(end) = raw_tag_end(source, start, node_start)
+                && yaml_separation_only(&source[end..node_start])
+            {
+                earliest = Some(start);
+            } else if earliest.is_some() {
+                break;
+            }
         }
-        if tag_start_boundary(source, start)
-            && let Some(end) = raw_tag_end(source, start, node_start)
-            && yaml_separation_only(&source[end..node_start])
-        {
-            earliest = Some(start);
-            line_start = source_line_start(source, start);
+        search_end = start;
+    }
+    earliest
+}
+
+fn preceding_anchor_range(source: &str, node_start: usize) -> Option<(usize, usize)> {
+    let mut search_end = node_start;
+    let mut earliest = None;
+    while let Some(start) = source[..search_end].rfind('&') {
+        if tag_start_boundary(source, start) {
+            if let Some(end) = raw_anchor_end(source, start, node_start)
+                && yaml_anchor_suffix_only(&source[end..node_start])
+            {
+                earliest = Some((start, end));
+            } else if earliest.is_some() {
+                break;
+            }
         }
         search_end = start;
     }
@@ -479,6 +514,43 @@ fn raw_tag_end(source: &str, start: usize, node_start: usize) -> Option<usize> {
     Some(end)
 }
 
+fn raw_anchor_end(source: &str, start: usize, node_start: usize) -> Option<usize> {
+    let suffix_start = start + '&'.len_utf8();
+    let mut end = suffix_start;
+    for (offset, character) in source[suffix_start..node_start].char_indices() {
+        if character.is_whitespace() || matches!(character, ',' | '[' | ']' | '{' | '}') {
+            break;
+        }
+        end = suffix_start + offset + character.len_utf8();
+    }
+    (end > suffix_start).then_some(end)
+}
+
+fn yaml_anchor_suffix_only(source: &str) -> bool {
+    let mut offset = 0;
+    while offset < source.len() {
+        let remaining = &source[offset..];
+        if let Some(character) = remaining.chars().next()
+            && character.is_whitespace()
+        {
+            offset += character.len_utf8();
+            continue;
+        }
+        if remaining.starts_with('#') {
+            offset += remaining.find(['\r', '\n']).unwrap_or(remaining.len());
+            continue;
+        }
+        if remaining.starts_with('!')
+            && let Some(end) = raw_tag_end(source, offset, source.len())
+        {
+            offset = end;
+            continue;
+        }
+        return false;
+    }
+    true
+}
+
 fn yaml_separation_only(source: &str) -> bool {
     let mut comment = false;
     for character in source.chars() {
@@ -500,19 +572,19 @@ enum ParsedNode {
     Scalar {
         value: String,
         style: ScalarStyle,
-        anchor: usize,
+        anchor: Option<ParsedSpan>,
         tag: Option<Tag>,
         span: ParsedSpan,
     },
     Sequence {
         values: Vec<Self>,
-        anchor: usize,
+        anchor: Option<ParsedSpan>,
         tag: Option<Tag>,
         span: ParsedSpan,
     },
     Mapping {
         entries: Vec<(Self, Self)>,
-        anchor: usize,
+        anchor: Option<ParsedSpan>,
         tag: Option<Tag>,
         span: ParsedSpan,
     },
@@ -536,13 +608,13 @@ impl ParsedNode {
 enum PendingContainer {
     Sequence {
         values: Vec<ParsedNode>,
-        anchor: usize,
+        anchor: Option<ParsedSpan>,
         tag: Option<Tag>,
         start: ParsedSpan,
     },
     Mapping {
         values: Vec<ParsedNode>,
-        anchor: usize,
+        anchor: Option<ParsedSpan>,
         tag: Option<Tag>,
         start: ParsedSpan,
     },
@@ -591,6 +663,7 @@ impl<'input> SpannedEventReceiver<'input> for TreeBuilder<'_, 'input> {
             Event::DocumentStart(_) => self.document_starts.push(parser_span),
             Event::Alias(_) => self.attach(ParsedNode::Alias { span: parser_span }),
             Event::Scalar(value, style, anchor, tag) => {
+                let anchor = self.source_map.anchor_span(span, anchor);
                 let span = self.source_map.scalar_span(span, style, tag.as_deref());
                 self.attach(ParsedNode::Scalar {
                     value: value.into_owned(),
@@ -601,6 +674,7 @@ impl<'input> SpannedEventReceiver<'input> for TreeBuilder<'_, 'input> {
                 });
             }
             Event::SequenceStart(anchor, tag) => {
+                let anchor = self.source_map.anchor_span(span, anchor);
                 let span = self.source_map.node_span(span, tag.as_deref());
                 self.stack.push(PendingContainer::Sequence {
                     values: Vec::new(),
@@ -610,6 +684,7 @@ impl<'input> SpannedEventReceiver<'input> for TreeBuilder<'_, 'input> {
                 });
             }
             Event::MappingStart(anchor, tag) => {
+                let anchor = self.source_map.anchor_span(span, anchor);
                 let span = self.source_map.node_span(span, tag.as_deref());
                 self.stack.push(PendingContainer::Mapping {
                     values: Vec::new(),
@@ -765,12 +840,17 @@ fn validate_profile(node: &ParsedNode, path: &str, diagnostics: &mut Vec<Diagnos
     }
 }
 
-fn validate_anchor(anchor: usize, path: &str, span: ParsedSpan, diagnostics: &mut Vec<Diagnostic>) {
-    if anchor != 0 {
+fn validate_anchor(
+    anchor: Option<ParsedSpan>,
+    path: &str,
+    _span: ParsedSpan,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(anchor) = anchor {
         diagnostics.push(profile_diagnostic(
             "YAML anchors are not permitted in schema documents",
             path,
-            span,
+            anchor,
             "anchor",
         ));
     }
