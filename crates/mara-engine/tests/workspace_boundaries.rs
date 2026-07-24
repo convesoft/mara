@@ -28,6 +28,15 @@ struct CargoPackage {
     name: String,
     #[serde(default)]
     targets: Vec<CargoTarget>,
+    #[serde(default)]
+    dependencies: Vec<CargoPackageDependency>,
+}
+
+#[derive(Deserialize)]
+struct CargoPackageDependency {
+    name: String,
+    rename: Option<String>,
+    kind: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -156,6 +165,27 @@ fn disallowed_core_dependencies(metadata: &CargoMetadata) -> BTreeSet<&str> {
         .into_iter()
         .filter(|dependency| !ALLOWED_CORE_DEPENDENCIES.contains(dependency))
         .collect()
+}
+
+fn core_petgraph_crate_names(metadata: &CargoMetadata) -> HashSet<String> {
+    let packages = workspace_packages(metadata);
+    let mut crate_names = HashSet::from(["petgraph".to_owned()]);
+    crate_names.extend(
+        packages["mara-core"]
+            .dependencies
+            .iter()
+            .filter(|dependency| {
+                dependency.name == "petgraph" && dependency.kind.as_deref() != Some("dev")
+            })
+            .map(|dependency| {
+                dependency
+                    .rename
+                    .as_deref()
+                    .unwrap_or(&dependency.name)
+                    .replace('-', "_")
+            }),
+    );
+    crate_names
 }
 
 fn core_production_targets(metadata: &CargoMetadata) -> (usize, BTreeSet<&str>) {
@@ -409,7 +439,10 @@ fn forbidden_macro_token_path(tokens: &TokenStream) -> Option<String> {
         .cloned()
 }
 
-fn petgraph_aliases(items: &[syn::Item]) -> (HashSet<String>, bool) {
+fn petgraph_aliases(
+    items: &[syn::Item],
+    dependency_crate_names: &HashSet<String>,
+) -> (HashSet<String>, bool) {
     fn collect(
         tree: &UseTree,
         under_petgraph: bool,
@@ -451,10 +484,10 @@ fn petgraph_aliases(items: &[syn::Item]) -> (HashSet<String>, bool) {
             _ => None,
         })
         .collect();
-    let mut aliases = HashSet::from(["petgraph".to_owned()]);
+    let mut aliases = dependency_crate_names.clone();
     for item in items {
         if let syn::Item::ExternCrate(item) = item
-            && item.ident == "petgraph"
+            && dependency_crate_names.contains(item.ident.to_string().as_str())
         {
             let alias = item
                 .rename
@@ -764,7 +797,7 @@ impl<'ast> Visit<'ast> for PublicPetgraphVisitor<'_> {
     }
 
     fn visit_item_extern_crate(&mut self, item: &'ast ItemExternCrate) {
-        if is_public(&item.vis) && item.ident == "petgraph" {
+        if is_public(&item.vis) && self.aliases.contains(item.ident.to_string().as_str()) {
             let exposed_name = item
                 .rename
                 .as_ref()
@@ -788,48 +821,198 @@ impl<'ast> Visit<'ast> for PublicPetgraphVisitor<'_> {
     }
 }
 
-fn public_petgraph_violations(file: &syn::File) -> BTreeSet<String> {
-    fn inspect_module(
-        items: &[syn::Item],
-        parent_aliases: Option<&HashSet<String>>,
-        root_aliases: Option<&HashSet<String>>,
-        violations: &mut BTreeSet<String>,
-    ) {
-        let (mut aliases, wildcard) = petgraph_aliases(items);
-        if let Some(parent_aliases) = parent_aliases {
-            aliases.extend(parent_aliases.iter().map(|alias| format!("super::{alias}")));
-        }
-        if let Some(root_aliases) = root_aliases {
-            aliases.extend(root_aliases.iter().map(|alias| format!("crate::{alias}")));
-        }
-        let root_aliases = root_aliases.cloned().unwrap_or_else(|| aliases.clone());
-        let mut visitor = PublicPetgraphVisitor {
-            aliases: &aliases,
-            violations: BTreeSet::new(),
-        };
-        if wildcard {
-            visitor
-                .violations
-                .insert("petgraph glob imports obscure exported types".into());
-        }
-        for item in items {
-            if !matches!(item, syn::Item::Mod(_)) {
-                visitor.visit_item(item);
-            }
-        }
-        violations.extend(visitor.violations);
+struct ModuleSourceContext {
+    source_file: PathBuf,
+    children_directory: PathBuf,
+}
 
-        for item in items {
-            if let syn::Item::Mod(module) = item
-                && let Some((_, items)) = &module.content
-            {
-                inspect_module(items, Some(&aliases), Some(&root_aliases), violations);
-            }
+fn child_module_source_context(source_file: PathBuf) -> ModuleSourceContext {
+    let parent = source_file.parent().expect("module source parent");
+    let children_directory = if source_file.file_name().is_some_and(|name| name == "mod.rs") {
+        parent.to_path_buf()
+    } else {
+        parent.join(source_file.file_stem().expect("module source stem"))
+    };
+    ModuleSourceContext {
+        source_file,
+        children_directory,
+    }
+}
+
+fn resolve_out_of_line_module(
+    module: &syn::ItemMod,
+    source: &ModuleSourceContext,
+) -> Option<PathBuf> {
+    let explicit_path = module.attrs.iter().find_map(|attribute| {
+        if !attribute.path().is_ident("path") {
+            return None;
         }
+        let syn::Meta::NameValue(name_value) = &attribute.meta else {
+            return None;
+        };
+        let syn::Expr::Lit(expression) = &name_value.value else {
+            return None;
+        };
+        let syn::Lit::Str(path) = &expression.lit else {
+            return None;
+        };
+        Some(PathBuf::from(path.value()))
+    });
+    if let Some(explicit_path) = explicit_path {
+        if explicit_path.is_absolute()
+            || explicit_path
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return None;
+        }
+        return Some(
+            source
+                .source_file
+                .parent()
+                .expect("module source parent")
+                .join(explicit_path),
+        )
+        .filter(|path| path.is_file());
     }
 
+    let module_name = module.ident.to_string();
+    [
+        source.children_directory.join(format!("{module_name}.rs")),
+        source.children_directory.join(&module_name).join("mod.rs"),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
+}
+
+fn inspect_petgraph_module(
+    items: &[syn::Item],
+    dependency_crate_names: &HashSet<String>,
+    parent_aliases: Option<&HashSet<String>>,
+    root_aliases: Option<&HashSet<String>>,
+    source: Option<&ModuleSourceContext>,
+    visited_sources: &mut HashSet<PathBuf>,
+    violations: &mut BTreeSet<String>,
+) {
+    let (mut aliases, wildcard) = petgraph_aliases(items, dependency_crate_names);
+    if let Some(parent_aliases) = parent_aliases {
+        aliases.extend(parent_aliases.iter().map(|alias| format!("super::{alias}")));
+    }
+    if let Some(root_aliases) = root_aliases {
+        aliases.extend(root_aliases.iter().map(|alias| format!("crate::{alias}")));
+    }
+    let root_aliases = root_aliases.cloned().unwrap_or_else(|| aliases.clone());
+    let mut visitor = PublicPetgraphVisitor {
+        aliases: &aliases,
+        violations: BTreeSet::new(),
+    };
+    if wildcard {
+        visitor
+            .violations
+            .insert("petgraph glob imports obscure exported types".into());
+    }
+    for item in items {
+        if !matches!(item, syn::Item::Mod(_)) {
+            visitor.visit_item(item);
+        }
+    }
+    violations.extend(visitor.violations);
+
+    for item in items {
+        let syn::Item::Mod(module) = item else {
+            continue;
+        };
+        if let Some((_, items)) = &module.content {
+            let inline_source = source.map(|source| ModuleSourceContext {
+                source_file: source.source_file.clone(),
+                children_directory: source.children_directory.join(module.ident.to_string()),
+            });
+            inspect_petgraph_module(
+                items,
+                dependency_crate_names,
+                Some(&aliases),
+                Some(&root_aliases),
+                inline_source.as_ref(),
+                visited_sources,
+                violations,
+            );
+        } else if let Some(source) = source
+            && let Some(child_source) = resolve_out_of_line_module(module, source)
+        {
+            let child_source = child_source
+                .canonicalize()
+                .unwrap_or_else(|error| panic!("resolve {}: {error}", child_source.display()));
+            if !visited_sources.insert(child_source.clone()) {
+                continue;
+            }
+            let contents = fs::read_to_string(&child_source)
+                .unwrap_or_else(|error| panic!("read {}: {error}", child_source.display()));
+            let syntax = syn::parse_file(&contents)
+                .unwrap_or_else(|error| panic!("parse {}: {error}", child_source.display()));
+            let child_source = child_module_source_context(child_source);
+            inspect_petgraph_module(
+                &syntax.items,
+                dependency_crate_names,
+                Some(&aliases),
+                Some(&root_aliases),
+                Some(&child_source),
+                visited_sources,
+                violations,
+            );
+        }
+    }
+}
+
+fn public_petgraph_violations_with_dependencies(
+    file: &syn::File,
+    dependency_crate_names: &HashSet<String>,
+) -> BTreeSet<String> {
     let mut violations = BTreeSet::new();
-    inspect_module(&file.items, None, None, &mut violations);
+    inspect_petgraph_module(
+        &file.items,
+        dependency_crate_names,
+        None,
+        None,
+        None,
+        &mut HashSet::new(),
+        &mut violations,
+    );
+    violations
+}
+
+fn public_petgraph_violations(file: &syn::File) -> BTreeSet<String> {
+    public_petgraph_violations_with_dependencies(file, &HashSet::from(["petgraph".to_owned()]))
+}
+
+fn public_petgraph_module_tree_violations(
+    crate_root: &Path,
+    dependency_crate_names: &HashSet<String>,
+) -> BTreeSet<String> {
+    let crate_root = crate_root
+        .canonicalize()
+        .unwrap_or_else(|error| panic!("resolve {}: {error}", crate_root.display()));
+    let contents = fs::read_to_string(&crate_root)
+        .unwrap_or_else(|error| panic!("read {}: {error}", crate_root.display()));
+    let syntax = syn::parse_file(&contents)
+        .unwrap_or_else(|error| panic!("parse {}: {error}", crate_root.display()));
+    let source = ModuleSourceContext {
+        children_directory: crate_root
+            .parent()
+            .expect("crate root parent")
+            .to_path_buf(),
+        source_file: crate_root.clone(),
+    };
+    let mut visited_sources = HashSet::from([crate_root]);
+    let mut violations = BTreeSet::new();
+    inspect_petgraph_module(
+        &syntax.items,
+        dependency_crate_names,
+        None,
+        None,
+        Some(&source),
+        &mut visited_sources,
+        &mut violations,
+    );
     violations
 }
 
@@ -877,6 +1060,7 @@ fn core_has_no_dependencies_or_infrastructure_coupling() {
         .canonicalize()
         .expect("resolve mara-core library source");
     assert_eq!(actual_library, expected_library);
+    let dependency_crate_names = core_petgraph_crate_names(&metadata);
     let core_source = expected_library.parent().expect("core source directory");
     let mut sources = Vec::new();
     rust_sources(core_source, &mut sources);
@@ -893,14 +1077,14 @@ fn core_has_no_dependencies_or_infrastructure_coupling() {
             source.display(),
             visitor.violations.join(", ")
         );
-        let public_violations = public_petgraph_violations(&syntax);
-        assert!(
-            public_violations.is_empty(),
-            "{} exposes private petgraph implementation types: {}",
-            source.display(),
-            public_violations.into_iter().collect::<Vec<_>>().join(", ")
-        );
     }
+    let public_violations =
+        public_petgraph_module_tree_violations(&expected_library, &dependency_crate_names);
+    assert!(
+        public_violations.is_empty(),
+        "mara-core exposes private petgraph implementation types: {}",
+        public_violations.into_iter().collect::<Vec<_>>().join(", ")
+    );
 }
 
 #[test]
@@ -1047,6 +1231,40 @@ fn core_dependency_allowlist_rejects_infrastructure_but_allows_pure_support() {
     assert_eq!(
         disallowed_core_dependencies(&metadata),
         BTreeSet::from(["git2"])
+    );
+}
+
+#[test]
+fn public_api_inspection_uses_renamed_petgraph_dependency_identifiers() {
+    let metadata: CargoMetadata = serde_json::from_str(
+        r#"{
+            "packages": [{
+                "id": "core-id",
+                "name": "mara-core",
+                "dependencies": [{
+                    "name": "petgraph",
+                    "rename": "graph-backend",
+                    "kind": null
+                }]
+            }],
+            "workspace_members": ["core-id"],
+            "resolve": {"nodes": [{"id": "core-id", "deps": []}]}
+        }"#,
+    )
+    .expect("decode metadata fixture");
+    let syntax = syn::parse_file(r#"pub fn graph() -> graph_backend::Graph<(), ()> { todo!() }"#)
+        .expect("parse fixture");
+
+    assert_eq!(
+        core_petgraph_crate_names(&metadata),
+        HashSet::from(["graph_backend".into(), "petgraph".into()])
+    );
+    assert!(
+        public_petgraph_violations_with_dependencies(
+            &syntax,
+            &core_petgraph_crate_names(&metadata)
+        )
+        .contains("graph_backend::Graph")
     );
 }
 
@@ -1345,6 +1563,47 @@ fn public_api_inspection_scopes_petgraph_aliases_to_modules() {
             "BackendGraph".into(),
             "crate::RootGraph".into(),
             "super::ParentGraph".into(),
+        ])
+    );
+}
+
+#[test]
+fn public_api_inspection_carries_aliases_through_out_of_line_modules() {
+    let directory = tempfile::tempdir().expect("create module fixture");
+    let crate_root = directory.path().join("lib.rs");
+    fs::write(
+        &crate_root,
+        r#"use petgraph::Graph as BackendGraph;
+        mod child;
+        mod control;"#,
+    )
+    .expect("write crate root");
+    fs::write(
+        directory.path().join("child.rs"),
+        r#"pub fn parent() -> super::BackendGraph<(), ()> { todo!() }
+        mod grandchild;"#,
+    )
+    .expect("write child module");
+    fs::create_dir(directory.path().join("child")).expect("create child module directory");
+    fs::write(
+        directory.path().join("child/grandchild.rs"),
+        r#"pub fn nested() -> super::super::BackendGraph<(), ()> { todo!() }
+        pub fn root() -> crate::BackendGraph<(), ()> { todo!() }"#,
+    )
+    .expect("write grandchild module");
+    fs::write(
+        directory.path().join("control.rs"),
+        r#"use domain_types::BackendGraph;
+        pub fn graph() -> BackendGraph { todo!() }"#,
+    )
+    .expect("write control module");
+
+    assert_eq!(
+        public_petgraph_module_tree_violations(&crate_root, &HashSet::from(["petgraph".into()])),
+        BTreeSet::from([
+            "crate::BackendGraph".into(),
+            "super::BackendGraph".into(),
+            "super::super::BackendGraph".into(),
         ])
     );
 }
