@@ -170,7 +170,7 @@ fn core_production_targets(metadata: &CargoMetadata) -> (usize, BTreeSet<&str>) 
     {
         match kind.as_str() {
             "lib" => libraries += 1,
-            "bench" | "example" | "test" => {}
+            "test" => {}
             other => {
                 disallowed.insert(other);
             }
@@ -354,13 +354,22 @@ impl<'ast> Visit<'ast> for CoreBoundaryVisitor {
                     .push("module path escapes the enforced core source tree".into());
             }
         }
+        if attribute.path().is_ident("cfg_attr")
+            && let syn::Meta::List(list) = &attribute.meta
+            && token_atoms(&list.tokens)
+                .iter()
+                .any(|token| token == "path")
+        {
+            self.violations
+                .push("conditional module paths escape source enforcement".into());
+        }
         visit::visit_attribute(self, attribute);
     }
 }
 
-fn forbidden_macro_token_path(tokens: &TokenStream) -> Option<String> {
-    fn collect(tokens: &TokenStream, atoms: &mut Vec<String>) {
-        for token in tokens.clone() {
+fn token_atoms(tokens: &TokenStream) -> Vec<String> {
+    fn collect(stream: &TokenStream, atoms: &mut Vec<String>) {
+        for token in stream.clone() {
             match token {
                 TokenTree::Group(group) => collect(&group.stream(), atoms),
                 TokenTree::Ident(identifier) => atoms.push(identifier.to_string()),
@@ -369,19 +378,20 @@ fn forbidden_macro_token_path(tokens: &TokenStream) -> Option<String> {
             }
         }
     }
-
     let mut atoms = Vec::new();
     collect(tokens, &mut atoms);
+    atoms
+}
+
+fn forbidden_macro_token_path(tokens: &TokenStream) -> Option<String> {
+    let atoms = token_atoms(tokens);
     for window in atoms.windows(4) {
-        if window[0] == "std"
-            && window[1] == ":"
-            && window[2] == ":"
-            && matches!(
-                window[3].as_str(),
-                "env" | "fs" | "io" | "net" | "os" | "process"
-            )
-        {
-            return Some(format!("std::{}", window[3]));
+        if window[0] == "std" && window[1] == ":" && window[2] == ":" {
+            return Some(if window[3] == "$" {
+                "std::<dynamic>".into()
+            } else {
+                format!("std::{}", window[3])
+            });
         }
     }
     atoms
@@ -397,12 +407,18 @@ fn forbidden_macro_token_path(tokens: &TokenStream) -> Option<String> {
 
 struct UseCollector<'ast> {
     trees: Vec<&'ast UseTree>,
+    extern_crates: Vec<&'ast ItemExternCrate>,
 }
 
 impl<'ast> Visit<'ast> for UseCollector<'ast> {
     fn visit_item_use(&mut self, item: &'ast ItemUse) {
         self.trees.push(&item.tree);
         visit::visit_item_use(self, item);
+    }
+
+    fn visit_item_extern_crate(&mut self, item: &'ast ItemExternCrate) {
+        self.extern_crates.push(item);
+        visit::visit_item_extern_crate(self, item);
     }
 }
 
@@ -437,9 +453,21 @@ fn petgraph_aliases(file: &syn::File) -> (HashSet<String>, bool) {
         }
     }
 
-    let mut collector = UseCollector { trees: Vec::new() };
+    let mut collector = UseCollector {
+        trees: Vec::new(),
+        extern_crates: Vec::new(),
+    };
     collector.visit_file(file);
     let mut aliases = HashSet::from(["petgraph".to_owned()]);
+    for item in &collector.extern_crates {
+        if item.ident == "petgraph" {
+            aliases.insert(
+                item.rename
+                    .as_ref()
+                    .map_or_else(|| item.ident.to_string(), |(_, rename)| rename.to_string()),
+            );
+        }
+    }
     let mut wildcard = false;
     loop {
         let before = aliases.len();
@@ -509,6 +537,33 @@ impl PublicPetgraphVisitor<'_> {
         };
         visitor.visit_generics(generics);
         self.violations.extend(visitor.paths);
+    }
+
+    fn inspect_path(&mut self, path: &syn::Path) {
+        let mut visitor = PetgraphPathVisitor {
+            aliases: self.aliases,
+            paths: BTreeSet::new(),
+        };
+        visitor.visit_path(path);
+        self.violations.extend(visitor.paths);
+    }
+
+    fn inspect_type_param_bound(&mut self, bound: &syn::TypeParamBound) {
+        let mut visitor = PetgraphPathVisitor {
+            aliases: self.aliases,
+            paths: BTreeSet::new(),
+        };
+        visitor.visit_type_param_bound(bound);
+        self.violations.extend(visitor.paths);
+    }
+
+    fn inspect_macro_tokens(&mut self, expression: &syn::Macro) {
+        let atoms = token_atoms(&expression.tokens);
+        if let Some(alias) = atoms.iter().find(|atom| self.aliases.contains(*atom)) {
+            self.violations.insert(format!(
+                "macro tokens reference private graph backend {alias}"
+            ));
+        }
     }
 }
 
@@ -588,6 +643,81 @@ impl<'ast> Visit<'ast> for PublicPetgraphVisitor<'_> {
             self.inspect_type(&item.ty);
         }
         visit::visit_item_static(self, item);
+    }
+
+    fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
+        if is_public(&item.vis) {
+            self.inspect_generics(&item.generics);
+            for bound in &item.supertraits {
+                self.inspect_type_param_bound(bound);
+            }
+            for trait_item in &item.items {
+                match trait_item {
+                    syn::TraitItem::Fn(function) => self.inspect_signature(&function.sig),
+                    syn::TraitItem::Type(item_type) => {
+                        self.inspect_generics(&item_type.generics);
+                        for bound in &item_type.bounds {
+                            self.inspect_type_param_bound(bound);
+                        }
+                        if let Some((_, default)) = &item_type.default {
+                            self.inspect_type(default);
+                        }
+                    }
+                    syn::TraitItem::Const(item_const) => {
+                        self.inspect_generics(&item_const.generics);
+                        self.inspect_type(&item_const.ty);
+                    }
+                    syn::TraitItem::Macro(item_macro) => {
+                        self.inspect_macro_tokens(&item_macro.mac);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        visit::visit_item_trait(self, item);
+    }
+
+    fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
+        if let Some((trait_path, _)) = &item.trait_ {
+            self.inspect_generics(&item.generics);
+            self.inspect_path(trait_path);
+            self.inspect_type(&item.self_ty);
+            for impl_item in &item.items {
+                match impl_item {
+                    syn::ImplItem::Fn(function) => self.inspect_signature(&function.sig),
+                    syn::ImplItem::Type(item_type) => {
+                        self.inspect_generics(&item_type.generics);
+                        self.inspect_type(&item_type.ty);
+                    }
+                    syn::ImplItem::Const(item_const) => {
+                        self.inspect_generics(&item_const.generics);
+                        self.inspect_type(&item_const.ty);
+                    }
+                    syn::ImplItem::Macro(item_macro) => {
+                        self.inspect_macro_tokens(&item_macro.mac);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        visit::visit_item_impl(self, item);
+    }
+
+    fn visit_item_extern_crate(&mut self, item: &'ast ItemExternCrate) {
+        if is_public(&item.vis) && item.ident == "petgraph" {
+            let exposed_name = item
+                .rename
+                .as_ref()
+                .map_or_else(|| item.ident.to_string(), |(_, rename)| rename.to_string());
+            self.violations
+                .insert(format!("public extern crate {exposed_name}"));
+        }
+        visit::visit_item_extern_crate(self, item);
+    }
+
+    fn visit_macro(&mut self, expression: &'ast syn::Macro) {
+        self.inspect_macro_tokens(expression);
+        visit::visit_macro(self, expression);
     }
 
     fn visit_item_use(&mut self, item: &'ast ItemUse) {
@@ -890,7 +1020,7 @@ fn core_clippy_policy_covers_path_filesystem_capabilities() {
 }
 
 #[test]
-fn core_target_check_rejects_build_scripts() {
+fn core_target_check_rejects_unscanned_production_targets() {
     let metadata: CargoMetadata = serde_json::from_str(
         r#"{
             "packages": [{
@@ -898,7 +1028,9 @@ fn core_target_check_rejects_build_scripts() {
                 "name": "mara-core",
                 "targets": [
                     {"kind": ["lib"], "src_path": "/workspace/core/src/lib.rs"},
-                    {"kind": ["custom-build"], "src_path": "/workspace/core/build.rs"}
+                    {"kind": ["custom-build"], "src_path": "/workspace/core/build.rs"},
+                    {"kind": ["example"], "src_path": "/workspace/core/examples/demo.rs"},
+                    {"kind": ["bench"], "src_path": "/workspace/core/benches/load.rs"}
                 ]
             }],
             "workspace_members": ["core-id"],
@@ -909,7 +1041,7 @@ fn core_target_check_rejects_build_scripts() {
 
     assert_eq!(
         core_production_targets(&metadata),
-        (1, BTreeSet::from(["custom-build"]))
+        (1, BTreeSet::from(["bench", "custom-build", "example"]))
     );
 }
 
@@ -956,6 +1088,31 @@ fn syntax_inspection_rejects_macro_hidden_and_compile_time_io() {
 }
 
 #[test]
+fn syntax_inspection_rejects_dynamic_macro_paths_and_conditional_modules() {
+    let syntax = syn::parse_file(
+        r#"macro_rules! read_input {
+            ($module:ident) => { std::$module::read("input") };
+        }
+        #[cfg_attr(all(), path = "../../outside.rs")]
+        mod outside;"#,
+    )
+    .expect("parse fixture");
+    let mut visitor = CoreBoundaryVisitor::default();
+    visitor.visit_file(&syntax);
+
+    assert!(
+        visitor
+            .violations
+            .contains(&"macro body contains forbidden path std::<dynamic>".into())
+    );
+    assert!(
+        visitor
+            .violations
+            .contains(&"conditional module paths escape source enforcement".into())
+    );
+}
+
+#[test]
 fn syntax_inspection_rejects_lint_suppression_and_escaping_modules() {
     let syntax = syn::parse_file(
         r#"#[allow(clippy::disallowed_methods)]
@@ -982,13 +1139,27 @@ fn public_api_inspection_rejects_petgraph_types_and_reexports() {
         r#"use petgraph::Graph as BackendGraph;
         pub fn graph() -> BackendGraph<(), ()> { todo!() }
         pub struct Snapshot { pub graph: petgraph::Graph<(), ()> }
-        pub use petgraph::graph::NodeIndex;"#,
+        pub use petgraph::graph::NodeIndex;
+        pub trait GraphView: petgraph::visit::GraphBase {
+            type Storage: Into<BackendGraph<(), ()>>;
+            fn graph(&self) -> BackendGraph<(), ()>;
+        }
+        pub struct MaraGraph;
+        impl GraphView for MaraGraph {
+            type Storage = petgraph::Graph<(), ()>;
+            fn graph(&self) -> BackendGraph<(), ()> { todo!() }
+        }
+        expose!(petgraph::Graph);
+        pub extern crate petgraph as graph_backend;"#,
     )
     .expect("parse fixture");
     let violations = public_petgraph_violations(&syntax);
 
     assert!(violations.contains("BackendGraph"));
     assert!(violations.contains("petgraph::Graph"));
+    assert!(violations.contains("petgraph::visit::GraphBase"));
+    assert!(violations.contains("macro tokens reference private graph backend petgraph"));
+    assert!(violations.contains("public extern crate graph_backend"));
     assert!(
         violations
             .iter()
