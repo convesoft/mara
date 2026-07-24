@@ -1,0 +1,12 @@
+disallowed-methods = [
+    { path = "std::path::Path::canonicalize", reason = "filesystem I/O belongs in mara-engine" },
+    { path = "std::path::Path::exists", reason = "filesystem I/O belongs in mara-engine" },
+    { path = "std::path::Path::is_dir", reason = "filesystem I/O belongs in mara-engine" },
+    { path = "std::path::Path::is_file", reason = "filesystem I/O belongs in mara-engine" },
+    { path = "std::path::Path::is_symlink", reason = "filesystem I/O belongs in mara-engine" },
+    { path = "std::path::Path::metadata", reason = "filesystem I/O belongs in mara-engine" },
+    { path = "std::path::Path::read_dir", reason = "filesystem I/O belongs in mara-engine" },
+    { path = "std::path::Path::read_link", reason = "filesystem I/O belongs in mara-engine" },
+    { path = "std::path::Path::symlink_metadata", reason = "filesystem I/O belongs in mara-engine" },
+    { path = "std::path::Path::try_exists", reason = "filesystem I/O belongs in mara-engine" },
+]

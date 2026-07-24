@@ -12,6 +12,7 @@ use syn::{
 };
 
 const WORKSPACE_PACKAGES: [&str; 4] = ["mara-core", "mara-markdown", "mara-engine", "mara-cli"];
+const ALLOWED_CORE_DEPENDENCIES: [&str; 1] = ["petgraph"];
 
 #[derive(Deserialize)]
 struct CargoMetadata {
@@ -40,6 +41,12 @@ struct CargoNode {
 #[derive(Deserialize)]
 struct CargoNodeDependency {
     pkg: String,
+    dep_kinds: Vec<CargoDependencyKind>,
+}
+
+#[derive(Deserialize)]
+struct CargoDependencyKind {
+    kind: Option<String>,
 }
 
 fn workspace_root() -> PathBuf {
@@ -97,6 +104,47 @@ fn resolved_workspace_dependencies<'a>(
         .deps
         .iter()
         .filter_map(|dependency| workspace_names_by_id.get(dependency.pkg.as_str()).copied())
+        .collect()
+}
+
+fn direct_non_dev_dependency_names<'a>(
+    metadata: &'a CargoMetadata,
+    package_name: &str,
+) -> BTreeSet<&'a str> {
+    let packages = workspace_packages(metadata);
+    let package = packages[package_name];
+    let package_names_by_id: BTreeMap<_, _> = metadata
+        .packages
+        .iter()
+        .map(|package| (package.id.as_str(), package.name.as_str()))
+        .collect();
+    metadata
+        .resolve
+        .nodes
+        .iter()
+        .find(|node| node.id == package.id)
+        .unwrap_or_else(|| panic!("missing resolve node for {package_name}"))
+        .deps
+        .iter()
+        .filter(|dependency| {
+            dependency
+                .dep_kinds
+                .iter()
+                .any(|kind| kind.kind.as_deref() != Some("dev"))
+        })
+        .map(|dependency| {
+            package_names_by_id
+                .get(dependency.pkg.as_str())
+                .copied()
+                .unwrap_or_else(|| panic!("missing package {}", dependency.pkg))
+        })
+        .collect()
+}
+
+fn disallowed_core_dependencies(metadata: &CargoMetadata) -> BTreeSet<&str> {
+    direct_non_dev_dependency_names(metadata, "mara-core")
+        .into_iter()
+        .filter(|dependency| !ALLOWED_CORE_DEPENDENCIES.contains(dependency))
         .collect()
 }
 
@@ -256,6 +304,9 @@ fn workspace_dependencies_follow_the_accepted_layer_direction() {
 
 #[test]
 fn core_has_no_dependencies_or_infrastructure_coupling() {
+    let metadata = cargo_metadata();
+    assert_eq!(disallowed_core_dependencies(&metadata), BTreeSet::new());
+
     let core_source = workspace_root().join("crates/mara-core/src");
     let mut sources = Vec::new();
     rust_sources(&core_source, &mut sources);
@@ -299,7 +350,8 @@ fn same_name_external_packages_do_not_count_as_workspace_edges() {
                     "id": "mara-markdown-id",
                     "deps": [{
                         "name": "domain",
-                        "pkg": "external-core-id"
+                        "pkg": "external-core-id",
+                        "dep_kinds": [{"kind": null}]
                     }]
                 }]
             }
@@ -376,4 +428,78 @@ fn syntax_inspection_rejects_terminal_output_macros() {
             "terminal macro dbg!",
         ]
     );
+}
+
+#[test]
+fn core_dependency_allowlist_rejects_infrastructure_but_allows_pure_support() {
+    let metadata: CargoMetadata = serde_json::from_str(
+        r#"{
+            "packages": [
+                {"id": "core-id", "name": "mara-core"},
+                {"id": "petgraph-id", "name": "petgraph"},
+                {"id": "git2-id", "name": "git2"},
+                {"id": "proptest-id", "name": "proptest"}
+            ],
+            "workspace_members": ["core-id"],
+            "resolve": {
+                "nodes": [{
+                    "id": "core-id",
+                    "deps": [
+                        {
+                            "name": "petgraph",
+                            "pkg": "petgraph-id",
+                            "dep_kinds": [{"kind": null}]
+                        },
+                        {
+                            "name": "git2",
+                            "pkg": "git2-id",
+                            "dep_kinds": [{"kind": null}]
+                        },
+                        {
+                            "name": "proptest",
+                            "pkg": "proptest-id",
+                            "dep_kinds": [{"kind": "dev"}]
+                        }
+                    ]
+                }]
+            }
+        }"#,
+    )
+    .expect("decode metadata fixture");
+
+    assert_eq!(
+        disallowed_core_dependencies(&metadata),
+        BTreeSet::from(["git2"])
+    );
+}
+
+#[test]
+fn core_clippy_policy_covers_path_filesystem_capabilities() {
+    let config: toml::Value = fs::read_to_string(workspace_root().join("clippy.toml"))
+        .expect("read Clippy policy")
+        .parse()
+        .expect("parse Clippy policy");
+    let configured: BTreeSet<_> = config["disallowed-methods"]
+        .as_array()
+        .expect("disallowed-methods array")
+        .iter()
+        .map(|entry| entry["path"].as_str().expect("disallowed method path"))
+        .collect();
+    let expected = BTreeSet::from([
+        "std::path::Path::canonicalize",
+        "std::path::Path::exists",
+        "std::path::Path::is_dir",
+        "std::path::Path::is_file",
+        "std::path::Path::is_symlink",
+        "std::path::Path::metadata",
+        "std::path::Path::read_dir",
+        "std::path::Path::read_link",
+        "std::path::Path::symlink_metadata",
+        "std::path::Path::try_exists",
+    ]);
+    assert_eq!(configured, expected);
+
+    let core_root = fs::read_to_string(workspace_root().join("crates/mara-core/src/lib.rs"))
+        .expect("read core crate root");
+    assert!(core_root.contains("clippy::disallowed_methods"));
 }

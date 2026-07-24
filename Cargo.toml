@@ -12,6 +12,9 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
+[workspace.lints.clippy]
+disallowed_methods = "allow"
+
 [workspace.dependencies]
 mara-core = { path = "crates/mara-core" }
 mara-markdown = { path = "crates/mara-markdown" }
