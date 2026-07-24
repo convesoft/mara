@@ -5,6 +5,7 @@ use std::{
     process::Command,
 };
 
+use proc_macro2::{TokenStream, TokenTree};
 use serde::Deserialize;
 use syn::{
     ItemExternCrate, ItemUse, UseTree,
@@ -25,6 +26,13 @@ struct CargoMetadata {
 struct CargoPackage {
     id: String,
     name: String,
+    #[serde(default)]
+    targets: Vec<CargoTarget>,
+}
+
+#[derive(Deserialize)]
+struct CargoTarget {
+    kind: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -148,6 +156,26 @@ fn disallowed_core_dependencies(metadata: &CargoMetadata) -> BTreeSet<&str> {
         .collect()
 }
 
+fn core_production_targets(metadata: &CargoMetadata) -> (usize, BTreeSet<&str>) {
+    let packages = workspace_packages(metadata);
+    let mut libraries = 0;
+    let mut disallowed = BTreeSet::new();
+    for kind in packages["mara-core"]
+        .targets
+        .iter()
+        .flat_map(|target| &target.kind)
+    {
+        match kind.as_str() {
+            "lib" => libraries += 1,
+            "bench" | "example" | "test" => {}
+            other => {
+                disallowed.insert(other);
+            }
+        }
+    }
+    (libraries, disallowed)
+}
+
 fn rust_sources(directory: &Path, sources: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(directory)
         .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
@@ -178,7 +206,10 @@ impl CoreBoundaryVisitor {
             segments,
             [standard, module, ..]
                 if standard == "std"
-                    && matches!(module.as_str(), "env" | "fs" | "io" | "net" | "process")
+                    && matches!(
+                        module.as_str(),
+                        "env" | "fs" | "io" | "net" | "os" | "process"
+                    )
         );
         if higher_layer_or_adapter || infrastructure {
             self.violations.push(segments.join("::"));
@@ -264,9 +295,57 @@ impl<'ast> Visit<'ast> for CoreBoundaryVisitor {
             ) {
                 self.violations.push(format!("terminal macro {name}!"));
             }
+            if matches!(
+                name.as_str(),
+                "env" | "include" | "include_bytes" | "include_str" | "option_env"
+            ) {
+                self.violations
+                    .push(format!("compile-time I/O macro {name}!"));
+            }
+        }
+        if let Some(path) = forbidden_macro_token_path(&expression.tokens) {
+            self.violations
+                .push(format!("macro body contains forbidden path {path}"));
         }
         visit::visit_macro(self, expression);
     }
+}
+
+fn forbidden_macro_token_path(tokens: &TokenStream) -> Option<String> {
+    fn collect(tokens: &TokenStream, atoms: &mut Vec<String>) {
+        for token in tokens.clone() {
+            match token {
+                TokenTree::Group(group) => collect(&group.stream(), atoms),
+                TokenTree::Ident(identifier) => atoms.push(identifier.to_string()),
+                TokenTree::Punct(punctuation) => atoms.push(punctuation.as_char().to_string()),
+                TokenTree::Literal(_) => atoms.push("<literal>".into()),
+            }
+        }
+    }
+
+    let mut atoms = Vec::new();
+    collect(tokens, &mut atoms);
+    for window in atoms.windows(4) {
+        if window[0] == "std"
+            && window[1] == ":"
+            && window[2] == ":"
+            && matches!(
+                window[3].as_str(),
+                "env" | "fs" | "io" | "net" | "os" | "process"
+            )
+        {
+            return Some(format!("std::{}", window[3]));
+        }
+    }
+    atoms
+        .iter()
+        .find(|atom| {
+            matches!(
+                atom.as_str(),
+                "clap" | "mara_cli" | "mara_engine" | "mara_markdown" | "rushdown"
+            )
+        })
+        .cloned()
 }
 
 #[test]
@@ -306,6 +385,7 @@ fn workspace_dependencies_follow_the_accepted_layer_direction() {
 fn core_has_no_dependencies_or_infrastructure_coupling() {
     let metadata = cargo_metadata();
     assert_eq!(disallowed_core_dependencies(&metadata), BTreeSet::new());
+    assert_eq!(core_production_targets(&metadata), (1, BTreeSet::new()));
 
     let core_source = workspace_root().join("crates/mara-core/src");
     let mut sources = Vec::new();
@@ -502,4 +582,86 @@ fn core_clippy_policy_covers_path_filesystem_capabilities() {
     let core_root = fs::read_to_string(workspace_root().join("crates/mara-core/src/lib.rs"))
         .expect("read core crate root");
     assert!(core_root.contains("clippy::disallowed_methods"));
+
+    let core_manifest: toml::Value =
+        fs::read_to_string(workspace_root().join("crates/mara-core/Cargo.toml"))
+            .expect("read core manifest")
+            .parse()
+            .expect("parse core manifest");
+    assert_eq!(core_manifest["package"]["build"].as_bool(), Some(false));
+    assert_eq!(core_manifest["package"]["autobins"].as_bool(), Some(false));
+    assert_eq!(
+        core_manifest["package"]["autoexamples"].as_bool(),
+        Some(false)
+    );
+    assert_eq!(
+        core_manifest["package"]["autobenches"].as_bool(),
+        Some(false)
+    );
+}
+
+#[test]
+fn core_target_check_rejects_build_scripts() {
+    let metadata: CargoMetadata = serde_json::from_str(
+        r#"{
+            "packages": [{
+                "id": "core-id",
+                "name": "mara-core",
+                "targets": [
+                    {"kind": ["lib"]},
+                    {"kind": ["custom-build"]}
+                ]
+            }],
+            "workspace_members": ["core-id"],
+            "resolve": {"nodes": [{"id": "core-id", "deps": []}]}
+        }"#,
+    )
+    .expect("decode metadata fixture");
+
+    assert_eq!(
+        core_production_targets(&metadata),
+        (1, BTreeSet::from(["custom-build"]))
+    );
+}
+
+#[test]
+fn syntax_inspection_rejects_os_specific_io_paths() {
+    let syntax = syn::parse_file(
+        r#"fn connect(path: &std::path::Path) {
+            let _ = std::os::unix::fs::symlink(path, path);
+            let _ = std::os::unix::net::UnixStream::connect(path);
+        }"#,
+    )
+    .expect("parse fixture");
+    let mut visitor = CoreBoundaryVisitor::default();
+    visitor.visit_file(&syntax);
+
+    assert_eq!(
+        visitor.violations,
+        [
+            "std::os::unix::fs::symlink",
+            "std::os::unix::net::UnixStream::connect"
+        ]
+    );
+}
+
+#[test]
+fn syntax_inspection_rejects_macro_hidden_and_compile_time_io() {
+    let syntax = syn::parse_file(
+        r#"macro_rules! read_input {
+            () => { std::fs::read("input") };
+        }
+        const TEXT: &str = include_str!("input");"#,
+    )
+    .expect("parse fixture");
+    let mut visitor = CoreBoundaryVisitor::default();
+    visitor.visit_file(&syntax);
+
+    assert_eq!(
+        visitor.violations,
+        [
+            "macro body contains forbidden path std::fs",
+            "compile-time I/O macro include_str!",
+        ]
+    );
 }

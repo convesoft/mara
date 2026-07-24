@@ -99,6 +99,7 @@ dependencies = [
  "libc",
  "mara-core",
  "mara-markdown",
+ "proc-macro2",
  "serde",
  "serde_json",
  "syn",
