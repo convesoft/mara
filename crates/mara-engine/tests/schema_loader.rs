@@ -570,6 +570,40 @@ fn rejects_unknown_keys_at_every_decoded_mapping_boundary() {
 }
 
 #[test]
+fn reports_all_independent_unknown_keys_in_source_order() {
+    let source = VALID_SCHEMA
+        .replace("  version:", "  owner: team\n  version:")
+        .replace("  mid:", "  generator: random\n  mid:")
+        .replace("    prefix:", "    length: 26\n    prefix:")
+        + "imports: first.yaml\nplugins: [example]\n";
+    let fixture = Fixture::new(&source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+
+    let diagnostics = error.diagnostics();
+    assert_eq!(diagnostics.len(), 5, "{diagnostics:#?}");
+    for diagnostic in diagnostics {
+        assert_code(diagnostic, SchemaDiagnosticCode::UnknownKey);
+    }
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| detail_string(diagnostic, "key").unwrap())
+            .collect::<Vec<_>>(),
+        ["owner", "generator", "length", "imports", "plugins"]
+    );
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| detail_string(diagnostic, "mapping").unwrap())
+            .collect::<Vec<_>>(),
+        ["schema", "identity", "identity.mid", "root", "root"]
+    );
+    assert!(diagnostics.windows(2).all(|pair| {
+        pair[0].primary().unwrap().start_byte() < pair[1].primary().unwrap().start_byte()
+    }));
+}
+
+#[test]
 fn rejects_unsupported_root_composition_constructs_as_unknown_v1_keys() {
     for key in [
         "imports",

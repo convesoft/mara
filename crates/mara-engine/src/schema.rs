@@ -20,6 +20,33 @@ use crate::project::{LoadedProject, open_loaded_schema};
 
 type DecodeResult<T> = Result<T, Box<Diagnostic>>;
 
+#[derive(Debug)]
+enum DocumentDecodeFailure {
+    Diagnostic(Box<Diagnostic>),
+    Diagnostics(Vec<Diagnostic>),
+}
+
+impl DocumentDecodeFailure {
+    fn into_diagnostics(self) -> Vec<Diagnostic> {
+        match self {
+            Self::Diagnostic(diagnostic) => vec![*diagnostic],
+            Self::Diagnostics(diagnostics) => diagnostics,
+        }
+    }
+}
+
+impl From<Diagnostic> for DocumentDecodeFailure {
+    fn from(diagnostic: Diagnostic) -> Self {
+        Self::Diagnostic(Box::new(diagnostic))
+    }
+}
+
+impl From<Box<Diagnostic>> for DocumentDecodeFailure {
+    fn from(diagnostic: Box<Diagnostic>) -> Self {
+        Self::Diagnostic(diagnostic)
+    }
+}
+
 /// A schema input failure. Invalid source is represented entirely by diagnostics;
 /// I/O failures additionally preserve their infrastructure cause and affected path.
 #[derive(Debug)]
@@ -228,7 +255,7 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
     }
 
     decode_v1_document(source, path, root)
-        .map_err(|diagnostic| SchemaLoadError::invalid(vec![*diagnostic]))
+        .map_err(|failure| SchemaLoadError::invalid(failure.into_diagnostics()))
 }
 
 fn validate_document_directives(source: &str, path: &str) -> Option<Diagnostic> {
@@ -1033,38 +1060,34 @@ fn is_core_float(value: &str) -> bool {
     }
 }
 
-fn decode_v1_document(source: &str, path: &str, root: ParsedNode) -> DecodeResult<SchemaDocument> {
+fn decode_v1_document(
+    source: &str,
+    path: &str,
+    root: ParsedNode,
+) -> Result<SchemaDocument, DocumentDecodeFailure> {
     let ParsedNode::Mapping {
         entries,
         span: root_span,
         ..
     } = root
     else {
-        return Err(Box::new(invalid_declaration(
+        return Err(invalid_declaration(
             "schema document root must be a mapping",
             path,
             root.span(),
             "root",
-        )));
+        )
+        .into());
     };
 
     let (format_key, format_value) =
         required_entry(&entries, "format_version", "root", path, root_span)?;
     let format_version = decode_format_version(format_key, format_value, path)?;
 
-    reject_unknown_keys(
-        &entries,
-        &[
-            "format_version",
-            "schema",
-            "identity",
-            "flavours",
-            "relations",
-            "rules",
-        ],
-        "root",
-        path,
-    )?;
+    let unknown_keys = v1_unknown_key_diagnostics(&entries, path);
+    if !unknown_keys.is_empty() {
+        return Err(DocumentDecodeFailure::Diagnostics(unknown_keys));
+    }
 
     let (schema_key, schema_value) = required_entry(&entries, "schema", "root", path, root_span)?;
     let schema_identity = decode_schema_identity(schema_value, path)?;
@@ -1089,12 +1112,13 @@ fn decode_v1_document(source: &str, path: &str, root: ParsedNode) -> DecodeResul
 
     let relations = if let Some((key, value)) = optional_entry(&entries, "relations") {
         let Some(len) = mapping_len(value) else {
-            return Err(Box::new(invalid_declaration(
+            return Err(invalid_declaration(
                 "root.relations must be a mapping",
                 path,
                 value.span(),
                 "relations",
-            )));
+            )
+            .into());
         };
         Some(section(path, key, value, len))
     } else {
@@ -1103,12 +1127,13 @@ fn decode_v1_document(source: &str, path: &str, root: ParsedNode) -> DecodeResul
 
     let rules = if let Some((key, value)) = optional_entry(&entries, "rules") {
         let Some(len) = sequence_len(value) else {
-            return Err(Box::new(invalid_declaration(
+            return Err(invalid_declaration(
                 "root.rules must be a sequence",
                 path,
                 value.span(),
                 "rules",
-            )));
+            )
+            .into());
         };
         Some(section(path, key, value, len))
     } else {
@@ -1187,7 +1212,6 @@ fn decode_schema_identity(node: &ParsedNode, path: &str) -> DecodeResult<SchemaI
             "schema",
         )));
     };
-    reject_unknown_keys(entries, &["name", "version"], "schema", path)?;
     let (name_key, name_value) = required_entry(entries, "name", "schema", path, *span)?;
     let name = expect_string(name_value, "schema.name", path)?;
     if !valid_kebab_name(name) {
@@ -1227,7 +1251,6 @@ fn decode_identity(node: &ParsedNode, path: &str) -> DecodeResult<IdentityConfig
             "identity",
         )));
     };
-    reject_unknown_keys(entries, &["mid"], "identity", path)?;
     let (mid_key, mid_value) = required_entry(entries, "mid", "identity", path, *span)?;
     let ParsedNode::Mapping {
         entries: mid_entries,
@@ -1242,8 +1265,6 @@ fn decode_identity(node: &ParsedNode, path: &str) -> DecodeResult<IdentityConfig
             "identity.mid",
         )));
     };
-    reject_unknown_keys(mid_entries, &["format", "prefix"], "identity.mid", path)?;
-
     let (format_key, format_value) =
         required_entry(mid_entries, "format", "identity.mid", path, *mid_span)?;
     let format = expect_string(format_value, "identity.mid.format", path)?;
@@ -1277,16 +1298,58 @@ fn decode_identity(node: &ParsedNode, path: &str) -> DecodeResult<IdentityConfig
     Ok(IdentityConfiguration::new(mid))
 }
 
-fn reject_unknown_keys(
+fn v1_unknown_key_diagnostics(entries: &[(ParsedNode, ParsedNode)], path: &str) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    collect_unknown_key_diagnostics(
+        entries,
+        &[
+            "format_version",
+            "schema",
+            "identity",
+            "flavours",
+            "relations",
+            "rules",
+        ],
+        "root",
+        path,
+        &mut diagnostics,
+    );
+
+    if let Some((_, ParsedNode::Mapping { entries, .. })) = optional_entry(entries, "schema") {
+        collect_unknown_key_diagnostics(
+            entries,
+            &["name", "version"],
+            "schema",
+            path,
+            &mut diagnostics,
+        );
+    }
+    if let Some((_, ParsedNode::Mapping { entries, .. })) = optional_entry(entries, "identity") {
+        collect_unknown_key_diagnostics(entries, &["mid"], "identity", path, &mut diagnostics);
+        if let Some((_, ParsedNode::Mapping { entries, .. })) = optional_entry(entries, "mid") {
+            collect_unknown_key_diagnostics(
+                entries,
+                &["format", "prefix"],
+                "identity.mid",
+                path,
+                &mut diagnostics,
+            );
+        }
+    }
+    diagnostics
+}
+
+fn collect_unknown_key_diagnostics(
     entries: &[(ParsedNode, ParsedNode)],
     allowed: &[&str],
     mapping: &'static str,
     path: &str,
-) -> DecodeResult<()> {
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     for (key, _) in entries {
         let (name, _) = string_key(key).expect("profile validation requires string keys");
         if !allowed.contains(&name) {
-            return Err(Box::new(
+            diagnostics.push(
                 Diagnostic::new(
                     SchemaDiagnosticCode::UnknownKey,
                     format!("{mapping} contains unknown key {name:?}"),
@@ -1295,10 +1358,9 @@ fn reject_unknown_keys(
                 .with_context(DiagnosticContext::new(Some(name.to_owned()), None, None))
                 .with_detail("key", name.to_owned())
                 .with_detail("mapping", mapping),
-            ));
+            );
         }
     }
-    Ok(())
 }
 
 fn required_entry<'a>(
