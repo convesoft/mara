@@ -467,6 +467,20 @@ fn accepts_yaml_1_2_core_tags_but_rejects_incompatible_core_tags() {
         verbatim_tag
     );
 
+    let commented_tag_source = source.replace(
+        "  !!str version: ! 1.0.0",
+        "  !!str version: !!str # !\n    1.0.0",
+    );
+    let fixture = Fixture::new(&commented_tag_source);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+    assert_eq!(
+        source_slice(
+            &commented_tag_source,
+            document.schema().value().version().value_source()
+        ),
+        "!!str # !\n    1.0.0"
+    );
+
     let invalid = source.replace("!!str core-schema", "!!timestamp core-schema");
     let error = assert_invalid(invalid, SchemaDiagnosticCode::Syntax);
     assert_eq!(
@@ -479,14 +493,14 @@ fn accepts_yaml_1_2_core_tags_but_rejects_incompatible_core_tags() {
 fn preserves_the_complete_authored_block_scalar_span() {
     let source = VALID_SCHEMA.replace(
         "version: 1.2.3-alpha.1+build.5",
-        "version: |-\n    1.2.3-alpha.1+build.5",
+        "version: |- # |\n    1.2.3-alpha.1+build.5",
     );
     let fixture = Fixture::new(&source);
     let document = load_schema(&fixture.loaded_project()).unwrap();
 
     assert_eq!(
         source_slice(&source, document.schema().value().version().value_source()),
-        "|-\n    1.2.3-alpha.1+build.5\n"
+        "|- # |\n    1.2.3-alpha.1+build.5\n"
     );
 }
 

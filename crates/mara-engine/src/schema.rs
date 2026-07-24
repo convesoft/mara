@@ -398,13 +398,19 @@ fn preceding_block_scalar_start(
     indicator: char,
 ) -> Option<usize> {
     let mut search_end = content_start;
+    let mut earliest = None;
+    let mut line_start = 0;
     while let Some(start) = source[..search_end].rfind(indicator) {
+        if earliest.is_some() && start < line_start {
+            break;
+        }
         if block_scalar_prefix_only(&source[start + indicator.len_utf8()..content_start]) {
-            return Some(start);
+            earliest = Some(start);
+            line_start = source_line_start(source, start);
         }
         search_end = start;
     }
-    None
+    earliest
 }
 
 fn block_scalar_prefix_only(source: &str) -> bool {
@@ -425,16 +431,28 @@ fn block_scalar_prefix_only(source: &str) -> bool {
 
 fn preceding_tag_start(source: &str, node_start: usize) -> Option<usize> {
     let mut search_end = node_start;
+    let mut earliest = None;
+    let mut line_start = 0;
     while let Some(start) = source[..search_end].rfind('!') {
+        if earliest.is_some() && start < line_start {
+            break;
+        }
         if tag_start_boundary(source, start)
             && let Some(end) = raw_tag_end(source, start, node_start)
             && yaml_separation_only(&source[end..node_start])
         {
-            return Some(start);
+            earliest = Some(start);
+            line_start = source_line_start(source, start);
         }
         search_end = start;
     }
-    None
+    earliest
+}
+
+fn source_line_start(source: &str, position: usize) -> usize {
+    source[..position]
+        .rfind(['\r', '\n'])
+        .map_or(0, |line_break| line_break + 1)
 }
 
 fn tag_start_boundary(source: &str, start: usize) -> bool {
@@ -873,6 +891,7 @@ fn is_core_boolean(value: &str) -> bool {
 }
 
 fn is_core_integer(value: &str) -> bool {
+    // YAML 1.2.2 Core permits a sign only on the base-ten alternative.
     let decimal = value.strip_prefix(['+', '-']).unwrap_or(value);
     if !decimal.is_empty() && decimal.bytes().all(|byte| byte.is_ascii_digit()) {
         return true;
@@ -1485,6 +1504,18 @@ mod tests {
             resolve_scalar("null", ScalarStyle::DoubleQuoted, None),
             Ok(ScalarKind::String)
         );
+
+        let explicit_integer = Tag {
+            handle: "tag:yaml.org,2002:".to_owned(),
+            suffix: "int".to_owned(),
+        };
+        for value in ["-0x1", "+0o7"] {
+            assert_eq!(
+                resolve_scalar(value, ScalarStyle::Plain, None),
+                Ok(ScalarKind::String)
+            );
+            assert!(resolve_scalar(value, ScalarStyle::Plain, Some(&explicit_integer)).is_err());
+        }
     }
 
     #[test]
