@@ -375,6 +375,26 @@ pub fn load_from_root(root: impl AsRef<Path>) -> Result<LoadedProject, ProjectLo
     })
 }
 
+pub(crate) fn open_loaded_schema(project: &LoadedProject) -> Result<fs::File, ProjectLoadError> {
+    let configured = project
+        .schema_path
+        .strip_prefix(&project.root)
+        .ok()
+        .and_then(Path::to_str)
+        .map(|path| path.replace('\\', "/"))
+        .unwrap_or_else(|| "<loaded schema>".to_owned());
+    let (file, _, _) = open_project_input(
+        &project.root,
+        &project.config_path,
+        &project.schema_path,
+        "project.schema",
+        &configured,
+        None,
+        ProjectLoadErrorCode::SchemaIo,
+    )?;
+    Ok(file)
+}
+
 fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoadError> {
     let (mut config_file, resolved_config_path, config_identity) = open_project_input(
         &location.root,
