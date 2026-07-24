@@ -1,4 +1,4 @@
-#![deny(
+#![forbid(
     clippy::dbg_macro,
     clippy::disallowed_methods,
     clippy::print_stderr,

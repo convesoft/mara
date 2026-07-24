@@ -1,11 +1,12 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fs,
     path::{Path, PathBuf},
     process::Command,
 };
 
 use proc_macro2::{TokenStream, TokenTree};
+use quote::ToTokens;
 use serde::Deserialize;
 use syn::{
     ItemExternCrate, ItemUse, UseTree,
@@ -33,6 +34,8 @@ struct CargoPackage {
 #[derive(Deserialize)]
 struct CargoTarget {
     kind: Vec<String>,
+    #[serde(default)]
+    src_path: String,
 }
 
 #[derive(Deserialize)]
@@ -176,6 +179,16 @@ fn core_production_targets(metadata: &CargoMetadata) -> (usize, BTreeSet<&str>) 
     (libraries, disallowed)
 }
 
+fn core_library_source(metadata: &CargoMetadata) -> &Path {
+    let packages = workspace_packages(metadata);
+    let target = packages["mara-core"]
+        .targets
+        .iter()
+        .find(|target| target.kind.iter().any(|kind| kind == "lib"))
+        .expect("mara-core library target");
+    Path::new(&target.src_path)
+}
+
 fn rust_sources(directory: &Path, sources: &mut Vec<PathBuf>) {
     for entry in fs::read_dir(directory)
         .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
@@ -309,6 +322,40 @@ impl<'ast> Visit<'ast> for CoreBoundaryVisitor {
         }
         visit::visit_macro(self, expression);
     }
+
+    fn visit_attribute(&mut self, attribute: &'ast syn::Attribute) {
+        let attribute_name = attribute.path().get_ident().map(ToString::to_string);
+        if matches!(attribute_name.as_deref(), Some("allow" | "expect")) {
+            let tokens = match &attribute.meta {
+                syn::Meta::List(list) => list.tokens.to_string(),
+                _ => String::new(),
+            };
+            if tokens.contains("clippy :: disallowed_methods")
+                || tokens.contains("clippy :: dbg_macro")
+                || tokens.contains("clippy :: print_stderr")
+                || tokens.contains("clippy :: print_stdout")
+            {
+                self.violations
+                    .push("core boundary lints must not be suppressed".into());
+            }
+        }
+        if attribute.path().is_ident("path")
+            && let syn::Meta::NameValue(name_value) = &attribute.meta
+            && let syn::Expr::Lit(expression) = &name_value.value
+            && let syn::Lit::Str(path) = &expression.lit
+        {
+            let path = Path::new(&path.value()).to_path_buf();
+            if path.is_absolute()
+                || path
+                    .components()
+                    .any(|component| matches!(component, std::path::Component::ParentDir))
+            {
+                self.violations
+                    .push("module path escapes the enforced core source tree".into());
+            }
+        }
+        visit::visit_attribute(self, attribute);
+    }
 }
 
 fn forbidden_macro_token_path(tokens: &TokenStream) -> Option<String> {
@@ -346,6 +393,231 @@ fn forbidden_macro_token_path(tokens: &TokenStream) -> Option<String> {
             )
         })
         .cloned()
+}
+
+struct UseCollector<'ast> {
+    trees: Vec<&'ast UseTree>,
+}
+
+impl<'ast> Visit<'ast> for UseCollector<'ast> {
+    fn visit_item_use(&mut self, item: &'ast ItemUse) {
+        self.trees.push(&item.tree);
+        visit::visit_item_use(self, item);
+    }
+}
+
+fn petgraph_aliases(file: &syn::File) -> (HashSet<String>, bool) {
+    fn collect(
+        tree: &UseTree,
+        under_petgraph: bool,
+        known: &HashSet<String>,
+        aliases: &mut HashSet<String>,
+        wildcard: &mut bool,
+    ) {
+        match tree {
+            UseTree::Path(path) => {
+                let under_petgraph = under_petgraph
+                    || path.ident == "petgraph"
+                    || known.contains(path.ident.to_string().as_str());
+                collect(&path.tree, under_petgraph, known, aliases, wildcard);
+            }
+            UseTree::Name(name) if under_petgraph => {
+                aliases.insert(name.ident.to_string());
+            }
+            UseTree::Rename(rename) if under_petgraph || rename.ident == "petgraph" => {
+                aliases.insert(rename.rename.to_string());
+            }
+            UseTree::Glob(_) if under_petgraph => *wildcard = true,
+            UseTree::Group(group) => {
+                for item in &group.items {
+                    collect(item, under_petgraph, known, aliases, wildcard);
+                }
+            }
+            UseTree::Name(_) | UseTree::Rename(_) | UseTree::Glob(_) => {}
+        }
+    }
+
+    let mut collector = UseCollector { trees: Vec::new() };
+    collector.visit_file(file);
+    let mut aliases = HashSet::from(["petgraph".to_owned()]);
+    let mut wildcard = false;
+    loop {
+        let before = aliases.len();
+        let known = aliases.clone();
+        for tree in &collector.trees {
+            collect(tree, false, &known, &mut aliases, &mut wildcard);
+        }
+        if aliases.len() == before {
+            break;
+        }
+    }
+    (aliases, wildcard)
+}
+
+struct PetgraphPathVisitor<'a> {
+    aliases: &'a HashSet<String>,
+    paths: BTreeSet<String>,
+}
+
+impl<'ast> Visit<'ast> for PetgraphPathVisitor<'_> {
+    fn visit_path(&mut self, path: &'ast syn::Path) {
+        if path
+            .segments
+            .first()
+            .is_some_and(|segment| self.aliases.contains(segment.ident.to_string().as_str()))
+        {
+            self.paths.insert(
+                path.segments
+                    .iter()
+                    .map(|segment| segment.ident.to_string())
+                    .collect::<Vec<_>>()
+                    .join("::"),
+            );
+        }
+        visit::visit_path(self, path);
+    }
+}
+
+struct PublicPetgraphVisitor<'a> {
+    aliases: &'a HashSet<String>,
+    violations: BTreeSet<String>,
+}
+
+impl PublicPetgraphVisitor<'_> {
+    fn inspect_signature(&mut self, signature: &syn::Signature) {
+        let mut visitor = PetgraphPathVisitor {
+            aliases: self.aliases,
+            paths: BTreeSet::new(),
+        };
+        visitor.visit_signature(signature);
+        self.violations.extend(visitor.paths);
+    }
+
+    fn inspect_type(&mut self, item_type: &syn::Type) {
+        let mut visitor = PetgraphPathVisitor {
+            aliases: self.aliases,
+            paths: BTreeSet::new(),
+        };
+        visitor.visit_type(item_type);
+        self.violations.extend(visitor.paths);
+    }
+
+    fn inspect_generics(&mut self, generics: &syn::Generics) {
+        let mut visitor = PetgraphPathVisitor {
+            aliases: self.aliases,
+            paths: BTreeSet::new(),
+        };
+        visitor.visit_generics(generics);
+        self.violations.extend(visitor.paths);
+    }
+}
+
+fn is_public(visibility: &syn::Visibility) -> bool {
+    matches!(visibility, syn::Visibility::Public(_))
+}
+
+impl<'ast> Visit<'ast> for PublicPetgraphVisitor<'_> {
+    fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        if is_public(&item.vis) {
+            self.inspect_signature(&item.sig);
+        }
+        visit::visit_item_fn(self, item);
+    }
+
+    fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
+        if is_public(&item.vis) {
+            self.inspect_signature(&item.sig);
+        }
+        visit::visit_impl_item_fn(self, item);
+    }
+
+    fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
+        if is_public(&item.vis) {
+            self.inspect_generics(&item.generics);
+            for field in &item.fields {
+                if is_public(&field.vis) {
+                    self.inspect_type(&field.ty);
+                }
+            }
+        }
+        visit::visit_item_struct(self, item);
+    }
+
+    fn visit_item_enum(&mut self, item: &'ast syn::ItemEnum) {
+        if is_public(&item.vis) {
+            self.inspect_generics(&item.generics);
+            for variant in &item.variants {
+                for field in &variant.fields {
+                    self.inspect_type(&field.ty);
+                }
+            }
+        }
+        visit::visit_item_enum(self, item);
+    }
+
+    fn visit_item_union(&mut self, item: &'ast syn::ItemUnion) {
+        if is_public(&item.vis) {
+            self.inspect_generics(&item.generics);
+            for field in &item.fields.named {
+                if is_public(&field.vis) {
+                    self.inspect_type(&field.ty);
+                }
+            }
+        }
+        visit::visit_item_union(self, item);
+    }
+
+    fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
+        if is_public(&item.vis) {
+            self.inspect_generics(&item.generics);
+            self.inspect_type(&item.ty);
+        }
+        visit::visit_item_type(self, item);
+    }
+
+    fn visit_item_const(&mut self, item: &'ast syn::ItemConst) {
+        if is_public(&item.vis) {
+            self.inspect_generics(&item.generics);
+            self.inspect_type(&item.ty);
+        }
+        visit::visit_item_const(self, item);
+    }
+
+    fn visit_item_static(&mut self, item: &'ast syn::ItemStatic) {
+        if is_public(&item.vis) {
+            self.inspect_type(&item.ty);
+        }
+        visit::visit_item_static(self, item);
+    }
+
+    fn visit_item_use(&mut self, item: &'ast ItemUse) {
+        if is_public(&item.vis) {
+            let text = item.tree.to_token_stream().to_string();
+            if self.aliases.iter().any(|alias| {
+                text == *alias
+                    || text.starts_with(format!("{alias} ::").as_str())
+                    || text.starts_with(format!("{alias} as").as_str())
+            }) {
+                self.violations.insert(format!("public use {text}"));
+            }
+        }
+        visit::visit_item_use(self, item);
+    }
+}
+
+fn public_petgraph_violations(file: &syn::File) -> BTreeSet<String> {
+    let (aliases, wildcard) = petgraph_aliases(file);
+    let mut visitor = PublicPetgraphVisitor {
+        aliases: &aliases,
+        violations: BTreeSet::new(),
+    };
+    if wildcard {
+        visitor
+            .violations
+            .insert("petgraph glob imports obscure exported types".into());
+    }
+    visitor.visit_file(file);
+    visitor.violations
 }
 
 #[test]
@@ -387,9 +659,11 @@ fn core_has_no_dependencies_or_infrastructure_coupling() {
     assert_eq!(disallowed_core_dependencies(&metadata), BTreeSet::new());
     assert_eq!(core_production_targets(&metadata), (1, BTreeSet::new()));
 
-    let core_source = workspace_root().join("crates/mara-core/src");
+    let expected_library = workspace_root().join("crates/mara-core/src/lib.rs");
+    assert_eq!(core_library_source(&metadata), expected_library);
+    let core_source = expected_library.parent().expect("core source directory");
     let mut sources = Vec::new();
-    rust_sources(&core_source, &mut sources);
+    rust_sources(core_source, &mut sources);
     for source in sources {
         let contents = fs::read_to_string(&source)
             .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
@@ -402,6 +676,13 @@ fn core_has_no_dependencies_or_infrastructure_coupling() {
             "{} contains forbidden core coupling: {}",
             source.display(),
             visitor.violations.join(", ")
+        );
+        let public_violations = public_petgraph_violations(&syntax);
+        assert!(
+            public_violations.is_empty(),
+            "{} exposes private petgraph implementation types: {}",
+            source.display(),
+            public_violations.into_iter().collect::<Vec<_>>().join(", ")
         );
     }
 }
@@ -581,7 +862,15 @@ fn core_clippy_policy_covers_path_filesystem_capabilities() {
 
     let core_root = fs::read_to_string(workspace_root().join("crates/mara-core/src/lib.rs"))
         .expect("read core crate root");
-    assert!(core_root.contains("clippy::disallowed_methods"));
+    let core_syntax = syn::parse_file(&core_root).expect("parse core crate root");
+    assert!(core_syntax.attrs.iter().any(|attribute| {
+        attribute.path().is_ident("forbid")
+            && matches!(
+                &attribute.meta,
+                syn::Meta::List(list)
+                    if list.tokens.to_string().contains("clippy :: disallowed_methods")
+            )
+    }));
 
     let core_manifest: toml::Value =
         fs::read_to_string(workspace_root().join("crates/mara-core/Cargo.toml"))
@@ -608,8 +897,8 @@ fn core_target_check_rejects_build_scripts() {
                 "id": "core-id",
                 "name": "mara-core",
                 "targets": [
-                    {"kind": ["lib"]},
-                    {"kind": ["custom-build"]}
+                    {"kind": ["lib"], "src_path": "/workspace/core/src/lib.rs"},
+                    {"kind": ["custom-build"], "src_path": "/workspace/core/build.rs"}
                 ]
             }],
             "workspace_members": ["core-id"],
@@ -663,5 +952,67 @@ fn syntax_inspection_rejects_macro_hidden_and_compile_time_io() {
             "macro body contains forbidden path std::fs",
             "compile-time I/O macro include_str!",
         ]
+    );
+}
+
+#[test]
+fn syntax_inspection_rejects_lint_suppression_and_escaping_modules() {
+    let syntax = syn::parse_file(
+        r#"#[allow(clippy::disallowed_methods)]
+        fn inspect(path: &std::path::Path) { let _ = path.exists(); }
+        #[path = "../../outside.rs"]
+        mod outside;"#,
+    )
+    .expect("parse fixture");
+    let mut visitor = CoreBoundaryVisitor::default();
+    visitor.visit_file(&syntax);
+
+    assert_eq!(
+        visitor.violations,
+        [
+            "core boundary lints must not be suppressed",
+            "module path escapes the enforced core source tree",
+        ]
+    );
+}
+
+#[test]
+fn public_api_inspection_rejects_petgraph_types_and_reexports() {
+    let syntax = syn::parse_file(
+        r#"use petgraph::Graph as BackendGraph;
+        pub fn graph() -> BackendGraph<(), ()> { todo!() }
+        pub struct Snapshot { pub graph: petgraph::Graph<(), ()> }
+        pub use petgraph::graph::NodeIndex;"#,
+    )
+    .expect("parse fixture");
+    let violations = public_petgraph_violations(&syntax);
+
+    assert!(violations.contains("BackendGraph"));
+    assert!(violations.contains("petgraph::Graph"));
+    assert!(
+        violations
+            .iter()
+            .any(|violation| violation.starts_with("public use petgraph :: graph :: NodeIndex"))
+    );
+}
+
+#[test]
+fn core_library_source_check_rejects_custom_roots() {
+    let metadata: CargoMetadata = serde_json::from_str(
+        r#"{
+            "packages": [{
+                "id": "core-id",
+                "name": "mara-core",
+                "targets": [{"kind": ["lib"], "src_path": "/outside/lib.rs"}]
+            }],
+            "workspace_members": ["core-id"],
+            "resolve": {"nodes": [{"id": "core-id", "deps": []}]}
+        }"#,
+    )
+    .expect("decode metadata fixture");
+
+    assert_ne!(
+        core_library_source(&metadata),
+        Path::new("/workspace/core/src/lib.rs")
     );
 }
