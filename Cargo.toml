@@ -1,18 +1,23 @@
-[package]
-name = "mara"
+[workspace]
+resolver = "3"
+members = [
+    "crates/mara-core",
+    "crates/mara-markdown",
+    "crates/mara-engine",
+    "crates/mara-cli",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 
-[dependencies]
+[workspace.dependencies]
+mara-core = { path = "crates/mara-core" }
+mara-markdown = { path = "crates/mara-markdown" }
+mara-engine = { path = "crates/mara-engine" }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
-
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem"] }
-
-[dev-dependencies]
 tempfile = "3"
+libc = "0.2"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem"] }

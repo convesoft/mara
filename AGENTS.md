@@ -51,6 +51,16 @@ to choose evidence appropriate to the changed contract.
 - Record newly discovered work in Linear Backlog instead of expanding the active
   issue. Move an issue to Done only after its implementation and verification
   evidence have merged.
+- Follow `REQ-VERIFICATION-LAYERS`: choose the lowest sufficient authoritative
+  verification mechanism for each claim.
+- Do not invent a custom parser, analyzer, lint, test framework, generator, or
+  comparable verification infrastructure unless issue readiness records the
+  contract gap, bounded tool and maintenance scope, accepted Mara contract, and
+  explicit human approval. If the need emerges during implementation or review,
+  stop and return for clarification; review findings cannot add it incidentally.
+- Treat test and helper complexity as implementation scope. If it rivals the
+  production change, stop and reassess the method or split or clarify the
+  contract unless that complexity was explicitly approved.
 
 ## Repository workflow
 

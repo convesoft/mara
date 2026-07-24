@@ -292,7 +292,16 @@ process exit mapping while delegating semantic operations to the engine API.
 :verifies: REQ-ARCH-STRUCTURED-FAILURES
 
 Architecture checks shall reject reverse crate dependencies and parser, CLI, or
-infrastructure types in public domain APIs. Fixtures shall prove that complete
+infrastructure types in public domain APIs. For the four-layer workspace
+foundation, package membership, package targets, and dependency direction are
+verified from Cargo manifests, `cargo metadata`, and compilation. This slice
+introduces no public `mara-core` semantic API and no core production or build
+dependencies, so it does not require source-level public-API analysis.
+
+Later issues that introduce concrete core dependencies or public semantic APIs
+own focused boundary evidence for those exact additions. A general Rust AST
+analyzer is not part of this test definition unless the custom-analysis gate in
+REQ-VERIFICATION-LAYERS is satisfied. Fixtures shall prove that complete
 documents and structured failures are available through libraries without a CLI.
 :::
 
