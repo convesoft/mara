@@ -29,3 +29,12 @@ cargo test --all-targets --all-features
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the authority boundaries between Mara,
 Linear, and GitHub and for the contribution workflow.
+
+## License
+
+Mara is licensed under either of the following licenses, at your option:
+
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT License](LICENSE-MIT)
+
+See [LICENSE](LICENSE) for the dual-license notice.
