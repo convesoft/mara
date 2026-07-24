@@ -79,7 +79,13 @@ impl SourceSpan {
 }
 
 fn validate_path(path: &str) -> Result<(), InvalidSourceSpan> {
-    if path.is_empty() || path.starts_with('/') || path.contains('\\') {
+    if path.is_empty()
+        || path.starts_with('/')
+        || path.contains('\0')
+        || path.contains('\\')
+        || has_windows_drive_prefix(path)
+        || has_uri_scheme(path)
+    {
         return Err(InvalidSourceSpan::InvalidPath);
     }
     if path
@@ -89,6 +95,22 @@ fn validate_path(path: &str) -> Result<(), InvalidSourceSpan> {
         return Err(InvalidSourceSpan::InvalidPath);
     }
     Ok(())
+}
+
+fn has_windows_drive_prefix(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
+fn has_uri_scheme(path: &str) -> bool {
+    let Some((scheme, _)) = path.split_once(':') else {
+        return false;
+    };
+    !scheme.is_empty()
+        && scheme.as_bytes()[0].is_ascii_alphabetic()
+        && scheme
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'-' | b'.'))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,6 +149,18 @@ mod tests {
 
         assert_eq!(
             SourceSpan::try_new("../schema.yaml", 0, 0, 1, 1, 1, 1),
+            Err(InvalidSourceSpan::InvalidPath)
+        );
+        assert_eq!(
+            SourceSpan::try_new("C:/schema.yaml", 0, 0, 1, 1, 1, 1),
+            Err(InvalidSourceSpan::InvalidPath)
+        );
+        assert_eq!(
+            SourceSpan::try_new("https:schema.yaml", 0, 0, 1, 1, 1, 1),
+            Err(InvalidSourceSpan::InvalidPath)
+        );
+        assert_eq!(
+            SourceSpan::try_new("schema\0.yaml", 0, 0, 1, 1, 1, 1),
             Err(InvalidSourceSpan::InvalidPath)
         );
         assert_eq!(

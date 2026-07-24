@@ -1,7 +1,7 @@
 //! Strict loading of the configured v1 Mara schema document and identity.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     error::Error,
     fmt,
     io::{self, Read},
@@ -10,8 +10,8 @@ use std::{
 };
 
 use mara_core::{
-    Diagnostic, DiagnosticContext, DiagnosticSeverity, IdentityConfiguration, MidFormat,
-    MidIdentity, RelatedDiagnostic, SchemaDiagnosticCode, SchemaDocument, SchemaField,
+    Diagnostic, DiagnosticContext, DiagnosticSeverity, DiagnosticValue, IdentityConfiguration,
+    MidFormat, MidIdentity, RelatedDiagnostic, SchemaDiagnosticCode, SchemaDocument, SchemaField,
     SchemaIdentity, SchemaSection, SourceSpan,
 };
 use regex_lite::Regex;
@@ -496,7 +496,7 @@ fn preceding_tag_start(source: &str, node_start: usize) -> Option<usize> {
     while let Some(start) = source[..search_end].rfind('!') {
         if tag_start_boundary(source, start) {
             if let Some(end) = raw_tag_end(source, start, node_start)
-                && yaml_separation_only(&source[end..node_start])
+                && yaml_tag_suffix_only(&source[end..node_start])
             {
                 earliest = Some(start);
             } else if earliest.is_some() {
@@ -506,6 +506,31 @@ fn preceding_tag_start(source: &str, node_start: usize) -> Option<usize> {
         search_end = start;
     }
     earliest
+}
+
+fn yaml_tag_suffix_only(source: &str) -> bool {
+    let mut offset = 0;
+    while offset < source.len() {
+        let remaining = &source[offset..];
+        if let Some(character) = remaining.chars().next()
+            && character.is_whitespace()
+        {
+            offset += character.len_utf8();
+            continue;
+        }
+        if remaining.starts_with('#') {
+            offset += remaining.find(['\r', '\n']).unwrap_or(remaining.len());
+            continue;
+        }
+        if remaining.starts_with('&')
+            && let Some(end) = raw_anchor_end(source, offset, source.len())
+        {
+            offset = end;
+            continue;
+        }
+        return false;
+    }
+    true
 }
 
 fn preceding_anchor_range(source: &str, node_start: usize) -> Option<(usize, usize)> {
@@ -589,22 +614,6 @@ fn yaml_anchor_suffix_only(source: &str) -> bool {
             continue;
         }
         return false;
-    }
-    true
-}
-
-fn yaml_separation_only(source: &str) -> bool {
-    let mut comment = false;
-    for character in source.chars() {
-        if comment {
-            if matches!(character, '\r' | '\n') {
-                comment = false;
-            }
-        } else if character == '#' {
-            comment = true;
-        } else if !character.is_whitespace() {
-            return false;
-        }
     }
     true
 }
@@ -1627,7 +1636,45 @@ fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
         }
         .then_with(|| severity_rank(left.severity()).cmp(&severity_rank(right.severity())))
         .then_with(|| left.code().as_str().cmp(right.code().as_str()))
+        .then_with(|| {
+            canonical_details_bytes(left.details()).cmp(&canonical_details_bytes(right.details()))
+        })
     });
+}
+
+fn canonical_details_bytes(details: &BTreeMap<String, DiagnosticValue>) -> Vec<u8> {
+    let value = serde_json::Value::Object(
+        details
+            .iter()
+            .map(|(key, value)| (key.clone(), diagnostic_json_value(value)))
+            .collect(),
+    );
+    let mut bytes = serde_json::to_vec_pretty(&value)
+        .expect("Mara diagnostic details always contain serializable JSON values");
+    bytes.push(b'\n');
+    bytes
+}
+
+fn diagnostic_json_value(value: &DiagnosticValue) -> serde_json::Value {
+    match value {
+        DiagnosticValue::Null => serde_json::Value::Null,
+        DiagnosticValue::Boolean(value) => serde_json::Value::Bool(*value),
+        DiagnosticValue::Integer(value) => serde_json::Value::Number((*value).into()),
+        DiagnosticValue::Unsigned(value) => serde_json::Value::Number((*value).into()),
+        DiagnosticValue::Number(value) => serde_json::Value::Number(
+            serde_json::Number::from_f64(value.get()).expect("Mara diagnostic numbers are finite"),
+        ),
+        DiagnosticValue::String(value) => serde_json::Value::String(value.clone()),
+        DiagnosticValue::Array(values) => {
+            serde_json::Value::Array(values.iter().map(diagnostic_json_value).collect())
+        }
+        DiagnosticValue::Object(values) => serde_json::Value::Object(
+            values
+                .iter()
+                .map(|(key, value)| (key.clone(), diagnostic_json_value(value)))
+                .collect(),
+        ),
+    }
 }
 
 const fn severity_rank(severity: DiagnosticSeverity) -> u8 {
@@ -1693,5 +1740,25 @@ mod tests {
     #[test]
     fn source_position_counts_unicode_scalars_and_crlf_once() {
         assert_eq!(position_at_valid_prefix("aé\r\nb".as_bytes()), (2, 2));
+    }
+
+    #[test]
+    fn diagnostic_sorting_uses_canonical_details_as_the_final_tie_breaker() {
+        let span = SourceSpan::try_new("schema.yaml", 0, 1, 1, 1, 1, 2).unwrap();
+        let mut diagnostics = vec![
+            Diagnostic::new(
+                SchemaDiagnosticCode::UnknownKey,
+                "second",
+                Some(span.clone()),
+            )
+            .with_detail("key", "z"),
+            Diagnostic::new(SchemaDiagnosticCode::UnknownKey, "first", Some(span))
+                .with_detail("key", "a"),
+        ];
+
+        sort_diagnostics(&mut diagnostics);
+
+        assert_eq!(diagnostics[0].message(), "first");
+        assert_eq!(diagnostics[1].message(), "second");
     }
 }

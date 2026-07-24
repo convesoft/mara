@@ -8,6 +8,7 @@ license.workspace = true
 mara-core.workspace = true
 mara-markdown.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 regex-lite.workspace = true
 saphyr-parser.workspace = true
 toml.workspace = true

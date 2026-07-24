@@ -429,6 +429,35 @@ fn rejects_aliases_in_addition_to_their_required_anchor() {
 }
 
 #[test]
+fn preserves_a_tag_span_when_the_tag_precedes_an_anchor() {
+    let source = VALID_SCHEMA.replace(
+        "name: mara-schema",
+        "name: !custom &schema_name mara-schema",
+    );
+    let fixture = Fixture::new(&source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+
+    let custom_tag = error
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| detail_string(diagnostic, "feature") == Some("custom_tag"))
+        .unwrap();
+    let anchor = error
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| detail_string(diagnostic, "feature") == Some("anchor"))
+        .unwrap();
+    assert_eq!(
+        source_slice(&source, custom_tag.primary().unwrap()),
+        "!custom &schema_name mara-schema"
+    );
+    assert_eq!(
+        source_slice(&source, anchor.primary().unwrap()),
+        "&schema_name"
+    );
+}
+
+#[test]
 fn accepts_yaml_1_2_core_tags_but_rejects_incompatible_core_tags() {
     let source = r#"!!str format_version: !!int "1"
 !!str schema: !!map
