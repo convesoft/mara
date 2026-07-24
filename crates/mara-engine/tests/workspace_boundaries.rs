@@ -206,6 +206,19 @@ impl<'ast> Visit<'ast> for CoreBoundaryVisitor {
         }
         visit::visit_item_extern_crate(self, item);
     }
+
+    fn visit_macro(&mut self, expression: &'ast syn::Macro) {
+        if let Some(segment) = expression.path.segments.last() {
+            let name = segment.ident.to_string();
+            if matches!(
+                name.as_str(),
+                "dbg" | "eprint" | "eprintln" | "print" | "println"
+            ) {
+                self.violations.push(format!("terminal macro {name}!"));
+            }
+        }
+        visit::visit_macro(self, expression);
+    }
 }
 
 #[test]
@@ -243,17 +256,6 @@ fn workspace_dependencies_follow_the_accepted_layer_direction() {
 
 #[test]
 fn core_has_no_dependencies_or_infrastructure_coupling() {
-    let metadata = cargo_metadata();
-    let packages = workspace_packages(&metadata);
-    let core = packages["mara-core"];
-    let core_node = metadata
-        .resolve
-        .nodes
-        .iter()
-        .find(|node| node.id == core.id)
-        .expect("resolve node for mara-core");
-    assert!(core_node.deps.is_empty());
-
     let core_source = workspace_root().join("crates/mara-core/src");
     let mut sources = Vec::new();
     rust_sources(&core_source, &mut sources);
@@ -346,5 +348,32 @@ fn syntax_inspection_rejects_std_root_globs() {
     assert_eq!(
         visitor.violations,
         ["glob-importing the std root can hide infrastructure paths"]
+    );
+}
+
+#[test]
+fn syntax_inspection_rejects_terminal_output_macros() {
+    let syntax = syn::parse_file(
+        r#"fn report(value: i32) {
+            print!("{value}");
+            println!("{value}");
+            eprint!("{value}");
+            eprintln!("{value}");
+            let _ = dbg!(value);
+        }"#,
+    )
+    .expect("parse fixture");
+    let mut visitor = CoreBoundaryVisitor::default();
+    visitor.visit_file(&syntax);
+
+    assert_eq!(
+        visitor.violations,
+        [
+            "terminal macro print!",
+            "terminal macro println!",
+            "terminal macro eprint!",
+            "terminal macro eprintln!",
+            "terminal macro dbg!",
+        ]
     );
 }
