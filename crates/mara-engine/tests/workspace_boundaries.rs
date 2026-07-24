@@ -165,7 +165,13 @@ impl CoreBoundaryVisitor {
                 }
                 segments.pop();
             }
-            UseTree::Glob(_) => self.check_path(segments),
+            UseTree::Glob(_) => {
+                self.check_path(segments);
+                if matches!(segments.as_slice(), [standard] if standard == "std") {
+                    self.violations
+                        .push("glob-importing the std root can hide infrastructure paths".into());
+                }
+            }
             UseTree::Group(group) => {
                 for tree in &group.items {
                     self.visit_use_tree(tree, segments);
@@ -327,5 +333,18 @@ fn syntax_inspection_rejects_grouped_std_root_aliases() {
     assert_eq!(
         visitor.violations,
         ["renaming the std root can hide infrastructure paths"]
+    );
+}
+
+#[test]
+fn syntax_inspection_rejects_std_root_globs() {
+    let syntax = syn::parse_file(r#"use std::*; fn read() { let _ = fs::read("input"); }"#)
+        .expect("parse fixture");
+    let mut visitor = CoreBoundaryVisitor::default();
+    visitor.visit_file(&syntax);
+
+    assert_eq!(
+        visitor.violations,
+        ["glob-importing the std root can hide infrastructure paths"]
     );
 }
