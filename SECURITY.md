@@ -1,21 +1,24 @@
-# Security policy
+# Security Policy
 
 ## Supported versions
 
-Mara is currently in bootstrap development and has no stable supported release.
-Security fixes target the latest `main` branch until a release policy is
-published.
+Mara is under active development and has not reached a stable release. Security
+fixes are applied to the default branch. Once Mara publishes releases, the latest
+release line will also receive security fixes unless a release announcement says
+otherwise.
 
 ## Reporting a vulnerability
 
-Do not disclose suspected vulnerabilities in a public issue. Use GitHub's
-private vulnerability reporting for the `convesoft/mara` repository and include:
+Do not report suspected vulnerabilities through a public issue or discussion.
+Use [GitHub private vulnerability reporting](https://github.com/convesoft/mara/security/advisories/new)
+so details remain private while the report is assessed.
+
+Include, when possible:
 
 - the affected revision or version;
-- the impact and realistic attack scenario;
-- reproduction steps or a minimal proof of concept;
-- any known mitigation.
+- steps or a minimal example that reproduces the issue;
+- the expected security impact;
+- any known mitigations or workarounds.
 
-The maintainers will acknowledge the report, assess severity, coordinate a fix,
-and publish remediation information appropriate to the risk. Public bug reports
-may be used after disclosure is safe.
+The report will be acknowledged after it is reviewed. Confirmed vulnerabilities
+will be coordinated privately until a fix and appropriate disclosure are ready.
