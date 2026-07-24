@@ -207,6 +207,10 @@ struct CoreBoundaryVisitor {
     violations: Vec<String>,
 }
 
+fn is_infrastructure_std_module(module: &str) -> bool {
+    matches!(module, "env" | "fs" | "io" | "net" | "os" | "process")
+}
+
 impl CoreBoundaryVisitor {
     fn check_path(&mut self, segments: &[String]) {
         let higher_layer_or_adapter = segments.first().is_some_and(|segment| {
@@ -219,10 +223,7 @@ impl CoreBoundaryVisitor {
             segments,
             [standard, module, ..]
                 if standard == "std"
-                    && matches!(
-                        module.as_str(),
-                        "env" | "fs" | "io" | "net" | "os" | "process"
-                    )
+                    && is_infrastructure_std_module(module)
         );
         if higher_layer_or_adapter || infrastructure {
             self.violations.push(segments.join("::"));
@@ -386,7 +387,11 @@ fn token_atoms(tokens: &TokenStream) -> Vec<String> {
 fn forbidden_macro_token_path(tokens: &TokenStream) -> Option<String> {
     let atoms = token_atoms(tokens);
     for window in atoms.windows(4) {
-        if window[0] == "std" && window[1] == ":" && window[2] == ":" {
+        if window[0] == "std"
+            && window[1] == ":"
+            && window[2] == ":"
+            && (window[3] == "$" || is_infrastructure_std_module(&window[3]))
+        {
             return Some(if window[3] == "$" {
                 "std::<dynamic>".into()
             } else {
@@ -440,7 +445,11 @@ fn petgraph_aliases(file: &syn::File) -> (HashSet<String>, bool) {
             UseTree::Name(name) if under_petgraph => {
                 aliases.insert(name.ident.to_string());
             }
-            UseTree::Rename(rename) if under_petgraph || rename.ident == "petgraph" => {
+            UseTree::Rename(rename)
+                if under_petgraph
+                    || rename.ident == "petgraph"
+                    || known.contains(rename.ident.to_string().as_str()) =>
+            {
                 aliases.insert(rename.rename.to_string());
             }
             UseTree::Glob(_) if under_petgraph => *wildcard = true,
@@ -1091,6 +1100,32 @@ fn syntax_inspection_rejects_macro_hidden_and_compile_time_io() {
 }
 
 #[test]
+fn syntax_inspection_distinguishes_pure_and_infrastructure_macro_paths() {
+    let syntax = syn::parse_file(
+        r#"macro_rules! build_map {
+            () => { std::collections::BTreeMap::new() };
+        }
+        macro_rules! read_fixed {
+            () => { std::fs::read("input") };
+        }
+        macro_rules! read_dynamic {
+            ($module:ident) => { std::$module::read("input") };
+        }"#,
+    )
+    .expect("parse fixture");
+    let mut visitor = CoreBoundaryVisitor::default();
+    visitor.visit_file(&syntax);
+
+    assert_eq!(
+        visitor.violations,
+        [
+            "macro body contains forbidden path std::fs",
+            "macro body contains forbidden path std::<dynamic>",
+        ]
+    );
+}
+
+#[test]
 fn syntax_inspection_rejects_dynamic_macro_paths_and_conditional_modules() {
     let syntax = syn::parse_file(
         r#"macro_rules! read_input {
@@ -1168,6 +1203,20 @@ fn public_api_inspection_rejects_petgraph_types_and_reexports() {
             .iter()
             .any(|violation| violation.starts_with("public use petgraph :: graph :: NodeIndex"))
     );
+}
+
+#[test]
+fn public_api_inspection_tracks_chained_petgraph_aliases() {
+    let syntax = syn::parse_file(
+        r#"use petgraph::Graph as BackendGraph;
+        use BackendGraph as InternalGraph;
+        use InternalGraph as DomainGraph;
+        pub fn graph() -> DomainGraph<(), ()> { todo!() }"#,
+    )
+    .expect("parse fixture");
+    let violations = public_petgraph_violations(&syntax);
+
+    assert!(violations.contains("DomainGraph"));
 }
 
 #[test]
