@@ -1,0 +1,583 @@
+use std::{fs, path::Path};
+
+use mara::project::{ProjectLoadError, discover_and_load, discover_project, load_from_root};
+use tempfile::TempDir;
+
+struct Fixture {
+    _temp: TempDir,
+    root: std::path::PathBuf,
+}
+
+impl Fixture {
+    fn new() -> Self {
+        let temp = tempfile::tempdir().expect("create isolated fixture");
+        let root = temp.path().join("project");
+        fs::create_dir_all(root.join(".mara")).unwrap();
+        fs::write(root.join(".mara/schema.yaml"), "format_version: 1\n").unwrap();
+        fs::write(root.join(".mara/project.toml"), valid_config()).unwrap();
+        Self { _temp: temp, root }
+    }
+
+    fn config_path(&self) -> std::path::PathBuf {
+        self.root.join(".mara/project.toml")
+    }
+
+    fn write_config(&self, source: impl AsRef<[u8]>) {
+        fs::write(self.config_path(), source).unwrap();
+    }
+}
+
+fn valid_config() -> String {
+    config_with(
+        ".mara/schema.yaml",
+        ".mara/index.json",
+        &["**/*.mara.md"],
+        &[],
+    )
+}
+
+fn config_with(schema: &str, index: &str, include: &[&str], exclude: &[&str]) -> String {
+    format!(
+        r#"format_version = 1
+[project]
+name = "mara-test"
+schema = {schema:?}
+[content]
+include = {include:?}
+exclude = {exclude:?}
+respect_gitignore = true
+follow_directory_symlinks = false
+allow_internal_file_symlinks = true
+[index]
+path = {index:?}
+[validation]
+warnings_as_errors = false
+[git]
+require_clean_worktree_for_writes = true
+"#
+    )
+}
+
+fn assert_invalid_field(error: ProjectLoadError, expected_field: &str) {
+    match error {
+        ProjectLoadError::InvalidConfiguration {
+            field, location, ..
+        } => {
+            assert_eq!(field, Some(expected_field));
+            assert!(location.is_some(), "semantic errors retain source location");
+        }
+        other => panic!("expected invalid {expected_field}, got {other}"),
+    }
+}
+
+fn assert_unsafe_field(error: ProjectLoadError, expected_field: &str) {
+    match error {
+        ProjectLoadError::UnsafePath {
+            field, location, ..
+        } => {
+            assert_eq!(field, expected_field);
+            assert!(location.is_some(), "path errors retain source location");
+        }
+        other => panic!("expected unsafe {expected_field}, got {other}"),
+    }
+}
+
+#[test]
+fn loads_the_complete_normative_v1_shape() {
+    let fixture = Fixture::new();
+
+    let project = load_from_root(&fixture.root).unwrap();
+
+    assert_eq!(project.root, fixture.root.canonicalize().unwrap());
+    assert_eq!(project.config_path, fixture.config_path());
+    assert_eq!(project.format_version, 1);
+    assert_eq!(project.name, "mara-test");
+    assert_eq!(
+        project.schema_path,
+        fixture
+            .root
+            .join(".mara/schema.yaml")
+            .canonicalize()
+            .unwrap()
+    );
+    assert_eq!(project.index_path, fixture.root.join(".mara/index.json"));
+    assert_eq!(project.content.include, ["**/*.mara.md"]);
+    assert!(project.content.exclude.is_empty());
+    assert!(project.content.respect_gitignore);
+    assert!(!project.content.follow_directory_symlinks);
+    assert!(project.content.allow_internal_file_symlinks);
+    assert!(!project.validation.warnings_as_errors);
+    assert!(project.git.require_clean_worktree_for_writes);
+}
+
+#[test]
+fn discovery_selects_the_nearest_root_from_a_directory_or_file() {
+    let outer = Fixture::new();
+    let inner_root = outer.root.join("nested");
+    fs::create_dir_all(inner_root.join(".mara")).unwrap();
+    fs::write(inner_root.join(".mara/schema.yaml"), "format_version: 1\n").unwrap();
+    fs::write(inner_root.join(".mara/project.toml"), valid_config()).unwrap();
+    let deep = inner_root.join("deep/path");
+    fs::create_dir_all(&deep).unwrap();
+    let file = deep.join("note.md");
+    fs::write(&file, "note").unwrap();
+
+    let from_directory = discover_project(&deep).unwrap();
+    let from_file = discover_project(&file).unwrap();
+
+    assert_eq!(from_directory.root, inner_root.canonicalize().unwrap());
+    assert_eq!(from_file, from_directory);
+}
+
+#[test]
+fn a_malformed_nearest_configuration_does_not_fall_back_to_an_outer_project() {
+    let outer = Fixture::new();
+    let inner_root = outer.root.join("nested");
+    fs::create_dir_all(inner_root.join(".mara/deep")).unwrap();
+    fs::write(inner_root.join(".mara/schema.yaml"), "format_version: 1\n").unwrap();
+    let inner_config = valid_config().replace(
+        "name = \"mara-test\"",
+        "name = \"mara-test\"\nunknown = true",
+    );
+    fs::write(inner_root.join(".mara/project.toml"), inner_config).unwrap();
+
+    let error = discover_and_load(inner_root.join(".mara/deep")).unwrap_err();
+
+    match error {
+        ProjectLoadError::InvalidConfiguration { path, .. } => {
+            assert_eq!(path, inner_root.join(".mara/project.toml"));
+        }
+        other => panic!("expected inner configuration failure, got {other}"),
+    }
+}
+
+#[test]
+fn reports_when_no_project_marker_exists() {
+    let temp = tempfile::tempdir().unwrap();
+    let error = discover_project(temp.path()).unwrap_err();
+    assert!(matches!(error, ProjectLoadError::ProjectNotFound { .. }));
+}
+
+#[test]
+fn rejects_unknown_keys_in_root_and_nested_tables() {
+    for source in [
+        valid_config().replace("format_version = 1", "format_version = 1\nunknown = true"),
+        valid_config().replace(
+            "name = \"mara-test\"",
+            "name = \"mara-test\"\nunknown = true",
+        ),
+    ] {
+        let fixture = Fixture::new();
+        fixture.write_config(source);
+        let error = load_from_root(&fixture.root).unwrap_err();
+        match error {
+            ProjectLoadError::InvalidConfiguration {
+                field: None,
+                location: Some(location),
+                message,
+                ..
+            } => {
+                assert!(location.line > 0);
+                assert!(message.contains("unknown field"));
+            }
+            other => panic!("expected source-aware unknown-field error, got {other}"),
+        }
+    }
+}
+
+#[test]
+fn rejects_duplicate_assignments_and_malformed_types_with_locations() {
+    let cases = [
+        valid_config().replace(
+            "format_version = 1",
+            "format_version = 1\nformat_version = 1",
+        ),
+        valid_config().replace(
+            "warnings_as_errors = false",
+            "warnings_as_errors = \"false\"",
+        ),
+    ];
+    for source in cases {
+        let fixture = Fixture::new();
+        fixture.write_config(source);
+        match load_from_root(&fixture.root).unwrap_err() {
+            ProjectLoadError::InvalidConfiguration {
+                location: Some(location),
+                ..
+            } => assert!(location.byte_offset > 0),
+            other => panic!("expected located TOML error, got {other}"),
+        }
+    }
+}
+
+#[test]
+fn rejects_missing_required_fields_and_tables() {
+    for source in [
+        valid_config().replace("name = \"mara-test\"\n", ""),
+        valid_config().replace("[git]\nrequire_clean_worktree_for_writes = true\n", ""),
+    ] {
+        let fixture = Fixture::new();
+        fixture.write_config(source);
+        assert!(matches!(
+            load_from_root(&fixture.root),
+            Err(ProjectLoadError::InvalidConfiguration { .. })
+        ));
+    }
+}
+
+#[test]
+fn rejects_unsupported_versions_and_invalid_project_names() {
+    let fixture = Fixture::new();
+    fixture.write_config(valid_config().replace("format_version = 1", "format_version = 2"));
+    assert_invalid_field(load_from_root(&fixture.root).unwrap_err(), "format_version");
+
+    for name in ["", "Mara", "1mara", "mara_kit", "mara--kit", "mara-"] {
+        let fixture = Fixture::new();
+        fixture.write_config(valid_config().replace("mara-test", name));
+        assert_invalid_field(load_from_root(&fixture.root).unwrap_err(), "project.name");
+    }
+}
+
+#[test]
+fn rejects_utf8_bom_and_invalid_utf8() {
+    let fixture = Fixture::new();
+    let mut bom = vec![0xef, 0xbb, 0xbf];
+    bom.extend(valid_config().into_bytes());
+    fixture.write_config(bom);
+    let bom_error = load_from_root(&fixture.root).unwrap_err();
+    assert!(bom_error.to_string().contains("byte-order mark"));
+
+    fixture.write_config([0xff, 0xfe, 0xfd]);
+    let utf8_error = load_from_root(&fixture.root).unwrap_err();
+    assert!(utf8_error.to_string().contains("not valid UTF-8"));
+}
+
+#[test]
+fn validates_every_supported_glob_form_without_discovering_content() {
+    let fixture = Fixture::new();
+    let globs = [
+        "*",
+        "?",
+        "[abc]",
+        "[a-z]",
+        "[!abc]",
+        "**",
+        "docs/**/[?].mara.md",
+        ".hidden/*.mara.md",
+    ];
+    fixture.write_config(config_with(
+        ".mara/schema.yaml",
+        ".mara/index.json",
+        &globs,
+        &[],
+    ));
+
+    let project = load_from_root(&fixture.root).unwrap();
+
+    assert_eq!(project.content.include, globs);
+}
+
+#[test]
+fn rejects_empty_duplicate_and_unsupported_globs() {
+    let fixture = Fixture::new();
+    fixture.write_config(config_with(
+        ".mara/schema.yaml",
+        ".mara/index.json",
+        &[],
+        &[],
+    ));
+    assert_invalid_field(
+        load_from_root(&fixture.root).unwrap_err(),
+        "content.include",
+    );
+
+    for patterns in [
+        vec!["same", "same"],
+        vec![""],
+        vec!["docs/{one,two}"],
+        vec![r"docs\*.md"],
+        vec!["docs//*.md"],
+        vec!["docs/**suffix.md"],
+        vec!["docs/[abc.md"],
+        vec!["docs/[].md"],
+        vec!["docs/[z-a].md"],
+        vec!["docs/a].md"],
+    ] {
+        let fixture = Fixture::new();
+        fixture.write_config(config_with(
+            ".mara/schema.yaml",
+            ".mara/index.json",
+            &patterns,
+            &[],
+        ));
+        assert_invalid_field(
+            load_from_root(&fixture.root).unwrap_err(),
+            "content.include",
+        );
+    }
+
+    let fixture = Fixture::new();
+    fixture.write_config(config_with(
+        ".mara/schema.yaml",
+        ".mara/index.json",
+        &["**/*.mara.md"],
+        &["same", "same"],
+    ));
+    assert_invalid_field(
+        load_from_root(&fixture.root).unwrap_err(),
+        "content.exclude",
+    );
+}
+
+#[test]
+fn rejects_every_forbidden_path_form_before_filesystem_lookup() {
+    let absolute = if cfg!(windows) {
+        "C:/outside/schema.yaml"
+    } else {
+        "/outside/schema.yaml"
+    };
+    for configured in [
+        "",
+        absolute,
+        r".mara\schema.yaml",
+        ".mara//schema.yaml",
+        ".mara/./schema.yaml",
+        ".mara/../schema.yaml",
+        "https://example.test/schema.yaml",
+        "C:schema.yaml",
+    ] {
+        let fixture = Fixture::new();
+        fixture.write_config(config_with(
+            configured,
+            ".mara/index.json",
+            &["**/*.mara.md"],
+            &[],
+        ));
+        assert_unsafe_field(load_from_root(&fixture.root).unwrap_err(), "project.schema");
+    }
+
+    let nul = Fixture::new();
+    nul.write_config(
+        valid_config().replace("schema = \".mara/schema.yaml\"", "schema = \"\\u0000\""),
+    );
+    assert!(matches!(
+        load_from_root(&nul.root),
+        Err(ProjectLoadError::InvalidConfiguration { .. })
+            | Err(ProjectLoadError::UnsafePath { .. })
+    ));
+}
+
+#[test]
+fn environment_expressions_are_literal_and_are_never_expanded() {
+    let fixture = Fixture::new();
+    fixture.write_config(config_with(
+        ".mara/schema.yaml",
+        "$HOME/index.json",
+        &["**/*.mara.md"],
+        &[],
+    ));
+
+    let project = load_from_root(&fixture.root).unwrap();
+
+    assert_eq!(project.index_path, fixture.root.join("$HOME/index.json"));
+}
+
+#[test]
+fn schema_must_be_an_existing_readable_regular_file() {
+    let missing = Fixture::new();
+    missing.write_config(config_with(
+        ".mara/missing.yaml",
+        ".mara/index.json",
+        &["**/*.mara.md"],
+        &[],
+    ));
+    assert_invalid_field(load_from_root(&missing.root).unwrap_err(), "project.schema");
+
+    let directory = Fixture::new();
+    fs::create_dir(directory.root.join("schema-dir")).unwrap();
+    directory.write_config(config_with(
+        "schema-dir",
+        ".mara/index.json",
+        &["**/*.mara.md"],
+        &[],
+    ));
+    assert_unsafe_field(
+        load_from_root(&directory.root).unwrap_err(),
+        "project.schema",
+    );
+}
+
+#[test]
+fn an_existing_index_destination_must_be_a_regular_file() {
+    let fixture = Fixture::new();
+    fs::create_dir(fixture.root.join("index-dir")).unwrap();
+    fixture.write_config(config_with(
+        ".mara/schema.yaml",
+        "index-dir",
+        &["**/*.mara.md"],
+        &[],
+    ));
+
+    assert_unsafe_field(load_from_root(&fixture.root).unwrap_err(), "index.path");
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_schema_and_index_paths_that_escape_through_symlinks() {
+    use std::os::unix::fs::symlink;
+
+    let outside = tempfile::tempdir().unwrap();
+    let outside_schema = outside.path().join("schema.yaml");
+    fs::write(&outside_schema, "format_version: 1\n").unwrap();
+
+    let schema_fixture = Fixture::new();
+    fs::remove_file(schema_fixture.root.join(".mara/schema.yaml")).unwrap();
+    symlink(
+        &outside_schema,
+        schema_fixture.root.join(".mara/schema.yaml"),
+    )
+    .unwrap();
+    assert_unsafe_field(
+        load_from_root(&schema_fixture.root).unwrap_err(),
+        "project.schema",
+    );
+
+    let index_fixture = Fixture::new();
+    symlink(outside.path(), index_fixture.root.join("external")).unwrap();
+    index_fixture.write_config(config_with(
+        ".mara/schema.yaml",
+        "external/index.json",
+        &["**/*.mara.md"],
+        &[],
+    ));
+    assert_unsafe_field(
+        load_from_root(&index_fixture.root).unwrap_err(),
+        "index.path",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn normalizes_internal_symlinks_and_rejects_index_aliases_to_inputs() {
+    use std::os::unix::fs::symlink;
+
+    let schema_fixture = Fixture::new();
+    let real_schema = schema_fixture.root.join(".mara/real-schema.yaml");
+    fs::rename(schema_fixture.root.join(".mara/schema.yaml"), &real_schema).unwrap();
+    symlink(&real_schema, schema_fixture.root.join(".mara/schema.yaml")).unwrap();
+    let loaded = load_from_root(&schema_fixture.root).unwrap();
+    assert_eq!(loaded.schema_path, real_schema.canonicalize().unwrap());
+
+    let alias_fixture = Fixture::new();
+    symlink(
+        alias_fixture.root.join(".mara/schema.yaml"),
+        alias_fixture.root.join(".mara/index-alias"),
+    )
+    .unwrap();
+    alias_fixture.write_config(config_with(
+        ".mara/schema.yaml",
+        ".mara/index-alias",
+        &["**/*.mara.md"],
+        &[],
+    ));
+    assert_unsafe_field(
+        load_from_root(&alias_fixture.root).unwrap_err(),
+        "index.path",
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn normalizes_a_missing_output_beneath_an_internal_symlinked_directory() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = Fixture::new();
+    fs::create_dir(fixture.root.join("real-output")).unwrap();
+    symlink(
+        fixture.root.join("real-output"),
+        fixture.root.join("output"),
+    )
+    .unwrap();
+    fixture.write_config(config_with(
+        ".mara/schema.yaml",
+        "output/generated/index.json",
+        &["**/*.mara.md"],
+        &[],
+    ));
+
+    let loaded = load_from_root(&fixture.root).unwrap();
+
+    assert_eq!(
+        loaded.index_path,
+        fixture.root.join("real-output/generated/index.json")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_a_project_configuration_marker_that_resolves_outside_the_root() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = Fixture::new();
+    let outside = tempfile::tempdir().unwrap();
+    let outside_config = outside.path().join("project.toml");
+    fs::write(&outside_config, valid_config()).unwrap();
+    fs::remove_file(fixture.config_path()).unwrap();
+    symlink(&outside_config, fixture.config_path()).unwrap();
+
+    let error = load_from_root(&fixture.root).unwrap_err();
+
+    match error {
+        ProjectLoadError::UnsafePath {
+            field,
+            location: None,
+            ..
+        } => assert_eq!(field, "project configuration"),
+        other => panic!("expected escaped configuration error, got {other}"),
+    }
+}
+
+#[test]
+fn diagnostics_are_deterministic_and_actionable() {
+    let fixture = Fixture::new();
+    fixture.write_config(config_with(
+        "../schema.yaml",
+        ".mara/index.json",
+        &["**/*.mara.md"],
+        &[],
+    ));
+
+    let first = load_from_root(&fixture.root).unwrap_err().to_string();
+    let second = load_from_root(&fixture.root).unwrap_err().to_string();
+
+    assert_eq!(first, second);
+    assert!(first.contains("project.schema"));
+    assert!(first.contains("../schema.yaml"));
+    assert!(first.contains(&fixture.config_path().display().to_string()));
+}
+
+#[test]
+fn an_explicit_root_must_be_a_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let file = temp.path().join("file");
+    fs::write(&file, "not a root").unwrap();
+    let error = load_from_root(&file).unwrap_err();
+    assert!(matches!(
+        error,
+        ProjectLoadError::InvalidConfiguration { .. }
+    ));
+}
+
+#[test]
+fn config_path_is_independent_of_the_callers_current_directory() {
+    let fixture = Fixture::new();
+    let relative_spelling = fixture.root.join("nested/../nested/deep");
+    fs::create_dir_all(fixture.root.join("nested/deep")).unwrap();
+
+    let project = discover_and_load(relative_spelling).unwrap();
+
+    assert_eq!(project.root, fixture.root.canonicalize().unwrap());
+    assert_eq!(project.config_path, fixture.config_path());
+    assert!(Path::new(&project.schema_path).is_absolute());
+    assert!(Path::new(&project.index_path).is_absolute());
+}
