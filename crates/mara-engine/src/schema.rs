@@ -121,11 +121,17 @@ fn schema_source_path(project: &LoadedProject) -> Result<String, io::Error> {
     let mut components = Vec::new();
     for component in relative.components() {
         match component {
-            Component::Normal(value) => components.push(
-                value
+            Component::Normal(value) => {
+                let value = value
                     .to_str()
-                    .ok_or_else(|| io::Error::other("loaded schema path is not UTF-8"))?,
-            ),
+                    .ok_or_else(|| io::Error::other("loaded schema path is not UTF-8"))?;
+                if value.contains('\\') {
+                    return Err(io::Error::other(
+                        "loaded schema path cannot be represented by a Mara source span",
+                    ));
+                }
+                components.push(value);
+            }
             _ => {
                 return Err(io::Error::other(
                     "loaded schema path is not normalized and project-relative",
@@ -179,19 +185,38 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
         )]));
     }
     if receiver.documents.len() != 1 {
-        let primary = receiver
-            .document_starts
-            .get(1)
-            .copied()
-            .or_else(|| receiver.document_starts.first().copied())
-            .map(|span| parser_span(path, span));
+        let (primary, feature) = if receiver.documents.is_empty() {
+            let (line, column) = position_at_valid_prefix(source.as_bytes());
+            (
+                Some(source_span(
+                    path,
+                    source.len(),
+                    source.len(),
+                    line,
+                    column,
+                    line,
+                    column,
+                )),
+                "empty_document",
+            )
+        } else {
+            (
+                receiver
+                    .document_starts
+                    .get(1)
+                    .copied()
+                    .or_else(|| receiver.document_starts.first().copied())
+                    .map(|span| parser_span(path, span)),
+                "multiple_documents",
+            )
+        };
         return Err(SchemaLoadError::invalid(vec![
             Diagnostic::new(
                 SchemaDiagnosticCode::Syntax,
                 "schema must contain exactly one YAML document",
                 primary,
             )
-            .with_detail("feature", "multiple_documents"),
+            .with_detail("feature", feature),
         ]));
     }
 
@@ -285,18 +310,22 @@ impl ParsedSpan {
 }
 
 #[derive(Debug)]
-struct SourceMap {
+struct SourceMap<'source> {
+    source: &'source str,
     char_to_byte: Vec<usize>,
 }
 
-impl SourceMap {
-    fn new(source: &str) -> Self {
+impl<'source> SourceMap<'source> {
+    fn new(source: &'source str) -> Self {
         let mut char_to_byte = source
             .char_indices()
             .map(|(byte, _)| byte)
             .collect::<Vec<_>>();
         char_to_byte.push(source.len());
-        Self { char_to_byte }
+        Self {
+            source,
+            char_to_byte,
+        }
     }
 
     fn position(&self, marker: Marker) -> ParsedPosition {
@@ -317,6 +346,135 @@ impl SourceMap {
             end: self.position(span.end),
         }
     }
+
+    fn node_span(&self, span: Span, tag: Option<&Tag>) -> ParsedSpan {
+        let mut parsed = self.span(span);
+        self.expand_tag(&mut parsed, tag);
+        parsed
+    }
+
+    fn scalar_span(&self, span: Span, style: ScalarStyle, tag: Option<&Tag>) -> ParsedSpan {
+        let mut parsed = self.span(span);
+        if matches!(style, ScalarStyle::Literal | ScalarStyle::Folded)
+            && let Some(start_byte) = preceding_block_scalar_start(
+                self.source,
+                parsed.start.byte,
+                if style == ScalarStyle::Literal {
+                    '|'
+                } else {
+                    '>'
+                },
+            )
+        {
+            let (line, column) = position_at_valid_prefix(&self.source.as_bytes()[..start_byte]);
+            parsed.start = ParsedPosition {
+                byte: start_byte,
+                line,
+                column,
+            };
+        }
+        self.expand_tag(&mut parsed, tag);
+        parsed
+    }
+
+    fn expand_tag(&self, parsed: &mut ParsedSpan, tag: Option<&Tag>) {
+        if tag.is_none() {
+            return;
+        }
+        if let Some(start_byte) = preceding_tag_start(self.source, parsed.start.byte) {
+            let (line, column) = position_at_valid_prefix(&self.source.as_bytes()[..start_byte]);
+            parsed.start = ParsedPosition {
+                byte: start_byte,
+                line,
+                column,
+            };
+        }
+    }
+}
+
+fn preceding_block_scalar_start(
+    source: &str,
+    content_start: usize,
+    indicator: char,
+) -> Option<usize> {
+    let mut search_end = content_start;
+    while let Some(start) = source[..search_end].rfind(indicator) {
+        if block_scalar_prefix_only(&source[start + indicator.len_utf8()..content_start]) {
+            return Some(start);
+        }
+        search_end = start;
+    }
+    None
+}
+
+fn block_scalar_prefix_only(source: &str) -> bool {
+    let Some(line_break) = source.find(['\r', '\n']) else {
+        return false;
+    };
+    let header = &source[..line_break];
+    let header = header.split_once('#').map_or(header, |(before, _)| before);
+    let indentation = source[line_break..]
+        .strip_prefix("\r\n")
+        .or_else(|| source[line_break..].strip_prefix(['\r', '\n']))
+        .expect("line break was located");
+    header
+        .chars()
+        .all(|character| character.is_whitespace() || matches!(character, '+' | '-' | '1'..='9'))
+        && indentation.chars().all(char::is_whitespace)
+}
+
+fn preceding_tag_start(source: &str, node_start: usize) -> Option<usize> {
+    let mut search_end = node_start;
+    while let Some(start) = source[..search_end].rfind('!') {
+        if tag_start_boundary(source, start)
+            && let Some(end) = raw_tag_end(source, start, node_start)
+            && yaml_separation_only(&source[end..node_start])
+        {
+            return Some(start);
+        }
+        search_end = start;
+    }
+    None
+}
+
+fn tag_start_boundary(source: &str, start: usize) -> bool {
+    source[..start].chars().next_back().is_none_or(|character| {
+        character.is_whitespace()
+            || matches!(character, ':' | '-' | '?' | ',' | '[' | ']' | '{' | '}')
+    })
+}
+
+fn raw_tag_end(source: &str, start: usize, node_start: usize) -> Option<usize> {
+    let tag = &source[start..node_start];
+    if let Some(verbatim) = tag.strip_prefix("!<") {
+        return verbatim.find('>').map(|end| start + 2 + end + 1);
+    }
+
+    let suffix_start = start + '!'.len_utf8();
+    let mut end = suffix_start;
+    for (offset, character) in source[suffix_start..node_start].char_indices() {
+        if character.is_whitespace() || matches!(character, ',' | '[' | ']' | '{' | '}') {
+            break;
+        }
+        end = suffix_start + offset + character.len_utf8();
+    }
+    Some(end)
+}
+
+fn yaml_separation_only(source: &str) -> bool {
+    let mut comment = false;
+    for character in source.chars() {
+        if comment {
+            if matches!(character, '\r' | '\n') {
+                comment = false;
+            }
+        } else if character == '#' {
+            comment = true;
+        } else if !character.is_whitespace() {
+            return false;
+        }
+    }
+    true
 }
 
 #[derive(Debug)]
@@ -373,16 +531,16 @@ enum PendingContainer {
 }
 
 #[derive(Debug)]
-struct TreeBuilder<'source> {
-    source_map: &'source SourceMap,
+struct TreeBuilder<'map, 'source> {
+    source_map: &'map SourceMap<'source>,
     documents: Vec<ParsedNode>,
     document_starts: Vec<ParsedSpan>,
     stack: Vec<PendingContainer>,
     error: Option<(String, ParsedSpan)>,
 }
 
-impl<'source> TreeBuilder<'source> {
-    fn new(source_map: &'source SourceMap) -> Self {
+impl<'map, 'source> TreeBuilder<'map, 'source> {
+    fn new(source_map: &'map SourceMap<'source>) -> Self {
         Self {
             source_map,
             documents: Vec::new(),
@@ -407,21 +565,25 @@ impl<'source> TreeBuilder<'source> {
     }
 }
 
-impl<'input> SpannedEventReceiver<'input> for TreeBuilder<'_> {
+impl<'input> SpannedEventReceiver<'input> for TreeBuilder<'_, 'input> {
     fn on_event(&mut self, event: Event<'input>, span: Span) {
-        let span = self.source_map.span(span);
+        let parser_span = self.source_map.span(span);
         match event {
             Event::StreamStart | Event::StreamEnd | Event::DocumentEnd | Event::Nothing => {}
-            Event::DocumentStart(_) => self.document_starts.push(span),
-            Event::Alias(_) => self.attach(ParsedNode::Alias { span }),
-            Event::Scalar(value, style, anchor, tag) => self.attach(ParsedNode::Scalar {
-                value: value.into_owned(),
-                style,
-                anchor,
-                tag: tag.map(|tag| tag.into_owned()),
-                span,
-            }),
+            Event::DocumentStart(_) => self.document_starts.push(parser_span),
+            Event::Alias(_) => self.attach(ParsedNode::Alias { span: parser_span }),
+            Event::Scalar(value, style, anchor, tag) => {
+                let span = self.source_map.scalar_span(span, style, tag.as_deref());
+                self.attach(ParsedNode::Scalar {
+                    value: value.into_owned(),
+                    style,
+                    anchor,
+                    tag: tag.map(|tag| tag.into_owned()),
+                    span,
+                });
+            }
             Event::SequenceStart(anchor, tag) => {
+                let span = self.source_map.node_span(span, tag.as_deref());
                 self.stack.push(PendingContainer::Sequence {
                     values: Vec::new(),
                     anchor,
@@ -430,6 +592,7 @@ impl<'input> SpannedEventReceiver<'input> for TreeBuilder<'_> {
                 });
             }
             Event::MappingStart(anchor, tag) => {
+                let span = self.source_map.node_span(span, tag.as_deref());
                 self.stack.push(PendingContainer::Mapping {
                     values: Vec::new(),
                     anchor,
@@ -447,9 +610,9 @@ impl<'input> SpannedEventReceiver<'input> for TreeBuilder<'_> {
                     values,
                     anchor,
                     tag,
-                    span: ParsedSpan::cover(start.start, span.end),
+                    span: ParsedSpan::cover(start.start, parser_span.end),
                 }),
-                _ => self.fail("YAML sequence events are unbalanced", span),
+                _ => self.fail("YAML sequence events are unbalanced", parser_span),
             },
             Event::MappingEnd => match self.stack.pop() {
                 Some(PendingContainer::Mapping {
@@ -459,7 +622,7 @@ impl<'input> SpannedEventReceiver<'input> for TreeBuilder<'_> {
                     start,
                 }) => {
                     if values.len() % 2 != 0 {
-                        self.fail("YAML mapping contains an unmatched key", span);
+                        self.fail("YAML mapping contains an unmatched key", parser_span);
                         return;
                     }
                     let mut values = values.into_iter();
@@ -472,10 +635,10 @@ impl<'input> SpannedEventReceiver<'input> for TreeBuilder<'_> {
                         entries,
                         anchor,
                         tag,
-                        span: ParsedSpan::cover(start.start, span.end),
+                        span: ParsedSpan::cover(start.start, parser_span.end),
                     });
                 }
-                _ => self.fail("YAML mapping events are unbalanced", span),
+                _ => self.fail("YAML mapping events are unbalanced", parser_span),
             },
         }
     }
@@ -605,7 +768,7 @@ fn validate_collection_tag(
     let Some(tag) = tag else {
         return;
     };
-    if is_non_specific_tag(tag) || (tag.is_yaml_core_schema() && tag.suffix == expected) {
+    if is_non_specific_tag(tag) || core_tag_suffix(tag) == Some(expected) {
         return;
     }
     diagnostics.push(profile_diagnostic(
@@ -653,15 +816,15 @@ fn resolve_scalar(
         if is_non_specific_tag(tag) {
             return Ok(ScalarKind::String);
         }
-        if !tag.is_yaml_core_schema() {
+        let Some(suffix) = core_tag_suffix(tag) else {
             return Err("custom YAML tags are not permitted in schema documents");
-        }
-        return match tag.suffix.as_str() {
+        };
+        return match suffix {
             "str" => Ok(ScalarKind::String),
             "null" => Ok(ScalarKind::Null),
             "bool" if is_core_boolean(value) => Ok(ScalarKind::Boolean),
             "int" if is_core_integer(value) => Ok(ScalarKind::Integer),
-            "float" if is_core_float(value) || is_core_integer(value) => Ok(ScalarKind::Float),
+            "float" if is_core_float(value) => Ok(ScalarKind::Float),
             "bool" | "int" | "float" => {
                 Err("explicit YAML core tag has an invalid scalar representation")
             }
@@ -686,6 +849,16 @@ fn resolve_scalar(
 
 fn is_non_specific_tag(tag: &Tag) -> bool {
     tag.handle.is_empty() && tag.suffix == "!"
+}
+
+fn core_tag_suffix(tag: &Tag) -> Option<&str> {
+    if tag.is_yaml_core_schema() {
+        Some(tag.suffix.as_str())
+    } else if tag.handle.is_empty() {
+        tag.suffix.strip_prefix("tag:yaml.org,2002:")
+    } else {
+        None
+    }
 }
 
 fn is_core_null(value: &str) -> bool {
@@ -749,7 +922,7 @@ fn is_core_float(value: &str) -> bool {
             return false;
         }
     }
-    let mantissa_is_float = if let Some(fraction) = mantissa.strip_prefix('.') {
+    if let Some(fraction) = mantissa.strip_prefix('.') {
         !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit())
     } else if let Some((whole, fraction)) = mantissa.split_once('.') {
         !whole.is_empty()
@@ -758,8 +931,7 @@ fn is_core_float(value: &str) -> bool {
             && !fraction.contains('.')
     } else {
         !mantissa.is_empty() && mantissa.bytes().all(|byte| byte.is_ascii_digit())
-    };
-    mantissa_is_float && (mantissa.contains('.') || exponent_digits.is_some())
+    }
 }
 
 fn decode_v1_document(source: &str, path: &str, root: ParsedNode) -> DecodeResult<SchemaDocument> {
@@ -888,19 +1060,12 @@ fn decode_format_version(
             "format_version",
         )));
     }
-    let parsed = raw.parse::<u32>().map_err(|_| {
-        Box::new(invalid_declaration(
-            "format_version is outside the supported integer range",
-            path,
-            *span,
-            "format_version",
-        ))
-    })?;
-    if parsed != 1 {
+    let significant = raw.trim_start_matches('0');
+    if significant != "1" {
         return Err(Box::new(
             Diagnostic::new(
                 SchemaDiagnosticCode::UnsupportedFormat,
-                format!("schema format version {parsed} is not supported"),
+                format!("schema format version {raw} is not supported"),
                 Some(parser_span(path, *span)),
             )
             .with_context(DiagnosticContext::new(
@@ -908,10 +1073,10 @@ fn decode_format_version(
                 None,
                 None,
             ))
-            .with_detail("format_version", parsed.to_string()),
+            .with_detail("format_version", raw.to_owned()),
         ));
     }
-    Ok(field(path, key, value, parsed))
+    Ok(field(path, key, value, 1))
 }
 
 fn decode_schema_identity(node: &ParsedNode, path: &str) -> DecodeResult<SchemaIdentity> {

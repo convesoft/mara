@@ -308,6 +308,24 @@ fn rejects_multiple_documents_at_the_second_document_marker() {
 }
 
 #[test]
+fn rejects_empty_documents_at_an_exact_eof_span() {
+    for source in ["", "# comment only\r\n"] {
+        let error = assert_invalid(source, SchemaDiagnosticCode::Syntax);
+        let diagnostic = only_diagnostic(&error);
+        let primary = diagnostic.primary().expect("empty input has an EOF span");
+
+        assert_eq!(detail_string(diagnostic, "feature"), Some("empty_document"));
+        assert_eq!(primary.start_byte(), source.len() as u64);
+        assert_eq!(primary.end_byte(), source.len() as u64);
+        if source.is_empty() {
+            assert_eq!((primary.start_line(), primary.start_column()), (1, 1));
+        } else {
+            assert_eq!((primary.start_line(), primary.start_column()), (2, 1));
+        }
+    }
+}
+
+#[test]
 fn accepts_yaml_1_2_directive_and_rejects_other_directives() {
     let explicit_v1 = format!("%YAML 1.2\n---\n{VALID_SCHEMA}");
     let fixture = Fixture::new(explicit_v1);
@@ -396,21 +414,58 @@ fn rejects_aliases_in_addition_to_their_required_anchor() {
 
 #[test]
 fn accepts_yaml_1_2_core_tags_but_rejects_incompatible_core_tags() {
-    let source = r#"format_version: !!int "1"
-schema: !!map
-  name: !!str core-schema
-  version: ! 1.0.0
-identity: !!map
-  mid: !!map
-    format: !!str ulid
-    prefix: !!str core_
-flavours: !!map {}
-relations: !!map {}
-rules: !!seq []
+    let source = r#"!!str format_version: !!int "1"
+!!str schema: !!map
+  !!str name: !!str core-schema
+  !!str version: ! 1.0.0
+!!str identity: !!map
+  !!str mid: !!map
+    !!str format: !!str ulid
+    !!str prefix: !!str core_
+!!str flavours: !!map {}
+!!str relations: !!map {}
+!!str rules: !!seq []
 "#;
     let fixture = Fixture::new(source);
     let document = load_schema(&fixture.loaded_project()).unwrap();
     assert_eq!(document.schema().value().name().value(), "core-schema");
+    assert_eq!(
+        source_slice(source, document.format_version().key_source()),
+        "!!str format_version"
+    );
+    assert_eq!(
+        source_slice(source, document.format_version().value_source()),
+        "!!int \"1\""
+    );
+    assert!(source_slice(source, document.schema().value_source()).starts_with("!!map\n"));
+    assert_eq!(
+        source_slice(source, document.schema().value().name().value_source()),
+        "!!str core-schema"
+    );
+    assert_eq!(
+        source_slice(source, document.schema().value().version().value_source()),
+        "! 1.0.0"
+    );
+    assert_eq!(
+        source_slice(source, document.relations().unwrap().value_source()),
+        "!!map {}"
+    );
+    assert_eq!(
+        source_slice(source, document.rules().unwrap().value_source()),
+        "!!seq []"
+    );
+
+    let verbatim_tag = "!<tag:yaml.org,2002:%73tr> core-schema";
+    let verbatim_source = source.replace("!!str core-schema", verbatim_tag);
+    let fixture = Fixture::new(&verbatim_source);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+    assert_eq!(
+        source_slice(
+            &verbatim_source,
+            document.schema().value().name().value_source()
+        ),
+        verbatim_tag
+    );
 
     let invalid = source.replace("!!str core-schema", "!!timestamp core-schema");
     let error = assert_invalid(invalid, SchemaDiagnosticCode::Syntax);
@@ -418,6 +473,36 @@ rules: !!seq []
         detail_string(only_diagnostic(&error), "feature"),
         Some("custom_tag")
     );
+}
+
+#[test]
+fn preserves_the_complete_authored_block_scalar_span() {
+    let source = VALID_SCHEMA.replace(
+        "version: 1.2.3-alpha.1+build.5",
+        "version: |-\n    1.2.3-alpha.1+build.5",
+    );
+    let fixture = Fixture::new(&source);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+
+    assert_eq!(
+        source_slice(&source, document.schema().value().version().value_source()),
+        "|-\n    1.2.3-alpha.1+build.5\n"
+    );
+}
+
+#[test]
+fn rejects_non_decimal_scalars_explicitly_tagged_as_floats() {
+    for value in ["0x3A", "0o7"] {
+        let source = VALID_SCHEMA.replace(
+            "relations: {}",
+            &format!("relations: {{invalid: !!float {value}}}"),
+        );
+        let error = assert_invalid(source, SchemaDiagnosticCode::Syntax);
+        assert_eq!(
+            detail_string(only_diagnostic(&error), "feature"),
+            Some("custom_tag")
+        );
+    }
 }
 
 #[test]
@@ -533,6 +618,14 @@ fn format_version_requires_unsigned_base_ten_integer_source() {
             VALID_SCHEMA.replace("format_version: 1", &format!("format_version: {authored}"));
         assert_invalid(source, SchemaDiagnosticCode::InvalidDeclaration);
     }
+
+    let oversized = "9".repeat(80);
+    let source = VALID_SCHEMA.replace("format_version: 1", &format!("format_version: {oversized}"));
+    let error = assert_invalid(source, SchemaDiagnosticCode::UnsupportedFormat);
+    assert_eq!(
+        detail_string(only_diagnostic(&error), "format_version"),
+        Some(oversized.as_str())
+    );
 }
 
 #[test]
@@ -580,4 +673,23 @@ fn parser_library_details_do_not_escape_the_public_schema_result() {
     let document = load_schema(&fixture.loaded_project()).unwrap();
     assert_mara_owned(&document);
     assert!(Path::new(document.source().path()).is_relative());
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_canonical_schema_paths_that_are_not_wire_safe_without_panicking() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = Fixture::new(VALID_SCHEMA);
+    fs::remove_file(fixture.schema_path()).unwrap();
+    let target = fixture.root.join(".mara/target\\schema.yaml");
+    fs::write(&target, VALID_SCHEMA).unwrap();
+    symlink("target\\schema.yaml", fixture.schema_path()).unwrap();
+    let project = fixture.loaded_project();
+
+    let error = load_schema(&project).unwrap_err();
+
+    assert_code(only_diagnostic(&error), SchemaDiagnosticCode::Io);
+    assert_eq!(error.path(), Some(project.schema_path.as_path()));
+    assert!(error.io_source().is_some());
 }
