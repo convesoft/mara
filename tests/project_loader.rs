@@ -324,6 +324,41 @@ fn rejects_unsupported_versions_and_invalid_project_names() {
 }
 
 #[test]
+fn rejects_missing_and_non_integer_format_versions_deterministically() {
+    let missing = Fixture::new();
+    missing.write_config(valid_config().replace("format_version = 1\n", ""));
+    let first_missing = load_from_root(&missing.root).unwrap_err();
+    let second_missing = load_from_root(&missing.root).unwrap_err();
+    assert_eq!(
+        first_missing.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ConfigInvalidValue)
+    );
+    assert_eq!(first_missing.to_string(), second_missing.to_string());
+    assert!(first_missing.to_string().contains("missing field"));
+
+    for replacement in [
+        "format_version = \"1\"",
+        "format_version = 1.0",
+        "format_version = true",
+    ] {
+        let fixture = Fixture::new();
+        fixture.write_config(valid_config().replace("format_version = 1", replacement));
+        let error = load_from_root(&fixture.root).unwrap_err();
+        assert_eq!(
+            error.diagnostic_code(),
+            Some(ProjectLoadErrorCode::ConfigInvalidValue)
+        );
+        assert!(matches!(
+            error,
+            ProjectLoadError::InvalidConfiguration {
+                location: Some(_),
+                ..
+            }
+        ));
+    }
+}
+
+#[test]
 fn rejects_utf8_bom_and_invalid_utf8() {
     let fixture = Fixture::new();
     let mut bom = vec![0xef, 0xbb, 0xbf];
