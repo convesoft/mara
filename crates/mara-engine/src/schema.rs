@@ -6,6 +6,7 @@ use std::{
     fmt,
     io::{self, Read},
     path::{Component, Path, PathBuf},
+    sync::OnceLock,
 };
 
 use mara_core::{
@@ -13,8 +14,8 @@ use mara_core::{
     MidIdentity, RelatedDiagnostic, SchemaDiagnosticCode, SchemaDocument, SchemaField,
     SchemaIdentity, SchemaSection, SourceSpan,
 };
+use regex_lite::Regex;
 use saphyr_parser::{Event, Marker, Parser, ScalarStyle, Span, SpannedEventReceiver, Tag};
-use semver::Version;
 
 use crate::project::{LoadedProject, open_loaded_schema};
 
@@ -261,18 +262,16 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
 fn validate_document_directives(source: &str, path: &str) -> Option<Diagnostic> {
     let mut byte_offset = 0;
     let mut line = 1;
-    for source_line in source.split_inclusive('\n') {
-        let line_without_lf = source_line.strip_suffix('\n').unwrap_or(source_line);
-        let content = line_without_lf
-            .strip_suffix('\r')
-            .unwrap_or(line_without_lf);
+    while byte_offset < source.len() {
+        let (source_line, next_offset) = source_line_at(source, byte_offset);
+        let content = source_line;
         let content = if byte_offset == 0 {
             content.strip_prefix('\u{feff}').unwrap_or(content)
         } else {
             content
         };
         if content.trim().is_empty() || content.trim_start().starts_with('#') {
-            byte_offset += source_line.len();
+            byte_offset = next_offset;
             line += 1;
             continue;
         }
@@ -283,7 +282,7 @@ fn validate_document_directives(source: &str, path: &str) -> Option<Diagnostic> 
         let feature = if let Some(rest) = content.strip_prefix("%YAML") {
             let version = rest.split_whitespace().next().unwrap_or("");
             if version == "1.2" {
-                byte_offset += source_line.len();
+                byte_offset = next_offset;
                 line += 1;
                 continue;
             }
@@ -293,9 +292,9 @@ fn validate_document_directives(source: &str, path: &str) -> Option<Diagnostic> 
         } else {
             "unsupported_directive"
         };
-        let bom_bytes = line_without_lf.len() - content.len();
+        let bom_bytes = source_line.len() - content.len();
         let start_byte = byte_offset + bom_bytes;
-        let start_column = line_without_lf[..bom_bytes].chars().count() + 1;
+        let start_column = source_line[..bom_bytes].chars().count() + 1;
         let primary = source_span(
             path,
             start_byte,
@@ -315,6 +314,22 @@ fn validate_document_directives(source: &str, path: &str) -> Option<Diagnostic> 
         );
     }
     None
+}
+
+fn source_line_at(source: &str, start: usize) -> (&str, usize) {
+    let remaining = &source[start..];
+    let content_len = remaining.find(['\r', '\n']).unwrap_or(remaining.len());
+    let terminator_len = if remaining[content_len..].starts_with("\r\n") {
+        2
+    } else if content_len < remaining.len() {
+        1
+    } else {
+        0
+    };
+    (
+        &remaining[..content_len],
+        start + content_len + terminator_len,
+    )
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1227,8 +1242,8 @@ fn decode_schema_identity(node: &ParsedNode, path: &str) -> DecodeResult<SchemaI
 
     let (version_key, version_value) = required_entry(entries, "version", "schema", path, *span)?;
     let version = expect_string(version_value, "schema.version", path)?;
-    Version::parse(version).map_err(|_| {
-        Box::new(
+    if !valid_semver(version) {
+        return Err(Box::new(
             invalid_declaration(
                 "schema.version must use SemVer 2.0.0 syntax",
                 path,
@@ -1236,8 +1251,8 @@ fn decode_schema_identity(node: &ParsedNode, path: &str) -> DecodeResult<SchemaI
                 "schema.version",
             )
             .with_detail("value", version.to_owned()),
-        )
-    })?;
+        ));
+    }
     let version = field(path, version_key, version_value, version.to_owned());
     Ok(SchemaIdentity::new(name, version))
 }
@@ -1509,6 +1524,21 @@ fn valid_mid_prefix(value: &str) -> bool {
         return false;
     };
     valid_lower_alphanumeric_segment(stem, true)
+}
+
+fn valid_semver(value: &str) -> bool {
+    static SEMVER: OnceLock<Regex> = OnceLock::new();
+    SEMVER
+        .get_or_init(|| {
+            Regex::new(concat!(
+                r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",
+                r"(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)",
+                r"(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?",
+                r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$",
+            ))
+            .expect("the SemVer 2.0.0 syntax pattern is valid")
+        })
+        .is_match(value)
 }
 
 fn parser_span(path: &str, span: ParsedSpan) -> SourceSpan {

@@ -344,6 +344,13 @@ fn accepts_yaml_1_2_directive_and_rejects_other_directives() {
         assert_eq!(diagnostic.primary().unwrap().start_line(), 1);
         assert_eq!(diagnostic.primary().unwrap().start_column(), 1);
     }
+
+    let bare_cr = format!("%YAML 1.2\r%TAG !e! tag:example.com,2026:\r---\r{VALID_SCHEMA}");
+    let error = assert_invalid(bare_cr, SchemaDiagnosticCode::Syntax);
+    let diagnostic = only_diagnostic(&error);
+    assert_eq!(detail_string(diagnostic, "feature"), Some("custom_tag"));
+    assert_eq!(diagnostic.primary().unwrap().start_line(), 2);
+    assert_eq!(diagnostic.primary().unwrap().start_column(), 1);
 }
 
 #[test]
@@ -647,6 +654,20 @@ fn rejects_invalid_schema_name_version_and_mid_settings() {
     for (code, field, source) in cases {
         let error = assert_invalid(source, code);
         assert_eq!(only_diagnostic(&error).context().field(), Some(field));
+    }
+}
+
+#[test]
+fn validates_semver_2_syntax_without_a_numeric_size_limit() {
+    let oversized = "18446744073709551616.0.0";
+    let valid = VALID_SCHEMA.replace("1.2.3-alpha.1+build.5", &format!("\"{oversized}\""));
+    let fixture = Fixture::new(valid);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+    assert_eq!(document.schema().value().version().value(), oversized);
+
+    for invalid in ["01.0.0", "1.0.0-01", "1.0.0-", "1.0.0+"] {
+        let source = VALID_SCHEMA.replace("1.2.3-alpha.1+build.5", &format!("\"{invalid}\""));
+        assert_invalid(source, SchemaDiagnosticCode::InvalidDeclaration);
     }
 }
 
