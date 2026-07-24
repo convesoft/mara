@@ -293,7 +293,7 @@ pub fn load_from_root(root: impl AsRef<Path>) -> Result<LoadedProject, ProjectLo
 }
 
 fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoadError> {
-    let (mut config_file, resolved_config_path) = open_project_input(
+    let (mut config_file, resolved_config_path, config_metadata) = open_project_input(
         &location.root,
         &location.config_path,
         &location.config_path,
@@ -378,7 +378,7 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
 
     let schema_location = location_for_span(source_text, &raw.project.schema);
     let schema_value = raw.project.schema.into_inner();
-    let schema_path = resolve_existing_input(
+    let (schema_path, schema_metadata) = resolve_existing_input(
         &location.root,
         &location.config_path,
         "project.schema",
@@ -395,7 +395,11 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
         &index_value,
         index_location,
     )?;
-    if index_path == resolved_config_path || index_path == schema_path {
+    let index_aliases_input = existing_metadata(&index_path)?.is_some_and(|index_metadata| {
+        same_file_identity(&index_metadata, &config_metadata) == Some(true)
+            || same_file_identity(&index_metadata, &schema_metadata) == Some(true)
+    });
+    if index_path == resolved_config_path || index_path == schema_path || index_aliases_input {
         return Err(unsafe_path(
             &location.config_path,
             "index.path",
@@ -435,10 +439,10 @@ fn resolve_existing_input(
     field: &'static str,
     configured: &str,
     location: Option<SourceLocation>,
-) -> Result<PathBuf, ProjectLoadError> {
+) -> Result<(PathBuf, fs::Metadata), ProjectLoadError> {
     validate_relative_path(config_path, field, configured, location)?;
     let logical_path = root.join(configured);
-    let (_, resolved_path) = open_project_input(
+    let (_, resolved_path, metadata) = open_project_input(
         root,
         config_path,
         &logical_path,
@@ -446,7 +450,7 @@ fn resolve_existing_input(
         configured,
         location,
     )?;
-    Ok(resolved_path)
+    Ok((resolved_path, metadata))
 }
 
 fn open_project_input(
@@ -456,7 +460,7 @@ fn open_project_input(
     field: &'static str,
     configured: &str,
     location: Option<SourceLocation>,
-) -> Result<(fs::File, PathBuf), ProjectLoadError> {
+) -> Result<(fs::File, PathBuf, fs::Metadata), ProjectLoadError> {
     let resolved_path = match fs::canonicalize(logical_path) {
         Ok(path) => path,
         Err(error) if error.kind() == io::ErrorKind::NotFound && location.is_some() => {
@@ -512,7 +516,19 @@ fn open_project_input(
         &metadata,
         location,
     )?;
-    Ok((file, resolved_path))
+    Ok((file, resolved_path, metadata))
+}
+
+fn existing_metadata(path: &Path) -> Result<Option<fs::Metadata>, ProjectLoadError> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(ProjectLoadError::Io {
+            operation: "inspect existing output identity",
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -545,7 +561,8 @@ fn verify_opened_input(
             path: rechecked_path.clone(),
             source,
         })?;
-    if rechecked_path != expected_path || !same_file_identity(opened_metadata, &rechecked_metadata)
+    if rechecked_path != expected_path
+        || same_file_identity(opened_metadata, &rechecked_metadata) == Some(false)
     {
         return Err(unsafe_path(
             config_path,
@@ -928,10 +945,10 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(unix)]
-fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> Option<bool> {
     use std::os::unix::fs::MetadataExt;
 
-    left.dev() == right.dev() && left.ino() == right.ino()
+    Some(left.dev() == right.dev() && left.ino() == right.ino())
 }
 
 #[cfg(windows)]
@@ -946,12 +963,14 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(windows)]
-fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> Option<bool> {
     use std::os::windows::fs::MetadataExt;
 
-    left.volume_serial_number() == right.volume_serial_number()
-        && left.file_index() == right.file_index()
-        && left.file_index().is_some()
+    Some(
+        left.volume_serial_number() == right.volume_serial_number()
+            && left.file_index() == right.file_index()
+            && left.file_index().is_some(),
+    )
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -964,8 +983,8 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
-    true
+fn same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> Option<bool> {
+    None
 }
 
 #[derive(Debug, Deserialize)]

@@ -488,6 +488,40 @@ fn normalizes_internal_symlinks_and_rejects_index_aliases_to_inputs() {
     );
 }
 
+#[test]
+fn rejects_hard_linked_index_aliases_to_configuration_or_schema() {
+    let config_alias = Fixture::new();
+    let config_index = config_alias.root.join(".mara/config-index-alias");
+    fs::hard_link(config_alias.config_path(), &config_index).unwrap();
+    config_alias.write_config(config_with(
+        ".mara/schema.yaml",
+        ".mara/config-index-alias",
+        &["**/*.mara.md"],
+        &[],
+    ));
+    assert_unsafe_field(
+        load_from_root(&config_alias.root).unwrap_err(),
+        "index.path",
+    );
+
+    let schema_alias = Fixture::new();
+    fs::hard_link(
+        schema_alias.root.join(".mara/schema.yaml"),
+        schema_alias.root.join(".mara/schema-index-alias"),
+    )
+    .unwrap();
+    schema_alias.write_config(config_with(
+        ".mara/schema.yaml",
+        ".mara/schema-index-alias",
+        &["**/*.mara.md"],
+        &[],
+    ));
+    assert_unsafe_field(
+        load_from_root(&schema_alias.root).unwrap_err(),
+        "index.path",
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn normalizes_a_missing_output_beneath_an_internal_symlinked_directory() {
