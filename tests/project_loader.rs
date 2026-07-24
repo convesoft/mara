@@ -1,6 +1,8 @@
 use std::{fs, path::Path};
 
-use mara::project::{ProjectLoadError, discover_and_load, discover_project, load_from_root};
+use mara::project::{
+    ProjectLoadError, ProjectLoadErrorCode, discover_and_load, discover_project, load_from_root,
+};
 use tempfile::TempDir;
 
 struct Fixture {
@@ -547,13 +549,27 @@ fn diagnostics_are_deterministic_and_actionable() {
         &[],
     ));
 
-    let first = load_from_root(&fixture.root).unwrap_err().to_string();
-    let second = load_from_root(&fixture.root).unwrap_err().to_string();
+    let first_error = load_from_root(&fixture.root).unwrap_err();
+    let second_error = load_from_root(&fixture.root).unwrap_err();
+    assert_eq!(first_error.code(), ProjectLoadErrorCode::UnsafePath);
+    assert_eq!(first_error.code().as_str(), "project.path.unsafe");
+    let first = first_error.to_string();
+    let second = second_error.to_string();
 
     assert_eq!(first, second);
     assert!(first.contains("project.schema"));
     assert!(first.contains("../schema.yaml"));
     assert!(first.contains(&fixture.config_path().display().to_string()));
+    match load_from_root(&fixture.root).unwrap_err() {
+        ProjectLoadError::UnsafePath {
+            location: Some(location),
+            ..
+        } => {
+            assert_eq!(location.line, 4);
+            assert_eq!(location.column, 10);
+        }
+        other => panic!("expected located path diagnostic, got {other}"),
+    }
 }
 
 #[test]

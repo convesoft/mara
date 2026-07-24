@@ -68,6 +68,26 @@ pub struct SourceLocation {
     pub column: usize,
 }
 
+/// Stable machine classification for project discovery and loading failures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProjectLoadErrorCode {
+    ProjectNotFound,
+    Io,
+    InvalidConfiguration,
+    UnsafePath,
+}
+
+impl ProjectLoadErrorCode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ProjectNotFound => "project.not_found",
+            Self::Io => "project.io",
+            Self::InvalidConfiguration => "project.configuration.invalid",
+            Self::UnsafePath => "project.path.unsafe",
+        }
+    }
+}
+
 /// A structured project discovery or loading failure.
 #[derive(Debug)]
 pub enum ProjectLoadError {
@@ -93,6 +113,18 @@ pub enum ProjectLoadError {
         resolved: Option<Box<Path>>,
         location: Option<SourceLocation>,
     },
+}
+
+impl ProjectLoadError {
+    /// Returns a stable code without requiring callers to parse display text.
+    pub const fn code(&self) -> ProjectLoadErrorCode {
+        match self {
+            Self::ProjectNotFound { .. } => ProjectLoadErrorCode::ProjectNotFound,
+            Self::Io { .. } => ProjectLoadErrorCode::Io,
+            Self::InvalidConfiguration { .. } => ProjectLoadErrorCode::InvalidConfiguration,
+            Self::UnsafePath { .. } => ProjectLoadErrorCode::UnsafePath,
+        }
+    }
 }
 
 impl fmt::Display for ProjectLoadError {
@@ -471,7 +503,60 @@ fn open_project_input(
             location,
         ));
     }
+    verify_opened_input(
+        root,
+        config_path,
+        field,
+        configured,
+        &resolved_path,
+        &metadata,
+        location,
+    )?;
     Ok((file, resolved_path))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_opened_input(
+    root: &Path,
+    config_path: &Path,
+    field: &'static str,
+    configured: &str,
+    expected_path: &Path,
+    opened_metadata: &fs::Metadata,
+    location: Option<SourceLocation>,
+) -> Result<(), ProjectLoadError> {
+    let rechecked_path =
+        fs::canonicalize(expected_path).map_err(|source| ProjectLoadError::Io {
+            operation: "recheck opened project input",
+            path: expected_path.to_path_buf(),
+            source,
+        })?;
+    ensure_contained(
+        root,
+        config_path,
+        field,
+        configured,
+        &rechecked_path,
+        location,
+    )?;
+    let rechecked_metadata =
+        fs::metadata(&rechecked_path).map_err(|source| ProjectLoadError::Io {
+            operation: "recheck project input identity",
+            path: rechecked_path.clone(),
+            source,
+        })?;
+    if rechecked_path != expected_path || !same_file_identity(opened_metadata, &rechecked_metadata)
+    {
+        return Err(unsafe_path(
+            config_path,
+            field,
+            configured,
+            "opened input changed during containment verification",
+            Some(rechecked_path),
+            location,
+        ));
+    }
+    Ok(())
 }
 
 fn resolve_output_path(
@@ -842,6 +927,13 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
         .open(path)
 }
 
+#[cfg(unix)]
+fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+
+    left.dev() == right.dev() && left.ino() == right.ino()
+}
+
 #[cfg(windows)]
 fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
     use std::os::windows::fs::OpenOptionsExt;
@@ -853,6 +945,15 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
         .open(path)
 }
 
+#[cfg(windows)]
+fn same_file_identity(left: &fs::Metadata, right: &fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    left.volume_serial_number() == right.volume_serial_number()
+        && left.file_index() == right.file_index()
+        && left.file_index().is_some()
+}
+
 #[cfg(not(any(unix, windows)))]
 fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
     let metadata = fs::symlink_metadata(path)?;
@@ -860,6 +961,11 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
         return Err(io::Error::other("refusing to follow an input symlink"));
     }
     fs::File::open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn same_file_identity(_left: &fs::Metadata, _right: &fs::Metadata) -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -906,4 +1012,36 @@ struct RawValidation {
 #[serde(deny_unknown_fields)]
 struct RawGit {
     require_clean_worktree_for_writes: bool,
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_an_open_handle_that_differs_from_the_rechecked_contained_path() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("project");
+        fs::create_dir_all(root.join(".mara")).unwrap();
+        let inside = root.join(".mara/schema.yaml");
+        let outside = fixture.path().join("outside-schema.yaml");
+        fs::write(&inside, "inside").unwrap();
+        fs::write(&outside, "outside").unwrap();
+        let opened_outside = fs::File::open(&outside).unwrap();
+        let opened_metadata = opened_outside.metadata().unwrap();
+        let expected_path = inside.canonicalize().unwrap();
+
+        let error = verify_opened_input(
+            &root.canonicalize().unwrap(),
+            &root.join(".mara/project.toml"),
+            "project.schema",
+            ".mara/schema.yaml",
+            &expected_path,
+            &opened_metadata,
+            None,
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, ProjectLoadError::UnsafePath { .. }));
+    }
 }
