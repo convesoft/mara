@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use mara::project::{
+use mara_engine::project::{
     ProjectLoadError, ProjectLoadErrorCode, ProjectLoadOperationalErrorCode, discover_and_load,
     discover_project, load_from_root,
 };
