@@ -15,6 +15,7 @@ impl Fixture {
         let temp = tempfile::tempdir().expect("create isolated fixture");
         let root = temp.path().join("project");
         fs::create_dir_all(root.join(".mara")).unwrap();
+        let root = root.canonicalize().unwrap();
         fs::write(root.join(".mara/schema.yaml"), "format_version: 1\n").unwrap();
         fs::write(root.join(".mara/project.toml"), valid_config()).unwrap();
         Self { _temp: temp, root }

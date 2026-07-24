@@ -492,6 +492,21 @@ fn open_project_input(
         &resolved_path,
         location,
     )?;
+    let metadata = fs::metadata(&resolved_path).map_err(|source| ProjectLoadError::Io {
+        operation: "inspect project input before opening",
+        path: resolved_path.clone(),
+        source,
+    })?;
+    if !metadata.is_file() {
+        return Err(unsafe_path(
+            config_path,
+            field,
+            configured,
+            "resolved input is not a regular file",
+            Some(resolved_path),
+            location,
+        ));
+    }
     let file = open_read_no_follow(&resolved_path).map_err(|source| ProjectLoadError::Io {
         operation: "open project input",
         path: resolved_path.clone(),
