@@ -258,13 +258,21 @@ fn validate_document_directives(source: &str, path: &str) -> Option<Diagnostic> 
         }
 
         let feature = if let Some(rest) = content.strip_prefix("%YAML") {
+            let has_separator = rest
+                .as_bytes()
+                .first()
+                .is_some_and(|byte| matches!(*byte, b' ' | b'\t'));
             let version = rest.split_whitespace().next().unwrap_or("");
-            if version == "1.2" {
+            if has_separator && version == "1.2" {
                 byte_offset = next_offset;
                 line += 1;
                 continue;
             }
-            "unsupported_yaml_version"
+            if has_separator {
+                "unsupported_yaml_version"
+            } else {
+                "unsupported_directive"
+            }
         } else if content.starts_with("%TAG") {
             "custom_tag"
         } else {

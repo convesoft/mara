@@ -352,6 +352,7 @@ fn accepts_yaml_1_2_directive_and_rejects_other_directives() {
 
     let cases = [
         ("%YAML 1.1\n---\n", "unsupported_yaml_version"),
+        ("%YAML1.2\n---\n", "unsupported_directive"),
         ("%TAG !e! tag:example.com,2026:\n---\n", "custom_tag"),
         ("%FUTURE value\n---\n", "unsupported_directive"),
     ];
