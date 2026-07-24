@@ -314,6 +314,18 @@ fn rejects_malformed_utf8_at_the_first_invalid_byte() {
 }
 
 #[test]
+fn rejects_nul_before_the_parser_can_truncate_the_document() {
+    let source = format!("{VALID_SCHEMA}\0---\n{VALID_SCHEMA}");
+    let error = assert_invalid(&source, SchemaDiagnosticCode::Syntax);
+    let diagnostic = only_diagnostic(&error);
+    let primary = diagnostic.primary().unwrap();
+
+    assert_eq!(detail_string(diagnostic, "feature"), Some("nul_character"));
+    assert_eq!(primary.start_byte(), VALID_SCHEMA.len() as u64);
+    assert_eq!(source_slice(&source, primary), "\0");
+}
+
+#[test]
 fn rejects_multiple_documents_at_the_second_document_marker() {
     let source = format!("{VALID_SCHEMA}---\n{VALID_SCHEMA}");
     let error = assert_invalid(source, SchemaDiagnosticCode::Syntax);

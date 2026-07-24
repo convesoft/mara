@@ -143,7 +143,7 @@ pub fn load_schema(project: &LoadedProject) -> Result<SchemaDocument, SchemaLoad
 
 fn schema_source_path(project: &LoadedProject) -> Result<String, io::Error> {
     let source_path = project.schema_source_path.clone();
-    SourceSpan::try_new(source_path.as_str(), 0, 0, 1, 1, 1, 1).map_err(|_| {
+    SourceSpan::try_new(source_path.as_str(), "", 0, 0, 1, 1, 1, 1).map_err(|_| {
         io::Error::other("configured schema path cannot be represented by a Mara source span")
     })?;
     Ok(source_path)
@@ -152,8 +152,19 @@ fn schema_source_path(project: &LoadedProject) -> Result<String, io::Error> {
 fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadError> {
     let source = std::str::from_utf8(bytes).map_err(|error| {
         let offset = error.valid_up_to();
+        let valid_prefix = std::str::from_utf8(&bytes[..offset])
+            .expect("the prefix before a UTF-8 decoding error is valid");
         let (line, column) = position_at_valid_prefix(&bytes[..offset]);
-        let primary = source_span(path, offset, offset, line, column, line, column);
+        let primary = source_span(
+            path,
+            valid_prefix,
+            offset,
+            offset,
+            line,
+            column,
+            line,
+            column,
+        );
         SchemaLoadError::invalid(vec![
             Diagnostic::new(
                 SchemaDiagnosticCode::Syntax,
@@ -164,16 +175,38 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
         ])
     })?;
 
+    if let Some(offset) = source.find('\0') {
+        let (line, column) = position_at_valid_prefix(&source.as_bytes()[..offset]);
+        let primary = source_span(
+            path,
+            source,
+            offset,
+            offset + 1,
+            line,
+            column,
+            line,
+            column + 1,
+        );
+        return Err(SchemaLoadError::invalid(vec![
+            Diagnostic::new(
+                SchemaDiagnosticCode::Syntax,
+                "schema source contains a forbidden NUL character",
+                Some(primary),
+            )
+            .with_detail("feature", "nul_character"),
+        ]));
+    }
+
     if let Some(diagnostic) = validate_document_directives(source, path) {
         return Err(SchemaLoadError::invalid(vec![diagnostic]));
     }
 
     let parser_source = source.strip_prefix('\u{feff}').unwrap_or(source);
     let parser_start_byte = source.len() - parser_source.len();
-    let source_map = SourceMap::new(source, parser_start_byte);
+    let source_map = SourceMap::new(path, source, parser_start_byte);
     let mut receiver = TreeBuilder::new(&source_map);
     if let Err(error) = Parser::new_from_str(parser_source).load(&mut receiver, true) {
-        let primary = marker_span(path, source_map.position(*error.marker()));
+        let primary = marker_span(&source_map, source_map.position(*error.marker()));
         return Err(SchemaLoadError::invalid(vec![
             Diagnostic::new(
                 SchemaDiagnosticCode::Syntax,
@@ -187,7 +220,7 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
         return Err(SchemaLoadError::invalid(vec![Diagnostic::new(
             SchemaDiagnosticCode::Syntax,
             message,
-            Some(parser_span(path, span)),
+            Some(parser_span(&source_map, span)),
         )]));
     }
     if receiver.documents.len() != 1 {
@@ -196,6 +229,7 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
             (
                 Some(source_span(
                     path,
+                    source,
                     source.len(),
                     source.len(),
                     line,
@@ -212,7 +246,7 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
                     .get(1)
                     .copied()
                     .or_else(|| receiver.document_starts.first().copied())
-                    .map(|span| parser_span(path, span)),
+                    .map(|span| parser_span(&source_map, span)),
                 "multiple_documents",
             )
         };
@@ -228,12 +262,12 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
 
     let root = receiver.documents.pop().expect("one document was checked");
     let mut profile = Vec::new();
-    validate_profile(&root, path, &mut profile);
+    validate_profile(&root, &source_map, &mut profile);
     if !profile.is_empty() {
         return Err(SchemaLoadError::invalid(profile));
     }
 
-    decode_v1_document(source, path, root)
+    decode_v1_document(&source_map, root)
         .map_err(|failure| SchemaLoadError::invalid(failure.into_diagnostics()))
 }
 
@@ -283,6 +317,7 @@ fn validate_document_directives(source: &str, path: &str) -> Option<Diagnostic> 
         let start_column = source_line[..bom_bytes].chars().count() + 1;
         let primary = source_span(
             path,
+            source,
             start_byte,
             start_byte + content.len(),
             line,
@@ -339,6 +374,7 @@ impl ParsedSpan {
 
 #[derive(Debug)]
 struct SourceMap<'source> {
+    path: &'source str,
     source: &'source str,
     char_to_byte: Vec<usize>,
     marker_index_offset: usize,
@@ -346,7 +382,7 @@ struct SourceMap<'source> {
 }
 
 impl<'source> SourceMap<'source> {
-    fn new(source: &'source str, parser_start_byte: usize) -> Self {
+    fn new(path: &'source str, source: &'source str, parser_start_byte: usize) -> Self {
         let mut char_to_byte = source
             .char_indices()
             .map(|(byte, _)| byte)
@@ -354,6 +390,7 @@ impl<'source> SourceMap<'source> {
         char_to_byte.push(source.len());
         let marker_index_offset = source[..parser_start_byte].chars().count();
         Self {
+            path,
             source,
             char_to_byte,
             marker_index_offset,
@@ -794,11 +831,15 @@ enum ScalarKind {
     Float,
 }
 
-fn validate_profile(node: &ParsedNode, path: &str, diagnostics: &mut Vec<Diagnostic>) {
+fn validate_profile(
+    node: &ParsedNode,
+    source_map: &SourceMap<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     match node {
         ParsedNode::Alias { span } => diagnostics.push(profile_diagnostic(
             "YAML aliases are not permitted in schema documents",
-            path,
+            source_map,
             *span,
             "alias",
         )),
@@ -809,17 +850,17 @@ fn validate_profile(node: &ParsedNode, path: &str, diagnostics: &mut Vec<Diagnos
             tag,
             span,
         } => {
-            validate_anchor(*anchor, path, *span, diagnostics);
+            validate_anchor(*anchor, source_map, *span, diagnostics);
             match resolve_scalar(value, *style, tag.as_ref()) {
                 Ok(ScalarKind::Null) => diagnostics.push(profile_diagnostic(
                     "null values are not permitted in schema documents",
-                    path,
+                    source_map,
                     *span,
                     "null",
                 )),
                 Ok(_) => {}
                 Err(message) => {
-                    diagnostics.push(profile_diagnostic(message, path, *span, "custom_tag"))
+                    diagnostics.push(profile_diagnostic(message, source_map, *span, "custom_tag"))
                 }
             }
         }
@@ -829,10 +870,10 @@ fn validate_profile(node: &ParsedNode, path: &str, diagnostics: &mut Vec<Diagnos
             tag,
             span,
         } => {
-            validate_anchor(*anchor, path, *span, diagnostics);
-            validate_collection_tag(tag.as_ref(), "seq", path, *span, diagnostics);
+            validate_anchor(*anchor, source_map, *span, diagnostics);
+            validate_collection_tag(tag.as_ref(), "seq", source_map, *span, diagnostics);
             for value in values {
-                validate_profile(value, path, diagnostics);
+                validate_profile(value, source_map, diagnostics);
             }
         }
         ParsedNode::Mapping {
@@ -841,22 +882,22 @@ fn validate_profile(node: &ParsedNode, path: &str, diagnostics: &mut Vec<Diagnos
             tag,
             span,
         } => {
-            validate_anchor(*anchor, path, *span, diagnostics);
-            validate_collection_tag(tag.as_ref(), "map", path, *span, diagnostics);
+            validate_anchor(*anchor, source_map, *span, diagnostics);
+            validate_collection_tag(tag.as_ref(), "map", source_map, *span, diagnostics);
             let mut seen = HashMap::<String, SourceSpan>::new();
             for (key, value) in entries {
                 let before = diagnostics.len();
-                validate_profile(key, path, diagnostics);
+                validate_profile(key, source_map, diagnostics);
                 if diagnostics.len() == before {
                     match string_key(key) {
                         Ok((_name, is_merge)) if is_merge => diagnostics.push(profile_diagnostic(
                             "YAML merge keys are not permitted in schema documents",
-                            path,
+                            source_map,
                             key.span(),
                             "merge_key",
                         )),
                         Ok((name, _)) => {
-                            let key_source = parser_span(path, key.span());
+                            let key_source = parser_span(source_map, key.span());
                             if let Some(first) = seen.get(name) {
                                 diagnostics.push(
                                     Diagnostic::new(
@@ -876,13 +917,13 @@ fn validate_profile(node: &ParsedNode, path: &str, diagnostics: &mut Vec<Diagnos
                         }
                         Err(()) => diagnostics.push(profile_diagnostic(
                             "every YAML mapping key must resolve to a string",
-                            path,
+                            source_map,
                             key.span(),
                             "non_string_key",
                         )),
                     }
                 }
-                validate_profile(value, path, diagnostics);
+                validate_profile(value, source_map, diagnostics);
             }
         }
     }
@@ -890,14 +931,14 @@ fn validate_profile(node: &ParsedNode, path: &str, diagnostics: &mut Vec<Diagnos
 
 fn validate_anchor(
     anchor: Option<ParsedSpan>,
-    path: &str,
+    source_map: &SourceMap<'_>,
     _span: ParsedSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Some(anchor) = anchor {
         diagnostics.push(profile_diagnostic(
             "YAML anchors are not permitted in schema documents",
-            path,
+            source_map,
             anchor,
             "anchor",
         ));
@@ -907,7 +948,7 @@ fn validate_anchor(
 fn validate_collection_tag(
     tag: Option<&Tag>,
     expected: &'static str,
-    path: &str,
+    source_map: &SourceMap<'_>,
     span: ParsedSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -919,7 +960,7 @@ fn validate_collection_tag(
     }
     diagnostics.push(profile_diagnostic(
         "custom or incompatible YAML tags are not permitted in schema documents",
-        path,
+        source_map,
         span,
         "custom_tag",
     ));
@@ -927,14 +968,14 @@ fn validate_collection_tag(
 
 fn profile_diagnostic(
     message: impl Into<String>,
-    path: &str,
+    source_map: &SourceMap<'_>,
     span: ParsedSpan,
     feature: &'static str,
 ) -> Diagnostic {
     Diagnostic::new(
         SchemaDiagnosticCode::Syntax,
         message,
-        Some(parser_span(path, span)),
+        Some(parser_span(source_map, span)),
     )
     .with_detail("feature", feature)
 }
@@ -1082,8 +1123,7 @@ fn is_core_float(value: &str) -> bool {
 }
 
 fn decode_v1_document(
-    source: &str,
-    path: &str,
+    source_map: &SourceMap<'_>,
     root: ParsedNode,
 ) -> Result<SchemaDocument, DocumentDecodeFailure> {
     let ParsedNode::Mapping {
@@ -1094,7 +1134,7 @@ fn decode_v1_document(
     else {
         return Err(invalid_declaration(
             "schema document root must be a mapping",
-            path,
+            source_map,
             root.span(),
             "root",
         )
@@ -1102,46 +1142,52 @@ fn decode_v1_document(
     };
 
     let (format_key, format_value) =
-        required_entry(&entries, "format_version", "root", path, root_span)?;
-    let format_version = decode_format_version(format_key, format_value, path)?;
+        required_entry(&entries, "format_version", "root", source_map, root_span)?;
+    let format_version = decode_format_version(format_key, format_value, source_map)?;
 
-    let unknown_keys = v1_unknown_key_diagnostics(&entries, path);
+    let unknown_keys = v1_unknown_key_diagnostics(&entries, source_map);
     if !unknown_keys.is_empty() {
         return Err(DocumentDecodeFailure::Diagnostics(unknown_keys));
     }
 
-    let (schema_key, schema_value) = required_entry(&entries, "schema", "root", path, root_span)?;
-    let schema_identity = decode_schema_identity(schema_value, path)?;
-    let schema = field(path, schema_key, schema_value, schema_identity);
+    let (schema_key, schema_value) =
+        required_entry(&entries, "schema", "root", source_map, root_span)?;
+    let schema_identity = decode_schema_identity(schema_value, source_map)?;
+    let schema = field(source_map, schema_key, schema_value, schema_identity);
 
     let (identity_key, identity_value) =
-        required_entry(&entries, "identity", "root", path, root_span)?;
-    let identity_configuration = decode_identity(identity_value, path)?;
-    let identity = field(path, identity_key, identity_value, identity_configuration);
+        required_entry(&entries, "identity", "root", source_map, root_span)?;
+    let identity_configuration = decode_identity(identity_value, source_map)?;
+    let identity = field(
+        source_map,
+        identity_key,
+        identity_value,
+        identity_configuration,
+    );
 
     let (flavours_key, flavours_value) =
-        required_entry(&entries, "flavours", "root", path, root_span)?;
+        required_entry(&entries, "flavours", "root", source_map, root_span)?;
     let flavours_len = mapping_len(flavours_value).ok_or_else(|| {
         invalid_declaration(
             "root.flavours must be a mapping",
-            path,
+            source_map,
             flavours_value.span(),
             "flavours",
         )
     })?;
-    let flavours = section(path, flavours_key, flavours_value, flavours_len);
+    let flavours = section(source_map, flavours_key, flavours_value, flavours_len);
 
     let relations = if let Some((key, value)) = optional_entry(&entries, "relations") {
         let Some(len) = mapping_len(value) else {
             return Err(invalid_declaration(
                 "root.relations must be a mapping",
-                path,
+                source_map,
                 value.span(),
                 "relations",
             )
             .into());
         };
-        Some(section(path, key, value, len))
+        Some(section(source_map, key, value, len))
     } else {
         None
     };
@@ -1150,19 +1196,28 @@ fn decode_v1_document(
         let Some(len) = sequence_len(value) else {
             return Err(invalid_declaration(
                 "root.rules must be a sequence",
-                path,
+                source_map,
                 value.span(),
                 "rules",
             )
             .into());
         };
-        Some(section(path, key, value, len))
+        Some(section(source_map, key, value, len))
     } else {
         None
     };
 
-    let (end_line, end_column) = position_at_valid_prefix(source.as_bytes());
-    let document_source = source_span(path, 0, source.len(), 1, 1, end_line, end_column);
+    let (end_line, end_column) = position_at_valid_prefix(source_map.source.as_bytes());
+    let document_source = source_span(
+        source_map.path,
+        source_map.source,
+        0,
+        source_map.source.len(),
+        1,
+        1,
+        end_line,
+        end_column,
+    );
     Ok(SchemaDocument::new(
         document_source,
         format_version,
@@ -1177,7 +1232,7 @@ fn decode_v1_document(
 fn decode_format_version(
     key: &ParsedNode,
     value: &ParsedNode,
-    path: &str,
+    source_map: &SourceMap<'_>,
 ) -> DecodeResult<SchemaField<u32>> {
     let ParsedNode::Scalar {
         value: raw,
@@ -1189,7 +1244,7 @@ fn decode_format_version(
     else {
         return Err(Box::new(invalid_declaration(
             "format_version must be the integer 1",
-            path,
+            source_map,
             value.span(),
             "format_version",
         )));
@@ -1200,7 +1255,7 @@ fn decode_format_version(
     {
         return Err(Box::new(invalid_declaration(
             "format_version must be an unsigned base-ten YAML integer",
-            path,
+            source_map,
             *span,
             "format_version",
         )));
@@ -1211,7 +1266,7 @@ fn decode_format_version(
             Diagnostic::new(
                 SchemaDiagnosticCode::UnsupportedFormat,
                 format!("schema format version {raw} is not supported"),
-                Some(parser_span(path, *span)),
+                Some(parser_span(source_map, *span)),
             )
             .with_context(DiagnosticContext::new(
                 Some("format_version".to_owned()),
@@ -1221,58 +1276,65 @@ fn decode_format_version(
             .with_detail("format_version", raw.to_owned()),
         ));
     }
-    Ok(field(path, key, value, 1))
+    Ok(field(source_map, key, value, 1))
 }
 
-fn decode_schema_identity(node: &ParsedNode, path: &str) -> DecodeResult<SchemaIdentity> {
+fn decode_schema_identity(
+    node: &ParsedNode,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<SchemaIdentity> {
     let ParsedNode::Mapping { entries, span, .. } = node else {
         return Err(Box::new(invalid_declaration(
             "root.schema must be a mapping",
-            path,
+            source_map,
             node.span(),
             "schema",
         )));
     };
-    let (name_key, name_value) = required_entry(entries, "name", "schema", path, *span)?;
-    let name = expect_string(name_value, "schema.name", path)?;
+    let (name_key, name_value) = required_entry(entries, "name", "schema", source_map, *span)?;
+    let name = expect_string(name_value, "schema.name", source_map)?;
     if !valid_kebab_name(name) {
         return Err(Box::new(invalid_name(
             "schema.name must match [a-z][a-z0-9]*(?:-[a-z0-9]+)*",
-            path,
+            source_map,
             name_value.span(),
             "schema.name",
             name,
         )));
     }
-    let name = field(path, name_key, name_value, name.to_owned());
+    let name = field(source_map, name_key, name_value, name.to_owned());
 
-    let (version_key, version_value) = required_entry(entries, "version", "schema", path, *span)?;
-    let version = expect_string(version_value, "schema.version", path)?;
+    let (version_key, version_value) =
+        required_entry(entries, "version", "schema", source_map, *span)?;
+    let version = expect_string(version_value, "schema.version", source_map)?;
     if !valid_semver(version) {
         return Err(Box::new(
             invalid_declaration(
                 "schema.version must use SemVer 2.0.0 syntax",
-                path,
+                source_map,
                 version_value.span(),
                 "schema.version",
             )
             .with_detail("value", version.to_owned()),
         ));
     }
-    let version = field(path, version_key, version_value, version.to_owned());
+    let version = field(source_map, version_key, version_value, version.to_owned());
     Ok(SchemaIdentity::new(name, version))
 }
 
-fn decode_identity(node: &ParsedNode, path: &str) -> DecodeResult<IdentityConfiguration> {
+fn decode_identity(
+    node: &ParsedNode,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<IdentityConfiguration> {
     let ParsedNode::Mapping { entries, span, .. } = node else {
         return Err(Box::new(invalid_declaration(
             "root.identity must be a mapping",
-            path,
+            source_map,
             node.span(),
             "identity",
         )));
     };
-    let (mid_key, mid_value) = required_entry(entries, "mid", "identity", path, *span)?;
+    let (mid_key, mid_value) = required_entry(entries, "mid", "identity", source_map, *span)?;
     let ParsedNode::Mapping {
         entries: mid_entries,
         span: mid_span,
@@ -1281,45 +1343,53 @@ fn decode_identity(node: &ParsedNode, path: &str) -> DecodeResult<IdentityConfig
     else {
         return Err(Box::new(invalid_declaration(
             "identity.mid must be a mapping",
-            path,
+            source_map,
             mid_value.span(),
             "identity.mid",
         )));
     };
     let (format_key, format_value) =
-        required_entry(mid_entries, "format", "identity.mid", path, *mid_span)?;
-    let format = expect_string(format_value, "identity.mid.format", path)?;
+        required_entry(mid_entries, "format", "identity.mid", source_map, *mid_span)?;
+    let format = expect_string(format_value, "identity.mid.format", source_map)?;
     if format != "ulid" {
         return Err(Box::new(
             invalid_declaration(
                 "identity.mid.format must be \"ulid\" in format version 1",
-                path,
+                source_map,
                 format_value.span(),
                 "identity.mid.format",
             )
             .with_detail("value", format.to_owned()),
         ));
     }
-    let format = field(path, format_key, format_value, MidFormat::Ulid);
+    let format = field(source_map, format_key, format_value, MidFormat::Ulid);
 
     let (prefix_key, prefix_value) =
-        required_entry(mid_entries, "prefix", "identity.mid", path, *mid_span)?;
-    let prefix = expect_string(prefix_value, "identity.mid.prefix", path)?;
+        required_entry(mid_entries, "prefix", "identity.mid", source_map, *mid_span)?;
+    let prefix = expect_string(prefix_value, "identity.mid.prefix", source_map)?;
     if !valid_mid_prefix(prefix) {
         return Err(Box::new(invalid_name(
             "identity.mid.prefix must match [a-z][a-z0-9]*_",
-            path,
+            source_map,
             prefix_value.span(),
             "identity.mid.prefix",
             prefix,
         )));
     }
-    let prefix = field(path, prefix_key, prefix_value, prefix.to_owned());
-    let mid = field(path, mid_key, mid_value, MidIdentity::new(format, prefix));
+    let prefix = field(source_map, prefix_key, prefix_value, prefix.to_owned());
+    let mid = field(
+        source_map,
+        mid_key,
+        mid_value,
+        MidIdentity::new(format, prefix),
+    );
     Ok(IdentityConfiguration::new(mid))
 }
 
-fn v1_unknown_key_diagnostics(entries: &[(ParsedNode, ParsedNode)], path: &str) -> Vec<Diagnostic> {
+fn v1_unknown_key_diagnostics(
+    entries: &[(ParsedNode, ParsedNode)],
+    source_map: &SourceMap<'_>,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     collect_unknown_key_diagnostics(
         entries,
@@ -1332,7 +1402,7 @@ fn v1_unknown_key_diagnostics(entries: &[(ParsedNode, ParsedNode)], path: &str) 
             "rules",
         ],
         "root",
-        path,
+        source_map,
         &mut diagnostics,
     );
 
@@ -1341,18 +1411,24 @@ fn v1_unknown_key_diagnostics(entries: &[(ParsedNode, ParsedNode)], path: &str) 
             entries,
             &["name", "version"],
             "schema",
-            path,
+            source_map,
             &mut diagnostics,
         );
     }
     if let Some((_, ParsedNode::Mapping { entries, .. })) = optional_entry(entries, "identity") {
-        collect_unknown_key_diagnostics(entries, &["mid"], "identity", path, &mut diagnostics);
+        collect_unknown_key_diagnostics(
+            entries,
+            &["mid"],
+            "identity",
+            source_map,
+            &mut diagnostics,
+        );
         if let Some((_, ParsedNode::Mapping { entries, .. })) = optional_entry(entries, "mid") {
             collect_unknown_key_diagnostics(
                 entries,
                 &["format", "prefix"],
                 "identity.mid",
-                path,
+                source_map,
                 &mut diagnostics,
             );
         }
@@ -1364,7 +1440,7 @@ fn collect_unknown_key_diagnostics(
     entries: &[(ParsedNode, ParsedNode)],
     allowed: &[&str],
     mapping: &'static str,
-    path: &str,
+    source_map: &SourceMap<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (key, _) in entries {
@@ -1374,7 +1450,7 @@ fn collect_unknown_key_diagnostics(
                 Diagnostic::new(
                     SchemaDiagnosticCode::UnknownKey,
                     format!("{mapping} contains unknown key {name:?}"),
-                    Some(parser_span(path, key.span())),
+                    Some(parser_span(source_map, key.span())),
                 )
                 .with_context(DiagnosticContext::new(Some(name.to_owned()), None, None))
                 .with_detail("key", name.to_owned())
@@ -1388,14 +1464,14 @@ fn required_entry<'a>(
     entries: &'a [(ParsedNode, ParsedNode)],
     name: &'static str,
     mapping: &'static str,
-    path: &str,
+    source_map: &SourceMap<'_>,
     mapping_span: ParsedSpan,
 ) -> DecodeResult<(&'a ParsedNode, &'a ParsedNode)> {
     optional_entry(entries, name).ok_or_else(|| {
         Box::new(
             invalid_declaration(
                 format!("{mapping} is missing required key {name:?}"),
-                path,
+                source_map,
                 mapping_span,
                 name,
             )
@@ -1418,7 +1494,7 @@ fn optional_entry<'a>(
 fn expect_string<'a>(
     node: &'a ParsedNode,
     field: &'static str,
-    path: &str,
+    source_map: &SourceMap<'_>,
 ) -> DecodeResult<&'a str> {
     let ParsedNode::Scalar {
         value, style, tag, ..
@@ -1426,7 +1502,7 @@ fn expect_string<'a>(
     else {
         return Err(Box::new(invalid_declaration(
             format!("{field} must be a string"),
-            path,
+            source_map,
             node.span(),
             field,
         )));
@@ -1434,7 +1510,7 @@ fn expect_string<'a>(
     if resolve_scalar(value, *style, tag.as_ref()).ok() != Some(ScalarKind::String) {
         return Err(Box::new(invalid_declaration(
             format!("{field} must be a string"),
-            path,
+            source_map,
             node.span(),
             field,
         )));
@@ -1456,39 +1532,49 @@ fn sequence_len(node: &ParsedNode) -> Option<usize> {
     }
 }
 
-fn field<T>(path: &str, key: &ParsedNode, value: &ParsedNode, decoded: T) -> SchemaField<T> {
+fn field<T>(
+    source_map: &SourceMap<'_>,
+    key: &ParsedNode,
+    value: &ParsedNode,
+    decoded: T,
+) -> SchemaField<T> {
     SchemaField::new(
-        parser_span(path, key.span()),
-        parser_span(path, value.span()),
+        parser_span(source_map, key.span()),
+        parser_span(source_map, value.span()),
         decoded,
     )
 }
 
-fn section(path: &str, key: &ParsedNode, value: &ParsedNode, len: usize) -> SchemaSection {
+fn section(
+    source_map: &SourceMap<'_>,
+    key: &ParsedNode,
+    value: &ParsedNode,
+    len: usize,
+) -> SchemaSection {
     SchemaSection::new(
-        parser_span(path, key.span()),
-        parser_span(path, value.span()),
+        parser_span(source_map, key.span()),
+        parser_span(source_map, value.span()),
         len,
     )
 }
 
 fn invalid_declaration(
     message: impl Into<String>,
-    path: &str,
+    source_map: &SourceMap<'_>,
     span: ParsedSpan,
     field: &'static str,
 ) -> Diagnostic {
     Diagnostic::new(
         SchemaDiagnosticCode::InvalidDeclaration,
         message,
-        Some(parser_span(path, span)),
+        Some(parser_span(source_map, span)),
     )
     .with_context(DiagnosticContext::new(Some(field.to_owned()), None, None))
 }
 
 fn invalid_name(
     message: impl Into<String>,
-    path: &str,
+    source_map: &SourceMap<'_>,
     span: ParsedSpan,
     field: &'static str,
     value: &str,
@@ -1496,7 +1582,7 @@ fn invalid_name(
     Diagnostic::new(
         SchemaDiagnosticCode::InvalidName,
         message,
-        Some(parser_span(path, span)),
+        Some(parser_span(source_map, span)),
     )
     .with_context(DiagnosticContext::new(Some(field.to_owned()), None, None))
     .with_detail("value", value.to_owned())
@@ -1547,9 +1633,10 @@ fn valid_semver(value: &str) -> bool {
         .is_match(value)
 }
 
-fn parser_span(path: &str, span: ParsedSpan) -> SourceSpan {
+fn parser_span(source_map: &SourceMap<'_>, span: ParsedSpan) -> SourceSpan {
     source_span(
-        path,
+        source_map.path,
+        source_map.source,
         span.start.byte,
         span.end.byte,
         span.start.line,
@@ -1559,9 +1646,10 @@ fn parser_span(path: &str, span: ParsedSpan) -> SourceSpan {
     )
 }
 
-fn marker_span(path: &str, marker: ParsedPosition) -> SourceSpan {
+fn marker_span(source_map: &SourceMap<'_>, marker: ParsedPosition) -> SourceSpan {
     source_span(
-        path,
+        source_map.path,
+        source_map.source,
         marker.byte,
         marker.byte,
         marker.line,
@@ -1574,6 +1662,7 @@ fn marker_span(path: &str, marker: ParsedPosition) -> SourceSpan {
 #[allow(clippy::too_many_arguments)]
 fn source_span(
     path: &str,
+    source: &str,
     start_byte: usize,
     end_byte: usize,
     start_line: usize,
@@ -1583,6 +1672,7 @@ fn source_span(
 ) -> SourceSpan {
     SourceSpan::try_new(
         path,
+        source,
         start_byte as u64,
         end_byte as u64,
         start_line as u64,
@@ -1741,7 +1831,7 @@ mod tests {
 
     #[test]
     fn diagnostic_sorting_uses_canonical_details_as_the_final_tie_breaker() {
-        let span = SourceSpan::try_new("schema.yaml", 0, 1, 1, 1, 1, 2).unwrap();
+        let span = SourceSpan::try_new("schema.yaml", "x", 0, 1, 1, 1, 1, 2).unwrap();
         let mut diagnostics = vec![
             Diagnostic::new(
                 SchemaDiagnosticCode::UnknownKey,
