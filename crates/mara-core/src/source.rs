@@ -34,6 +34,11 @@ impl SourceSpan {
         if start_line > end_line || (start_line == end_line && start_column > end_column) {
             return Err(InvalidSourceSpan::ReversedCoordinates);
         }
+        let empty_bytes = start_byte == end_byte;
+        let empty_coordinates = start_line == end_line && start_column == end_column;
+        if empty_bytes != empty_coordinates {
+            return Err(InvalidSourceSpan::InconsistentRange);
+        }
         Ok(Self {
             path,
             start_byte,
@@ -119,6 +124,7 @@ pub enum InvalidSourceSpan {
     ReversedBytes,
     ZeroCoordinate,
     ReversedCoordinates,
+    InconsistentRange,
 }
 
 impl fmt::Display for InvalidSourceSpan {
@@ -128,6 +134,9 @@ impl fmt::Display for InvalidSourceSpan {
             Self::ReversedBytes => "source byte range is reversed",
             Self::ZeroCoordinate => "source lines and columns are one-based",
             Self::ReversedCoordinates => "source coordinate range is reversed",
+            Self::InconsistentRange => {
+                "source byte and coordinate ranges disagree about whether the span is empty"
+            }
         };
         formatter.write_str(message)
     }
@@ -166,6 +175,14 @@ mod tests {
         assert_eq!(
             SourceSpan::try_new("schema.yaml", 2, 1, 1, 3, 1, 2),
             Err(InvalidSourceSpan::ReversedBytes)
+        );
+        assert_eq!(
+            SourceSpan::try_new("schema.yaml", 1, 1, 1, 2, 1, 3),
+            Err(InvalidSourceSpan::InconsistentRange)
+        );
+        assert_eq!(
+            SourceSpan::try_new("schema.yaml", 1, 2, 1, 2, 1, 2),
+            Err(InvalidSourceSpan::InconsistentRange)
         );
     }
 }

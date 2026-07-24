@@ -170,7 +170,11 @@ fn schema_source_path(project: &LoadedProject) -> Result<String, io::Error> {
     if components.is_empty() {
         return Err(io::Error::other("loaded schema path has no file name"));
     }
-    Ok(components.join("/"))
+    let source_path = components.join("/");
+    SourceSpan::try_new(source_path.as_str(), 0, 0, 1, 1, 1, 1).map_err(|_| {
+        io::Error::other("loaded schema path cannot be represented by a Mara source span")
+    })?;
+    Ok(source_path)
 }
 
 fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadError> {
@@ -192,9 +196,11 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
         return Err(SchemaLoadError::invalid(vec![diagnostic]));
     }
 
-    let source_map = SourceMap::new(source);
+    let parser_source = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let parser_start_byte = source.len() - parser_source.len();
+    let source_map = SourceMap::new(source, parser_start_byte);
     let mut receiver = TreeBuilder::new(&source_map);
-    if let Err(error) = Parser::new_from_str(source).load(&mut receiver, true) {
+    if let Err(error) = Parser::new_from_str(parser_source).load(&mut receiver, true) {
         let primary = marker_span(path, source_map.position(*error.marker()));
         return Err(SchemaLoadError::invalid(vec![
             Diagnostic::new(
@@ -355,30 +361,41 @@ impl ParsedSpan {
 struct SourceMap<'source> {
     source: &'source str,
     char_to_byte: Vec<usize>,
+    marker_index_offset: usize,
+    first_line_column_offset: usize,
 }
 
 impl<'source> SourceMap<'source> {
-    fn new(source: &'source str) -> Self {
+    fn new(source: &'source str, parser_start_byte: usize) -> Self {
         let mut char_to_byte = source
             .char_indices()
             .map(|(byte, _)| byte)
             .collect::<Vec<_>>();
         char_to_byte.push(source.len());
+        let marker_index_offset = source[..parser_start_byte].chars().count();
         Self {
             source,
             char_to_byte,
+            marker_index_offset,
+            first_line_column_offset: marker_index_offset,
         }
     }
 
     fn position(&self, marker: Marker) -> ParsedPosition {
         let byte = *self
             .char_to_byte
-            .get(marker.index())
+            .get(marker.index() + self.marker_index_offset)
             .expect("YAML parser marker is inside its UTF-8 input");
         ParsedPosition {
             byte,
             line: marker.line(),
-            column: marker.col() + 1,
+            column: marker.col()
+                + 1
+                + if marker.line() == 1 {
+                    self.first_line_column_offset
+                } else {
+                    0
+                },
         }
     }
 

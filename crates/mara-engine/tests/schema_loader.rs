@@ -227,6 +227,25 @@ fn loads_valid_v1_identity_and_preserves_every_decoded_key_and_value_span() {
 }
 
 #[test]
+fn accepts_an_initial_utf8_bom_and_preserves_original_offsets() {
+    let schema = VALID_SCHEMA
+        .strip_prefix("# strict v1 fixture\n")
+        .expect("the shared fixture starts with its descriptive comment");
+    let source = format!("\u{feff}{schema}");
+    let fixture = Fixture::new(&source);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+
+    assert_eq!(document.source().start_byte(), 0);
+    assert_eq!(document.source().end_byte(), source.len() as u64);
+    assert_eq!(document.format_version().key_source().start_byte(), 3);
+    assert_eq!(document.format_version().key_source().start_column(), 2);
+    assert_eq!(
+        source_slice(&source, document.format_version().key_source()),
+        "format_version"
+    );
+}
+
+#[test]
 fn accepts_empty_flavours_and_keeps_omitted_collections_absent() {
     let source = r#"format_version: 1
 schema:
@@ -787,16 +806,21 @@ fn parser_library_details_do_not_escape_the_public_schema_result() {
 fn rejects_canonical_schema_paths_that_are_not_wire_safe_without_panicking() {
     use std::os::unix::fs::symlink;
 
-    let fixture = Fixture::new(VALID_SCHEMA);
-    fs::remove_file(fixture.schema_path()).unwrap();
-    let target = fixture.root.join(".mara/target\\schema.yaml");
-    fs::write(&target, VALID_SCHEMA).unwrap();
-    symlink("target\\schema.yaml", fixture.schema_path()).unwrap();
-    let project = fixture.loaded_project();
+    for (target_relative, symlink_target) in [
+        (".mara/target\\schema.yaml", "target\\schema.yaml"),
+        ("C:schema.yaml", "../C:schema.yaml"),
+        ("https:schema.yaml", "../https:schema.yaml"),
+    ] {
+        let fixture = Fixture::new(VALID_SCHEMA);
+        fs::remove_file(fixture.schema_path()).unwrap();
+        fs::write(fixture.root.join(target_relative), VALID_SCHEMA).unwrap();
+        symlink(symlink_target, fixture.schema_path()).unwrap();
+        let project = fixture.loaded_project();
 
-    let error = load_schema(&project).unwrap_err();
+        let error = load_schema(&project).unwrap_err();
 
-    assert_code(only_diagnostic(&error), SchemaDiagnosticCode::Io);
-    assert_eq!(error.path(), Some(project.schema_path.as_path()));
-    assert!(error.io_source().is_some());
+        assert_code(only_diagnostic(&error), SchemaDiagnosticCode::Io);
+        assert_eq!(error.path(), Some(project.schema_path.as_path()));
+        assert!(error.io_source().is_some());
+    }
 }
