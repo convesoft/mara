@@ -1100,6 +1100,8 @@ fn validate_glob(glob: &str) -> Result<(), &'static str> {
         }
         validate_glob_segment(segment)?;
     }
+    crate::content::compile_content_glob(glob)
+        .map_err(|_| "glob cannot be compiled by the content matcher")?;
     Ok(())
 }
 

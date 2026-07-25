@@ -303,28 +303,64 @@ fn compile_globs(patterns: &[String]) -> Vec<Glob<'static>> {
     patterns
         .iter()
         .map(|pattern| {
-            let pattern = escape_wax_extensions(pattern);
-            let expression = if let Some(pattern) = pattern.strip_prefix("**/") {
-                format!("**/(?-i){pattern}")
-            } else if pattern == "**" {
-                pattern
-            } else {
-                format!("(?-i){pattern}")
-            };
-            Glob::new(&expression)
-                .expect("the project loader validated every content glob")
-                .into_owned()
+            compile_content_glob(pattern).expect("the project loader validated every content glob")
         })
         .collect()
 }
 
-fn escape_wax_extensions(pattern: &str) -> String {
+pub(crate) fn compile_content_glob(pattern: &str) -> Result<Glob<'static>, wax::BuildError> {
+    let pattern = wax_expression(pattern);
+    let expression = if let Some(pattern) = pattern.strip_prefix("**/") {
+        format!("**/(?-i){pattern}")
+    } else if pattern == "**" {
+        pattern
+    } else {
+        format!("(?-i){pattern}")
+    };
+    Glob::new(&expression).map(Glob::into_owned)
+}
+
+fn wax_expression(pattern: &str) -> String {
+    let characters: Vec<char> = pattern.chars().collect();
     let mut expression = String::with_capacity(pattern.len());
-    for character in pattern.chars() {
-        if matches!(character, '$' | '(' | ')' | '<' | '>') {
+    let mut index = 0;
+    while index < characters.len() {
+        if characters[index] == '[' {
+            let close = index
+                + 1
+                + characters[index + 1..]
+                    .iter()
+                    .position(|character| *character == ']')
+                    .expect("the project loader validated every character class");
+            expression.push('[');
+            let mut content_index = index + 1;
+            if characters[content_index] == '!' {
+                expression.push('!');
+                content_index += 1;
+            }
+            while content_index < close {
+                let character = characters[content_index];
+                if character == '[' {
+                    expression.push('\\');
+                } else if character == '-'
+                    && content_index >= index + 3
+                    && characters[content_index - 2] == '-'
+                {
+                    expression.push(characters[content_index - 1]);
+                }
+                expression.push(character);
+                content_index += 1;
+            }
+            expression.push(']');
+            index = close + 1;
+            continue;
+        }
+        let character = characters[index];
+        if matches!(character, '$' | '(' | ')' | '<' | '>' | ',') {
             expression.push('\\');
         }
         expression.push(character);
+        index += 1;
     }
     expression
 }

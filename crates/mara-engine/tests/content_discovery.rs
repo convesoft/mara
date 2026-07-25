@@ -98,6 +98,8 @@ fn configured_globs_select_files_with_deterministic_precedence_and_order() {
             "extensions/$cash.md",
             "extensions/(flag).md",
             "extensions/<repeat>.md",
+            "extensions/name,part.md",
+            "classes/[a-b-c].txt",
         ],
         &["docs/excluded*.mara.md", "classes/b.md"],
         false,
@@ -122,6 +124,9 @@ fn configured_globs_select_files_with_deterministic_precedence_and_order() {
         "extensions/$cash.md",
         "extensions/(flag).md",
         "extensions/<repeat>.md",
+        "extensions/name,part.md",
+        "classes/c.txt",
+        "classes/d.txt",
         "ordinary.md",
     ] {
         fixture.write(path, path);
@@ -137,10 +142,12 @@ fn configured_globs_select_files_with_deterministic_precedence_and_order() {
         [
             "a.mara.md",
             "classes/a.md",
+            "classes/c.txt",
             "docs/kept.mara.md",
             "extensions/$cash.md",
             "extensions/(flag).md",
             "extensions/<repeat>.md",
+            "extensions/name,part.md",
             "literal/?.md",
             "negative/b.md",
             "notes/file1.md",
