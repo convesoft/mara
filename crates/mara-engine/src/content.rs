@@ -280,12 +280,25 @@ fn content_walker(
         .follow_links(project.content.follow_directory_symlinks);
 
     let root = project.root.clone();
+    let include_patterns = project.content.include.clone();
     let follow_directory_symlinks = project.content.follow_directory_symlinks;
     builder.filter_entry(move |entry| {
-        if entry.depth() == 0 || !entry.path_is_symlink() {
+        if entry.depth() == 0 {
             return true;
         }
-        let is_directory = fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_dir());
+        let is_directory = entry.file_type().is_some_and(|kind| kind.is_dir())
+            || (entry.path_is_symlink()
+                && fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_dir()));
+        if is_directory
+            && lossy_relative_path(&root, entry.path())
+                .as_deref()
+                .is_some_and(|path| !directory_is_include_reachable(&include_patterns, path))
+        {
+            return false;
+        }
+        if !entry.path_is_symlink() {
+            return true;
+        }
         if !is_directory {
             return true;
         }
@@ -456,6 +469,22 @@ fn is_fully_excluded_tree(excludes: &[String], path: &str) -> bool {
     })
 }
 
+fn directory_is_include_reachable(includes: &[String], path: &str) -> bool {
+    includes.iter().any(|pattern| {
+        let literal_prefix = pattern
+            .split('/')
+            .take_while(|segment| {
+                *segment != "**" && !segment.chars().any(|c| matches!(c, '*' | '?' | '['))
+            })
+            .collect::<Vec<_>>()
+            .join("/");
+        literal_prefix.is_empty()
+            || path == literal_prefix
+            || path.starts_with(&format!("{literal_prefix}/"))
+            || literal_prefix.starts_with(&format!("{path}/"))
+    })
+}
+
 fn finalize_diagnostics(diagnostics: &mut [Diagnostic]) {
     sort_diagnostics(diagnostics);
 }
@@ -561,15 +590,16 @@ fn open_candidate(
     };
     verify_parent_directory_policy(project, candidate)?;
     let file = open_read_no_follow(open_path)
-        .map_err(|_| open_failure_diagnostic(project, candidate, "open"))?;
-    let identity = file_identity(&file).map_err(|_| {
+        .map_err(|error| open_failure_diagnostic(project, candidate, "open", &error))?;
+    let identity = file_identity(&file).map_err(|error| {
         Box::new(
             diagnostic_at_start(
                 ContentDiagnosticCode::Io,
                 &candidate.source_path,
                 "could not identify opened content input",
             )
-            .with_detail("operation", "identify"),
+            .with_detail("operation", "identify")
+            .with_detail("cause", error.to_string()),
         )
     })?;
     verify_candidate_path(project, candidate, &resolved_path, identity)?;
@@ -586,14 +616,15 @@ fn decode_candidate(
     mut file: fs::File,
 ) -> Result<SourceDocument, Box<Diagnostic>> {
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|_| {
+    file.read_to_end(&mut bytes).map_err(|error| {
         Box::new(
             diagnostic_at_start(
                 ContentDiagnosticCode::Io,
                 &candidate.source_path,
                 "could not read content input",
             )
-            .with_detail("operation", "read"),
+            .with_detail("operation", "read")
+            .with_detail("cause", error.to_string()),
         )
     })?;
     let source = match std::str::from_utf8(&bytes) {
@@ -707,7 +738,7 @@ fn verify_candidate_path(
         candidate.logical_path.as_path()
     };
     let rechecked_file = open_read_no_follow(recheck_open_path)
-        .map_err(|_| open_failure_diagnostic(project, candidate, "reopen"))?;
+        .map_err(|error| open_failure_diagnostic(project, candidate, "reopen", &error))?;
     let rechecked_identity = file_identity(&rechecked_file).map_err(|_| {
         Box::new(
             diagnostic_at_start(
@@ -772,6 +803,7 @@ fn open_failure_diagnostic(
     project: &LoadedProject,
     candidate: &Candidate,
     operation: &'static str,
+    error: &std::io::Error,
 ) -> Box<Diagnostic> {
     if !project.content.allow_internal_file_symlinks
         && fs::symlink_metadata(&candidate.logical_path)
@@ -792,7 +824,8 @@ fn open_failure_diagnostic(
                 &candidate.source_path,
                 "could not open content input",
             )
-            .with_detail("operation", operation),
+            .with_detail("operation", operation)
+            .with_detail("cause", error.to_string()),
         )
     }
 }
@@ -907,6 +940,18 @@ mod tests {
         finalize_diagnostics(&mut diagnostics);
 
         assert_eq!(diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn include_prefixes_prune_only_unreachable_directories() {
+        let includes = vec!["docs/**/*.mara.md".to_owned()];
+        assert!(directory_is_include_reachable(&includes, "docs"));
+        assert!(directory_is_include_reachable(&includes, "docs/nested"));
+        assert!(!directory_is_include_reachable(&includes, "vendor"));
+        assert!(directory_is_include_reachable(
+            &["**/*.mara.md".to_owned()],
+            "vendor"
+        ));
     }
 
     #[cfg(unix)]
