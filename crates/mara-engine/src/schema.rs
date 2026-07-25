@@ -1973,8 +1973,10 @@ fn decode_optional_pattern(
     };
     let field_name = format!("{mapping}.{name}");
     let pattern = expect_string(value, &field_name, source_map)?;
-    let whole_value_pattern = format!(r"\A(?:{pattern})\z");
-    if UnicodeRegex::new(&whole_value_pattern).is_err() {
+    // Compile the authored expression directly. Later value validation enforces
+    // whole-string matching from match bounds; textual wrapping would corrupt a
+    // valid verbose-mode pattern that ends in a comment.
+    if UnicodeRegex::new(pattern).is_err() {
         return Err(Box::new(
             Diagnostic::new(
                 SchemaDiagnosticCode::InvalidPattern,

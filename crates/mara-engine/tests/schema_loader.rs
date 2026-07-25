@@ -474,6 +474,25 @@ fn accepts_unicode_rust_patterns_and_rejects_invalid_patterns_at_the_value() {
         r"\p{Greek}+"
     );
 
+    let verbose_comment = RICH_SCHEMA.replace(
+        "pattern: REQ-[0-9]+",
+        "pattern: '(?x)REQ-[0-9]+ # trailing comment'",
+    );
+    let fixture = Fixture::new(&verbose_comment);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+    assert_eq!(
+        document
+            .flavours()
+            .get("requirement")
+            .unwrap()
+            .display_id()
+            .value()
+            .pattern()
+            .unwrap()
+            .value(),
+        "(?x)REQ-[0-9]+ # trailing comment"
+    );
+
     for source in [
         RICH_SCHEMA.replace("pattern: REQ-[0-9]+", "pattern: '('"),
         RICH_SCHEMA.replace("pattern: .+", "pattern: '[unterminated'"),
