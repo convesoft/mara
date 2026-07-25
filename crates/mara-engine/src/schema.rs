@@ -1,7 +1,7 @@
-//! Strict loading of the configured v1 Mara schema document and identity.
+//! Strict loading and compilation of the configured v1 Mara schema document.
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     error::Error,
     fmt,
     io::{self, Read},
@@ -10,11 +10,14 @@ use std::{
 };
 
 use mara_core::{
-    Diagnostic, DiagnosticContext, DiagnosticSeverity, DiagnosticValue, IdentityConfiguration,
-    MidFormat, MidIdentity, RelatedDiagnostic, SchemaDiagnosticCode, SchemaDocument, SchemaField,
-    SchemaIdentity, SchemaSection, SourceIndex, SourceSpan,
+    Diagnostic, DiagnosticContext, DiagnosticSeverity, DiagnosticValue, DisplayIdDefinition,
+    FieldDefinition, FieldType, FlavourDefinition, FlavourDefinitions, FlavourGuidance,
+    IdentityConfiguration, MidFormat, MidIdentity, RelatedDiagnostic, RequiredBuiltInDefinition,
+    SchemaDiagnosticCode, SchemaDocument, SchemaField, SchemaIdentity, SchemaSection, SchemaValue,
+    SourceIndex, SourceSpan,
 };
-use regex_lite::Regex;
+use regex::Regex as UnicodeRegex;
+use regex_lite::Regex as LiteRegex;
 use saphyr_parser::{Event, Marker, Parser, ScalarStyle, Span, SpannedEventReceiver, Tag};
 
 use crate::project::{LoadedProject, open_loaded_schema};
@@ -1387,15 +1390,7 @@ fn decode_v1_document(
 
     let (flavours_key, flavours_value) =
         required_entry(entries, "flavours", "root", source_map, *root_span)?;
-    let flavours_len = mapping_len(flavours_value).ok_or_else(|| {
-        invalid_declaration(
-            "root.flavours must be a mapping",
-            source_map,
-            flavours_value.span(),
-            "flavours",
-        )
-    })?;
-    let flavours = section(source_map, flavours_key, flavours_value, flavours_len);
+    let flavours = decode_flavours(flavours_key, flavours_value, source_map)?;
 
     let relations = if let Some((key, value)) = optional_entry(entries, "relations") {
         let Some(len) = mapping_len(value) else {
@@ -1605,6 +1600,524 @@ fn decode_identity(
     Ok(IdentityConfiguration::new(mid))
 }
 
+fn decode_flavours(
+    key: &ParsedNode,
+    node: &ParsedNode,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<FlavourDefinitions> {
+    let entries = expect_mapping(node, "root.flavours", source_map)?;
+    let mut declared_names = BTreeSet::new();
+    for (name_node, _) in entries {
+        let (name, _) = string_key(name_node).expect("profile validation requires string keys");
+        if !valid_snake_name(name) {
+            return Err(Box::new(invalid_name(
+                "flavour names must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
+                source_map,
+                name_node.span(),
+                "flavours",
+                name,
+            )));
+        }
+        declared_names.insert(name.to_owned());
+    }
+
+    let mut definitions = BTreeMap::new();
+    for (name_node, definition_node) in entries {
+        let (name, _) = string_key(name_node).expect("profile validation requires string keys");
+        let definition = decode_flavour(
+            name,
+            name_node,
+            definition_node,
+            &declared_names,
+            source_map,
+        )?;
+        definitions.insert(name.to_owned(), definition);
+    }
+
+    Ok(FlavourDefinitions::new(
+        parser_span(source_map, key.span()),
+        parser_span(source_map, node.span()),
+        definitions,
+    ))
+}
+
+fn decode_flavour(
+    name: &str,
+    name_node: &ParsedNode,
+    node: &ParsedNode,
+    declared_names: &BTreeSet<String>,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<FlavourDefinition> {
+    let mapping = format!("flavours.{name}");
+    let entries = expect_mapping(node, &mapping, source_map)?;
+
+    let (label_key, label_value) =
+        required_entry(entries, "label", &mapping, source_map, node.span())?;
+    let label_field = format!("{mapping}.label");
+    let label = expect_non_empty_string(label_value, &label_field, source_map)?;
+    let label = field(source_map, label_key, label_value, label.to_owned());
+
+    let (description_key, description_value) =
+        required_entry(entries, "description", &mapping, source_map, node.span())?;
+    let description_field = format!("{mapping}.description");
+    let description = expect_non_empty_string(description_value, &description_field, source_map)?;
+    let description = field(
+        source_map,
+        description_key,
+        description_value,
+        description.to_owned(),
+    );
+
+    let (guidance_key, guidance_value) =
+        required_entry(entries, "guidance", &mapping, source_map, node.span())?;
+    let guidance = decode_guidance(name, guidance_value, declared_names, source_map)?;
+    let guidance = field(source_map, guidance_key, guidance_value, guidance);
+
+    let (id_key, id_value) = required_entry(entries, "id", &mapping, source_map, node.span())?;
+    let display_id = decode_display_id(name, id_value, source_map)?;
+    let display_id = field(source_map, id_key, id_value, display_id);
+
+    let (title_key, title_value) =
+        required_entry(entries, "title", &mapping, source_map, node.span())?;
+    let title = decode_required_builtin(name, "title", title_value, source_map)?;
+    let title = field(source_map, title_key, title_value, title);
+
+    let (body_key, body_value) =
+        required_entry(entries, "body", &mapping, source_map, node.span())?;
+    let body = decode_required_builtin(name, "body", body_value, source_map)?;
+    let body = field(source_map, body_key, body_value, body);
+
+    let (fields_source, fields) = decode_fields(name, entries, source_map)?;
+
+    Ok(FlavourDefinition::new(
+        name.to_owned(),
+        parser_span(source_map, name_node.span()),
+        parser_span(source_map, node.span()),
+        label,
+        description,
+        guidance,
+        display_id,
+        title,
+        body,
+        fields_source,
+        fields,
+    ))
+}
+
+fn decode_guidance(
+    flavour: &str,
+    node: &ParsedNode,
+    declared_names: &BTreeSet<String>,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<FlavourGuidance> {
+    let mapping = format!("flavours.{flavour}.guidance");
+    let entries = expect_mapping(node, &mapping, source_map)?;
+
+    let (use_when_key, use_when_value) =
+        required_entry(entries, "use_when", &mapping, source_map, node.span())?;
+    let use_when_field = format!("{mapping}.use_when");
+    let use_when_values =
+        decode_unique_string_sequence(use_when_value, &use_when_field, true, source_map)?;
+    let use_when = field(source_map, use_when_key, use_when_value, use_when_values);
+
+    let (avoid_when_key, avoid_when_value) =
+        required_entry(entries, "avoid_when", &mapping, source_map, node.span())?;
+    let avoid_when_field = format!("{mapping}.avoid_when");
+    let avoid_when_values =
+        decode_unique_string_sequence(avoid_when_value, &avoid_when_field, true, source_map)?;
+    let avoid_when = field(
+        source_map,
+        avoid_when_key,
+        avoid_when_value,
+        avoid_when_values,
+    );
+
+    let (distinguish_from_source, distinguish_from) =
+        if let Some((key, value)) = optional_entry(entries, "distinguish_from") {
+            let distinction_mapping = format!("{mapping}.distinguish_from");
+            let distinctions = expect_mapping(value, &distinction_mapping, source_map)?;
+            let mut compiled = BTreeMap::new();
+            for (target_node, explanation_node) in distinctions {
+                let (target, _) =
+                    string_key(target_node).expect("profile validation requires string keys");
+                if target == flavour {
+                    return Err(Box::new(invalid_declaration(
+                        format!("flavour {flavour:?} cannot distinguish itself"),
+                        source_map,
+                        target_node.span(),
+                        &distinction_mapping,
+                    )));
+                }
+                if !declared_names.contains(target) {
+                    return Err(Box::new(
+                        invalid_declaration(
+                            format!("distinction target {target:?} is not a declared flavour"),
+                            source_map,
+                            target_node.span(),
+                            &distinction_mapping,
+                        )
+                        .with_detail("target", target.to_owned()),
+                    ));
+                }
+                let explanation_field = format!("{distinction_mapping}.{target}");
+                let explanation =
+                    expect_non_empty_string(explanation_node, &explanation_field, source_map)?;
+                compiled.insert(
+                    target.to_owned(),
+                    field(
+                        source_map,
+                        target_node,
+                        explanation_node,
+                        explanation.to_owned(),
+                    ),
+                );
+            }
+            (
+                Some(section(source_map, key, value, distinctions.len())),
+                compiled,
+            )
+        } else {
+            (None, BTreeMap::new())
+        };
+
+    Ok(FlavourGuidance::new(
+        use_when,
+        avoid_when,
+        distinguish_from_source,
+        distinguish_from,
+    ))
+}
+
+fn decode_display_id(
+    flavour: &str,
+    node: &ParsedNode,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<DisplayIdDefinition> {
+    let mapping = format!("flavours.{flavour}.id");
+    let entries = expect_mapping(node, &mapping, source_map)?;
+    let required = decode_optional_boolean(entries, "required", &mapping, source_map)?;
+    let pattern = decode_optional_pattern(entries, "pattern", &mapping, source_map)?;
+    Ok(DisplayIdDefinition::new(required, pattern))
+}
+
+fn decode_required_builtin(
+    flavour: &str,
+    builtin: &str,
+    node: &ParsedNode,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<RequiredBuiltInDefinition> {
+    let mapping = format!("flavours.{flavour}.{builtin}");
+    let entries = expect_mapping(node, &mapping, source_map)?;
+    let required = decode_optional_boolean(entries, "required", &mapping, source_map)?;
+    Ok(RequiredBuiltInDefinition::new(required))
+}
+
+fn decode_fields(
+    flavour: &str,
+    flavour_entries: &[(ParsedNode, ParsedNode)],
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<(Option<SchemaSection>, BTreeMap<String, FieldDefinition>)> {
+    let Some((key, value)) = optional_entry(flavour_entries, "fields") else {
+        return Ok((None, BTreeMap::new()));
+    };
+    let mapping = format!("flavours.{flavour}.fields");
+    let entries = expect_mapping(value, &mapping, source_map)?;
+    let source = section(source_map, key, value, entries.len());
+    let mut definitions = BTreeMap::new();
+
+    for (name_node, definition_node) in entries {
+        let (name, _) = string_key(name_node).expect("profile validation requires string keys");
+        if !valid_snake_name(name) {
+            return Err(Box::new(invalid_name(
+                "field names must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
+                source_map,
+                name_node.span(),
+                &mapping,
+                name,
+            )));
+        }
+        if is_reserved_field_name(name) {
+            return Err(Box::new(
+                invalid_name(
+                    format!("field name {name:?} is reserved"),
+                    source_map,
+                    name_node.span(),
+                    &mapping,
+                    name,
+                )
+                .with_detail("name", name.to_owned()),
+            ));
+        }
+        let definition = decode_field(flavour, name, name_node, definition_node, source_map)?;
+        definitions.insert(name.to_owned(), definition);
+    }
+
+    Ok((Some(source), definitions))
+}
+
+fn decode_field(
+    flavour: &str,
+    name: &str,
+    name_node: &ParsedNode,
+    node: &ParsedNode,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<FieldDefinition> {
+    let mapping = format!("flavours.{flavour}.fields.{name}");
+    let entries = expect_mapping(node, &mapping, source_map)?;
+
+    let (type_key, type_value) =
+        required_entry(entries, "type", &mapping, source_map, node.span())?;
+    let type_field = format!("{mapping}.type");
+    let raw_type = expect_string(type_value, &type_field, source_map)?;
+    let field_type = match raw_type {
+        "string" => FieldType::String,
+        "integer" => FieldType::Integer,
+        "number" => FieldType::Number,
+        "boolean" => FieldType::Boolean,
+        "enum" => FieldType::Enum,
+        _ => {
+            return Err(Box::new(
+                invalid_declaration(
+                    "field type must be string, integer, number, boolean, or enum",
+                    source_map,
+                    type_value.span(),
+                    &type_field,
+                )
+                .with_detail("value", raw_type.to_owned()),
+            ));
+        }
+    };
+    let field_type = field(source_map, type_key, type_value, field_type);
+    let required = decode_optional_boolean(entries, "required", &mapping, source_map)?;
+    let repeatable = decode_optional_boolean(entries, "repeatable", &mapping, source_map)?;
+
+    let values = match (field_type.value(), optional_entry(entries, "values")) {
+        (FieldType::Enum, Some((values_key, values_value))) => {
+            let values_field = format!("{mapping}.values");
+            let values =
+                decode_unique_string_sequence(values_value, &values_field, false, source_map)?;
+            Some(field(source_map, values_key, values_value, values))
+        }
+        (FieldType::Enum, None) => {
+            return Err(Box::new(
+                invalid_declaration(
+                    "enum fields require a non-empty values sequence",
+                    source_map,
+                    node.span(),
+                    &mapping,
+                )
+                .with_detail("key", "values"),
+            ));
+        }
+        (_, Some((values_key, _))) => {
+            return Err(Box::new(invalid_declaration(
+                "values is permitted only for enum fields",
+                source_map,
+                values_key.span(),
+                &mapping,
+            )));
+        }
+        (_, None) => None,
+    };
+
+    let pattern = match (field_type.value(), optional_entry(entries, "pattern")) {
+        (FieldType::String, Some(_)) => {
+            decode_optional_pattern(entries, "pattern", &mapping, source_map)?
+        }
+        (FieldType::String, None) => None,
+        (_, Some((pattern_key, _))) => {
+            return Err(Box::new(invalid_declaration(
+                "pattern is permitted only for string fields",
+                source_map,
+                pattern_key.span(),
+                &mapping,
+            )));
+        }
+        (_, None) => None,
+    };
+
+    Ok(FieldDefinition::new(
+        name.to_owned(),
+        parser_span(source_map, name_node.span()),
+        parser_span(source_map, node.span()),
+        field_type,
+        required,
+        repeatable,
+        values,
+        pattern,
+    ))
+}
+
+fn decode_optional_boolean(
+    entries: &[(ParsedNode, ParsedNode)],
+    name: &str,
+    mapping: &str,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<Option<SchemaField<bool>>> {
+    let Some((key, value)) = optional_entry(entries, name) else {
+        return Ok(None);
+    };
+    let field_name = format!("{mapping}.{name}");
+    let decoded = expect_boolean(value, &field_name, source_map)?;
+    Ok(Some(field(source_map, key, value, decoded)))
+}
+
+fn decode_optional_pattern(
+    entries: &[(ParsedNode, ParsedNode)],
+    name: &str,
+    mapping: &str,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<Option<SchemaField<String>>> {
+    let Some((key, value)) = optional_entry(entries, name) else {
+        return Ok(None);
+    };
+    let field_name = format!("{mapping}.{name}");
+    let pattern = expect_string(value, &field_name, source_map)?;
+    let whole_value_pattern = format!(r"\A(?:{pattern})\z");
+    if UnicodeRegex::new(&whole_value_pattern).is_err() {
+        return Err(Box::new(
+            Diagnostic::new(
+                SchemaDiagnosticCode::InvalidPattern,
+                format!("{field_name} is not a valid Rust regex pattern"),
+                Some(parser_span(source_map, value.span())),
+            )
+            .with_context(DiagnosticContext::new(Some(field_name), None, None))
+            .with_detail("pattern", pattern.to_owned()),
+        ));
+    }
+    Ok(Some(field(source_map, key, value, pattern.to_owned())))
+}
+
+fn decode_unique_string_sequence(
+    node: &ParsedNode,
+    field_name: &str,
+    reject_empty_values: bool,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<Vec<SchemaValue<String>>> {
+    let values = expect_sequence(node, field_name, source_map)?;
+    if values.is_empty() {
+        return Err(Box::new(invalid_declaration(
+            format!("{field_name} must be a non-empty sequence"),
+            source_map,
+            node.span(),
+            field_name,
+        )));
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut compiled = Vec::with_capacity(values.len());
+    for value_node in values {
+        let value = expect_string(value_node, field_name, source_map)?;
+        if reject_empty_values && value.is_empty() {
+            return Err(Box::new(invalid_declaration(
+                format!("{field_name} entries must be non-empty strings"),
+                source_map,
+                value_node.span(),
+                field_name,
+            )));
+        }
+        if !seen.insert(value.to_owned()) {
+            return Err(Box::new(
+                invalid_declaration(
+                    format!("{field_name} entries must be unique"),
+                    source_map,
+                    value_node.span(),
+                    field_name,
+                )
+                .with_detail("value", value.to_owned()),
+            ));
+        }
+        compiled.push(SchemaValue::new(
+            parser_span(source_map, value_node.span()),
+            value.to_owned(),
+        ));
+    }
+    Ok(compiled)
+}
+
+fn expect_mapping<'a>(
+    node: &'a ParsedNode,
+    field_name: &str,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<&'a [(ParsedNode, ParsedNode)]> {
+    let ParsedNode::Mapping { entries, .. } = node else {
+        return Err(Box::new(invalid_declaration(
+            format!("{field_name} must be a mapping"),
+            source_map,
+            node.span(),
+            field_name,
+        )));
+    };
+    Ok(entries)
+}
+
+fn expect_sequence<'a>(
+    node: &'a ParsedNode,
+    field_name: &str,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<&'a [ParsedNode]> {
+    let ParsedNode::Sequence { values, .. } = node else {
+        return Err(Box::new(invalid_declaration(
+            format!("{field_name} must be a sequence"),
+            source_map,
+            node.span(),
+            field_name,
+        )));
+    };
+    Ok(values)
+}
+
+fn expect_non_empty_string<'a>(
+    node: &'a ParsedNode,
+    field_name: &str,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<&'a str> {
+    let value = expect_string(node, field_name, source_map)?;
+    if value.is_empty() {
+        return Err(Box::new(invalid_declaration(
+            format!("{field_name} must be a non-empty string"),
+            source_map,
+            node.span(),
+            field_name,
+        )));
+    }
+    Ok(value)
+}
+
+fn expect_boolean(
+    node: &ParsedNode,
+    field_name: &str,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<bool> {
+    let ParsedNode::Scalar {
+        value, style, tag, ..
+    } = node
+    else {
+        return Err(Box::new(invalid_declaration(
+            format!("{field_name} must be a boolean"),
+            source_map,
+            node.span(),
+            field_name,
+        )));
+    };
+    if resolve_scalar(value, *style, tag.as_ref()).ok() != Some(ScalarKind::Boolean) {
+        return Err(Box::new(invalid_declaration(
+            format!("{field_name} must be a boolean"),
+            source_map,
+            node.span(),
+            field_name,
+        )));
+    }
+    Ok(matches!(value.as_str(), "true" | "True" | "TRUE"))
+}
+
+fn is_reserved_field_name(name: &str) -> bool {
+    matches!(
+        name,
+        "mid" | "flavour" | "id" | "title" | "body" | "source_location" | "mentions"
+    )
+}
+
 fn v1_unknown_key_diagnostics(
     entries: &[(ParsedNode, ParsedNode)],
     source_map: &SourceMap<'_>,
@@ -1652,13 +2165,111 @@ fn v1_unknown_key_diagnostics(
             );
         }
     }
+    if let Some((_, ParsedNode::Mapping { entries, .. })) = optional_entry(entries, "flavours") {
+        collect_flavour_unknown_key_diagnostics(entries, source_map, &mut diagnostics);
+    }
     diagnostics
+}
+
+fn collect_flavour_unknown_key_diagnostics(
+    flavours: &[(ParsedNode, ParsedNode)],
+    source_map: &SourceMap<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for (flavour_key, flavour_value) in flavours {
+        let (flavour, _) =
+            string_key(flavour_key).expect("profile validation requires string keys");
+        let ParsedNode::Mapping {
+            entries: flavour_entries,
+            ..
+        } = flavour_value
+        else {
+            continue;
+        };
+        let flavour_mapping = format!("flavours.{flavour}");
+        collect_unknown_key_diagnostics(
+            flavour_entries,
+            &[
+                "label",
+                "description",
+                "guidance",
+                "id",
+                "title",
+                "body",
+                "fields",
+            ],
+            &flavour_mapping,
+            source_map,
+            diagnostics,
+        );
+
+        if let Some((_, ParsedNode::Mapping { entries, .. })) =
+            optional_entry(flavour_entries, "guidance")
+        {
+            let mapping = format!("{flavour_mapping}.guidance");
+            collect_unknown_key_diagnostics(
+                entries,
+                &["use_when", "avoid_when", "distinguish_from"],
+                &mapping,
+                source_map,
+                diagnostics,
+            );
+        }
+        if let Some((_, ParsedNode::Mapping { entries, .. })) =
+            optional_entry(flavour_entries, "id")
+        {
+            let mapping = format!("{flavour_mapping}.id");
+            collect_unknown_key_diagnostics(
+                entries,
+                &["required", "pattern"],
+                &mapping,
+                source_map,
+                diagnostics,
+            );
+        }
+        for builtin in ["title", "body"] {
+            if let Some((_, ParsedNode::Mapping { entries, .. })) =
+                optional_entry(flavour_entries, builtin)
+            {
+                let mapping = format!("{flavour_mapping}.{builtin}");
+                collect_unknown_key_diagnostics(
+                    entries,
+                    &["required"],
+                    &mapping,
+                    source_map,
+                    diagnostics,
+                );
+            }
+        }
+        if let Some((
+            _,
+            ParsedNode::Mapping {
+                entries: fields, ..
+            },
+        )) = optional_entry(flavour_entries, "fields")
+        {
+            for (field_key, field_value) in fields {
+                let (field_name, _) =
+                    string_key(field_key).expect("profile validation requires string keys");
+                if let ParsedNode::Mapping { entries, .. } = field_value {
+                    let mapping = format!("{flavour_mapping}.fields.{field_name}");
+                    collect_unknown_key_diagnostics(
+                        entries,
+                        &["type", "required", "repeatable", "values", "pattern"],
+                        &mapping,
+                        source_map,
+                        diagnostics,
+                    );
+                }
+            }
+        }
+    }
 }
 
 fn collect_unknown_key_diagnostics(
     entries: &[(ParsedNode, ParsedNode)],
     allowed: &[&str],
-    mapping: &'static str,
+    mapping: &str,
     source_map: &SourceMap<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -1681,8 +2292,8 @@ fn collect_unknown_key_diagnostics(
 
 fn required_entry<'a>(
     entries: &'a [(ParsedNode, ParsedNode)],
-    name: &'static str,
-    mapping: &'static str,
+    name: &str,
+    mapping: &str,
     source_map: &SourceMap<'_>,
     mapping_span: ParsedSpan,
 ) -> DecodeResult<(&'a ParsedNode, &'a ParsedNode)> {
@@ -1712,7 +2323,7 @@ fn optional_entry<'a>(
 
 fn expect_string<'a>(
     node: &'a ParsedNode,
-    field: &'static str,
+    field: &str,
     source_map: &SourceMap<'_>,
 ) -> DecodeResult<&'a str> {
     let ParsedNode::Scalar {
@@ -1781,7 +2392,7 @@ fn invalid_declaration(
     message: impl Into<String>,
     source_map: &SourceMap<'_>,
     span: ParsedSpan,
-    field: &'static str,
+    field: &str,
 ) -> Diagnostic {
     Diagnostic::new(
         SchemaDiagnosticCode::InvalidDeclaration,
@@ -1795,7 +2406,7 @@ fn invalid_name(
     message: impl Into<String>,
     source_map: &SourceMap<'_>,
     span: ParsedSpan,
-    field: &'static str,
+    field: &str,
     value: &str,
 ) -> Diagnostic {
     Diagnostic::new(
@@ -1809,6 +2420,15 @@ fn invalid_name(
 
 fn valid_kebab_name(value: &str) -> bool {
     let mut segments = value.split('-');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    valid_lower_alphanumeric_segment(first, true)
+        && segments.all(|segment| valid_lower_alphanumeric_segment(segment, false))
+}
+
+fn valid_snake_name(value: &str) -> bool {
+    let mut segments = value.split('_');
     let Some(first) = segments.next() else {
         return false;
     };
@@ -1838,10 +2458,10 @@ fn valid_mid_prefix(value: &str) -> bool {
 }
 
 fn valid_semver(value: &str) -> bool {
-    static SEMVER: OnceLock<Regex> = OnceLock::new();
+    static SEMVER: OnceLock<LiteRegex> = OnceLock::new();
     SEMVER
         .get_or_init(|| {
-            Regex::new(concat!(
+            LiteRegex::new(concat!(
                 r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)",
                 r"(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)",
                 r"(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?",

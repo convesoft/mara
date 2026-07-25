@@ -11,7 +11,8 @@ pub use diagnostic::{
 };
 pub use identity::{Mid, MidParseError};
 pub use schema::{
-    IdentityConfiguration, MidFormat, MidIdentity, SchemaDocument, SchemaField, SchemaIdentity,
-    SchemaSection,
+    DisplayIdDefinition, FieldDefinition, FieldType, FlavourDefinition, FlavourDefinitions,
+    FlavourGuidance, IdentityConfiguration, MidFormat, MidIdentity, RequiredBuiltInDefinition,
+    SchemaDocument, SchemaField, SchemaIdentity, SchemaSection, SchemaValue,
 };
 pub use source::{InvalidSourceSpan, SourceIndex, SourceSpan};
