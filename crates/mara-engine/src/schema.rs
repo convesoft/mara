@@ -392,6 +392,7 @@ struct SourceMap<'source> {
     source: &'source str,
     source_index: SourceIndex,
     char_to_byte: Vec<usize>,
+    indicators: IndicatorIndex,
     marker_index_offset: usize,
     first_line_column_offset: usize,
 }
@@ -403,11 +404,13 @@ impl<'source> SourceMap<'source> {
             .map(|(byte, _)| byte)
             .collect::<Vec<_>>();
         char_to_byte.push(source.len());
+        let indicators = yaml_indicator_index(source);
         let marker_index_offset = source[..parser_start_byte].chars().count();
         Self {
             source,
             source_index,
             char_to_byte,
+            indicators,
             marker_index_offset,
             first_line_column_offset: marker_index_offset,
         }
@@ -449,6 +452,11 @@ impl<'source> SourceMap<'source> {
         if matches!(style, ScalarStyle::Literal | ScalarStyle::Folded)
             && let Some(start_byte) = preceding_block_scalar_start(
                 self.source,
+                if style == ScalarStyle::Literal {
+                    &self.indicators.literal_blocks
+                } else {
+                    &self.indicators.folded_blocks
+                },
                 parsed.start.byte,
                 if style == ScalarStyle::Literal {
                     '|'
@@ -457,12 +465,7 @@ impl<'source> SourceMap<'source> {
                 },
             )
         {
-            let (line, column) = position_at_valid_prefix(&self.source.as_bytes()[..start_byte]);
-            parsed.start = ParsedPosition {
-                byte: start_byte,
-                line,
-                column,
-            };
+            parsed.start = self.position_at_byte(start_byte);
         }
         self.expand_tag(&mut parsed, tag);
         parsed
@@ -472,13 +475,10 @@ impl<'source> SourceMap<'source> {
         if tag.is_none() {
             return;
         }
-        if let Some(start_byte) = preceding_tag_start(self.source, parsed.start.byte) {
-            let (line, column) = position_at_valid_prefix(&self.source.as_bytes()[..start_byte]);
-            parsed.start = ParsedPosition {
-                byte: start_byte,
-                line,
-                column,
-            };
+        if let Some(start_byte) =
+            preceding_tag_start(self.source, &self.indicators.tags, parsed.start.byte)
+        {
+            parsed.start = self.position_at_byte(start_byte);
         }
     }
 
@@ -487,7 +487,11 @@ impl<'source> SourceMap<'source> {
             return None;
         }
         let parser_span = self.span(span);
-        let Some((start, end)) = preceding_anchor_range(self.source, parser_span.start.byte) else {
+        let Some((start, end)) = preceding_anchor_range(
+            self.source,
+            &self.indicators.anchors,
+            parser_span.start.byte,
+        ) else {
             return Some(parser_span);
         };
         Some(ParsedSpan {
@@ -497,30 +501,35 @@ impl<'source> SourceMap<'source> {
     }
 
     fn position_at_byte(&self, byte: usize) -> ParsedPosition {
-        let (line, column) = position_at_valid_prefix(&self.source.as_bytes()[..byte]);
-        ParsedPosition { byte, line, column }
+        let (line, column) = self
+            .source_index
+            .coordinates_at(byte as u64)
+            .expect("parser evidence ends at a legal Mara source boundary");
+        ParsedPosition {
+            byte,
+            line: usize::try_from(line).expect("source line fits in usize"),
+            column: usize::try_from(column).expect("source column fits in usize"),
+        }
     }
 }
 
 fn preceding_block_scalar_start(
     source: &str,
+    candidates: &[IndicatorCandidate],
     content_start: usize,
     indicator: char,
 ) -> Option<usize> {
-    let mut search_end = content_start;
-    let mut earliest = None;
-    let mut line_start = 0;
-    while let Some(start) = source[..search_end].rfind(indicator) {
-        if earliest.is_some() && start < line_start {
-            break;
+    let candidate_count = candidates.partition_point(|candidate| candidate.start < content_start);
+    for candidate in candidates[..candidate_count].iter().rev() {
+        if candidate.is_in_preceding_comment(content_start) {
+            continue;
         }
+        let start = candidate.start;
         if block_scalar_prefix_only(&source[start + indicator.len_utf8()..content_start]) {
-            earliest = Some(start);
-            line_start = source_line_start(source, start);
+            return Some(start);
         }
-        search_end = start;
     }
-    earliest
+    None
 }
 
 fn block_scalar_prefix_only(source: &str) -> bool {
@@ -539,22 +548,82 @@ fn block_scalar_prefix_only(source: &str) -> bool {
         && indentation.chars().all(char::is_whitespace)
 }
 
-fn preceding_tag_start(source: &str, node_start: usize) -> Option<usize> {
-    let mut search_end = node_start;
-    let mut earliest = None;
-    while let Some(start) = source[..search_end].rfind('!') {
-        if tag_start_boundary(source, start)
-            && !tag_starts_in_preceding_comment(source, start, node_start)
-        {
-            if let Some(end) = raw_tag_end(source, start, node_start)
-                && yaml_tag_suffix_only(&source[end..node_start])
-            {
-                earliest = Some(start);
-            } else if earliest.is_some() {
-                break;
+#[derive(Debug, Clone, Copy)]
+struct IndicatorCandidate {
+    start: usize,
+    comment_line_end: Option<usize>,
+}
+
+impl IndicatorCandidate {
+    fn is_in_preceding_comment(self, node_start: usize) -> bool {
+        self.comment_line_end
+            .is_some_and(|line_end| node_start > line_end)
+    }
+}
+
+#[derive(Debug, Default)]
+struct IndicatorIndex {
+    tags: Vec<IndicatorCandidate>,
+    anchors: Vec<IndicatorCandidate>,
+    literal_blocks: Vec<IndicatorCandidate>,
+    folded_blocks: Vec<IndicatorCandidate>,
+}
+
+fn yaml_indicator_index(source: &str) -> IndicatorIndex {
+    let mut indicators = IndicatorIndex::default();
+    let mut line_start = 0;
+    while line_start < source.len() {
+        let (line, next_line) = source_line_at(source, line_start);
+        let comment_start = line.char_indices().find_map(|(offset, character)| {
+            (character == '#'
+                && (offset == 0
+                    || line[..offset]
+                        .chars()
+                        .next_back()
+                        .is_some_and(char::is_whitespace)))
+            .then_some(offset)
+        });
+        let line_end = line_start + line.len();
+        for (offset, character) in line.char_indices() {
+            let candidate = IndicatorCandidate {
+                start: line_start + offset,
+                comment_line_end: comment_start
+                    .is_some_and(|comment_start| offset >= comment_start)
+                    .then_some(line_end),
+            };
+            match character {
+                '!' => indicators.tags.push(candidate),
+                '&' => indicators.anchors.push(candidate),
+                '|' => indicators.literal_blocks.push(candidate),
+                '>' => indicators.folded_blocks.push(candidate),
+                _ => {}
             }
         }
-        search_end = start;
+        line_start = next_line;
+    }
+    indicators
+}
+
+fn preceding_tag_start(
+    source: &str,
+    candidates: &[IndicatorCandidate],
+    node_start: usize,
+) -> Option<usize> {
+    let candidate_count = candidates.partition_point(|candidate| candidate.start < node_start);
+    let mut earliest = None;
+    for candidate in candidates[..candidate_count].iter().rev() {
+        if candidate.is_in_preceding_comment(node_start) {
+            continue;
+        }
+        let start = candidate.start;
+        if tag_start_boundary(source, start)
+            && let Some(end) = raw_tag_end(source, start, node_start)
+            && yaml_tag_suffix_only(&source[end..node_start])
+        {
+            earliest = Some(start);
+        } else if earliest.is_some() {
+            break;
+        }
     }
     earliest
 }
@@ -584,10 +653,18 @@ fn yaml_tag_suffix_only(source: &str) -> bool {
     true
 }
 
-fn preceding_anchor_range(source: &str, node_start: usize) -> Option<(usize, usize)> {
-    let mut search_end = node_start;
+fn preceding_anchor_range(
+    source: &str,
+    candidates: &[IndicatorCandidate],
+    node_start: usize,
+) -> Option<(usize, usize)> {
+    let candidate_count = candidates.partition_point(|candidate| candidate.start < node_start);
     let mut earliest = None;
-    while let Some(start) = source[..search_end].rfind('&') {
+    for candidate in candidates[..candidate_count].iter().rev() {
+        if candidate.is_in_preceding_comment(node_start) {
+            continue;
+        }
+        let start = candidate.start;
         if tag_start_boundary(source, start) {
             if let Some(end) = raw_anchor_end(source, start, node_start)
                 && yaml_anchor_suffix_only(&source[end..node_start])
@@ -597,32 +674,8 @@ fn preceding_anchor_range(source: &str, node_start: usize) -> Option<(usize, usi
                 break;
             }
         }
-        search_end = start;
     }
     earliest
-}
-
-fn source_line_start(source: &str, position: usize) -> usize {
-    source[..position]
-        .rfind(['\r', '\n'])
-        .map_or(0, |line_break| line_break + 1)
-}
-
-fn tag_starts_in_preceding_comment(source: &str, start: usize, node_start: usize) -> bool {
-    if !source[start..node_start].contains(['\r', '\n']) {
-        return false;
-    }
-
-    let line_start = source_line_start(source, start);
-    let before_tag = &source[line_start..start];
-    before_tag.char_indices().any(|(offset, character)| {
-        character == '#'
-            && (offset == 0
-                || before_tag[..offset]
-                    .chars()
-                    .next_back()
-                    .is_some_and(char::is_whitespace))
-    })
 }
 
 fn tag_start_boundary(source: &str, start: usize) -> bool {

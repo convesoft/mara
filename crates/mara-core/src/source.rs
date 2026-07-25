@@ -116,6 +116,16 @@ impl SourceIndex {
         })
     }
 
+    /// Returns the one-based line and Unicode-scalar column at a legal byte boundary.
+    pub fn coordinates_at(&self, byte: u64) -> Result<(u64, u64), InvalidSourceSpan> {
+        let byte = usize::try_from(byte).map_err(|_| InvalidSourceSpan::ByteOutOfBounds)?;
+        if byte > self.source_len {
+            return Err(InvalidSourceSpan::ByteOutOfBounds);
+        }
+        let position = self.position(byte)?;
+        Ok((position.line, position.column))
+    }
+
     fn position(&self, byte: usize) -> Result<IndexedPosition, InvalidSourceSpan> {
         self.positions
             .binary_search_by_key(&byte, |position| position.byte)
@@ -278,6 +288,7 @@ mod tests {
         assert!(!span.is_empty());
 
         let index = SourceIndex::try_new(".mara/schema.yaml", source).unwrap();
+        assert_eq!(index.coordinates_at(4), Ok((2, 1)));
         assert_eq!(
             index.try_span(2, 4, 1, 2, 2, 1).unwrap(),
             SourceSpan::try_new(".mara/schema.yaml", source, 2, 4, 1, 2, 2, 1).unwrap()
