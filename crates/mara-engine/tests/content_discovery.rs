@@ -556,6 +556,28 @@ fn internal_file_symlinks_follow_explicit_policy() {
 
 #[cfg(any(unix, windows))]
 #[test]
+fn external_file_symlink_targets_are_rejected() {
+    let fixture = Fixture::new(&["*.mara.md"], &[], false, false, true);
+    let outside = fixture._temp.path().join("outside-source.md");
+    fs::write(&outside, "outside").unwrap();
+    symlink_file(&outside, fixture.root.join("external.mara.md"));
+
+    let discovery = discover_content(&fixture.load());
+
+    assert!(discovery.documents().is_empty());
+    assert_eq!(discovery.diagnostics().len(), 1);
+    assert_eq!(
+        discovery.diagnostics()[0].code(),
+        DiagnosticCode::Project(ProjectDiagnosticCode::SymlinkRejected)
+    );
+    assert_eq!(
+        discovery.diagnostics()[0].primary().unwrap().path(),
+        "external.mara.md"
+    );
+}
+
+#[cfg(any(unix, windows))]
+#[test]
 fn directory_symlink_policy_contains_targets_and_recovers_from_cycles() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], false, true, false);
     fixture.write("ordinary.mara.md", "ordinary");
