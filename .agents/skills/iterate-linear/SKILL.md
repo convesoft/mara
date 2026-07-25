@@ -23,6 +23,8 @@ Explicit invocation authorizes this orchestrator to:
 
 - apply the bounded Linear mutations authorized by `$find-next-issue` and
   `$assess-issue`;
+- apply READY issues' `codex-model:<model-id>` and
+  `codex-reasoning:<effort>` labels when creating their worker tasks;
 - create dedicated Codex worktree tasks for READY issues;
 - merge worker pull requests only after a fresh merge-readiness recheck;
 - wait for and verify the automatic completion of merged implementation,
@@ -112,15 +114,19 @@ has durably routed to separate remediation work. Serial operation prevents defau
 branch and merge-readiness races.
 
 Maintain a registry in task context containing each issue’s worker `threadId`,
-`hostId`, latest wait cursor, PR, branch, and last result. Reuse an existing blocked
-worker for the same issue rather than creating a conflicting worktree.
+`hostId`, selected model and reasoning effort, latest wait cursor, PR, branch, and
+last result. Reuse an existing blocked worker for the same issue rather than
+creating a conflicting worktree.
 
 Before creating any worker, reconcile that registry against the Codex project task
 list, Git worktree list, and open GitHub PRs/branches for the exact issue. Rehydrate
-an existing worker's `threadId`, `hostId`, cursor, branch, and PR when exactly one
-match exists. If multiple possible workers exist, or a branch/PR exists without an
-unambiguous owning task, return BLOCKED and create nothing. A missing in-memory
-registry entry is never sufficient proof that no worker exists.
+an existing worker's `threadId`, `hostId`, cursor, branch, PR, and actual model and
+reasoning from the owning task's metadata when exactly one match exists. If that
+metadata does not expose its creation settings, record model and reasoning as
+`unknown`; never infer them from current issue labels. If multiple possible workers
+exist, or a branch/PR exists without an unambiguous owning task, return BLOCKED and
+create nothing. A missing in-memory registry entry is never sufficient proof that
+no worker exists.
 
 ## Run the orchestration loop
 
@@ -167,25 +173,44 @@ BLOCKED instead of looping.
 
 If no worker registry entry exists for the issue:
 
-1. Call the Codex app project-list capability and use the already resolved Mara
+1. Re-read the exact Linear issue and use its current label names as the
+   authoritative worker-configuration snapshot.
+2. Independently collect labels with the exact prefixes `codex-model:` and
+   `codex-reasoning:`. Require at most one label for each prefix and a non-empty
+   suffix. If either prefix is duplicated or has an empty suffix, return BLOCKED
+   without creating a task.
+3. Treat this skill's explicit invocation as authorization to apply a
+   `codex-model:<model-id>` label as the issue's explicit worker-task `model`
+   configuration, and treat a
+   `codex-reasoning:<effort>` label as the explicit request for its `thinking`
+   value. Preserve each suffix exactly; do not normalize, alias, or infer values.
+   A missing prefix means omit only that corresponding override so the task uses
+   the configured default.
+4. Check the native worker-creation capability's current model and reasoning
+   contract. If a requested value or model/reasoning combination is unsupported,
+   return BLOCKED with the offending labels and create nothing. If task creation
+   rejects the requested combination for the destination host, likewise return
+   BLOCKED; never retry by silently dropping or changing either override.
+5. Call the Codex app project-list capability and use the already resolved Mara
    project ID.
-2. Create one project task with a new `worktree` environment. Omit `startingState`
-   so it starts from the project default branch.
-3. Omit model and reasoning overrides unless the user explicitly requested them.
-4. Use this entire prompt, substituting the issue ID:
+6. Create one project task with a new `worktree` environment. Omit `startingState`
+   so it starts from the project default branch. Pass the resolved model as
+   `model` and reasoning effort as `thinking` when their labels are present.
+7. Use this entire prompt, substituting the issue ID:
 
    ```text
    $implement-issue ISSUE_ID
    ```
 
-5. Record the returned `threadId` and `hostId`. If worktree creation is queued and
-   only a client ID is available, wait for that creation to resolve; never dispatch
-   a duplicate task.
+8. Record the resolved model and reasoning effort with the returned `threadId` and
+   `hostId`. If worktree creation is queued and only a client ID is available, wait
+   for that creation to resolve; never dispatch a duplicate task.
 
 If a blocked worker already exists for the issue, resume it with
 `send_message_to_thread` under the worker-message rule above. The worker re-reads
-authoritative state to verify which blocker changed. Omit model and reasoning
-overrides.
+authoritative state to verify which blocker changed. The existing task retains the
+model and reasoning selected when it was created; do not replace it or reinterpret
+changed labels during resumption.
 
 ### 4. Wait for the worker result
 
@@ -275,7 +300,8 @@ preserve all state until control is reconciled.
 
 Record a fingerprint after each selector, assessor, worker, merge, and Linear
 mutation result. A fingerprint includes relevant issue states, dependency edges,
-worker IDs/results, PR head, and local default-branch HEAD.
+worker IDs/results and selected model/reasoning, PR head, and local default-branch
+HEAD.
 
 Do not repeat a phase against an unchanged fingerprint unless waiting on an
 explicitly named external signal. Never create duplicate remediation issues,
