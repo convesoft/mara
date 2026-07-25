@@ -100,7 +100,7 @@ pub fn compile_documents(
         item.set_resolved_references(resolved);
     }
 
-    let mut narrative_authored = narrative_references(documents);
+    let mut narrative_authored = narrative_references(documents, &mut diagnostics);
     narrative_authored.sort_by(|left, right| compare_spans(left.source(), right.source()));
     let mut narrative_references = Vec::new();
     for reference in narrative_authored {
@@ -128,27 +128,27 @@ fn identity_record(schema: &SchemaDocument, item: &ParsedItem) -> IdentityRecord
         .iter()
         .filter(|entry| entry.key() == "id")
         .collect::<Vec<_>>();
-    let display_id = schema
-        .flavours()
-        .get(item.flavour())
-        .filter(|_| entries.len() == 1)
-        .and_then(|flavour| {
-            let entry = entries[0];
-            if entry.value().is_empty()
-                || flavour
-                    .display_id()
-                    .value()
-                    .pattern()
-                    .is_some_and(|pattern| !whole_pattern(pattern.value()).is_match(entry.value()))
-            {
-                return None;
-            }
-            Some(Provenanced::new(
-                entry.value().to_owned(),
-                entry.source().clone(),
-            ))
+    let display_id = entries.first().and_then(|entry| {
+        (!entry.value().is_empty())
+            .then(|| Provenanced::new(entry.value().to_owned(), entry.source().clone()))
+    });
+    let active = entries.len() == 1
+        && display_id.as_ref().is_some_and(|display_id| {
+            schema
+                .flavours()
+                .get(item.flavour())
+                .is_some_and(|flavour| {
+                    flavour
+                        .display_id()
+                        .value()
+                        .pattern()
+                        .is_none_or(|pattern| {
+                            whole_pattern(pattern.value()).is_match(display_id.value())
+                        })
+                })
         });
     IdentityRecord::new(item.mid().clone(), display_id, item.header_source().clone())
+        .with_active_display_id(active)
 }
 
 fn normalize_item(
@@ -365,6 +365,15 @@ fn normalize_scalar(
     let value = entry.value();
     let normalized = match definition.field_type().value() {
         FieldType::String => {
+            if definition.is_required() && value.is_empty() {
+                diagnostics.push(missing_value(
+                    item,
+                    display_id,
+                    definition.name(),
+                    entry.source(),
+                ));
+                return None;
+            }
             if let Some(pattern) = definition.pattern()
                 && !whole_pattern(pattern.value()).is_match(value)
             {
@@ -576,17 +585,41 @@ fn split_relation_target(target: &str) -> (Option<&str>, &str) {
     }
 }
 
-fn narrative_references(documents: &[ParsedDocument]) -> Vec<AuthoredReference> {
-    documents
+fn narrative_references(
+    documents: &[ParsedDocument],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<AuthoredReference> {
+    let mut authored = Vec::new();
+    for markdown in documents
         .iter()
         .flat_map(|document| document.blocks())
         .filter_map(ParsedBlock::as_markdown)
-        .flat_map(|markdown| {
-            markdown.references().iter().map(move |reference| {
-                authored_narrative_reference(reference, markdown.source().clone())
-            })
-        })
-        .collect()
+    {
+        for reference in markdown.references() {
+            let (relation, target) = split_relation_target(reference.target());
+            if let Some(relation) = relation {
+                diagnostics.push(
+                    Diagnostic::new(
+                        RelationDiagnosticCode::Unknown,
+                        "typed relation requires an authored item source",
+                        Some(reference.source().clone()),
+                    )
+                    .with_context(DiagnosticContext::new(
+                        None,
+                        Some(relation.to_owned()),
+                        Some(target.to_owned()),
+                    ))
+                    .with_detail("relation", relation),
+                );
+                continue;
+            }
+            authored.push(authored_narrative_reference(
+                reference,
+                markdown.source().clone(),
+            ));
+        }
+    }
+    authored
 }
 
 fn authored_narrative_reference(
@@ -753,7 +786,7 @@ mod tests {
             span(),
             span(),
             field(FieldType::String),
-            None,
+            Some(field(true)),
             Some(field(true)),
             None,
             None,
@@ -849,6 +882,7 @@ See [[REQ-TWO]] and [[m_00000000000000000000000002]].\n\
 :id: REQ-TWO\n\
 :title: Second\n\
 :custom_state: draft\n\
+:tag: gamma\n\
 :traces: REQ-ONE\n\
 \n\
 Body.\n\
@@ -905,6 +939,7 @@ Body.\n\
 :id: REQ-ONE\n\
 :title: First\n\
 :custom_state: approved\n\
+:tag: alpha\n\
 :status: approved\n\
 :traces: REQ-MISSING\n\
 \n\
@@ -939,6 +974,7 @@ Body.\n\
 :title: duplicate\n\
 :custom_state: unknown\n\
 :score: NaN\n\
+:tag:\n\
 \n\
 Body.\n\
 :::\n",
@@ -955,6 +991,10 @@ Body.\n\
         assert!(codes.contains("field.repetition"));
         assert!(codes.contains("field.invalid_enum"));
         assert!(codes.contains("field.invalid_scalar"));
+        assert!(result.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code().as_str() == "item.missing_value"
+                && diagnostic.context().field() == Some("tag")
+        }));
         assert!(
             result
                 .diagnostics()
@@ -972,6 +1012,7 @@ Body.\n\
 :id: REQ-DUP\n\
 :title: First\n\
 :custom_state: approved\n\
+:tag: alpha\n\
 \n\
 [[MISSING]]\n\
 :::\n",
@@ -983,6 +1024,7 @@ Body.\n\
 :id: REQ-DUP\n\
 :title: Second\n\
 :custom_state: approved\n\
+:tag: beta\n\
 \n\
 [[REQ-DUP]]\n\
 :::\n",
@@ -1009,5 +1051,85 @@ Body.\n\
             .unwrap();
         assert_eq!(ambiguous.primary().unwrap().path(), "b.mara.md");
         assert_eq!(ambiguous.related().len(), 2);
+    }
+
+    #[test]
+    fn duplicate_invalid_display_ids_are_diagnosed_but_not_active() {
+        let schema = schema();
+        let first = document(
+            "a.mara.md",
+            ":::req m_00000000000000000000000001\n\
+:id: wrong\n\
+:title: First\n\
+:custom_state: approved\n\
+:tag: alpha\n\
+\n\
+Body.\n\
+:::\n",
+            &schema,
+        );
+        let second = document(
+            "b.mara.md",
+            ":::req m_00000000000000000000000002\n\
+:id: wrong\n\
+:title: Second\n\
+:custom_state: approved\n\
+:tag: beta\n\
+\n\
+Body.\n\
+:::\n",
+            &schema,
+        );
+        let result = compile_documents(&schema, &[first, second]);
+
+        assert_eq!(
+            result
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| diagnostic.code().as_str() == "identity.invalid_display_id")
+                .count(),
+            2
+        );
+        assert!(
+            result.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code().as_str() == "identity.duplicate_display_id"
+            })
+        );
+        assert!(result.identity_index().display_ids().get("wrong").is_none());
+    }
+
+    #[test]
+    fn relation_qualified_narrative_reference_is_not_treated_as_a_display_id() {
+        let schema = schema();
+        let parsed = document(
+            "narrative.mara.md",
+            "Narrative [[traces:REQ-ONE]].\n\
+\n\
+:::req m_00000000000000000000000001\n\
+:id: REQ-ONE\n\
+:title: First\n\
+:custom_state: approved\n\
+:tag: alpha\n\
+\n\
+Body.\n\
+:::\n",
+            &schema,
+        );
+        let result = compile_documents(&schema, &[parsed]);
+
+        let relation = result
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| diagnostic.code().as_str() == "relation.unknown")
+            .unwrap();
+        assert_eq!(relation.context().relation(), Some("traces"));
+        assert_eq!(relation.context().target(), Some("REQ-ONE"));
+        assert!(
+            !result
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code().as_str() == "reference.unresolved")
+        );
+        assert!(result.narrative_references().is_empty());
     }
 }

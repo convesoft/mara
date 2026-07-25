@@ -217,6 +217,7 @@ impl NormalizedItem {
 pub struct IdentityRecord {
     mid: Mid,
     display_id: Option<Provenanced<String>>,
+    display_id_active: bool,
     header_source: SourceSpan,
 }
 
@@ -229,8 +230,14 @@ impl IdentityRecord {
         Self {
             mid,
             display_id,
+            display_id_active: true,
             header_source,
         }
+    }
+
+    pub fn with_active_display_id(mut self, active: bool) -> Self {
+        self.display_id_active = active;
+        self
     }
 
     pub const fn mid(&self) -> &Mid {
@@ -239,6 +246,10 @@ impl IdentityRecord {
 
     pub const fn display_id(&self) -> Option<&Provenanced<String>> {
         self.display_id.as_ref()
+    }
+
+    pub const fn display_id_is_active(&self) -> bool {
+        self.display_id.is_some() && self.display_id_active
     }
 
     pub const fn header_source(&self) -> &SourceSpan {
@@ -291,6 +302,7 @@ impl IdentityIndexBuild {
 impl IdentityIndex {
     pub fn build(records: &[IdentityRecord]) -> IdentityIndexBuild {
         let mut index = Self::default();
+        let mut all_display_ids = BTreeMap::<String, Vec<IdentityCandidate>>::new();
         for record in records {
             let candidate = IdentityCandidate {
                 mid: record.mid.clone(),
@@ -302,11 +314,17 @@ impl IdentityIndex {
                 .or_default()
                 .push(candidate.clone());
             if let Some(display_id) = record.display_id() {
-                index
-                    .display_ids
+                all_display_ids
                     .entry(display_id.value().clone())
                     .or_default()
-                    .push(candidate);
+                    .push(candidate.clone());
+                if record.display_id_is_active() {
+                    index
+                        .display_ids
+                        .entry(display_id.value().clone())
+                        .or_default()
+                        .push(candidate);
+                }
             }
         }
         for candidates in index.mids.values_mut() {
@@ -315,8 +333,11 @@ impl IdentityIndex {
         for candidates in index.display_ids.values_mut() {
             sort_candidates(candidates);
         }
+        for candidates in all_display_ids.values_mut() {
+            sort_candidates(candidates);
+        }
 
-        let mut diagnostics = duplicate_diagnostics(&index, records);
+        let mut diagnostics = duplicate_diagnostics(&index, &all_display_ids, records);
         sort_diagnostics(&mut diagnostics);
         IdentityIndexBuild { index, diagnostics }
     }
@@ -369,7 +390,11 @@ fn compare_spans(left: &SourceSpan, right: &SourceSpan) -> Ordering {
         .then_with(|| left.end_byte().cmp(&right.end_byte()))
 }
 
-fn duplicate_diagnostics(index: &IdentityIndex, records: &[IdentityRecord]) -> Vec<Diagnostic> {
+fn duplicate_diagnostics(
+    index: &IdentityIndex,
+    all_display_ids: &BTreeMap<String, Vec<IdentityCandidate>>,
+    records: &[IdentityRecord],
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     for (mid, candidates) in &index.mids {
         if candidates.len() > 1 {
@@ -388,7 +413,7 @@ fn duplicate_diagnostics(index: &IdentityIndex, records: &[IdentityRecord]) -> V
             diagnostics.push(diagnostic);
         }
     }
-    for (display_id, candidates) in &index.display_ids {
+    for (display_id, candidates) in all_display_ids {
         if candidates.len() > 1 {
             let primary = records
                 .iter()
@@ -596,6 +621,28 @@ mod tests {
         assert_eq!(
             IdentityIndex::build(&[first.clone(), second.clone()]),
             IdentityIndex::build(&[second, first])
+        );
+    }
+
+    #[test]
+    fn inactive_display_ids_still_participate_in_duplicate_diagnostics() {
+        let first = record(mid("00000000000000000000000001"), Some("invalid"), "a.md")
+            .with_active_display_id(false);
+        let second = record(mid("00000000000000000000000002"), Some("invalid"), "b.md")
+            .with_active_display_id(false);
+        let build = IdentityIndex::build(&[first, second]);
+
+        assert!(build.index().display_ids().get("invalid").is_none());
+        assert!(build.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code() == IdentityDiagnosticCode::DuplicateDisplayId.into()
+        }));
+        assert_eq!(
+            build
+                .index()
+                .resolve(&reference("invalid"), &identity())
+                .unwrap_err()
+                .code(),
+            ReferenceDiagnosticCode::Unresolved.into()
         );
     }
 }
