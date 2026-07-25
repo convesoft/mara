@@ -587,6 +587,22 @@ fn accepts_yaml_1_2_core_tags_but_rejects_incompatible_core_tags() {
         "!!str core-schema"
     );
 
+    let quoted_hash_source = source.replace(
+        "  !!str name: !!str core-schema",
+        "  !!str name: [\"# quoted\", !custom\n    core-schema]",
+    );
+    let fixture = Fixture::new(&quoted_hash_source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+    let custom_tag = error
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| detail_string(diagnostic, "feature") == Some("custom_tag"))
+        .unwrap();
+    assert_eq!(
+        source_slice(&quoted_hash_source, custom_tag.primary().unwrap()),
+        "!custom\n    core-schema"
+    );
+
     let invalid = source.replace("!!str core-schema", "!!timestamp core-schema");
     let error = assert_invalid(invalid, SchemaDiagnosticCode::Syntax);
     assert_eq!(

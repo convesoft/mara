@@ -441,13 +441,24 @@ impl<'source> SourceMap<'source> {
         }
     }
 
-    fn node_span(&self, span: Span, tag: Option<&Tag>) -> ParsedSpan {
+    fn node_span(
+        &self,
+        span: Span,
+        tag: Option<&Tag>,
+        quoted_scalars: &[ParsedSpan],
+    ) -> ParsedSpan {
         let mut parsed = self.span(span);
-        self.expand_tag(&mut parsed, tag);
+        self.expand_tag(&mut parsed, tag, quoted_scalars);
         parsed
     }
 
-    fn scalar_span(&self, span: Span, style: ScalarStyle, tag: Option<&Tag>) -> ParsedSpan {
+    fn scalar_span(
+        &self,
+        span: Span,
+        style: ScalarStyle,
+        tag: Option<&Tag>,
+        quoted_scalars: &[ParsedSpan],
+    ) -> ParsedSpan {
         let mut parsed = self.span(span);
         if matches!(style, ScalarStyle::Literal | ScalarStyle::Folded)
             && let Some(start_byte) = preceding_block_scalar_start(
@@ -463,26 +474,40 @@ impl<'source> SourceMap<'source> {
                 } else {
                     '>'
                 },
+                quoted_scalars,
             )
         {
             parsed.start = self.position_at_byte(start_byte);
         }
-        self.expand_tag(&mut parsed, tag);
+        self.expand_tag(&mut parsed, tag, quoted_scalars);
         parsed
     }
 
-    fn expand_tag(&self, parsed: &mut ParsedSpan, tag: Option<&Tag>) {
+    fn expand_tag(
+        &self,
+        parsed: &mut ParsedSpan,
+        tag: Option<&Tag>,
+        quoted_scalars: &[ParsedSpan],
+    ) {
         if tag.is_none() {
             return;
         }
-        if let Some(start_byte) =
-            preceding_tag_start(self.source, &self.indicators.tags, parsed.start.byte)
-        {
+        if let Some(start_byte) = preceding_tag_start(
+            self.source,
+            &self.indicators.tags,
+            parsed.start.byte,
+            quoted_scalars,
+        ) {
             parsed.start = self.position_at_byte(start_byte);
         }
     }
 
-    fn anchor_span(&self, span: Span, anchor: usize) -> Option<ParsedSpan> {
+    fn anchor_span(
+        &self,
+        span: Span,
+        anchor: usize,
+        quoted_scalars: &[ParsedSpan],
+    ) -> Option<ParsedSpan> {
         if anchor == 0 {
             return None;
         }
@@ -491,6 +516,7 @@ impl<'source> SourceMap<'source> {
             self.source,
             &self.indicators.anchors,
             parser_span.start.byte,
+            quoted_scalars,
         ) else {
             return Some(parser_span);
         };
@@ -518,10 +544,11 @@ fn preceding_block_scalar_start(
     candidates: &[IndicatorCandidate],
     content_start: usize,
     indicator: char,
+    quoted_scalars: &[ParsedSpan],
 ) -> Option<usize> {
     let candidate_count = candidates.partition_point(|candidate| candidate.start < content_start);
     for candidate in candidates[..candidate_count].iter().rev() {
-        if candidate.is_in_preceding_comment(content_start) {
+        if candidate.is_in_preceding_comment(content_start, quoted_scalars) {
             continue;
         }
         let start = candidate.start;
@@ -551,13 +578,28 @@ fn block_scalar_prefix_only(source: &str) -> bool {
 #[derive(Debug, Clone, Copy)]
 struct IndicatorCandidate {
     start: usize,
+    possible_comment_start: Option<usize>,
     comment_line_end: Option<usize>,
 }
 
 impl IndicatorCandidate {
-    fn is_in_preceding_comment(self, node_start: usize) -> bool {
-        self.comment_line_end
-            .is_some_and(|line_end| node_start > line_end)
+    fn is_in_preceding_comment(self, node_start: usize, quoted_scalars: &[ParsedSpan]) -> bool {
+        let Some(comment_start) = self.possible_comment_start else {
+            return false;
+        };
+        if self
+            .comment_line_end
+            .is_none_or(|line_end| node_start <= line_end)
+        {
+            return false;
+        }
+
+        let containing_count =
+            quoted_scalars.partition_point(|span| span.start.byte <= comment_start);
+        !containing_count.checked_sub(1).is_some_and(|index| {
+            let span = quoted_scalars[index];
+            comment_start < span.end.byte
+        })
     }
 }
 
@@ -574,22 +616,22 @@ fn yaml_indicator_index(source: &str) -> IndicatorIndex {
     let mut line_start = 0;
     while line_start < source.len() {
         let (line, next_line) = source_line_at(source, line_start);
-        let comment_start = line.char_indices().find_map(|(offset, character)| {
-            (character == '#'
+        let line_end = line_start + line.len();
+        let mut possible_comment_start = None;
+        for (offset, character) in line.char_indices() {
+            if character == '#'
                 && (offset == 0
                     || line[..offset]
                         .chars()
                         .next_back()
-                        .is_some_and(char::is_whitespace)))
-            .then_some(offset)
-        });
-        let line_end = line_start + line.len();
-        for (offset, character) in line.char_indices() {
+                        .is_some_and(char::is_whitespace))
+            {
+                possible_comment_start = Some(line_start + offset);
+            }
             let candidate = IndicatorCandidate {
                 start: line_start + offset,
-                comment_line_end: comment_start
-                    .is_some_and(|comment_start| offset >= comment_start)
-                    .then_some(line_end),
+                possible_comment_start,
+                comment_line_end: possible_comment_start.map(|_| line_end),
             };
             match character {
                 '!' => indicators.tags.push(candidate),
@@ -608,11 +650,12 @@ fn preceding_tag_start(
     source: &str,
     candidates: &[IndicatorCandidate],
     node_start: usize,
+    quoted_scalars: &[ParsedSpan],
 ) -> Option<usize> {
     let candidate_count = candidates.partition_point(|candidate| candidate.start < node_start);
     let mut earliest = None;
     for candidate in candidates[..candidate_count].iter().rev() {
-        if candidate.is_in_preceding_comment(node_start) {
+        if candidate.is_in_preceding_comment(node_start, quoted_scalars) {
             continue;
         }
         let start = candidate.start;
@@ -657,11 +700,12 @@ fn preceding_anchor_range(
     source: &str,
     candidates: &[IndicatorCandidate],
     node_start: usize,
+    quoted_scalars: &[ParsedSpan],
 ) -> Option<(usize, usize)> {
     let candidate_count = candidates.partition_point(|candidate| candidate.start < node_start);
     let mut earliest = None;
     for candidate in candidates[..candidate_count].iter().rev() {
-        if candidate.is_in_preceding_comment(node_start) {
+        if candidate.is_in_preceding_comment(node_start, quoted_scalars) {
             continue;
         }
         let start = candidate.start;
@@ -814,6 +858,7 @@ struct TreeBuilder<'map, 'source> {
     documents: Vec<ParsedNode>,
     document_starts: Vec<ParsedSpan>,
     stack: Vec<PendingContainer>,
+    quoted_scalars: Vec<ParsedSpan>,
     error: Option<(String, ParsedSpan)>,
 }
 
@@ -824,6 +869,7 @@ impl<'map, 'source> TreeBuilder<'map, 'source> {
             documents: Vec::new(),
             document_starts: Vec::new(),
             stack: Vec::new(),
+            quoted_scalars: Vec::new(),
             error: None,
         }
     }
@@ -863,8 +909,15 @@ impl<'input> SpannedEventReceiver<'input> for TreeBuilder<'_, 'input> {
             Event::DocumentStart(_) => self.document_starts.push(parser_span),
             Event::Alias(_) => self.attach(ParsedNode::Alias { span: parser_span }),
             Event::Scalar(value, style, anchor, tag) => {
-                let anchor = self.source_map.anchor_span(span, anchor);
-                let span = self.source_map.scalar_span(span, style, tag.as_deref());
+                let anchor = self
+                    .source_map
+                    .anchor_span(span, anchor, &self.quoted_scalars);
+                let span =
+                    self.source_map
+                        .scalar_span(span, style, tag.as_deref(), &self.quoted_scalars);
+                if matches!(style, ScalarStyle::SingleQuoted | ScalarStyle::DoubleQuoted) {
+                    self.quoted_scalars.push(parser_span);
+                }
                 self.attach(ParsedNode::Scalar {
                     value: value.into_owned(),
                     style,
@@ -874,8 +927,12 @@ impl<'input> SpannedEventReceiver<'input> for TreeBuilder<'_, 'input> {
                 });
             }
             Event::SequenceStart(anchor, tag) => {
-                let anchor = self.source_map.anchor_span(span, anchor);
-                let span = self.source_map.node_span(span, tag.as_deref());
+                let anchor = self
+                    .source_map
+                    .anchor_span(span, anchor, &self.quoted_scalars);
+                let span = self
+                    .source_map
+                    .node_span(span, tag.as_deref(), &self.quoted_scalars);
                 self.stack.push(PendingContainer::Sequence {
                     values: Vec::new(),
                     anchor,
@@ -884,8 +941,12 @@ impl<'input> SpannedEventReceiver<'input> for TreeBuilder<'_, 'input> {
                 });
             }
             Event::MappingStart(anchor, tag) => {
-                let anchor = self.source_map.anchor_span(span, anchor);
-                let span = self.source_map.node_span(span, tag.as_deref());
+                let anchor = self
+                    .source_map
+                    .anchor_span(span, anchor, &self.quoted_scalars);
+                let span = self
+                    .source_map
+                    .node_span(span, tag.as_deref(), &self.quoted_scalars);
                 self.stack.push(PendingContainer::Mapping {
                     values: Vec::new(),
                     anchor,
