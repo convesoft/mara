@@ -5,3 +5,4 @@ mod diagnostic;
 pub mod identity;
 pub mod project;
 pub mod schema;
+pub mod semantic;

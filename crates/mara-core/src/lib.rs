@@ -3,12 +3,14 @@
 pub mod diagnostic;
 pub mod identity;
 pub mod schema;
+pub mod semantic;
 pub mod source;
 
 pub use diagnostic::{
     ContentDiagnosticCode, Diagnostic, DiagnosticCode, DiagnosticContext, DiagnosticItem,
-    DiagnosticNumber, DiagnosticSeverity, DiagnosticValue, IdentityDiagnosticCode,
-    ProjectDiagnosticCode, RelatedDiagnostic, SchemaDiagnosticCode, SyntaxDiagnosticCode,
+    DiagnosticNumber, DiagnosticSeverity, DiagnosticValue, FieldDiagnosticCode,
+    IdentityDiagnosticCode, ItemDiagnosticCode, ProjectDiagnosticCode, ReferenceDiagnosticCode,
+    RelatedDiagnostic, RelationDiagnosticCode, SchemaDiagnosticCode, SyntaxDiagnosticCode,
     sort_diagnostics,
 };
 pub use identity::{Mid, MidParseError};
@@ -21,6 +23,11 @@ pub use schema::{
     RuleApplicability, RuleCondition, RuleConditionNumber, RuleConditionValue, RuleConfiguration,
     RuleCount, RuleDefinition, RuleDefinitions, RuleDirection, RuleKind, RuleSeverity,
     SchemaDocument, SchemaField, SchemaIdentity, SchemaSection, SchemaValue,
+};
+pub use semantic::{
+    AuthoredReference, IdentityCandidate, IdentityIndex, IdentityIndexBuild, IdentityRecord,
+    NormalizedFieldValue, NormalizedItem, NormalizedNumber, NormalizedScalar, Provenanced,
+    ReferenceOrigin, ResolvedReference,
 };
 pub use source::{
     InvalidSourceSpan, LineEnding, SourceDocument, SourceIndex, SourceSpan, SourceText,

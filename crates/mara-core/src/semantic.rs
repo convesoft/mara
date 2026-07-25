@@ -1,0 +1,648 @@
+use std::{cmp::Ordering, collections::BTreeMap};
+
+use crate::{
+    Diagnostic, DiagnosticContext, DiagnosticItem, DiagnosticValue, IdentityDiagnosticCode, Mid,
+    MidIdentity, ReferenceDiagnosticCode, RelatedDiagnostic, SourceSpan, sort_diagnostics,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Provenanced<T> {
+    value: T,
+    source: SourceSpan,
+}
+
+impl<T> Provenanced<T> {
+    pub fn new(value: T, source: SourceSpan) -> Self {
+        Self { value, source }
+    }
+
+    pub const fn value(&self) -> &T {
+        &self.value
+    }
+
+    pub const fn source(&self) -> &SourceSpan {
+        &self.source
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct NormalizedNumber(f64);
+
+impl NormalizedNumber {
+    pub fn new(value: f64) -> Option<Self> {
+        value.is_finite().then_some(Self(value))
+    }
+
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl Eq for NormalizedNumber {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NormalizedScalar {
+    String(String),
+    Integer(i64),
+    Number(NormalizedNumber),
+    Boolean(bool),
+    Enum(String),
+}
+
+pub type NormalizedFieldValue = Provenanced<NormalizedScalar>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReferenceOrigin {
+    Item {
+        mid: Mid,
+        display_id: Option<String>,
+    },
+    Narrative(SourceSpan),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthoredReference {
+    target: String,
+    label: Option<String>,
+    relation: Option<String>,
+    origin: ReferenceOrigin,
+    source: SourceSpan,
+}
+
+impl AuthoredReference {
+    pub fn new(
+        target: String,
+        label: Option<String>,
+        relation: Option<String>,
+        origin: ReferenceOrigin,
+        source: SourceSpan,
+    ) -> Self {
+        Self {
+            target,
+            label,
+            relation,
+            origin,
+            source,
+        }
+    }
+
+    pub fn target(&self) -> &str {
+        &self.target
+    }
+
+    pub fn label(&self) -> Option<&str> {
+        self.label.as_deref()
+    }
+
+    pub fn relation(&self) -> Option<&str> {
+        self.relation.as_deref()
+    }
+
+    pub const fn origin(&self) -> &ReferenceOrigin {
+        &self.origin
+    }
+
+    pub const fn source(&self) -> &SourceSpan {
+        &self.source
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedReference {
+    target: Mid,
+    authored: AuthoredReference,
+}
+
+impl ResolvedReference {
+    pub fn new(target: Mid, authored: AuthoredReference) -> Self {
+        Self { target, authored }
+    }
+
+    pub const fn target(&self) -> &Mid {
+        &self.target
+    }
+
+    pub const fn authored(&self) -> &AuthoredReference {
+        &self.authored
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NormalizedItem {
+    mid: Mid,
+    flavour: String,
+    display_id: Option<Provenanced<String>>,
+    title: Option<Provenanced<String>>,
+    body: Provenanced<String>,
+    fields: BTreeMap<String, Vec<NormalizedFieldValue>>,
+    authored_references: Vec<AuthoredReference>,
+    resolved_references: Vec<ResolvedReference>,
+    source: SourceSpan,
+    header_source: SourceSpan,
+}
+
+impl NormalizedItem {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        mid: Mid,
+        flavour: String,
+        display_id: Option<Provenanced<String>>,
+        title: Option<Provenanced<String>>,
+        body: Provenanced<String>,
+        fields: BTreeMap<String, Vec<NormalizedFieldValue>>,
+        authored_references: Vec<AuthoredReference>,
+        source: SourceSpan,
+        header_source: SourceSpan,
+    ) -> Self {
+        Self {
+            mid,
+            flavour,
+            display_id,
+            title,
+            body,
+            fields,
+            authored_references,
+            resolved_references: Vec::new(),
+            source,
+            header_source,
+        }
+    }
+
+    pub const fn mid(&self) -> &Mid {
+        &self.mid
+    }
+
+    pub fn flavour(&self) -> &str {
+        &self.flavour
+    }
+
+    pub const fn display_id(&self) -> Option<&Provenanced<String>> {
+        self.display_id.as_ref()
+    }
+
+    pub const fn title(&self) -> Option<&Provenanced<String>> {
+        self.title.as_ref()
+    }
+
+    pub const fn body(&self) -> &Provenanced<String> {
+        &self.body
+    }
+
+    pub const fn fields(&self) -> &BTreeMap<String, Vec<NormalizedFieldValue>> {
+        &self.fields
+    }
+
+    pub fn authored_references(&self) -> &[AuthoredReference] {
+        &self.authored_references
+    }
+
+    pub fn resolved_references(&self) -> &[ResolvedReference] {
+        &self.resolved_references
+    }
+
+    pub fn set_resolved_references(&mut self, references: Vec<ResolvedReference>) {
+        self.resolved_references = references;
+    }
+
+    pub const fn source(&self) -> &SourceSpan {
+        &self.source
+    }
+
+    pub const fn header_source(&self) -> &SourceSpan {
+        &self.header_source
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdentityRecord {
+    mid: Mid,
+    display_id: Option<Provenanced<String>>,
+    display_id_active: bool,
+    header_source: SourceSpan,
+}
+
+impl IdentityRecord {
+    pub fn new(
+        mid: Mid,
+        display_id: Option<Provenanced<String>>,
+        header_source: SourceSpan,
+    ) -> Self {
+        Self {
+            mid,
+            display_id,
+            display_id_active: true,
+            header_source,
+        }
+    }
+
+    pub fn with_active_display_id(mut self, active: bool) -> Self {
+        self.display_id_active = active;
+        self
+    }
+
+    pub const fn mid(&self) -> &Mid {
+        &self.mid
+    }
+
+    pub const fn display_id(&self) -> Option<&Provenanced<String>> {
+        self.display_id.as_ref()
+    }
+
+    pub const fn display_id_is_active(&self) -> bool {
+        self.display_id.is_some() && self.display_id_active
+    }
+
+    pub const fn header_source(&self) -> &SourceSpan {
+        &self.header_source
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdentityCandidate {
+    mid: Mid,
+    header_source: SourceSpan,
+}
+
+impl IdentityCandidate {
+    pub const fn mid(&self) -> &Mid {
+        &self.mid
+    }
+
+    pub const fn header_source(&self) -> &SourceSpan {
+        &self.header_source
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IdentityIndex {
+    mids: BTreeMap<Mid, Vec<IdentityCandidate>>,
+    display_ids: BTreeMap<String, Vec<IdentityCandidate>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdentityIndexBuild {
+    index: IdentityIndex,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl IdentityIndexBuild {
+    pub const fn index(&self) -> &IdentityIndex {
+        &self.index
+    }
+
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+
+    pub fn into_parts(self) -> (IdentityIndex, Vec<Diagnostic>) {
+        (self.index, self.diagnostics)
+    }
+}
+
+impl IdentityIndex {
+    pub fn build(records: &[IdentityRecord]) -> IdentityIndexBuild {
+        let mut index = Self::default();
+        let mut all_display_ids = BTreeMap::<String, Vec<IdentityCandidate>>::new();
+        for record in records {
+            let candidate = IdentityCandidate {
+                mid: record.mid.clone(),
+                header_source: record.header_source.clone(),
+            };
+            index
+                .mids
+                .entry(record.mid.clone())
+                .or_default()
+                .push(candidate.clone());
+            if let Some(display_id) = record.display_id() {
+                all_display_ids
+                    .entry(display_id.value().clone())
+                    .or_default()
+                    .push(candidate.clone());
+                if record.display_id_is_active() {
+                    index
+                        .display_ids
+                        .entry(display_id.value().clone())
+                        .or_default()
+                        .push(candidate);
+                }
+            }
+        }
+        for candidates in index.mids.values_mut() {
+            sort_candidates(candidates);
+        }
+        for candidates in index.display_ids.values_mut() {
+            sort_candidates(candidates);
+        }
+        for candidates in all_display_ids.values_mut() {
+            sort_candidates(candidates);
+        }
+
+        let mut diagnostics = duplicate_diagnostics(&index, &all_display_ids, records);
+        sort_diagnostics(&mut diagnostics);
+        IdentityIndexBuild { index, diagnostics }
+    }
+
+    pub const fn mids(&self) -> &BTreeMap<Mid, Vec<IdentityCandidate>> {
+        &self.mids
+    }
+
+    pub const fn display_ids(&self) -> &BTreeMap<String, Vec<IdentityCandidate>> {
+        &self.display_ids
+    }
+
+    pub fn resolve(
+        &self,
+        reference: &AuthoredReference,
+        identity: &MidIdentity,
+    ) -> Result<ResolvedReference, Box<Diagnostic>> {
+        let candidates = match Mid::parse(reference.target(), identity) {
+            Ok(mid) => self.mids.get(&mid),
+            Err(_) => self.display_ids.get(reference.target()),
+        };
+        match candidates {
+            Some(candidates) if candidates.len() == 1 => Ok(ResolvedReference::new(
+                candidates[0].mid.clone(),
+                reference.clone(),
+            )),
+            Some(candidates) if !candidates.is_empty() => {
+                Err(Box::new(ambiguous_reference(reference, candidates)))
+            }
+            _ => Err(Box::new(unresolved_reference(reference))),
+        }
+    }
+}
+
+fn sort_candidates(candidates: &mut [IdentityCandidate]) {
+    candidates.sort_by(|left, right| {
+        left.mid
+            .as_str()
+            .as_bytes()
+            .cmp(right.mid.as_str().as_bytes())
+            .then_with(|| compare_spans(&left.header_source, &right.header_source))
+    });
+}
+
+fn compare_spans(left: &SourceSpan, right: &SourceSpan) -> Ordering {
+    left.path()
+        .as_bytes()
+        .cmp(right.path().as_bytes())
+        .then_with(|| left.start_byte().cmp(&right.start_byte()))
+        .then_with(|| left.end_byte().cmp(&right.end_byte()))
+}
+
+fn duplicate_diagnostics(
+    index: &IdentityIndex,
+    all_display_ids: &BTreeMap<String, Vec<IdentityCandidate>>,
+    records: &[IdentityRecord],
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for (mid, candidates) in &index.mids {
+        if candidates.len() > 1 {
+            let mut diagnostic = Diagnostic::new(
+                IdentityDiagnosticCode::DuplicateMid,
+                "machine identity is used by more than one item",
+                None,
+            )
+            .with_detail("mid", mid.as_str());
+            for candidate in candidates {
+                diagnostic = diagnostic.with_related(RelatedDiagnostic::new(
+                    "item with duplicate machine identity",
+                    candidate.header_source.clone(),
+                ));
+            }
+            diagnostics.push(diagnostic);
+        }
+    }
+    for (display_id, candidates) in all_display_ids {
+        if candidates.len() > 1 {
+            let primary = records
+                .iter()
+                .filter_map(IdentityRecord::display_id)
+                .filter(|candidate| candidate.value() == display_id)
+                .min_by(|left, right| compare_spans(left.source(), right.source()))
+                .map(|candidate| candidate.source().clone());
+            let mut diagnostic = Diagnostic::new(
+                IdentityDiagnosticCode::DuplicateDisplayId,
+                "display ID is used by more than one item",
+                primary,
+            )
+            .with_detail("display_id", display_id.clone())
+            .with_detail(
+                "candidate_mids",
+                DiagnosticValue::Array(
+                    candidates
+                        .iter()
+                        .map(|candidate| DiagnosticValue::String(candidate.mid.to_string()))
+                        .collect(),
+                ),
+            );
+            for candidate in candidates {
+                diagnostic = diagnostic.with_related(RelatedDiagnostic::new(
+                    format!("display ID belongs to {}", candidate.mid),
+                    candidate.header_source.clone(),
+                ));
+            }
+            diagnostics.push(diagnostic);
+        }
+    }
+    diagnostics
+}
+
+fn unresolved_reference(reference: &AuthoredReference) -> Diagnostic {
+    decorate_reference_diagnostic(
+        Diagnostic::new(
+            ReferenceDiagnosticCode::Unresolved,
+            "internal reference does not resolve to an active item",
+            Some(reference.source.clone()),
+        )
+        .with_detail("reference", reference.target.clone()),
+        reference,
+    )
+}
+
+fn ambiguous_reference(
+    reference: &AuthoredReference,
+    candidates: &[IdentityCandidate],
+) -> Diagnostic {
+    let mut diagnostic = Diagnostic::new(
+        ReferenceDiagnosticCode::Ambiguous,
+        "internal reference matches more than one active item",
+        Some(reference.source.clone()),
+    )
+    .with_detail(
+        "candidate_mids",
+        DiagnosticValue::Array(
+            candidates
+                .iter()
+                .map(|candidate| DiagnosticValue::String(candidate.mid.to_string()))
+                .collect(),
+        ),
+    )
+    .with_detail("reference", reference.target.clone());
+    for candidate in candidates {
+        diagnostic = diagnostic.with_related(RelatedDiagnostic::new(
+            format!("candidate {}", candidate.mid),
+            candidate.header_source.clone(),
+        ));
+    }
+    decorate_reference_diagnostic(diagnostic, reference)
+}
+
+fn decorate_reference_diagnostic(
+    mut diagnostic: Diagnostic,
+    reference: &AuthoredReference,
+) -> Diagnostic {
+    if let ReferenceOrigin::Item { mid, display_id } = reference.origin() {
+        diagnostic = diagnostic.with_item(DiagnosticItem::new(mid.clone(), display_id.clone()));
+    }
+    diagnostic.with_context(DiagnosticContext::new(
+        None,
+        reference.relation.clone(),
+        Some(reference.target.clone()),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{MidFormat, SchemaField, SourceIndex};
+
+    fn identity() -> MidIdentity {
+        let span = span("schema.yaml", "x", 0, 1);
+        MidIdentity::new(
+            SchemaField::new(span.clone(), span.clone(), MidFormat::Ulid),
+            SchemaField::new(span.clone(), span, "m_".to_owned()),
+        )
+    }
+
+    fn mid(suffix: &str) -> Mid {
+        Mid::parse(&format!("m_{suffix}"), &identity()).unwrap()
+    }
+
+    fn span(path: &str, source: &str, start: u64, end: u64) -> SourceSpan {
+        let index = SourceIndex::try_new(path, source).unwrap();
+        let (start_line, start_column) = index.coordinates_at(start).unwrap();
+        let (end_line, end_column) = index.coordinates_at(end).unwrap();
+        index
+            .try_span(start, end, start_line, start_column, end_line, end_column)
+            .unwrap()
+    }
+
+    fn record(mid: Mid, id: Option<&str>, path: &str) -> IdentityRecord {
+        let source = "item";
+        let source_span = span(path, source, 0, source.len() as u64);
+        IdentityRecord::new(
+            mid,
+            id.map(|id| Provenanced::new(id.to_owned(), source_span.clone())),
+            source_span,
+        )
+    }
+
+    fn reference(target: &str) -> AuthoredReference {
+        AuthoredReference::new(
+            target.to_owned(),
+            None,
+            None,
+            ReferenceOrigin::Narrative(span("ref.md", "ref", 0, 3)),
+            span("ref.md", "ref", 0, 3),
+        )
+    }
+
+    #[test]
+    fn exact_mid_wins_and_display_ids_are_exact_without_alias_fallback() {
+        let first = mid("00000000000000000000000001");
+        let second = mid("00000000000000000000000002");
+        let build = IdentityIndex::build(&[
+            record(first.clone(), Some("REQ-ONE"), "a.md"),
+            record(second.clone(), Some(first.as_str()), "b.md"),
+        ]);
+
+        assert_eq!(
+            build
+                .index()
+                .resolve(&reference(first.as_str()), &identity())
+                .unwrap()
+                .target(),
+            &first
+        );
+        assert_eq!(
+            build
+                .index()
+                .resolve(&reference("REQ-ONE"), &identity())
+                .unwrap()
+                .target(),
+            &first
+        );
+        assert_eq!(
+            build
+                .index()
+                .resolve(&reference("req-one"), &identity())
+                .unwrap_err()
+                .code(),
+            ReferenceDiagnosticCode::Unresolved.into()
+        );
+    }
+
+    #[test]
+    fn duplicate_indexes_and_ambiguous_candidates_are_deterministic() {
+        let first = mid("00000000000000000000000001");
+        let second = mid("00000000000000000000000002");
+        let records = vec![
+            record(second.clone(), Some("DUP"), "z.md"),
+            record(first.clone(), Some("DUP"), "a.md"),
+            record(first, None, "b.md"),
+        ];
+        let build = IdentityIndex::build(&records);
+        let mut reversed = records.clone();
+        reversed.reverse();
+        assert_eq!(build, IdentityIndex::build(&reversed));
+
+        assert_eq!(build.diagnostics().len(), 2);
+        let ambiguous = build
+            .index()
+            .resolve(&reference("DUP"), &identity())
+            .unwrap_err();
+        assert_eq!(ambiguous.code(), ReferenceDiagnosticCode::Ambiguous.into());
+        assert_eq!(
+            ambiguous.details().get("candidate_mids"),
+            Some(&DiagnosticValue::Array(vec![
+                DiagnosticValue::String("m_00000000000000000000000001".to_owned()),
+                DiagnosticValue::String("m_00000000000000000000000002".to_owned()),
+            ]))
+        );
+        assert_eq!(ambiguous.related()[0].span().path(), "a.md");
+        assert_eq!(ambiguous.related()[1].span().path(), "z.md");
+    }
+
+    #[test]
+    fn pure_index_output_is_independent_of_input_order() {
+        let first = record(mid("00000000000000000000000001"), Some("ONE"), "a.md");
+        let second = record(mid("00000000000000000000000002"), Some("TWO"), "b.md");
+        assert_eq!(
+            IdentityIndex::build(&[first.clone(), second.clone()]),
+            IdentityIndex::build(&[second, first])
+        );
+    }
+
+    #[test]
+    fn inactive_display_ids_still_participate_in_duplicate_diagnostics() {
+        let first = record(mid("00000000000000000000000001"), Some("invalid"), "a.md")
+            .with_active_display_id(false);
+        let second = record(mid("00000000000000000000000002"), Some("invalid"), "b.md")
+            .with_active_display_id(false);
+        let build = IdentityIndex::build(&[first, second]);
+
+        assert!(build.index().display_ids().get("invalid").is_none());
+        assert!(build.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code() == IdentityDiagnosticCode::DuplicateDisplayId.into()
+        }));
+        assert_eq!(
+            build
+                .index()
+                .resolve(&reference("invalid"), &identity())
+                .unwrap_err()
+                .code(),
+            ReferenceDiagnosticCode::Unresolved.into()
+        );
+    }
+}
