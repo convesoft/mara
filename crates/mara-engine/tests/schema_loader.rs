@@ -876,6 +876,14 @@ fn diagnoses_inverse_symmetry_acyclicity_and_cardinality_contradictions() {
 "#,
         ),
         (
+            "{}",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [requirement]}
+    cardinality: {}
+"#,
+        ),
+        (
             "-1",
             r#"  relation:
     source: {flavours: [requirement]}
@@ -1034,6 +1042,42 @@ fn reports_relation_diagnostics_independently_of_other_declaration_failures() {
         ["''", "missing"]
     );
 
+    let symmetric_source = rich_schema_with_relations(
+        r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [missing]}
+    symmetric: true
+"#,
+    );
+    let fixture = Fixture::new(&symmetric_source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+    assert_eq!(
+        error
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| source_slice(&symmetric_source, diagnostic.primary().unwrap()))
+            .collect::<Vec<_>>(),
+        ["{flavours: [missing]}", "missing"]
+    );
+
+    let acyclic_source = rich_schema_with_relations(
+        r#"  relation:
+    source: {flavours: [requirement]}
+    target: {external: [HTTPS]}
+    acyclic: true
+"#,
+    );
+    let fixture = Fixture::new(&acyclic_source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+    assert_eq!(
+        error
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| source_slice(&acyclic_source, diagnostic.primary().unwrap()))
+            .collect::<Vec<_>>(),
+        ["HTTPS", "true"]
+    );
+
     let namespace_source = rich_schema_with_relations(
         r#"  status:
     source: {flavours: [requirement]}
@@ -1093,7 +1137,7 @@ fn rejects_unknown_keys_at_every_relation_declaration_boundary() {
             r#"  relation:
     source: {flavours: [requirement]}
     target: {flavours: [design]}
-    cardinality: {total: {max: 1}}
+    cardinality: {outgoing: {}, total: {max: 1}}
 "#,
         ),
         (

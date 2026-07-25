@@ -1951,40 +1951,24 @@ fn decode_relation(
                 &mapping,
             ));
         }
-        if let (Some(source), Some(target)) = (&source, &target) {
-            let source_flavours = source
-                .value()
-                .flavours()
-                .value()
-                .iter()
-                .map(|flavour| flavour.value().as_str())
-                .collect::<BTreeSet<_>>();
-            let target_flavours = target
-                .value()
-                .flavours()
-                .map(|flavours| {
-                    flavours
-                        .value()
-                        .iter()
-                        .map(|flavour| flavour.value().as_str())
-                        .collect::<BTreeSet<_>>()
-                })
-                .unwrap_or_default();
-            if source_flavours != target_flavours {
-                diagnostics.push(invalid_declaration_at_source(
-                    "symmetric relations require identical source and target flavour sets",
-                    target.value_source().clone(),
-                    &mapping,
-                ));
-            }
+        if let (Some(source_flavours), Some(target_flavours)) = (
+            authored_relation_flavours(entries, "source"),
+            authored_relation_flavours(entries, "target"),
+        ) && source_flavours != target_flavours
+        {
+            let target_source = optional_entry(entries, "target")
+                .map(|(_, target)| parser_span(source_map, target.span()))
+                .expect("a decoded target flavour set has a target mapping");
+            diagnostics.push(invalid_declaration_at_source(
+                "symmetric relations require identical source and target flavour sets",
+                target_source,
+                &mapping,
+            ));
         }
     }
 
     let acyclic_enabled = acyclic.as_ref().is_some_and(|enabled| *enabled.value());
-    if acyclic_enabled
-        && let Some(target) = &target
-        && let Some(external) = target.value().external()
-    {
+    if acyclic_enabled && let Some(external_key) = authored_external_target_key(entries) {
         diagnostics.push(
             invalid_declaration_at_source(
                 "acyclic relations cannot permit external targets",
@@ -1997,7 +1981,7 @@ fn decode_relation(
             )
             .with_related(RelatedDiagnostic::new(
                 "external targets are declared here",
-                external.key_source().clone(),
+                parser_span(source_map, external_key.span()),
             )),
         );
     }
@@ -2285,6 +2269,16 @@ fn decode_relation_cardinality(
     let entries =
         expect_mapping(node, &mapping, source_map).map_err(|diagnostic| vec![*diagnostic])?;
     let mut diagnostics = Vec::new();
+    if optional_entry(entries, "outgoing").is_none()
+        && optional_entry(entries, "incoming").is_none()
+    {
+        diagnostics.push(invalid_declaration(
+            "relation cardinality requires outgoing and/or incoming bounds",
+            source_map,
+            node.span(),
+            &mapping,
+        ));
+    }
     let outgoing = optional_entry(entries, "outgoing").and_then(|(key, value)| {
         collect_compilation(
             decode_cardinality_bound(value, &format!("{mapping}.outgoing"), source_map),
@@ -2512,6 +2506,37 @@ fn relation_endpoint_flavours(
         .filter(|flavour| valid_snake_name(flavour) && flavour_namespaces.contains(flavour))
         .map(str::to_owned)
         .collect()
+}
+
+fn authored_relation_flavours(
+    relation_entries: &[(ParsedNode, ParsedNode)],
+    endpoint: &str,
+) -> Option<BTreeSet<String>> {
+    let (_, endpoint_node) = optional_entry(relation_entries, endpoint)?;
+    let ParsedNode::Mapping { entries, .. } = endpoint_node else {
+        return None;
+    };
+    let Some((_, flavour_node)) = optional_entry(entries, "flavours") else {
+        return (endpoint == "target").then(BTreeSet::new);
+    };
+    let ParsedNode::Sequence { values, .. } = flavour_node else {
+        return None;
+    };
+    values
+        .iter()
+        .map(parsed_string)
+        .map(|value| value.map(str::to_owned))
+        .collect()
+}
+
+fn authored_external_target_key(
+    relation_entries: &[(ParsedNode, ParsedNode)],
+) -> Option<&ParsedNode> {
+    let (_, ParsedNode::Mapping { entries, .. }) = optional_entry(relation_entries, "target")?
+    else {
+        return None;
+    };
+    optional_entry(entries, "external").map(|(key, _)| key)
 }
 
 fn parsed_string(node: &ParsedNode) -> Option<&str> {
