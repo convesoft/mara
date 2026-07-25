@@ -290,4 +290,70 @@ fn mixed_document_hierarchy_and_inline_contexts_remain_lossless() {
     assert_eq!(item.references()[0].target(), "ITEM");
     assert_eq!(item.references()[0].context(), InlineReferenceContext::Text);
     assert_eq!(slice(&source, item.references()[0].source()), "[[ITEM]]");
+    assert_eq!(slice(&source, top.heading_source()), "# Top [[TOP|label]]");
+}
+
+#[test]
+fn section_ranges_distinguish_preamble_direct_content_children_and_siblings() {
+    let source = format!(
+        "Preamble.\n\n:::req {MID}\n\nItem body.\n:::\n\n# One\n\nDirect one.\n\n## Child\n\nChild body.\n\n# Two\n\nDirect two.\n"
+    );
+    let parsed = parse(&source);
+
+    assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
+    assert_eq!(
+        parsed
+            .preamble()
+            .iter()
+            .filter_map(ParsedBlock::as_item)
+            .count(),
+        1
+    );
+    assert_eq!(parsed.sections().len(), 2);
+    let one = &parsed.sections()[0];
+    let two = &parsed.sections()[1];
+    assert_eq!(slice(&source, one.heading_source()), "# One");
+    assert_eq!(slice(&source, two.heading_source()), "# Two");
+    assert_eq!(
+        parsed.blocks()[one.content_range()]
+            .iter()
+            .filter_map(ParsedBlock::as_markdown)
+            .map(|block| block.raw())
+            .collect::<String>(),
+        "Direct one.\n\n"
+    );
+    assert_eq!(one.children().len(), 1);
+    assert_eq!(
+        slice(&source, one.children()[0].heading_source()),
+        "## Child"
+    );
+    assert_eq!(
+        slice(&source, one.source()),
+        "# One\n\nDirect one.\n\n## Child\n\nChild body.\n\n"
+    );
+    assert_eq!(slice(&source, two.source()), "# Two\n\nDirect two.\n");
+}
+
+#[test]
+fn inline_reference_spans_follow_unicode_crlf_and_escape_parity() {
+    let source = "é [[ONE]]\r\n\\\\[[TWO|label]] and \\[[ESCAPED]]\r\n<span data-ref=\"[[ATTR]]\"></span>\r\n";
+    let parsed = parse(source);
+    let references = parsed
+        .blocks()
+        .iter()
+        .filter_map(ParsedBlock::as_markdown)
+        .flat_map(|block| block.references())
+        .collect::<Vec<_>>();
+
+    assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
+    assert_eq!(references.len(), 2);
+    assert_eq!(references[0].target(), "ONE");
+    assert_eq!(slice(source, references[0].source()), "[[ONE]]");
+    assert_eq!(references[0].source().start_byte(), 3);
+    assert_eq!(references[0].source().start_line(), 1);
+    assert_eq!(references[0].source().start_column(), 3);
+    assert_eq!(references[1].target(), "TWO");
+    assert_eq!(references[1].label(), Some("label"));
+    assert_eq!(slice(source, references[1].source()), "[[TWO|label]]");
+    assert_eq!(references[1].source().start_line(), 2);
 }

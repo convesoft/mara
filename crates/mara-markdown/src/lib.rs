@@ -1020,12 +1020,30 @@ fn build_section(
         level,
         title,
         source: span(document, heading.source().start_byte() as usize, end),
-        heading_source: heading.source().clone(),
+        heading_source: heading_markup_span(document, heading),
         heading_block,
         content_start,
         content_end,
         children,
     }
+}
+
+fn heading_markup_span(document: &SourceDocument, heading: &MarkdownSegment) -> SourceSpan {
+    let source = document.source().as_str();
+    let start = heading.source().start_byte() as usize;
+    let end = heading.source().end_byte() as usize;
+    let first_line = next_line(source, start, end);
+    let first_content = line_content_index(first_line, source);
+    let atx = first_content
+        .str(source)
+        .trim_start_matches([' ', '\t'])
+        .starts_with('#');
+    let heading_end = if atx || first_line.stop() >= end {
+        first_content.stop()
+    } else {
+        line_content_index(next_line(source, first_line.stop(), end), source).stop()
+    };
+    span(document, start, heading_end)
 }
 
 fn span(document: &SourceDocument, start: usize, end: usize) -> SourceSpan {
