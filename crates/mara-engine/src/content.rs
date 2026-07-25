@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::OsString,
     fs,
-    io::Read,
+    io::{self, Read},
     path::{Component, Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex},
@@ -81,27 +81,67 @@ struct IncludePattern {
     segments: Vec<IncludeSegment>,
 }
 
+#[derive(Debug)]
+struct GitContext {
+    tracked_paths: io::Result<Vec<PathBuf>>,
+    external_ignore_files: Vec<PathBuf>,
+}
+
 /// Discovers and decodes the content selected by an already validated project.
 /// Documents and diagnostics are both returned in normalized project-relative
 /// path order.
 pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
     let includes = compile_globs(&project.content.include);
     let excludes = compile_globs(&project.content.exclude);
-    let tracked_paths = project
+    let git_context = project
         .content
         .respect_gitignore
-        .then(|| tracked_content_paths(&project.root))
+        .then(|| git_context(&project.root))
         .flatten();
-    let respect_gitignore = tracked_paths.is_some();
+    let respect_gitignore = git_context.is_some();
     let rejected_directories = Arc::new(Mutex::new(Vec::new()));
+    let unreadable_ignore_files = Arc::new(Mutex::new(Vec::new()));
     let mut candidates = Vec::new();
     let mut diagnostics = Vec::new();
+    let tracked_paths = match git_context {
+        Some(GitContext {
+            tracked_paths: Ok(paths),
+            external_ignore_files,
+        }) => {
+            for path in external_ignore_files {
+                record_unreadable_ignore_file(&unreadable_ignore_files, &path);
+            }
+            paths
+        }
+        Some(GitContext {
+            tracked_paths: Err(_),
+            external_ignore_files,
+        }) => {
+            for path in external_ignore_files {
+                record_unreadable_ignore_file(&unreadable_ignore_files, &path);
+            }
+            let source_path = normalized_relative_path(&project.root, &project.config_path)
+                .unwrap_or_else(|| ".mara/project.toml".to_owned());
+            diagnostics.push(
+                diagnostic_at_start(
+                    ContentDiagnosticCode::Io,
+                    &source_path,
+                    "could not enumerate Git-tracked content paths",
+                )
+                .with_detail("operation", "gitignore")
+                .with_detail("reason", "tracked_query_failed"),
+            );
+            Vec::new()
+        }
+        None => Vec::new(),
+    };
     let mut seen_logical_paths = HashSet::new();
 
     for result in content_walker(
         project,
         respect_gitignore,
         Arc::clone(&rejected_directories),
+        Arc::clone(&unreadable_ignore_files),
     )
     .build()
     {
@@ -201,7 +241,7 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
         }
     }
 
-    for logical_path in tracked_paths.into_iter().flatten() {
+    for logical_path in tracked_paths {
         if !seen_logical_paths.insert(logical_path.clone()) {
             continue;
         }
@@ -227,6 +267,15 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
         .expect("the directory rejection lock is not poisoned");
     for rejected in rejected_directories {
         diagnostics.push(rejected_directory_diagnostic(rejected));
+    }
+    let mut unreadable_ignore_files = Arc::try_unwrap(unreadable_ignore_files)
+        .expect("the content walker released its ignore-rule failure recorder")
+        .into_inner()
+        .expect("the ignore-rule failure lock is not poisoned");
+    unreadable_ignore_files.sort();
+    unreadable_ignore_files.dedup();
+    for path in unreadable_ignore_files {
+        diagnostics.push(unreadable_ignore_file_diagnostic(&project.root, &path));
     }
 
     candidates.sort_by(|left, right| left.source_path.cmp(&right.source_path));
@@ -296,6 +345,7 @@ fn content_walker(
     project: &LoadedProject,
     respect_gitignore: bool,
     rejected: Arc<Mutex<Vec<RejectedDirectorySymlink>>>,
+    unreadable_ignore_files: Arc<Mutex<Vec<PathBuf>>>,
 ) -> WalkBuilder {
     let mut builder = WalkBuilder::new(&project.root);
     builder
@@ -314,6 +364,12 @@ fn content_walker(
     let follow_directory_symlinks = project.content.follow_directory_symlinks;
     builder.filter_entry(move |entry| {
         if entry.depth() == 0 {
+            if respect_gitignore {
+                record_unreadable_ignore_file(
+                    &unreadable_ignore_files,
+                    &entry.path().join(".gitignore"),
+                );
+            }
             return true;
         }
         let is_directory = entry.file_type().is_some_and(|kind| kind.is_dir())
@@ -325,6 +381,12 @@ fn content_walker(
                 || !directory_is_include_reachable(&include_patterns, &path))
         {
             return false;
+        }
+        if respect_gitignore && is_directory {
+            record_unreadable_ignore_file(
+                &unreadable_ignore_files,
+                &entry.path().join(".gitignore"),
+            );
         }
         if !entry.path_is_symlink() {
             return true;
@@ -622,23 +684,115 @@ fn candidate_from_path(
     }))
 }
 
-fn tracked_content_paths(root: &Path) -> Option<Vec<PathBuf>> {
+fn git_context(root: &Path) -> Option<GitContext> {
+    let inside = git_output(root, &["rev-parse", "--is-inside-work-tree"]).ok()?;
+    if !inside.status.success() || inside.stdout.strip_suffix(b"\n") != Some(b"true") {
+        return None;
+    }
+    let worktree_root = git_output(root, &["rev-parse", "--show-toplevel"])
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| git_path_from_output(root, &output.stdout).ok())?;
+    let mut external_ignore_files = vec![root.join(".gitignore")];
+    let mut ancestor = root.parent();
+    while let Some(directory) = ancestor.filter(|directory| directory.starts_with(&worktree_root)) {
+        external_ignore_files.push(directory.join(".gitignore"));
+        if directory == worktree_root {
+            break;
+        }
+        ancestor = directory.parent();
+    }
+    if let Ok(output) = git_output(root, &["rev-parse", "--git-path", "info/exclude"])
+        && output.status.success()
+        && let Ok(path) = git_path_from_output(root, &output.stdout)
+    {
+        external_ignore_files.push(path);
+    }
+    if let Ok(output) = git_output(
+        root,
+        &["config", "--null", "--path", "--get", "core.excludesFile"],
+    ) && output.status.success()
+        && let Ok(path) = git_path_from_output(root, &output.stdout)
+    {
+        external_ignore_files.push(path);
+    }
+    external_ignore_files.sort();
+    external_ignore_files.dedup();
+    Some(GitContext {
+        tracked_paths: tracked_content_paths(root),
+        external_ignore_files,
+    })
+}
+
+fn tracked_content_paths(root: &Path) -> io::Result<Vec<PathBuf>> {
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
         .args(["ls-files", "-z", "--cached", "--", "."])
-        .output()
-        .ok()?;
+        .output()?;
     if !output.status.success() {
-        return None;
+        return Err(io::Error::other(
+            "Git could not enumerate tracked project paths",
+        ));
     }
     output
         .stdout
         .split(|byte| *byte == 0)
         .filter(|path| !path.is_empty())
         .map(|path| git_path(root, path))
-        .collect::<std::io::Result<_>>()
-        .ok()
+        .collect()
+}
+
+fn git_output(root: &Path, args: &[&str]) -> io::Result<std::process::Output> {
+    Command::new("git").arg("-C").arg(root).args(args).output()
+}
+
+fn git_path_from_output(root: &Path, output: &[u8]) -> io::Result<PathBuf> {
+    let output = output
+        .strip_suffix(b"\0")
+        .or_else(|| output.strip_suffix(b"\r\n"))
+        .or_else(|| output.strip_suffix(b"\n"))
+        .unwrap_or(output);
+    if output.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Git returned an empty path",
+        ));
+    }
+    git_path(root, output)
+}
+
+fn record_unreadable_ignore_file(paths: &Mutex<Vec<PathBuf>>, path: &Path) {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+        Err(_) => {}
+        Ok(_) => match fs::metadata(path) {
+            Ok(metadata) if metadata.is_file() && fs::read_to_string(path).is_ok() => return,
+            Ok(_) | Err(_) => {}
+        },
+    }
+    paths
+        .lock()
+        .expect("the ignore-rule failure lock is not poisoned")
+        .push(path.to_path_buf());
+}
+
+fn unreadable_ignore_file_diagnostic(root: &Path, path: &Path) -> Diagnostic {
+    let diagnostic = match normalized_relative_path(root, path) {
+        Some(source_path) => diagnostic_at_start(
+            ContentDiagnosticCode::Io,
+            &source_path,
+            "could not read a Git ignore rule file",
+        ),
+        None => Diagnostic::new(
+            ContentDiagnosticCode::Io,
+            "could not read an external Git ignore rule file",
+            None,
+        ),
+    };
+    diagnostic
+        .with_detail("operation", "gitignore")
+        .with_detail("reason", "ignore_rule_io")
 }
 
 #[cfg(unix)]

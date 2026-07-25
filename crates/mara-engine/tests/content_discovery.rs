@@ -290,6 +290,70 @@ fn gitignore_parse_errors_are_reported_without_hiding_independent_content() {
 }
 
 #[test]
+fn tracked_query_failures_keep_ignore_filtering_and_report_evidence() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
+    fixture.git(&["init", "--quiet"]);
+    fs::create_dir(fixture.root.join(".git/index")).unwrap();
+    fixture.write(".gitignore", "ignored.mara.md\n");
+    fixture.write("ignored.mara.md", "ignored");
+    fixture.write("good.mara.md", "good");
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["good.mara.md"]);
+    assert!(discovery.diagnostics().iter().any(|diagnostic| {
+        diagnostic.details().get("reason")
+            == Some(&mara_core::DiagnosticValue::from("tracked_query_failed"))
+    }));
+}
+
+#[test]
+fn unreadable_ignore_rules_are_reported_without_hiding_independent_content() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
+    fixture.git(&["init", "--quiet"]);
+    fs::create_dir(fixture.root.join(".gitignore")).unwrap();
+    fixture.write("good.mara.md", "good");
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["good.mara.md"]);
+    assert!(
+        discovery.diagnostics().iter().any(|diagnostic| {
+            diagnostic
+                .primary()
+                .is_some_and(|span| span.path() == ".gitignore")
+                && diagnostic.details().get("reason")
+                    == Some(&mara_core::DiagnosticValue::from("ignore_rule_io"))
+        }),
+        "diagnostics: {:#?}",
+        discovery.diagnostics()
+    );
+}
+
+#[test]
+fn unreadable_external_ignore_rules_are_reported_without_host_path_provenance() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
+    fixture.git(&["init", "--quiet"]);
+    let external_ignore = fixture._temp.path().join("external-global-ignore");
+    fs::create_dir(&external_ignore).unwrap();
+    fixture.git(&[
+        "config",
+        "core.excludesFile",
+        external_ignore.to_str().unwrap(),
+    ]);
+    fixture.write("good.mara.md", "good");
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["good.mara.md"]);
+    assert!(discovery.diagnostics().iter().any(|diagnostic| {
+        diagnostic.primary().is_none()
+            && diagnostic.details().get("reason")
+                == Some(&mara_core::DiagnosticValue::from("ignore_rule_io"))
+    }));
+}
+
+#[test]
 fn complete_text_provenance_and_source_boundaries_are_retained() {
     let fixture = Fixture::new(&["docs/*.mara.md"], &[], false, false, false);
     let source = "é\r\nline\r\n";
