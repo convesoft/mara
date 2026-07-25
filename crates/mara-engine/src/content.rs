@@ -13,7 +13,7 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 
-use ignore::{WalkBuilder, gitignore::GitignoreBuilder};
+use ignore::WalkBuilder;
 use mara_core::{
     ContentDiagnosticCode, Diagnostic, ProjectDiagnosticCode, SourceDocument, SourceSpan,
     SourceText,
@@ -102,7 +102,6 @@ struct IgnoreRuleFile {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct IgnoreRuleFailure {
     path: PathBuf,
-    reason: &'static str,
 }
 
 #[derive(Debug)]
@@ -698,7 +697,11 @@ fn candidate_from_path(
 }
 
 fn git_context(root: &Path) -> io::Result<Option<GitContext>> {
-    let inside = git_output(root, &["rev-parse", "--is-inside-work-tree"])?;
+    let inside = match git_output(root, &["rev-parse", "--is-inside-work-tree"]) {
+        Ok(output) => output,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
     if !inside.status.success() {
         return Ok(None);
     }
@@ -840,25 +843,13 @@ fn record_unreadable_ignore_file(
     }
     if logical_metadata.is_none()
         || !fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
-        || fs::read_to_string(path).is_err()
+        || fs::read(path).is_err()
     {
         failures
             .lock()
             .expect("the ignore-rule failure lock is not poisoned")
             .push(IgnoreRuleFailure {
                 path: path.to_path_buf(),
-                reason: "ignore_rule_io",
-            });
-        return;
-    }
-    let parent = path.parent().unwrap_or(Path::new("/"));
-    if GitignoreBuilder::new(parent).add(path).is_some() {
-        failures
-            .lock()
-            .expect("the ignore-rule failure lock is not poisoned")
-            .push(IgnoreRuleFailure {
-                path: path.to_path_buf(),
-                reason: "ignore_rule_error",
             });
     }
 }
@@ -876,26 +867,21 @@ fn gitignore_query_diagnostic(
 }
 
 fn ignore_rule_file_diagnostic(root: &Path, failure: IgnoreRuleFailure) -> Diagnostic {
-    let message = if failure.reason == "ignore_rule_io" {
-        "could not read a Git ignore rule file"
-    } else {
-        "could not parse a Git ignore rule file"
-    };
     let diagnostic = match normalized_relative_path(root, &failure.path) {
-        Some(source_path) => diagnostic_at_start(ContentDiagnosticCode::Io, &source_path, message),
+        Some(source_path) => diagnostic_at_start(
+            ContentDiagnosticCode::Io,
+            &source_path,
+            "could not read a Git ignore rule file",
+        ),
         None => Diagnostic::new(
             ContentDiagnosticCode::Io,
-            if failure.reason == "ignore_rule_io" {
-                "could not read an external Git ignore rule file"
-            } else {
-                "could not parse an external Git ignore rule file"
-            },
+            "could not read an external Git ignore rule file",
             None,
         ),
     };
     diagnostic
         .with_detail("operation", "gitignore")
-        .with_detail("reason", failure.reason)
+        .with_detail("reason", "ignore_rule_io")
 }
 
 #[cfg(unix)]

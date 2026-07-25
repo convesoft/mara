@@ -289,7 +289,7 @@ fn unsupported_source_paths_are_diagnosed_without_panicking_or_losing_other_file
 }
 
 #[test]
-fn gitignore_parse_errors_are_reported_without_hiding_independent_content() {
+fn gitignore_pattern_semantics_are_delegated_to_git() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
     fixture.git(&["init", "--quiet"]);
     fixture.write(".gitignore", "[z-a]\n");
@@ -298,9 +298,24 @@ fn gitignore_parse_errors_are_reported_without_hiding_independent_content() {
     let discovery = discover_content(&fixture.load());
 
     assert_eq!(document_paths(&discovery), ["nested/good.mara.md"]);
-    assert!(discovery.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == DiagnosticCode::Content(ContentDiagnosticCode::Io)
-    }));
+    assert!(discovery.diagnostics().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn gitignore_files_preserve_git_byte_semantics() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
+    fixture.git(&["init", "--quiet"]);
+    fixture.write(
+        ".gitignore",
+        [b'i', b'g', b'n', b'o', b'r', b'e', b'd', b'-', 0xff, b'\n'],
+    );
+    fixture.write("good.mara.md", "good source");
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["good.mara.md"]);
+    assert!(discovery.diagnostics().is_empty());
 }
 
 #[test]
