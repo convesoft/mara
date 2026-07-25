@@ -1,12 +1,17 @@
 //! Deterministic discovery and loading of configured Mara source documents.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
+    ffi::OsString,
     fs,
     io::Read,
     path::{Component, Path, PathBuf},
+    process::Command,
     sync::{Arc, Mutex},
 };
+
+#[cfg(unix)]
+use std::os::unix::ffi::OsStringExt;
 
 use ignore::WalkBuilder;
 use mara_core::{
@@ -65,17 +70,57 @@ struct RejectedDirectorySymlink {
     reason: &'static str,
 }
 
+#[derive(Debug)]
+enum IncludeSegment {
+    Recursive,
+    Pattern(Glob<'static>),
+}
+
+#[derive(Debug)]
+struct IncludePattern {
+    segments: Vec<IncludeSegment>,
+}
+
 /// Discovers and decodes the content selected by an already validated project.
 /// Documents and diagnostics are both returned in normalized project-relative
 /// path order.
 pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
     let includes = compile_globs(&project.content.include);
     let excludes = compile_globs(&project.content.exclude);
+    let respect_gitignore = gitignore_is_active(project);
     let rejected_directories = Arc::new(Mutex::new(Vec::new()));
     let mut candidates = Vec::new();
     let mut diagnostics = Vec::new();
+    let tracked_paths = if respect_gitignore {
+        match tracked_content_paths(&project.root) {
+            Ok(paths) => paths,
+            Err(_) => {
+                let source_path = normalized_relative_path(&project.root, &project.config_path)
+                    .unwrap_or_else(|| ".mara/project.toml".to_owned());
+                diagnostics.push(
+                    diagnostic_at_start(
+                        ContentDiagnosticCode::Io,
+                        &source_path,
+                        "could not enumerate Git-tracked content paths",
+                    )
+                    .with_detail("operation", "gitignore")
+                    .with_detail("reason", "tracked_query_failed"),
+                );
+                Vec::new()
+            }
+        }
+    } else {
+        Vec::new()
+    };
+    let mut seen_logical_paths = HashSet::new();
 
-    for result in content_walker(project, Arc::clone(&rejected_directories)).build() {
+    for result in content_walker(
+        project,
+        respect_gitignore,
+        Arc::clone(&rejected_directories),
+    )
+    .build()
+    {
         let entry = match result {
             Ok(entry) => entry,
             Err(error) => {
@@ -161,38 +206,32 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
         if entry.depth() == 0 || entry.file_type().is_some_and(|kind| kind.is_dir()) {
             continue;
         }
-        let source_path = match candidate_source_path(&project.root, entry.path()) {
-            Ok(source_path) => source_path,
-            Err(diagnostic) => {
-                if lossy_relative_path(&project.root, entry.path())
-                    .as_deref()
-                    .is_some_and(|path| !is_selected(&includes, &excludes, path))
-                {
-                    continue;
-                }
-                diagnostics.push(*diagnostic);
-                continue;
-            }
+        let logical_path = entry.into_path();
+        if !seen_logical_paths.insert(logical_path.clone()) {
+            continue;
+        }
+        match candidate_from_path(&project.root, logical_path, &includes, &excludes) {
+            Ok(Some(candidate)) => candidates.push(candidate),
+            Ok(None) => {}
+            Err(diagnostic) => diagnostics.push(*diagnostic),
+        }
+    }
+
+    for logical_path in tracked_paths {
+        if !seen_logical_paths.insert(logical_path.clone()) {
+            continue;
+        }
+        let Ok(metadata) = fs::symlink_metadata(&logical_path) else {
+            continue;
         };
-        if !is_selected(&includes, &excludes, &source_path) {
+        if metadata.is_dir() {
             continue;
         }
-        if SourceSpan::try_new(&source_path, "", 0, 0, 1, 1, 1, 1).is_err() {
-            diagnostics.push(
-                diagnostic_at_start(
-                    ContentDiagnosticCode::Io,
-                    &source_path,
-                    "selected content path cannot be represented as Mara source provenance",
-                )
-                .with_detail("operation", "identify")
-                .with_detail("reason", "invalid_source_path"),
-            );
-            continue;
+        match candidate_from_path(&project.root, logical_path, &includes, &excludes) {
+            Ok(Some(candidate)) => candidates.push(candidate),
+            Ok(None) => {}
+            Err(diagnostic) => diagnostics.push(*diagnostic),
         }
-        candidates.push(Candidate {
-            logical_path: entry.into_path(),
-            source_path,
-        });
     }
 
     let rejected_directories = Arc::try_unwrap(rejected_directories)
@@ -268,14 +307,10 @@ fn opened_file_identity(path: &Path) -> Option<FileIdentity> {
 
 fn content_walker(
     project: &LoadedProject,
+    respect_gitignore: bool,
     rejected: Arc<Mutex<Vec<RejectedDirectorySymlink>>>,
 ) -> WalkBuilder {
     let mut builder = WalkBuilder::new(&project.root);
-    let respect_gitignore = project.content.respect_gitignore
-        && project
-            .root
-            .ancestors()
-            .any(|ancestor| ancestor.join(".git").exists());
     builder
         .hidden(false)
         .ignore(false)
@@ -287,7 +322,8 @@ fn content_walker(
         .follow_links(project.content.follow_directory_symlinks);
 
     let root = project.root.clone();
-    let include_patterns = project.content.include.clone();
+    let include_patterns = compile_include_patterns(&project.content.include);
+    let exclude_patterns = project.content.exclude.clone();
     let follow_directory_symlinks = project.content.follow_directory_symlinks;
     builder.filter_entry(move |entry| {
         if entry.depth() == 0 {
@@ -297,9 +333,9 @@ fn content_walker(
             || (entry.path_is_symlink()
                 && fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_dir()));
         if is_directory
-            && lossy_relative_path(&root, entry.path())
-                .as_deref()
-                .is_some_and(|path| !directory_is_include_reachable(&include_patterns, path))
+            && let Some(path) = lossy_relative_path(&root, entry.path())
+            && (is_fully_excluded_tree(&exclude_patterns, &path)
+                || !directory_is_include_reachable(&include_patterns, &path))
         {
             return false;
         }
@@ -476,20 +512,71 @@ fn is_fully_excluded_tree(excludes: &[String], path: &str) -> bool {
     })
 }
 
-fn directory_is_include_reachable(includes: &[String], path: &str) -> bool {
-    includes.iter().any(|pattern| {
-        let literal_prefix = pattern
-            .split('/')
-            .take_while(|segment| {
-                *segment != "**" && !segment.chars().any(|c| matches!(c, '*' | '?' | '['))
-            })
-            .collect::<Vec<_>>()
-            .join("/");
-        literal_prefix.is_empty()
-            || path == literal_prefix
-            || path.starts_with(&format!("{literal_prefix}/"))
-            || literal_prefix.starts_with(&format!("{path}/"))
-    })
+fn compile_include_patterns(patterns: &[String]) -> Vec<IncludePattern> {
+    patterns
+        .iter()
+        .map(|pattern| {
+            let mut segments = Vec::new();
+            for segment in pattern.split('/') {
+                if segment == "**" {
+                    if !matches!(segments.last(), Some(IncludeSegment::Recursive)) {
+                        segments.push(IncludeSegment::Recursive);
+                    }
+                } else {
+                    segments.push(IncludeSegment::Pattern(
+                        compile_content_glob(segment)
+                            .expect("the project loader validated every content glob segment"),
+                    ));
+                }
+            }
+            IncludePattern { segments }
+        })
+        .collect()
+}
+
+fn directory_is_include_reachable(includes: &[IncludePattern], path: &str) -> bool {
+    includes
+        .iter()
+        .any(|pattern| include_can_match_descendant(pattern, path))
+}
+
+fn include_can_match_descendant(pattern: &IncludePattern, path: &str) -> bool {
+    let mut states = epsilon_closure(&pattern.segments, vec![0]);
+    for segment in path.split('/') {
+        let mut next = Vec::new();
+        for state in states {
+            match pattern.segments.get(state) {
+                Some(IncludeSegment::Recursive) => next.push(state),
+                Some(IncludeSegment::Pattern(glob)) if glob.is_match(segment) => {
+                    next.push(state + 1);
+                }
+                Some(IncludeSegment::Pattern(_)) | None => {}
+            }
+        }
+        states = epsilon_closure(&pattern.segments, next);
+        if states.is_empty() {
+            return false;
+        }
+    }
+    states
+        .into_iter()
+        .any(|state| state < pattern.segments.len())
+}
+
+fn epsilon_closure(segments: &[IncludeSegment], mut states: Vec<usize>) -> Vec<usize> {
+    let mut index = 0;
+    while index < states.len() {
+        let state = states[index];
+        if matches!(segments.get(state), Some(IncludeSegment::Recursive))
+            && !states.contains(&(state + 1))
+        {
+            states.push(state + 1);
+        }
+        index += 1;
+    }
+    states.sort_unstable();
+    states.dedup();
+    states
 }
 
 fn finalize_diagnostics(diagnostics: &mut [Diagnostic]) {
@@ -508,6 +595,83 @@ fn candidate_source_path(root: &Path, path: &Path) -> Result<String, Box<Diagnos
             .with_detail("reason", "non_utf8_path"),
         )
     })
+}
+
+fn candidate_from_path(
+    root: &Path,
+    logical_path: PathBuf,
+    includes: &[Glob<'_>],
+    excludes: &[Glob<'_>],
+) -> Result<Option<Candidate>, Box<Diagnostic>> {
+    let source_path = match candidate_source_path(root, &logical_path) {
+        Ok(source_path) => source_path,
+        Err(diagnostic) => {
+            if lossy_relative_path(root, &logical_path)
+                .as_deref()
+                .is_some_and(|path| !is_selected(includes, excludes, path))
+            {
+                return Ok(None);
+            }
+            return Err(diagnostic);
+        }
+    };
+    if !is_selected(includes, excludes, &source_path) {
+        return Ok(None);
+    }
+    if SourceSpan::try_new(&source_path, "", 0, 0, 1, 1, 1, 1).is_err() {
+        return Err(Box::new(
+            diagnostic_at_start(
+                ContentDiagnosticCode::Io,
+                &source_path,
+                "selected content path cannot be represented as Mara source provenance",
+            )
+            .with_detail("operation", "identify")
+            .with_detail("reason", "invalid_source_path"),
+        ));
+    }
+    Ok(Some(Candidate {
+        logical_path,
+        source_path,
+    }))
+}
+
+fn gitignore_is_active(project: &LoadedProject) -> bool {
+    project.content.respect_gitignore
+        && project
+            .root
+            .ancestors()
+            .any(|ancestor| ancestor.join(".git").exists())
+}
+
+fn tracked_content_paths(root: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["ls-files", "-z", "--cached", "--", "."])
+        .output()?;
+    if !output.status.success() {
+        return Err(std::io::Error::other(
+            "Git could not enumerate tracked project paths",
+        ));
+    }
+    output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| git_path(root, path))
+        .collect()
+}
+
+#[cfg(unix)]
+fn git_path(root: &Path, path: &[u8]) -> std::io::Result<PathBuf> {
+    Ok(root.join(OsString::from_vec(path.to_vec())))
+}
+
+#[cfg(not(unix))]
+fn git_path(root: &Path, path: &[u8]) -> std::io::Result<PathBuf> {
+    let path = std::str::from_utf8(path)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    Ok(root.join(OsString::from(path)))
 }
 
 fn index_alias_diagnostic(project: &LoadedProject, candidate: &Candidate) -> Diagnostic {
@@ -950,15 +1114,21 @@ mod tests {
     }
 
     #[test]
-    fn include_prefixes_prune_only_unreachable_directories() {
-        let includes = vec!["docs/**/*.mara.md".to_owned()];
+    fn include_patterns_prune_only_unreachable_directories() {
+        let includes = compile_include_patterns(&["docs/sources/**/*.mara.md".to_owned()]);
         assert!(directory_is_include_reachable(&includes, "docs"));
-        assert!(directory_is_include_reachable(&includes, "docs/nested"));
-        assert!(!directory_is_include_reachable(&includes, "vendor"));
+        assert!(directory_is_include_reachable(&includes, "docs/sources"));
         assert!(directory_is_include_reachable(
-            &["**/*.mara.md".to_owned()],
-            "vendor"
+            &includes,
+            "docs/sources/nested"
         ));
+        assert!(!directory_is_include_reachable(&includes, "docs/other"));
+        assert!(!directory_is_include_reachable(&includes, "vendor"));
+        let recursive = compile_include_patterns(&["**/*.mara.md".to_owned()]);
+        assert!(directory_is_include_reachable(&recursive, "vendor"));
+        let shallow = compile_include_patterns(&["docs/*.mara.md".to_owned()]);
+        assert!(directory_is_include_reachable(&shallow, "docs"));
+        assert!(!directory_is_include_reachable(&shallow, "docs/nested"));
     }
 
     #[cfg(unix)]

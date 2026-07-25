@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fs, path::Path, process::Command};
 
 use mara_core::{ContentDiagnosticCode, DiagnosticCode, LineEnding, ProjectDiagnosticCode};
 use mara_engine::{content::discover_content, project::load_from_root};
@@ -46,6 +46,16 @@ impl Fixture {
 
     fn load(&self) -> mara_engine::project::LoadedProject {
         load_from_root(&self.root).unwrap()
+    }
+
+    fn git(&self, args: &[&str]) {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(&self.root)
+            .args(args)
+            .status()
+            .expect("run Git for isolated fixture");
+        assert!(status.success(), "Git command failed: {args:?}");
     }
 }
 
@@ -161,15 +171,23 @@ fn configured_globs_select_files_with_deterministic_precedence_and_order() {
 #[test]
 fn gitignore_overrides_includes_but_matching_untracked_files_remain_eligible() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
-    fs::create_dir(fixture.root.join(".git")).unwrap();
-    fixture.write(".gitignore", "ignored.mara.md\nignored-dir/\n");
+    fixture.git(&["init", "--quiet"]);
+    fixture.write(
+        ".gitignore",
+        "ignored.mara.md\nignored-dir/\ntracked-ignored.mara.md\n",
+    );
     fixture.write("ignored.mara.md", "ignored");
     fixture.write("ignored-dir/nested.mara.md", "ignored nested");
+    fixture.write("tracked-ignored.mara.md", "tracked source");
     fixture.write("untracked.mara.md", "new source");
+    fixture.git(&["add", "--force", "tracked-ignored.mara.md"]);
 
     let discovery = discover_content(&fixture.load());
 
-    assert_eq!(document_paths(&discovery), ["untracked.mara.md"]);
+    assert_eq!(
+        document_paths(&discovery),
+        ["tracked-ignored.mara.md", "untracked.mara.md"]
+    );
     assert!(discovery.diagnostics().is_empty());
 
     fs::write(
@@ -183,6 +201,7 @@ fn gitignore_overrides_includes_but_matching_untracked_files_remain_eligible() {
         [
             "ignored-dir/nested.mara.md",
             "ignored.mara.md",
+            "tracked-ignored.mara.md",
             "untracked.mara.md"
         ]
     );
@@ -257,7 +276,7 @@ fn unsupported_source_paths_are_diagnosed_without_panicking_or_losing_other_file
 #[test]
 fn gitignore_parse_errors_are_reported_without_hiding_independent_content() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
-    fs::create_dir(fixture.root.join(".git")).unwrap();
+    fixture.git(&["init", "--quiet"]);
     fixture.write(".gitignore", "[z-a]\n");
     fixture.write("nested/good.mara.md", "good source");
 
@@ -458,6 +477,41 @@ fn directory_symlinks_are_skipped_when_following_is_disabled() {
     let discovery = discover_content(&fixture.load());
 
     assert!(discovery.documents().is_empty());
+    assert!(discovery.diagnostics().is_empty());
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn full_include_shape_prunes_unreachable_symlink_trees_before_policy_checks() {
+    let fixture = Fixture::new(&["docs/*/selected/*.mara.md"], &[], false, true, false);
+    fixture.write("docs/group/selected/source.mara.md", "selected");
+    let outside = fixture._temp.path().join("outside-include");
+    fs::create_dir(&outside).unwrap();
+    fs::create_dir_all(fixture.root.join("docs/group")).unwrap();
+    symlink_directory(&outside, fixture.root.join("docs/group/unreachable"));
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(
+        document_paths(&discovery),
+        ["docs/group/selected/source.mara.md"]
+    );
+    assert!(discovery.diagnostics().is_empty());
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn fully_excluded_symlink_trees_are_pruned_before_policy_checks() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &["external/**"], false, true, false);
+    fixture.write("ordinary.mara.md", "ordinary");
+    let outside = fixture._temp.path().join("outside-exclude");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("outside.mara.md"), "outside").unwrap();
+    symlink_directory(&outside, fixture.root.join("external"));
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["ordinary.mara.md"]);
     assert!(discovery.diagnostics().is_empty());
 }
 
