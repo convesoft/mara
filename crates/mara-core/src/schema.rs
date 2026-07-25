@@ -807,6 +807,354 @@ impl RelationDefinitions {
     }
 }
 
+/// The project-selected diagnostic severity for a validation rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RuleSeverity {
+    Error,
+    Warning,
+    Info,
+}
+
+impl RuleSeverity {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Info => "info",
+        }
+    }
+}
+
+/// The closed validation-rule kind set supported by schema format version 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RuleKind {
+    RequiresRelation,
+    RequiresField,
+    Orphan,
+}
+
+impl RuleKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RequiresRelation => "requires_relation",
+            Self::RequiresField => "requires_field",
+            Self::Orphan => "orphan",
+        }
+    }
+}
+
+/// The canonical edge direction inspected by a relation requirement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RuleDirection {
+    Outgoing,
+    Incoming,
+}
+
+impl RuleDirection {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Outgoing => "outgoing",
+            Self::Incoming => "incoming",
+        }
+    }
+}
+
+/// The source-preserving flavour selection shared by every validation rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleApplicability {
+    flavours: SchemaField<Vec<SchemaValue<String>>>,
+}
+
+impl RuleApplicability {
+    pub fn new(flavours: SchemaField<Vec<SchemaValue<String>>>) -> Self {
+        Self { flavours }
+    }
+
+    pub const fn flavours(&self) -> &SchemaField<Vec<SchemaValue<String>>> {
+        &self.flavours
+    }
+}
+
+/// A finite floating-point value used by a rule condition.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct RuleConditionNumber(f64);
+
+impl RuleConditionNumber {
+    pub fn new(value: f64) -> Option<Self> {
+        value.is_finite().then_some(Self(value))
+    }
+
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl Eq for RuleConditionNumber {}
+
+/// One typed scalar value used by a rule condition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleConditionValue {
+    String(String),
+    Integer(i64),
+    Number(RuleConditionNumber),
+    Boolean(bool),
+}
+
+/// An optional single-valued field condition for a validation rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleCondition {
+    field: SchemaField<String>,
+    values: SchemaField<Vec<SchemaValue<RuleConditionValue>>>,
+}
+
+impl RuleCondition {
+    pub fn new(
+        field: SchemaField<String>,
+        values: SchemaField<Vec<SchemaValue<RuleConditionValue>>>,
+    ) -> Self {
+        Self { field, values }
+    }
+
+    pub const fn field(&self) -> &SchemaField<String> {
+        &self.field
+    }
+
+    pub const fn values(&self) -> &SchemaField<Vec<SchemaValue<RuleConditionValue>>> {
+        &self.values
+    }
+}
+
+/// One authored canonical-relation selector shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelationRuleSelection {
+    Relation(SchemaField<String>),
+    AnyOf(SchemaField<Vec<SchemaValue<String>>>),
+}
+
+/// One authored flavour-local field selector shape.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldRuleSelection {
+    Field(SchemaField<String>),
+    AnyOf(SchemaField<Vec<SchemaValue<String>>>),
+}
+
+/// Required minimum and optional maximum used by counting rules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleCount {
+    min: SchemaField<u64>,
+    max: Option<SchemaField<CardinalityMaximum>>,
+}
+
+impl RuleCount {
+    pub fn new(min: SchemaField<u64>, max: Option<SchemaField<CardinalityMaximum>>) -> Self {
+        Self { min, max }
+    }
+
+    pub const fn min(&self) -> &SchemaField<u64> {
+        &self.min
+    }
+
+    pub const fn max(&self) -> Option<&SchemaField<CardinalityMaximum>> {
+        self.max.as_ref()
+    }
+
+    pub fn maximum(&self) -> CardinalityMaximum {
+        self.max
+            .as_ref()
+            .map_or(CardinalityMaximum::Many, |maximum| *maximum.value())
+    }
+}
+
+/// Parameters for a `requires_relation` validation rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequiresRelationRule {
+    relations: RelationRuleSelection,
+    direction: SchemaField<RuleDirection>,
+    count: RuleCount,
+}
+
+impl RequiresRelationRule {
+    pub fn new(
+        relations: RelationRuleSelection,
+        direction: SchemaField<RuleDirection>,
+        count: RuleCount,
+    ) -> Self {
+        Self {
+            relations,
+            direction,
+            count,
+        }
+    }
+
+    pub const fn relations(&self) -> &RelationRuleSelection {
+        &self.relations
+    }
+
+    pub const fn direction(&self) -> &SchemaField<RuleDirection> {
+        &self.direction
+    }
+
+    pub const fn count(&self) -> &RuleCount {
+        &self.count
+    }
+}
+
+/// Parameters for a `requires_field` validation rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequiresFieldRule {
+    fields: FieldRuleSelection,
+    count: RuleCount,
+}
+
+impl RequiresFieldRule {
+    pub fn new(fields: FieldRuleSelection, count: RuleCount) -> Self {
+        Self { fields, count }
+    }
+
+    pub const fn fields(&self) -> &FieldRuleSelection {
+        &self.fields
+    }
+
+    pub const fn count(&self) -> &RuleCount {
+        &self.count
+    }
+}
+
+/// Parameters for an `orphan` validation rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrphanRule {
+    relations: SchemaField<Vec<SchemaValue<String>>>,
+}
+
+impl OrphanRule {
+    pub fn new(relations: SchemaField<Vec<SchemaValue<String>>>) -> Self {
+        Self { relations }
+    }
+
+    pub const fn relations(&self) -> &SchemaField<Vec<SchemaValue<String>>> {
+        &self.relations
+    }
+}
+
+/// The kind-specific parameters for one compiled validation rule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuleConfiguration {
+    RequiresRelation(RequiresRelationRule),
+    RequiresField(RequiresFieldRule),
+    Orphan(OrphanRule),
+}
+
+/// One compiled validation rule and all of its schema provenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleDefinition {
+    source: SourceSpan,
+    name: SchemaField<String>,
+    kind: SchemaField<RuleKind>,
+    severity: SchemaField<RuleSeverity>,
+    applies_to: SchemaField<RuleApplicability>,
+    condition: Option<SchemaField<RuleCondition>>,
+    configuration: RuleConfiguration,
+}
+
+impl RuleDefinition {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        source: SourceSpan,
+        name: SchemaField<String>,
+        kind: SchemaField<RuleKind>,
+        severity: SchemaField<RuleSeverity>,
+        applies_to: SchemaField<RuleApplicability>,
+        condition: Option<SchemaField<RuleCondition>>,
+        configuration: RuleConfiguration,
+    ) -> Self {
+        Self {
+            source,
+            name,
+            kind,
+            severity,
+            applies_to,
+            condition,
+            configuration,
+        }
+    }
+
+    pub const fn source(&self) -> &SourceSpan {
+        &self.source
+    }
+
+    pub const fn name(&self) -> &SchemaField<String> {
+        &self.name
+    }
+
+    pub const fn kind(&self) -> &SchemaField<RuleKind> {
+        &self.kind
+    }
+
+    pub const fn severity(&self) -> &SchemaField<RuleSeverity> {
+        &self.severity
+    }
+
+    pub const fn applies_to(&self) -> &SchemaField<RuleApplicability> {
+        &self.applies_to
+    }
+
+    pub const fn condition(&self) -> Option<&SchemaField<RuleCondition>> {
+        self.condition.as_ref()
+    }
+
+    pub const fn configuration(&self) -> &RuleConfiguration {
+        &self.configuration
+    }
+}
+
+/// The optional ordered root rule sequence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleDefinitions {
+    key_source: SourceSpan,
+    value_source: SourceSpan,
+    definitions: Vec<RuleDefinition>,
+}
+
+impl RuleDefinitions {
+    pub fn new(
+        key_source: SourceSpan,
+        value_source: SourceSpan,
+        definitions: Vec<RuleDefinition>,
+    ) -> Self {
+        Self {
+            key_source,
+            value_source,
+            definitions,
+        }
+    }
+
+    pub const fn key_source(&self) -> &SourceSpan {
+        &self.key_source
+    }
+
+    pub const fn value_source(&self) -> &SourceSpan {
+        &self.value_source
+    }
+
+    pub fn definitions(&self) -> &[RuleDefinition] {
+        &self.definitions
+    }
+
+    pub fn get(&self, name: &str) -> Option<&RuleDefinition> {
+        self.definitions
+            .iter()
+            .find(|definition| definition.name().value() == name)
+    }
+
+    pub const fn len(&self) -> usize {
+        self.definitions.len()
+    }
+
+    pub const fn is_empty(&self) -> bool {
+        self.definitions.is_empty()
+    }
+}
+
 /// Source-preserving compiled format-v1 schema values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaDocument {
@@ -816,7 +1164,7 @@ pub struct SchemaDocument {
     identity: SchemaField<IdentityConfiguration>,
     flavours: FlavourDefinitions,
     relations: Option<RelationDefinitions>,
-    rules: Option<SchemaSection>,
+    rules: Option<RuleDefinitions>,
 }
 
 impl SchemaDocument {
@@ -828,7 +1176,7 @@ impl SchemaDocument {
         identity: SchemaField<IdentityConfiguration>,
         flavours: FlavourDefinitions,
         relations: Option<RelationDefinitions>,
-        rules: Option<SchemaSection>,
+        rules: Option<RuleDefinitions>,
     ) -> Self {
         Self {
             source,
@@ -872,7 +1220,7 @@ impl SchemaDocument {
             .map_or(&EMPTY, RelationDefinitions::external_mention_schemes)
     }
 
-    pub const fn rules(&self) -> Option<&SchemaSection> {
+    pub const fn rules(&self) -> Option<&RuleDefinitions> {
         self.rules.as_ref()
     }
 }

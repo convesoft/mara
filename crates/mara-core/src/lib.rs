@@ -12,9 +12,12 @@ pub use diagnostic::{
 pub use identity::{Mid, MidParseError};
 pub use schema::{
     CardinalityBound, CardinalityMaximum, DerivedSourceKind, DisplayIdDefinition, FieldDefinition,
-    FieldType, FlavourDefinition, FlavourDefinitions, FlavourGuidance, IdentityConfiguration,
-    MidFormat, MidIdentity, RelationCardinality, RelationDefinition, RelationDefinitions,
-    RelationSourceEndpoint, RelationTargetEndpoint, RequiredBuiltInDefinition, SchemaDocument,
-    SchemaField, SchemaIdentity, SchemaSection, SchemaValue,
+    FieldRuleSelection, FieldType, FlavourDefinition, FlavourDefinitions, FlavourGuidance,
+    IdentityConfiguration, MidFormat, MidIdentity, OrphanRule, RelationCardinality,
+    RelationDefinition, RelationDefinitions, RelationRuleSelection, RelationSourceEndpoint,
+    RelationTargetEndpoint, RequiredBuiltInDefinition, RequiresFieldRule, RequiresRelationRule,
+    RuleApplicability, RuleCondition, RuleConditionNumber, RuleConditionValue, RuleConfiguration,
+    RuleCount, RuleDefinition, RuleDefinitions, RuleDirection, RuleKind, RuleSeverity,
+    SchemaDocument, SchemaField, SchemaIdentity, SchemaSection, SchemaValue,
 };
 pub use source::{InvalidSourceSpan, SourceIndex, SourceSpan};
