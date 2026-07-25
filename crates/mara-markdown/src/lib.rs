@@ -11,7 +11,7 @@ use mara_core::{
     SourceSpan, SyntaxDiagnosticCode, sort_diagnostics,
 };
 use rushdown::{
-    ast::{Arena, KindData, NodeKind, NodeRef, NodeType, PrettyPrint},
+    ast::{Arena, HeadingKind, KindData, NodeKind, NodeRef, NodeType, PrettyPrint},
     context::{ContextKey, ContextKeyRegistry, UsizeValue},
     parser::{
         self, AnyBlockParser, AnyInlineParser, BlockParser, InlineParser,
@@ -134,8 +134,10 @@ pub struct MarkdownSegment {
     source: SourceSpan,
     kind: NarrativeKind,
     heading_level: Option<u8>,
+    heading_kind: Option<ParsedHeadingKind>,
     heading_title: Option<String>,
     references: Vec<InlineReference>,
+    structure: MarkdownNode,
 }
 
 impl MarkdownSegment {
@@ -155,6 +157,10 @@ impl MarkdownSegment {
         self.heading_level
     }
 
+    pub const fn heading_kind(&self) -> Option<ParsedHeadingKind> {
+        self.heading_kind
+    }
+
     pub fn heading_title(&self) -> Option<&str> {
         self.heading_title.as_deref()
     }
@@ -162,6 +168,16 @@ impl MarkdownSegment {
     pub fn references(&self) -> &[InlineReference] {
         &self.references
     }
+
+    pub const fn structure(&self) -> &MarkdownNode {
+        &self.structure
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParsedHeadingKind {
+    Atx,
+    Setext,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -174,6 +190,50 @@ pub enum NarrativeKind {
     Table,
     ThematicBreak,
     Html,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkdownNode {
+    kind: MarkdownNodeKind,
+    children: Vec<MarkdownNode>,
+}
+
+impl MarkdownNode {
+    pub const fn kind(&self) -> MarkdownNodeKind {
+        self.kind
+    }
+
+    pub fn children(&self) -> &[MarkdownNode] {
+        &self.children
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkdownNodeKind {
+    Paragraph,
+    Heading,
+    ThematicBreak,
+    CodeBlock,
+    Blockquote,
+    List,
+    ListItem,
+    HtmlBlock,
+    Text,
+    CodeSpan,
+    Emphasis,
+    Strong,
+    Link,
+    Image,
+    RawHtml,
+    LinkReferenceDefinition,
+    Table,
+    TableHeader,
+    TableBody,
+    TableRow,
+    TableCell,
+    Strikethrough,
+    InlineReference,
     Other,
 }
 
@@ -766,10 +826,17 @@ fn convert_document_blocks(
                 document,
                 cursor,
                 event_start,
-                NarrativeKind::Other,
-                None,
-                None,
-                Vec::new(),
+                MarkdownSegmentData {
+                    kind: NarrativeKind::Other,
+                    heading_level: None,
+                    heading_kind: None,
+                    heading_title: None,
+                    references: Vec::new(),
+                    structure: MarkdownNode {
+                        kind: MarkdownNodeKind::Other,
+                        children: Vec::new(),
+                    },
+                },
             ));
         }
 
@@ -794,10 +861,17 @@ fn convert_document_blocks(
             document,
             cursor,
             source.len(),
-            NarrativeKind::Other,
-            None,
-            None,
-            Vec::new(),
+            MarkdownSegmentData {
+                kind: NarrativeKind::Other,
+                heading_level: None,
+                heading_kind: None,
+                heading_title: None,
+                references: Vec::new(),
+                structure: MarkdownNode {
+                    kind: MarkdownNodeKind::Other,
+                    children: Vec::new(),
+                },
+            },
         ));
     }
     blocks
@@ -810,16 +884,24 @@ fn markdown_from_node(
     start: usize,
     end: usize,
 ) -> ParsedBlock {
-    let (kind, heading_level) = match arena[node_ref].kind_data() {
-        KindData::Paragraph(_) => (NarrativeKind::Paragraph, None),
-        KindData::Heading(heading) => (NarrativeKind::Heading, Some(heading.level())),
-        KindData::List(_) => (NarrativeKind::List, None),
-        KindData::Blockquote(_) => (NarrativeKind::Quote, None),
-        KindData::CodeBlock(_) => (NarrativeKind::Code, None),
-        KindData::Table(_) => (NarrativeKind::Table, None),
-        KindData::ThematicBreak(_) => (NarrativeKind::ThematicBreak, None),
-        KindData::HtmlBlock(_) => (NarrativeKind::Html, None),
-        _ => (NarrativeKind::Other, None),
+    let (kind, heading_level, heading_kind) = match arena[node_ref].kind_data() {
+        KindData::Paragraph(_) => (NarrativeKind::Paragraph, None, None),
+        KindData::Heading(heading) => (
+            NarrativeKind::Heading,
+            Some(heading.level()),
+            Some(match heading.heading_kind() {
+                HeadingKind::Atx => ParsedHeadingKind::Atx,
+                HeadingKind::Setext => ParsedHeadingKind::Setext,
+                _ => ParsedHeadingKind::Atx,
+            }),
+        ),
+        KindData::List(_) => (NarrativeKind::List, None, None),
+        KindData::Blockquote(_) => (NarrativeKind::Quote, None, None),
+        KindData::CodeBlock(_) => (NarrativeKind::Code, None, None),
+        KindData::Table(_) => (NarrativeKind::Table, None, None),
+        KindData::ThematicBreak(_) => (NarrativeKind::ThematicBreak, None, None),
+        KindData::HtmlBlock(_) => (NarrativeKind::Html, None, None),
+        _ => (NarrativeKind::Other, None, None),
     };
     let heading_title =
         heading_level.map(|_| plain_text(arena, node_ref, document.source().as_str()));
@@ -828,30 +910,81 @@ fn markdown_from_node(
         document,
         start,
         end,
-        kind,
-        heading_level,
-        heading_title,
-        references,
+        MarkdownSegmentData {
+            kind,
+            heading_level,
+            heading_kind,
+            heading_title,
+            references,
+            structure: convert_markdown_node(arena, node_ref),
+        },
     )
+}
+
+struct MarkdownSegmentData {
+    kind: NarrativeKind,
+    heading_level: Option<u8>,
+    heading_kind: Option<ParsedHeadingKind>,
+    heading_title: Option<String>,
+    references: Vec<InlineReference>,
+    structure: MarkdownNode,
 }
 
 fn markdown_segment(
     document: &SourceDocument,
     start: usize,
     end: usize,
-    kind: NarrativeKind,
-    heading_level: Option<u8>,
-    heading_title: Option<String>,
-    references: Vec<InlineReference>,
+    data: MarkdownSegmentData,
 ) -> ParsedBlock {
     ParsedBlock::Markdown(MarkdownSegment {
         raw: document.source().as_str()[start..end].to_owned(),
         source: span(document, start, end),
-        kind,
-        heading_level,
-        heading_title,
-        references,
+        kind: data.kind,
+        heading_level: data.heading_level,
+        heading_kind: data.heading_kind,
+        heading_title: data.heading_title,
+        references: data.references,
+        structure: data.structure,
     })
+}
+
+fn convert_markdown_node(arena: &Arena, node_ref: NodeRef) -> MarkdownNode {
+    let data = arena[node_ref].kind_data();
+    let kind = match data {
+        KindData::Paragraph(_) => MarkdownNodeKind::Paragraph,
+        KindData::Heading(_) => MarkdownNodeKind::Heading,
+        KindData::ThematicBreak(_) => MarkdownNodeKind::ThematicBreak,
+        KindData::CodeBlock(_) => MarkdownNodeKind::CodeBlock,
+        KindData::Blockquote(_) => MarkdownNodeKind::Blockquote,
+        KindData::List(_) => MarkdownNodeKind::List,
+        KindData::ListItem(_) => MarkdownNodeKind::ListItem,
+        KindData::HtmlBlock(_) => MarkdownNodeKind::HtmlBlock,
+        KindData::Text(_) => MarkdownNodeKind::Text,
+        KindData::CodeSpan(_) => MarkdownNodeKind::CodeSpan,
+        KindData::Emphasis(_) => MarkdownNodeKind::Emphasis,
+        KindData::Strong(_) => MarkdownNodeKind::Strong,
+        KindData::Link(_) => MarkdownNodeKind::Link,
+        KindData::Image(_) => MarkdownNodeKind::Image,
+        KindData::RawHtml(_) => MarkdownNodeKind::RawHtml,
+        KindData::LinkReferenceDefinition(_) => MarkdownNodeKind::LinkReferenceDefinition,
+        KindData::Table(_) => MarkdownNodeKind::Table,
+        KindData::TableHeader(_) => MarkdownNodeKind::TableHeader,
+        KindData::TableBody(_) => MarkdownNodeKind::TableBody,
+        KindData::TableRow(_) => MarkdownNodeKind::TableRow,
+        KindData::TableCell(_) => MarkdownNodeKind::TableCell,
+        KindData::Strikethrough(_) => MarkdownNodeKind::Strikethrough,
+        KindData::Extension(_) if data.kind_name() == "MaraInlineReference" => {
+            MarkdownNodeKind::InlineReference
+        }
+        _ => MarkdownNodeKind::Other,
+    };
+    MarkdownNode {
+        kind,
+        children: arena[node_ref]
+            .children(arena)
+            .map(|child| convert_markdown_node(arena, child))
+            .collect(),
+    }
 }
 
 fn plain_text(arena: &Arena, node_ref: NodeRef, source: &str) -> String {
@@ -1034,15 +1167,12 @@ fn heading_markup_span(document: &SourceDocument, heading: &MarkdownSegment) -> 
     let end = heading.source().end_byte() as usize;
     let first_line = next_line(source, start, end);
     let first_content = line_content_index(first_line, source);
-    let atx = first_content
-        .str(source)
-        .trim_start_matches([' ', '\t'])
-        .starts_with('#');
-    let heading_end = if atx || first_line.stop() >= end {
-        first_content.stop()
-    } else {
-        line_content_index(next_line(source, first_line.stop(), end), source).stop()
-    };
+    let heading_end =
+        if heading.heading_kind() == Some(ParsedHeadingKind::Atx) || first_line.stop() >= end {
+            first_content.stop()
+        } else {
+            line_content_index(next_line(source, first_line.stop(), end), source).stop()
+        };
     span(document, start, heading_end)
 }
 

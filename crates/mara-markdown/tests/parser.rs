@@ -2,7 +2,10 @@ use mara_core::{
     DiagnosticCode, IdentityDiagnosticCode, MidFormat, MidIdentity, SchemaField, SourceDocument,
     SourceIndex, SourceText, SyntaxDiagnosticCode,
 };
-use mara_markdown::{InlineReferenceContext, NarrativeKind, ParsedBlock, parse_document};
+use mara_markdown::{
+    InlineReferenceContext, MarkdownNode, MarkdownNodeKind, NarrativeKind, ParsedBlock,
+    ParsedHeadingKind, parse_document,
+};
 
 const MID: &str = "m_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
@@ -24,6 +27,24 @@ fn parse(source: &str) -> mara_markdown::ParsedDocument {
 
 fn slice<'a>(source: &'a str, span: &mara_core::SourceSpan) -> &'a str {
     &source[span.start_byte() as usize..span.end_byte() as usize]
+}
+
+fn has_structure_path(node: &MarkdownNode, path: &[MarkdownNodeKind]) -> bool {
+    if path.is_empty() {
+        return true;
+    }
+    if node.kind() == path[0]
+        && (path.len() == 1
+            || node
+                .children()
+                .iter()
+                .any(|child| has_structure_path(child, &path[1..])))
+    {
+        return true;
+    }
+    node.children()
+        .iter()
+        .any(|child| has_structure_path(child, path))
 }
 
 #[test]
@@ -356,4 +377,48 @@ fn inline_reference_spans_follow_unicode_crlf_and_escape_parity() {
     assert_eq!(references[1].label(), Some("label"));
     assert_eq!(slice(source, references[1].source()), "[[TWO|label]]");
     assert_eq!(references[1].source().start_line(), 2);
+}
+
+#[test]
+fn nested_narrative_structure_is_converted_to_mara_owned_nodes() {
+    let source = "Paragraph *emphasis [link](https://example.com)*.\n\n- list **strong**\n";
+    let parsed = parse(source);
+    let narrative = parsed
+        .blocks()
+        .iter()
+        .filter_map(ParsedBlock::as_markdown)
+        .collect::<Vec<_>>();
+
+    assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
+    assert!(has_structure_path(
+        narrative[0].structure(),
+        &[
+            MarkdownNodeKind::Paragraph,
+            MarkdownNodeKind::Emphasis,
+            MarkdownNodeKind::Link,
+        ]
+    ));
+    assert!(has_structure_path(
+        narrative[1].structure(),
+        &[
+            MarkdownNodeKind::List,
+            MarkdownNodeKind::ListItem,
+            MarkdownNodeKind::Paragraph,
+            MarkdownNodeKind::Strong,
+        ]
+    ));
+}
+
+#[test]
+fn hash_prefixed_setext_heading_span_includes_underline() {
+    let source = "#hashtag\n===\n\nBody.\n";
+    let parsed = parse(source);
+    let section = &parsed.sections()[0];
+    let heading = parsed.blocks()[section.heading_block()]
+        .as_markdown()
+        .unwrap();
+
+    assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
+    assert_eq!(heading.heading_kind(), Some(ParsedHeadingKind::Setext));
+    assert_eq!(slice(source, section.heading_source()), "#hashtag\n===");
 }
