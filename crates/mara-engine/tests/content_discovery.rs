@@ -322,6 +322,27 @@ fn gitignore_pattern_semantics_are_delegated_to_git() {
 
 #[cfg(unix)]
 #[test]
+fn git_discovery_does_not_execute_configured_fsmonitor_hooks() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
+    fixture.write("selected.mara.md", "selected");
+    fixture.git(&["init", "--quiet"]);
+    let marker = fixture._temp.path().join("fsmonitor-ran");
+    let hook = fixture._temp.path().join("fsmonitor-hook");
+    fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+    fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+    fixture.git(&["config", "core.fsmonitor", hook.to_str().unwrap()]);
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["selected.mara.md"]);
+    assert!(discovery.diagnostics().is_empty());
+    assert!(!marker.exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn gitignore_files_preserve_git_byte_semantics() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
     fixture.git(&["init", "--quiet"]);

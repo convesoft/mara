@@ -1380,9 +1380,10 @@ pub(crate) fn path_identity(
     use std::os::windows::fs::OpenOptionsExt;
 
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
     let file = fs::OpenOptions::new()
         .access_mode(0)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
         .open(path)?;
     file_identity(&file)
 }

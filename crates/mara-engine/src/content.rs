@@ -1089,6 +1089,7 @@ fn git_output(root: &Path, args: &[&str]) -> io::Result<std::process::Output> {
         .env_remove("GIT_WORK_TREE")
         .env_remove("GIT_COMMON_DIR")
         .env_remove("GIT_INDEX_FILE")
+        .args(["-c", "core.fsmonitor=false"])
         .arg("-C")
         .arg(root)
         .args(args)
