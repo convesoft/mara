@@ -1701,6 +1701,42 @@ fn applies_cross_flavour_condition_union_semantics_and_rejects_repeatable_fields
 }
 
 #[test]
+fn applies_string_condition_patterns_to_the_whole_value() {
+    let rule = r#"  - name: matching_summary_requires_estimate
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    when: {field: summary, in: [ab]}
+    field: estimate
+    min: 1
+"#;
+    let source = rich_schema_with_relations_and_rules(COMPLETE_RELATIONS, rule).replace(
+        "repeatable: true\n        pattern: .+",
+        "repeatable: false\n        pattern: a|ab",
+    );
+
+    let fixture = Fixture::new(&source);
+    load_schema(&fixture.loaded_project()).unwrap();
+
+    let invalid = source.replace("in: [ab]", "in: [abc]");
+    let error = assert_invalid(&invalid, SchemaDiagnosticCode::InvalidDeclaration);
+    assert_eq!(
+        source_slice(&invalid, only_diagnostic(&error).primary().unwrap()),
+        "abc"
+    );
+
+    let verbose = source.replace("pattern: a|ab", "pattern: '(?x)a|ab # trailing comment'");
+    let fixture = Fixture::new(&verbose);
+    load_schema(&fixture.loaded_project()).unwrap();
+    let invalid_verbose = verbose.replace("in: [ab]", "in: [abc]");
+    let error = assert_invalid(&invalid_verbose, SchemaDiagnosticCode::InvalidDeclaration);
+    assert_eq!(
+        source_slice(&invalid_verbose, only_diagnostic(&error).primary().unwrap()),
+        "abc"
+    );
+}
+
+#[test]
 fn compiles_typed_condition_values_against_each_scalar_field_domain() {
     let source = rich_schema_with_relations_and_rules(
         COMPLETE_RELATIONS,

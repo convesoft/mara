@@ -2263,11 +2263,9 @@ fn rule_condition_value_is_valid(
 ) -> Option<bool> {
     match (field.field_type?, value) {
         (FieldType::String, RuleConditionValue::String(value)) => match field.pattern.as_deref() {
-            Some(pattern) => UnicodeRegex::new(pattern).ok().map(|pattern| {
-                pattern
-                    .find(value)
-                    .is_some_and(|found| found.start() == 0 && found.end() == value.len())
-            }),
+            Some(pattern) => compile_whole_string_pattern(pattern)
+                .ok()
+                .map(|pattern| pattern.is_match(value)),
             None => Some(true),
         },
         (FieldType::Integer, RuleConditionValue::Integer(_))
@@ -4120,10 +4118,7 @@ fn decode_optional_pattern(
     };
     let field_name = format!("{mapping}.{name}");
     let pattern = expect_string(value, &field_name, source_map)?;
-    // Compile the authored expression directly. Later value validation enforces
-    // whole-string matching from match bounds; textual wrapping would corrupt a
-    // valid verbose-mode pattern that ends in a comment.
-    if UnicodeRegex::new(pattern).is_err() {
+    if compile_whole_string_pattern(pattern).is_err() {
         return Err(Box::new(
             Diagnostic::new(
                 SchemaDiagnosticCode::InvalidPattern,
@@ -4135,6 +4130,14 @@ fn decode_optional_pattern(
         ));
     }
     Ok(Some(field(source_map, key, value, pattern.to_owned())))
+}
+
+fn compile_whole_string_pattern(pattern: &str) -> Result<UnicodeRegex, regex::Error> {
+    UnicodeRegex::new(&format!(r"\A(?:{pattern})\z")).or_else(|_| {
+        // In verbose mode, a trailing comment can hide the wrapper's closing
+        // syntax. A line break terminates that comment and remains ignored.
+        UnicodeRegex::new(&format!("\\A(?:{pattern}\n)\\z"))
+    })
 }
 
 fn rule_reference_string_values(
