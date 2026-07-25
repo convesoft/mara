@@ -2,7 +2,10 @@ use mara_core::{
     DiagnosticCode, IdentityDiagnosticCode, MidFormat, MidIdentity, SchemaField, SourceDocument,
     SourceIndex, SourceText, SyntaxDiagnosticCode,
 };
-use mara_markdown::{ParsedBlock, parse_document};
+use mara_markdown::{
+    InlineReferenceContext, MarkdownLinkKind, MarkdownNode, MarkdownNodeKind, MarkdownNodePayload,
+    NarrativeKind, ParsedBlock, ParsedHeadingKind, parse_document,
+};
 
 const MID: &str = "m_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 
@@ -26,6 +29,33 @@ fn slice<'a>(source: &'a str, span: &mara_core::SourceSpan) -> &'a str {
     &source[span.start_byte() as usize..span.end_byte() as usize]
 }
 
+fn has_structure_path(node: &MarkdownNode, path: &[MarkdownNodeKind]) -> bool {
+    if path.is_empty() {
+        return true;
+    }
+    if node.kind() == path[0]
+        && (path.len() == 1
+            || node
+                .children()
+                .iter()
+                .any(|child| has_structure_path(child, &path[1..])))
+    {
+        return true;
+    }
+    node.children()
+        .iter()
+        .any(|child| has_structure_path(child, path))
+}
+
+fn find_structure(node: &MarkdownNode, kind: MarkdownNodeKind) -> Option<&MarkdownNode> {
+    if node.kind() == kind {
+        return Some(node);
+    }
+    node.children()
+        .iter()
+        .find_map(|child| find_structure(child, kind))
+}
+
 #[test]
 fn valid_items_are_lossless_and_keep_structural_header_values_out_of_metadata() {
     let source = format!(
@@ -34,13 +64,17 @@ fn valid_items_are_lossless_and_keep_structural_header_values_out_of_metadata() 
     let parsed = parse(&source);
 
     assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
-    assert_eq!(parsed.blocks().len(), 3);
+    assert_eq!(parsed.blocks().len(), 4);
     assert_eq!(
         parsed.blocks()[0].as_markdown().unwrap().raw(),
         "# Intro\n\n"
     );
     assert_eq!(
-        parsed.blocks()[2].as_markdown().unwrap().raw(),
+        parsed.blocks()[2..]
+            .iter()
+            .filter_map(ParsedBlock::as_markdown)
+            .map(|markdown| markdown.raw())
+            .collect::<String>(),
         "\n\nTail.\n"
     );
 
@@ -190,8 +224,15 @@ fn ordinary_markdown_and_mara_like_code_are_preserved_intact() {
 
     assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
     assert_eq!(parsed.items().count(), 0);
-    assert_eq!(parsed.blocks().len(), 1);
-    assert_eq!(parsed.blocks()[0].as_markdown().unwrap().raw(), source);
+    assert_eq!(
+        parsed
+            .blocks()
+            .iter()
+            .filter_map(ParsedBlock::as_markdown)
+            .map(|markdown| markdown.raw())
+            .collect::<String>(),
+        source
+    );
 }
 
 #[test]
@@ -218,4 +259,248 @@ fn crlf_source_spans_and_empty_bodies_remain_exact() {
     assert_eq!(item.metadata()[0].raw_value(), "\tX ");
     assert_eq!(item.metadata()[0].value(), "X");
     assert_eq!(slice(&source, item.metadata()[0].source()), ":id:\tX ");
+}
+
+#[test]
+fn mixed_document_hierarchy_and_inline_contexts_remain_lossless() {
+    let source = format!(
+        "Preamble [[PRE]].\n\n# Top [[TOP|label]]\n\nParagraph [[TEXT]] and `[[CODE]]`.\n\n- list [[LIST]]\n\n| value |\n| --- |\n| [[CELL]] |\n\n```text\n[[FENCE]]\n```\n\n<div>[[HTML]]</div>\n\n:::req {MID}\n\nBody [[ITEM]] and \\[[ESCAPED]].\n:::\n\n## Child\n\nChild text.\n"
+    );
+    let parsed = parse(&source);
+
+    assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
+    assert_eq!(parsed.sections().len(), 1);
+    let top = &parsed.sections()[0];
+    assert_eq!(top.level(), 1);
+    assert_eq!(top.title(), "Top [[TOP|label]]");
+    assert_eq!(top.children().len(), 1);
+    assert_eq!(top.children()[0].level(), 2);
+    assert_eq!(top.children()[0].title(), "Child");
+    assert_eq!(
+        slice(&source, top.source()),
+        &source[top.source().start_byte() as usize..]
+    );
+
+    let reconstructed = parsed
+        .blocks()
+        .iter()
+        .map(|block| match block {
+            ParsedBlock::Markdown(markdown) => markdown.raw(),
+            ParsedBlock::Item(item) => slice(&source, item.source()),
+        })
+        .collect::<String>();
+    assert_eq!(reconstructed, source);
+    assert!(
+        parsed
+            .blocks()
+            .iter()
+            .filter_map(ParsedBlock::as_markdown)
+            .any(|block| block.kind() == NarrativeKind::Table)
+    );
+
+    let narrative_references = parsed
+        .blocks()
+        .iter()
+        .filter_map(ParsedBlock::as_markdown)
+        .flat_map(|block| block.references())
+        .map(|reference| (reference.target(), reference.label(), reference.context()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        narrative_references,
+        [
+            ("PRE", None, InlineReferenceContext::Text),
+            ("TOP", Some("label"), InlineReferenceContext::Heading),
+            ("TEXT", None, InlineReferenceContext::Text),
+            ("LIST", None, InlineReferenceContext::ListItem),
+            ("CELL", None, InlineReferenceContext::TableCell),
+        ]
+    );
+    let item = parsed.items().next().unwrap();
+    assert_eq!(item.references().len(), 1);
+    assert_eq!(item.references()[0].target(), "ITEM");
+    assert_eq!(item.references()[0].context(), InlineReferenceContext::Text);
+    assert_eq!(slice(&source, item.references()[0].source()), "[[ITEM]]");
+    assert_eq!(slice(&source, top.heading_source()), "# Top [[TOP|label]]");
+}
+
+#[test]
+fn section_ranges_distinguish_preamble_direct_content_children_and_siblings() {
+    let source = format!(
+        "Preamble.\n\n:::req {MID}\n\nItem body.\n:::\n\n# One\n\nDirect one.\n\n## Child\n\nChild body.\n\n# Two\n\nDirect two.\n"
+    );
+    let parsed = parse(&source);
+
+    assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
+    assert_eq!(
+        parsed
+            .preamble()
+            .iter()
+            .filter_map(ParsedBlock::as_item)
+            .count(),
+        1
+    );
+    assert_eq!(parsed.sections().len(), 2);
+    let one = &parsed.sections()[0];
+    let two = &parsed.sections()[1];
+    assert_eq!(slice(&source, one.heading_source()), "# One");
+    assert_eq!(slice(&source, two.heading_source()), "# Two");
+    assert_eq!(
+        parsed.blocks()[one.content_range()]
+            .iter()
+            .filter_map(ParsedBlock::as_markdown)
+            .map(|block| block.raw())
+            .collect::<String>(),
+        "Direct one.\n\n"
+    );
+    assert_eq!(one.children().len(), 1);
+    assert_eq!(
+        slice(&source, one.children()[0].heading_source()),
+        "## Child"
+    );
+    assert_eq!(
+        slice(&source, one.source()),
+        "# One\n\nDirect one.\n\n## Child\n\nChild body.\n\n"
+    );
+    assert_eq!(slice(&source, two.source()), "# Two\n\nDirect two.\n");
+}
+
+#[test]
+fn inline_reference_spans_follow_unicode_crlf_and_escape_parity() {
+    let source = "é [[ONE]]\r\n\\\\[[TWO|label]] and \\[[ESCAPED]]\r\n<span data-ref=\"[[ATTR]]\"></span>\r\n";
+    let parsed = parse(source);
+    let references = parsed
+        .blocks()
+        .iter()
+        .filter_map(ParsedBlock::as_markdown)
+        .flat_map(|block| block.references())
+        .collect::<Vec<_>>();
+
+    assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
+    assert_eq!(references.len(), 2);
+    assert_eq!(references[0].target(), "ONE");
+    assert_eq!(slice(source, references[0].source()), "[[ONE]]");
+    assert_eq!(references[0].source().start_byte(), 3);
+    assert_eq!(references[0].source().start_line(), 1);
+    assert_eq!(references[0].source().start_column(), 3);
+    assert_eq!(references[1].target(), "TWO");
+    assert_eq!(references[1].label(), Some("label"));
+    assert_eq!(slice(source, references[1].source()), "[[TWO|label]]");
+    assert_eq!(references[1].source().start_line(), 2);
+}
+
+#[test]
+fn nested_narrative_structure_is_converted_to_mara_owned_nodes() {
+    let source = "Paragraph *emphasis [link](https://example.com \"Link title\") tail* and ![alt](image.png \"Image title\") plus `code`.\n\n3. list **strong**\n";
+    let parsed = parse(source);
+    let narrative = parsed
+        .blocks()
+        .iter()
+        .filter_map(ParsedBlock::as_markdown)
+        .collect::<Vec<_>>();
+
+    assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
+    assert_eq!(
+        slice(source, narrative[0].structure().source()),
+        narrative[0].raw()
+    );
+    assert!(has_structure_path(
+        narrative[0].structure(),
+        &[
+            MarkdownNodeKind::Paragraph,
+            MarkdownNodeKind::Emphasis,
+            MarkdownNodeKind::Link,
+        ]
+    ));
+    assert!(has_structure_path(
+        narrative[1].structure(),
+        &[
+            MarkdownNodeKind::List,
+            MarkdownNodeKind::ListItem,
+            MarkdownNodeKind::Paragraph,
+            MarkdownNodeKind::Strong,
+        ]
+    ));
+
+    let paragraph = narrative[0].structure();
+    let text = find_structure(paragraph, MarkdownNodeKind::Text).unwrap();
+    assert_eq!(
+        text.payload(),
+        &MarkdownNodePayload::Text {
+            value: "Paragraph ".to_owned(),
+            soft_break: false,
+            hard_break: false,
+        }
+    );
+    assert_eq!(slice(source, text.source()), "Paragraph ");
+
+    let link = find_structure(paragraph, MarkdownNodeKind::Link).unwrap();
+    assert_eq!(
+        link.payload(),
+        &MarkdownNodePayload::Link {
+            destination: "https://example.com".to_owned(),
+            title: Some("Link title".to_owned()),
+            kind: MarkdownLinkKind::Inline,
+        }
+    );
+    assert_eq!(
+        slice(source, link.source()),
+        "[link](https://example.com \"Link title\")"
+    );
+
+    let image = find_structure(paragraph, MarkdownNodeKind::Image).unwrap();
+    assert_eq!(
+        image.payload(),
+        &MarkdownNodePayload::Image {
+            destination: "image.png".to_owned(),
+            title: Some("Image title".to_owned()),
+            kind: MarkdownLinkKind::Inline,
+        }
+    );
+    assert_eq!(
+        slice(source, image.source()),
+        "![alt](image.png \"Image title\")"
+    );
+
+    let code = find_structure(paragraph, MarkdownNodeKind::CodeSpan).unwrap();
+    assert_eq!(
+        code.payload(),
+        &MarkdownNodePayload::CodeSpan {
+            value: "code".to_owned(),
+        }
+    );
+    assert_eq!(slice(source, code.source()), "`code`");
+
+    let list = narrative[1].structure();
+    assert_eq!(
+        list.payload(),
+        &MarkdownNodePayload::List {
+            marker: '.',
+            start: 3,
+            tight: true,
+        }
+    );
+    assert_eq!(slice(source, list.source()), narrative[1].raw());
+}
+
+#[test]
+fn code_span_contents_are_included_in_section_titles() {
+    let source = "# Use `mara check` safely\n\nBody.\n";
+    let parsed = parse(source);
+
+    assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
+    assert_eq!(parsed.sections()[0].title(), "Use mara check safely");
+}
+
+#[test]
+fn hash_prefixed_setext_heading_span_includes_underline() {
+    let source = "#hashtag\n===\n\nBody.\n";
+    let parsed = parse(source);
+    let section = &parsed.sections()[0];
+    let heading = parsed.blocks()[section.heading_block()]
+        .as_markdown()
+        .unwrap();
+
+    assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
+    assert_eq!(heading.heading_kind(), Some(ParsedHeadingKind::Setext));
+    assert_eq!(slice(source, section.heading_source()), "#hashtag\n===");
 }
