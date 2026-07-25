@@ -4277,7 +4277,11 @@ fn decode_rule_condition_value(
         )));
     };
     let decoded = match resolve_scalar(value, *style, tag.as_ref()).ok() {
-        Some(ScalarKind::String) => Some(RuleConditionValue::String(value.clone())),
+        Some(ScalarKind::String) => Some(RuleConditionValue::String(
+            value
+                .trim_matches(|character| matches!(character, ' ' | '\t'))
+                .to_owned(),
+        )),
         Some(ScalarKind::Boolean) => parsed_boolean(node).map(RuleConditionValue::Boolean),
         Some(ScalarKind::Integer) if valid_rule_integer_syntax(value) => value
             .parse::<i64>()

@@ -1737,6 +1737,40 @@ fn applies_string_condition_patterns_to_the_whole_value() {
 }
 
 #[test]
+fn normalizes_string_condition_values_without_losing_source_spans() {
+    let source = rich_schema_with_relations_and_rules(
+        COMPLETE_RELATIONS,
+        r#"  - name: matching_summary_requires_estimate
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    when: {field: summary, in: [" approved "]}
+    field: estimate
+    min: 1
+"#,
+    )
+    .replace("repeatable: true", "repeatable: false");
+    let fixture = Fixture::new(&source);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+    let value = &document.rules().unwrap().definitions()[0]
+        .condition()
+        .unwrap()
+        .value()
+        .values()
+        .value()[0];
+
+    assert_eq!(condition_string(value.value()), "approved");
+    assert_eq!(source_slice(&source, value.source()), r#"" approved ""#);
+
+    let duplicate = source.replace(r#"in: [" approved "]"#, r#"in: [approved, " approved "]"#);
+    let error = assert_invalid(&duplicate, SchemaDiagnosticCode::InvalidDeclaration);
+    assert_eq!(
+        source_slice(&duplicate, only_diagnostic(&error).primary().unwrap()),
+        r#"" approved ""#
+    );
+}
+
+#[test]
 fn compiles_typed_condition_values_against_each_scalar_field_domain() {
     let source = rich_schema_with_relations_and_rules(
         COMPLETE_RELATIONS,
