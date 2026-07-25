@@ -2044,11 +2044,13 @@ fn rule_reference_flavours(entries: &[(ParsedNode, ParsedNode)]) -> Option<Vec<S
     let (_, ParsedNode::Sequence { values, .. }) = optional_entry(entries, "flavours")? else {
         return None;
     };
+    let mut seen = BTreeSet::new();
     Some(
         values
             .iter()
             .filter_map(parsed_string)
             .filter(|name| valid_snake_name(name))
+            .filter(|name| seen.insert((*name).to_owned()))
             .map(str::to_owned)
             .collect(),
     )
@@ -4118,7 +4120,7 @@ fn decode_optional_pattern(
     };
     let field_name = format!("{mapping}.{name}");
     let pattern = expect_string(value, &field_name, source_map)?;
-    if compile_whole_string_pattern(pattern).is_err() {
+    if UnicodeRegex::new(pattern).is_err() || compile_whole_string_pattern(pattern).is_err() {
         return Err(Box::new(
             Diagnostic::new(
                 SchemaDiagnosticCode::InvalidPattern,

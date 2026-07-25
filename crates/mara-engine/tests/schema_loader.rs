@@ -1872,6 +1872,37 @@ fn preserves_independent_diagnostics_across_the_normative_compilation_stages() {
 }
 
 #[test]
+fn does_not_repeat_reference_diagnostics_for_duplicate_applicability() {
+    let source = rich_schema_with_relations_and_rules(
+        COMPLETE_RELATIONS,
+        r#"  - name: duplicate_applicability
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement, requirement]}
+    when: {field: missing_condition, in: [draft]}
+    field: missing_field
+    min: 1
+"#,
+    );
+    let fixture = Fixture::new(&source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+
+    assert_eq!(error.diagnostics().len(), 3, "{:#?}", error.diagnostics());
+    for field in ["missing_condition", "missing_field"] {
+        assert_eq!(
+            error
+                .diagnostics()
+                .iter()
+                .filter(|diagnostic| detail_string(diagnostic, "field") == Some(field))
+                .count(),
+            1,
+            "{:#?}",
+            error.diagnostics()
+        );
+    }
+}
+
+#[test]
 fn continues_reference_diagnostics_after_malformed_sequence_entries() {
     let cases = [
         r#"  - name: malformed_flavours
@@ -2002,6 +2033,7 @@ fn accepts_unicode_rust_patterns_and_rejects_invalid_patterns_at_the_value() {
     for source in [
         RICH_SCHEMA.replace("pattern: REQ-[0-9]+", "pattern: '('"),
         RICH_SCHEMA.replace("pattern: .+", "pattern: '[unterminated'"),
+        RICH_SCHEMA.replace("pattern: .+", "pattern: '(?x)a\\'"),
     ] {
         let error = assert_invalid(source.clone(), SchemaDiagnosticCode::InvalidPattern);
         let diagnostic = only_diagnostic(&error);
