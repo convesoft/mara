@@ -604,6 +604,19 @@ fn internal_file_symlinks_follow_explicit_policy() {
 
 #[cfg(any(unix, windows))]
 #[test]
+fn unselected_dangling_symlinks_do_not_invalidate_discovery() {
+    let fixture = Fixture::new(&["selected.mara.md"], &[], false, false, false);
+    fixture.write("selected.mara.md", "selected");
+    symlink_file("missing.txt", fixture.root.join("unselected.txt"));
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["selected.mara.md"]);
+    assert!(discovery.diagnostics().is_empty());
+}
+
+#[cfg(any(unix, windows))]
+#[test]
 fn external_file_symlink_targets_are_rejected() {
     let fixture = Fixture::new(&["*.mara.md"], &[], false, false, true);
     let outside = fixture._temp.path().join("outside-source.md");

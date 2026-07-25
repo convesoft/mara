@@ -1,7 +1,7 @@
 //! Deterministic discovery and loading of configured Mara source documents.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     ffi::OsString,
     fs,
     io::{self, Read},
@@ -161,109 +161,127 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
     };
     let ignored_paths = Arc::new(ignored_paths);
     let mut seen_logical_paths = HashSet::new();
+    let mut queued_walk_roots = HashSet::from([project.root.clone()]);
+    let mut walk_roots = VecDeque::from([project.root.clone()]);
 
-    for result in content_walker(
-        project,
-        respect_gitignore,
-        Arc::clone(&ignored_paths),
-        Arc::clone(&rejected_directories),
-        Arc::clone(&ignore_rule_failures),
-    )
-    .build()
-    {
-        let entry = match result {
-            Ok(entry) => entry,
-            Err(error) => {
-                for error in walk_error_parts(&error) {
-                    let error_path = walk_error_path(error);
-                    let source_path =
-                        error_path.and_then(|path| normalized_relative_path(&project.root, path));
-                    if source_path
+    while let Some(walk_root) = walk_roots.pop_front() {
+        for result in content_walker(
+            project,
+            &walk_root,
+            respect_gitignore,
+            Arc::clone(&ignored_paths),
+            Arc::clone(&rejected_directories),
+            Arc::clone(&ignore_rule_failures),
+        )
+        .build()
+        {
+            let entry = match result {
+                Ok(entry) => entry,
+                Err(error) => {
+                    for error in walk_error_parts(&error) {
+                        let error_path = walk_error_path(error);
+                        let source_path = error_path
+                            .and_then(|path| normalized_relative_path(&project.root, path));
+                        if source_path.as_deref().is_some_and(|path| {
+                            is_fully_excluded_tree(&project.content.exclude, path)
+                        }) {
+                            continue;
+                        }
+                        let is_loop = is_walk_loop(error);
+                        if !is_loop
+                            && error_path.is_some_and(|path| {
+                                fs::symlink_metadata(path).is_ok_and(|metadata| !metadata.is_dir())
+                            })
+                            && source_path
+                                .as_deref()
+                                .is_some_and(|path| !is_selected(&includes, &excludes, path))
+                        {
+                            continue;
+                        }
+                        let reason = if is_loop {
+                            "directory_cycle"
+                        } else {
+                            "walk_error"
+                        };
+                        let diagnostic = match source_path {
+                            Some(source_path) => diagnostic_at_start(
+                                ContentDiagnosticCode::Io,
+                                &source_path,
+                                "could not inspect a configured content path",
+                            ),
+                            None => Diagnostic::new(
+                                ContentDiagnosticCode::Io,
+                                "could not inspect a configured content path",
+                                None,
+                            ),
+                        };
+                        diagnostics.push(
+                            diagnostic
+                                .with_detail("operation", "discover")
+                                .with_detail("reason", reason),
+                        );
+                    }
+                    continue;
+                }
+            };
+            if let Some(error) = entry.error() {
+                let affected_path = normalized_relative_path(&project.root, entry.path());
+                if affected_path
+                    .as_deref()
+                    .is_some_and(|path| is_fully_excluded_tree(&project.content.exclude, path))
+                {
+                    continue;
+                }
+                if entry.file_type().is_some_and(|kind| kind.is_file())
+                    && affected_path
                         .as_deref()
-                        .is_some_and(|path| is_fully_excluded_tree(&project.content.exclude, path))
-                    {
-                        continue;
-                    }
-                    let is_loop = is_walk_loop(error);
-                    if !is_loop
-                        && error_path.is_some_and(|path| {
-                            fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
-                        })
-                        && source_path
-                            .as_deref()
-                            .is_some_and(|path| !is_selected(&includes, &excludes, path))
-                    {
-                        continue;
-                    }
-                    let reason = if is_loop {
-                        "directory_cycle"
-                    } else {
-                        "walk_error"
-                    };
-                    let diagnostic = match source_path {
-                        Some(source_path) => diagnostic_at_start(
+                        .is_some_and(|path| !is_selected(&includes, &excludes, path))
+                {
+                    continue;
+                }
+                for error in walk_error_parts(error) {
+                    let source_path = walk_error_path(error)
+                        .and_then(|path| normalized_relative_path(&project.root, path))
+                        .or_else(|| affected_path.clone())
+                        .unwrap_or_else(|| ".mara/project.toml".to_owned());
+                    diagnostics.push(
+                        diagnostic_at_start(
                             ContentDiagnosticCode::Io,
                             &source_path,
-                            "could not inspect a configured content path",
-                        ),
-                        None => Diagnostic::new(
-                            ContentDiagnosticCode::Io,
-                            "could not inspect a configured content path",
-                            None,
-                        ),
-                    };
-                    diagnostics.push(
-                        diagnostic
-                            .with_detail("operation", "discover")
-                            .with_detail("reason", reason),
+                            "could not evaluate ignore rules for content input",
+                        )
+                        .with_detail("operation", "gitignore")
+                        .with_detail("reason", "ignore_rule_error"),
                     );
                 }
                 continue;
             }
-        };
-        if let Some(error) = entry.error() {
-            let affected_path = normalized_relative_path(&project.root, entry.path());
-            if affected_path
-                .as_deref()
-                .is_some_and(|path| is_fully_excluded_tree(&project.content.exclude, path))
-            {
+            if entry.depth() == 0 || entry.file_type().is_some_and(|kind| kind.is_dir()) {
                 continue;
             }
-            if entry.file_type().is_some_and(|kind| kind.is_file())
-                && affected_path
-                    .as_deref()
-                    .is_some_and(|path| !is_selected(&includes, &excludes, path))
+            if entry.path_is_symlink()
+                && fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_dir())
             {
+                if project.content.follow_directory_symlinks {
+                    queue_directory_symlink(
+                        project,
+                        entry.path(),
+                        &mut queued_walk_roots,
+                        &mut walk_roots,
+                        &mut diagnostics,
+                    );
+                }
                 continue;
             }
-            for error in walk_error_parts(error) {
-                let source_path = walk_error_path(error)
-                    .and_then(|path| normalized_relative_path(&project.root, path))
-                    .or_else(|| affected_path.clone())
-                    .unwrap_or_else(|| ".mara/project.toml".to_owned());
-                diagnostics.push(
-                    diagnostic_at_start(
-                        ContentDiagnosticCode::Io,
-                        &source_path,
-                        "could not evaluate ignore rules for content input",
-                    )
-                    .with_detail("operation", "gitignore")
-                    .with_detail("reason", "ignore_rule_error"),
-                );
+            let logical_path = entry.into_path();
+            if !seen_logical_paths.insert(logical_path.clone()) {
+                continue;
             }
-            continue;
-        }
-        if entry.depth() == 0 || entry.file_type().is_some_and(|kind| kind.is_dir()) {
-            continue;
-        }
-        let logical_path = entry.into_path();
-        if !seen_logical_paths.insert(logical_path.clone()) {
-            continue;
-        }
-        match candidate_from_path(&project.root, logical_path, &includes, &excludes) {
-            Ok(Some(candidate)) => candidates.push(candidate),
-            Ok(None) => {}
-            Err(diagnostic) => diagnostics.push(*diagnostic),
+            match candidate_from_path(&project.root, logical_path, &includes, &excludes) {
+                Ok(Some(candidate)) => candidates.push(candidate),
+                Ok(None) => {}
+                Err(diagnostic) => diagnostics.push(*diagnostic),
+            }
         }
     }
 
@@ -349,12 +367,13 @@ fn opened_file_identity(path: &Path) -> Option<FileIdentity> {
 
 fn content_walker(
     project: &LoadedProject,
+    walk_root: &Path,
     respect_gitignore: bool,
     ignored_paths: Arc<IgnoredPaths>,
     rejected: Arc<Mutex<Vec<RejectedDirectorySymlink>>>,
     ignore_rule_failures: Arc<Mutex<Vec<IgnoreRuleFailure>>>,
 ) -> WalkBuilder {
-    let mut builder = WalkBuilder::new(&project.root);
+    let mut builder = WalkBuilder::new(walk_root);
     builder
         .hidden(false)
         .ignore(false)
@@ -363,9 +382,12 @@ fn content_walker(
         .git_global(false)
         .parents(false)
         .require_git(true)
-        .follow_links(project.content.follow_directory_symlinks);
+        .follow_links(false);
 
     let root = project.root.clone();
+    let logical_walk_root = walk_root.to_path_buf();
+    let resolved_walk_root =
+        fs::canonicalize(walk_root).unwrap_or_else(|_| walk_root.to_path_buf());
     let include_patterns = compile_include_patterns(&project.content.include);
     let exclude_patterns = project.content.exclude.clone();
     let follow_directory_symlinks = project.content.follow_directory_symlinks;
@@ -380,8 +402,15 @@ fn content_walker(
             }
             return true;
         }
-        if respect_gitignore && ignored_paths.contains(entry.path()) {
-            return false;
+        if respect_gitignore {
+            let physical_path = entry
+                .path()
+                .strip_prefix(&logical_walk_root)
+                .map(|relative| resolved_walk_root.join(relative))
+                .unwrap_or_else(|_| entry.path().to_path_buf());
+            if ignored_paths.contains(&physical_path) {
+                return false;
+            }
         }
         let is_directory = entry.file_type().is_some_and(|kind| kind.is_dir())
             || (entry.path_is_symlink()
@@ -432,6 +461,46 @@ fn content_walker(
         }
     });
     builder
+}
+
+fn queue_directory_symlink(
+    project: &LoadedProject,
+    path: &Path,
+    queued: &mut HashSet<PathBuf>,
+    pending: &mut VecDeque<PathBuf>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Ok(target) = fs::canonicalize(path) else {
+        return;
+    };
+    let parent = path
+        .parent()
+        .and_then(|parent| fs::canonicalize(parent).ok());
+    if parent.is_some_and(|parent| parent.starts_with(&target)) {
+        let source_path = normalized_relative_path(&project.root, path);
+        let diagnostic = match source_path {
+            Some(source_path) => diagnostic_at_start(
+                ContentDiagnosticCode::Io,
+                &source_path,
+                "content directory symlink forms a traversal cycle",
+            ),
+            None => Diagnostic::new(
+                ContentDiagnosticCode::Io,
+                "content directory symlink with a non-UTF-8 path forms a traversal cycle",
+                None,
+            ),
+        };
+        diagnostics.push(
+            diagnostic
+                .with_detail("operation", "discover")
+                .with_detail("reason", "directory_cycle"),
+        );
+        return;
+    }
+    let path = path.to_path_buf();
+    if queued.insert(path.clone()) {
+        pending.push_back(path);
+    }
 }
 
 fn record_rejected_directory(
