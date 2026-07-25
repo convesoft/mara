@@ -1315,7 +1315,10 @@ pub(crate) fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>>
 }
 
 #[cfg(unix)]
-fn path_identity(_path: &Path, metadata: &fs::Metadata) -> io::Result<Option<FileIdentity>> {
+pub(crate) fn path_identity(
+    _path: &Path,
+    metadata: &fs::Metadata,
+) -> io::Result<Option<FileIdentity>> {
     use std::os::unix::fs::MetadataExt;
 
     Ok(Some(FileIdentity {
@@ -1357,7 +1360,10 @@ pub(crate) fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>>
 }
 
 #[cfg(windows)]
-fn path_identity(path: &Path, _metadata: &fs::Metadata) -> io::Result<Option<FileIdentity>> {
+pub(crate) fn path_identity(
+    path: &Path,
+    _metadata: &fs::Metadata,
+) -> io::Result<Option<FileIdentity>> {
     use std::os::windows::fs::OpenOptionsExt;
 
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
@@ -1383,7 +1389,10 @@ pub(crate) fn file_identity(_file: &fs::File) -> io::Result<Option<FileIdentity>
 }
 
 #[cfg(not(any(unix, windows)))]
-fn path_identity(_path: &Path, _metadata: &fs::Metadata) -> io::Result<Option<FileIdentity>> {
+pub(crate) fn path_identity(
+    _path: &Path,
+    _metadata: &fs::Metadata,
+) -> io::Result<Option<FileIdentity>> {
     Ok(None)
 }
 

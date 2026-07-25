@@ -17,7 +17,7 @@ use wax::{Glob, Program};
 
 use crate::{
     diagnostic::sort_diagnostics,
-    project::{FileIdentity, LoadedProject, file_identity, open_read_no_follow},
+    project::{FileIdentity, LoadedProject, file_identity, open_read_no_follow, path_identity},
 };
 
 /// A complete content-discovery result. Per-file failures do not discard
@@ -79,34 +79,37 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
         let entry = match result {
             Ok(entry) => entry,
             Err(error) => {
-                let source_path = walk_error_path(&error)
-                    .and_then(|path| normalized_relative_path(&project.root, path));
-                let is_loop = is_walk_loop(&error);
-                if !is_loop
-                    && walk_error_path(&error).is_some_and(|path| {
-                        fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
-                    })
-                    && source_path
-                        .as_deref()
-                        .is_some_and(|path| !is_selected(&includes, &excludes, path))
-                {
-                    continue;
+                for error in walk_error_parts(&error) {
+                    let source_path = walk_error_path(error)
+                        .and_then(|path| normalized_relative_path(&project.root, path));
+                    let is_loop = is_walk_loop(error);
+                    if !is_loop
+                        && walk_error_path(error).is_some_and(|path| {
+                            fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
+                        })
+                        && source_path
+                            .as_deref()
+                            .is_some_and(|path| !is_selected(&includes, &excludes, path))
+                    {
+                        continue;
+                    }
+                    let source_path =
+                        source_path.unwrap_or_else(|| ".mara/project.toml".to_owned());
+                    let reason = if is_loop {
+                        "directory_cycle"
+                    } else {
+                        "walk_error"
+                    };
+                    diagnostics.push(
+                        diagnostic_at_start(
+                            ContentDiagnosticCode::Io,
+                            &source_path,
+                            "could not inspect a configured content path",
+                        )
+                        .with_detail("operation", "discover")
+                        .with_detail("reason", reason),
+                    );
                 }
-                let source_path = source_path.unwrap_or_else(|| ".mara/project.toml".to_owned());
-                let reason = if is_loop {
-                    "directory_cycle"
-                } else {
-                    "walk_error"
-                };
-                diagnostics.push(
-                    diagnostic_at_start(
-                        ContentDiagnosticCode::Io,
-                        &source_path,
-                        "could not inspect a configured content path",
-                    )
-                    .with_detail("operation", "discover")
-                    .with_detail("reason", reason),
-                );
                 continue;
             }
         };
@@ -140,6 +143,12 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
         let source_path = match candidate_source_path(&project.root, entry.path()) {
             Ok(source_path) => source_path,
             Err(diagnostic) => {
+                if lossy_relative_path(&project.root, entry.path())
+                    .as_deref()
+                    .is_some_and(|path| !is_selected(&includes, &excludes, path))
+                {
+                    continue;
+                }
                 diagnostics.push(*diagnostic);
                 continue;
             }
@@ -230,8 +239,8 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
 }
 
 fn opened_file_identity(path: &Path) -> Option<FileIdentity> {
-    open_read_no_follow(path)
-        .and_then(|file| file_identity(&file))
+    fs::metadata(path)
+        .and_then(|metadata| path_identity(path, &metadata))
         .ok()
         .flatten()
 }
@@ -763,6 +772,21 @@ fn normalized_relative_path(root: &Path, path: &Path) -> Option<String> {
     (!output.is_empty()).then_some(output)
 }
 
+fn lossy_relative_path(root: &Path, path: &Path) -> Option<String> {
+    let relative = path.strip_prefix(root).ok()?;
+    let mut output = String::new();
+    for component in relative.components() {
+        let Component::Normal(segment) = component else {
+            return None;
+        };
+        if !output.is_empty() {
+            output.push('/');
+        }
+        output.push_str(&segment.to_string_lossy());
+    }
+    (!output.is_empty()).then_some(output)
+}
+
 fn walk_error_path(error: &ignore::Error) -> Option<&Path> {
     match error {
         ignore::Error::Partial(errors) => errors.iter().find_map(walk_error_path),
@@ -775,6 +799,13 @@ fn walk_error_path(error: &ignore::Error) -> Option<&Path> {
         | ignore::Error::Glob { .. }
         | ignore::Error::UnrecognizedFileType(_)
         | ignore::Error::InvalidDefinition => None,
+    }
+}
+
+fn walk_error_parts(error: &ignore::Error) -> Vec<&ignore::Error> {
+    match error {
+        ignore::Error::Partial(errors) => errors.iter().flat_map(walk_error_parts).collect(),
+        _ => vec![error],
     }
 }
 
