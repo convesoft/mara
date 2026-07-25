@@ -72,6 +72,34 @@ impl ContentDiagnosticCode {
     }
 }
 
+/// Item-syntax diagnostic codes implemented by the Markdown adapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SyntaxDiagnosticCode {
+    InvalidItemHeader,
+    InvalidMetadata,
+    UnclosedItem,
+}
+
+impl SyntaxDiagnosticCode {
+    pub const ALL: [Self; 3] = [
+        Self::InvalidItemHeader,
+        Self::InvalidMetadata,
+        Self::UnclosedItem,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidItemHeader => "syntax.invalid_item_header",
+            Self::InvalidMetadata => "syntax.invalid_metadata",
+            Self::UnclosedItem => "syntax.unclosed_item",
+        }
+    }
+
+    pub const fn default_severity(self) -> DiagnosticSeverity {
+        DiagnosticSeverity::Error
+    }
+}
+
 /// The complete schema diagnostic-code family in wire format version 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SchemaDiagnosticCode {
@@ -119,6 +147,7 @@ impl SchemaDiagnosticCode {
 pub enum DiagnosticCode {
     Project(ProjectDiagnosticCode),
     Content(ContentDiagnosticCode),
+    Syntax(SyntaxDiagnosticCode),
     Schema(SchemaDiagnosticCode),
 }
 
@@ -127,6 +156,7 @@ impl DiagnosticCode {
         match self {
             Self::Project(code) => code.as_str(),
             Self::Content(code) => code.as_str(),
+            Self::Syntax(code) => code.as_str(),
             Self::Schema(code) => code.as_str(),
         }
     }
@@ -135,6 +165,7 @@ impl DiagnosticCode {
         match self {
             Self::Project(code) => code.default_severity(),
             Self::Content(code) => code.default_severity(),
+            Self::Syntax(code) => code.default_severity(),
             Self::Schema(code) => code.default_severity(),
         }
     }
@@ -149,6 +180,12 @@ impl From<ProjectDiagnosticCode> for DiagnosticCode {
 impl From<ContentDiagnosticCode> for DiagnosticCode {
     fn from(value: ContentDiagnosticCode) -> Self {
         Self::Content(value)
+    }
+}
+
+impl From<SyntaxDiagnosticCode> for DiagnosticCode {
+    fn from(value: SyntaxDiagnosticCode) -> Self {
+        Self::Syntax(value)
     }
 }
 
@@ -396,6 +433,14 @@ mod tests {
         assert_eq!(
             ContentDiagnosticCode::ALL.map(ContentDiagnosticCode::as_str),
             ["content.io", "content.invalid_utf8"]
+        );
+        assert_eq!(
+            SyntaxDiagnosticCode::ALL.map(SyntaxDiagnosticCode::as_str),
+            [
+                "syntax.invalid_item_header",
+                "syntax.invalid_metadata",
+                "syntax.unclosed_item",
+            ]
         );
     }
 

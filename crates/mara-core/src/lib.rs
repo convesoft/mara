@@ -8,7 +8,7 @@ pub mod source;
 pub use diagnostic::{
     ContentDiagnosticCode, Diagnostic, DiagnosticCode, DiagnosticContext, DiagnosticItem,
     DiagnosticNumber, DiagnosticSeverity, DiagnosticValue, ProjectDiagnosticCode,
-    RelatedDiagnostic, SchemaDiagnosticCode,
+    RelatedDiagnostic, SchemaDiagnosticCode, SyntaxDiagnosticCode,
 };
 pub use identity::{Mid, MidParseError};
 pub use schema::{
