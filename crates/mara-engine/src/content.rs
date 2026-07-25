@@ -87,31 +87,15 @@ struct IncludePattern {
 pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
     let includes = compile_globs(&project.content.include);
     let excludes = compile_globs(&project.content.exclude);
-    let respect_gitignore = gitignore_is_active(project);
+    let tracked_paths = project
+        .content
+        .respect_gitignore
+        .then(|| tracked_content_paths(&project.root))
+        .flatten();
+    let respect_gitignore = tracked_paths.is_some();
     let rejected_directories = Arc::new(Mutex::new(Vec::new()));
     let mut candidates = Vec::new();
     let mut diagnostics = Vec::new();
-    let tracked_paths = if respect_gitignore {
-        match tracked_content_paths(&project.root) {
-            Ok(paths) => paths,
-            Err(_) => {
-                let source_path = normalized_relative_path(&project.root, &project.config_path)
-                    .unwrap_or_else(|| ".mara/project.toml".to_owned());
-                diagnostics.push(
-                    diagnostic_at_start(
-                        ContentDiagnosticCode::Io,
-                        &source_path,
-                        "could not enumerate Git-tracked content paths",
-                    )
-                    .with_detail("operation", "gitignore")
-                    .with_detail("reason", "tracked_query_failed"),
-                );
-                Vec::new()
-            }
-        }
-    } else {
-        Vec::new()
-    };
     let mut seen_logical_paths = HashSet::new();
 
     for result in content_walker(
@@ -217,14 +201,17 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
         }
     }
 
-    for logical_path in tracked_paths {
+    for logical_path in tracked_paths.into_iter().flatten() {
         if !seen_logical_paths.insert(logical_path.clone()) {
             continue;
         }
         let Ok(metadata) = fs::symlink_metadata(&logical_path) else {
             continue;
         };
-        if metadata.is_dir() {
+        if metadata.is_dir()
+            || (metadata.file_type().is_symlink()
+                && fs::metadata(&logical_path).is_ok_and(|target| target.is_dir()))
+        {
             continue;
         }
         match candidate_from_path(&project.root, logical_path, &includes, &excludes) {
@@ -635,31 +622,23 @@ fn candidate_from_path(
     }))
 }
 
-fn gitignore_is_active(project: &LoadedProject) -> bool {
-    project.content.respect_gitignore
-        && project
-            .root
-            .ancestors()
-            .any(|ancestor| ancestor.join(".git").exists())
-}
-
-fn tracked_content_paths(root: &Path) -> std::io::Result<Vec<PathBuf>> {
+fn tracked_content_paths(root: &Path) -> Option<Vec<PathBuf>> {
     let output = Command::new("git")
         .arg("-C")
         .arg(root)
         .args(["ls-files", "-z", "--cached", "--", "."])
-        .output()?;
+        .output()
+        .ok()?;
     if !output.status.success() {
-        return Err(std::io::Error::other(
-            "Git could not enumerate tracked project paths",
-        ));
+        return None;
     }
     output
         .stdout
         .split(|byte| *byte == 0)
         .filter(|path| !path.is_empty())
         .map(|path| git_path(root, path))
-        .collect()
+        .collect::<std::io::Result<_>>()
+        .ok()
 }
 
 #[cfg(unix)]

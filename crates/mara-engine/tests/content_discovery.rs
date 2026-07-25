@@ -210,6 +210,7 @@ fn gitignore_overrides_includes_but_matching_untracked_files_remain_eligible() {
 #[test]
 fn gitignore_has_no_effect_outside_a_git_worktree() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
+    fs::create_dir(fixture.root.join(".git")).unwrap();
     fixture.write(".gitignore", "selected.mara.md\n");
     fixture.write("selected.mara.md", "selected");
 
@@ -473,6 +474,21 @@ fn directory_symlinks_are_skipped_when_following_is_disabled() {
     let fixture = Fixture::new(&["alias/*.mara.md"], &[], false, false, false);
     fixture.write("real/inside.mara.md", "inside");
     symlink_directory("real", fixture.root.join("alias"));
+
+    let discovery = discover_content(&fixture.load());
+
+    assert!(discovery.documents().is_empty());
+    assert!(discovery.diagnostics().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn tracked_directory_symlinks_remain_skipped_when_following_is_disabled() {
+    let fixture = Fixture::new(&["alias"], &[], true, false, true);
+    fixture.write("real/inside.mara.md", "inside");
+    symlink_directory("real", fixture.root.join("alias"));
+    fixture.git(&["init", "--quiet"]);
+    fixture.git(&["add", "alias"]);
 
     let discovery = discover_content(&fixture.load());
 
