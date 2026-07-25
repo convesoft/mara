@@ -6,3 +6,4 @@ license.workspace = true
 
 [dependencies]
 mara-core.workspace = true
+rushdown.workspace = true
