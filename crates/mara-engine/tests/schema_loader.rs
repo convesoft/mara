@@ -1244,6 +1244,42 @@ fn reports_all_independent_flavour_and_field_defects_regardless_of_mapping_order
 }
 
 #[test]
+fn reports_root_flavour_and_sequence_defects_from_one_compilation() {
+    let source = VALID_SCHEMA
+        .replace("  requirement:", "  bad-name:")
+        .replace("label: Requirement", "label: ''")
+        .replace("[Document an externally visible obligation.]", "[1, '']")
+        .replace("relations: {}", "relations: []")
+        .replace("rules: []", "rules: {}");
+    let fixture = Fixture::new(&source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+
+    let diagnostics = error.diagnostics();
+    assert_eq!(diagnostics.len(), 6, "{diagnostics:#?}");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| source_slice(&source, diagnostic.primary().unwrap()))
+            .collect::<Vec<_>>(),
+        ["bad-name", "''", "1", "''", "[]", "{}"]
+    );
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code().as_str())
+            .collect::<Vec<_>>(),
+        [
+            "schema.invalid_name",
+            "schema.invalid_declaration",
+            "schema.invalid_declaration",
+            "schema.invalid_declaration",
+            "schema.invalid_declaration",
+            "schema.invalid_declaration",
+        ]
+    );
+}
+
+#[test]
 fn rejects_unsupported_root_composition_constructs_as_unknown_v1_keys() {
     for key in [
         "imports",
