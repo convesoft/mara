@@ -100,18 +100,122 @@ impl SyntaxDiagnosticCode {
     }
 }
 
-/// Identity diagnostic codes implemented by the Markdown adapter.
+/// Identity diagnostic codes implemented by parsing and semantic compilation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum IdentityDiagnosticCode {
     InvalidMid,
+    DuplicateMid,
+    InvalidDisplayId,
+    DuplicateDisplayId,
 }
 
 impl IdentityDiagnosticCode {
-    pub const ALL: [Self; 1] = [Self::InvalidMid];
+    pub const ALL: [Self; 4] = [
+        Self::InvalidMid,
+        Self::DuplicateMid,
+        Self::InvalidDisplayId,
+        Self::DuplicateDisplayId,
+    ];
 
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::InvalidMid => "identity.invalid_mid",
+            Self::DuplicateMid => "identity.duplicate_mid",
+            Self::InvalidDisplayId => "identity.invalid_display_id",
+            Self::DuplicateDisplayId => "identity.duplicate_display_id",
+        }
+    }
+
+    pub const fn default_severity(self) -> DiagnosticSeverity {
+        DiagnosticSeverity::Error
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ItemDiagnosticCode {
+    UnknownFlavour,
+    MissingValue,
+    UnknownKey,
+}
+
+impl ItemDiagnosticCode {
+    pub const ALL: [Self; 3] = [Self::UnknownFlavour, Self::MissingValue, Self::UnknownKey];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UnknownFlavour => "item.unknown_flavour",
+            Self::MissingValue => "item.missing_value",
+            Self::UnknownKey => "item.unknown_key",
+        }
+    }
+
+    pub const fn default_severity(self) -> DiagnosticSeverity {
+        DiagnosticSeverity::Error
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum FieldDiagnosticCode {
+    InvalidScalar,
+    InvalidEnum,
+    PatternMismatch,
+    Repetition,
+}
+
+impl FieldDiagnosticCode {
+    pub const ALL: [Self; 4] = [
+        Self::InvalidScalar,
+        Self::InvalidEnum,
+        Self::PatternMismatch,
+        Self::Repetition,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidScalar => "field.invalid_scalar",
+            Self::InvalidEnum => "field.invalid_enum",
+            Self::PatternMismatch => "field.pattern_mismatch",
+            Self::Repetition => "field.repetition",
+        }
+    }
+
+    pub const fn default_severity(self) -> DiagnosticSeverity {
+        DiagnosticSeverity::Error
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ReferenceDiagnosticCode {
+    Unresolved,
+    Ambiguous,
+}
+
+impl ReferenceDiagnosticCode {
+    pub const ALL: [Self; 2] = [Self::Unresolved, Self::Ambiguous];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unresolved => "reference.unresolved",
+            Self::Ambiguous => "reference.ambiguous",
+        }
+    }
+
+    pub const fn default_severity(self) -> DiagnosticSeverity {
+        DiagnosticSeverity::Error
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RelationDiagnosticCode {
+    Unknown,
+}
+
+impl RelationDiagnosticCode {
+    pub const ALL: [Self; 1] = [Self::Unknown];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "relation.unknown",
         }
     }
 
@@ -169,6 +273,10 @@ pub enum DiagnosticCode {
     Content(ContentDiagnosticCode),
     Syntax(SyntaxDiagnosticCode),
     Identity(IdentityDiagnosticCode),
+    Item(ItemDiagnosticCode),
+    Field(FieldDiagnosticCode),
+    Reference(ReferenceDiagnosticCode),
+    Relation(RelationDiagnosticCode),
     Schema(SchemaDiagnosticCode),
 }
 
@@ -179,6 +287,10 @@ impl DiagnosticCode {
             Self::Content(code) => code.as_str(),
             Self::Syntax(code) => code.as_str(),
             Self::Identity(code) => code.as_str(),
+            Self::Item(code) => code.as_str(),
+            Self::Field(code) => code.as_str(),
+            Self::Reference(code) => code.as_str(),
+            Self::Relation(code) => code.as_str(),
             Self::Schema(code) => code.as_str(),
         }
     }
@@ -189,6 +301,10 @@ impl DiagnosticCode {
             Self::Content(code) => code.default_severity(),
             Self::Syntax(code) => code.default_severity(),
             Self::Identity(code) => code.default_severity(),
+            Self::Item(code) => code.default_severity(),
+            Self::Field(code) => code.default_severity(),
+            Self::Reference(code) => code.default_severity(),
+            Self::Relation(code) => code.default_severity(),
             Self::Schema(code) => code.default_severity(),
         }
     }
@@ -215,6 +331,30 @@ impl From<SyntaxDiagnosticCode> for DiagnosticCode {
 impl From<IdentityDiagnosticCode> for DiagnosticCode {
     fn from(value: IdentityDiagnosticCode) -> Self {
         Self::Identity(value)
+    }
+}
+
+impl From<ItemDiagnosticCode> for DiagnosticCode {
+    fn from(value: ItemDiagnosticCode) -> Self {
+        Self::Item(value)
+    }
+}
+
+impl From<FieldDiagnosticCode> for DiagnosticCode {
+    fn from(value: FieldDiagnosticCode) -> Self {
+        Self::Field(value)
+    }
+}
+
+impl From<ReferenceDiagnosticCode> for DiagnosticCode {
+    fn from(value: ReferenceDiagnosticCode) -> Self {
+        Self::Reference(value)
+    }
+}
+
+impl From<RelationDiagnosticCode> for DiagnosticCode {
+    fn from(value: RelationDiagnosticCode) -> Self {
+        Self::Relation(value)
     }
 }
 
@@ -539,7 +679,37 @@ mod tests {
         );
         assert_eq!(
             IdentityDiagnosticCode::ALL.map(IdentityDiagnosticCode::as_str),
-            ["identity.invalid_mid"]
+            [
+                "identity.invalid_mid",
+                "identity.duplicate_mid",
+                "identity.invalid_display_id",
+                "identity.duplicate_display_id",
+            ]
+        );
+        assert_eq!(
+            ItemDiagnosticCode::ALL.map(ItemDiagnosticCode::as_str),
+            [
+                "item.unknown_flavour",
+                "item.missing_value",
+                "item.unknown_key"
+            ]
+        );
+        assert_eq!(
+            FieldDiagnosticCode::ALL.map(FieldDiagnosticCode::as_str),
+            [
+                "field.invalid_scalar",
+                "field.invalid_enum",
+                "field.pattern_mismatch",
+                "field.repetition",
+            ]
+        );
+        assert_eq!(
+            ReferenceDiagnosticCode::ALL.map(ReferenceDiagnosticCode::as_str),
+            ["reference.unresolved", "reference.ambiguous"]
+        );
+        assert_eq!(
+            RelationDiagnosticCode::ALL.map(RelationDiagnosticCode::as_str),
+            ["relation.unknown"]
         );
     }
 
