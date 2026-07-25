@@ -1082,7 +1082,7 @@ fn validate_glob(glob: &str) -> Result<(), &'static str> {
     if glob.contains('\\') {
         return Err("backslash escaping and platform separators are unsupported");
     }
-    if glob.contains('{') || glob.contains('}') {
+    if contains_brace_extension(glob) {
         return Err("brace expansion is unsupported");
     }
     if glob.split('/').any(str::is_empty) {
@@ -1103,6 +1103,19 @@ fn validate_glob(glob: &str) -> Result<(), &'static str> {
     crate::content::compile_content_glob(glob)
         .map_err(|_| "glob cannot be compiled by the content matcher")?;
     Ok(())
+}
+
+fn contains_brace_extension(glob: &str) -> bool {
+    let mut in_class = false;
+    for character in glob.chars() {
+        match character {
+            '[' if !in_class => in_class = true,
+            ']' if in_class => in_class = false,
+            '{' | '}' if !in_class => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 fn validate_glob_segment(segment: &str) -> Result<(), &'static str> {

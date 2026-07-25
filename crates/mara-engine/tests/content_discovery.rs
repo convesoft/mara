@@ -110,6 +110,7 @@ fn configured_globs_select_files_with_deterministic_precedence_and_order() {
             "extensions/<repeat>.md",
             "extensions/name,part.md",
             "classes/[a-b-c].txt",
+            "literal/[{]draft[}].md",
         ],
         &["docs/excluded*.mara.md", "classes/b.md"],
         false,
@@ -127,6 +128,7 @@ fn configured_globs_select_files_with_deterministic_precedence_and_order() {
         "classes/b.md",
         "classes/d.md",
         "literal/?.md",
+        "literal/{draft}.md",
         "negative/a.md",
         "negative/b.md",
         "unicode/é.md",
@@ -159,6 +161,7 @@ fn configured_globs_select_files_with_deterministic_precedence_and_order() {
             "extensions/<repeat>.md",
             "extensions/name,part.md",
             "literal/?.md",
+            "literal/{draft}.md",
             "negative/b.md",
             "notes/file1.md",
             "unicode/é.md",
@@ -174,19 +177,29 @@ fn gitignore_overrides_includes_but_matching_untracked_files_remain_eligible() {
     fixture.git(&["init", "--quiet"]);
     fixture.write(
         ".gitignore",
-        "ignored.mara.md\nignored-dir/\ntracked-ignored.mara.md\n",
+        "ignored.mara.md\nignored-dir/\ntracked-dir/\ntracked-ignored.mara.md\n",
     );
     fixture.write("ignored.mara.md", "ignored");
     fixture.write("ignored-dir/nested.mara.md", "ignored nested");
+    fixture.write("tracked-dir/nested.mara.md", "tracked nested source");
     fixture.write("tracked-ignored.mara.md", "tracked source");
     fixture.write("untracked.mara.md", "new source");
-    fixture.git(&["add", "--force", "tracked-ignored.mara.md"]);
+    fixture.git(&[
+        "add",
+        "--force",
+        "tracked-ignored.mara.md",
+        "tracked-dir/nested.mara.md",
+    ]);
 
     let discovery = discover_content(&fixture.load());
 
     assert_eq!(
         document_paths(&discovery),
-        ["tracked-ignored.mara.md", "untracked.mara.md"]
+        [
+            "tracked-dir/nested.mara.md",
+            "tracked-ignored.mara.md",
+            "untracked.mara.md"
+        ]
     );
     assert!(discovery.diagnostics().is_empty());
 
@@ -201,6 +214,7 @@ fn gitignore_overrides_includes_but_matching_untracked_files_remain_eligible() {
         [
             "ignored-dir/nested.mara.md",
             "ignored.mara.md",
+            "tracked-dir/nested.mara.md",
             "tracked-ignored.mara.md",
             "untracked.mara.md"
         ]
@@ -290,7 +304,7 @@ fn gitignore_parse_errors_are_reported_without_hiding_independent_content() {
 }
 
 #[test]
-fn tracked_query_failures_keep_ignore_filtering_and_report_evidence() {
+fn ignore_query_failures_preserve_documents_and_report_evidence() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
     fixture.git(&["init", "--quiet"]);
     fs::create_dir(fixture.root.join(".git/index")).unwrap();
@@ -300,10 +314,13 @@ fn tracked_query_failures_keep_ignore_filtering_and_report_evidence() {
 
     let discovery = discover_content(&fixture.load());
 
-    assert_eq!(document_paths(&discovery), ["good.mara.md"]);
+    assert_eq!(
+        document_paths(&discovery),
+        ["good.mara.md", "ignored.mara.md"]
+    );
     assert!(discovery.diagnostics().iter().any(|diagnostic| {
         diagnostic.details().get("reason")
-            == Some(&mara_core::DiagnosticValue::from("tracked_query_failed"))
+            == Some(&mara_core::DiagnosticValue::from("ignore_query_failed"))
     }));
 }
 
@@ -351,6 +368,42 @@ fn unreadable_external_ignore_rules_are_reported_without_host_path_provenance() 
             && diagnostic.details().get("reason")
                 == Some(&mara_core::DiagnosticValue::from("ignore_rule_io"))
     }));
+}
+
+#[test]
+fn repository_configured_excludes_are_applied_to_untracked_content() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
+    fixture.git(&["init", "--quiet"]);
+    let external_ignore = fixture._temp.path().join("effective-excludes");
+    fs::write(&external_ignore, "ignored.mara.md\n").unwrap();
+    fixture.git(&[
+        "config",
+        "core.excludesFile",
+        external_ignore.to_str().unwrap(),
+    ]);
+    fixture.write("ignored.mara.md", "ignored");
+    fixture.write("good.mara.md", "good");
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["good.mara.md"]);
+    assert!(discovery.diagnostics().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn symlinked_worktree_ignore_files_are_not_followed() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
+    fixture.git(&["init", "--quiet"]);
+    let outside_ignore = fixture._temp.path().join("outside-ignore");
+    fs::write(&outside_ignore, "selected.mara.md\n").unwrap();
+    symlink_file(&outside_ignore, fixture.root.join(".gitignore"));
+    fixture.write("selected.mara.md", "selected");
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["selected.mara.md"]);
+    assert!(discovery.diagnostics().is_empty());
 }
 
 #[test]
