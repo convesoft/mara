@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
 use mara_core::{
-    Diagnostic, DiagnosticCode, DiagnosticValue, Mid, MidFormat, SchemaDiagnosticCode,
+    Diagnostic, DiagnosticCode, DiagnosticValue, FieldType, Mid, MidFormat, SchemaDiagnosticCode,
 };
 use mara_engine::{
     project::{LoadedProject, load_from_root},
@@ -21,8 +21,70 @@ identity:
 flavours:
   requirement:
     label: Requirement
+    description: A verifiable obligation.
+    guidance:
+      use_when: [Document an externally visible obligation.]
+      avoid_when: [The content explains an implementation choice.]
+    id: {}
+    title: {}
+    body: {}
 relations: {}
 rules: []
+"#;
+
+const RICH_SCHEMA: &str = r#"format_version: 1
+schema:
+  name: rich-schema
+  version: 1.0.0
+identity:
+  mid:
+    format: ulid
+    prefix: rich_
+flavours:
+  requirement:
+    label: Requirement
+    description: A verifiable obligation.
+    guidance:
+      use_when:
+        - Define an externally visible obligation.
+      avoid_when:
+        - The content explains an implementation choice.
+      distinguish_from:
+        design: Describes the solution rather than the obligation.
+    id:
+      required: true
+      pattern: REQ-[0-9]+
+    title:
+      required: true
+    body: {}
+    fields:
+      summary:
+        type: string
+        required: true
+        repeatable: true
+        pattern: .+
+      estimate:
+        type: integer
+      confidence:
+        type: number
+      automated:
+        type: boolean
+      status:
+        type: enum
+        required: true
+        values:
+          - draft
+          - approved
+  design:
+    label: Design
+    description: A chosen implementation structure.
+    guidance:
+      use_when: [Describe a solution structure.]
+      avoid_when: [The content defines an obligation.]
+    id: {}
+    title:
+      required: false
+    body: {}
 "#;
 
 struct Fixture {
@@ -206,7 +268,17 @@ fn loads_valid_v1_identity_and_preserves_every_decoded_key_and_value_span() {
     );
     assert_eq!(
         source_slice(VALID_SCHEMA, document.flavours().value_source()),
-        "requirement:\n    label: Requirement\n"
+        concat!(
+            "requirement:\n",
+            "    label: Requirement\n",
+            "    description: A verifiable obligation.\n",
+            "    guidance:\n",
+            "      use_when: [Document an externally visible obligation.]\n",
+            "      avoid_when: [The content explains an implementation choice.]\n",
+            "    id: {}\n",
+            "    title: {}\n",
+            "    body: {}\n",
+        )
     );
     assert_eq!(document.flavours().len(), 1);
     assert_eq!(
@@ -271,6 +343,392 @@ flavours: {}
     assert!(document.flavours().is_empty());
     assert!(document.relations().is_none());
     assert!(document.rules().is_none());
+}
+
+#[test]
+fn compiles_guidance_builtins_and_every_scalar_field_into_deterministic_domain_values() {
+    let first_fixture = Fixture::new(RICH_SCHEMA);
+    let first = load_schema(&first_fixture.loaded_project()).unwrap();
+    let second_fixture = Fixture::new(RICH_SCHEMA);
+    let second = load_schema(&second_fixture.loaded_project()).unwrap();
+
+    assert_eq!(first.flavours(), second.flavours());
+    assert_eq!(
+        first
+            .flavours()
+            .definitions()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["design", "requirement"]
+    );
+
+    let requirement = first.flavours().get("requirement").unwrap();
+    assert_eq!(requirement.name(), "requirement");
+    assert_eq!(
+        source_slice(RICH_SCHEMA, requirement.key_source()),
+        "requirement"
+    );
+    assert_eq!(requirement.label().value(), "Requirement");
+    assert_eq!(
+        source_slice(RICH_SCHEMA, requirement.description().value_source()),
+        "A verifiable obligation."
+    );
+
+    let guidance = requirement.guidance().value();
+    assert_eq!(
+        guidance
+            .use_when()
+            .value()
+            .iter()
+            .map(|value| value.value().as_str())
+            .collect::<Vec<_>>(),
+        ["Define an externally visible obligation."]
+    );
+    assert_eq!(
+        source_slice(RICH_SCHEMA, guidance.use_when().value()[0].source()),
+        "Define an externally visible obligation."
+    );
+    let distinction = &guidance.distinguish_from()["design"];
+    assert_eq!(
+        distinction.value(),
+        "Describes the solution rather than the obligation."
+    );
+    assert_eq!(
+        source_slice(RICH_SCHEMA, distinction.key_source()),
+        "design"
+    );
+    assert_eq!(guidance.distinguish_from_source().unwrap().len(), 1);
+
+    assert!(requirement.display_id().value().is_required());
+    assert_eq!(
+        requirement.display_id().value().pattern().unwrap().value(),
+        "REQ-[0-9]+"
+    );
+    assert!(requirement.title().value().is_required());
+    assert!(!requirement.body().value().is_required());
+    assert!(requirement.body().value().required().is_none());
+
+    let fields = requirement.fields();
+    assert_eq!(
+        fields.keys().map(String::as_str).collect::<Vec<_>>(),
+        ["automated", "confidence", "estimate", "status", "summary"]
+    );
+    assert_eq!(*fields["summary"].field_type().value(), FieldType::String);
+    assert!(fields["summary"].is_required());
+    assert!(fields["summary"].is_repeatable());
+    assert_eq!(fields["summary"].pattern().unwrap().value(), ".+");
+    assert_eq!(*fields["estimate"].field_type().value(), FieldType::Integer);
+    assert_eq!(
+        *fields["confidence"].field_type().value(),
+        FieldType::Number
+    );
+    assert_eq!(
+        *fields["automated"].field_type().value(),
+        FieldType::Boolean
+    );
+    assert_eq!(*fields["status"].field_type().value(), FieldType::Enum);
+    assert_eq!(
+        fields["status"]
+            .values()
+            .unwrap()
+            .value()
+            .iter()
+            .map(|value| value.value().as_str())
+            .collect::<Vec<_>>(),
+        ["draft", "approved"]
+    );
+    assert_eq!(
+        source_slice(
+            RICH_SCHEMA,
+            fields["status"].values().unwrap().value()[1].source()
+        ),
+        "approved"
+    );
+    assert!(fields["estimate"].required().is_none());
+    assert!(!fields["estimate"].is_required());
+    assert!(requirement.fields_source().is_some());
+
+    let design = first.flavours().get("design").unwrap();
+    assert!(!design.title().value().is_required());
+    assert!(!*design.title().value().required().unwrap().value());
+    assert!(design.fields_source().is_none());
+    assert!(design.fields().is_empty());
+}
+
+#[test]
+fn accepts_unicode_rust_patterns_and_rejects_invalid_patterns_at_the_value() {
+    let unicode = RICH_SCHEMA.replace("pattern: REQ-[0-9]+", "pattern: '\\p{Greek}+'");
+    let fixture = Fixture::new(&unicode);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+    assert_eq!(
+        document
+            .flavours()
+            .get("requirement")
+            .unwrap()
+            .display_id()
+            .value()
+            .pattern()
+            .unwrap()
+            .value(),
+        r"\p{Greek}+"
+    );
+
+    let verbose_comment = RICH_SCHEMA.replace(
+        "pattern: REQ-[0-9]+",
+        "pattern: '(?x)REQ-[0-9]+ # trailing comment'",
+    );
+    let fixture = Fixture::new(&verbose_comment);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+    assert_eq!(
+        document
+            .flavours()
+            .get("requirement")
+            .unwrap()
+            .display_id()
+            .value()
+            .pattern()
+            .unwrap()
+            .value(),
+        "(?x)REQ-[0-9]+ # trailing comment"
+    );
+
+    for source in [
+        RICH_SCHEMA.replace("pattern: REQ-[0-9]+", "pattern: '('"),
+        RICH_SCHEMA.replace("pattern: .+", "pattern: '[unterminated'"),
+    ] {
+        let error = assert_invalid(source.clone(), SchemaDiagnosticCode::InvalidPattern);
+        let diagnostic = only_diagnostic(&error);
+        let invalid_pattern = source_slice(&source, diagnostic.primary().unwrap());
+        assert!(invalid_pattern.contains('(') || invalid_pattern.contains('['));
+    }
+}
+
+#[test]
+fn rejects_forbidden_field_shapes_and_no_default_keys() {
+    let cases = [
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            RICH_SCHEMA.replace(
+                "type: integer",
+                "type: integer\n        values: [small, large]",
+            ),
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            RICH_SCHEMA.replace("type: integer", "type: integer\n        pattern: '[0-9]+'"),
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            RICH_SCHEMA.replace(
+                "        values:\n          - draft\n          - approved\n",
+                "",
+            ),
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            RICH_SCHEMA.replace(
+                "        values:\n          - draft\n          - approved",
+                "        values: []",
+            ),
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            RICH_SCHEMA.replace("          - approved", "          - draft"),
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            RICH_SCHEMA.replace("type: boolean", "type: object"),
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            RICH_SCHEMA.replace("          - approved", "          - 1"),
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            RICH_SCHEMA.replace("        type: boolean", "        required: true"),
+        ),
+        (
+            SchemaDiagnosticCode::UnknownKey,
+            RICH_SCHEMA.replace("type: boolean", "type: boolean\n        default: false"),
+        ),
+        (
+            SchemaDiagnosticCode::UnknownKey,
+            RICH_SCHEMA.replace("type: boolean", "type: boolean\n        nullable: true"),
+        ),
+    ];
+
+    for (code, source) in cases {
+        assert_invalid(source, code);
+    }
+}
+
+#[test]
+fn requires_complete_non_empty_flavour_guidance_and_builtin_declarations() {
+    let missing_cases = [
+        "    label: Requirement\n",
+        "    description: A verifiable obligation.\n",
+        concat!(
+            "    guidance:\n",
+            "      use_when: [Document an externally visible obligation.]\n",
+            "      avoid_when: [The content explains an implementation choice.]\n",
+        ),
+        "    id: {}\n",
+        "    title: {}\n",
+        "    body: {}\n",
+    ];
+    for declaration in missing_cases {
+        let source = VALID_SCHEMA.replacen(declaration, "", 1);
+        assert_invalid(source, SchemaDiagnosticCode::InvalidDeclaration);
+    }
+
+    for (authored, replacement) in [
+        ("label: Requirement", "label: ''"),
+        ("description: A verifiable obligation.", "description: ''"),
+        ("id: {}", "id: []"),
+        ("title: {}", "title: []"),
+        ("body: {}", "body: []"),
+    ] {
+        let source = VALID_SCHEMA.replacen(authored, replacement, 1);
+        assert_invalid(source, SchemaDiagnosticCode::InvalidDeclaration);
+    }
+
+    let invalid_boolean = RICH_SCHEMA.replacen("required: true", "required: yes", 1);
+    assert_invalid(invalid_boolean, SchemaDiagnosticCode::InvalidDeclaration);
+    let invalid_fields =
+        VALID_SCHEMA.replacen("    body: {}\n", "    body: {}\n    fields: []\n", 1);
+    assert_invalid(invalid_fields, SchemaDiagnosticCode::InvalidDeclaration);
+}
+
+#[test]
+fn rejects_invalid_and_reserved_declaration_names_at_their_keys() {
+    let invalid_flavour = VALID_SCHEMA.replace("  requirement:", "  Requirement:");
+    let error = assert_invalid(invalid_flavour.clone(), SchemaDiagnosticCode::InvalidName);
+    assert_eq!(
+        source_slice(&invalid_flavour, only_diagnostic(&error).primary().unwrap()),
+        "Requirement"
+    );
+
+    let invalid_field = RICH_SCHEMA.replace("      summary:", "      bad-name:");
+    let error = assert_invalid(invalid_field.clone(), SchemaDiagnosticCode::InvalidName);
+    assert_eq!(
+        source_slice(&invalid_field, only_diagnostic(&error).primary().unwrap()),
+        "bad-name"
+    );
+
+    for reserved in [
+        "mid",
+        "flavour",
+        "id",
+        "title",
+        "body",
+        "source_location",
+        "mentions",
+    ] {
+        let source = RICH_SCHEMA.replace("      summary:", &format!("      {reserved}:"));
+        let error = assert_invalid(source.clone(), SchemaDiagnosticCode::InvalidName);
+        assert_eq!(
+            source_slice(&source, only_diagnostic(&error).primary().unwrap()),
+            reserved
+        );
+    }
+}
+
+#[test]
+fn rejects_missing_empty_duplicate_and_inconsistent_guidance_at_source() {
+    let missing = VALID_SCHEMA.replace(
+        "      use_when: [Document an externally visible obligation.]\n",
+        "",
+    );
+    assert_invalid(missing, SchemaDiagnosticCode::InvalidDeclaration);
+
+    let empty_sequence = VALID_SCHEMA.replace("[Document an externally visible obligation.]", "[]");
+    let error = assert_invalid(
+        empty_sequence.clone(),
+        SchemaDiagnosticCode::InvalidDeclaration,
+    );
+    assert_eq!(
+        source_slice(&empty_sequence, only_diagnostic(&error).primary().unwrap()),
+        "[]"
+    );
+
+    let empty_entry = VALID_SCHEMA.replace("[Document an externally visible obligation.]", "['']");
+    let error = assert_invalid(
+        empty_entry.clone(),
+        SchemaDiagnosticCode::InvalidDeclaration,
+    );
+    assert_eq!(
+        source_slice(&empty_entry, only_diagnostic(&error).primary().unwrap()),
+        "''"
+    );
+
+    let duplicate = VALID_SCHEMA.replace(
+        "[Document an externally visible obligation.]",
+        "[same, same]",
+    );
+    assert_invalid(duplicate, SchemaDiagnosticCode::InvalidDeclaration);
+
+    let self_distinction = RICH_SCHEMA.replace(
+        "        design: Describes the solution rather than the obligation.",
+        "        requirement: Describes the solution rather than the obligation.",
+    );
+    let error = assert_invalid(
+        self_distinction.clone(),
+        SchemaDiagnosticCode::InvalidDeclaration,
+    );
+    assert_eq!(
+        source_slice(
+            &self_distinction,
+            only_diagnostic(&error).primary().unwrap()
+        ),
+        "requirement"
+    );
+
+    let unknown_distinction = RICH_SCHEMA.replace(
+        "        design: Describes the solution rather than the obligation.",
+        "        risk: Describes the solution rather than the obligation.",
+    );
+    let error = assert_invalid(
+        unknown_distinction.clone(),
+        SchemaDiagnosticCode::InvalidDeclaration,
+    );
+    assert_eq!(
+        source_slice(
+            &unknown_distinction,
+            only_diagnostic(&error).primary().unwrap()
+        ),
+        "risk"
+    );
+}
+
+#[test]
+fn rejects_unknown_keys_at_every_flavour_declaration_boundary() {
+    let cases = [
+        RICH_SCHEMA.replacen(
+            "    description:",
+            "    lifecycle: draft\n    description:",
+            1,
+        ),
+        RICH_SCHEMA.replacen(
+            "      use_when:",
+            "      prompt: choose carefully\n      use_when:",
+            1,
+        ),
+        RICH_SCHEMA.replace(
+            "      pattern: REQ",
+            "      generator: sequence\n      pattern: REQ",
+        ),
+        RICH_SCHEMA.replacen("    title:\n", "    title:\n      pattern: .+\n", 1),
+        RICH_SCHEMA.replacen("    body: {}", "    body:\n      format: markdown", 1),
+        RICH_SCHEMA.replace(
+            "        type: boolean",
+            "        type: boolean\n        default: false",
+        ),
+    ];
+
+    for source in cases {
+        assert_invalid(source, SchemaDiagnosticCode::UnknownKey);
+    }
 }
 
 #[test]
@@ -343,7 +801,10 @@ fn rejects_multiple_documents_at_the_second_document_marker() {
         detail_string(diagnostic, "feature"),
         Some("multiple_documents")
     );
-    assert_eq!(diagnostic.primary().unwrap().start_line(), 15);
+    assert_eq!(
+        diagnostic.primary().unwrap().start_line(),
+        (VALID_SCHEMA.lines().count() + 1) as u64
+    );
 }
 
 #[test]
@@ -399,13 +860,13 @@ fn validates_and_drops_deep_profile_values_iteratively() {
     const DEPTH: usize = 20_000;
     let nested = format!("{}leaf", "- ".repeat(DEPTH));
     let source = format!(
-        "format_version: 1\nschema:\n  name: deep-schema\n  version: 1.0.0\nidentity:\n  mid:\n    format: ulid\n    prefix: deep_\nflavours:\n  deep:\n    {nested}\n"
+        "format_version: 1\nschema:\n  name: deep-schema\n  version: 1.0.0\nidentity:\n  mid:\n    format: ulid\n    prefix: deep_\nflavours: {{}}\nrelations:\n  deep:\n    {nested}\n"
     );
 
     let fixture = Fixture::new(source);
     let document = load_schema(&fixture.loaded_project()).unwrap();
 
-    assert_eq!(document.flavours().len(), 1);
+    assert_eq!(document.relations().unwrap().len(), 1);
 }
 
 #[test]
@@ -663,8 +1124,13 @@ future_root: true
 
 #[test]
 fn rejects_unknown_keys_at_every_decoded_mapping_boundary() {
+    let appended_line = (VALID_SCHEMA.lines().count() + 1) as u64;
     let cases = [
-        ("root", format!("{VALID_SCHEMA}imports: other.yaml\n"), 15),
+        (
+            "root",
+            format!("{VALID_SCHEMA}imports: other.yaml\n"),
+            appended_line,
+        ),
         (
             "schema",
             VALID_SCHEMA.replace("  version:", "  owner: team\n  version:"),
@@ -722,6 +1188,147 @@ fn reports_all_independent_unknown_keys_in_source_order() {
     assert!(diagnostics.windows(2).all(|pair| {
         pair[0].primary().unwrap().start_byte() < pair[1].primary().unwrap().start_byte()
     }));
+}
+
+#[test]
+fn reports_unknown_keys_together_with_independent_declaration_defects() {
+    let source = VALID_SCHEMA.replace("    label: Requirement", "    owner: team\n    label: ''");
+    let fixture = Fixture::new(&source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+
+    let diagnostics = error.diagnostics();
+    assert_eq!(diagnostics.len(), 2, "{diagnostics:#?}");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| (
+                diagnostic.code().as_str(),
+                source_slice(&source, diagnostic.primary().unwrap()),
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("schema.unknown_key", "owner"),
+            ("schema.invalid_declaration", "''"),
+        ]
+    );
+}
+
+#[test]
+fn reports_all_independent_flavour_and_field_defects_regardless_of_mapping_order() {
+    let source = RICH_SCHEMA
+        .replacen("label: Requirement", "label: ''", 1)
+        .replacen("pattern: .+", "pattern: '['", 1)
+        .replacen("type: integer", "type: integer\n        values: [small]", 1)
+        .replacen(
+            "description: A chosen implementation structure.",
+            "description: ''",
+            1,
+        );
+    let flavours_start = source.find("flavours:\n").unwrap() + "flavours:\n".len();
+    let design_start = source.find("  design:\n").unwrap();
+    let reordered = format!(
+        "{}{}{}",
+        &source[..flavours_start],
+        &source[design_start..],
+        &source[flavours_start..design_start]
+    );
+
+    let first_fixture = Fixture::new(&source);
+    let first = load_schema(&first_fixture.loaded_project()).unwrap_err();
+    let reordered_fixture = Fixture::new(&reordered);
+    let reordered_error = load_schema(&reordered_fixture.loaded_project()).unwrap_err();
+
+    assert_eq!(first.diagnostics().len(), 4, "{:#?}", first.diagnostics());
+    assert_eq!(
+        first
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| source_slice(&source, diagnostic.primary().unwrap()))
+            .collect::<Vec<_>>(),
+        ["''", "'['", "values", "''"]
+    );
+
+    let identities = |error: &SchemaLoadError| {
+        let mut identities = error
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.code().as_str().to_owned(),
+                    diagnostic.context().field().unwrap_or("").to_owned(),
+                    diagnostic.message().to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
+        identities.sort_unstable();
+        identities
+    };
+    assert_eq!(identities(&first), identities(&reordered_error));
+}
+
+#[test]
+fn reports_root_flavour_and_sequence_defects_from_one_compilation() {
+    let source = VALID_SCHEMA
+        .replace("  requirement:", "  bad-name:")
+        .replace("label: Requirement", "label: ''")
+        .replace("[Document an externally visible obligation.]", "[1, '']")
+        .replace("relations: {}", "relations: []")
+        .replace("rules: []", "rules: {}");
+    let fixture = Fixture::new(&source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+
+    let diagnostics = error.diagnostics();
+    assert_eq!(diagnostics.len(), 6, "{diagnostics:#?}");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| source_slice(&source, diagnostic.primary().unwrap()))
+            .collect::<Vec<_>>(),
+        ["bad-name", "''", "1", "''", "[]", "{}"]
+    );
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code().as_str())
+            .collect::<Vec<_>>(),
+        [
+            "schema.invalid_name",
+            "schema.invalid_declaration",
+            "schema.invalid_declaration",
+            "schema.invalid_declaration",
+            "schema.invalid_declaration",
+            "schema.invalid_declaration",
+        ]
+    );
+}
+
+#[test]
+fn reports_all_schema_and_mid_identity_defects_from_one_compilation() {
+    let source = VALID_SCHEMA
+        .replace("name: mara-schema", "name: Mara_Schema")
+        .replace("1.2.3-alpha.1+build.5", "\"1.2\"")
+        .replace("format: ulid", "format: uuid")
+        .replace("prefix: m_", "prefix: M-");
+    let fixture = Fixture::new(&source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+
+    let diagnostics = error.diagnostics();
+    assert_eq!(diagnostics.len(), 4, "{diagnostics:#?}");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| (
+                diagnostic.code().as_str(),
+                source_slice(&source, diagnostic.primary().unwrap()),
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("schema.invalid_name", "Mara_Schema"),
+            ("schema.invalid_declaration", "\"1.2\""),
+            ("schema.invalid_declaration", "uuid"),
+            ("schema.invalid_name", "M-"),
+        ]
+    );
 }
 
 #[test]
@@ -826,7 +1433,18 @@ fn rejects_wrong_types_missing_keys_and_collection_shapes() {
         VALID_SCHEMA.replace("format_version: 1", "format_version: \"1\""),
         VALID_SCHEMA.replace("  name: mara-schema\n", ""),
         VALID_SCHEMA.replace(
-            "flavours:\n  requirement:\n    label: Requirement",
+            concat!(
+                "flavours:\n",
+                "  requirement:\n",
+                "    label: Requirement\n",
+                "    description: A verifiable obligation.\n",
+                "    guidance:\n",
+                "      use_when: [Document an externally visible obligation.]\n",
+                "      avoid_when: [The content explains an implementation choice.]\n",
+                "    id: {}\n",
+                "    title: {}\n",
+                "    body: {}",
+            ),
             "flavours: []",
         ),
         VALID_SCHEMA.replace("relations: {}", "relations: []"),
