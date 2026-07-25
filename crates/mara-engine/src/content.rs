@@ -82,6 +82,12 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 for error in walk_error_parts(&error) {
                     let source_path = walk_error_path(error)
                         .and_then(|path| normalized_relative_path(&project.root, path));
+                    if source_path
+                        .as_deref()
+                        .is_some_and(|path| is_fully_excluded_tree(&project.content.exclude, path))
+                    {
+                        continue;
+                    }
                     let is_loop = is_walk_loop(error);
                     if !is_loop
                         && walk_error_path(error).is_some_and(|path| {
@@ -115,6 +121,12 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
         };
         if let Some(error) = entry.error() {
             let affected_path = normalized_relative_path(&project.root, entry.path());
+            if affected_path
+                .as_deref()
+                .is_some_and(|path| is_fully_excluded_tree(&project.content.exclude, path))
+            {
+                continue;
+            }
             if entry.file_type().is_some_and(|kind| kind.is_file())
                 && affected_path
                     .as_deref()
@@ -252,7 +264,11 @@ fn content_walker(
     rejected: Arc<Mutex<Vec<RejectedDirectorySymlink>>>,
 ) -> WalkBuilder {
     let mut builder = WalkBuilder::new(&project.root);
-    let respect_gitignore = project.content.respect_gitignore;
+    let respect_gitignore = project.content.respect_gitignore
+        && project
+            .root
+            .ancestors()
+            .any(|ancestor| ancestor.join(".git").exists());
     builder
         .hidden(false)
         .ignore(false)
@@ -415,6 +431,29 @@ fn matches_any(patterns: &[Glob<'_>], path: &str) -> bool {
 
 fn is_selected(includes: &[Glob<'_>], excludes: &[Glob<'_>], path: &str) -> bool {
     matches_any(includes, path) && !matches_any(excludes, path)
+}
+
+fn is_fully_excluded_tree(excludes: &[String], path: &str) -> bool {
+    excludes.iter().any(|pattern| {
+        if pattern == "**" {
+            return true;
+        }
+        let Some(root_pattern) = pattern.strip_suffix("/**") else {
+            return false;
+        };
+        let Ok(root_pattern) = compile_content_glob(root_pattern) else {
+            return false;
+        };
+        path.split('/')
+            .scan(String::new(), |ancestor, segment| {
+                if !ancestor.is_empty() {
+                    ancestor.push('/');
+                }
+                ancestor.push_str(segment);
+                Some(ancestor.clone())
+            })
+            .any(|ancestor| root_pattern.is_match(ancestor.as_str()))
+    })
 }
 
 fn finalize_diagnostics(diagnostics: &mut [Diagnostic]) {

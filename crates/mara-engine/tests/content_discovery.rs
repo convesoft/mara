@@ -189,6 +189,18 @@ fn gitignore_overrides_includes_but_matching_untracked_files_remain_eligible() {
 }
 
 #[test]
+fn gitignore_has_no_effect_outside_a_git_worktree() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
+    fixture.write(".gitignore", "selected.mara.md\n");
+    fixture.write("selected.mara.md", "selected");
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["selected.mara.md"]);
+    assert!(discovery.diagnostics().is_empty());
+}
+
+#[test]
 fn invalid_utf8_does_not_erase_independently_loaded_documents() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], false, false, false);
     fixture.write("a-bad.mara.md", [b'a', b'\n', 0xff, b'b']);
