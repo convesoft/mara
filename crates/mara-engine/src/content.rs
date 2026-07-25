@@ -770,10 +770,9 @@ fn parse_git_worktree_response(output: &[u8]) -> io::Result<bool> {
 }
 
 fn ignored_content_paths(root: &Path) -> io::Result<IgnoredPaths> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args([
+    let output = git_output(
+        root,
+        &[
             "ls-files",
             "-z",
             "--others",
@@ -782,8 +781,8 @@ fn ignored_content_paths(root: &Path) -> io::Result<IgnoredPaths> {
             "--directory",
             "--",
             ".",
-        ])
-        .output()?;
+        ],
+    )?;
     if !output.status.success() {
         return Err(io::Error::other(
             "Git could not enumerate ignored project paths",
@@ -814,7 +813,15 @@ fn ignored_content_paths(root: &Path) -> io::Result<IgnoredPaths> {
 }
 
 fn git_output(root: &Path, args: &[&str]) -> io::Result<std::process::Output> {
-    Command::new("git").arg("-C").arg(root).args(args).output()
+    Command::new("git")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
 }
 
 fn git_path_from_output(root: &Path, output: &[u8]) -> io::Result<PathBuf> {
@@ -849,10 +856,7 @@ fn record_unreadable_ignore_file(
     {
         return;
     }
-    if logical_metadata.is_none()
-        || !fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
-        || fs::read(path).is_err()
-    {
+    if logical_metadata.is_none() || !ignore_rule_is_readable(path) {
         failures
             .lock()
             .expect("the ignore-rule failure lock is not poisoned")
@@ -860,6 +864,25 @@ fn record_unreadable_ignore_file(
                 path: path.to_path_buf(),
             });
     }
+}
+
+#[cfg(unix)]
+fn ignore_rule_is_readable(path: &Path) -> bool {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+        .and_then(|file| file.metadata())
+        .is_ok_and(|metadata| !metadata.is_dir())
+}
+
+#[cfg(not(unix))]
+fn ignore_rule_is_readable(path: &Path) -> bool {
+    fs::File::open(path)
+        .and_then(|file| file.metadata())
+        .is_ok_and(|metadata| !metadata.is_dir())
 }
 
 fn gitignore_query_diagnostic(

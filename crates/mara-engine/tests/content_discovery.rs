@@ -50,12 +50,31 @@ impl Fixture {
 
     fn git(&self, args: &[&str]) {
         let status = Command::new("git")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_COMMON_DIR")
+            .env_remove("GIT_INDEX_FILE")
             .arg("-C")
             .arg(&self.root)
             .args(args)
             .status()
             .expect("run Git for isolated fixture");
         assert!(status.success(), "Git command failed: {args:?}");
+        if args.first() == Some(&"init") {
+            let excludes = self.root.join(".git/fixture-global-excludes");
+            fs::write(&excludes, "").unwrap();
+            let status = Command::new("git")
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE")
+                .env_remove("GIT_COMMON_DIR")
+                .env_remove("GIT_INDEX_FILE")
+                .arg("-C")
+                .arg(&self.root)
+                .args(["config", "core.excludesFile", excludes.to_str().unwrap()])
+                .status()
+                .expect("isolate fixture from ambient Git excludes");
+            assert!(status.success());
+        }
     }
 }
 
@@ -397,6 +416,20 @@ fn repository_configured_excludes_are_applied_to_untracked_content() {
         external_ignore.to_str().unwrap(),
     ]);
     fixture.write("ignored.mara.md", "ignored");
+    fixture.write("good.mara.md", "good");
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["good.mara.md"]);
+    assert!(discovery.diagnostics().is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn readable_special_files_are_valid_configured_excludes() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
+    fixture.git(&["init", "--quiet"]);
+    fixture.git(&["config", "core.excludesFile", "/dev/null"]);
     fixture.write("good.mara.md", "good");
 
     let discovery = discover_content(&fixture.load());
