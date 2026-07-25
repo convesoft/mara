@@ -23,6 +23,7 @@ use saphyr_parser::{Event, Marker, Parser, ScalarStyle, Span, SpannedEventReceiv
 use crate::project::{LoadedProject, open_loaded_schema};
 
 type DecodeResult<T> = Result<T, Box<Diagnostic>>;
+type CompilationResult<T> = Result<T, Vec<Diagnostic>>;
 
 #[derive(Debug)]
 enum DocumentDecodeFailure {
@@ -48,6 +49,12 @@ impl From<Diagnostic> for DocumentDecodeFailure {
 impl From<Box<Diagnostic>> for DocumentDecodeFailure {
     fn from(diagnostic: Box<Diagnostic>) -> Self {
         Self::Diagnostic(diagnostic)
+    }
+}
+
+impl From<Vec<Diagnostic>> for DocumentDecodeFailure {
+    fn from(diagnostics: Vec<Diagnostic>) -> Self {
+        Self::Diagnostics(diagnostics)
     }
 }
 
@@ -1604,19 +1611,22 @@ fn decode_flavours(
     key: &ParsedNode,
     node: &ParsedNode,
     source_map: &SourceMap<'_>,
-) -> DecodeResult<FlavourDefinitions> {
-    let entries = expect_mapping(node, "root.flavours", source_map)?;
+) -> CompilationResult<FlavourDefinitions> {
+    let entries = expect_mapping(node, "root.flavours", source_map)
+        .map_err(|diagnostic| vec![*diagnostic])?;
+    let mut diagnostics = Vec::new();
     let mut declared_names = BTreeSet::new();
     for (name_node, _) in entries {
         let (name, _) = string_key(name_node).expect("profile validation requires string keys");
         if !valid_snake_name(name) {
-            return Err(Box::new(invalid_name(
+            diagnostics.push(invalid_name(
                 "flavour names must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
                 source_map,
                 name_node.span(),
                 "flavours",
                 name,
-            )));
+            ));
+            continue;
         }
         declared_names.insert(name.to_owned());
     }
@@ -1624,14 +1634,23 @@ fn decode_flavours(
     let mut definitions = BTreeMap::new();
     for (name_node, definition_node) in entries {
         let (name, _) = string_key(name_node).expect("profile validation requires string keys");
-        let definition = decode_flavour(
+        if !valid_snake_name(name) {
+            continue;
+        }
+        let result = decode_flavour(
             name,
             name_node,
             definition_node,
             &declared_names,
             source_map,
-        )?;
-        definitions.insert(name.to_owned(), definition);
+        );
+        if let Some(definition) = collect_compilation(result, &mut diagnostics) {
+            definitions.insert(name.to_owned(), definition);
+        }
+    }
+
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
     }
 
     Ok(FlavourDefinitions::new(
@@ -1641,64 +1660,125 @@ fn decode_flavours(
     ))
 }
 
+fn collect_decode<T>(result: DecodeResult<T>, diagnostics: &mut Vec<Diagnostic>) -> Option<T> {
+    match result {
+        Ok(value) => Some(value),
+        Err(diagnostic) => {
+            diagnostics.push(*diagnostic);
+            None
+        }
+    }
+}
+
+fn collect_compilation<T>(
+    result: CompilationResult<T>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<T> {
+    match result {
+        Ok(value) => Some(value),
+        Err(mut found) => {
+            diagnostics.append(&mut found);
+            None
+        }
+    }
+}
+
 fn decode_flavour(
     name: &str,
     name_node: &ParsedNode,
     node: &ParsedNode,
     declared_names: &BTreeSet<String>,
     source_map: &SourceMap<'_>,
-) -> DecodeResult<FlavourDefinition> {
+) -> CompilationResult<FlavourDefinition> {
     let mapping = format!("flavours.{name}");
-    let entries = expect_mapping(node, &mapping, source_map)?;
+    let entries =
+        expect_mapping(node, &mapping, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut diagnostics = Vec::new();
 
-    let (label_key, label_value) =
-        required_entry(entries, "label", &mapping, source_map, node.span())?;
     let label_field = format!("{mapping}.label");
-    let label = expect_non_empty_string(label_value, &label_field, source_map)?;
-    let label = field(source_map, label_key, label_value, label.to_owned());
-
-    let (description_key, description_value) =
-        required_entry(entries, "description", &mapping, source_map, node.span())?;
-    let description_field = format!("{mapping}.description");
-    let description = expect_non_empty_string(description_value, &description_field, source_map)?;
-    let description = field(
-        source_map,
-        description_key,
-        description_value,
-        description.to_owned(),
+    let label = collect_decode(
+        required_entry(entries, "label", &mapping, source_map, node.span()).and_then(
+            |(key, value)| {
+                let decoded = expect_non_empty_string(value, &label_field, source_map)?;
+                Ok(field(source_map, key, value, decoded.to_owned()))
+            },
+        ),
+        &mut diagnostics,
     );
 
-    let (guidance_key, guidance_value) =
-        required_entry(entries, "guidance", &mapping, source_map, node.span())?;
-    let guidance = decode_guidance(name, guidance_value, declared_names, source_map)?;
-    let guidance = field(source_map, guidance_key, guidance_value, guidance);
+    let description_field = format!("{mapping}.description");
+    let description = collect_decode(
+        required_entry(entries, "description", &mapping, source_map, node.span()).and_then(
+            |(key, value)| {
+                let decoded = expect_non_empty_string(value, &description_field, source_map)?;
+                Ok(field(source_map, key, value, decoded.to_owned()))
+            },
+        ),
+        &mut diagnostics,
+    );
 
-    let (id_key, id_value) = required_entry(entries, "id", &mapping, source_map, node.span())?;
-    let display_id = decode_display_id(name, id_value, source_map)?;
-    let display_id = field(source_map, id_key, id_value, display_id);
+    let guidance = collect_decode(
+        required_entry(entries, "guidance", &mapping, source_map, node.span()),
+        &mut diagnostics,
+    )
+    .and_then(|(key, value)| {
+        collect_compilation(
+            decode_guidance(name, value, declared_names, source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
 
-    let (title_key, title_value) =
-        required_entry(entries, "title", &mapping, source_map, node.span())?;
-    let title = decode_required_builtin(name, "title", title_value, source_map)?;
-    let title = field(source_map, title_key, title_value, title);
+    let display_id = collect_decode(
+        required_entry(entries, "id", &mapping, source_map, node.span()),
+        &mut diagnostics,
+    )
+    .and_then(|(key, value)| {
+        collect_compilation(decode_display_id(name, value, source_map), &mut diagnostics)
+            .map(|decoded| field(source_map, key, value, decoded))
+    });
 
-    let (body_key, body_value) =
-        required_entry(entries, "body", &mapping, source_map, node.span())?;
-    let body = decode_required_builtin(name, "body", body_value, source_map)?;
-    let body = field(source_map, body_key, body_value, body);
+    let title = collect_decode(
+        required_entry(entries, "title", &mapping, source_map, node.span()),
+        &mut diagnostics,
+    )
+    .and_then(|(key, value)| {
+        collect_compilation(
+            decode_required_builtin(name, "title", value, source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
 
-    let (fields_source, fields) = decode_fields(name, entries, source_map)?;
+    let body = collect_decode(
+        required_entry(entries, "body", &mapping, source_map, node.span()),
+        &mut diagnostics,
+    )
+    .and_then(|(key, value)| {
+        collect_compilation(
+            decode_required_builtin(name, "body", value, source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+
+    let fields = collect_compilation(decode_fields(name, entries, source_map), &mut diagnostics);
+
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    let (fields_source, fields) = fields.expect("valid field compilation produced a value");
 
     Ok(FlavourDefinition::new(
         name.to_owned(),
         parser_span(source_map, name_node.span()),
         parser_span(source_map, node.span()),
-        label,
-        description,
-        guidance,
-        display_id,
-        title,
-        body,
+        label.expect("valid label compilation produced a value"),
+        description.expect("valid description compilation produced a value"),
+        guidance.expect("valid guidance compilation produced a value"),
+        display_id.expect("valid display-ID compilation produced a value"),
+        title.expect("valid title compilation produced a value"),
+        body.expect("valid body compilation produced a value"),
         fields_source,
         fields,
     ))
@@ -1709,80 +1789,102 @@ fn decode_guidance(
     node: &ParsedNode,
     declared_names: &BTreeSet<String>,
     source_map: &SourceMap<'_>,
-) -> DecodeResult<FlavourGuidance> {
+) -> CompilationResult<FlavourGuidance> {
     let mapping = format!("flavours.{flavour}.guidance");
-    let entries = expect_mapping(node, &mapping, source_map)?;
+    let entries =
+        expect_mapping(node, &mapping, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut diagnostics = Vec::new();
 
-    let (use_when_key, use_when_value) =
-        required_entry(entries, "use_when", &mapping, source_map, node.span())?;
     let use_when_field = format!("{mapping}.use_when");
-    let use_when_values =
-        decode_unique_string_sequence(use_when_value, &use_when_field, true, source_map)?;
-    let use_when = field(source_map, use_when_key, use_when_value, use_when_values);
+    let use_when = collect_decode(
+        required_entry(entries, "use_when", &mapping, source_map, node.span()).and_then(
+            |(key, value)| {
+                let decoded =
+                    decode_unique_string_sequence(value, &use_when_field, true, source_map)?;
+                Ok(field(source_map, key, value, decoded))
+            },
+        ),
+        &mut diagnostics,
+    );
 
-    let (avoid_when_key, avoid_when_value) =
-        required_entry(entries, "avoid_when", &mapping, source_map, node.span())?;
     let avoid_when_field = format!("{mapping}.avoid_when");
-    let avoid_when_values =
-        decode_unique_string_sequence(avoid_when_value, &avoid_when_field, true, source_map)?;
-    let avoid_when = field(
-        source_map,
-        avoid_when_key,
-        avoid_when_value,
-        avoid_when_values,
+    let avoid_when = collect_decode(
+        required_entry(entries, "avoid_when", &mapping, source_map, node.span()).and_then(
+            |(key, value)| {
+                let decoded =
+                    decode_unique_string_sequence(value, &avoid_when_field, true, source_map)?;
+                Ok(field(source_map, key, value, decoded))
+            },
+        ),
+        &mut diagnostics,
     );
 
     let (distinguish_from_source, distinguish_from) =
         if let Some((key, value)) = optional_entry(entries, "distinguish_from") {
             let distinction_mapping = format!("{mapping}.distinguish_from");
-            let distinctions = expect_mapping(value, &distinction_mapping, source_map)?;
             let mut compiled = BTreeMap::new();
-            for (target_node, explanation_node) in distinctions {
-                let (target, _) =
-                    string_key(target_node).expect("profile validation requires string keys");
-                if target == flavour {
-                    return Err(Box::new(invalid_declaration(
-                        format!("flavour {flavour:?} cannot distinguish itself"),
-                        source_map,
-                        target_node.span(),
-                        &distinction_mapping,
-                    )));
-                }
-                if !declared_names.contains(target) {
-                    return Err(Box::new(
-                        invalid_declaration(
-                            format!("distinction target {target:?} is not a declared flavour"),
+            let distinctions = collect_decode(
+                expect_mapping(value, &distinction_mapping, source_map),
+                &mut diagnostics,
+            );
+            if let Some(distinctions) = distinctions {
+                for (target_node, explanation_node) in distinctions {
+                    let (target, _) =
+                        string_key(target_node).expect("profile validation requires string keys");
+                    let mut target_valid = true;
+                    if target == flavour {
+                        diagnostics.push(invalid_declaration(
+                            format!("flavour {flavour:?} cannot distinguish itself"),
                             source_map,
                             target_node.span(),
                             &distinction_mapping,
-                        )
-                        .with_detail("target", target.to_owned()),
-                    ));
+                        ));
+                        target_valid = false;
+                    } else if !declared_names.contains(target) {
+                        diagnostics.push(
+                            invalid_declaration(
+                                format!("distinction target {target:?} is not a declared flavour"),
+                                source_map,
+                                target_node.span(),
+                                &distinction_mapping,
+                            )
+                            .with_detail("target", target.to_owned()),
+                        );
+                        target_valid = false;
+                    }
+                    let explanation_field = format!("{distinction_mapping}.{target}");
+                    let explanation = collect_decode(
+                        expect_non_empty_string(explanation_node, &explanation_field, source_map),
+                        &mut diagnostics,
+                    );
+                    if target_valid && let Some(explanation) = explanation {
+                        compiled.insert(
+                            target.to_owned(),
+                            field(
+                                source_map,
+                                target_node,
+                                explanation_node,
+                                explanation.to_owned(),
+                            ),
+                        );
+                    }
                 }
-                let explanation_field = format!("{distinction_mapping}.{target}");
-                let explanation =
-                    expect_non_empty_string(explanation_node, &explanation_field, source_map)?;
-                compiled.insert(
-                    target.to_owned(),
-                    field(
-                        source_map,
-                        target_node,
-                        explanation_node,
-                        explanation.to_owned(),
-                    ),
-                );
             }
             (
-                Some(section(source_map, key, value, distinctions.len())),
+                distinctions.map(|entries| section(source_map, key, value, entries.len())),
                 compiled,
             )
         } else {
             (None, BTreeMap::new())
         };
 
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+
     Ok(FlavourGuidance::new(
-        use_when,
-        avoid_when,
+        use_when.expect("valid use_when compilation produced a value"),
+        avoid_when.expect("valid avoid_when compilation produced a value"),
         distinguish_from_source,
         distinguish_from,
     ))
@@ -1792,12 +1894,26 @@ fn decode_display_id(
     flavour: &str,
     node: &ParsedNode,
     source_map: &SourceMap<'_>,
-) -> DecodeResult<DisplayIdDefinition> {
+) -> CompilationResult<DisplayIdDefinition> {
     let mapping = format!("flavours.{flavour}.id");
-    let entries = expect_mapping(node, &mapping, source_map)?;
-    let required = decode_optional_boolean(entries, "required", &mapping, source_map)?;
-    let pattern = decode_optional_pattern(entries, "pattern", &mapping, source_map)?;
-    Ok(DisplayIdDefinition::new(required, pattern))
+    let entries =
+        expect_mapping(node, &mapping, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut diagnostics = Vec::new();
+    let required = collect_decode(
+        decode_optional_boolean(entries, "required", &mapping, source_map),
+        &mut diagnostics,
+    );
+    let pattern = collect_decode(
+        decode_optional_pattern(entries, "pattern", &mapping, source_map),
+        &mut diagnostics,
+    );
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(DisplayIdDefinition::new(
+        required.expect("valid required compilation produced a value"),
+        pattern.expect("valid pattern compilation produced a value"),
+    ))
 }
 
 fn decode_required_builtin(
@@ -1805,10 +1921,12 @@ fn decode_required_builtin(
     builtin: &str,
     node: &ParsedNode,
     source_map: &SourceMap<'_>,
-) -> DecodeResult<RequiredBuiltInDefinition> {
+) -> CompilationResult<RequiredBuiltInDefinition> {
     let mapping = format!("flavours.{flavour}.{builtin}");
-    let entries = expect_mapping(node, &mapping, source_map)?;
-    let required = decode_optional_boolean(entries, "required", &mapping, source_map)?;
+    let entries =
+        expect_mapping(node, &mapping, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let required = decode_optional_boolean(entries, "required", &mapping, source_map)
+        .map_err(|diagnostic| vec![*diagnostic])?;
     Ok(RequiredBuiltInDefinition::new(required))
 }
 
@@ -1816,28 +1934,32 @@ fn decode_fields(
     flavour: &str,
     flavour_entries: &[(ParsedNode, ParsedNode)],
     source_map: &SourceMap<'_>,
-) -> DecodeResult<(Option<SchemaSection>, BTreeMap<String, FieldDefinition>)> {
+) -> CompilationResult<(Option<SchemaSection>, BTreeMap<String, FieldDefinition>)> {
     let Some((key, value)) = optional_entry(flavour_entries, "fields") else {
         return Ok((None, BTreeMap::new()));
     };
     let mapping = format!("flavours.{flavour}.fields");
-    let entries = expect_mapping(value, &mapping, source_map)?;
+    let entries =
+        expect_mapping(value, &mapping, source_map).map_err(|diagnostic| vec![*diagnostic])?;
     let source = section(source_map, key, value, entries.len());
     let mut definitions = BTreeMap::new();
+    let mut diagnostics = Vec::new();
 
     for (name_node, definition_node) in entries {
         let (name, _) = string_key(name_node).expect("profile validation requires string keys");
+        let mut name_valid = true;
         if !valid_snake_name(name) {
-            return Err(Box::new(invalid_name(
+            diagnostics.push(invalid_name(
                 "field names must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
                 source_map,
                 name_node.span(),
                 &mapping,
                 name,
-            )));
+            ));
+            name_valid = false;
         }
         if is_reserved_field_name(name) {
-            return Err(Box::new(
+            diagnostics.push(
                 invalid_name(
                     format!("field name {name:?} is reserved"),
                     source_map,
@@ -1846,10 +1968,20 @@ fn decode_fields(
                     name,
                 )
                 .with_detail("name", name.to_owned()),
-            ));
+            );
+            name_valid = false;
         }
-        let definition = decode_field(flavour, name, name_node, definition_node, source_map)?;
-        definitions.insert(name.to_owned(), definition);
+        let definition = collect_compilation(
+            decode_field(flavour, name, name_node, definition_node, source_map),
+            &mut diagnostics,
+        );
+        if name_valid && let Some(definition) = definition {
+            definitions.insert(name.to_owned(), definition);
+        }
+    }
+
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
     }
 
     Ok((Some(source), definitions))
@@ -1861,45 +1993,62 @@ fn decode_field(
     name_node: &ParsedNode,
     node: &ParsedNode,
     source_map: &SourceMap<'_>,
-) -> DecodeResult<FieldDefinition> {
+) -> CompilationResult<FieldDefinition> {
     let mapping = format!("flavours.{flavour}.fields.{name}");
-    let entries = expect_mapping(node, &mapping, source_map)?;
+    let entries =
+        expect_mapping(node, &mapping, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut diagnostics = Vec::new();
 
-    let (type_key, type_value) =
-        required_entry(entries, "type", &mapping, source_map, node.span())?;
     let type_field = format!("{mapping}.type");
-    let raw_type = expect_string(type_value, &type_field, source_map)?;
-    let field_type = match raw_type {
-        "string" => FieldType::String,
-        "integer" => FieldType::Integer,
-        "number" => FieldType::Number,
-        "boolean" => FieldType::Boolean,
-        "enum" => FieldType::Enum,
-        _ => {
-            return Err(Box::new(
-                invalid_declaration(
-                    "field type must be string, integer, number, boolean, or enum",
-                    source_map,
-                    type_value.span(),
-                    &type_field,
-                )
-                .with_detail("value", raw_type.to_owned()),
-            ));
-        }
-    };
-    let field_type = field(source_map, type_key, type_value, field_type);
-    let required = decode_optional_boolean(entries, "required", &mapping, source_map)?;
-    let repeatable = decode_optional_boolean(entries, "repeatable", &mapping, source_map)?;
+    let field_type = collect_decode(
+        required_entry(entries, "type", &mapping, source_map, node.span()).and_then(
+            |(key, value)| {
+                let raw_type = expect_string(value, &type_field, source_map)?;
+                let decoded = match raw_type {
+                    "string" => FieldType::String,
+                    "integer" => FieldType::Integer,
+                    "number" => FieldType::Number,
+                    "boolean" => FieldType::Boolean,
+                    "enum" => FieldType::Enum,
+                    _ => {
+                        return Err(Box::new(
+                            invalid_declaration(
+                                "field type must be string, integer, number, boolean, or enum",
+                                source_map,
+                                value.span(),
+                                &type_field,
+                            )
+                            .with_detail("value", raw_type.to_owned()),
+                        ));
+                    }
+                };
+                Ok(field(source_map, key, value, decoded))
+            },
+        ),
+        &mut diagnostics,
+    );
+    let required = collect_decode(
+        decode_optional_boolean(entries, "required", &mapping, source_map),
+        &mut diagnostics,
+    );
+    let repeatable = collect_decode(
+        decode_optional_boolean(entries, "repeatable", &mapping, source_map),
+        &mut diagnostics,
+    );
 
-    let values = match (field_type.value(), optional_entry(entries, "values")) {
-        (FieldType::Enum, Some((values_key, values_value))) => {
+    let field_type_kind = field_type.as_ref().map(|field_type| *field_type.value());
+    let values_entry = optional_entry(entries, "values");
+    let values = match (field_type_kind, values_entry) {
+        (Some(FieldType::Enum), Some((values_key, values_value))) => {
             let values_field = format!("{mapping}.values");
-            let values =
-                decode_unique_string_sequence(values_value, &values_field, false, source_map)?;
-            Some(field(source_map, values_key, values_value, values))
+            collect_decode(
+                decode_unique_string_sequence(values_value, &values_field, false, source_map),
+                &mut diagnostics,
+            )
+            .map(|decoded| field(source_map, values_key, values_value, decoded))
         }
-        (FieldType::Enum, None) => {
-            return Err(Box::new(
+        (Some(FieldType::Enum), None) => {
+            diagnostics.push(
                 invalid_declaration(
                     "enum fields require a non-empty values sequence",
                     source_map,
@@ -1907,42 +2056,69 @@ fn decode_field(
                     &mapping,
                 )
                 .with_detail("key", "values"),
-            ));
+            );
+            None
         }
-        (_, Some((values_key, _))) => {
-            return Err(Box::new(invalid_declaration(
+        (Some(_), Some((values_key, _))) => {
+            diagnostics.push(invalid_declaration(
                 "values is permitted only for enum fields",
                 source_map,
                 values_key.span(),
                 &mapping,
-            )));
+            ));
+            None
         }
-        (_, None) => None,
+        (Some(_), None) => None,
+        (None, Some((_, values_value))) => {
+            let values_field = format!("{mapping}.values");
+            let _ = collect_decode(
+                decode_unique_string_sequence(values_value, &values_field, false, source_map),
+                &mut diagnostics,
+            );
+            None
+        }
+        (None, None) => None,
     };
 
-    let pattern = match (field_type.value(), optional_entry(entries, "pattern")) {
-        (FieldType::String, Some(_)) => {
-            decode_optional_pattern(entries, "pattern", &mapping, source_map)?
-        }
-        (FieldType::String, None) => None,
-        (_, Some((pattern_key, _))) => {
-            return Err(Box::new(invalid_declaration(
+    let pattern_entry = optional_entry(entries, "pattern");
+    let pattern = match (field_type_kind, pattern_entry) {
+        (Some(FieldType::String), Some(_)) => collect_decode(
+            decode_optional_pattern(entries, "pattern", &mapping, source_map),
+            &mut diagnostics,
+        )
+        .flatten(),
+        (Some(FieldType::String), None) => None,
+        (Some(_), Some((pattern_key, _))) => {
+            diagnostics.push(invalid_declaration(
                 "pattern is permitted only for string fields",
                 source_map,
                 pattern_key.span(),
                 &mapping,
-            )));
+            ));
+            None
         }
-        (_, None) => None,
+        (Some(_), None) => None,
+        (None, Some(_)) => {
+            let _ = collect_decode(
+                decode_optional_pattern(entries, "pattern", &mapping, source_map),
+                &mut diagnostics,
+            );
+            None
+        }
+        (None, None) => None,
     };
+
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
 
     Ok(FieldDefinition::new(
         name.to_owned(),
         parser_span(source_map, name_node.span()),
         parser_span(source_map, node.span()),
-        field_type,
-        required,
-        repeatable,
+        field_type.expect("valid type compilation produced a value"),
+        required.expect("valid required compilation produced a value"),
+        repeatable.expect("valid repeatable compilation produced a value"),
         values,
         pattern,
     ))

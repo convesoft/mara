@@ -1191,6 +1191,59 @@ fn reports_all_independent_unknown_keys_in_source_order() {
 }
 
 #[test]
+fn reports_all_independent_flavour_and_field_defects_regardless_of_mapping_order() {
+    let source = RICH_SCHEMA
+        .replacen("label: Requirement", "label: ''", 1)
+        .replacen("pattern: .+", "pattern: '['", 1)
+        .replacen("type: integer", "type: integer\n        values: [small]", 1)
+        .replacen(
+            "description: A chosen implementation structure.",
+            "description: ''",
+            1,
+        );
+    let flavours_start = source.find("flavours:\n").unwrap() + "flavours:\n".len();
+    let design_start = source.find("  design:\n").unwrap();
+    let reordered = format!(
+        "{}{}{}",
+        &source[..flavours_start],
+        &source[design_start..],
+        &source[flavours_start..design_start]
+    );
+
+    let first_fixture = Fixture::new(&source);
+    let first = load_schema(&first_fixture.loaded_project()).unwrap_err();
+    let reordered_fixture = Fixture::new(&reordered);
+    let reordered_error = load_schema(&reordered_fixture.loaded_project()).unwrap_err();
+
+    assert_eq!(first.diagnostics().len(), 4, "{:#?}", first.diagnostics());
+    assert_eq!(
+        first
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| source_slice(&source, diagnostic.primary().unwrap()))
+            .collect::<Vec<_>>(),
+        ["''", "'['", "values", "''"]
+    );
+
+    let identities = |error: &SchemaLoadError| {
+        let mut identities = error
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.code().as_str().to_owned(),
+                    diagnostic.context().field().unwrap_or("").to_owned(),
+                    diagnostic.message().to_owned(),
+                )
+            })
+            .collect::<Vec<_>>();
+        identities.sort_unstable();
+        identities
+    };
+    assert_eq!(identities(&first), identities(&reordered_error));
+}
+
+#[test]
 fn rejects_unsupported_root_composition_constructs_as_unknown_v1_keys() {
     for key in [
         "imports",
