@@ -1377,24 +1377,22 @@ fn decode_v1_document(
 
     let mut diagnostics = v1_unknown_key_diagnostics(entries, source_map);
     let schema = collect_decode(
-        required_entry(entries, "schema", "root", source_map, *root_span).and_then(
-            |(key, value)| {
-                let decoded = decode_schema_identity(value, source_map)?;
-                Ok(field(source_map, key, value, decoded))
-            },
-        ),
+        required_entry(entries, "schema", "root", source_map, *root_span),
         &mut diagnostics,
-    );
+    )
+    .and_then(|(key, value)| {
+        collect_compilation(decode_schema_identity(value, source_map), &mut diagnostics)
+            .map(|decoded| field(source_map, key, value, decoded))
+    });
 
     let identity = collect_decode(
-        required_entry(entries, "identity", "root", source_map, *root_span).and_then(
-            |(key, value)| {
-                let decoded = decode_identity(value, source_map)?;
-                Ok(field(source_map, key, value, decoded))
-            },
-        ),
+        required_entry(entries, "identity", "root", source_map, *root_span),
         &mut diagnostics,
-    );
+    )
+    .and_then(|(key, value)| {
+        collect_compilation(decode_identity(value, source_map), &mut diagnostics)
+            .map(|decoded| field(source_map, key, value, decoded))
+    });
 
     let flavours = collect_decode(
         required_entry(entries, "flavours", "root", source_map, *root_span),
@@ -1514,106 +1512,137 @@ fn decode_format_version(
 fn decode_schema_identity(
     node: &ParsedNode,
     source_map: &SourceMap<'_>,
-) -> DecodeResult<SchemaIdentity> {
+) -> CompilationResult<SchemaIdentity> {
     let ParsedNode::Mapping { entries, span, .. } = node else {
-        return Err(Box::new(invalid_declaration(
+        return Err(vec![invalid_declaration(
             "root.schema must be a mapping",
             source_map,
             node.span(),
             "schema",
-        )));
+        )]);
     };
-    let (name_key, name_value) = required_entry(entries, "name", "schema", source_map, *span)?;
-    let name = expect_string(name_value, "schema.name", source_map)?;
-    if !valid_kebab_name(name) {
-        return Err(Box::new(invalid_name(
-            "schema.name must match [a-z][a-z0-9]*(?:-[a-z0-9]+)*",
-            source_map,
-            name_value.span(),
-            "schema.name",
-            name,
-        )));
+    let mut diagnostics = Vec::new();
+    let name = collect_decode(
+        required_entry(entries, "name", "schema", source_map, *span).and_then(|(key, value)| {
+            let name = expect_string(value, "schema.name", source_map)?;
+            if !valid_kebab_name(name) {
+                return Err(Box::new(invalid_name(
+                    "schema.name must match [a-z][a-z0-9]*(?:-[a-z0-9]+)*",
+                    source_map,
+                    value.span(),
+                    "schema.name",
+                    name,
+                )));
+            }
+            Ok(field(source_map, key, value, name.to_owned()))
+        }),
+        &mut diagnostics,
+    );
+    let version = collect_decode(
+        required_entry(entries, "version", "schema", source_map, *span).and_then(|(key, value)| {
+            let version = expect_string(value, "schema.version", source_map)?;
+            if !valid_semver(version) {
+                return Err(Box::new(
+                    invalid_declaration(
+                        "schema.version must use SemVer 2.0.0 syntax",
+                        source_map,
+                        value.span(),
+                        "schema.version",
+                    )
+                    .with_detail("value", version.to_owned()),
+                ));
+            }
+            Ok(field(source_map, key, value, version.to_owned()))
+        }),
+        &mut diagnostics,
+    );
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
     }
-    let name = field(source_map, name_key, name_value, name.to_owned());
-
-    let (version_key, version_value) =
-        required_entry(entries, "version", "schema", source_map, *span)?;
-    let version = expect_string(version_value, "schema.version", source_map)?;
-    if !valid_semver(version) {
-        return Err(Box::new(
-            invalid_declaration(
-                "schema.version must use SemVer 2.0.0 syntax",
-                source_map,
-                version_value.span(),
-                "schema.version",
-            )
-            .with_detail("value", version.to_owned()),
-        ));
-    }
-    let version = field(source_map, version_key, version_value, version.to_owned());
-    Ok(SchemaIdentity::new(name, version))
+    Ok(SchemaIdentity::new(
+        name.expect("valid schema name compilation produced a value"),
+        version.expect("valid schema version compilation produced a value"),
+    ))
 }
 
 fn decode_identity(
     node: &ParsedNode,
     source_map: &SourceMap<'_>,
-) -> DecodeResult<IdentityConfiguration> {
+) -> CompilationResult<IdentityConfiguration> {
     let ParsedNode::Mapping { entries, span, .. } = node else {
-        return Err(Box::new(invalid_declaration(
+        return Err(vec![invalid_declaration(
             "root.identity must be a mapping",
             source_map,
             node.span(),
             "identity",
-        )));
+        )]);
     };
-    let (mid_key, mid_value) = required_entry(entries, "mid", "identity", source_map, *span)?;
+    let (mid_key, mid_value) = required_entry(entries, "mid", "identity", source_map, *span)
+        .map_err(|diagnostic| vec![*diagnostic])?;
     let ParsedNode::Mapping {
         entries: mid_entries,
         span: mid_span,
         ..
     } = mid_value
     else {
-        return Err(Box::new(invalid_declaration(
+        return Err(vec![invalid_declaration(
             "identity.mid must be a mapping",
             source_map,
             mid_value.span(),
             "identity.mid",
-        )));
+        )]);
     };
-    let (format_key, format_value) =
-        required_entry(mid_entries, "format", "identity.mid", source_map, *mid_span)?;
-    let format = expect_string(format_value, "identity.mid.format", source_map)?;
-    if format != "ulid" {
-        return Err(Box::new(
-            invalid_declaration(
-                "identity.mid.format must be \"ulid\" in format version 1",
-                source_map,
-                format_value.span(),
-                "identity.mid.format",
-            )
-            .with_detail("value", format.to_owned()),
-        ));
-    }
-    let format = field(source_map, format_key, format_value, MidFormat::Ulid);
 
-    let (prefix_key, prefix_value) =
-        required_entry(mid_entries, "prefix", "identity.mid", source_map, *mid_span)?;
-    let prefix = expect_string(prefix_value, "identity.mid.prefix", source_map)?;
-    if !valid_mid_prefix(prefix) {
-        return Err(Box::new(invalid_name(
-            "identity.mid.prefix must match [a-z][a-z0-9]*_",
-            source_map,
-            prefix_value.span(),
-            "identity.mid.prefix",
-            prefix,
-        )));
+    let mut diagnostics = Vec::new();
+    let format = collect_decode(
+        required_entry(mid_entries, "format", "identity.mid", source_map, *mid_span).and_then(
+            |(key, value)| {
+                let format = expect_string(value, "identity.mid.format", source_map)?;
+                if format != "ulid" {
+                    return Err(Box::new(
+                        invalid_declaration(
+                            "identity.mid.format must be \"ulid\" in format version 1",
+                            source_map,
+                            value.span(),
+                            "identity.mid.format",
+                        )
+                        .with_detail("value", format.to_owned()),
+                    ));
+                }
+                Ok(field(source_map, key, value, MidFormat::Ulid))
+            },
+        ),
+        &mut diagnostics,
+    );
+    let prefix = collect_decode(
+        required_entry(mid_entries, "prefix", "identity.mid", source_map, *mid_span).and_then(
+            |(key, value)| {
+                let prefix = expect_string(value, "identity.mid.prefix", source_map)?;
+                if !valid_mid_prefix(prefix) {
+                    return Err(Box::new(invalid_name(
+                        "identity.mid.prefix must match [a-z][a-z0-9]*_",
+                        source_map,
+                        value.span(),
+                        "identity.mid.prefix",
+                        prefix,
+                    )));
+                }
+                Ok(field(source_map, key, value, prefix.to_owned()))
+            },
+        ),
+        &mut diagnostics,
+    );
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
     }
-    let prefix = field(source_map, prefix_key, prefix_value, prefix.to_owned());
     let mid = field(
         source_map,
         mid_key,
         mid_value,
-        MidIdentity::new(format, prefix),
+        MidIdentity::new(
+            format.expect("valid MID format compilation produced a value"),
+            prefix.expect("valid MID prefix compilation produced a value"),
+        ),
     );
     Ok(IdentityConfiguration::new(mid))
 }

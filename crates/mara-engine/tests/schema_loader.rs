@@ -1303,6 +1303,35 @@ fn reports_root_flavour_and_sequence_defects_from_one_compilation() {
 }
 
 #[test]
+fn reports_all_schema_and_mid_identity_defects_from_one_compilation() {
+    let source = VALID_SCHEMA
+        .replace("name: mara-schema", "name: Mara_Schema")
+        .replace("1.2.3-alpha.1+build.5", "\"1.2\"")
+        .replace("format: ulid", "format: uuid")
+        .replace("prefix: m_", "prefix: M-");
+    let fixture = Fixture::new(&source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+
+    let diagnostics = error.diagnostics();
+    assert_eq!(diagnostics.len(), 4, "{diagnostics:#?}");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| (
+                diagnostic.code().as_str(),
+                source_slice(&source, diagnostic.primary().unwrap()),
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("schema.invalid_name", "Mara_Schema"),
+            ("schema.invalid_declaration", "\"1.2\""),
+            ("schema.invalid_declaration", "uuid"),
+            ("schema.invalid_name", "M-"),
+        ]
+    );
+}
+
+#[test]
 fn rejects_unsupported_root_composition_constructs_as_unknown_v1_keys() {
     for key in [
         "imports",
