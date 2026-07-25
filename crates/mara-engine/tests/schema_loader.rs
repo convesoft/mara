@@ -573,6 +573,20 @@ fn accepts_yaml_1_2_core_tags_but_rejects_incompatible_core_tags() {
         "!!str\n    # !\n    1.0.0"
     );
 
+    let preceding_comment_source = source.replace(
+        "  !!str name: !!str core-schema",
+        "  !!str name:\n    # misleading !tag\n    !!str core-schema",
+    );
+    let fixture = Fixture::new(&preceding_comment_source);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+    assert_eq!(
+        source_slice(
+            &preceding_comment_source,
+            document.schema().value().name().value_source()
+        ),
+        "!!str core-schema"
+    );
+
     let invalid = source.replace("!!str core-schema", "!!timestamp core-schema");
     let error = assert_invalid(invalid, SchemaDiagnosticCode::Syntax);
     assert_eq!(

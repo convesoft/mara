@@ -12,4 +12,4 @@ pub use schema::{
     IdentityConfiguration, MidFormat, MidIdentity, SchemaDocument, SchemaField, SchemaIdentity,
     SchemaSection,
 };
-pub use source::{InvalidSourceSpan, SourceSpan};
+pub use source::{InvalidSourceSpan, SourceIndex, SourceSpan};

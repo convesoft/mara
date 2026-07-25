@@ -1,5 +1,129 @@
 use std::{error::Error, fmt};
 
+/// A reusable index of every legal source-span boundary in one UTF-8 source.
+#[derive(Debug, Clone)]
+pub struct SourceIndex {
+    path: String,
+    source_len: usize,
+    positions: Vec<IndexedPosition>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct IndexedPosition {
+    byte: usize,
+    line: u64,
+    column: u64,
+}
+
+impl SourceIndex {
+    /// Indexes source positions after validating the normalized project-relative path.
+    pub fn try_new(path: impl Into<String>, source: &str) -> Result<Self, InvalidSourceSpan> {
+        let path = path.into();
+        validate_path(&path)?;
+
+        let mut positions = vec![IndexedPosition {
+            byte: 0,
+            line: 1,
+            column: 1,
+        }];
+        let mut line = 1;
+        let mut column = 1;
+        let mut characters = source.char_indices().peekable();
+        while let Some((byte, character)) = characters.next() {
+            let mut end_byte = byte + character.len_utf8();
+            match character {
+                '\r' => {
+                    if characters
+                        .peek()
+                        .is_some_and(|(_, character)| *character == '\n')
+                    {
+                        let (byte, character) = characters
+                            .next()
+                            .expect("the peeked CRLF line feed is present");
+                        end_byte = byte + character.len_utf8();
+                    }
+                    line += 1;
+                    column = 1;
+                }
+                '\n' => {
+                    line += 1;
+                    column = 1;
+                }
+                _ => column += 1,
+            }
+            positions.push(IndexedPosition {
+                byte: end_byte,
+                line,
+                column,
+            });
+        }
+
+        Ok(Self {
+            path,
+            source_len: source.len(),
+            positions,
+        })
+    }
+
+    /// Constructs a span by validating byte boundaries and coordinates against
+    /// the indexed source positions.
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_span(
+        &self,
+        start_byte: u64,
+        end_byte: u64,
+        start_line: u64,
+        start_column: u64,
+        end_line: u64,
+        end_column: u64,
+    ) -> Result<SourceSpan, InvalidSourceSpan> {
+        if start_byte > end_byte {
+            return Err(InvalidSourceSpan::ReversedBytes);
+        }
+        let start_index =
+            usize::try_from(start_byte).map_err(|_| InvalidSourceSpan::ByteOutOfBounds)?;
+        let end_index =
+            usize::try_from(end_byte).map_err(|_| InvalidSourceSpan::ByteOutOfBounds)?;
+        if end_index > self.source_len {
+            return Err(InvalidSourceSpan::ByteOutOfBounds);
+        }
+        let expected_start = self.position(start_index)?;
+        let expected_end = self.position(end_index)?;
+        if start_line == 0 || start_column == 0 || end_line == 0 || end_column == 0 {
+            return Err(InvalidSourceSpan::ZeroCoordinate);
+        }
+        if start_line > end_line || (start_line == end_line && start_column > end_column) {
+            return Err(InvalidSourceSpan::ReversedCoordinates);
+        }
+        let empty_bytes = start_byte == end_byte;
+        let empty_coordinates = start_line == end_line && start_column == end_column;
+        if empty_bytes != empty_coordinates {
+            return Err(InvalidSourceSpan::InconsistentRange);
+        }
+        if (expected_start.line, expected_start.column) != (start_line, start_column)
+            || (expected_end.line, expected_end.column) != (end_line, end_column)
+        {
+            return Err(InvalidSourceSpan::CoordinateMismatch);
+        }
+        Ok(SourceSpan {
+            path: self.path.clone(),
+            start_byte,
+            end_byte,
+            start_line,
+            start_column,
+            end_line,
+            end_column,
+        })
+    }
+
+    fn position(&self, byte: usize) -> Result<IndexedPosition, InvalidSourceSpan> {
+        self.positions
+            .binary_search_by_key(&byte, |position| position.byte)
+            .map(|index| self.positions[index])
+            .map_err(|_| InvalidSourceSpan::InvalidBoundary)
+    }
+}
+
 /// An exact half-open range in one normalized project-relative UTF-8 source path.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SourceSpan {
@@ -26,50 +150,14 @@ impl SourceSpan {
         end_line: u64,
         end_column: u64,
     ) -> Result<Self, InvalidSourceSpan> {
-        let path = path.into();
-        validate_path(&path)?;
-        if start_byte > end_byte {
-            return Err(InvalidSourceSpan::ReversedBytes);
-        }
-        let start_index =
-            usize::try_from(start_byte).map_err(|_| InvalidSourceSpan::ByteOutOfBounds)?;
-        let end_index =
-            usize::try_from(end_byte).map_err(|_| InvalidSourceSpan::ByteOutOfBounds)?;
-        if end_index > source.len() {
-            return Err(InvalidSourceSpan::ByteOutOfBounds);
-        }
-        if !source.is_char_boundary(start_index)
-            || !source.is_char_boundary(end_index)
-            || splits_crlf(source, start_index)
-            || splits_crlf(source, end_index)
-        {
-            return Err(InvalidSourceSpan::InvalidBoundary);
-        }
-        if start_line == 0 || start_column == 0 || end_line == 0 || end_column == 0 {
-            return Err(InvalidSourceSpan::ZeroCoordinate);
-        }
-        if start_line > end_line || (start_line == end_line && start_column > end_column) {
-            return Err(InvalidSourceSpan::ReversedCoordinates);
-        }
-        let empty_bytes = start_byte == end_byte;
-        let empty_coordinates = start_line == end_line && start_column == end_column;
-        if empty_bytes != empty_coordinates {
-            return Err(InvalidSourceSpan::InconsistentRange);
-        }
-        let expected_start = position_at(source, start_index);
-        let expected_end = position_at(source, end_index);
-        if expected_start != (start_line, start_column) || expected_end != (end_line, end_column) {
-            return Err(InvalidSourceSpan::CoordinateMismatch);
-        }
-        Ok(Self {
-            path,
+        SourceIndex::try_new(path, source)?.try_span(
             start_byte,
             end_byte,
             start_line,
             start_column,
             end_line,
             end_column,
-        })
+        )
     }
 
     pub fn path(&self) -> &str {
@@ -103,36 +191,6 @@ impl SourceSpan {
     pub const fn is_empty(&self) -> bool {
         self.start_byte == self.end_byte
     }
-}
-
-fn splits_crlf(source: &str, byte: usize) -> bool {
-    byte > 0
-        && byte < source.len()
-        && source.as_bytes()[byte - 1] == b'\r'
-        && source.as_bytes()[byte] == b'\n'
-}
-
-fn position_at(source: &str, byte: usize) -> (u64, u64) {
-    let mut line = 1;
-    let mut column = 1;
-    let mut characters = source[..byte].chars().peekable();
-    while let Some(character) = characters.next() {
-        match character {
-            '\r' => {
-                if characters.peek() == Some(&'\n') {
-                    characters.next();
-                }
-                line += 1;
-                column = 1;
-            }
-            '\n' => {
-                line += 1;
-                column = 1;
-            }
-            _ => column += 1,
-        }
-    }
-    (line, column)
 }
 
 fn validate_path(path: &str) -> Result<(), InvalidSourceSpan> {
@@ -218,6 +276,12 @@ mod tests {
         assert_eq!(span.start_byte(), 0);
         assert_eq!(span.end_column(), 2);
         assert!(!span.is_empty());
+
+        let index = SourceIndex::try_new(".mara/schema.yaml", source).unwrap();
+        assert_eq!(
+            index.try_span(2, 4, 1, 2, 2, 1).unwrap(),
+            SourceSpan::try_new(".mara/schema.yaml", source, 2, 4, 1, 2, 2, 1).unwrap()
+        );
 
         assert_eq!(
             SourceSpan::try_new("../schema.yaml", "", 0, 0, 1, 1, 1, 1),

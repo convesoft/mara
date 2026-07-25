@@ -12,7 +12,7 @@ use std::{
 use mara_core::{
     Diagnostic, DiagnosticContext, DiagnosticSeverity, DiagnosticValue, IdentityConfiguration,
     MidFormat, MidIdentity, RelatedDiagnostic, SchemaDiagnosticCode, SchemaDocument, SchemaField,
-    SchemaIdentity, SchemaSection, SourceSpan,
+    SchemaIdentity, SchemaSection, SourceIndex, SourceSpan,
 };
 use regex_lite::Regex;
 use saphyr_parser::{Event, Marker, Parser, ScalarStyle, Span, SpannedEventReceiver, Tag};
@@ -155,16 +155,17 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
         let valid_prefix = std::str::from_utf8(&bytes[..offset])
             .expect("the prefix before a UTF-8 decoding error is valid");
         let (line, column) = position_at_valid_prefix(&bytes[..offset]);
-        let primary = source_span(
+        let primary = SourceSpan::try_new(
             path,
             valid_prefix,
-            offset,
-            offset,
-            line,
-            column,
-            line,
-            column,
-        );
+            offset as u64,
+            offset as u64,
+            line as u64,
+            column as u64,
+            line as u64,
+            column as u64,
+        )
+        .expect("the valid UTF-8 prefix produced a valid Mara source span");
         SchemaLoadError::invalid(vec![
             Diagnostic::new(
                 SchemaDiagnosticCode::Syntax,
@@ -175,11 +176,13 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
         ])
     })?;
 
+    let source_index = SourceIndex::try_new(path, source)
+        .expect("the rooted project produced a valid Mara source index");
+
     if let Some(offset) = source.find('\0') {
         let (line, column) = position_at_valid_prefix(&source.as_bytes()[..offset]);
         let primary = source_span(
-            path,
-            source,
+            &source_index,
             offset,
             offset + 1,
             line,
@@ -197,13 +200,13 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
         ]));
     }
 
-    if let Some(diagnostic) = validate_document_directives(source, path) {
+    if let Some(diagnostic) = validate_document_directives(source, &source_index) {
         return Err(SchemaLoadError::invalid(vec![diagnostic]));
     }
 
     let parser_source = source.strip_prefix('\u{feff}').unwrap_or(source);
     let parser_start_byte = source.len() - parser_source.len();
-    let source_map = SourceMap::new(path, source, parser_start_byte);
+    let source_map = SourceMap::new(source, parser_start_byte, source_index);
     let mut receiver = TreeBuilder::new(&source_map);
     let parse_error = Parser::new_from_str(parser_source).find_map(|result| match result {
         Ok((event, span)) => {
@@ -237,8 +240,7 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
             let (line, column) = position_at_valid_prefix(source.as_bytes());
             (
                 Some(source_span(
-                    path,
-                    source,
+                    &source_map.source_index,
                     source.len(),
                     source.len(),
                     line,
@@ -291,7 +293,7 @@ fn directive_arguments<'a>(content: &'a str, name: &str) -> Option<&'a str> {
         .then_some(rest)
 }
 
-fn validate_document_directives(source: &str, path: &str) -> Option<Diagnostic> {
+fn validate_document_directives(source: &str, source_index: &SourceIndex) -> Option<Diagnostic> {
     let mut byte_offset = 0;
     let mut line = 1;
     while byte_offset < source.len() {
@@ -330,8 +332,7 @@ fn validate_document_directives(source: &str, path: &str) -> Option<Diagnostic> 
         let start_byte = byte_offset + bom_bytes;
         let start_column = source_line[..bom_bytes].chars().count() + 1;
         let primary = source_span(
-            path,
-            source,
+            source_index,
             start_byte,
             start_byte + content.len(),
             line,
@@ -388,15 +389,15 @@ impl ParsedSpan {
 
 #[derive(Debug)]
 struct SourceMap<'source> {
-    path: &'source str,
     source: &'source str,
+    source_index: SourceIndex,
     char_to_byte: Vec<usize>,
     marker_index_offset: usize,
     first_line_column_offset: usize,
 }
 
 impl<'source> SourceMap<'source> {
-    fn new(path: &'source str, source: &'source str, parser_start_byte: usize) -> Self {
+    fn new(source: &'source str, parser_start_byte: usize, source_index: SourceIndex) -> Self {
         let mut char_to_byte = source
             .char_indices()
             .map(|(byte, _)| byte)
@@ -404,8 +405,8 @@ impl<'source> SourceMap<'source> {
         char_to_byte.push(source.len());
         let marker_index_offset = source[..parser_start_byte].chars().count();
         Self {
-            path,
             source,
+            source_index,
             char_to_byte,
             marker_index_offset,
             first_line_column_offset: marker_index_offset,
@@ -542,7 +543,9 @@ fn preceding_tag_start(source: &str, node_start: usize) -> Option<usize> {
     let mut search_end = node_start;
     let mut earliest = None;
     while let Some(start) = source[..search_end].rfind('!') {
-        if tag_start_boundary(source, start) {
+        if tag_start_boundary(source, start)
+            && !tag_starts_in_preceding_comment(source, start, node_start)
+        {
             if let Some(end) = raw_tag_end(source, start, node_start)
                 && yaml_tag_suffix_only(&source[end..node_start])
             {
@@ -603,6 +606,23 @@ fn source_line_start(source: &str, position: usize) -> usize {
     source[..position]
         .rfind(['\r', '\n'])
         .map_or(0, |line_break| line_break + 1)
+}
+
+fn tag_starts_in_preceding_comment(source: &str, start: usize, node_start: usize) -> bool {
+    if !source[start..node_start].contains(['\r', '\n']) {
+        return false;
+    }
+
+    let line_start = source_line_start(source, start);
+    let before_tag = &source[line_start..start];
+    before_tag.char_indices().any(|(offset, character)| {
+        character == '#'
+            && (offset == 0
+                || before_tag[..offset]
+                    .chars()
+                    .next_back()
+                    .is_some_and(char::is_whitespace))
+    })
 }
 
 fn tag_start_boundary(source: &str, start: usize) -> bool {
@@ -1295,8 +1315,7 @@ fn decode_v1_document(
 
     let (end_line, end_column) = position_at_valid_prefix(source_map.source.as_bytes());
     let document_source = source_span(
-        source_map.path,
-        source_map.source,
+        &source_map.source_index,
         0,
         source_map.source.len(),
         1,
@@ -1721,8 +1740,7 @@ fn valid_semver(value: &str) -> bool {
 
 fn parser_span(source_map: &SourceMap<'_>, span: ParsedSpan) -> SourceSpan {
     source_span(
-        source_map.path,
-        source_map.source,
+        &source_map.source_index,
         span.start.byte,
         span.end.byte,
         span.start.line,
@@ -1734,8 +1752,7 @@ fn parser_span(source_map: &SourceMap<'_>, span: ParsedSpan) -> SourceSpan {
 
 fn marker_span(source_map: &SourceMap<'_>, marker: ParsedPosition) -> SourceSpan {
     source_span(
-        source_map.path,
-        source_map.source,
+        &source_map.source_index,
         marker.byte,
         marker.byte,
         marker.line,
@@ -1747,8 +1764,7 @@ fn marker_span(source_map: &SourceMap<'_>, marker: ParsedPosition) -> SourceSpan
 
 #[allow(clippy::too_many_arguments)]
 fn source_span(
-    path: &str,
-    source: &str,
+    source_index: &SourceIndex,
     start_byte: usize,
     end_byte: usize,
     start_line: usize,
@@ -1756,17 +1772,16 @@ fn source_span(
     end_line: usize,
     end_column: usize,
 ) -> SourceSpan {
-    SourceSpan::try_new(
-        path,
-        source,
-        start_byte as u64,
-        end_byte as u64,
-        start_line as u64,
-        start_column as u64,
-        end_line as u64,
-        end_column as u64,
-    )
-    .expect("parser and rooted project produced a valid Mara source span")
+    source_index
+        .try_span(
+            start_byte as u64,
+            end_byte as u64,
+            start_line as u64,
+            start_column as u64,
+            end_line as u64,
+            end_column as u64,
+        )
+        .expect("parser and rooted project produced a valid Mara source span")
 }
 
 fn position_at_valid_prefix(prefix: &[u8]) -> (usize, usize) {
