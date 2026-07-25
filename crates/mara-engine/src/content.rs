@@ -15,7 +15,10 @@ use mara_core::{
 };
 use wax::{Glob, Program};
 
-use crate::project::{FileIdentity, LoadedProject, file_identity, open_read_no_follow};
+use crate::{
+    diagnostic::sort_diagnostics,
+    project::{FileIdentity, LoadedProject, file_identity, open_read_no_follow},
+};
 
 /// A complete content-discovery result. Per-file failures do not discard
 /// independently loaded documents.
@@ -210,20 +213,7 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
     }
 
     documents.sort_by(|left, right| left.path().cmp(right.path()));
-    diagnostics.sort_by(|left, right| {
-        match (left.primary(), right.primary()) {
-            (Some(left), Some(right)) => left
-                .path()
-                .as_bytes()
-                .cmp(right.path().as_bytes())
-                .then_with(|| left.start_byte().cmp(&right.start_byte())),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
-        }
-        .then_with(|| left.code().as_str().cmp(right.code().as_str()))
-    });
-    diagnostics.dedup();
+    finalize_diagnostics(&mut diagnostics);
 
     ContentDiscovery {
         documents,
@@ -341,6 +331,10 @@ fn escape_wax_extensions(pattern: &str) -> String {
 
 fn matches_any(patterns: &[Glob<'_>], path: &str) -> bool {
     patterns.iter().any(|pattern| pattern.is_match(path))
+}
+
+fn finalize_diagnostics(diagnostics: &mut [Diagnostic]) {
+    sort_diagnostics(diagnostics);
 }
 
 fn candidate_source_path(root: &Path, path: &Path) -> Result<String, Box<Diagnostic>> {
@@ -682,10 +676,11 @@ fn diagnostic_at_start(
     Diagnostic::new(code, message, primary).with_detail("path", path)
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn non_utf8_candidate_paths_produce_pathless_diagnostics() {
         use std::{ffi::OsString, os::unix::ffi::OsStringExt};
@@ -703,5 +698,17 @@ mod tests {
             diagnostic.details().get("reason"),
             Some(&mara_core::DiagnosticValue::from("non_utf8_path"))
         );
+    }
+
+    #[test]
+    fn pathless_failures_remain_independent_after_sorting() {
+        let mut diagnostics = vec![
+            Diagnostic::new(ContentDiagnosticCode::Io, "unsupported path", None),
+            Diagnostic::new(ContentDiagnosticCode::Io, "unsupported path", None),
+        ];
+
+        finalize_diagnostics(&mut diagnostics);
+
+        assert_eq!(diagnostics.len(), 2);
     }
 }
