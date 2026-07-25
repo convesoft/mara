@@ -359,19 +359,27 @@ When Codex or another reviewer reports findings:
 1. Wait for every reviewer active on that head to finish and capture the delayed
    findings snapshot before releasing the remote-head lock.
 2. Read every finding in context.
-3. Use the GitHub review-comment workflow when thread state matters.
+3. Use the GitHub review-comment workflow to preserve each finding's originating
+   comment and conversation state.
 4. Fix valid, issue-scoped findings.
 5. Explain invalid findings with evidence.
 6. Run relevant validation.
 7. Commit corrections locally.
-8. Resolve or answer threads appropriately.
-9. Re-run `$loop-code-review` after material changes and wait for its terminal,
+8. Re-run `$loop-code-review` after material changes and wait for its terminal,
    captured, closed, finding-free result.
-10. Push only when no local or remote reviewer remains active. Record the new head
-    SHA and push timestamp, then lock that head and wait for its new automatic
-    `eyes` to terminal (`+1` or bot-comment) lifecycle and delayed snapshot. Do not
-    post `@codex review`.
-11. Continue until no actionable findings remain.
+9. Push only when no local or remote reviewer remains active. Immediately record
+   the new head SHA and push timestamp; the remote-head lock begins at the push.
+10. Immediately after the fix push, reply to every originating remote-review
+    comment fixed by that push with a concise fix summary and the pushed commit
+    SHA, then resolve its GitHub conversation. Treat the reply, resolution, and
+    fix push as one correction handoff: do not consider the finding cleared or the
+    PR unblocked until a fresh thread fetch confirms the response and resolved
+    conversation. If GitHub provides no resolvable conversation, respond in the
+    finding's originating comment channel and record that fact.
+11. Keep the new head locked and wait for its new automatic `eyes` to terminal
+    (`+1` or bot-comment) lifecycle and delayed snapshot. Do not post `@codex
+    review`.
+12. Continue until no actionable findings remain.
 
 MERGE-READY CONDITIONS
 
@@ -388,6 +396,8 @@ Do not report merge readiness until:
 - the delayed post-completion snapshot contains no actionable Codex comments,
   submitted reviews, or review threads
 - no actionable Codex findings remain
+- every remote finding addressed by a fix push has a response on its originating
+  comment and its review conversation is resolved when GitHub provides one
 - no actionable human review threads remain
 - final local validation passes
 - final local independent review passes
