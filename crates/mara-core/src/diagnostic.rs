@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::SourceSpan;
+use crate::{Mid, SourceSpan};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DiagnosticSeverity {
@@ -153,19 +153,16 @@ impl RelatedDiagnostic {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticItem {
-    mid: String,
+    mid: Mid,
     id: Option<String>,
 }
 
 impl DiagnosticItem {
-    pub fn new(mid: impl Into<String>, id: Option<String>) -> Self {
-        Self {
-            mid: mid.into(),
-            id,
-        }
+    pub fn new(mid: Mid, id: Option<String>) -> Self {
+        Self { mid, id }
     }
 
-    pub fn mid(&self) -> &str {
+    pub const fn mid(&self) -> &Mid {
         &self.mid
     }
 

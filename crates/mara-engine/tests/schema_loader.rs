@@ -1,6 +1,8 @@
 use std::{fs, path::Path};
 
-use mara_core::{Diagnostic, DiagnosticCode, DiagnosticValue, MidFormat, SchemaDiagnosticCode};
+use mara_core::{
+    Diagnostic, DiagnosticCode, DiagnosticValue, Mid, MidFormat, SchemaDiagnosticCode,
+};
 use mara_engine::{
     project::{LoadedProject, load_from_root},
     schema::{SchemaLoadError, load_schema},
@@ -175,6 +177,12 @@ fn loads_valid_v1_identity_and_preserves_every_decoded_key_and_value_span() {
     );
     assert_eq!(*mid.value().format().value(), MidFormat::Ulid);
     assert_eq!(mid.value().prefix().value(), "m_");
+    let first_mid = Mid::from_ulid_value(mid.value(), 0);
+    assert_eq!(first_mid.as_str(), "m_00000000000000000000000000");
+    assert_eq!(
+        Mid::parse(first_mid.as_str(), mid.value()).unwrap(),
+        first_mid
+    );
     assert_eq!(
         source_slice(VALID_SCHEMA, mid.value().format().key_source()),
         "format"
