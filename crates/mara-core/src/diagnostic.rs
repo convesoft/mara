@@ -100,6 +100,26 @@ impl SyntaxDiagnosticCode {
     }
 }
 
+/// Identity diagnostic codes implemented by the Markdown adapter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum IdentityDiagnosticCode {
+    InvalidMid,
+}
+
+impl IdentityDiagnosticCode {
+    pub const ALL: [Self; 1] = [Self::InvalidMid];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidMid => "identity.invalid_mid",
+        }
+    }
+
+    pub const fn default_severity(self) -> DiagnosticSeverity {
+        DiagnosticSeverity::Error
+    }
+}
+
 /// The complete schema diagnostic-code family in wire format version 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SchemaDiagnosticCode {
@@ -148,6 +168,7 @@ pub enum DiagnosticCode {
     Project(ProjectDiagnosticCode),
     Content(ContentDiagnosticCode),
     Syntax(SyntaxDiagnosticCode),
+    Identity(IdentityDiagnosticCode),
     Schema(SchemaDiagnosticCode),
 }
 
@@ -157,6 +178,7 @@ impl DiagnosticCode {
             Self::Project(code) => code.as_str(),
             Self::Content(code) => code.as_str(),
             Self::Syntax(code) => code.as_str(),
+            Self::Identity(code) => code.as_str(),
             Self::Schema(code) => code.as_str(),
         }
     }
@@ -166,6 +188,7 @@ impl DiagnosticCode {
             Self::Project(code) => code.default_severity(),
             Self::Content(code) => code.default_severity(),
             Self::Syntax(code) => code.default_severity(),
+            Self::Identity(code) => code.default_severity(),
             Self::Schema(code) => code.default_severity(),
         }
     }
@@ -186,6 +209,12 @@ impl From<ContentDiagnosticCode> for DiagnosticCode {
 impl From<SyntaxDiagnosticCode> for DiagnosticCode {
     fn from(value: SyntaxDiagnosticCode) -> Self {
         Self::Syntax(value)
+    }
+}
+
+impl From<IdentityDiagnosticCode> for DiagnosticCode {
+    fn from(value: IdentityDiagnosticCode) -> Self {
+        Self::Identity(value)
     }
 }
 
@@ -441,6 +470,10 @@ mod tests {
                 "syntax.invalid_metadata",
                 "syntax.unclosed_item",
             ]
+        );
+        assert_eq!(
+            IdentityDiagnosticCode::ALL.map(IdentityDiagnosticCode::as_str),
+            ["identity.invalid_mid"]
         );
     }
 

@@ -6,13 +6,16 @@ use std::{
     rc::Rc,
 };
 
-use mara_core::{Diagnostic, Mid, MidIdentity, SourceDocument, SourceSpan, SyntaxDiagnosticCode};
+use mara_core::{
+    Diagnostic, IdentityDiagnosticCode, Mid, MidIdentity, MidParseError, SourceDocument,
+    SourceSpan, SyntaxDiagnosticCode,
+};
 use rushdown::{
     ast::{Arena, KindData, NodeKind, NodeRef, NodeType, PrettyPrint},
     context::{ContextKey, ContextKeyRegistry, UsizeValue},
     parser::{
-        self, AnyBlockParser, BlockParser, NoParserOptions, PRIORITY_FENCED_CODE_BLOCK, Parser,
-        ParserExtension, ParserExtensionFn,
+        self, AnyBlockParser, BlockParser, PRIORITY_FENCED_CODE_BLOCK, Parser, ParserExtension,
+        ParserExtensionFn, ParserOptions,
     },
     text::{self, BasicReader, Reader as _, Segment},
 };
@@ -157,7 +160,10 @@ impl ParsedMetadataEntry {
 /// Parses one complete source document through Rushdown and converts the
 /// adapter AST immediately into Mara-owned structural values.
 pub fn parse_document(source: SourceDocument, identity: &MidIdentity) -> ParsedDocument {
-    let parser = Parser::with_extensions(parser::Options::default(), mara_item_extension());
+    let parser = Parser::with_extensions(
+        parser::Options::default(),
+        mara_item_extension(identity.clone()),
+    );
     let mut reader = BasicReader::new(source.source().as_str());
     let (arena, document_ref) = parser.parse(&mut reader);
 
@@ -223,16 +229,27 @@ impl From<MaraItemBlockNode> for KindData {
 #[derive(Debug)]
 struct MaraItemBlockParser {
     item_depth: ContextKey<UsizeValue>,
+    identity: MidIdentity,
 }
 
 impl MaraItemBlockParser {
-    fn new(registry: Rc<RefCell<ContextKeyRegistry>>) -> Self {
+    fn new(options: MaraItemParserOptions, registry: Rc<RefCell<ContextKeyRegistry>>) -> Self {
         let item_depth = registry
             .borrow_mut()
             .get_or_create::<UsizeValue>(ITEM_DEPTH_CONTEXT);
-        Self { item_depth }
+        Self {
+            item_depth,
+            identity: options.identity,
+        }
     }
 }
+
+#[derive(Debug)]
+struct MaraItemParserOptions {
+    identity: MidIdentity,
+}
+
+impl ParserOptions for MaraItemParserOptions {}
 
 impl BlockParser for MaraItemBlockParser {
     fn trigger(&self) -> &[u8] {
@@ -250,7 +267,10 @@ impl BlockParser for MaraItemBlockParser {
             return None;
         }
         let segment = reader.peek_line_segment()?;
-        if !is_item_candidate(segment.bytes(reader.source()).as_ref()) {
+        if !is_item_candidate(
+            segment.bytes(reader.source()).as_ref(),
+            self.identity.prefix().value(),
+        ) {
             return None;
         }
 
@@ -285,7 +305,7 @@ impl BlockParser for MaraItemBlockParser {
             reader.advance_to_eol();
             return None;
         }
-        if is_item_candidate(line.as_ref()) {
+        if is_item_candidate(line.as_ref(), self.identity.prefix().value()) {
             rushdown::as_extension_data_mut!(arena, node_ref, MaraItemBlockNode)
                 .nested_openings
                 .push(line_content_index(segment, reader.source()));
@@ -314,11 +334,11 @@ impl From<MaraItemBlockParser> for AnyBlockParser {
     }
 }
 
-fn mara_item_extension() -> impl ParserExtension {
-    ParserExtensionFn::new(|parser: &mut Parser| {
+fn mara_item_extension(identity: MidIdentity) -> impl ParserExtension {
+    ParserExtensionFn::new(move |parser: &mut Parser| {
         parser.add_block_parser(
             MaraItemBlockParser::new,
-            NoParserOptions,
+            MaraItemParserOptions { identity },
             ITEM_PARSER_PRIORITY,
         );
     })
@@ -335,7 +355,7 @@ fn convert_item(
     let header_span = span(document, header_index.start(), header_index.stop());
     let (flavour, mid) = match parse_header(header_index.str(source), identity) {
         Ok(header) => header,
-        Err(reason) => {
+        Err(HeaderError::Syntax(reason)) => {
             diagnostics.push(
                 Diagnostic::new(
                     SyntaxDiagnosticCode::InvalidItemHeader,
@@ -343,6 +363,17 @@ fn convert_item(
                     Some(header_span),
                 )
                 .with_detail("reason", reason),
+            );
+            return None;
+        }
+        Err(HeaderError::InvalidMid(error)) => {
+            diagnostics.push(
+                Diagnostic::new(
+                    IdentityDiagnosticCode::InvalidMid,
+                    "item header contains an invalid MID",
+                    Some(header_span),
+                )
+                .with_detail("reason", error.to_string()),
             );
             return None;
         }
@@ -389,20 +420,30 @@ fn convert_item(
     })
 }
 
-fn parse_header(line: &str, identity: &MidIdentity) -> Result<(String, Mid), String> {
+#[derive(Debug)]
+enum HeaderError {
+    Syntax(&'static str),
+    InvalidMid(MidParseError),
+}
+
+fn parse_header(line: &str, identity: &MidIdentity) -> Result<(String, Mid), HeaderError> {
     let rest = line
         .strip_prefix(":::")
-        .ok_or_else(|| "missing opening marker".to_owned())?;
+        .ok_or(HeaderError::Syntax("missing opening marker"))?;
     let (flavour, mid_text) = rest
         .split_once(' ')
-        .ok_or_else(|| "missing MID token".to_owned())?;
+        .ok_or(HeaderError::Syntax("missing MID token"))?;
     if !valid_snake_name(flavour) {
-        return Err("flavour must be a lowercase ASCII snake name".to_owned());
+        return Err(HeaderError::Syntax(
+            "flavour must be a lowercase ASCII snake name",
+        ));
     }
     if mid_text.is_empty() || mid_text.bytes().any(|byte| byte.is_ascii_whitespace()) {
-        return Err("header must contain exactly one flavour and one MID token".to_owned());
+        return Err(HeaderError::Syntax(
+            "header must contain exactly one flavour and one MID token",
+        ));
     }
-    let mid = Mid::parse(mid_text, identity).map_err(|error| error.to_string())?;
+    let mid = Mid::parse(mid_text, identity).map_err(HeaderError::InvalidMid)?;
     Ok((flavour.to_owned(), mid))
 }
 
@@ -536,12 +577,36 @@ fn line_content_index(segment: Segment, source: &str) -> text::Index {
     text::Index::new(segment.start(), stop)
 }
 
-fn is_item_candidate(line: &[u8]) -> bool {
-    let line = without_line_ending(line);
-    line.len() > 3
-        && line.starts_with(b":::")
-        && line[3].is_ascii_lowercase()
-        && !line.starts_with(b"::::")
+fn is_item_candidate(line: &[u8], configured_prefix: &str) -> bool {
+    let Ok(line) = str::from_utf8(without_line_ending(line)) else {
+        return false;
+    };
+    let Some(rest) = line.strip_prefix(":::") else {
+        return false;
+    };
+    if rest.is_empty() || rest.starts_with(':') || rest.starts_with(char::is_whitespace) {
+        return false;
+    }
+
+    let mut tokens = rest.split_ascii_whitespace();
+    let Some(_flavour) = tokens.next() else {
+        return false;
+    };
+    let Some(mid) = tokens.next() else {
+        return false;
+    };
+    is_mid_shaped(mid, configured_prefix)
+}
+
+fn is_mid_shaped(token: &str, configured_prefix: &str) -> bool {
+    if token.starts_with(configured_prefix) {
+        return true;
+    }
+
+    let Some((prefix, encoded)) = token.split_once('_') else {
+        return false;
+    };
+    valid_name_segment(prefix, true) && encoded.chars().count() == 26
 }
 
 fn is_exact_closer(line: &[u8]) -> bool {

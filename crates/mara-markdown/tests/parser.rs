@@ -1,6 +1,6 @@
 use mara_core::{
-    DiagnosticCode, MidFormat, MidIdentity, SchemaField, SourceDocument, SourceIndex, SourceText,
-    SyntaxDiagnosticCode,
+    DiagnosticCode, IdentityDiagnosticCode, MidFormat, MidIdentity, SchemaField, SourceDocument,
+    SourceIndex, SourceText, SyntaxDiagnosticCode,
 };
 use mara_markdown::{ParsedBlock, parse_document};
 
@@ -81,7 +81,7 @@ fn valid_items_are_lossless_and_keep_structural_header_values_out_of_metadata() 
 
 #[test]
 fn malformed_headers_metadata_and_boundaries_have_stable_codes() {
-    let malformed_header = parse(":::req\n\n:::\n");
+    let malformed_header = parse(&format!(":::req {MID} trailing\n\n:::\n"));
     assert_eq!(malformed_header.items().count(), 0);
     assert_eq!(
         malformed_header.diagnostics()[0].code(),
@@ -118,6 +118,26 @@ fn malformed_headers_metadata_and_boundaries_have_stable_codes() {
 }
 
 #[test]
+fn malformed_mid_tokens_keep_the_identity_diagnostic_category() {
+    for mid in [
+        "x_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "m_01ARZ3NDEKTSV4RRFFQ69G5FAI",
+        "m_81ARZ3NDEKTSV4RRFFQ69G5FAV",
+    ] {
+        let source = format!(":::req {mid}\n\n:::\n");
+        let parsed = parse(&source);
+
+        assert_eq!(parsed.items().count(), 0);
+        assert_eq!(parsed.diagnostics().len(), 1);
+        assert_eq!(
+            parsed.diagnostics()[0].code(),
+            DiagnosticCode::Identity(IdentityDiagnosticCode::InvalidMid),
+            "{mid}"
+        );
+    }
+}
+
+#[test]
 fn nested_real_items_are_diagnosed_and_never_extracted() {
     let source = format!(":::req {MID}\n\nouter\n:::test {MID}\ninner\n:::\n:::\n");
     let parsed = parse(&source);
@@ -138,7 +158,7 @@ fn nested_real_items_are_diagnosed_and_never_extracted() {
 #[test]
 fn ordinary_markdown_and_mara_like_code_are_preserved_intact() {
     let source = format!(
-        "# Ordinary\n\n::: note\nnot a Mara item\n:::\n\n```markdown\n:::req {MID}\n\n:::\n```\n\n<pre>\n:::req {MID}\n:::\n</pre>\n"
+        "# Ordinary\n\n:::note\nnot a Mara item\n:::\n\n:::warning Caution\nstill not a Mara item\n:::\n\n::: note\nnot a Mara item\n:::\n\n```markdown\n:::req {MID}\n\n:::\n```\n\n<pre>\n:::req {MID}\n:::\n</pre>\n"
     );
     let parsed = parse(&source);
 
