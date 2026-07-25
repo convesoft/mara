@@ -21,7 +21,8 @@ skill takes no parameters. Never infer a starting issue or narrow scope from
 conversation context.
 
 Never run implicitly. Explicit invocation authorizes only verified coordination-
-parent closure; all other access is read-only.
+parent acceptance-checklist reconciliation plus parent closure; all other access is
+read-only.
 
 When called by `$iterate-linear`, treat the exact nested invocation as explicit.
 Return the structured result to that active orchestrator as a nonterminal phase
@@ -30,14 +31,16 @@ the entire final response.
 
 ## Boundary
 
-Do not read Mara contracts to decide READY/CLARIFY/SPLIT, create or edit delivery
-issues, create blocker relations, edit repository files, mutate GitHub, or start
-implementation. `$assess-issue` owns readiness and verdict remediation after this
-skill returns a candidate.
+Do not read Mara contracts to decide READY/CLARIFY/SPLIT, create delivery issues,
+edit non-parent delivery content, create blocker relations, edit repository files,
+mutate GitHub, or start implementation. `$assess-issue` owns readiness and verdict
+remediation after this skill returns a candidate.
 
-The only permitted mutation is moving an explicit coordination parent to the team’s
+The only permitted mutations are checking an explicit coordination parent's
+evidence-backed aggregate acceptance criteria and moving that parent to the team's
 resolved completed status after every child, blocker, aggregate criterion, and
-required merge-evidence check passes.
+required merge-evidence check passes. Every description mutation must preserve all
+content except the exact authorized checkbox markers.
 
 ## Load every Linear issue
 
@@ -95,12 +98,15 @@ For every explicit coordination parent:
    evidence, or is impermissibly canceled.
 3. When all children are completed, verify every parent blocker, aggregate
    completion criterion, and required merge artifact.
-4. Immediately before writing, re-read the parent, every direct child, every
-   blocker, all dependency relations, aggregate completion signals, and required
-   merge evidence. If anything changed, abandon the write and recompute the graph.
-5. Resolve the team’s unique completed state, move the parent to it, and re-read the
-   result. Skip the write if already completed.
-6. Record every verified parent transition for the final result.
+4. Immediately before closure, re-read the parent, every child and blocker, all
+   dependency relations, aggregate criteria, and required merge evidence. Abandon
+   closure and recompute if anything changed.
+5. Idempotently check every verified aggregate acceptance criterion while preserving
+   all other description content, then re-read the parent.
+6. Resolve the team's unique completed state, move the parent to it, and re-read the
+   result. Skip the status write if already completed.
+7. Record every verified checklist reconciliation and parent transition for the
+   final result.
 
 If completion contract or evidence is ambiguous, return BLOCKED. Do not select the
 parent itself as implementation work.

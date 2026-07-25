@@ -94,7 +94,7 @@ Before editing:
 5. Read relevant Mara specifications, schemas, decisions, requirements, and tests.
 6. Inspect current Git and repository state.
 7. Inspect completed prerequisites and related PRs when relevant.
-8. Establish explicit acceptance criteria from authoritative sources.
+8. Build the acceptance evidence matrix defined below.
 9. Identify which Mara item IDs the issue addresses.
 10. Detect contradictions before implementation.
 
@@ -105,6 +105,24 @@ Authority rules:
 - GitHub owns PR, CI, review, and merge state.
 - If these sources conflict materially, stop and report the conflict to the control plane.
 - Do not silently choose whichever source is easier to implement.
+
+ACCEPTANCE EVIDENCE
+
+Number the Linear acceptance criteria `AC-1`, `AC-2`, and so on in source order.
+Maintain one row per criterion with its exact text, current result (`PENDING`,
+`PASS`, or `BLOCKED`), and concrete evidence.
+
+Use `PENDING` at `MERGE READY` only when the criterion explicitly requires a
+confirmed merge. Record the exact merge evidence the control plane must verify;
+every other criterion must be `PASS`.
+
+Checkbox state is a convenience projection, never evidence. Do not mark a row
+`PASS` because its Linear box is checked. Do not edit the issue checklist; the
+control plane owns that reconciliation after merge.
+
+Re-read the criteria before local independent review and again before `MERGE READY`.
+If their text or order changed, return `BLOCKED` so the control plane can reassess
+the issue.
 
 SCOPE
 
@@ -137,7 +155,8 @@ BRANCH AND COMMITS
 
 IMPLEMENTATION LOOP
 
-1. Translate acceptance criteria into observable behavior.
+1. Translate every acceptance evidence row into observable behavior and keep the
+   row current as implementation proceeds.
 2. Determine the smallest sufficient implementation surface.
 3. Follow AGENTS.md delegation requirements for discovery.
 4. Implement one coherent increment.
@@ -158,7 +177,9 @@ VALIDATION
 
 Before remote review:
 
-1. Build a validation matrix mapping changed behavior to validation commands.
+1. Build a validation matrix mapping every acceptance evidence row and changed
+   behavior to the lowest sufficient validation command or other authoritative
+   evidence.
 2. Run required formatting checks.
 3. Run required linting.
 4. Run relevant tests.
@@ -179,6 +200,13 @@ After implementation and validation, invoke:
 `$loop-code-review`
 
 Review the complete issue-scoped branch diff.
+
+When composing the loop's self-contained reviewer request, include the complete
+acceptance evidence matrix. Require the reviewer to check that every criterion is
+represented and backed by suitable evidence. Require `PASS` for every criterion
+that can be verified before merge; for an explicitly merge-dependent `PENDING` row,
+require the exact post-merge evidence to be named. Treat an omitted, unsupported, or
+incorrectly pending criterion as an actionable finding.
 
 Every local review pass is a strict snapshot lock:
 
@@ -223,6 +251,7 @@ The PR description must contain:
 - scope
 - non-goals
 - relevant Mara requirement and decision IDs
+- the complete acceptance evidence matrix
 - validation commands and outcomes
 - local independent-review result
 - residual risks, or `None`
@@ -240,6 +269,7 @@ PR: <URL>
 Branch: {{WORKER_BRANCH}}
 Commit: <SHA>
 Requirements covered: <IDs>
+Acceptance evidence: <AC IDs, results, and current-head evidence>
 Validation: <commands and outcomes>
 Local review: <result>
 Residual risks: <none or list>
@@ -255,6 +285,11 @@ Monitor:
 - review comments and threads
 - reactions from `chatgpt-codex-connector[bot]`
 - the current PR head SHA
+
+Whenever the PR head changes, mark prior implementation-dependent acceptance rows
+stale, re-run their required evidence against the replacement head, and update the
+PR description with the refreshed matrix. Do not carry a `PASS` or independent
+acceptance-review result across a head change.
 
 Ordinary CI, CodeQL, Dependency Review, or GitHub Advanced Security activity is
 not GitHub Codex review evidence.
@@ -357,7 +392,13 @@ Do not report merge readiness until:
 - final local validation passes
 - final local independent review passes
 - PR description is complete
-- issue acceptance criteria are satisfied
+- the Linear acceptance criteria have been re-read and their text and order still
+  match the matrix
+- every acceptance criterion appears exactly once in the evidence matrix
+- every acceptance row is `PASS` with sufficient evidence, except an explicitly
+  merge-dependent row may be `PENDING` with its required post-merge evidence named
+- the final independent reviewer evaluated the complete acceptance matrix and has
+  no actionable acceptance finding
 - no known blocker remains
 
 Then report:
@@ -368,6 +409,11 @@ PR: <URL>
 Branch: {{WORKER_BRANCH}}
 Final commit: <SHA>
 Requirements covered: <IDs>
+Acceptance evidence:
+  AC-1: <verbatim criterion without checkbox marker>
+    Result: <PASS, or PENDING only when merge-dependent>
+    Evidence: <command/result, source evidence, or immutable URI>
+  <repeat for every criterion>
 CI: <checks and outcomes>
 GitHub Codex review: <review identification or URL>
 Other review threads: <result>
