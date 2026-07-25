@@ -344,6 +344,33 @@ fn configured_index_destination_cannot_also_be_selected_content() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn write_only_index_alias_is_diagnosed_before_content_open() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], false, false, false);
+    fixture.write("index.mara.md", "derived output");
+    let config = fs::read_to_string(fixture.root.join(".mara/project.toml"))
+        .unwrap()
+        .replace(".mara/index.json", "index.mara.md");
+    fs::write(fixture.root.join(".mara/project.toml"), config).unwrap();
+    fs::set_permissions(
+        fixture.root.join("index.mara.md"),
+        fs::Permissions::from_mode(0o200),
+    )
+    .unwrap();
+
+    let discovery = discover_content(&fixture.load());
+
+    assert!(discovery.documents().is_empty());
+    assert_eq!(discovery.diagnostics().len(), 1);
+    assert_eq!(
+        discovery.diagnostics()[0].code(),
+        DiagnosticCode::Project(ProjectDiagnosticCode::DuplicateFile)
+    );
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn internal_file_symlinks_follow_explicit_policy() {

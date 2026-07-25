@@ -61,7 +61,7 @@ struct OpenedCandidate {
 
 #[derive(Debug)]
 struct RejectedDirectorySymlink {
-    source_path: String,
+    source_path: Option<String>,
     reason: &'static str,
 }
 
@@ -149,14 +149,7 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
         .into_inner()
         .expect("the directory rejection lock is not poisoned");
     for rejected in rejected_directories {
-        diagnostics.push(
-            diagnostic_at_start(
-                ProjectDiagnosticCode::SymlinkRejected,
-                &rejected.source_path,
-                "content directory symlink was rejected",
-            )
-            .with_detail("reason", rejected.reason),
-        );
+        diagnostics.push(rejected_directory_diagnostic(rejected));
     }
 
     candidates.sort_by(|left, right| left.source_path.cmp(&right.source_path));
@@ -165,22 +158,16 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
     let mut selected_paths = HashMap::<PathBuf, String>::new();
     let index_identity = opened_file_identity(&project.index_path);
     for candidate in candidates {
+        if fs::canonicalize(&candidate.logical_path).is_ok_and(|path| path == project.index_path) {
+            diagnostics.push(index_alias_diagnostic(project, &candidate));
+            continue;
+        }
         match open_candidate(project, &candidate) {
             Ok(opened) => {
                 let aliases_index = opened.resolved_path == project.index_path
                     || matches!((opened.identity, index_identity), (Some(left), Some(right)) if left == right);
                 if aliases_index {
-                    let index_path = normalized_relative_path(&project.root, &project.index_path)
-                        .unwrap_or_else(|| "<configured-index>".to_owned());
-                    diagnostics.push(
-                        diagnostic_at_start(
-                            ProjectDiagnosticCode::DuplicateFile,
-                            &candidate.source_path,
-                            "selected content path aliases the configured index destination",
-                        )
-                        .with_detail("first_path", index_path)
-                        .with_detail("path", candidate.source_path.clone()),
-                    );
+                    diagnostics.push(index_alias_diagnostic(project, &candidate));
                     continue;
                 }
                 let duplicate = opened
@@ -288,14 +275,30 @@ fn record_rejected_directory(
     path: &Path,
     reason: &'static str,
 ) {
-    if let Some(source_path) = normalized_relative_path(root, path) {
-        rejected
-            .lock()
-            .expect("the directory rejection lock is not poisoned")
-            .push(RejectedDirectorySymlink {
-                source_path,
-                reason,
-            });
+    rejected
+        .lock()
+        .expect("the directory rejection lock is not poisoned")
+        .push(RejectedDirectorySymlink {
+            source_path: normalized_relative_path(root, path),
+            reason,
+        });
+}
+
+fn rejected_directory_diagnostic(rejected: RejectedDirectorySymlink) -> Diagnostic {
+    match rejected.source_path {
+        Some(source_path) => diagnostic_at_start(
+            ProjectDiagnosticCode::SymlinkRejected,
+            &source_path,
+            "content directory symlink was rejected",
+        )
+        .with_detail("reason", rejected.reason),
+        None => Diagnostic::new(
+            ProjectDiagnosticCode::SymlinkRejected,
+            "content directory symlink with a non-UTF-8 path was rejected",
+            None,
+        )
+        .with_detail("path_reason", "non_utf8_path")
+        .with_detail("reason", rejected.reason),
     }
 }
 
@@ -356,7 +359,7 @@ fn wax_expression(pattern: &str) -> String {
             continue;
         }
         let character = characters[index];
-        if matches!(character, '$' | '(' | ')' | '<' | '>' | ',') {
+        if matches!(character, '$' | '(' | ')' | '<' | '>' | ',' | ':') {
             expression.push('\\');
         }
         expression.push(character);
@@ -385,6 +388,18 @@ fn candidate_source_path(root: &Path, path: &Path) -> Result<String, Box<Diagnos
             .with_detail("reason", "non_utf8_path"),
         )
     })
+}
+
+fn index_alias_diagnostic(project: &LoadedProject, candidate: &Candidate) -> Diagnostic {
+    let index_path = normalized_relative_path(&project.root, &project.index_path)
+        .unwrap_or_else(|| "<configured-index>".to_owned());
+    diagnostic_at_start(
+        ProjectDiagnosticCode::DuplicateFile,
+        &candidate.source_path,
+        "selected content path aliases the configured index destination",
+    )
+    .with_detail("first_path", index_path)
+    .with_detail("path", candidate.source_path.clone())
 }
 
 fn open_candidate(
@@ -746,5 +761,29 @@ mod tests {
         finalize_diagnostics(&mut diagnostics);
 
         assert_eq!(diagnostics.len(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_directory_rejections_retain_failure_evidence() {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let root = Path::new("/project");
+        let path = root.join(OsString::from_vec(b"invalid-\xff".to_vec()));
+        let rejected = Mutex::new(Vec::new());
+        record_rejected_directory(&rejected, root, &path, "target could not be resolved");
+        let [rejected] = rejected.into_inner().unwrap().try_into().unwrap();
+
+        let diagnostic = rejected_directory_diagnostic(rejected);
+
+        assert_eq!(
+            diagnostic.code(),
+            mara_core::DiagnosticCode::Project(ProjectDiagnosticCode::SymlinkRejected)
+        );
+        assert!(diagnostic.primary().is_none());
+        assert_eq!(
+            diagnostic.details().get("path_reason"),
+            Some(&mara_core::DiagnosticValue::from("non_utf8_path"))
+        );
     }
 }
