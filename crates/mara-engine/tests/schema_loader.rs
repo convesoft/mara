@@ -2,7 +2,7 @@ use std::{fs, path::Path};
 
 use mara_core::{
     CardinalityMaximum, DerivedSourceKind, Diagnostic, DiagnosticCode, DiagnosticValue, FieldType,
-    Mid, MidFormat, SchemaDiagnosticCode,
+    Mid, MidFormat, SchemaDiagnosticCode, SchemaField,
 };
 use mara_engine::{
     project::{LoadedProject, load_from_root},
@@ -209,6 +209,11 @@ fn assert_invalid(schema: impl AsRef<[u8]>, code: SchemaDiagnosticCode) -> Schem
 
 fn source_slice<'a>(source: &'a str, span: &mara_core::SourceSpan) -> &'a str {
     &source[span.start_byte() as usize..span.end_byte() as usize]
+}
+
+fn assert_field_source<T>(source: &str, field: &SchemaField<T>, key: &str, value: &str) {
+    assert_eq!(source_slice(source, field.key_source()), key);
+    assert_eq!(source_slice(source, field.value_source()), value);
 }
 
 fn detail_string<'a>(diagnostic: &'a Diagnostic, key: &str) -> Option<&'a str> {
@@ -509,6 +514,9 @@ fn compiles_relation_endpoints_constraints_cardinality_and_external_allowlist_de
     assert_eq!(first.relations(), second.relations());
     let relations = first.relations().unwrap();
     assert_eq!(source_slice(&source, relations.key_source()), "relations");
+    let relations_source = source_slice(&source, relations.value_source());
+    assert!(relations_source.starts_with("derives_from:\n"));
+    assert!(relations_source.ends_with("    acyclic: true\n"));
     assert_eq!(relations.len(), 3);
     assert_eq!(
         relations
@@ -533,6 +541,21 @@ fn compiles_relation_endpoints_constraints_cardinality_and_external_allowlist_de
         source_slice(&source, derives_from.key_source()),
         "derives_from"
     );
+    let relation_source = source_slice(&source, derives_from.value_source());
+    assert!(relation_source.starts_with("source:\n"));
+    assert!(relation_source.ends_with("        max: 3\n  "));
+    assert_field_source(
+        &source,
+        derives_from.source(),
+        "source",
+        "flavours: [design]\n      derived: [source_span]\n    ",
+    );
+    assert_field_source(
+        &source,
+        derives_from.source().value().flavours(),
+        "flavours",
+        "[design]",
+    );
     assert_eq!(
         derives_from
             .source()
@@ -544,7 +567,15 @@ fn compiles_relation_endpoints_constraints_cardinality_and_external_allowlist_de
             .collect::<Vec<_>>(),
         ["design"]
     );
+    assert_eq!(
+        source_slice(
+            &source,
+            derives_from.source().value().flavours().value()[0].source()
+        ),
+        "design"
+    );
     let derived = derives_from.source().value().derived().unwrap();
+    assert_field_source(&source, derived, "derived", "[source_span]");
     assert_eq!(derived.value().len(), 1);
     assert_eq!(*derived.value()[0].value(), DerivedSourceKind::SourceSpan);
     assert_eq!(
@@ -552,6 +583,24 @@ fn compiles_relation_endpoints_constraints_cardinality_and_external_allowlist_de
         "source_span"
     );
     let target = derives_from.target().value();
+    assert_field_source(
+        &source,
+        derives_from.target(),
+        "target",
+        "flavours: [requirement]\n      external: [https, linear+v1]\n    ",
+    );
+    assert_field_source(
+        &source,
+        target.flavours().unwrap(),
+        "flavours",
+        "[requirement]",
+    );
+    assert_field_source(
+        &source,
+        target.external().unwrap(),
+        "external",
+        "[https, linear+v1]",
+    );
     assert_eq!(
         target
             .flavours()
@@ -563,6 +612,10 @@ fn compiles_relation_endpoints_constraints_cardinality_and_external_allowlist_de
         ["requirement"]
     );
     assert_eq!(
+        source_slice(&source, target.flavours().unwrap().value()[0].source()),
+        "requirement"
+    );
+    assert_eq!(
         target
             .external()
             .unwrap()
@@ -572,7 +625,41 @@ fn compiles_relation_endpoints_constraints_cardinality_and_external_allowlist_de
             .collect::<Vec<_>>(),
         ["https", "linear+v1"]
     );
+    assert_eq!(
+        target
+            .external()
+            .unwrap()
+            .value()
+            .iter()
+            .map(|value| source_slice(&source, value.source()))
+            .collect::<Vec<_>>(),
+        ["https", "linear+v1"]
+    );
     assert_eq!(derives_from.inverse().unwrap().value(), "derived_by");
+    assert_field_source(
+        &source,
+        derives_from.inverse().unwrap(),
+        "inverse",
+        "derived_by",
+    );
+    assert_field_source(
+        &source,
+        derives_from.inverse_authoring().unwrap(),
+        "inverse_authoring",
+        "true",
+    );
+    assert_field_source(
+        &source,
+        derives_from.symmetric().unwrap(),
+        "symmetric",
+        "false",
+    );
+    assert_field_source(
+        &source,
+        derives_from.self_reference().unwrap(),
+        "self_reference",
+        "false",
+    );
     assert!(derives_from.permits_inverse_authoring());
     assert!(!derives_from.is_symmetric());
     assert!(!derives_from.requires_same_flavour());
@@ -580,16 +667,41 @@ fn compiles_relation_endpoints_constraints_cardinality_and_external_allowlist_de
     assert!(!derives_from.is_acyclic());
 
     let cardinality = derives_from.cardinality().unwrap().value();
+    assert_field_source(
+        &source,
+        derives_from.cardinality().unwrap(),
+        "cardinality",
+        concat!(
+            "outgoing:\n",
+            "        min: 1\n",
+            "        max: many\n",
+            "      incoming:\n",
+            "        min: 0\n",
+            "        max: 3\n  ",
+        ),
+    );
     let outgoing = cardinality.outgoing().unwrap().value();
+    assert_field_source(
+        &source,
+        cardinality.outgoing().unwrap(),
+        "outgoing",
+        "min: 1\n        max: many\n      ",
+    );
     assert_eq!(outgoing.minimum(), 1);
     assert_eq!(outgoing.maximum(), CardinalityMaximum::Many);
-    assert_eq!(
-        source_slice(&source, outgoing.min().unwrap().value_source()),
-        "1"
-    );
+    assert_field_source(&source, outgoing.min().unwrap(), "min", "1");
+    assert_field_source(&source, outgoing.max().unwrap(), "max", "many");
     let incoming = cardinality.incoming().unwrap().value();
+    assert_field_source(
+        &source,
+        cardinality.incoming().unwrap(),
+        "incoming",
+        "min: 0\n        max: 3\n  ",
+    );
     assert_eq!(incoming.minimum(), 0);
     assert_eq!(incoming.maximum(), CardinalityMaximum::Bounded(3));
+    assert_field_source(&source, incoming.min().unwrap(), "min", "0");
+    assert_field_source(&source, incoming.max().unwrap(), "max", "3");
 
     let related_to = relations.get("related_to").unwrap();
     assert!(related_to.is_symmetric());
@@ -598,6 +710,13 @@ fn compiles_relation_endpoints_constraints_cardinality_and_external_allowlist_de
     assert!(related_to.is_acyclic());
     assert!(related_to.inverse().is_none());
     assert!(related_to.cardinality().is_none());
+    assert_field_source(
+        &source,
+        related_to.same_flavour().unwrap(),
+        "same_flavour",
+        "true",
+    );
+    assert_field_source(&source, related_to.acyclic().unwrap(), "acyclic", "true");
 
     let references = relations.get("references").unwrap();
     assert!(references.target().value().flavours().is_none());
@@ -893,6 +1012,55 @@ fn enforces_each_flavour_authoring_namespace_collision_class() {
     let fixture = Fixture::new(scoped);
     let schema = load_schema(&fixture.loaded_project()).unwrap();
     assert!(schema.relations().unwrap().get("status").is_some());
+}
+
+#[test]
+fn reports_relation_diagnostics_independently_of_other_declaration_failures() {
+    let endpoint_source = rich_schema_with_relations(
+        r#"  relation:
+    source: {flavours: [missing]}
+    target: {flavours: [requirement]}
+"#,
+    )
+    .replacen("label: Requirement", "label: ''", 1);
+    let fixture = Fixture::new(&endpoint_source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+    assert_eq!(
+        error
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| source_slice(&endpoint_source, diagnostic.primary().unwrap()))
+            .collect::<Vec<_>>(),
+        ["''", "missing"]
+    );
+
+    let namespace_source = rich_schema_with_relations(
+        r#"  status:
+    source: {flavours: [requirement]}
+    target: {flavours: [design]}
+    cardinality:
+      outgoing: {min: -1}
+"#,
+    );
+    let fixture = Fixture::new(&namespace_source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+    assert_eq!(error.diagnostics().len(), 2, "{:#?}", error.diagnostics());
+    assert_eq!(
+        error
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| source_slice(&namespace_source, diagnostic.primary().unwrap()))
+            .collect::<Vec<_>>(),
+        ["status", "-1"]
+    );
+    assert_eq!(
+        error
+            .diagnostics()
+            .iter()
+            .filter_map(|diagnostic| detail_string(diagnostic, "collision"))
+            .collect::<Vec<_>>(),
+        ["field"]
+    );
 }
 
 #[test]

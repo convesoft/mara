@@ -1396,6 +1396,8 @@ fn decode_v1_document(
             .map(|decoded| field(source_map, key, value, decoded))
     });
 
+    let flavour_namespaces = optional_entry(entries, "flavours")
+        .and_then(|(_, value)| FlavourNamespaces::from_node(value, source_map));
     let flavours = collect_decode(
         required_entry(entries, "flavours", "root", source_map, *root_span),
         &mut diagnostics,
@@ -1406,7 +1408,7 @@ fn decode_v1_document(
 
     let relations = if let Some((key, value)) = optional_entry(entries, "relations") {
         collect_compilation(
-            decode_relations(key, value, flavours.as_ref(), source_map),
+            decode_relations(key, value, flavour_namespaces.as_ref(), source_map),
             &mut diagnostics,
         )
     } else {
@@ -1695,15 +1697,62 @@ fn decode_flavours(
     ))
 }
 
+struct FlavourNamespace {
+    fields: BTreeMap<String, SourceSpan>,
+}
+
+struct FlavourNamespaces {
+    definitions: BTreeMap<String, FlavourNamespace>,
+}
+
+impl FlavourNamespaces {
+    fn from_node(node: &ParsedNode, source_map: &SourceMap<'_>) -> Option<Self> {
+        let ParsedNode::Mapping { entries, .. } = node else {
+            return None;
+        };
+        let mut definitions = BTreeMap::new();
+        for (name_node, definition_node) in entries {
+            let (name, _) = string_key(name_node).expect("profile validation requires string keys");
+            if !valid_snake_name(name) {
+                continue;
+            }
+            let mut fields = BTreeMap::new();
+            if let ParsedNode::Mapping { entries, .. } = definition_node
+                && let Some((_, ParsedNode::Mapping { entries, .. })) =
+                    optional_entry(entries, "fields")
+            {
+                for (field_node, _) in entries {
+                    let (field, _) =
+                        string_key(field_node).expect("profile validation requires string keys");
+                    fields.insert(field.to_owned(), parser_span(source_map, field_node.span()));
+                }
+            }
+            definitions.insert(name.to_owned(), FlavourNamespace { fields });
+        }
+        Some(Self { definitions })
+    }
+
+    fn contains(&self, name: &str) -> bool {
+        self.definitions.contains_key(name)
+    }
+
+    fn field(&self, flavour: &str, name: &str) -> Option<&SourceSpan> {
+        self.definitions
+            .get(flavour)
+            .and_then(|namespace| namespace.fields.get(name))
+    }
+}
+
 fn decode_relations(
     key: &ParsedNode,
     node: &ParsedNode,
-    flavours: Option<&FlavourDefinitions>,
+    flavour_namespaces: Option<&FlavourNamespaces>,
     source_map: &SourceMap<'_>,
 ) -> CompilationResult<RelationDefinitions> {
     let entries = expect_mapping(node, "root.relations", source_map)
         .map_err(|diagnostic| vec![*diagnostic])?;
     let mut definitions = BTreeMap::new();
+    let mut authoring_names = Vec::new();
     let mut diagnostics = Vec::new();
 
     for (name_node, definition_node) in entries {
@@ -1741,8 +1790,24 @@ fn decode_relations(
             name_valid = false;
         }
 
+        if let Some(flavour_namespaces) = flavour_namespaces {
+            authoring_names.extend(relation_authoring_names(
+                name,
+                name_node,
+                definition_node,
+                flavour_namespaces,
+                source_map,
+            ));
+        }
+
         let definition = collect_compilation(
-            decode_relation(name, name_node, definition_node, flavours, source_map),
+            decode_relation(
+                name,
+                name_node,
+                definition_node,
+                flavour_namespaces,
+                source_map,
+            ),
             &mut diagnostics,
         );
         if name_valid && let Some(definition) = definition {
@@ -1750,8 +1815,11 @@ fn decode_relations(
         }
     }
 
-    if let Some(flavours) = flavours {
-        diagnostics.extend(validate_authoring_namespaces(&definitions, flavours));
+    if let Some(flavour_namespaces) = flavour_namespaces {
+        diagnostics.extend(validate_authoring_namespaces(
+            authoring_names,
+            flavour_namespaces,
+        ));
     }
     if !diagnostics.is_empty() {
         return Err(diagnostics);
@@ -1768,7 +1836,7 @@ fn decode_relation(
     name: &str,
     name_node: &ParsedNode,
     node: &ParsedNode,
-    flavours: Option<&FlavourDefinitions>,
+    flavour_namespaces: Option<&FlavourNamespaces>,
     source_map: &SourceMap<'_>,
 ) -> CompilationResult<RelationDefinition> {
     let mapping = format!("relations.{name}");
@@ -1782,7 +1850,7 @@ fn decode_relation(
     )
     .and_then(|(key, value)| {
         collect_compilation(
-            decode_relation_source(name, value, flavours, source_map),
+            decode_relation_source(name, value, flavour_namespaces, source_map),
             &mut diagnostics,
         )
         .map(|decoded| field(source_map, key, value, decoded))
@@ -1793,7 +1861,7 @@ fn decode_relation(
     )
     .and_then(|(key, value)| {
         collect_compilation(
-            decode_relation_target(name, value, flavours, source_map),
+            decode_relation_target(name, value, flavour_namespaces, source_map),
             &mut diagnostics,
         )
         .map(|decoded| field(source_map, key, value, decoded))
@@ -1981,7 +2049,7 @@ fn decode_relation(
 fn decode_relation_source(
     relation: &str,
     node: &ParsedNode,
-    flavours: Option<&FlavourDefinitions>,
+    flavour_namespaces: Option<&FlavourNamespaces>,
     source_map: &SourceMap<'_>,
 ) -> CompilationResult<RelationSourceEndpoint> {
     let mapping = format!("relations.{relation}.source");
@@ -1995,7 +2063,12 @@ fn decode_relation_source(
     )
     .and_then(|(key, value)| {
         collect_compilation(
-            decode_relation_flavour_sequence(value, &flavours_field, flavours, source_map),
+            decode_relation_flavour_sequence(
+                value,
+                &flavours_field,
+                flavour_namespaces,
+                source_map,
+            ),
             &mut diagnostics,
         )
         .map(|decoded| field(source_map, key, value, decoded))
@@ -2019,7 +2092,7 @@ fn decode_relation_source(
 fn decode_relation_target(
     relation: &str,
     node: &ParsedNode,
-    flavours: Option<&FlavourDefinitions>,
+    flavour_namespaces: Option<&FlavourNamespaces>,
     source_map: &SourceMap<'_>,
 ) -> CompilationResult<RelationTargetEndpoint> {
     let mapping = format!("relations.{relation}.target");
@@ -2041,7 +2114,7 @@ fn decode_relation_target(
             decode_relation_flavour_sequence(
                 value,
                 &format!("{mapping}.flavours"),
-                flavours,
+                flavour_namespaces,
                 source_map,
             ),
             &mut diagnostics,
@@ -2064,7 +2137,7 @@ fn decode_relation_target(
 fn decode_relation_flavour_sequence(
     node: &ParsedNode,
     field_name: &str,
-    flavours: Option<&FlavourDefinitions>,
+    flavour_namespaces: Option<&FlavourNamespaces>,
     source_map: &SourceMap<'_>,
 ) -> CompilationResult<Vec<SchemaValue<String>>> {
     let values =
@@ -2096,7 +2169,7 @@ fn decode_relation_flavour_sequence(
             ));
             continue;
         }
-        if flavours.is_some_and(|flavours| flavours.get(value).is_none()) {
+        if flavour_namespaces.is_some_and(|namespaces| !namespaces.contains(value)) {
             diagnostics.push(
                 invalid_declaration(
                     format!("endpoint flavour {value:?} is not declared by this schema"),
@@ -2366,116 +2439,174 @@ fn reserved_authoring_name_kind(name: &str) -> Option<ReservedAuthoringNameKind>
 
 #[derive(Clone)]
 struct AuthoringName {
+    flavour: String,
+    name: String,
     relation: String,
     kind: &'static str,
     source: SourceSpan,
 }
 
+fn relation_authoring_names(
+    relation: &str,
+    relation_node: &ParsedNode,
+    node: &ParsedNode,
+    flavour_namespaces: &FlavourNamespaces,
+    source_map: &SourceMap<'_>,
+) -> Vec<AuthoringName> {
+    if !valid_snake_name(relation) || reserved_authoring_name_kind(relation).is_some() {
+        return Vec::new();
+    }
+    let ParsedNode::Mapping { entries, .. } = node else {
+        return Vec::new();
+    };
+    let mut names = relation_endpoint_flavours(entries, "source", flavour_namespaces)
+        .into_iter()
+        .map(|flavour| AuthoringName {
+            flavour,
+            name: relation.to_owned(),
+            relation: relation.to_owned(),
+            kind: "canonical",
+            source: parser_span(source_map, relation_node.span()),
+        })
+        .collect::<Vec<_>>();
+
+    let inverse_authoring_enabled = optional_entry(entries, "inverse_authoring")
+        .and_then(|(_, value)| parsed_boolean(value))
+        .unwrap_or(false);
+    if inverse_authoring_enabled
+        && let Some((_, inverse_node)) = optional_entry(entries, "inverse")
+        && let Some(inverse) = parsed_string(inverse_node)
+        && valid_snake_name(inverse)
+        && reserved_authoring_name_kind(inverse).is_none()
+    {
+        names.extend(
+            relation_endpoint_flavours(entries, "target", flavour_namespaces)
+                .into_iter()
+                .map(|flavour| AuthoringName {
+                    flavour,
+                    name: inverse.to_owned(),
+                    relation: relation.to_owned(),
+                    kind: "inverse",
+                    source: parser_span(source_map, inverse_node.span()),
+                }),
+        );
+    }
+    names
+}
+
+fn relation_endpoint_flavours(
+    relation_entries: &[(ParsedNode, ParsedNode)],
+    endpoint: &str,
+    flavour_namespaces: &FlavourNamespaces,
+) -> BTreeSet<String> {
+    let Some((_, ParsedNode::Mapping { entries, .. })) = optional_entry(relation_entries, endpoint)
+    else {
+        return BTreeSet::new();
+    };
+    let Some((_, ParsedNode::Sequence { values, .. })) = optional_entry(entries, "flavours") else {
+        return BTreeSet::new();
+    };
+    values
+        .iter()
+        .filter_map(parsed_string)
+        .filter(|flavour| valid_snake_name(flavour) && flavour_namespaces.contains(flavour))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn parsed_string(node: &ParsedNode) -> Option<&str> {
+    let ParsedNode::Scalar {
+        value, style, tag, ..
+    } = node
+    else {
+        return None;
+    };
+    (resolve_scalar(value, *style, tag.as_ref()).ok() == Some(ScalarKind::String))
+        .then_some(value)
+        .map(String::as_str)
+}
+
+fn parsed_boolean(node: &ParsedNode) -> Option<bool> {
+    let ParsedNode::Scalar {
+        value, style, tag, ..
+    } = node
+    else {
+        return None;
+    };
+    (resolve_scalar(value, *style, tag.as_ref()).ok() == Some(ScalarKind::Boolean))
+        .then_some(matches!(value.as_str(), "true" | "True" | "TRUE"))
+}
+
 fn validate_authoring_namespaces(
-    definitions: &BTreeMap<String, RelationDefinition>,
-    flavours: &FlavourDefinitions,
+    mut names: Vec<AuthoringName>,
+    flavour_namespaces: &FlavourNamespaces,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut occupied = BTreeMap::<(String, String), AuthoringName>::new();
-
-    for definition in definitions.values() {
-        let canonical = AuthoringName {
-            relation: definition.name().to_owned(),
-            kind: "canonical",
-            source: definition.key_source().clone(),
-        };
-        let source_flavours = definition
-            .source()
-            .value()
-            .flavours()
-            .value()
-            .iter()
-            .map(|flavour| flavour.value().clone())
-            .collect::<BTreeSet<_>>();
-        for flavour in source_flavours {
-            validate_authoring_name(
-                &flavour,
-                definition.name(),
-                canonical.clone(),
-                flavours,
-                &mut occupied,
-                &mut diagnostics,
-            );
-        }
-
-        if definition.permits_inverse_authoring()
-            && let Some(inverse) = definition.inverse()
-            && let Some(target_flavours) = definition.target().value().flavours()
-        {
-            let inverse_name = AuthoringName {
-                relation: definition.name().to_owned(),
-                kind: "inverse",
-                source: inverse.value_source().clone(),
-            };
-            let target_flavours = target_flavours
-                .value()
-                .iter()
-                .map(|flavour| flavour.value().clone())
-                .collect::<BTreeSet<_>>();
-            for flavour in target_flavours {
-                validate_authoring_name(
-                    &flavour,
-                    inverse.value(),
-                    inverse_name.clone(),
-                    flavours,
-                    &mut occupied,
-                    &mut diagnostics,
-                );
-            }
-        }
+    names.sort_by(|left, right| {
+        (&left.flavour, &left.name, &left.relation, left.kind).cmp(&(
+            &right.flavour,
+            &right.name,
+            &right.relation,
+            right.kind,
+        ))
+    });
+    names.dedup_by(|left, right| {
+        left.flavour == right.flavour
+            && left.name == right.name
+            && left.relation == right.relation
+            && left.kind == right.kind
+    });
+    for candidate in names {
+        validate_authoring_name(
+            candidate,
+            flavour_namespaces,
+            &mut occupied,
+            &mut diagnostics,
+        );
     }
     diagnostics
 }
 
 fn validate_authoring_name(
-    flavour_name: &str,
-    name: &str,
     candidate: AuthoringName,
-    flavours: &FlavourDefinitions,
+    flavour_namespaces: &FlavourNamespaces,
     occupied: &mut BTreeMap<(String, String), AuthoringName>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let flavour = flavours
-        .get(flavour_name)
-        .expect("endpoint validation retained only declared flavours");
-    if let Some(field) = flavour.fields().get(name) {
+    if let Some(field_source) = flavour_namespaces.field(&candidate.flavour, &candidate.name) {
         diagnostics.push(
             Diagnostic::new(
                 SchemaDiagnosticCode::InvalidDeclaration,
                 format!(
-                    "{} relation authoring name {name:?} collides with a field on flavour {flavour_name:?}",
-                    candidate.kind
+                    "{} relation authoring name {:?} collides with a field on flavour {:?}",
+                    candidate.kind, candidate.name, candidate.flavour
                 ),
                 Some(candidate.source.clone()),
             )
             .with_related(RelatedDiagnostic::new(
                 "conflicting field is declared here",
-                field.key_source().clone(),
+                field_source.clone(),
             ))
             .with_context(DiagnosticContext::new(
                 None,
                 Some(candidate.relation.clone()),
-                Some(flavour_name.to_owned()),
+                Some(candidate.flavour.clone()),
             ))
             .with_detail("collision", "field")
-            .with_detail("flavour", flavour_name.to_owned())
-            .with_detail("name", name.to_owned()),
+            .with_detail("flavour", candidate.flavour.clone())
+            .with_detail("name", candidate.name.clone()),
         );
     }
 
-    let key = (flavour_name.to_owned(), name.to_owned());
+    let key = (candidate.flavour.clone(), candidate.name.clone());
     if let Some(first) = occupied.get(&key) {
         diagnostics.push(
             Diagnostic::new(
                 SchemaDiagnosticCode::InvalidDeclaration,
                 format!(
-                    "{} relation authoring name {name:?} collides with another authorable relation on flavour {flavour_name:?}",
-                    candidate.kind
+                    "{} relation authoring name {:?} collides with another authorable relation on flavour {:?}",
+                    candidate.kind, candidate.name, candidate.flavour
                 ),
                 Some(candidate.source),
             )
@@ -2486,12 +2617,12 @@ fn validate_authoring_name(
             .with_context(DiagnosticContext::new(
                 None,
                 Some(candidate.relation.clone()),
-                Some(flavour_name.to_owned()),
+                Some(candidate.flavour.clone()),
             ))
             .with_detail("collision", first.kind)
             .with_detail("first_relation", first.relation.clone())
-            .with_detail("flavour", flavour_name.to_owned())
-            .with_detail("name", name.to_owned()),
+            .with_detail("flavour", candidate.flavour.clone())
+            .with_detail("name", candidate.name.clone()),
         );
     } else {
         occupied.insert(key, candidate);
