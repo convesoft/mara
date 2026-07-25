@@ -80,8 +80,9 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
             Ok(entry) => entry,
             Err(error) => {
                 for error in walk_error_parts(&error) {
-                    let source_path = walk_error_path(error)
-                        .and_then(|path| normalized_relative_path(&project.root, path));
+                    let error_path = walk_error_path(error);
+                    let source_path =
+                        error_path.and_then(|path| normalized_relative_path(&project.root, path));
                     if source_path
                         .as_deref()
                         .is_some_and(|path| is_fully_excluded_tree(&project.content.exclude, path))
@@ -90,7 +91,7 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                     }
                     let is_loop = is_walk_loop(error);
                     if !is_loop
-                        && walk_error_path(error).is_some_and(|path| {
+                        && error_path.is_some_and(|path| {
                             fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
                         })
                         && source_path
@@ -99,21 +100,27 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                     {
                         continue;
                     }
-                    let source_path =
-                        source_path.unwrap_or_else(|| ".mara/project.toml".to_owned());
                     let reason = if is_loop {
                         "directory_cycle"
                     } else {
                         "walk_error"
                     };
-                    diagnostics.push(
-                        diagnostic_at_start(
+                    let diagnostic = match source_path {
+                        Some(source_path) => diagnostic_at_start(
                             ContentDiagnosticCode::Io,
                             &source_path,
                             "could not inspect a configured content path",
-                        )
-                        .with_detail("operation", "discover")
-                        .with_detail("reason", reason),
+                        ),
+                        None => Diagnostic::new(
+                            ContentDiagnosticCode::Io,
+                            "could not inspect a configured content path",
+                            None,
+                        ),
+                    };
+                    diagnostics.push(
+                        diagnostic
+                            .with_detail("operation", "discover")
+                            .with_detail("reason", reason),
                     );
                 }
                 continue;
@@ -274,7 +281,7 @@ fn content_walker(
         .ignore(false)
         .git_ignore(respect_gitignore)
         .git_exclude(respect_gitignore)
-        .git_global(false)
+        .git_global(respect_gitignore)
         .parents(respect_gitignore)
         .require_git(true)
         .follow_links(project.content.follow_directory_symlinks);
