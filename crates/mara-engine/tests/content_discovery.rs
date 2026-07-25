@@ -191,6 +191,17 @@ fn configured_globs_select_files_with_deterministic_precedence_and_order() {
 }
 
 #[test]
+fn a_character_class_can_select_a_literal_closing_bracket() {
+    let fixture = Fixture::new(&["docs/[]].mara.md"], &[], false, false, false);
+    fixture.write("docs/].mara.md", "literal closing bracket");
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["docs/].mara.md"]);
+    assert!(discovery.diagnostics().is_empty());
+}
+
+#[test]
 fn gitignore_overrides_includes_but_matching_untracked_files_remain_eligible() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
     fixture.git(&["init", "--quiet"]);
@@ -767,6 +778,22 @@ fn fully_excluded_symlink_trees_are_pruned_before_policy_checks() {
     let fixture = Fixture::new(&["**/*.mara.md"], &["external/**"], false, true, false);
     fixture.write("ordinary.mara.md", "ordinary");
     let outside = fixture._temp.path().join("outside-exclude");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("outside.mara.md"), "outside").unwrap();
+    symlink_directory(&outside, fixture.root.join("external"));
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["ordinary.mara.md"]);
+    assert!(discovery.diagnostics().is_empty());
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn recursive_wildcard_excludes_prune_the_complete_tree_before_policy_checks() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &["external/**/*"], false, true, false);
+    fixture.write("ordinary.mara.md", "ordinary");
+    let outside = fixture._temp.path().join("outside-recursive-exclude");
     fs::create_dir(&outside).unwrap();
     fs::write(outside.join("outside.mara.md"), "outside").unwrap();
     symlink_directory(&outside, fixture.root.join("external"));

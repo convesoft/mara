@@ -774,12 +774,8 @@ fn wax_expression(pattern: &str) -> String {
     let mut index = 0;
     while index < characters.len() {
         if characters[index] == '[' {
-            let close = index
-                + 1
-                + characters[index + 1..]
-                    .iter()
-                    .position(|character| *character == ']')
-                    .expect("the project loader validated every character class");
+            let close = content_glob_class_close(&characters, index)
+                .expect("the project loader validated every character class");
             expression.push('[');
             let mut content_index = index + 1;
             if characters[content_index] == '!' {
@@ -788,7 +784,7 @@ fn wax_expression(pattern: &str) -> String {
             }
             while content_index < close {
                 let character = characters[content_index];
-                if character == '[' {
+                if matches!(character, '[' | ']') {
                     expression.push('\\');
                 } else if character == '-'
                     && content_index >= index + 3
@@ -813,6 +809,21 @@ fn wax_expression(pattern: &str) -> String {
     expression
 }
 
+pub(crate) fn content_glob_class_close(characters: &[char], open: usize) -> Option<usize> {
+    let mut search_start = open.checked_add(1)?;
+    if characters.get(search_start) == Some(&'!') {
+        search_start += 1;
+    }
+    if characters.get(search_start) == Some(&']') {
+        search_start += 1;
+    }
+    characters
+        .get(search_start..)?
+        .iter()
+        .position(|character| *character == ']')
+        .map(|offset| search_start + offset)
+}
+
 fn matches_any(patterns: &[Glob<'_>], path: &str) -> bool {
     patterns.iter().any(|pattern| pattern.is_match(path))
 }
@@ -823,13 +834,31 @@ fn is_selected(includes: &[Glob<'_>], excludes: &[Glob<'_>], path: &str) -> bool
 
 fn is_fully_excluded_tree(excludes: &[String], path: &str) -> bool {
     excludes.iter().any(|pattern| {
-        if pattern == "**" {
+        let segments = pattern.split('/').collect::<Vec<_>>();
+        let mut suffix_start = segments.len();
+        let mut recursive = false;
+        let mut single_star = false;
+        for (index, segment) in segments.iter().enumerate().rev() {
+            match *segment {
+                "**" => {
+                    recursive = true;
+                    suffix_start = index;
+                }
+                "*" if !single_star => {
+                    single_star = true;
+                    suffix_start = index;
+                }
+                _ => break,
+            }
+        }
+        if !recursive {
+            return false;
+        }
+        let root_pattern = segments[..suffix_start].join("/");
+        if root_pattern.is_empty() {
             return true;
         }
-        let Some(root_pattern) = pattern.strip_suffix("/**") else {
-            return false;
-        };
-        let Ok(root_pattern) = compile_content_glob(root_pattern) else {
+        let Ok(root_pattern) = compile_content_glob(&root_pattern) else {
             return false;
         };
         path.split('/')
