@@ -35,6 +35,8 @@ pub struct LoadedProject {
     pub config_path: PathBuf,
     pub format_version: u32,
     pub name: String,
+    /// Normalized project-relative path selected by `project.schema`.
+    pub schema_source_path: String,
     /// Canonical path of the existing schema input.
     pub schema_path: PathBuf,
     pub content: ContentConfig,
@@ -375,6 +377,19 @@ pub fn load_from_root(root: impl AsRef<Path>) -> Result<LoadedProject, ProjectLo
     })
 }
 
+pub(crate) fn open_loaded_schema(project: &LoadedProject) -> Result<fs::File, ProjectLoadError> {
+    let (file, _, _) = open_project_input(
+        &project.root,
+        &project.config_path,
+        &project.schema_path,
+        "project.schema",
+        &project.schema_source_path,
+        None,
+        ProjectLoadErrorCode::SchemaIo,
+    )?;
+    Ok(file)
+}
+
 fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoadError> {
     let (mut config_file, resolved_config_path, config_identity) = open_project_input(
         &location.root,
@@ -482,12 +497,12 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
     )?;
 
     let schema_location = location_for_span(source_text, &raw.project.schema);
-    let schema_value = raw.project.schema.into_inner();
+    let schema_source_path = raw.project.schema.into_inner();
     let (schema_path, schema_identity) = resolve_existing_input(
         &location.root,
         &location.config_path,
         "project.schema",
-        &schema_value,
+        &schema_source_path,
         schema_location,
         ProjectLoadErrorCode::SchemaIo,
     )?;
@@ -521,6 +536,7 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
         config_path: location.config_path,
         format_version: 1,
         name,
+        schema_source_path,
         schema_path,
         content: ContentConfig {
             include,
