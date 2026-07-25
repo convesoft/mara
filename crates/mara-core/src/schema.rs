@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::SourceSpan;
 
@@ -494,6 +494,319 @@ impl FlavourDefinitions {
     }
 }
 
+/// The closed set of derived relation-source kinds in schema format version 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum DerivedSourceKind {
+    SourceSpan,
+}
+
+impl DerivedSourceKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SourceSpan => "source_span",
+        }
+    }
+}
+
+/// Permitted source endpoints for one relation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationSourceEndpoint {
+    flavours: SchemaField<Vec<SchemaValue<String>>>,
+    derived: Option<SchemaField<Vec<SchemaValue<DerivedSourceKind>>>>,
+}
+
+impl RelationSourceEndpoint {
+    pub fn new(
+        flavours: SchemaField<Vec<SchemaValue<String>>>,
+        derived: Option<SchemaField<Vec<SchemaValue<DerivedSourceKind>>>>,
+    ) -> Self {
+        Self { flavours, derived }
+    }
+
+    pub const fn flavours(&self) -> &SchemaField<Vec<SchemaValue<String>>> {
+        &self.flavours
+    }
+
+    pub const fn derived(&self) -> Option<&SchemaField<Vec<SchemaValue<DerivedSourceKind>>>> {
+        self.derived.as_ref()
+    }
+}
+
+/// Permitted target endpoints for one relation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationTargetEndpoint {
+    flavours: Option<SchemaField<Vec<SchemaValue<String>>>>,
+    external: Option<SchemaField<Vec<SchemaValue<String>>>>,
+}
+
+impl RelationTargetEndpoint {
+    pub fn new(
+        flavours: Option<SchemaField<Vec<SchemaValue<String>>>>,
+        external: Option<SchemaField<Vec<SchemaValue<String>>>>,
+    ) -> Self {
+        Self { flavours, external }
+    }
+
+    pub const fn flavours(&self) -> Option<&SchemaField<Vec<SchemaValue<String>>>> {
+        self.flavours.as_ref()
+    }
+
+    pub const fn external(&self) -> Option<&SchemaField<Vec<SchemaValue<String>>>> {
+        self.external.as_ref()
+    }
+}
+
+/// The effective upper bound for one relation direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CardinalityMaximum {
+    Bounded(u64),
+    Many,
+}
+
+/// Source-preserving bounds for one relation direction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CardinalityBound {
+    min: Option<SchemaField<u64>>,
+    max: Option<SchemaField<CardinalityMaximum>>,
+}
+
+impl CardinalityBound {
+    pub fn new(
+        min: Option<SchemaField<u64>>,
+        max: Option<SchemaField<CardinalityMaximum>>,
+    ) -> Self {
+        Self { min, max }
+    }
+
+    pub const fn min(&self) -> Option<&SchemaField<u64>> {
+        self.min.as_ref()
+    }
+
+    pub fn minimum(&self) -> u64 {
+        self.min.as_ref().map_or(0, |min| *min.value())
+    }
+
+    pub const fn max(&self) -> Option<&SchemaField<CardinalityMaximum>> {
+        self.max.as_ref()
+    }
+
+    pub fn maximum(&self) -> CardinalityMaximum {
+        self.max
+            .as_ref()
+            .map_or(CardinalityMaximum::Many, |max| *max.value())
+    }
+}
+
+/// Optional outgoing and incoming relation bounds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationCardinality {
+    outgoing: Option<SchemaField<CardinalityBound>>,
+    incoming: Option<SchemaField<CardinalityBound>>,
+}
+
+impl RelationCardinality {
+    pub fn new(
+        outgoing: Option<SchemaField<CardinalityBound>>,
+        incoming: Option<SchemaField<CardinalityBound>>,
+    ) -> Self {
+        Self { outgoing, incoming }
+    }
+
+    pub const fn outgoing(&self) -> Option<&SchemaField<CardinalityBound>> {
+        self.outgoing.as_ref()
+    }
+
+    pub const fn incoming(&self) -> Option<&SchemaField<CardinalityBound>> {
+        self.incoming.as_ref()
+    }
+}
+
+/// One compiled relation declaration and all of its schema provenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationDefinition {
+    name: String,
+    key_source: SourceSpan,
+    value_source: SourceSpan,
+    source: SchemaField<RelationSourceEndpoint>,
+    target: SchemaField<RelationTargetEndpoint>,
+    inverse: Option<SchemaField<String>>,
+    inverse_authoring: Option<SchemaField<bool>>,
+    symmetric: Option<SchemaField<bool>>,
+    same_flavour: Option<SchemaField<bool>>,
+    self_reference: Option<SchemaField<bool>>,
+    acyclic: Option<SchemaField<bool>>,
+    cardinality: Option<SchemaField<RelationCardinality>>,
+}
+
+impl RelationDefinition {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: String,
+        key_source: SourceSpan,
+        value_source: SourceSpan,
+        source: SchemaField<RelationSourceEndpoint>,
+        target: SchemaField<RelationTargetEndpoint>,
+        inverse: Option<SchemaField<String>>,
+        inverse_authoring: Option<SchemaField<bool>>,
+        symmetric: Option<SchemaField<bool>>,
+        same_flavour: Option<SchemaField<bool>>,
+        self_reference: Option<SchemaField<bool>>,
+        acyclic: Option<SchemaField<bool>>,
+        cardinality: Option<SchemaField<RelationCardinality>>,
+    ) -> Self {
+        Self {
+            name,
+            key_source,
+            value_source,
+            source,
+            target,
+            inverse,
+            inverse_authoring,
+            symmetric,
+            same_flavour,
+            self_reference,
+            acyclic,
+            cardinality,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub const fn key_source(&self) -> &SourceSpan {
+        &self.key_source
+    }
+
+    pub const fn value_source(&self) -> &SourceSpan {
+        &self.value_source
+    }
+
+    pub const fn source(&self) -> &SchemaField<RelationSourceEndpoint> {
+        &self.source
+    }
+
+    pub const fn target(&self) -> &SchemaField<RelationTargetEndpoint> {
+        &self.target
+    }
+
+    pub const fn inverse(&self) -> Option<&SchemaField<String>> {
+        self.inverse.as_ref()
+    }
+
+    pub const fn inverse_authoring(&self) -> Option<&SchemaField<bool>> {
+        self.inverse_authoring.as_ref()
+    }
+
+    pub fn permits_inverse_authoring(&self) -> bool {
+        self.inverse_authoring
+            .as_ref()
+            .is_some_and(|enabled| *enabled.value())
+    }
+
+    pub const fn symmetric(&self) -> Option<&SchemaField<bool>> {
+        self.symmetric.as_ref()
+    }
+
+    pub fn is_symmetric(&self) -> bool {
+        self.symmetric
+            .as_ref()
+            .is_some_and(|symmetric| *symmetric.value())
+    }
+
+    pub const fn same_flavour(&self) -> Option<&SchemaField<bool>> {
+        self.same_flavour.as_ref()
+    }
+
+    pub fn requires_same_flavour(&self) -> bool {
+        self.same_flavour
+            .as_ref()
+            .is_some_and(|same_flavour| *same_flavour.value())
+    }
+
+    pub const fn self_reference(&self) -> Option<&SchemaField<bool>> {
+        self.self_reference.as_ref()
+    }
+
+    pub fn permits_self_reference(&self) -> bool {
+        self.self_reference
+            .as_ref()
+            .is_none_or(|self_reference| *self_reference.value())
+    }
+
+    pub const fn acyclic(&self) -> Option<&SchemaField<bool>> {
+        self.acyclic.as_ref()
+    }
+
+    pub fn is_acyclic(&self) -> bool {
+        self.acyclic
+            .as_ref()
+            .is_some_and(|acyclic| *acyclic.value())
+    }
+
+    pub const fn cardinality(&self) -> Option<&SchemaField<RelationCardinality>> {
+        self.cardinality.as_ref()
+    }
+}
+
+/// The optional root relation mapping, canonicalized by relation name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationDefinitions {
+    key_source: SourceSpan,
+    value_source: SourceSpan,
+    definitions: BTreeMap<String, RelationDefinition>,
+    external_mention_schemes: BTreeSet<String>,
+}
+
+impl RelationDefinitions {
+    pub fn new(
+        key_source: SourceSpan,
+        value_source: SourceSpan,
+        definitions: BTreeMap<String, RelationDefinition>,
+    ) -> Self {
+        let external_mention_schemes = definitions
+            .values()
+            .filter_map(|definition| definition.target().value().external())
+            .flat_map(|external| external.value())
+            .map(|scheme| scheme.value().clone())
+            .collect();
+        Self {
+            key_source,
+            value_source,
+            definitions,
+            external_mention_schemes,
+        }
+    }
+
+    pub const fn key_source(&self) -> &SourceSpan {
+        &self.key_source
+    }
+
+    pub const fn value_source(&self) -> &SourceSpan {
+        &self.value_source
+    }
+
+    pub const fn definitions(&self) -> &BTreeMap<String, RelationDefinition> {
+        &self.definitions
+    }
+
+    pub fn get(&self, name: &str) -> Option<&RelationDefinition> {
+        self.definitions.get(name)
+    }
+
+    pub fn len(&self) -> usize {
+        self.definitions.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.definitions.is_empty()
+    }
+
+    pub const fn external_mention_schemes(&self) -> &BTreeSet<String> {
+        &self.external_mention_schemes
+    }
+}
+
 /// Source-preserving compiled format-v1 schema values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaDocument {
@@ -502,7 +815,7 @@ pub struct SchemaDocument {
     schema: SchemaField<SchemaIdentity>,
     identity: SchemaField<IdentityConfiguration>,
     flavours: FlavourDefinitions,
-    relations: Option<SchemaSection>,
+    relations: Option<RelationDefinitions>,
     rules: Option<SchemaSection>,
 }
 
@@ -514,7 +827,7 @@ impl SchemaDocument {
         schema: SchemaField<SchemaIdentity>,
         identity: SchemaField<IdentityConfiguration>,
         flavours: FlavourDefinitions,
-        relations: Option<SchemaSection>,
+        relations: Option<RelationDefinitions>,
         rules: Option<SchemaSection>,
     ) -> Self {
         Self {
@@ -548,8 +861,15 @@ impl SchemaDocument {
         &self.flavours
     }
 
-    pub const fn relations(&self) -> Option<&SchemaSection> {
+    pub const fn relations(&self) -> Option<&RelationDefinitions> {
         self.relations.as_ref()
+    }
+
+    pub fn external_mention_schemes(&self) -> &BTreeSet<String> {
+        static EMPTY: BTreeSet<String> = BTreeSet::new();
+        self.relations
+            .as_ref()
+            .map_or(&EMPTY, RelationDefinitions::external_mention_schemes)
     }
 
     pub const fn rules(&self) -> Option<&SchemaSection> {

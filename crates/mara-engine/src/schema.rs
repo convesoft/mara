@@ -10,9 +10,11 @@ use std::{
 };
 
 use mara_core::{
-    Diagnostic, DiagnosticContext, DiagnosticSeverity, DiagnosticValue, DisplayIdDefinition,
-    FieldDefinition, FieldType, FlavourDefinition, FlavourDefinitions, FlavourGuidance,
-    IdentityConfiguration, MidFormat, MidIdentity, RelatedDiagnostic, RequiredBuiltInDefinition,
+    CardinalityBound, CardinalityMaximum, DerivedSourceKind, Diagnostic, DiagnosticContext,
+    DiagnosticSeverity, DiagnosticValue, DisplayIdDefinition, FieldDefinition, FieldType,
+    FlavourDefinition, FlavourDefinitions, FlavourGuidance, IdentityConfiguration, MidFormat,
+    MidIdentity, RelatedDiagnostic, RelationCardinality, RelationDefinition, RelationDefinitions,
+    RelationSourceEndpoint, RelationTargetEndpoint, RequiredBuiltInDefinition,
     SchemaDiagnosticCode, SchemaDocument, SchemaField, SchemaIdentity, SchemaSection, SchemaValue,
     SourceIndex, SourceSpan,
 };
@@ -1394,6 +1396,8 @@ fn decode_v1_document(
             .map(|decoded| field(source_map, key, value, decoded))
     });
 
+    let flavour_namespaces = optional_entry(entries, "flavours")
+        .and_then(|(_, value)| FlavourNamespaces::from_node(value, source_map));
     let flavours = collect_decode(
         required_entry(entries, "flavours", "root", source_map, *root_span),
         &mut diagnostics,
@@ -1403,17 +1407,10 @@ fn decode_v1_document(
     });
 
     let relations = if let Some((key, value)) = optional_entry(entries, "relations") {
-        if let Some(len) = mapping_len(value) {
-            Some(section(source_map, key, value, len))
-        } else {
-            diagnostics.push(invalid_declaration(
-                "root.relations must be a mapping",
-                source_map,
-                value.span(),
-                "relations",
-            ));
-            None
-        }
+        collect_compilation(
+            decode_relations(key, value, flavour_namespaces.as_ref(), source_map),
+            &mut diagnostics,
+        )
     } else {
         None
     };
@@ -1698,6 +1695,963 @@ fn decode_flavours(
         parser_span(source_map, node.span()),
         definitions,
     ))
+}
+
+struct FlavourNamespace {
+    fields: BTreeMap<String, SourceSpan>,
+}
+
+struct FlavourNamespaces {
+    definitions: BTreeMap<String, FlavourNamespace>,
+}
+
+impl FlavourNamespaces {
+    fn from_node(node: &ParsedNode, source_map: &SourceMap<'_>) -> Option<Self> {
+        let ParsedNode::Mapping { entries, .. } = node else {
+            return None;
+        };
+        let mut definitions = BTreeMap::new();
+        for (name_node, definition_node) in entries {
+            let (name, _) = string_key(name_node).expect("profile validation requires string keys");
+            if !valid_snake_name(name) {
+                continue;
+            }
+            let mut fields = BTreeMap::new();
+            if let ParsedNode::Mapping { entries, .. } = definition_node
+                && let Some((_, ParsedNode::Mapping { entries, .. })) =
+                    optional_entry(entries, "fields")
+            {
+                for (field_node, _) in entries {
+                    let (field, _) =
+                        string_key(field_node).expect("profile validation requires string keys");
+                    fields.insert(field.to_owned(), parser_span(source_map, field_node.span()));
+                }
+            }
+            definitions.insert(name.to_owned(), FlavourNamespace { fields });
+        }
+        Some(Self { definitions })
+    }
+
+    fn contains(&self, name: &str) -> bool {
+        self.definitions.contains_key(name)
+    }
+
+    fn field(&self, flavour: &str, name: &str) -> Option<&SourceSpan> {
+        self.definitions
+            .get(flavour)
+            .and_then(|namespace| namespace.fields.get(name))
+    }
+}
+
+fn decode_relations(
+    key: &ParsedNode,
+    node: &ParsedNode,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<RelationDefinitions> {
+    let entries = expect_mapping(node, "root.relations", source_map)
+        .map_err(|diagnostic| vec![*diagnostic])?;
+    let mut definitions = BTreeMap::new();
+    let mut authoring_names = Vec::new();
+    let mut diagnostics = Vec::new();
+
+    for (name_node, definition_node) in entries {
+        let (name, _) = string_key(name_node).expect("profile validation requires string keys");
+        let mut name_valid = true;
+        if !valid_snake_name(name) {
+            diagnostics.push(invalid_name(
+                "relation names must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
+                source_map,
+                name_node.span(),
+                "relations",
+                name,
+            ));
+            name_valid = false;
+        }
+        if let Some(kind) = reserved_authoring_name_kind(name) {
+            diagnostics.push(
+                invalid_name(
+                    match kind {
+                        ReservedAuthoringNameKind::BuiltIn => {
+                            format!("relation name {name:?} collides with an item built-in")
+                        }
+                        ReservedAuthoringNameKind::Reserved => {
+                            format!("relation name {name:?} is reserved")
+                        }
+                    },
+                    source_map,
+                    name_node.span(),
+                    "relations",
+                    name,
+                )
+                .with_detail("collision", kind.as_str())
+                .with_detail("name", name.to_owned()),
+            );
+            name_valid = false;
+        }
+
+        if let Some(flavour_namespaces) = flavour_namespaces {
+            authoring_names.extend(relation_authoring_names(
+                name,
+                name_node,
+                definition_node,
+                flavour_namespaces,
+                source_map,
+            ));
+        }
+
+        let definition = collect_compilation(
+            decode_relation(
+                name,
+                name_node,
+                definition_node,
+                flavour_namespaces,
+                source_map,
+            ),
+            &mut diagnostics,
+        );
+        if name_valid && let Some(definition) = definition {
+            definitions.insert(name.to_owned(), definition);
+        }
+    }
+
+    if let Some(flavour_namespaces) = flavour_namespaces {
+        diagnostics.extend(validate_authoring_namespaces(
+            authoring_names,
+            flavour_namespaces,
+        ));
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+
+    Ok(RelationDefinitions::new(
+        parser_span(source_map, key.span()),
+        parser_span(source_map, node.span()),
+        definitions,
+    ))
+}
+
+fn decode_relation(
+    name: &str,
+    name_node: &ParsedNode,
+    node: &ParsedNode,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<RelationDefinition> {
+    let mapping = format!("relations.{name}");
+    let entries =
+        expect_mapping(node, &mapping, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut diagnostics = Vec::new();
+
+    let source = collect_decode(
+        required_entry(entries, "source", &mapping, source_map, node.span()),
+        &mut diagnostics,
+    )
+    .and_then(|(key, value)| {
+        collect_compilation(
+            decode_relation_source(name, value, flavour_namespaces, source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+    let target = collect_decode(
+        required_entry(entries, "target", &mapping, source_map, node.span()),
+        &mut diagnostics,
+    )
+    .and_then(|(key, value)| {
+        collect_compilation(
+            decode_relation_target(name, value, flavour_namespaces, source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+
+    let inverse_entry = optional_entry(entries, "inverse");
+    let inverse = inverse_entry.and_then(|(key, value)| {
+        let field_name = format!("{mapping}.inverse");
+        let inverse = collect_decode(
+            expect_string(value, &field_name, source_map),
+            &mut diagnostics,
+        )?;
+        if !valid_snake_name(inverse) {
+            diagnostics.push(invalid_name(
+                "relation inverse names must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
+                source_map,
+                value.span(),
+                &field_name,
+                inverse,
+            ));
+            return None;
+        }
+        Some(field(source_map, key, value, inverse.to_owned()))
+    });
+    let inverse_authoring = collect_decode(
+        decode_optional_boolean(entries, "inverse_authoring", &mapping, source_map),
+        &mut diagnostics,
+    )
+    .flatten();
+    let symmetric = collect_decode(
+        decode_optional_boolean(entries, "symmetric", &mapping, source_map),
+        &mut diagnostics,
+    )
+    .flatten();
+    let same_flavour = collect_decode(
+        decode_optional_boolean(entries, "same_flavour", &mapping, source_map),
+        &mut diagnostics,
+    )
+    .flatten();
+    let self_reference = collect_decode(
+        decode_optional_boolean(entries, "self_reference", &mapping, source_map),
+        &mut diagnostics,
+    )
+    .flatten();
+    let acyclic = collect_decode(
+        decode_optional_boolean(entries, "acyclic", &mapping, source_map),
+        &mut diagnostics,
+    )
+    .flatten();
+    let cardinality = optional_entry(entries, "cardinality").and_then(|(key, value)| {
+        collect_compilation(
+            decode_relation_cardinality(name, value, source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+
+    let inverse_authoring_enabled = inverse_authoring
+        .as_ref()
+        .is_some_and(|enabled| *enabled.value());
+    if inverse_authoring_enabled && inverse_entry.is_none() {
+        let enabled = inverse_authoring
+            .as_ref()
+            .expect("enabled inverse authoring has a source field");
+        diagnostics.push(invalid_declaration_at_source(
+            "inverse_authoring: true requires an inverse name",
+            enabled.value_source().clone(),
+            &mapping,
+        ));
+    }
+
+    let symmetric_enabled = symmetric.as_ref().is_some_and(|enabled| *enabled.value());
+    if symmetric_enabled {
+        if let Some((_, value)) = inverse_entry {
+            diagnostics.push(invalid_declaration(
+                "symmetric relations cannot declare an inverse name",
+                source_map,
+                value.span(),
+                &mapping,
+            ));
+        }
+        if let Some((_, value)) = optional_entry(entries, "inverse_authoring") {
+            diagnostics.push(invalid_declaration(
+                "symmetric relations cannot declare inverse_authoring",
+                source_map,
+                value.span(),
+                &mapping,
+            ));
+        }
+        if let (Some(source_flavours), Some(target_flavours)) = (
+            authored_relation_flavours(entries, "source"),
+            authored_relation_flavours(entries, "target"),
+        ) && source_flavours != target_flavours
+        {
+            let target_source = optional_entry(entries, "target")
+                .map(|(_, target)| parser_span(source_map, target.span()))
+                .expect("a decoded target flavour set has a target mapping");
+            diagnostics.push(invalid_declaration_at_source(
+                "symmetric relations require identical source and target flavour sets",
+                target_source,
+                &mapping,
+            ));
+        }
+    }
+
+    let acyclic_enabled = acyclic.as_ref().is_some_and(|enabled| *enabled.value());
+    if acyclic_enabled && let Some(external_key) = authored_external_target_key(entries) {
+        diagnostics.push(
+            invalid_declaration_at_source(
+                "acyclic relations cannot permit external targets",
+                acyclic
+                    .as_ref()
+                    .expect("enabled acyclicity has a source field")
+                    .value_source()
+                    .clone(),
+                &mapping,
+            )
+            .with_related(RelatedDiagnostic::new(
+                "external targets are declared here",
+                parser_span(source_map, external_key.span()),
+            )),
+        );
+    }
+
+    if inverse_authoring_enabled
+        && let Some(inverse) = &inverse
+        && let Some(kind) = reserved_authoring_name_kind(inverse.value())
+    {
+        diagnostics.push(
+            invalid_name_at_source(
+                match kind {
+                    ReservedAuthoringNameKind::BuiltIn => format!(
+                        "enabled inverse name {:?} collides with an item built-in",
+                        inverse.value()
+                    ),
+                    ReservedAuthoringNameKind::Reserved => {
+                        format!("enabled inverse name {:?} is reserved", inverse.value())
+                    }
+                },
+                inverse.value_source().clone(),
+                &format!("{mapping}.inverse"),
+                inverse.value(),
+            )
+            .with_detail("collision", kind.as_str())
+            .with_detail("name", inverse.value().clone()),
+        );
+    }
+
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+
+    Ok(RelationDefinition::new(
+        name.to_owned(),
+        parser_span(source_map, name_node.span()),
+        parser_span(source_map, node.span()),
+        source.expect("valid relation source compilation produced a value"),
+        target.expect("valid relation target compilation produced a value"),
+        inverse,
+        inverse_authoring,
+        symmetric,
+        same_flavour,
+        self_reference,
+        acyclic,
+        cardinality,
+    ))
+}
+
+fn decode_relation_source(
+    relation: &str,
+    node: &ParsedNode,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<RelationSourceEndpoint> {
+    let mapping = format!("relations.{relation}.source");
+    let entries =
+        expect_mapping(node, &mapping, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut diagnostics = Vec::new();
+    let flavours_field = format!("{mapping}.flavours");
+    let compiled_flavours = collect_decode(
+        required_entry(entries, "flavours", &mapping, source_map, node.span()),
+        &mut diagnostics,
+    )
+    .and_then(|(key, value)| {
+        collect_compilation(
+            decode_relation_flavour_sequence(
+                value,
+                &flavours_field,
+                flavour_namespaces,
+                source_map,
+            ),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+    let derived = optional_entry(entries, "derived").and_then(|(key, value)| {
+        collect_compilation(
+            decode_derived_source_sequence(value, &format!("{mapping}.derived"), source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(RelationSourceEndpoint::new(
+        compiled_flavours.expect("valid source flavours compilation produced a value"),
+        derived,
+    ))
+}
+
+fn decode_relation_target(
+    relation: &str,
+    node: &ParsedNode,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<RelationTargetEndpoint> {
+    let mapping = format!("relations.{relation}.target");
+    let entries =
+        expect_mapping(node, &mapping, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut diagnostics = Vec::new();
+    if optional_entry(entries, "flavours").is_none()
+        && optional_entry(entries, "external").is_none()
+    {
+        diagnostics.push(invalid_declaration(
+            "relation targets require flavours and/or external schemes",
+            source_map,
+            node.span(),
+            &mapping,
+        ));
+    }
+    let compiled_flavours = optional_entry(entries, "flavours").and_then(|(key, value)| {
+        collect_compilation(
+            decode_relation_flavour_sequence(
+                value,
+                &format!("{mapping}.flavours"),
+                flavour_namespaces,
+                source_map,
+            ),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+    let external = optional_entry(entries, "external").and_then(|(key, value)| {
+        collect_compilation(
+            decode_external_scheme_sequence(value, &format!("{mapping}.external"), source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(RelationTargetEndpoint::new(compiled_flavours, external))
+}
+
+fn decode_relation_flavour_sequence(
+    node: &ParsedNode,
+    field_name: &str,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<Vec<SchemaValue<String>>> {
+    let values =
+        expect_sequence(node, field_name, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    if values.is_empty() {
+        return Err(vec![invalid_declaration(
+            format!("{field_name} must be a non-empty sequence"),
+            source_map,
+            node.span(),
+            field_name,
+        )]);
+    }
+    let mut compiled = Vec::with_capacity(values.len());
+    let mut diagnostics = Vec::new();
+    for value_node in values {
+        let Some(value) = collect_decode(
+            expect_string(value_node, field_name, source_map),
+            &mut diagnostics,
+        ) else {
+            continue;
+        };
+        if !valid_snake_name(value) {
+            diagnostics.push(invalid_name(
+                "endpoint flavour names must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
+                source_map,
+                value_node.span(),
+                field_name,
+                value,
+            ));
+            continue;
+        }
+        if flavour_namespaces.is_some_and(|namespaces| !namespaces.contains(value)) {
+            diagnostics.push(
+                invalid_declaration(
+                    format!("endpoint flavour {value:?} is not declared by this schema"),
+                    source_map,
+                    value_node.span(),
+                    field_name,
+                )
+                .with_detail("flavour", value.to_owned()),
+            );
+            continue;
+        }
+        compiled.push(SchemaValue::new(
+            parser_span(source_map, value_node.span()),
+            value.to_owned(),
+        ));
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(compiled)
+}
+
+fn decode_derived_source_sequence(
+    node: &ParsedNode,
+    field_name: &str,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<Vec<SchemaValue<DerivedSourceKind>>> {
+    let values =
+        expect_sequence(node, field_name, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut compiled = Vec::with_capacity(values.len());
+    let mut diagnostics = Vec::new();
+    for value_node in values {
+        let Some(value) = collect_decode(
+            expect_string(value_node, field_name, source_map),
+            &mut diagnostics,
+        ) else {
+            continue;
+        };
+        if value != "source_span" {
+            diagnostics.push(
+                invalid_declaration(
+                    "derived source kind must be source_span in format version 1",
+                    source_map,
+                    value_node.span(),
+                    field_name,
+                )
+                .with_detail("value", value.to_owned()),
+            );
+            continue;
+        }
+        compiled.push(SchemaValue::new(
+            parser_span(source_map, value_node.span()),
+            DerivedSourceKind::SourceSpan,
+        ));
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(compiled)
+}
+
+fn decode_external_scheme_sequence(
+    node: &ParsedNode,
+    field_name: &str,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<Vec<SchemaValue<String>>> {
+    let values =
+        expect_sequence(node, field_name, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    if values.is_empty() {
+        return Err(vec![invalid_declaration(
+            format!("{field_name} must be a non-empty sequence"),
+            source_map,
+            node.span(),
+            field_name,
+        )]);
+    }
+    let mut compiled = Vec::with_capacity(values.len());
+    let mut diagnostics = Vec::new();
+    for value_node in values {
+        let Some(value) = collect_decode(
+            expect_string(value_node, field_name, source_map),
+            &mut diagnostics,
+        ) else {
+            continue;
+        };
+        if !valid_external_scheme(value) {
+            diagnostics.push(invalid_name(
+                "external schemes must match [a-z][a-z0-9+.-]* and omit ://",
+                source_map,
+                value_node.span(),
+                field_name,
+                value,
+            ));
+            continue;
+        }
+        compiled.push(SchemaValue::new(
+            parser_span(source_map, value_node.span()),
+            value.to_owned(),
+        ));
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(compiled)
+}
+
+fn decode_relation_cardinality(
+    relation: &str,
+    node: &ParsedNode,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<RelationCardinality> {
+    let mapping = format!("relations.{relation}.cardinality");
+    let entries =
+        expect_mapping(node, &mapping, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut diagnostics = Vec::new();
+    if optional_entry(entries, "outgoing").is_none()
+        && optional_entry(entries, "incoming").is_none()
+    {
+        diagnostics.push(invalid_declaration(
+            "relation cardinality requires outgoing and/or incoming bounds",
+            source_map,
+            node.span(),
+            &mapping,
+        ));
+    }
+    let outgoing = optional_entry(entries, "outgoing").and_then(|(key, value)| {
+        collect_compilation(
+            decode_cardinality_bound(value, &format!("{mapping}.outgoing"), source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+    let incoming = optional_entry(entries, "incoming").and_then(|(key, value)| {
+        collect_compilation(
+            decode_cardinality_bound(value, &format!("{mapping}.incoming"), source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(RelationCardinality::new(outgoing, incoming))
+}
+
+fn decode_cardinality_bound(
+    node: &ParsedNode,
+    mapping: &str,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<CardinalityBound> {
+    let entries =
+        expect_mapping(node, mapping, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut diagnostics = Vec::new();
+    let min = optional_entry(entries, "min").and_then(|(key, value)| {
+        collect_decode(
+            expect_non_negative_integer(value, &format!("{mapping}.min"), source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+    let max = optional_entry(entries, "max").and_then(|(key, value)| {
+        collect_decode(
+            expect_cardinality_maximum(value, &format!("{mapping}.max"), source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+    if let Some(maximum) = &max
+        && let CardinalityMaximum::Bounded(maximum_value) = *maximum.value()
+        && maximum_value < min.as_ref().map_or(0, |minimum| *minimum.value())
+    {
+        diagnostics.push(
+            invalid_declaration_at_source(
+                "cardinality max must be greater than or equal to min",
+                maximum.value_source().clone(),
+                mapping,
+            )
+            .with_detail("max", DiagnosticValue::Unsigned(maximum_value))
+            .with_detail(
+                "min",
+                DiagnosticValue::Unsigned(min.as_ref().map_or(0, |minimum| *minimum.value())),
+            ),
+        );
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(CardinalityBound::new(min, max))
+}
+
+fn expect_non_negative_integer(
+    node: &ParsedNode,
+    field_name: &str,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<u64> {
+    let ParsedNode::Scalar {
+        value, style, tag, ..
+    } = node
+    else {
+        return Err(Box::new(invalid_declaration(
+            format!("{field_name} must be a non-negative base-ten integer"),
+            source_map,
+            node.span(),
+            field_name,
+        )));
+    };
+    if resolve_scalar(value, *style, tag.as_ref()).ok() != Some(ScalarKind::Integer)
+        || value.is_empty()
+        || !value.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(Box::new(invalid_declaration(
+            format!("{field_name} must be a non-negative base-ten integer"),
+            source_map,
+            node.span(),
+            field_name,
+        )));
+    }
+    value.parse().map_err(|_| {
+        Box::new(
+            invalid_declaration(
+                format!("{field_name} is too large to represent"),
+                source_map,
+                node.span(),
+                field_name,
+            )
+            .with_detail("value", value.to_owned()),
+        )
+    })
+}
+
+fn expect_cardinality_maximum(
+    node: &ParsedNode,
+    field_name: &str,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<CardinalityMaximum> {
+    if let Ok(value) = expect_string(node, field_name, source_map) {
+        if value == "many" {
+            return Ok(CardinalityMaximum::Many);
+        }
+        return Err(Box::new(
+            invalid_declaration(
+                format!("{field_name} must be a non-negative integer or many"),
+                source_map,
+                node.span(),
+                field_name,
+            )
+            .with_detail("value", value.to_owned()),
+        ));
+    }
+    expect_non_negative_integer(node, field_name, source_map).map(CardinalityMaximum::Bounded)
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ReservedAuthoringNameKind {
+    BuiltIn,
+    Reserved,
+}
+
+impl ReservedAuthoringNameKind {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::BuiltIn => "built_in",
+            Self::Reserved => "reserved",
+        }
+    }
+}
+
+fn reserved_authoring_name_kind(name: &str) -> Option<ReservedAuthoringNameKind> {
+    match name {
+        "id" | "title" | "body" => Some(ReservedAuthoringNameKind::BuiltIn),
+        "mid" | "flavour" | "source_location" | "mentions" => {
+            Some(ReservedAuthoringNameKind::Reserved)
+        }
+        _ => None,
+    }
+}
+
+#[derive(Clone)]
+struct AuthoringName {
+    flavour: String,
+    name: String,
+    relation: String,
+    kind: &'static str,
+    source: SourceSpan,
+}
+
+fn relation_authoring_names(
+    relation: &str,
+    relation_node: &ParsedNode,
+    node: &ParsedNode,
+    flavour_namespaces: &FlavourNamespaces,
+    source_map: &SourceMap<'_>,
+) -> Vec<AuthoringName> {
+    if !valid_snake_name(relation) || reserved_authoring_name_kind(relation).is_some() {
+        return Vec::new();
+    }
+    let ParsedNode::Mapping { entries, .. } = node else {
+        return Vec::new();
+    };
+    let mut names = relation_endpoint_flavours(entries, "source", flavour_namespaces)
+        .into_iter()
+        .map(|flavour| AuthoringName {
+            flavour,
+            name: relation.to_owned(),
+            relation: relation.to_owned(),
+            kind: "canonical",
+            source: parser_span(source_map, relation_node.span()),
+        })
+        .collect::<Vec<_>>();
+
+    let inverse_authoring_enabled = optional_entry(entries, "inverse_authoring")
+        .and_then(|(_, value)| parsed_boolean(value))
+        .unwrap_or(false);
+    if inverse_authoring_enabled
+        && let Some((_, inverse_node)) = optional_entry(entries, "inverse")
+        && let Some(inverse) = parsed_string(inverse_node)
+        && valid_snake_name(inverse)
+        && reserved_authoring_name_kind(inverse).is_none()
+    {
+        names.extend(
+            relation_endpoint_flavours(entries, "target", flavour_namespaces)
+                .into_iter()
+                .map(|flavour| AuthoringName {
+                    flavour,
+                    name: inverse.to_owned(),
+                    relation: relation.to_owned(),
+                    kind: "inverse",
+                    source: parser_span(source_map, inverse_node.span()),
+                }),
+        );
+    }
+    names
+}
+
+fn relation_endpoint_flavours(
+    relation_entries: &[(ParsedNode, ParsedNode)],
+    endpoint: &str,
+    flavour_namespaces: &FlavourNamespaces,
+) -> BTreeSet<String> {
+    let Some((_, ParsedNode::Mapping { entries, .. })) = optional_entry(relation_entries, endpoint)
+    else {
+        return BTreeSet::new();
+    };
+    let Some((_, ParsedNode::Sequence { values, .. })) = optional_entry(entries, "flavours") else {
+        return BTreeSet::new();
+    };
+    values
+        .iter()
+        .filter_map(parsed_string)
+        .filter(|flavour| valid_snake_name(flavour) && flavour_namespaces.contains(flavour))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn authored_relation_flavours(
+    relation_entries: &[(ParsedNode, ParsedNode)],
+    endpoint: &str,
+) -> Option<BTreeSet<String>> {
+    let (_, endpoint_node) = optional_entry(relation_entries, endpoint)?;
+    let ParsedNode::Mapping { entries, .. } = endpoint_node else {
+        return None;
+    };
+    let Some((_, flavour_node)) = optional_entry(entries, "flavours") else {
+        return (endpoint == "target").then(BTreeSet::new);
+    };
+    let ParsedNode::Sequence { values, .. } = flavour_node else {
+        return None;
+    };
+    values
+        .iter()
+        .map(parsed_string)
+        .map(|value| value.map(str::to_owned))
+        .collect()
+}
+
+fn authored_external_target_key(
+    relation_entries: &[(ParsedNode, ParsedNode)],
+) -> Option<&ParsedNode> {
+    let (_, ParsedNode::Mapping { entries, .. }) = optional_entry(relation_entries, "target")?
+    else {
+        return None;
+    };
+    optional_entry(entries, "external").map(|(key, _)| key)
+}
+
+fn parsed_string(node: &ParsedNode) -> Option<&str> {
+    let ParsedNode::Scalar {
+        value, style, tag, ..
+    } = node
+    else {
+        return None;
+    };
+    (resolve_scalar(value, *style, tag.as_ref()).ok() == Some(ScalarKind::String))
+        .then_some(value)
+        .map(String::as_str)
+}
+
+fn parsed_boolean(node: &ParsedNode) -> Option<bool> {
+    let ParsedNode::Scalar {
+        value, style, tag, ..
+    } = node
+    else {
+        return None;
+    };
+    (resolve_scalar(value, *style, tag.as_ref()).ok() == Some(ScalarKind::Boolean))
+        .then_some(matches!(value.as_str(), "true" | "True" | "TRUE"))
+}
+
+fn validate_authoring_namespaces(
+    mut names: Vec<AuthoringName>,
+    flavour_namespaces: &FlavourNamespaces,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut occupied = BTreeMap::<(String, String), AuthoringName>::new();
+    names.sort_by(|left, right| {
+        (&left.flavour, &left.name, &left.relation, left.kind).cmp(&(
+            &right.flavour,
+            &right.name,
+            &right.relation,
+            right.kind,
+        ))
+    });
+    names.dedup_by(|left, right| {
+        left.flavour == right.flavour
+            && left.name == right.name
+            && left.relation == right.relation
+            && left.kind == right.kind
+    });
+    for candidate in names {
+        validate_authoring_name(
+            candidate,
+            flavour_namespaces,
+            &mut occupied,
+            &mut diagnostics,
+        );
+    }
+    diagnostics
+}
+
+fn validate_authoring_name(
+    candidate: AuthoringName,
+    flavour_namespaces: &FlavourNamespaces,
+    occupied: &mut BTreeMap<(String, String), AuthoringName>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(field_source) = flavour_namespaces.field(&candidate.flavour, &candidate.name) {
+        diagnostics.push(
+            Diagnostic::new(
+                SchemaDiagnosticCode::InvalidDeclaration,
+                format!(
+                    "{} relation authoring name {:?} collides with a field on flavour {:?}",
+                    candidate.kind, candidate.name, candidate.flavour
+                ),
+                Some(candidate.source.clone()),
+            )
+            .with_related(RelatedDiagnostic::new(
+                "conflicting field is declared here",
+                field_source.clone(),
+            ))
+            .with_context(DiagnosticContext::new(
+                None,
+                Some(candidate.relation.clone()),
+                Some(candidate.flavour.clone()),
+            ))
+            .with_detail("collision", "field")
+            .with_detail("flavour", candidate.flavour.clone())
+            .with_detail("name", candidate.name.clone()),
+        );
+    }
+
+    let key = (candidate.flavour.clone(), candidate.name.clone());
+    if let Some(first) = occupied.get(&key) {
+        diagnostics.push(
+            Diagnostic::new(
+                SchemaDiagnosticCode::InvalidDeclaration,
+                format!(
+                    "{} relation authoring name {:?} collides with another authorable relation on flavour {:?}",
+                    candidate.kind, candidate.name, candidate.flavour
+                ),
+                Some(candidate.source),
+            )
+            .with_related(RelatedDiagnostic::new(
+                "first authorable relation name is declared here",
+                first.source.clone(),
+            ))
+            .with_context(DiagnosticContext::new(
+                None,
+                Some(candidate.relation.clone()),
+                Some(candidate.flavour.clone()),
+            ))
+            .with_detail("collision", first.kind)
+            .with_detail("first_relation", first.relation.clone())
+            .with_detail("flavour", candidate.flavour.clone())
+            .with_detail("name", candidate.name.clone()),
+        );
+    } else {
+        occupied.insert(key, candidate);
+    }
 }
 
 fn collect_decode<T>(result: DecodeResult<T>, diagnostics: &mut Vec<Diagnostic>) -> Option<T> {
@@ -2403,6 +3357,9 @@ fn v1_unknown_key_diagnostics(
     if let Some((_, ParsedNode::Mapping { entries, .. })) = optional_entry(entries, "flavours") {
         collect_flavour_unknown_key_diagnostics(entries, source_map, &mut diagnostics);
     }
+    if let Some((_, ParsedNode::Mapping { entries, .. })) = optional_entry(entries, "relations") {
+        collect_relation_unknown_key_diagnostics(entries, source_map, &mut diagnostics);
+    }
     diagnostics
 }
 
@@ -2501,6 +3458,85 @@ fn collect_flavour_unknown_key_diagnostics(
     }
 }
 
+fn collect_relation_unknown_key_diagnostics(
+    relations: &[(ParsedNode, ParsedNode)],
+    source_map: &SourceMap<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for (relation_key, relation_value) in relations {
+        let (relation, _) =
+            string_key(relation_key).expect("profile validation requires string keys");
+        let ParsedNode::Mapping {
+            entries: relation_entries,
+            ..
+        } = relation_value
+        else {
+            continue;
+        };
+        let relation_mapping = format!("relations.{relation}");
+        collect_unknown_key_diagnostics(
+            relation_entries,
+            &[
+                "source",
+                "target",
+                "inverse",
+                "inverse_authoring",
+                "symmetric",
+                "same_flavour",
+                "self_reference",
+                "acyclic",
+                "cardinality",
+            ],
+            &relation_mapping,
+            source_map,
+            diagnostics,
+        );
+
+        for (endpoint, allowed) in [
+            ("source", &["flavours", "derived"][..]),
+            ("target", &["flavours", "external"][..]),
+        ] {
+            if let Some((_, ParsedNode::Mapping { entries, .. })) =
+                optional_entry(relation_entries, endpoint)
+            {
+                collect_unknown_key_diagnostics(
+                    entries,
+                    allowed,
+                    &format!("{relation_mapping}.{endpoint}"),
+                    source_map,
+                    diagnostics,
+                );
+            }
+        }
+
+        if let Some((_, ParsedNode::Mapping { entries, .. })) =
+            optional_entry(relation_entries, "cardinality")
+        {
+            let cardinality_mapping = format!("{relation_mapping}.cardinality");
+            collect_unknown_key_diagnostics(
+                entries,
+                &["outgoing", "incoming"],
+                &cardinality_mapping,
+                source_map,
+                diagnostics,
+            );
+            for direction in ["outgoing", "incoming"] {
+                if let Some((_, ParsedNode::Mapping { entries, .. })) =
+                    optional_entry(entries, direction)
+                {
+                    collect_unknown_key_diagnostics(
+                        entries,
+                        &["min", "max"],
+                        &format!("{cardinality_mapping}.{direction}"),
+                        source_map,
+                        diagnostics,
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn collect_unknown_key_diagnostics(
     entries: &[(ParsedNode, ParsedNode)],
     allowed: &[&str],
@@ -2583,13 +3619,6 @@ fn expect_string<'a>(
     Ok(value)
 }
 
-fn mapping_len(node: &ParsedNode) -> Option<usize> {
-    match node {
-        ParsedNode::Mapping { entries, .. } => Some(entries.len()),
-        _ => None,
-    }
-}
-
 fn sequence_len(node: &ParsedNode) -> Option<usize> {
     match node {
         ParsedNode::Sequence { values, .. } => Some(values.len()),
@@ -2637,6 +3666,19 @@ fn invalid_declaration(
     .with_context(DiagnosticContext::new(Some(field.to_owned()), None, None))
 }
 
+fn invalid_declaration_at_source(
+    message: impl Into<String>,
+    source: SourceSpan,
+    field: &str,
+) -> Diagnostic {
+    Diagnostic::new(
+        SchemaDiagnosticCode::InvalidDeclaration,
+        message,
+        Some(source),
+    )
+    .with_context(DiagnosticContext::new(Some(field.to_owned()), None, None))
+}
+
 fn invalid_name(
     message: impl Into<String>,
     source_map: &SourceMap<'_>,
@@ -2651,6 +3693,17 @@ fn invalid_name(
     )
     .with_context(DiagnosticContext::new(Some(field.to_owned()), None, None))
     .with_detail("value", value.to_owned())
+}
+
+fn invalid_name_at_source(
+    message: impl Into<String>,
+    source: SourceSpan,
+    field: &str,
+    value: &str,
+) -> Diagnostic {
+    Diagnostic::new(SchemaDiagnosticCode::InvalidName, message, Some(source))
+        .with_context(DiagnosticContext::new(Some(field.to_owned()), None, None))
+        .with_detail("value", value.to_owned())
 }
 
 fn valid_kebab_name(value: &str) -> bool {
@@ -2669,6 +3722,17 @@ fn valid_snake_name(value: &str) -> bool {
     };
     valid_lower_alphanumeric_segment(first, true)
         && segments.all(|segment| valid_lower_alphanumeric_segment(segment, false))
+}
+
+fn valid_external_scheme(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    first.is_ascii_lowercase()
+        && bytes.all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'+' | b'.' | b'-')
+        })
 }
 
 fn valid_lower_alphanumeric_segment(value: &str, require_letter_first: bool) -> bool {
