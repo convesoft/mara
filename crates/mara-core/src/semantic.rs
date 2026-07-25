@@ -53,7 +53,10 @@ pub type NormalizedFieldValue = Provenanced<NormalizedScalar>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReferenceOrigin {
-    Item(Mid),
+    Item {
+        mid: Mid,
+        display_id: Option<String>,
+    },
     Narrative(SourceSpan),
 }
 
@@ -390,7 +393,8 @@ fn duplicate_diagnostics(index: &IdentityIndex, records: &[IdentityRecord]) -> V
             let primary = records
                 .iter()
                 .filter_map(IdentityRecord::display_id)
-                .find(|candidate| candidate.value() == display_id)
+                .filter(|candidate| candidate.value() == display_id)
+                .min_by(|left, right| compare_spans(left.source(), right.source()))
                 .map(|candidate| candidate.source().clone());
             let mut diagnostic = Diagnostic::new(
                 IdentityDiagnosticCode::DuplicateDisplayId,
@@ -463,8 +467,8 @@ fn decorate_reference_diagnostic(
     mut diagnostic: Diagnostic,
     reference: &AuthoredReference,
 ) -> Diagnostic {
-    if let ReferenceOrigin::Item(mid) = reference.origin() {
-        diagnostic = diagnostic.with_item(DiagnosticItem::new(mid.clone(), None));
+    if let ReferenceOrigin::Item { mid, display_id } = reference.origin() {
+        diagnostic = diagnostic.with_item(DiagnosticItem::new(mid.clone(), display_id.clone()));
     }
     diagnostic.with_context(DiagnosticContext::new(
         None,
@@ -564,6 +568,9 @@ mod tests {
             record(first, None, "b.md"),
         ];
         let build = IdentityIndex::build(&records);
+        let mut reversed = records.clone();
+        reversed.reverse();
+        assert_eq!(build, IdentityIndex::build(&reversed));
 
         assert_eq!(build.diagnostics().len(), 2);
         let ambiguous = build
