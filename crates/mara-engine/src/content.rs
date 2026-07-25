@@ -1697,6 +1697,19 @@ mod tests {
     #[test]
     fn opened_content_handles_must_still_be_regular_files() {
         let directory = tempfile::tempdir().unwrap();
+
+        #[cfg(windows)]
+        let file = {
+            use std::os::windows::fs::OpenOptionsExt;
+
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+            fs::OpenOptions::new()
+                .access_mode(0)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+                .open(directory.path())
+                .unwrap()
+        };
+        #[cfg(not(windows))]
         let file = fs::File::open(directory.path()).unwrap();
         let candidate = Candidate {
             logical_path: directory.path().to_path_buf(),
