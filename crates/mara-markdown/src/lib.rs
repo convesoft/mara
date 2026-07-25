@@ -11,7 +11,10 @@ use mara_core::{
     SourceSpan, SyntaxDiagnosticCode, sort_diagnostics,
 };
 use rushdown::{
-    ast::{Arena, HeadingKind, KindData, NodeKind, NodeRef, NodeType, PrettyPrint},
+    ast::{
+        Arena, CodeBlockKind, HeadingKind, KindData, LinkKind, LinkReferenceKind, NodeKind,
+        NodeRef, NodeType, PrettyPrint, TableCellAlignment, Task, TextQualifier,
+    },
     context::{ContextKey, ContextKeyRegistry, UsizeValue},
     parser::{
         self, AnyBlockParser, AnyInlineParser, BlockParser, InlineParser,
@@ -137,7 +140,7 @@ pub struct MarkdownSegment {
     heading_kind: Option<ParsedHeadingKind>,
     heading_title: Option<String>,
     references: Vec<InlineReference>,
-    structure: MarkdownNode,
+    structure: Box<MarkdownNode>,
 }
 
 impl MarkdownSegment {
@@ -169,8 +172,8 @@ impl MarkdownSegment {
         &self.references
     }
 
-    pub const fn structure(&self) -> &MarkdownNode {
-        &self.structure
+    pub fn structure(&self) -> &MarkdownNode {
+        self.structure.as_ref()
     }
 }
 
@@ -196,6 +199,8 @@ pub enum NarrativeKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarkdownNode {
     kind: MarkdownNodeKind,
+    source: SourceSpan,
+    payload: MarkdownNodePayload,
     children: Vec<MarkdownNode>,
 }
 
@@ -204,9 +209,116 @@ impl MarkdownNode {
         self.kind
     }
 
+    pub const fn source(&self) -> &SourceSpan {
+        &self.source
+    }
+
+    pub const fn payload(&self) -> &MarkdownNodePayload {
+        &self.payload
+    }
+
     pub fn children(&self) -> &[MarkdownNode] {
         &self.children
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MarkdownNodePayload {
+    None,
+    Heading {
+        level: u8,
+        kind: ParsedHeadingKind,
+    },
+    CodeBlock {
+        kind: MarkdownCodeBlockKind,
+        info: Option<String>,
+        value: String,
+    },
+    List {
+        marker: char,
+        start: u32,
+        tight: bool,
+    },
+    ListItem {
+        task: Option<MarkdownTaskState>,
+    },
+    Text {
+        value: String,
+        soft_break: bool,
+        hard_break: bool,
+    },
+    CodeSpan {
+        value: String,
+    },
+    Link {
+        destination: String,
+        title: Option<String>,
+        kind: MarkdownLinkKind,
+    },
+    Image {
+        destination: String,
+        title: Option<String>,
+        kind: MarkdownLinkKind,
+    },
+    Html {
+        value: String,
+    },
+    LinkReferenceDefinition {
+        label: String,
+        destination: String,
+        title: Option<String>,
+    },
+    TableCell {
+        alignment: MarkdownTableAlignment,
+    },
+    InlineReference {
+        target: String,
+        label: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkdownCodeBlockKind {
+    Indented,
+    Fenced,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkdownTaskState {
+    Active,
+    Completed,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MarkdownLinkKind {
+    Inline,
+    Reference {
+        label: String,
+        kind: MarkdownLinkReferenceKind,
+    },
+    Auto {
+        text: String,
+    },
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkdownLinkReferenceKind {
+    Full,
+    Collapsed,
+    Shortcut,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkdownTableAlignment {
+    Left,
+    Center,
+    Right,
+    None,
+    Other,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -834,6 +946,8 @@ fn convert_document_blocks(
                     references: Vec::new(),
                     structure: MarkdownNode {
                         kind: MarkdownNodeKind::Other,
+                        source: span(document, cursor, event_start),
+                        payload: MarkdownNodePayload::None,
                         children: Vec::new(),
                     },
                 },
@@ -869,6 +983,8 @@ fn convert_document_blocks(
                 references: Vec::new(),
                 structure: MarkdownNode {
                     kind: MarkdownNodeKind::Other,
+                    source: span(document, cursor, source.len()),
+                    payload: MarkdownNodePayload::None,
                     children: Vec::new(),
                 },
             },
@@ -916,7 +1032,7 @@ fn markdown_from_node(
             heading_kind,
             heading_title,
             references,
-            structure: convert_markdown_node(arena, node_ref),
+            structure: convert_markdown_node(document, arena, node_ref, start, end),
         },
     )
 }
@@ -944,11 +1060,17 @@ fn markdown_segment(
         heading_kind: data.heading_kind,
         heading_title: data.heading_title,
         references: data.references,
-        structure: data.structure,
+        structure: Box::new(data.structure),
     })
 }
 
-fn convert_markdown_node(arena: &Arena, node_ref: NodeRef) -> MarkdownNode {
+fn convert_markdown_node(
+    document: &SourceDocument,
+    arena: &Arena,
+    node_ref: NodeRef,
+    start: usize,
+    end: usize,
+) -> MarkdownNode {
     let data = arena[node_ref].kind_data();
     let kind = match data {
         KindData::Paragraph(_) => MarkdownNodeKind::Paragraph,
@@ -978,12 +1100,163 @@ fn convert_markdown_node(arena: &Arena, node_ref: NodeRef) -> MarkdownNode {
         }
         _ => MarkdownNodeKind::Other,
     };
+    let source_text = document.source().as_str();
+    let payload = convert_markdown_payload(arena, node_ref, source_text);
+    let (source_start, source_end) =
+        intrinsic_markdown_node_range(arena, node_ref).unwrap_or((start, end));
+    let child_refs = arena[node_ref].children(arena).collect::<Vec<_>>();
+    let children = child_refs
+        .iter()
+        .enumerate()
+        .map(|(index, child)| {
+            let child_start = markdown_node_start(arena, *child)
+                .unwrap_or(start)
+                .clamp(start, end);
+            let child_end = child_refs[index + 1..]
+                .iter()
+                .find_map(|next| markdown_node_start(arena, *next))
+                .unwrap_or(end)
+                .clamp(child_start, end);
+            convert_markdown_node(document, arena, *child, child_start, child_end)
+        })
+        .collect();
     MarkdownNode {
         kind,
-        children: arena[node_ref]
-            .children(arena)
-            .map(|child| convert_markdown_node(arena, child))
-            .collect(),
+        source: span(document, source_start, source_end),
+        payload,
+        children,
+    }
+}
+
+fn convert_markdown_payload(arena: &Arena, node_ref: NodeRef, source: &str) -> MarkdownNodePayload {
+    match arena[node_ref].kind_data() {
+        KindData::Heading(heading) => MarkdownNodePayload::Heading {
+            level: heading.level(),
+            kind: convert_heading_kind(heading.heading_kind()),
+        },
+        KindData::CodeBlock(code) => MarkdownNodePayload::CodeBlock {
+            kind: match code.code_block_kind() {
+                CodeBlockKind::Indented => MarkdownCodeBlockKind::Indented,
+                CodeBlockKind::Fenced => MarkdownCodeBlockKind::Fenced,
+                _ => MarkdownCodeBlockKind::Other,
+            },
+            info: code.info_str(source).map(str::to_owned),
+            value: lines_text(code.value(), source),
+        },
+        KindData::List(list) => MarkdownNodePayload::List {
+            marker: char::from(list.marker()),
+            start: list.start(),
+            tight: list.is_tight(),
+        },
+        KindData::ListItem(item) => MarkdownNodePayload::ListItem {
+            task: item.task().map(|task| match task {
+                Task::Active => MarkdownTaskState::Active,
+                Task::Completed => MarkdownTaskState::Completed,
+                _ => MarkdownTaskState::Other,
+            }),
+        },
+        KindData::HtmlBlock(html) => MarkdownNodePayload::Html {
+            value: lines_text(html.value(), source),
+        },
+        KindData::Text(text) => MarkdownNodePayload::Text {
+            value: text.str(source).to_owned(),
+            soft_break: text.has_qualifiers(TextQualifier::SOFT_LINE_BREAK),
+            hard_break: text.has_qualifiers(TextQualifier::HARD_LINE_BREAK),
+        },
+        KindData::CodeSpan(code) => MarkdownNodePayload::CodeSpan {
+            value: code.str(source).into_owned(),
+        },
+        KindData::Link(link) => MarkdownNodePayload::Link {
+            destination: link.destination_str(source).to_owned(),
+            title: link.title_str(source).map(|title| title.into_owned()),
+            kind: convert_link_kind(link.link_kind(), source),
+        },
+        KindData::Image(image) => MarkdownNodePayload::Image {
+            destination: image.destination_str(source).to_owned(),
+            title: image.title_str(source).map(|title| title.into_owned()),
+            kind: convert_link_kind(image.link_kind(), source),
+        },
+        KindData::RawHtml(html) => MarkdownNodePayload::Html {
+            value: html.str(source).into_owned(),
+        },
+        KindData::LinkReferenceDefinition(reference) => {
+            MarkdownNodePayload::LinkReferenceDefinition {
+                label: reference.label_str(source).into_owned(),
+                destination: reference.destination_str(source).to_owned(),
+                title: reference.title_str(source).map(|title| title.into_owned()),
+            }
+        }
+        KindData::TableCell(cell) => MarkdownNodePayload::TableCell {
+            alignment: match cell.alignment() {
+                TableCellAlignment::Left => MarkdownTableAlignment::Left,
+                TableCellAlignment::Center => MarkdownTableAlignment::Center,
+                TableCellAlignment::Right => MarkdownTableAlignment::Right,
+                TableCellAlignment::None => MarkdownTableAlignment::None,
+                _ => MarkdownTableAlignment::Other,
+            },
+        },
+        data if data.kind_name() == "MaraInlineReference" => {
+            let reference = rushdown::as_extension_data!(arena, node_ref, MaraInlineReferenceNode);
+            MarkdownNodePayload::InlineReference {
+                target: reference.target.clone(),
+                label: reference.label.clone(),
+            }
+        }
+        _ => MarkdownNodePayload::None,
+    }
+}
+
+fn convert_heading_kind(kind: HeadingKind) -> ParsedHeadingKind {
+    match kind {
+        HeadingKind::Atx => ParsedHeadingKind::Atx,
+        HeadingKind::Setext => ParsedHeadingKind::Setext,
+        _ => ParsedHeadingKind::Atx,
+    }
+}
+
+fn convert_link_kind(kind: &LinkKind, source: &str) -> MarkdownLinkKind {
+    match kind {
+        LinkKind::Inline => MarkdownLinkKind::Inline,
+        LinkKind::Reference(reference) => MarkdownLinkKind::Reference {
+            label: reference.value_str(source).into_owned(),
+            kind: match reference.link_reference_kind() {
+                LinkReferenceKind::Full => MarkdownLinkReferenceKind::Full,
+                LinkReferenceKind::Collapsed => MarkdownLinkReferenceKind::Collapsed,
+                LinkReferenceKind::Shortcut => MarkdownLinkReferenceKind::Shortcut,
+                _ => MarkdownLinkReferenceKind::Other,
+            },
+        },
+        LinkKind::Auto(auto) => MarkdownLinkKind::Auto {
+            text: auto.text_str(source).to_owned(),
+        },
+        _ => MarkdownLinkKind::Other,
+    }
+}
+
+fn lines_text(lines: &text::Lines, source: &str) -> String {
+    let mut value = String::new();
+    for line in lines.iter(source) {
+        value.push_str(&line);
+    }
+    value
+}
+
+fn markdown_node_start(arena: &Arena, node_ref: NodeRef) -> Option<usize> {
+    if arena[node_ref].kind_data().kind_name() == "MaraInlineReference" {
+        let reference = rushdown::as_extension_data!(arena, node_ref, MaraInlineReferenceNode);
+        return Some(reference.index.start());
+    }
+    arena[node_ref].pos()
+}
+
+fn intrinsic_markdown_node_range(arena: &Arena, node_ref: NodeRef) -> Option<(usize, usize)> {
+    match arena[node_ref].kind_data() {
+        KindData::Text(text) => text.index().map(|index| (index.start(), index.stop())),
+        data if data.kind_name() == "MaraInlineReference" => {
+            let reference = rushdown::as_extension_data!(arena, node_ref, MaraInlineReferenceNode);
+            Some((reference.index.start(), reference.index.stop()))
+        }
+        _ => None,
     }
 }
 
@@ -996,6 +1269,10 @@ fn plain_text(arena: &Arena, node_ref: NodeRef, source: &str) -> String {
 fn append_plain_text(arena: &Arena, node_ref: NodeRef, source: &str, result: &mut String) {
     if let KindData::Text(text) = arena[node_ref].kind_data() {
         result.push_str(text.str(source));
+        return;
+    }
+    if let KindData::CodeSpan(code) = arena[node_ref].kind_data() {
+        result.push_str(&code.str(source));
         return;
     }
     if arena[node_ref].kind_data().kind_name() == "MaraInlineReference" {

@@ -3,8 +3,8 @@ use mara_core::{
     SourceIndex, SourceText, SyntaxDiagnosticCode,
 };
 use mara_markdown::{
-    InlineReferenceContext, MarkdownNode, MarkdownNodeKind, NarrativeKind, ParsedBlock,
-    ParsedHeadingKind, parse_document,
+    InlineReferenceContext, MarkdownLinkKind, MarkdownNode, MarkdownNodeKind, MarkdownNodePayload,
+    NarrativeKind, ParsedBlock, ParsedHeadingKind, parse_document,
 };
 
 const MID: &str = "m_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -45,6 +45,15 @@ fn has_structure_path(node: &MarkdownNode, path: &[MarkdownNodeKind]) -> bool {
     node.children()
         .iter()
         .any(|child| has_structure_path(child, path))
+}
+
+fn find_structure(node: &MarkdownNode, kind: MarkdownNodeKind) -> Option<&MarkdownNode> {
+    if node.kind() == kind {
+        return Some(node);
+    }
+    node.children()
+        .iter()
+        .find_map(|child| find_structure(child, kind))
 }
 
 #[test]
@@ -381,7 +390,7 @@ fn inline_reference_spans_follow_unicode_crlf_and_escape_parity() {
 
 #[test]
 fn nested_narrative_structure_is_converted_to_mara_owned_nodes() {
-    let source = "Paragraph *emphasis [link](https://example.com)*.\n\n- list **strong**\n";
+    let source = "Paragraph *emphasis [link](https://example.com \"Link title\") tail* and ![alt](image.png \"Image title\") plus `code`.\n\n3. list **strong**\n";
     let parsed = parse(source);
     let narrative = parsed
         .blocks()
@@ -390,6 +399,10 @@ fn nested_narrative_structure_is_converted_to_mara_owned_nodes() {
         .collect::<Vec<_>>();
 
     assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
+    assert_eq!(
+        slice(source, narrative[0].structure().source()),
+        narrative[0].raw()
+    );
     assert!(has_structure_path(
         narrative[0].structure(),
         &[
@@ -407,6 +420,75 @@ fn nested_narrative_structure_is_converted_to_mara_owned_nodes() {
             MarkdownNodeKind::Strong,
         ]
     ));
+
+    let paragraph = narrative[0].structure();
+    let text = find_structure(paragraph, MarkdownNodeKind::Text).unwrap();
+    assert_eq!(
+        text.payload(),
+        &MarkdownNodePayload::Text {
+            value: "Paragraph ".to_owned(),
+            soft_break: false,
+            hard_break: false,
+        }
+    );
+    assert_eq!(slice(source, text.source()), "Paragraph ");
+
+    let link = find_structure(paragraph, MarkdownNodeKind::Link).unwrap();
+    assert_eq!(
+        link.payload(),
+        &MarkdownNodePayload::Link {
+            destination: "https://example.com".to_owned(),
+            title: Some("Link title".to_owned()),
+            kind: MarkdownLinkKind::Inline,
+        }
+    );
+    assert_eq!(
+        slice(source, link.source()),
+        "[link](https://example.com \"Link title\")"
+    );
+
+    let image = find_structure(paragraph, MarkdownNodeKind::Image).unwrap();
+    assert_eq!(
+        image.payload(),
+        &MarkdownNodePayload::Image {
+            destination: "image.png".to_owned(),
+            title: Some("Image title".to_owned()),
+            kind: MarkdownLinkKind::Inline,
+        }
+    );
+    assert_eq!(
+        slice(source, image.source()),
+        "![alt](image.png \"Image title\")"
+    );
+
+    let code = find_structure(paragraph, MarkdownNodeKind::CodeSpan).unwrap();
+    assert_eq!(
+        code.payload(),
+        &MarkdownNodePayload::CodeSpan {
+            value: "code".to_owned(),
+        }
+    );
+    assert_eq!(slice(source, code.source()), "`code`");
+
+    let list = narrative[1].structure();
+    assert_eq!(
+        list.payload(),
+        &MarkdownNodePayload::List {
+            marker: '.',
+            start: 3,
+            tight: true,
+        }
+    );
+    assert_eq!(slice(source, list.source()), narrative[1].raw());
+}
+
+#[test]
+fn code_span_contents_are_included_in_section_titles() {
+    let source = "# Use `mara check` safely\n\nBody.\n";
+    let parsed = parse(source);
+
+    assert!(parsed.is_valid(), "{:?}", parsed.diagnostics());
+    assert_eq!(parsed.sections()[0].title(), "Use mara check safely");
 }
 
 #[test]
