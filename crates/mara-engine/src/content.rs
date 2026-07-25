@@ -122,19 +122,21 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
             {
                 continue;
             }
-            let source_path = walk_error_path(error)
-                .and_then(|path| normalized_relative_path(&project.root, path))
-                .or(affected_path);
-            let source_path = source_path.unwrap_or_else(|| ".mara/project.toml".to_owned());
-            diagnostics.push(
-                diagnostic_at_start(
-                    ContentDiagnosticCode::Io,
-                    &source_path,
-                    "could not evaluate ignore rules for content input",
-                )
-                .with_detail("operation", "gitignore")
-                .with_detail("reason", "ignore_rule_error"),
-            );
+            for error in walk_error_parts(error) {
+                let source_path = walk_error_path(error)
+                    .and_then(|path| normalized_relative_path(&project.root, path))
+                    .or_else(|| affected_path.clone())
+                    .unwrap_or_else(|| ".mara/project.toml".to_owned());
+                diagnostics.push(
+                    diagnostic_at_start(
+                        ContentDiagnosticCode::Io,
+                        &source_path,
+                        "could not evaluate ignore rules for content input",
+                    )
+                    .with_detail("operation", "gitignore")
+                    .with_detail("reason", "ignore_rule_error"),
+                );
+            }
             continue;
         }
         if entry.depth() == 0 || entry.file_type().is_some_and(|kind| kind.is_dir()) {
