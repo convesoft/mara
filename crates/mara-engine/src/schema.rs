@@ -2086,9 +2086,12 @@ fn decode_rule_flavour_sequence(
     flavour_namespaces: Option<&FlavourNamespaces>,
     source_map: &SourceMap<'_>,
 ) -> CompilationResult<Vec<SchemaValue<String>>> {
-    let values = decode_unique_string_sequence(node, field_name, true, source_map)?;
     let mut diagnostics = Vec::new();
-    for value in &values {
+    let values = collect_compilation(
+        decode_unique_string_sequence(node, field_name, true, source_map),
+        &mut diagnostics,
+    );
+    for value in rule_reference_string_values(node, source_map) {
         if !valid_snake_name(value.value()) {
             diagnostics.push(invalid_name_at_source(
                 "rule flavour references must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
@@ -2113,7 +2116,7 @@ fn decode_rule_flavour_sequence(
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
-    Ok(values)
+    Ok(values.expect("valid rule flavour sequence produced a value"))
 }
 
 fn decode_rule_condition(
@@ -2155,15 +2158,12 @@ fn decode_rule_condition(
         .map(|decoded| field(source_map, key, value, decoded))
     });
 
-    if let (Some(field_name), Some(values), Some(applies_to), Some(flavour_namespaces)) = (
-        field_name.as_ref(),
-        values.as_ref(),
-        applies_to,
-        flavour_namespaces,
-    ) {
+    if let (Some(field_name), Some(applies_to), Some(flavour_namespaces)) =
+        (field_name.as_ref(), applies_to, flavour_namespaces)
+    {
         diagnostics.extend(validate_rule_condition_references(
             field_name,
-            values,
+            values.as_ref(),
             applies_to,
             flavour_namespaces,
         ));
@@ -2179,7 +2179,7 @@ fn decode_rule_condition(
 
 fn validate_rule_condition_references(
     field: &SchemaField<String>,
-    values: &SchemaField<Vec<SchemaValue<RuleConditionValue>>>,
+    values: Option<&SchemaField<Vec<SchemaValue<RuleConditionValue>>>>,
     applies_to: &[String],
     flavour_namespaces: &FlavourNamespaces,
 ) -> Vec<Diagnostic> {
@@ -2228,6 +2228,9 @@ fn validate_rule_condition_references(
         fields.push(definition);
     }
 
+    let Some(values) = values else {
+        return diagnostics;
+    };
     for value in values.value() {
         let mut known_domain = false;
         let mut accepted = false;
@@ -2535,9 +2538,12 @@ fn decode_rule_relation_sequence(
     relation_namespaces: Option<&RelationNamespaces>,
     source_map: &SourceMap<'_>,
 ) -> CompilationResult<Vec<SchemaValue<String>>> {
-    let values = decode_unique_string_sequence(node, field_name, true, source_map)?;
     let mut diagnostics = Vec::new();
-    for value in &values {
+    let values = collect_compilation(
+        decode_unique_string_sequence(node, field_name, true, source_map),
+        &mut diagnostics,
+    );
+    for value in rule_reference_string_values(node, source_map) {
         if let Err(mut found) = validate_rule_relation_reference(
             value.value(),
             value.source().clone(),
@@ -2550,7 +2556,7 @@ fn decode_rule_relation_sequence(
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
-    Ok(values)
+    Ok(values.expect("valid rule relation sequence produced a value"))
 }
 
 fn validate_rule_relation_reference(
@@ -2601,9 +2607,12 @@ fn decode_rule_field_sequence(
     flavour_namespaces: Option<&FlavourNamespaces>,
     source_map: &SourceMap<'_>,
 ) -> CompilationResult<Vec<SchemaValue<String>>> {
-    let values = decode_unique_string_sequence(node, field_name, true, source_map)?;
     let mut diagnostics = Vec::new();
-    for value in &values {
+    let values = collect_compilation(
+        decode_unique_string_sequence(node, field_name, true, source_map),
+        &mut diagnostics,
+    );
+    for value in rule_reference_string_values(node, source_map) {
         if let Err(mut found) = validate_rule_field_reference(
             value.value(),
             value.source().clone(),
@@ -2617,7 +2626,7 @@ fn decode_rule_field_sequence(
     if !diagnostics.is_empty() {
         return Err(diagnostics);
     }
-    Ok(values)
+    Ok(values.expect("valid rule field sequence produced a value"))
 }
 
 fn validate_rule_field_reference(
@@ -4126,6 +4135,25 @@ fn decode_optional_pattern(
         ));
     }
     Ok(Some(field(source_map, key, value, pattern.to_owned())))
+}
+
+fn rule_reference_string_values(
+    node: &ParsedNode,
+    source_map: &SourceMap<'_>,
+) -> Vec<SchemaValue<String>> {
+    let ParsedNode::Sequence { values, .. } = node else {
+        return Vec::new();
+    };
+    let mut seen = BTreeSet::new();
+    values
+        .iter()
+        .filter_map(|value_node| {
+            let value = parsed_string(value_node)?;
+            seen.insert(value.to_owned()).then(|| {
+                SchemaValue::new(parser_span(source_map, value_node.span()), value.to_owned())
+            })
+        })
+        .collect()
 }
 
 fn decode_unique_rule_condition_sequence(

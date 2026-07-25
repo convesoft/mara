@@ -131,6 +131,14 @@ const COMPLETE_RULES: &str = r#"  - name: design_has_requirement
     direction: outgoing
     min: 1
     max: many
+  - name: design_has_trace
+    kind: requires_relation
+    severity: info
+    applies_to:
+      flavours: [design]
+    relation_any_of: [derives_from, related_to]
+    direction: outgoing
+    min: 1
   - name: requirement_has_estimate
     kind: requires_field
     severity: warning
@@ -142,6 +150,13 @@ const COMPLETE_RULES: &str = r#"  - name: design_has_requirement
     field_any_of: [estimate, confidence]
     min: 1
     max: 2
+  - name: requirement_has_status
+    kind: requires_field
+    severity: error
+    applies_to:
+      flavours: [requirement]
+    field: status
+    min: 1
   - name: requirement_is_connected
     kind: orphan
     severity: info
@@ -793,7 +808,7 @@ fn compiles_every_rule_shape_in_authored_order_with_complete_source_evidence() {
             .strip_prefix("  ")
             .expect("the embedded rules are indented under the root key")
     );
-    assert_eq!(rules.len(), 3);
+    assert_eq!(rules.len(), 5);
     assert_eq!(
         rules
             .definitions()
@@ -802,7 +817,9 @@ fn compiles_every_rule_shape_in_authored_order_with_complete_source_evidence() {
             .collect::<Vec<_>>(),
         [
             "design_has_requirement",
+            "design_has_trace",
             "requirement_has_estimate",
+            "requirement_has_status",
             "requirement_is_connected"
         ]
     );
@@ -845,6 +862,28 @@ fn compiles_every_rule_shape_in_authored_order_with_complete_source_evidence() {
     assert_eq!(*configuration.count().min().value(), 1);
     assert_eq!(configuration.count().maximum(), CardinalityMaximum::Many);
 
+    let relation_any_of = rules.get("design_has_trace").unwrap();
+    let RuleConfiguration::RequiresRelation(configuration) = relation_any_of.configuration() else {
+        panic!("expected requires_relation configuration")
+    };
+    let RelationRuleSelection::AnyOf(selected) = configuration.relations() else {
+        panic!("expected relation_any_of selection")
+    };
+    assert_field_source(
+        &source,
+        selected,
+        "relation_any_of",
+        "[derives_from, related_to]",
+    );
+    assert_eq!(
+        selected
+            .value()
+            .iter()
+            .map(|value| source_slice(&source, value.source()))
+            .collect::<Vec<_>>(),
+        ["derives_from", "related_to"]
+    );
+
     let required_field = rules.get("requirement_has_estimate").unwrap();
     assert_eq!(*required_field.kind().value(), RuleKind::RequiresField);
     assert_eq!(*required_field.severity().value(), RuleSeverity::Warning);
@@ -886,6 +925,15 @@ fn compiles_every_rule_shape_in_authored_order_with_complete_source_evidence() {
         configuration.count().maximum(),
         CardinalityMaximum::Bounded(2)
     );
+
+    let singular_field = rules.get("requirement_has_status").unwrap();
+    let RuleConfiguration::RequiresField(configuration) = singular_field.configuration() else {
+        panic!("expected requires_field configuration")
+    };
+    let FieldRuleSelection::Field(selected) = configuration.fields() else {
+        panic!("expected singular field selection")
+    };
+    assert_field_source(&source, selected, "field", "status");
 
     let orphan = rules.get("requirement_is_connected").unwrap();
     assert_eq!(*orphan.kind().value(), RuleKind::Orphan);
@@ -1785,6 +1833,87 @@ fn preserves_independent_diagnostics_across_the_normative_compilation_stages() {
             .collect::<Vec<_>>(),
         ["missing_flavour", "missing_condition", "missing_field"]
     );
+}
+
+#[test]
+fn continues_reference_diagnostics_after_malformed_sequence_entries() {
+    let cases = [
+        r#"  - name: malformed_flavours
+    kind: orphan
+    severity: warning
+    applies_to: {flavours: [missing_flavour, 1]}
+    relations: [related_to]
+"#,
+        r#"  - name: malformed_relations
+    kind: orphan
+    severity: warning
+    applies_to: {flavours: [requirement]}
+    relations: [missing_relation, 1]
+"#,
+        r#"  - name: malformed_fields
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    field_any_of: [missing_field, 1]
+    min: 1
+"#,
+    ];
+
+    for rule in cases {
+        let source = rich_schema_with_relations_and_rules(COMPLETE_RELATIONS, rule);
+        let fixture = Fixture::new(&source);
+        let error = load_schema(&fixture.loaded_project()).unwrap_err();
+        assert_eq!(error.diagnostics().len(), 2, "{:#?}", error.diagnostics());
+        assert!(
+            error
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| source_slice(&source, diagnostic.primary().unwrap()) == "1")
+        );
+        assert!(error.diagnostics().iter().any(|diagnostic| {
+            detail_string(diagnostic, "flavour").is_some()
+                || detail_string(diagnostic, "relation").is_some()
+                || detail_string(diagnostic, "field").is_some()
+        }));
+    }
+}
+
+#[test]
+fn validates_condition_field_references_when_condition_values_are_invalid() {
+    let cases = [
+        (
+            "missing_condition",
+            r#"  - name: missing_condition_values
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    when: {field: missing_condition}
+    field: estimate
+    min: 1
+"#,
+        ),
+        (
+            "summary",
+            r#"  - name: malformed_repeatable_condition
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    when: {field: summary, in: {}}
+    field: estimate
+    min: 1
+"#,
+        ),
+    ];
+
+    for (condition_field, rule) in cases {
+        let source = rich_schema_with_relations_and_rules(COMPLETE_RELATIONS, rule);
+        let fixture = Fixture::new(&source);
+        let error = load_schema(&fixture.loaded_project()).unwrap_err();
+        assert_eq!(error.diagnostics().len(), 2, "{:#?}", error.diagnostics());
+        assert!(error.diagnostics().iter().any(|diagnostic| {
+            source_slice(&source, diagnostic.primary().unwrap()) == condition_field
+        }));
+    }
 }
 
 #[test]
