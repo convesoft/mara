@@ -64,6 +64,15 @@ struct OpenedCandidate {
     identity: Option<FileIdentity>,
 }
 
+#[derive(Debug, Clone)]
+struct WalkRoot {
+    logical_path: PathBuf,
+    physical_path: PathBuf,
+    identity: Option<FileIdentity>,
+    ancestor_identities: HashSet<FileIdentity>,
+    ancestor_paths: HashSet<PathBuf>,
+}
+
 #[derive(Debug)]
 struct RejectedDirectorySymlink {
     source_path: Option<String>,
@@ -161,10 +170,27 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
     };
     let ignored_paths = Arc::new(ignored_paths);
     let mut seen_logical_paths = HashSet::new();
+    let root_identity = fs::metadata(&project.root)
+        .ok()
+        .and_then(|metadata| path_identity(&project.root, &metadata).ok().flatten());
+    let root_walk = WalkRoot {
+        logical_path: project.root.clone(),
+        physical_path: project.root.clone(),
+        identity: root_identity,
+        ancestor_identities: root_identity.into_iter().collect(),
+        ancestor_paths: HashSet::from([project.root.clone()]),
+    };
     let mut queued_walk_roots = HashSet::from([project.root.clone()]);
-    let mut walk_roots = VecDeque::from([project.root.clone()]);
+    let mut walk_roots = VecDeque::from([root_walk]);
 
     while let Some(walk_root) = walk_roots.pop_front() {
+        let walk_root = match revalidate_walk_root(project, walk_root) {
+            Ok(walk_root) => walk_root,
+            Err(diagnostic) => {
+                diagnostics.push(*diagnostic);
+                continue;
+            }
+        };
         for result in content_walker(
             project,
             &walk_root,
@@ -180,7 +206,10 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 Err(error) => {
                     for error in walk_error_parts(&error) {
                         let error_path = walk_error_path(error);
-                        let source_path = error_path
+                        let logical_error_path =
+                            error_path.map(|path| logical_walk_path(&walk_root, path));
+                        let source_path = logical_error_path
+                            .as_deref()
                             .and_then(|path| normalized_relative_path(&project.root, path));
                         if source_path.as_deref().is_some_and(|path| {
                             is_fully_excluded_tree(&project.content.exclude, path)
@@ -225,7 +254,8 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 }
             };
             if let Some(error) = entry.error() {
-                let affected_path = normalized_relative_path(&project.root, entry.path());
+                let logical_entry_path = logical_walk_path(&walk_root, entry.path());
+                let affected_path = normalized_relative_path(&project.root, &logical_entry_path);
                 if affected_path
                     .as_deref()
                     .is_some_and(|path| is_fully_excluded_tree(&project.content.exclude, path))
@@ -241,6 +271,8 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 }
                 for error in walk_error_parts(error) {
                     let source_path = walk_error_path(error)
+                        .map(|path| logical_walk_path(&walk_root, path))
+                        .as_deref()
                         .and_then(|path| normalized_relative_path(&project.root, path))
                         .or_else(|| affected_path.clone())
                         .unwrap_or_else(|| ".mara/project.toml".to_owned());
@@ -265,7 +297,9 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 if project.content.follow_directory_symlinks {
                     queue_directory_symlink(
                         project,
+                        &walk_root,
                         entry.path(),
+                        &logical_walk_path(&walk_root, entry.path()),
                         &mut queued_walk_roots,
                         &mut walk_roots,
                         &mut diagnostics,
@@ -273,7 +307,7 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 }
                 continue;
             }
-            let logical_path = entry.into_path();
+            let logical_path = logical_walk_path(&walk_root, entry.path());
             if !seen_logical_paths.insert(logical_path.clone()) {
                 continue;
             }
@@ -365,15 +399,98 @@ fn opened_file_identity(path: &Path) -> Option<FileIdentity> {
         .flatten()
 }
 
+fn logical_walk_path(walk_root: &WalkRoot, physical_path: &Path) -> PathBuf {
+    physical_path
+        .strip_prefix(&walk_root.physical_path)
+        .map(|relative| walk_root.logical_path.join(relative))
+        .unwrap_or_else(|_| walk_root.logical_path.clone())
+}
+
+fn walk_root_diagnostic(
+    project: &LoadedProject,
+    walk_root: &WalkRoot,
+    message: &'static str,
+    reason: &'static str,
+) -> Diagnostic {
+    let source_path = normalized_relative_path(&project.root, &walk_root.logical_path);
+    let diagnostic = match source_path {
+        Some(source_path) => diagnostic_at_start(ContentDiagnosticCode::Io, &source_path, message),
+        None => Diagnostic::new(ContentDiagnosticCode::Io, message, None),
+    };
+    diagnostic
+        .with_detail("operation", "discover")
+        .with_detail("reason", reason)
+}
+
+fn revalidate_walk_root(
+    project: &LoadedProject,
+    mut walk_root: WalkRoot,
+) -> Result<WalkRoot, Box<Diagnostic>> {
+    let resolved_path = fs::canonicalize(&walk_root.physical_path).map_err(|_| {
+        Box::new(walk_root_diagnostic(
+            project,
+            &walk_root,
+            "content directory changed before it could be inspected",
+            "directory_changed",
+        ))
+    })?;
+    if !resolved_path.starts_with(&project.root) {
+        return Err(Box::new(walk_root_diagnostic(
+            project,
+            &walk_root,
+            "content directory resolved outside the project root before inspection",
+            "directory_outside_root",
+        )));
+    }
+    let metadata = fs::metadata(&resolved_path).map_err(|_| {
+        Box::new(walk_root_diagnostic(
+            project,
+            &walk_root,
+            "content directory changed before it could be inspected",
+            "directory_changed",
+        ))
+    })?;
+    if !metadata.is_dir() {
+        return Err(Box::new(walk_root_diagnostic(
+            project,
+            &walk_root,
+            "content directory became a non-directory before inspection",
+            "directory_changed",
+        )));
+    }
+    let identity = path_identity(&resolved_path, &metadata)
+        .map_err(|_| {
+            Box::new(walk_root_diagnostic(
+                project,
+                &walk_root,
+                "content directory identity could not be verified",
+                "directory_identity_unavailable",
+            ))
+        })?
+        .or(walk_root.identity);
+    if matches!((walk_root.identity, identity), (Some(expected), Some(actual)) if expected != actual)
+    {
+        return Err(Box::new(walk_root_diagnostic(
+            project,
+            &walk_root,
+            "content directory changed before it could be inspected",
+            "directory_changed",
+        )));
+    }
+    walk_root.physical_path = resolved_path;
+    walk_root.identity = identity;
+    Ok(walk_root)
+}
+
 fn content_walker(
     project: &LoadedProject,
-    walk_root: &Path,
+    walk_root: &WalkRoot,
     respect_gitignore: bool,
     ignored_paths: Arc<IgnoredPaths>,
     rejected: Arc<Mutex<Vec<RejectedDirectorySymlink>>>,
     ignore_rule_failures: Arc<Mutex<Vec<IgnoreRuleFailure>>>,
 ) -> WalkBuilder {
-    let mut builder = WalkBuilder::new(walk_root);
+    let mut builder = WalkBuilder::new(&walk_root.physical_path);
     builder
         .hidden(false)
         .ignore(false)
@@ -385,9 +502,8 @@ fn content_walker(
         .follow_links(false);
 
     let root = project.root.clone();
-    let logical_walk_root = walk_root.to_path_buf();
-    let resolved_walk_root =
-        fs::canonicalize(walk_root).unwrap_or_else(|_| walk_root.to_path_buf());
+    let logical_walk_root = walk_root.logical_path.clone();
+    let physical_walk_root = walk_root.physical_path.clone();
     let include_patterns = compile_include_patterns(&project.content.include);
     let exclude_patterns = project.content.exclude.clone();
     let follow_directory_symlinks = project.content.follow_directory_symlinks;
@@ -402,21 +518,19 @@ fn content_walker(
             }
             return true;
         }
-        if respect_gitignore {
-            let physical_path = entry
-                .path()
-                .strip_prefix(&logical_walk_root)
-                .map(|relative| resolved_walk_root.join(relative))
-                .unwrap_or_else(|_| entry.path().to_path_buf());
-            if ignored_paths.contains(&physical_path) {
-                return false;
-            }
+        if respect_gitignore && ignored_paths.contains(entry.path()) {
+            return false;
         }
+        let logical_path = entry
+            .path()
+            .strip_prefix(&physical_walk_root)
+            .map(|relative| logical_walk_root.join(relative))
+            .unwrap_or_else(|_| logical_walk_root.clone());
         let is_directory = entry.file_type().is_some_and(|kind| kind.is_dir())
             || (entry.path_is_symlink()
                 && fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_dir()));
         if is_directory
-            && let Some(path) = lossy_relative_path(&root, entry.path())
+            && let Some(path) = lossy_relative_path(&root, &logical_path)
             && (is_fully_excluded_tree(&exclude_patterns, &path)
                 || !directory_is_include_reachable(&include_patterns, &path))
         {
@@ -444,7 +558,7 @@ fn content_walker(
                 record_rejected_directory(
                     &rejected,
                     &root,
-                    entry.path(),
+                    &logical_path,
                     "resolved target is outside the project root",
                 );
                 false
@@ -453,7 +567,7 @@ fn content_walker(
                 record_rejected_directory(
                     &rejected,
                     &root,
-                    entry.path(),
+                    &logical_path,
                     "target could not be resolved",
                 );
                 false
@@ -465,19 +579,81 @@ fn content_walker(
 
 fn queue_directory_symlink(
     project: &LoadedProject,
-    path: &Path,
+    walk_root: &WalkRoot,
+    physical_path: &Path,
+    logical_path: &Path,
     queued: &mut HashSet<PathBuf>,
-    pending: &mut VecDeque<PathBuf>,
+    pending: &mut VecDeque<WalkRoot>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    let Ok(target) = fs::canonicalize(path) else {
-        return;
+    let target = match fs::canonicalize(physical_path) {
+        Ok(target) => target,
+        Err(_) => {
+            diagnostics.push(directory_discovery_diagnostic(
+                project,
+                logical_path,
+                "content directory symlink changed before it could be queued",
+                "directory_changed",
+            ));
+            return;
+        }
     };
-    let parent = path
+    if !target.starts_with(&project.root) {
+        diagnostics.push(directory_discovery_diagnostic(
+            project,
+            logical_path,
+            "content directory symlink resolved outside the project root before it could be queued",
+            "directory_outside_root",
+        ));
+        return;
+    }
+    let metadata = match fs::metadata(&target) {
+        Ok(metadata) => metadata,
+        Err(_) => {
+            diagnostics.push(directory_discovery_diagnostic(
+                project,
+                logical_path,
+                "content directory symlink changed before it could be queued",
+                "directory_changed",
+            ));
+            return;
+        }
+    };
+    if !metadata.is_dir() {
+        diagnostics.push(directory_discovery_diagnostic(
+            project,
+            logical_path,
+            "content directory symlink became a non-directory before it could be queued",
+            "directory_changed",
+        ));
+        return;
+    }
+    let identity = path_identity(&target, &metadata).ok().flatten();
+    let mut ancestor_identities = walk_root.ancestor_identities.clone();
+    let mut ancestor_paths = walk_root.ancestor_paths.clone();
+    let mut ancestor = physical_path.parent();
+    while let Some(path) = ancestor.filter(|path| path.starts_with(&walk_root.physical_path)) {
+        if let Ok(path) = fs::canonicalize(path) {
+            ancestor_paths.insert(path);
+        }
+        if let Ok(metadata) = fs::metadata(path)
+            && let Ok(Some(identity)) = path_identity(path, &metadata)
+        {
+            ancestor_identities.insert(identity);
+        }
+        if path == walk_root.physical_path {
+            break;
+        }
+        ancestor = path.parent();
+    }
+    let canonical_parent = physical_path
         .parent()
         .and_then(|parent| fs::canonicalize(parent).ok());
-    if parent.is_some_and(|parent| parent.starts_with(&target)) {
-        let source_path = normalized_relative_path(&project.root, path);
+    let forms_cycle = identity.is_some_and(|identity| ancestor_identities.contains(&identity))
+        || ancestor_paths.contains(&target)
+        || canonical_parent.is_some_and(|parent| parent.starts_with(&target));
+    if forms_cycle {
+        let source_path = normalized_relative_path(&project.root, logical_path);
         let diagnostic = match source_path {
             Some(source_path) => diagnostic_at_start(
                 ContentDiagnosticCode::Io,
@@ -497,10 +673,36 @@ fn queue_directory_symlink(
         );
         return;
     }
-    let path = path.to_path_buf();
-    if queued.insert(path.clone()) {
-        pending.push_back(path);
+    if let Some(identity) = identity {
+        ancestor_identities.insert(identity);
     }
+    let logical_path = logical_path.to_path_buf();
+    if queued.insert(logical_path.clone()) {
+        ancestor_paths.insert(target.clone());
+        pending.push_back(WalkRoot {
+            logical_path,
+            physical_path: target,
+            identity,
+            ancestor_identities,
+            ancestor_paths,
+        });
+    }
+}
+
+fn directory_discovery_diagnostic(
+    project: &LoadedProject,
+    logical_path: &Path,
+    message: &'static str,
+    reason: &'static str,
+) -> Diagnostic {
+    let source_path = normalized_relative_path(&project.root, logical_path);
+    let diagnostic = match source_path {
+        Some(source_path) => diagnostic_at_start(ContentDiagnosticCode::Io, &source_path, message),
+        None => Diagnostic::new(ContentDiagnosticCode::Io, message, None),
+    };
+    diagnostic
+        .with_detail("operation", "discover")
+        .with_detail("reason", reason)
 }
 
 fn record_rejected_directory(
@@ -1434,6 +1636,32 @@ mod tests {
     use super::*;
 
     #[cfg(unix)]
+    fn loaded_project(root: PathBuf) -> LoadedProject {
+        LoadedProject {
+            config_path: root.join(".mara/project.toml"),
+            format_version: 1,
+            name: "test".to_owned(),
+            schema_source_path: ".mara/schema.yaml".to_owned(),
+            schema_path: root.join(".mara/schema.yaml"),
+            content: crate::project::ContentConfig {
+                include: vec!["**/*.mara.md".to_owned()],
+                exclude: Vec::new(),
+                respect_gitignore: false,
+                follow_directory_symlinks: true,
+                allow_internal_file_symlinks: false,
+            },
+            index_path: root.join(".mara/index.json"),
+            validation: crate::project::ValidationConfig {
+                warnings_as_errors: false,
+            },
+            git: crate::project::GitConfig {
+                require_clean_worktree_for_writes: true,
+            },
+            root,
+        }
+    }
+
+    #[cfg(unix)]
     #[test]
     fn non_utf8_candidate_paths_produce_pathless_diagnostics() {
         use std::{ffi::OsString, os::unix::ffi::OsStringExt};
@@ -1479,6 +1707,38 @@ mod tests {
         assert_eq!(
             diagnostic.details().get("reason"),
             Some(&mara_core::DiagnosticValue::from("opened_not_regular"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn queued_walk_roots_are_rejected_if_their_physical_path_is_redirected() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("project");
+        let outside = fixture.path().join("outside");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let target = root.join("target");
+        fs::create_dir(&target).unwrap();
+        let metadata = fs::metadata(&target).unwrap();
+        let identity = path_identity(&target, &metadata).unwrap();
+        let walk_root = WalkRoot {
+            logical_path: root.join("alias"),
+            physical_path: target.clone(),
+            identity,
+            ancestor_identities: identity.into_iter().collect(),
+            ancestor_paths: HashSet::from([target.clone()]),
+        };
+        fs::rename(&target, root.join("moved-target")).unwrap();
+        symlink(&outside, &target).unwrap();
+
+        let diagnostic = revalidate_walk_root(&loaded_project(root), walk_root).unwrap_err();
+
+        assert_eq!(
+            diagnostic.details().get("reason"),
+            Some(&mara_core::DiagnosticValue::from("directory_outside_root"))
         );
     }
 

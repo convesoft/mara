@@ -670,6 +670,31 @@ fn directory_symlink_policy_contains_targets_and_recovers_from_cycles() {
 
 #[cfg(any(unix, windows))]
 #[test]
+fn sibling_directory_symlink_cycles_are_bounded_by_filesystem_identity() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], false, true, false);
+    fs::create_dir_all(fixture.root.join("a")).unwrap();
+    fs::create_dir_all(fixture.root.join("b")).unwrap();
+    symlink_directory("../b", fixture.root.join("a/to-b"));
+    symlink_directory("../a", fixture.root.join("b/to-a"));
+
+    let discovery = discover_content(&fixture.load());
+
+    let cycle_paths = discovery
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic.code() == DiagnosticCode::Content(ContentDiagnosticCode::Io)
+                && diagnostic.details().get("reason")
+                    == Some(&mara_core::DiagnosticValue::from("directory_cycle"))
+        })
+        .filter_map(|diagnostic| diagnostic.primary().map(|span| span.path()))
+        .collect::<Vec<_>>();
+    assert!(cycle_paths.contains(&"a/to-b/to-a"));
+    assert!(cycle_paths.contains(&"b/to-a/to-b"));
+}
+
+#[cfg(any(unix, windows))]
+#[test]
 fn directory_symlinks_are_skipped_when_following_is_disabled() {
     let fixture = Fixture::new(&["alias/*.mara.md"], &[], false, false, false);
     fixture.write("real/inside.mara.md", "inside");
