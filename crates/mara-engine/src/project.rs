@@ -1115,6 +1115,9 @@ fn validate_glob_segment(segment: &str) -> Result<(), &'static str> {
                     .ok_or("glob contains an unclosed character class")?;
                 let close = index + 1 + close_offset;
                 let mut content = &characters[index + 1..close];
+                if content.first() == Some(&'^') {
+                    return Err("character classes use `!`, not `^`, for negation");
+                }
                 if content.first() == Some(&'!') {
                     content = &content[1..];
                 }

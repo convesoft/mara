@@ -432,6 +432,7 @@ fn rejects_empty_duplicate_and_unsupported_globs() {
         vec!["docs/**suffix.md"],
         vec!["docs/[abc.md"],
         vec!["docs/[].md"],
+        vec!["docs/[^a].md"],
         vec!["docs/[z-a].md"],
         vec!["docs/a].md"],
     ] {

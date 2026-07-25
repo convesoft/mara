@@ -171,22 +171,68 @@ fn gitignore_overrides_includes_but_matching_untracked_files_remain_eligible() {
 #[test]
 fn invalid_utf8_does_not_erase_independently_loaded_documents() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], false, false, false);
-    fixture.write("bad.mara.md", [b'a', b'\n', 0xff, b'b']);
+    fixture.write("a-bad.mara.md", [b'a', b'\n', 0xff, b'b']);
+    fs::hard_link(
+        fixture.root.join("a-bad.mara.md"),
+        fixture.root.join("b-bad-alias.mara.md"),
+    )
+    .unwrap();
     fixture.write("good.mara.md", "complete\nsource\n");
 
     let discovery = discover_content(&fixture.load());
 
     assert_eq!(document_paths(&discovery), ["good.mara.md"]);
-    assert_eq!(discovery.diagnostics().len(), 1);
-    let diagnostic = &discovery.diagnostics()[0];
-    assert_eq!(
-        diagnostic.code(),
-        DiagnosticCode::Content(ContentDiagnosticCode::InvalidUtf8)
-    );
-    let primary = diagnostic.primary().unwrap();
-    assert_eq!(primary.path(), "bad.mara.md");
+    assert_eq!(discovery.diagnostics().len(), 2);
+    let invalid_utf8 = discovery
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.code() == DiagnosticCode::Content(ContentDiagnosticCode::InvalidUtf8)
+        })
+        .unwrap();
+    let primary = invalid_utf8.primary().unwrap();
+    assert_eq!(primary.path(), "a-bad.mara.md");
     assert_eq!(primary.start_byte(), 2);
     assert_eq!((primary.start_line(), primary.start_column()), (2, 1));
+    assert!(discovery.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::Project(ProjectDiagnosticCode::DuplicateFile)
+            && diagnostic
+                .primary()
+                .is_some_and(|span| span.path() == "b-bad-alias.mara.md")
+    }));
+}
+
+#[cfg(unix)]
+#[test]
+fn unsupported_source_paths_are_diagnosed_without_panicking_or_losing_other_files() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], false, false, false);
+    fixture.write("scheme:bad.mara.md", "unsupported path");
+    fixture.write("valid.mara.md", "valid source");
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["valid.mara.md"]);
+    assert_eq!(discovery.diagnostics().len(), 1);
+    assert_eq!(
+        discovery.diagnostics()[0].code(),
+        DiagnosticCode::Content(ContentDiagnosticCode::Io)
+    );
+    assert!(discovery.diagnostics()[0].primary().is_none());
+}
+
+#[test]
+fn gitignore_parse_errors_are_reported_without_hiding_independent_content() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
+    fs::create_dir(fixture.root.join(".git")).unwrap();
+    fixture.write(".gitignore", "[z-a]\n");
+    fixture.write("nested/good.mara.md", "good source");
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["nested/good.mara.md"]);
+    assert!(discovery.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::Content(ContentDiagnosticCode::Io)
+    }));
 }
 
 #[test]

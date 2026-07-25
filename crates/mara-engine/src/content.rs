@@ -47,7 +47,13 @@ impl ContentDiscovery {
 struct Candidate {
     logical_path: PathBuf,
     source_path: String,
-    is_symlink: bool,
+}
+
+#[derive(Debug)]
+struct OpenedCandidate {
+    file: fs::File,
+    resolved_path: PathBuf,
+    identity: Option<FileIdentity>,
 }
 
 #[derive(Debug)]
@@ -90,16 +96,9 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 continue;
             }
         };
-        if entry.depth() == 0 || entry.file_type().is_some_and(|kind| kind.is_dir()) {
-            continue;
-        }
-        let Some(source_path) = normalized_relative_path(&project.root, entry.path()) else {
-            continue;
-        };
-        if !includes.is_match(&source_path) || excludes.is_match(&source_path) {
-            continue;
-        }
         if entry.error().is_some() {
+            let source_path = normalized_relative_path(&project.root, entry.path())
+                .unwrap_or_else(|| ".mara/project.toml".to_owned());
             diagnostics.push(
                 diagnostic_at_start(
                     ContentDiagnosticCode::Io,
@@ -111,11 +110,30 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
             );
             continue;
         }
-        let is_symlink = entry.path_is_symlink();
+        if entry.depth() == 0 || entry.file_type().is_some_and(|kind| kind.is_dir()) {
+            continue;
+        }
+        let Some(source_path) = normalized_relative_path(&project.root, entry.path()) else {
+            continue;
+        };
+        if !includes.is_match(&source_path) || excludes.is_match(&source_path) {
+            continue;
+        }
+        if SourceSpan::try_new(&source_path, "", 0, 0, 1, 1, 1, 1).is_err() {
+            diagnostics.push(
+                diagnostic_at_start(
+                    ContentDiagnosticCode::Io,
+                    &source_path,
+                    "selected content path cannot be represented as Mara source provenance",
+                )
+                .with_detail("operation", "identify")
+                .with_detail("reason", "invalid_source_path"),
+            );
+            continue;
+        }
         candidates.push(Candidate {
             logical_path: entry.into_path(),
             source_path,
-            is_symlink,
         });
     }
 
@@ -140,10 +158,10 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
     let mut selected_paths = HashMap::<PathBuf, String>::new();
     let index_identity = opened_file_identity(&project.index_path);
     for candidate in candidates {
-        match load_candidate(project, &candidate) {
-            Ok((document, resolved_path, identity)) => {
-                let aliases_index = resolved_path == project.index_path
-                    || matches!((identity, index_identity), (Some(left), Some(right)) if left == right);
+        match open_candidate(project, &candidate) {
+            Ok(opened) => {
+                let aliases_index = opened.resolved_path == project.index_path
+                    || matches!((opened.identity, index_identity), (Some(left), Some(right)) if left == right);
                 if aliases_index {
                     let index_path = normalized_relative_path(&project.root, &project.index_path)
                         .unwrap_or_else(|| "<configured-index>".to_owned());
@@ -158,9 +176,10 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                     );
                     continue;
                 }
-                let duplicate = identity
+                let duplicate = opened
+                    .identity
                     .and_then(|identity| selected_identities.get(&identity).cloned())
-                    .or_else(|| selected_paths.get(&resolved_path).cloned());
+                    .or_else(|| selected_paths.get(&opened.resolved_path).cloned());
                 if let Some(first_path) = duplicate {
                     diagnostics.push(
                         diagnostic_at_start(
@@ -173,11 +192,14 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                     );
                     continue;
                 }
-                if let Some(identity) = identity {
+                if let Some(identity) = opened.identity {
                     selected_identities.insert(identity, candidate.source_path.clone());
                 }
-                selected_paths.insert(resolved_path, candidate.source_path.clone());
-                documents.push(document);
+                selected_paths.insert(opened.resolved_path, candidate.source_path.clone());
+                match decode_candidate(&candidate, opened.file) {
+                    Ok(document) => documents.push(document),
+                    Err(diagnostic) => diagnostics.push(*diagnostic),
+                }
             }
             Err(diagnostic) => diagnostics.push(*diagnostic),
         }
@@ -296,11 +318,22 @@ fn compile_globs(patterns: &[String]) -> GlobSet {
         .expect("validated content globs compile into one matcher")
 }
 
-fn load_candidate(
+fn open_candidate(
     project: &LoadedProject,
     candidate: &Candidate,
-) -> Result<(SourceDocument, PathBuf, Option<FileIdentity>), Box<Diagnostic>> {
-    if candidate.is_symlink && !project.content.allow_internal_file_symlinks {
+) -> Result<OpenedCandidate, Box<Diagnostic>> {
+    let logical_metadata = fs::symlink_metadata(&candidate.logical_path).map_err(|_| {
+        Box::new(
+            diagnostic_at_start(
+                ContentDiagnosticCode::Io,
+                &candidate.source_path,
+                "could not inspect selected content path",
+            )
+            .with_detail("operation", "inspect"),
+        )
+    })?;
+    let is_file_symlink = logical_metadata.file_type().is_symlink();
+    if is_file_symlink && !project.content.allow_internal_file_symlinks {
         return Err(Box::new(
             diagnostic_at_start(
                 ProjectDiagnosticCode::SymlinkRejected,
@@ -352,16 +385,13 @@ fn load_candidate(
         ));
     }
 
-    let mut file = open_read_no_follow(&resolved_path).map_err(|_| {
-        Box::new(
-            diagnostic_at_start(
-                ContentDiagnosticCode::Io,
-                &candidate.source_path,
-                "could not open content input",
-            )
-            .with_detail("operation", "open"),
-        )
-    })?;
+    let open_path = if is_file_symlink {
+        resolved_path.as_path()
+    } else {
+        candidate.logical_path.as_path()
+    };
+    let file = open_read_no_follow(open_path)
+        .map_err(|_| open_failure_diagnostic(project, candidate, "open"))?;
     let identity = file_identity(&file).map_err(|_| {
         Box::new(
             diagnostic_at_start(
@@ -374,6 +404,17 @@ fn load_candidate(
     })?;
     verify_candidate_path(project, candidate, &resolved_path, identity)?;
 
+    Ok(OpenedCandidate {
+        file,
+        resolved_path,
+        identity,
+    })
+}
+
+fn decode_candidate(
+    candidate: &Candidate,
+    mut file: fs::File,
+) -> Result<SourceDocument, Box<Diagnostic>> {
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(|_| {
         Box::new(
@@ -385,33 +426,61 @@ fn load_candidate(
             .with_detail("operation", "read"),
         )
     })?;
-    let source = std::str::from_utf8(&bytes).map_err(|error| {
-        let offset = error.valid_up_to();
-        let valid_prefix = std::str::from_utf8(&bytes[..offset])
-            .expect("the prefix before a UTF-8 decoding error is valid");
-        let index = mara_core::SourceIndex::try_new(candidate.source_path.clone(), valid_prefix)
-            .expect("a discovered logical path is valid Mara source provenance");
-        let (line, column) = index
-            .coordinates_at(offset as u64)
-            .expect("a UTF-8 error offset is a source boundary in its valid prefix");
-        let primary = index
-            .try_span(offset as u64, offset as u64, line, column, line, column)
-            .expect("a UTF-8 error offset is a valid empty span in its prefix");
-        Box::new(
-            Diagnostic::new(
-                ContentDiagnosticCode::InvalidUtf8,
-                "content source is not valid UTF-8",
-                Some(primary),
-            )
-            .with_detail("path", candidate.source_path.clone()),
-        )
-    })?;
-    let document = SourceDocument::try_new(
+    let source = match std::str::from_utf8(&bytes) {
+        Ok(source) => source,
+        Err(error) => return Err(invalid_utf8_diagnostic(candidate, &bytes, error)),
+    };
+    SourceDocument::try_new(
         candidate.source_path.clone(),
         SourceText::new(source.to_owned()),
     )
-    .expect("a discovered logical path and UTF-8 source form a source document");
-    Ok((document, resolved_path, identity))
+    .map_err(|_| {
+        Box::new(
+            diagnostic_at_start(
+                ContentDiagnosticCode::Io,
+                &candidate.source_path,
+                "content source could not be represented as a Mara source document",
+            )
+            .with_detail("operation", "decode")
+            .with_detail("reason", "invalid_source_document"),
+        )
+    })
+}
+
+fn invalid_utf8_diagnostic(
+    candidate: &Candidate,
+    bytes: &[u8],
+    error: std::str::Utf8Error,
+) -> Box<Diagnostic> {
+    let offset = error.valid_up_to();
+    let valid_prefix = std::str::from_utf8(&bytes[..offset])
+        .expect("the prefix before a UTF-8 decoding error is valid");
+    let Ok(index) = mara_core::SourceIndex::try_new(candidate.source_path.clone(), valid_prefix)
+    else {
+        return Box::new(
+            diagnostic_at_start(
+                ContentDiagnosticCode::Io,
+                &candidate.source_path,
+                "selected content path cannot be indexed as Mara source provenance",
+            )
+            .with_detail("operation", "decode")
+            .with_detail("reason", "invalid_source_path"),
+        );
+    };
+    let (line, column) = index
+        .coordinates_at(offset as u64)
+        .expect("a UTF-8 error offset is a source boundary in its valid prefix");
+    let primary = index
+        .try_span(offset as u64, offset as u64, line, column, line, column)
+        .expect("a UTF-8 error offset is a valid empty span in its prefix");
+    Box::new(
+        Diagnostic::new(
+            ContentDiagnosticCode::InvalidUtf8,
+            "content source is not valid UTF-8",
+            Some(primary),
+        )
+        .with_detail("path", candidate.source_path.clone()),
+    )
 }
 
 fn verify_candidate_path(
@@ -420,6 +489,27 @@ fn verify_candidate_path(
     expected_path: &Path,
     opened_identity: Option<FileIdentity>,
 ) -> Result<(), Box<Diagnostic>> {
+    let logical_metadata = fs::symlink_metadata(&candidate.logical_path).map_err(|_| {
+        Box::new(
+            diagnostic_at_start(
+                ContentDiagnosticCode::Io,
+                &candidate.source_path,
+                "could not recheck selected content path",
+            )
+            .with_detail("operation", "recheck"),
+        )
+    })?;
+    let is_file_symlink = logical_metadata.file_type().is_symlink();
+    if is_file_symlink && !project.content.allow_internal_file_symlinks {
+        return Err(Box::new(
+            diagnostic_at_start(
+                ProjectDiagnosticCode::SymlinkRejected,
+                &candidate.source_path,
+                "content path became a file symlink during verification",
+            )
+            .with_detail("reason", "file_symlink_disabled"),
+        ));
+    }
     let rechecked_path = fs::canonicalize(&candidate.logical_path).map_err(|_| {
         Box::new(
             diagnostic_at_start(
@@ -440,16 +530,13 @@ fn verify_candidate_path(
             .with_detail("reason", "path_changed_during_open"),
         ));
     }
-    let rechecked_file = open_read_no_follow(&rechecked_path).map_err(|_| {
-        Box::new(
-            diagnostic_at_start(
-                ContentDiagnosticCode::Io,
-                &candidate.source_path,
-                "could not reopen content input for identity verification",
-            )
-            .with_detail("operation", "reopen"),
-        )
-    })?;
+    let recheck_open_path = if is_file_symlink {
+        rechecked_path.as_path()
+    } else {
+        candidate.logical_path.as_path()
+    };
+    let rechecked_file = open_read_no_follow(recheck_open_path)
+        .map_err(|_| open_failure_diagnostic(project, candidate, "reopen"))?;
     let rechecked_identity = file_identity(&rechecked_file).map_err(|_| {
         Box::new(
             diagnostic_at_start(
@@ -471,6 +558,35 @@ fn verify_candidate_path(
         ));
     }
     Ok(())
+}
+
+fn open_failure_diagnostic(
+    project: &LoadedProject,
+    candidate: &Candidate,
+    operation: &'static str,
+) -> Box<Diagnostic> {
+    if !project.content.allow_internal_file_symlinks
+        && fs::symlink_metadata(&candidate.logical_path)
+            .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        Box::new(
+            diagnostic_at_start(
+                ProjectDiagnosticCode::SymlinkRejected,
+                &candidate.source_path,
+                "content file symlink is disabled by project configuration",
+            )
+            .with_detail("reason", "file_symlink_disabled"),
+        )
+    } else {
+        Box::new(
+            diagnostic_at_start(
+                ContentDiagnosticCode::Io,
+                &candidate.source_path,
+                "could not open content input",
+            )
+            .with_detail("operation", operation),
+        )
+    }
 }
 
 fn normalized_relative_path(root: &Path, path: &Path) -> Option<String> {
@@ -523,7 +639,6 @@ fn diagnostic_at_start(
     path: &str,
     message: impl Into<String>,
 ) -> Diagnostic {
-    let primary = SourceSpan::try_new(path, "", 0, 0, 1, 1, 1, 1)
-        .expect("discovered source paths are normalized and project-relative");
-    Diagnostic::new(code, message, Some(primary)).with_detail("path", path)
+    let primary = SourceSpan::try_new(path, "", 0, 0, 1, 1, 1, 1).ok();
+    Diagnostic::new(code, message, primary).with_detail("path", path)
 }
