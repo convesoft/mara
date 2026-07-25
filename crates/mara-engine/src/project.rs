@@ -1312,7 +1312,7 @@ pub(crate) fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 
     fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)
 }
 

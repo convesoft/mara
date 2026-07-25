@@ -984,6 +984,7 @@ fn open_candidate(
     verify_parent_directory_policy(project, candidate)?;
     let file = open_read_no_follow(open_path)
         .map_err(|error| open_failure_diagnostic(project, candidate, "open", &error))?;
+    verify_opened_regular_file(candidate, &file)?;
     let identity = file_identity(&file).map_err(|error| {
         Box::new(
             diagnostic_at_start(
@@ -1002,6 +1003,35 @@ fn open_candidate(
         resolved_path,
         identity,
     })
+}
+
+fn verify_opened_regular_file(
+    candidate: &Candidate,
+    file: &fs::File,
+) -> Result<(), Box<Diagnostic>> {
+    let metadata = file.metadata().map_err(|error| {
+        Box::new(
+            diagnostic_at_start(
+                ContentDiagnosticCode::Io,
+                &candidate.source_path,
+                "could not inspect opened content input",
+            )
+            .with_detail("operation", "inspect")
+            .with_detail("cause", error.to_string()),
+        )
+    })?;
+    if metadata.is_file() {
+        return Ok(());
+    }
+    Err(Box::new(
+        diagnostic_at_start(
+            ContentDiagnosticCode::Io,
+            &candidate.source_path,
+            "opened content input is not a regular file",
+        )
+        .with_detail("operation", "inspect")
+        .with_detail("reason", "opened_not_regular"),
+    ))
 }
 
 fn decode_candidate(
@@ -1333,6 +1363,23 @@ mod tests {
         finalize_diagnostics(&mut diagnostics);
 
         assert_eq!(diagnostics.len(), 2);
+    }
+
+    #[test]
+    fn opened_content_handles_must_still_be_regular_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = fs::File::open(directory.path()).unwrap();
+        let candidate = Candidate {
+            logical_path: directory.path().to_path_buf(),
+            source_path: "source.mara.md".to_owned(),
+        };
+
+        let diagnostic = verify_opened_regular_file(&candidate, &file).unwrap_err();
+
+        assert_eq!(
+            diagnostic.details().get("reason"),
+            Some(&mara_core::DiagnosticValue::from("opened_not_regular"))
+        );
     }
 
     #[test]
