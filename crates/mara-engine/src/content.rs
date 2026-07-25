@@ -80,9 +80,17 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
             Ok(entry) => entry,
             Err(error) => {
                 let source_path = walk_error_path(&error)
-                    .and_then(|path| normalized_relative_path(&project.root, path))
-                    .unwrap_or_else(|| ".mara/project.toml".to_owned());
-                let reason = if is_walk_loop(&error) {
+                    .and_then(|path| normalized_relative_path(&project.root, path));
+                let is_loop = is_walk_loop(&error);
+                if !is_loop
+                    && source_path
+                        .as_deref()
+                        .is_some_and(|path| !is_selected(&includes, &excludes, path))
+                {
+                    continue;
+                }
+                let source_path = source_path.unwrap_or_else(|| ".mara/project.toml".to_owned());
+                let reason = if is_loop {
                     "directory_cycle"
                 } else {
                     "walk_error"
@@ -100,8 +108,14 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
             }
         };
         if entry.error().is_some() {
-            let source_path = normalized_relative_path(&project.root, entry.path())
-                .unwrap_or_else(|| ".mara/project.toml".to_owned());
+            let source_path = normalized_relative_path(&project.root, entry.path());
+            if source_path
+                .as_deref()
+                .is_some_and(|path| !is_selected(&includes, &excludes, path))
+            {
+                continue;
+            }
+            let source_path = source_path.unwrap_or_else(|| ".mara/project.toml".to_owned());
             diagnostics.push(
                 diagnostic_at_start(
                     ContentDiagnosticCode::Io,
@@ -123,7 +137,7 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 continue;
             }
         };
-        if !matches_any(&includes, &source_path) || matches_any(&excludes, &source_path) {
+        if !is_selected(&includes, &excludes, &source_path) {
             continue;
         }
         if SourceSpan::try_new(&source_path, "", 0, 0, 1, 1, 1, 1).is_err() {
@@ -372,6 +386,10 @@ fn matches_any(patterns: &[Glob<'_>], path: &str) -> bool {
     patterns.iter().any(|pattern| pattern.is_match(path))
 }
 
+fn is_selected(includes: &[Glob<'_>], excludes: &[Glob<'_>], path: &str) -> bool {
+    matches_any(includes, path) && !matches_any(excludes, path)
+}
+
 fn finalize_diagnostics(diagnostics: &mut [Diagnostic]) {
     sort_diagnostics(diagnostics);
 }
@@ -406,6 +424,7 @@ fn open_candidate(
     project: &LoadedProject,
     candidate: &Candidate,
 ) -> Result<OpenedCandidate, Box<Diagnostic>> {
+    verify_parent_directory_policy(project, candidate)?;
     let logical_metadata = fs::symlink_metadata(&candidate.logical_path).map_err(|_| {
         Box::new(
             diagnostic_at_start(
@@ -474,6 +493,7 @@ fn open_candidate(
     } else {
         candidate.logical_path.as_path()
     };
+    verify_parent_directory_policy(project, candidate)?;
     let file = open_read_no_follow(open_path)
         .map_err(|_| open_failure_diagnostic(project, candidate, "open"))?;
     let identity = file_identity(&file).map_err(|_| {
@@ -573,6 +593,7 @@ fn verify_candidate_path(
     expected_path: &Path,
     opened_identity: Option<FileIdentity>,
 ) -> Result<(), Box<Diagnostic>> {
+    verify_parent_directory_policy(project, candidate)?;
     let logical_metadata = fs::symlink_metadata(&candidate.logical_path).map_err(|_| {
         Box::new(
             diagnostic_at_start(
@@ -640,6 +661,43 @@ fn verify_candidate_path(
             )
             .with_detail("reason", "identity_changed_during_open"),
         ));
+    }
+    Ok(())
+}
+
+fn verify_parent_directory_policy(
+    project: &LoadedProject,
+    candidate: &Candidate,
+) -> Result<(), Box<Diagnostic>> {
+    if project.content.follow_directory_symlinks {
+        return Ok(());
+    }
+    let relative = candidate
+        .logical_path
+        .strip_prefix(&project.root)
+        .map_err(|_| {
+            Box::new(
+                diagnostic_at_start(
+                    ProjectDiagnosticCode::PathOutsideRoot,
+                    &candidate.source_path,
+                    "content path is outside the project root",
+                )
+                .with_detail("reason", "outside_project_root"),
+            )
+        })?;
+    let mut current = project.root.clone();
+    for component in relative.parent().into_iter().flat_map(Path::components) {
+        current.push(component);
+        if fs::symlink_metadata(&current).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            return Err(Box::new(
+                diagnostic_at_start(
+                    ProjectDiagnosticCode::SymlinkRejected,
+                    &candidate.source_path,
+                    "content parent directory symlink is disabled by project configuration",
+                )
+                .with_detail("reason", "directory_symlink_disabled"),
+            ));
+        }
     }
     Ok(())
 }
