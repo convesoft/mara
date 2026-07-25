@@ -156,6 +156,32 @@ fn nested_real_items_are_diagnosed_and_never_extracted() {
 }
 
 #[test]
+fn diagnostics_follow_canonical_source_order_across_parse_stages() {
+    let source =
+        format!(":::req {MID}\n:Bad: malformed first\n\nbody\n:::test {MID}\nnested\n:::\n:::\n");
+    let parsed = parse(&source);
+
+    assert_eq!(parsed.items().count(), 0);
+    assert_eq!(parsed.diagnostics().len(), 2);
+    assert_eq!(
+        parsed.diagnostics()[0].code(),
+        DiagnosticCode::Syntax(SyntaxDiagnosticCode::InvalidMetadata)
+    );
+    assert_eq!(
+        slice(&source, parsed.diagnostics()[0].primary().unwrap()),
+        ":Bad: malformed first"
+    );
+    assert_eq!(
+        parsed.diagnostics()[1].code(),
+        DiagnosticCode::Syntax(SyntaxDiagnosticCode::InvalidItemHeader)
+    );
+    assert_eq!(
+        slice(&source, parsed.diagnostics()[1].primary().unwrap()),
+        format!(":::test {MID}")
+    );
+}
+
+#[test]
 fn ordinary_markdown_and_mara_like_code_are_preserved_intact() {
     let source = format!(
         "# Ordinary\n\n:::note\nnot a Mara item\n:::\n\n:::warning Caution\nstill not a Mara item\n:::\n\n::: note\nnot a Mara item\n:::\n\n```markdown\n:::req {MID}\n\n:::\n```\n\n<pre>\n:::req {MID}\n:::\n</pre>\n"

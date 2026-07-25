@@ -8,7 +8,7 @@ use std::{
 
 use mara_core::{
     Diagnostic, IdentityDiagnosticCode, Mid, MidIdentity, MidParseError, SourceDocument,
-    SourceSpan, SyntaxDiagnosticCode,
+    SourceSpan, SyntaxDiagnosticCode, sort_diagnostics,
 };
 use rushdown::{
     ast::{Arena, KindData, NodeKind, NodeRef, NodeType, PrettyPrint},
@@ -178,6 +178,7 @@ pub fn parse_document(source: SourceDocument, identity: &MidIdentity) -> ParsedD
             items.push(item);
         }
     }
+    sort_diagnostics(&mut diagnostics);
 
     let blocks = interleave_markdown(&source, items);
     ParsedDocument {

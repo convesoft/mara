@@ -9,6 +9,7 @@ pub use diagnostic::{
     ContentDiagnosticCode, Diagnostic, DiagnosticCode, DiagnosticContext, DiagnosticItem,
     DiagnosticNumber, DiagnosticSeverity, DiagnosticValue, IdentityDiagnosticCode,
     ProjectDiagnosticCode, RelatedDiagnostic, SchemaDiagnosticCode, SyntaxDiagnosticCode,
+    sort_diagnostics,
 };
 pub use identity::{Mid, MidParseError};
 pub use schema::{
