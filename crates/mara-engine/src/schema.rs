@@ -2148,11 +2148,14 @@ fn decode_rule_condition(
         ),
         &mut diagnostics,
     );
-    let values = collect_decode(
+    let values_entry = collect_decode(
         required_entry(entries, "in", "rules[].when", source_map, node.span()),
         &mut diagnostics,
-    )
-    .and_then(|(key, value)| {
+    );
+    let provisional_values = values_entry.as_ref().map_or_else(Vec::new, |(_, value)| {
+        rule_condition_values_for_reference_validation(value, "rules[].when.in", source_map)
+    });
+    let values = values_entry.and_then(|(key, value)| {
         collect_compilation(
             decode_unique_rule_condition_sequence(value, "rules[].when.in", source_map),
             &mut diagnostics,
@@ -2163,9 +2166,14 @@ fn decode_rule_condition(
     if let (Some(field_name), Some(applies_to), Some(flavour_namespaces)) =
         (field_name.as_ref(), applies_to, flavour_namespaces)
     {
+        let validation_values = values
+            .as_ref()
+            .map_or(provisional_values.as_slice(), |values| {
+                values.value().as_slice()
+            });
         diagnostics.extend(validate_rule_condition_references(
             field_name,
-            values.as_ref(),
+            validation_values,
             applies_to,
             flavour_namespaces,
         ));
@@ -2181,7 +2189,7 @@ fn decode_rule_condition(
 
 fn validate_rule_condition_references(
     field: &SchemaField<String>,
-    values: Option<&SchemaField<Vec<SchemaValue<RuleConditionValue>>>>,
+    values: &[SchemaValue<RuleConditionValue>],
     applies_to: &[String],
     flavour_namespaces: &FlavourNamespaces,
 ) -> Vec<Diagnostic> {
@@ -2225,15 +2233,11 @@ fn validate_rule_condition_references(
                 .with_detail("field", field.value().clone())
                 .with_detail("flavour", flavour.clone()),
             );
-            continue;
         }
         fields.push(definition);
     }
 
-    let Some(values) = values else {
-        return diagnostics;
-    };
-    for value in values.value() {
+    for value in values {
         let mut known_domain = false;
         let mut accepted = false;
         for field in &fields {
@@ -4233,6 +4237,25 @@ fn rule_condition_value_key(value: &RuleConditionValue) -> RuleConditionValueKey
         }
         RuleConditionValue::Boolean(value) => RuleConditionValueKey::Boolean(*value),
     }
+}
+
+fn rule_condition_values_for_reference_validation(
+    node: &ParsedNode,
+    field_name: &str,
+    source_map: &SourceMap<'_>,
+) -> Vec<SchemaValue<RuleConditionValue>> {
+    let ParsedNode::Sequence { values, .. } = node else {
+        return Vec::new();
+    };
+    let mut seen = BTreeSet::new();
+    values
+        .iter()
+        .filter_map(|value_node| {
+            let value = decode_rule_condition_value(value_node, field_name, source_map).ok()?;
+            seen.insert(rule_condition_value_key(&value))
+                .then(|| SchemaValue::new(parser_span(source_map, value_node.span()), value))
+        })
+        .collect()
 }
 
 fn decode_rule_condition_value(

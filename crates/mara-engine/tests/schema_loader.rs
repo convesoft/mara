@@ -1984,6 +1984,71 @@ fn validates_condition_field_references_when_condition_values_are_invalid() {
 }
 
 #[test]
+fn preserves_condition_domain_diagnostics_with_other_condition_errors() {
+    let malformed_sibling = rich_schema_with_relations_and_rules(
+        COMPLETE_RELATIONS,
+        r#"  - name: malformed_condition_values
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    when: {field: status, in: [retired, {}]}
+    field: estimate
+    min: 1
+"#,
+    );
+    let fixture = Fixture::new(&malformed_sibling);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+    assert_eq!(
+        error
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| {
+                source_slice(
+                    &malformed_sibling,
+                    diagnostic
+                        .primary()
+                        .expect("schema diagnostic has a source"),
+                )
+            })
+            .collect::<Vec<_>>(),
+        ["retired", "{}"]
+    );
+
+    let repeatable = rich_schema_with_relations_and_rules(
+        COMPLETE_RELATIONS,
+        r#"  - name: repeatable_condition
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    when: {field: status, in: [retired]}
+    field: estimate
+    min: 1
+"#,
+    )
+    .replace(
+        "type: enum\n        required: true",
+        "type: enum\n        required: true\n        repeatable: true",
+    );
+    let fixture = Fixture::new(&repeatable);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+    assert_eq!(
+        error
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| {
+                source_slice(
+                    &repeatable,
+                    diagnostic
+                        .primary()
+                        .expect("schema diagnostic has a source"),
+                )
+            })
+            .collect::<Vec<_>>(),
+        ["status", "retired"]
+    );
+}
+
+#[test]
 fn rejects_a_non_sequence_rule_root_without_producing_a_schema_model() {
     let source = VALID_SCHEMA.replace("rules: []", "rules: {}");
     let error = assert_invalid(&source, SchemaDiagnosticCode::InvalidDeclaration);
