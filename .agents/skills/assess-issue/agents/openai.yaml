@@ -1,0 +1,7 @@
+interface:
+  display_name: "Assess Issue"
+  short_description: "Assess and remediate exactly one Linear issue"
+  default_prompt: "$assess-issue CON-99"
+
+policy:
+  allow_implicit_invocation: false
