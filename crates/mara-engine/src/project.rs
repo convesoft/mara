@@ -13,8 +13,8 @@ use toml::Spanned;
 pub const PROJECT_DIRECTORY: &str = ".mara";
 pub const PROJECT_CONFIG_FILE: &str = "project.toml";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FileIdentity {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FileIdentity {
     volume: u64,
     file: u64,
 }
@@ -1289,7 +1289,7 @@ fn check_output_write_access(path: &Path, _directory: bool) -> io::Result<()> {
 }
 
 #[cfg(unix)]
-fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
 
     fs::OpenOptions::new()
@@ -1299,7 +1299,7 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(unix)]
-fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
+pub(crate) fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
     use std::os::unix::fs::MetadataExt;
 
     let metadata = file.metadata()?;
@@ -1320,7 +1320,7 @@ fn path_identity(_path: &Path, metadata: &fs::Metadata) -> io::Result<Option<Fil
 }
 
 #[cfg(windows)]
-fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
     use std::os::windows::fs::OpenOptionsExt;
 
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
@@ -1331,7 +1331,7 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(windows)]
-fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
+pub(crate) fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
@@ -1364,7 +1364,7 @@ fn path_identity(path: &Path, _metadata: &fs::Metadata) -> io::Result<Option<Fil
 }
 
 #[cfg(not(any(unix, windows)))]
-fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         return Err(io::Error::other("refusing to follow an input symlink"));
@@ -1373,7 +1373,7 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn file_identity(_file: &fs::File) -> io::Result<Option<FileIdentity>> {
+pub(crate) fn file_identity(_file: &fs::File) -> io::Result<Option<FileIdentity>> {
     Ok(None)
 }
 

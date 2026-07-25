@@ -19,6 +19,59 @@ impl DiagnosticSeverity {
     }
 }
 
+/// The project-discovery diagnostic-code family in wire format version 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ProjectDiagnosticCode {
+    NotFound,
+    PathOutsideRoot,
+    SymlinkRejected,
+    DuplicateFile,
+}
+
+impl ProjectDiagnosticCode {
+    pub const ALL: [Self; 4] = [
+        Self::NotFound,
+        Self::PathOutsideRoot,
+        Self::SymlinkRejected,
+        Self::DuplicateFile,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NotFound => "project.not_found",
+            Self::PathOutsideRoot => "project.path_outside_root",
+            Self::SymlinkRejected => "project.symlink_rejected",
+            Self::DuplicateFile => "project.duplicate_file",
+        }
+    }
+
+    pub const fn default_severity(self) -> DiagnosticSeverity {
+        DiagnosticSeverity::Error
+    }
+}
+
+/// The content-loading diagnostic-code family in wire format version 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ContentDiagnosticCode {
+    Io,
+    InvalidUtf8,
+}
+
+impl ContentDiagnosticCode {
+    pub const ALL: [Self; 2] = [Self::Io, Self::InvalidUtf8];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Io => "content.io",
+            Self::InvalidUtf8 => "content.invalid_utf8",
+        }
+    }
+
+    pub const fn default_severity(self) -> DiagnosticSeverity {
+        DiagnosticSeverity::Error
+    }
+}
+
 /// The complete schema diagnostic-code family in wire format version 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SchemaDiagnosticCode {
@@ -64,20 +117,38 @@ impl SchemaDiagnosticCode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum DiagnosticCode {
+    Project(ProjectDiagnosticCode),
+    Content(ContentDiagnosticCode),
     Schema(SchemaDiagnosticCode),
 }
 
 impl DiagnosticCode {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Project(code) => code.as_str(),
+            Self::Content(code) => code.as_str(),
             Self::Schema(code) => code.as_str(),
         }
     }
 
     pub const fn default_severity(self) -> DiagnosticSeverity {
         match self {
+            Self::Project(code) => code.default_severity(),
+            Self::Content(code) => code.default_severity(),
             Self::Schema(code) => code.default_severity(),
         }
+    }
+}
+
+impl From<ProjectDiagnosticCode> for DiagnosticCode {
+    fn from(value: ProjectDiagnosticCode) -> Self {
+        Self::Project(value)
+    }
+}
+
+impl From<ContentDiagnosticCode> for DiagnosticCode {
+    fn from(value: ContentDiagnosticCode) -> Self {
+        Self::Content(value)
     }
 }
 
@@ -308,6 +379,23 @@ mod tests {
                 "schema.invalid_pattern",
                 "schema.invalid_declaration",
             ]
+        );
+    }
+
+    #[test]
+    fn project_and_content_code_catalogues_are_closed_and_stable() {
+        assert_eq!(
+            ProjectDiagnosticCode::ALL.map(ProjectDiagnosticCode::as_str),
+            [
+                "project.not_found",
+                "project.path_outside_root",
+                "project.symlink_rejected",
+                "project.duplicate_file",
+            ]
+        );
+        assert_eq!(
+            ContentDiagnosticCode::ALL.map(ContentDiagnosticCode::as_str),
+            ["content.io", "content.invalid_utf8"]
         );
     }
 

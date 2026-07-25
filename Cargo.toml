@@ -24,6 +24,8 @@ saphyr-parser = "0.0.11"
 ulid = { version = "3.0.0", default-features = false }
 getrandom = "0.4.3"
 toml = "0.8"
+globset = "0.4"
+ignore = "0.4"
 tempfile = "3"
 libc = "0.2"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem"] }

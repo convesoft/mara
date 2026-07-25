@@ -6,8 +6,9 @@ pub mod schema;
 pub mod source;
 
 pub use diagnostic::{
-    Diagnostic, DiagnosticCode, DiagnosticContext, DiagnosticItem, DiagnosticNumber,
-    DiagnosticSeverity, DiagnosticValue, RelatedDiagnostic, SchemaDiagnosticCode,
+    ContentDiagnosticCode, Diagnostic, DiagnosticCode, DiagnosticContext, DiagnosticItem,
+    DiagnosticNumber, DiagnosticSeverity, DiagnosticValue, ProjectDiagnosticCode,
+    RelatedDiagnostic, SchemaDiagnosticCode,
 };
 pub use identity::{Mid, MidParseError};
 pub use schema::{
@@ -20,4 +21,6 @@ pub use schema::{
     RuleCount, RuleDefinition, RuleDefinitions, RuleDirection, RuleKind, RuleSeverity,
     SchemaDocument, SchemaField, SchemaIdentity, SchemaSection, SchemaValue,
 };
-pub use source::{InvalidSourceSpan, SourceIndex, SourceSpan};
+pub use source::{
+    InvalidSourceSpan, LineEnding, SourceDocument, SourceIndex, SourceSpan, SourceText,
+};
