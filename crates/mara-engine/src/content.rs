@@ -8,12 +8,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
 use mara_core::{
     ContentDiagnosticCode, Diagnostic, ProjectDiagnosticCode, SourceDocument, SourceSpan,
     SourceText,
 };
+use wax::{Glob, Program};
 
 use crate::project::{FileIdentity, LoadedProject, file_identity, open_read_no_follow};
 
@@ -113,10 +113,14 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
         if entry.depth() == 0 || entry.file_type().is_some_and(|kind| kind.is_dir()) {
             continue;
         }
-        let Some(source_path) = normalized_relative_path(&project.root, entry.path()) else {
-            continue;
+        let source_path = match candidate_source_path(&project.root, entry.path()) {
+            Ok(source_path) => source_path,
+            Err(diagnostic) => {
+                diagnostics.push(*diagnostic);
+                continue;
+            }
         };
-        if !includes.is_match(&source_path) || excludes.is_match(&source_path) {
+        if !matches_any(&includes, &source_path) || matches_any(&excludes, &source_path) {
             continue;
         }
         if SourceSpan::try_new(&source_path, "", 0, 0, 1, 1, 1, 1).is_err() {
@@ -207,15 +211,17 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
 
     documents.sort_by(|left, right| left.path().cmp(right.path()));
     diagnostics.sort_by(|left, right| {
-        left.primary()
-            .map(SourceSpan::path)
-            .cmp(&right.primary().map(SourceSpan::path))
-            .then_with(|| {
-                left.primary()
-                    .map(SourceSpan::start_byte)
-                    .cmp(&right.primary().map(SourceSpan::start_byte))
-            })
-            .then_with(|| left.code().as_str().cmp(right.code().as_str()))
+        match (left.primary(), right.primary()) {
+            (Some(left), Some(right)) => left
+                .path()
+                .as_bytes()
+                .cmp(right.path().as_bytes())
+                .then_with(|| left.start_byte().cmp(&right.start_byte())),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+        .then_with(|| left.code().as_str().cmp(right.code().as_str()))
     });
     diagnostics.dedup();
 
@@ -303,19 +309,52 @@ fn record_rejected_directory(
     }
 }
 
-fn compile_globs(patterns: &[String]) -> GlobSet {
-    let mut set = GlobSetBuilder::new();
-    for pattern in patterns {
-        let glob = GlobBuilder::new(pattern)
-            .literal_separator(true)
-            .backslash_escape(false)
-            .case_insensitive(false)
-            .build()
-            .expect("the project loader validated every content glob");
-        set.add(glob);
+fn compile_globs(patterns: &[String]) -> Vec<Glob<'static>> {
+    patterns
+        .iter()
+        .map(|pattern| {
+            let pattern = escape_wax_extensions(pattern);
+            let expression = if let Some(pattern) = pattern.strip_prefix("**/") {
+                format!("**/(?-i){pattern}")
+            } else if pattern == "**" {
+                pattern
+            } else {
+                format!("(?-i){pattern}")
+            };
+            Glob::new(&expression)
+                .expect("the project loader validated every content glob")
+                .into_owned()
+        })
+        .collect()
+}
+
+fn escape_wax_extensions(pattern: &str) -> String {
+    let mut expression = String::with_capacity(pattern.len());
+    for character in pattern.chars() {
+        if matches!(character, '$' | '(' | ')' | '<' | '>') {
+            expression.push('\\');
+        }
+        expression.push(character);
     }
-    set.build()
-        .expect("validated content globs compile into one matcher")
+    expression
+}
+
+fn matches_any(patterns: &[Glob<'_>], path: &str) -> bool {
+    patterns.iter().any(|pattern| pattern.is_match(path))
+}
+
+fn candidate_source_path(root: &Path, path: &Path) -> Result<String, Box<Diagnostic>> {
+    normalized_relative_path(root, path).ok_or_else(|| {
+        Box::new(
+            Diagnostic::new(
+                ContentDiagnosticCode::Io,
+                "content path is not valid UTF-8",
+                None,
+            )
+            .with_detail("operation", "identify")
+            .with_detail("reason", "non_utf8_path"),
+        )
+    })
 }
 
 fn open_candidate(
@@ -641,4 +680,28 @@ fn diagnostic_at_start(
 ) -> Diagnostic {
     let primary = SourceSpan::try_new(path, "", 0, 0, 1, 1, 1, 1).ok();
     Diagnostic::new(code, message, primary).with_detail("path", path)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_utf8_candidate_paths_produce_pathless_diagnostics() {
+        use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+        let root = Path::new("/project");
+        let path = root.join(OsString::from_vec(b"invalid-\xff.mara.md".to_vec()));
+        let diagnostic = candidate_source_path(root, &path).unwrap_err();
+
+        assert_eq!(
+            diagnostic.code(),
+            mara_core::DiagnosticCode::Content(ContentDiagnosticCode::Io)
+        );
+        assert!(diagnostic.primary().is_none());
+        assert_eq!(
+            diagnostic.details().get("reason"),
+            Some(&mara_core::DiagnosticValue::from("non_utf8_path"))
+        );
+    }
 }

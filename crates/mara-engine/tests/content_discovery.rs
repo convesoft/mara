@@ -94,6 +94,10 @@ fn configured_globs_select_files_with_deterministic_precedence_and_order() {
             "classes/[a-c].md",
             "literal/[?].md",
             "negative/[!a].md",
+            "unicode/?.md",
+            "extensions/$cash.md",
+            "extensions/(flag).md",
+            "extensions/<repeat>.md",
         ],
         &["docs/excluded*.mara.md", "classes/b.md"],
         false,
@@ -113,6 +117,11 @@ fn configured_globs_select_files_with_deterministic_precedence_and_order() {
         "literal/?.md",
         "negative/a.md",
         "negative/b.md",
+        "unicode/é.md",
+        "unicode/éé.md",
+        "extensions/$cash.md",
+        "extensions/(flag).md",
+        "extensions/<repeat>.md",
         "ordinary.md",
     ] {
         fixture.write(path, path);
@@ -129,9 +138,13 @@ fn configured_globs_select_files_with_deterministic_precedence_and_order() {
             "a.mara.md",
             "classes/a.md",
             "docs/kept.mara.md",
+            "extensions/$cash.md",
+            "extensions/(flag).md",
+            "extensions/<repeat>.md",
             "literal/?.md",
             "negative/b.md",
             "notes/file1.md",
+            "unicode/é.md",
             "z.mara.md",
         ]
     );
@@ -206,18 +219,20 @@ fn invalid_utf8_does_not_erase_independently_loaded_documents() {
 #[test]
 fn unsupported_source_paths_are_diagnosed_without_panicking_or_losing_other_files() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], false, false, false);
+    fixture.write("a-invalid.mara.md", [0xff]);
     fixture.write("scheme:bad.mara.md", "unsupported path");
     fixture.write("valid.mara.md", "valid source");
 
     let discovery = discover_content(&fixture.load());
 
     assert_eq!(document_paths(&discovery), ["valid.mara.md"]);
-    assert_eq!(discovery.diagnostics().len(), 1);
+    assert_eq!(discovery.diagnostics().len(), 2);
     assert_eq!(
         discovery.diagnostics()[0].code(),
-        DiagnosticCode::Content(ContentDiagnosticCode::Io)
+        DiagnosticCode::Content(ContentDiagnosticCode::InvalidUtf8)
     );
-    assert!(discovery.diagnostics()[0].primary().is_none());
+    assert!(discovery.diagnostics()[0].primary().is_some());
+    assert!(discovery.diagnostics()[1].primary().is_none());
 }
 
 #[test]
