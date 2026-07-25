@@ -1375,12 +1375,7 @@ fn decode_v1_document(
         required_entry(entries, "format_version", "root", source_map, *root_span)?;
     let format_version = decode_format_version(format_key, format_value, source_map)?;
 
-    let unknown_keys = v1_unknown_key_diagnostics(entries, source_map);
-    if !unknown_keys.is_empty() {
-        return Err(DocumentDecodeFailure::Diagnostics(unknown_keys));
-    }
-
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = v1_unknown_key_diagnostics(entries, source_map);
     let schema = collect_decode(
         required_entry(entries, "schema", "root", source_map, *root_span).and_then(
             |(key, value)| {

@@ -1191,6 +1191,29 @@ fn reports_all_independent_unknown_keys_in_source_order() {
 }
 
 #[test]
+fn reports_unknown_keys_together_with_independent_declaration_defects() {
+    let source = VALID_SCHEMA.replace("    label: Requirement", "    owner: team\n    label: ''");
+    let fixture = Fixture::new(&source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+
+    let diagnostics = error.diagnostics();
+    assert_eq!(diagnostics.len(), 2, "{diagnostics:#?}");
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| (
+                diagnostic.code().as_str(),
+                source_slice(&source, diagnostic.primary().unwrap()),
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("schema.unknown_key", "owner"),
+            ("schema.invalid_declaration", "''"),
+        ]
+    );
+}
+
+#[test]
 fn reports_all_independent_flavour_and_field_defects_regardless_of_mapping_order() {
     let source = RICH_SCHEMA
         .replacen("label: Requirement", "label: ''", 1)
