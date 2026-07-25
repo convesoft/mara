@@ -1,0 +1,7 @@
+interface:
+  display_name: "Iterate Linear"
+  short_description: "Implement and close every Mara Linear issue"
+  default_prompt: "$iterate-linear"
+
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Implement Issue"
+  short_description: "Deliver an issue to merge-ready and report the caller"
+  default_prompt: "$implement-issue CON-99"
+
+policy:
+  allow_implicit_invocation: false

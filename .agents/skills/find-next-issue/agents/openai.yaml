@@ -1,0 +1,7 @@
+interface:
+  display_name: "Find Next Issue"
+  short_description: "Find the next available Linear delivery issue"
+  default_prompt: "$find-next-issue"
+
+policy:
+  allow_implicit_invocation: false
