@@ -1819,6 +1819,27 @@ fn compiles_typed_condition_values_against_each_scalar_field_domain() {
 }
 
 #[test]
+fn preserves_numeric_condition_values_in_diagnostic_details() {
+    let source = rich_schema_with_relations_and_rules(
+        COMPLETE_RELATIONS,
+        r#"  - name: invalid_numeric_condition
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    when: {field: estimate, in: [2.5]}
+    field: estimate
+    min: 1
+"#,
+    );
+    let error = assert_invalid(&source, SchemaDiagnosticCode::InvalidDeclaration);
+
+    assert!(matches!(
+        only_diagnostic(&error).details().get("value"),
+        Some(DiagnosticValue::Number(value)) if value.get() == 2.5
+    ));
+}
+
+#[test]
 fn preserves_independent_diagnostics_across_the_normative_compilation_stages() {
     let source = rich_schema_with_relations_and_rules(
         r#"  broken_relation:

@@ -11,15 +11,15 @@ use std::{
 
 use mara_core::{
     CardinalityBound, CardinalityMaximum, DerivedSourceKind, Diagnostic, DiagnosticContext,
-    DiagnosticSeverity, DiagnosticValue, DisplayIdDefinition, FieldDefinition, FieldRuleSelection,
-    FieldType, FlavourDefinition, FlavourDefinitions, FlavourGuidance, IdentityConfiguration,
-    MidFormat, MidIdentity, OrphanRule, RelatedDiagnostic, RelationCardinality, RelationDefinition,
-    RelationDefinitions, RelationRuleSelection, RelationSourceEndpoint, RelationTargetEndpoint,
-    RequiredBuiltInDefinition, RequiresFieldRule, RequiresRelationRule, RuleApplicability,
-    RuleCondition, RuleConditionNumber, RuleConditionValue, RuleConfiguration, RuleCount,
-    RuleDefinition, RuleDefinitions, RuleDirection, RuleKind, RuleSeverity, SchemaDiagnosticCode,
-    SchemaDocument, SchemaField, SchemaIdentity, SchemaSection, SchemaValue, SourceIndex,
-    SourceSpan,
+    DiagnosticNumber, DiagnosticSeverity, DiagnosticValue, DisplayIdDefinition, FieldDefinition,
+    FieldRuleSelection, FieldType, FlavourDefinition, FlavourDefinitions, FlavourGuidance,
+    IdentityConfiguration, MidFormat, MidIdentity, OrphanRule, RelatedDiagnostic,
+    RelationCardinality, RelationDefinition, RelationDefinitions, RelationRuleSelection,
+    RelationSourceEndpoint, RelationTargetEndpoint, RequiredBuiltInDefinition, RequiresFieldRule,
+    RequiresRelationRule, RuleApplicability, RuleCondition, RuleConditionNumber,
+    RuleConditionValue, RuleConfiguration, RuleCount, RuleDefinition, RuleDefinitions,
+    RuleDirection, RuleKind, RuleSeverity, SchemaDiagnosticCode, SchemaDocument, SchemaField,
+    SchemaIdentity, SchemaSection, SchemaValue, SourceIndex, SourceSpan,
 };
 use regex::Regex as UnicodeRegex;
 use regex_lite::Regex as LiteRegex;
@@ -2289,7 +2289,9 @@ fn rule_condition_value_detail(value: &RuleConditionValue) -> DiagnosticValue {
     match value {
         RuleConditionValue::String(value) => DiagnosticValue::String(value.clone()),
         RuleConditionValue::Integer(value) => DiagnosticValue::Integer(*value),
-        RuleConditionValue::Number(value) => DiagnosticValue::String(value.get().to_string()),
+        RuleConditionValue::Number(value) => DiagnosticValue::Number(
+            DiagnosticNumber::new(value.get()).expect("rule condition numbers are finite"),
+        ),
         RuleConditionValue::Boolean(value) => DiagnosticValue::Boolean(*value),
     }
 }
