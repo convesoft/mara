@@ -705,11 +705,8 @@ fn git_context(root: &Path) -> io::Result<Option<GitContext>> {
     if !inside.status.success() {
         return Ok(None);
     }
-    if inside.stdout.strip_suffix(b"\n") != Some(b"true") {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Git did not confirm a worktree",
-        ));
+    if !parse_git_worktree_response(&inside.stdout)? {
+        return Ok(None);
     }
     let worktree_root = git_output(root, &["rev-parse", "--show-toplevel"])?;
     if !worktree_root.status.success() {
@@ -759,6 +756,17 @@ fn git_context(root: &Path) -> io::Result<Option<GitContext>> {
         ignored_paths: ignored_content_paths(root),
         ignore_rule_files,
     }))
+}
+
+fn parse_git_worktree_response(output: &[u8]) -> io::Result<bool> {
+    match output.strip_suffix(b"\n").unwrap_or(output) {
+        b"true" => Ok(true),
+        b"false" => Ok(false),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Git returned an invalid worktree response",
+        )),
+    }
 }
 
 fn ignored_content_paths(root: &Path) -> io::Result<IgnoredPaths> {
@@ -1380,6 +1388,13 @@ mod tests {
             diagnostic.details().get("reason"),
             Some(&mara_core::DiagnosticValue::from("opened_not_regular"))
         );
+    }
+
+    #[test]
+    fn git_false_response_means_worktree_context_is_unavailable() {
+        assert!(parse_git_worktree_response(b"true\n").unwrap());
+        assert!(!parse_git_worktree_response(b"false\n").unwrap());
+        assert!(parse_git_worktree_response(b"unknown\n").is_err());
     }
 
     #[test]
