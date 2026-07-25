@@ -4177,6 +4177,7 @@ fn decode_unique_rule_condition_sequence(
         )]);
     }
 
+    let mut seen = BTreeSet::new();
     let mut compiled = Vec::with_capacity(values.len());
     let mut diagnostics = Vec::new();
     for value_node in values {
@@ -4186,10 +4187,7 @@ fn decode_unique_rule_condition_sequence(
         ) else {
             continue;
         };
-        if compiled
-            .iter()
-            .any(|existing: &SchemaValue<RuleConditionValue>| existing.value() == &value)
-        {
+        if !seen.insert(rule_condition_value_key(&value)) {
             diagnostics.push(
                 invalid_declaration(
                     format!("{field_name} entries must be unique"),
@@ -4210,6 +4208,31 @@ fn decode_unique_rule_condition_sequence(
         return Err(diagnostics);
     }
     Ok(compiled)
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum RuleConditionValueKey {
+    String(String),
+    Integer(i64),
+    Number(u64),
+    Boolean(bool),
+}
+
+fn rule_condition_value_key(value: &RuleConditionValue) -> RuleConditionValueKey {
+    match value {
+        RuleConditionValue::String(value) => RuleConditionValueKey::String(value.clone()),
+        RuleConditionValue::Integer(value) => RuleConditionValueKey::Integer(*value),
+        RuleConditionValue::Number(value) => {
+            let value = value.get();
+            let bits = if value == 0.0 {
+                0.0_f64.to_bits()
+            } else {
+                value.to_bits()
+            };
+            RuleConditionValueKey::Number(bits)
+        }
+        RuleConditionValue::Boolean(value) => RuleConditionValueKey::Boolean(*value),
+    }
 }
 
 fn decode_rule_condition_value(
