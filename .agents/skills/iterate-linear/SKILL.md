@@ -27,6 +27,8 @@ Explicit invocation authorizes this orchestrator to:
   `codex-reasoning:<effort>` labels when creating their worker tasks;
 - create dedicated Codex worktree tasks for READY issues;
 - merge worker pull requests only after a fresh merge-readiness recheck;
+- reconcile verified acceptance checkboxes after a confirmed merge while preserving
+  every other part of the issue description;
 - wait for and verify the automatic completion of merged implementation,
   clarification, prerequisite, and split-child issues;
 - fast-forward the local default branch after each merge;
@@ -132,6 +134,14 @@ no worker exists.
 
 Repeat the following phases without asking the user to restate the command.
 
+Before selecting new work, recover any registry issue whose exact PR head is
+confirmed merged but whose phase 7 work did not fully finish. Rehydrate its recorded
+acceptance matrix and merged commit, verify that the current criteria still match,
+then resume phase 7 from its first incomplete step; completed steps are idempotent.
+Do not reassess the issue, resume its worker, or attempt the merge again. If the
+recorded evidence cannot be recovered or no longer matches, return BLOCKED with the
+merged commit.
+
 ### 1. Select globally
 
 Invoke `$find-next-issue` with no arguments and follow its skill contract exactly.
@@ -219,9 +229,10 @@ bounded waits and continue waiting on timeouts; commentary does not mean complet
 
 Accept only:
 
-- `MERGE READY` with issue, PR URL, branch, exact head SHA, requirements, CI,
-  automatic Codex review, other review threads, local validation, local independent
-  review, residual risks, and recommended merge method;
+- `MERGE READY` with issue, PR URL, branch, exact head SHA, requirements, one
+  acceptance-evidence row per criterion, CI, automatic Codex review, other review
+  threads, local validation, local independent review, residual risks, and
+  recommended merge method;
 - `BLOCKED` with issue, phase, concrete blocker, evidence, safe work already
   completed, required decision/authority/external change, available options, and a
   recommended option.
@@ -240,14 +251,23 @@ Keep the worker task and worktree available. Reassess the same issue once using
 - If assessment returns `SPLIT`, first verify the worker has no unique commits,
   uncommitted changes, or open PR. Then archive it and remove its registry entry;
   if unique work exists, return BLOCKED rather than abandoning or reassigning it.
-- If assessment still reports READY without resolving the worker blocker, return
-  BLOCKED because assessment and implementation evidence conflict.
+- If the worker reported changed acceptance criteria and assessment returns
+  `READY`, resume the same worker and require fresh evidence.
+- If assessment still reports READY without resolving any other worker blocker,
+  return BLOCKED because assessment and implementation evidence conflict.
 - If the blocker is external or requires user authority, report it and wait. Do not
   create another worker or silently broaden scope.
 
 ### 6. Recheck and merge a MERGE READY result
 
-Immediately before merge, independently fetch current GitHub state and verify:
+Immediately before merge, re-read the Linear acceptance criteria and current GitHub
+state. Require exactly one worker evidence row for every criterion, with matching ID,
+order, and text, excluding the checkbox marker itself.
+
+If the criteria and worker rows differ, do not merge. Resume the same worker with
+the exact worker message and require a fresh `MERGE READY` report.
+
+When the criteria are unchanged, verify:
 
 - the PR is open, non-draft, and targets the canonical default branch;
 - current head SHA exactly equals the worker-reported SHA;
@@ -258,8 +278,17 @@ Immediately before merge, independently fetch current GitHub state and verify:
   `+1`, and its delayed snapshot has no actionable findings;
 - no actionable human review thread remains;
 - the PR description cites the Linear issue and affected Mara IDs;
+- the PR description contains exactly one acceptance-evidence row for every current
+  criterion;
+- every row is `PASS` with the required evidence, except an explicitly
+  merge-dependent row may be `PENDING` with the exact post-merge evidence it needs;
 - the worker’s validation and independent-review evidence is complete;
+- the final independent reviewer evaluated the complete acceptance matrix for the
+  current head and reported no actionable acceptance finding;
 - no residual risk contradicts merge readiness.
+
+Do not check Linear acceptance boxes before merge. Reconcile them only after GitHub
+confirms that exact head was merged.
 
 If state is stale or a condition regressed, do not merge. Resume the same worker with
 the exact worker message above. It re-reads the PR and authoritative state to
@@ -279,29 +308,38 @@ After confirmed merge:
 1. Require the local control checkout to remain clean and on the default branch.
 2. Run `git pull --ff-only` from the canonical remote and verify local HEAD contains
    the merged commit. Do not reset on failure.
-3. Re-read the Linear issue until the merge automation moves it to a completed
+3. Re-read the acceptance criteria and verify their text and order still match the
+   evidence matrix, ignoring checkbox markers.
+4. Verify the confirmed merge supplies the named evidence for every merge-dependent
+   `PENDING` row and change those rows to `PASS`. If any row remains non-`PASS`,
+   report BLOCKED with the merged commit.
+5. Idempotently change each verified criterion's unchecked marker to checked while
+   preserving all other issue-description content, then re-read the issue to verify
+   the update. If criteria changed or the update failed, report BLOCKED with the
+   merged commit.
+6. Re-read the Linear issue until the merge automation moves it to a completed
    state, using bounded waits between checks.
-4. Do not manually update the state of an implementation, clarification,
+7. Do not manually update the state of an implementation, clarification,
    prerequisite, or split-child issue. Manual closure is reserved for verified
    coordination parents and occurs only inside `$find-next-issue`.
-5. Confirm the PR/merge evidence remains linked or otherwise discoverable from the
+8. Confirm the PR/merge evidence remains linked or otherwise discoverable from the
    issue. Do not add closing-keyword semantics to PR text.
-6. Archive the completed worker task using its recorded `threadId` and `hostId`.
-7. Remove its active registry entry, record the completed issue and PR, then return
+9. Archive the completed worker task using its recorded `threadId` and `hostId`.
+10. Remove its active registry entry, record the completed issue, acceptance
+   reconciliation, and PR, then return
    to `$find-next-issue`.
 
-If the PR merged but the automatic Linear completion signal does not arrive within
-the bounded wait, report BLOCKED with the merged commit and the missing automation
-signal. Do not manually close the issue or dispatch another worker. If local
-synchronization fails, likewise report BLOCKED with the exact recovery action and
-preserve all state until control is reconciled.
+If checklist reconciliation or automatic Linear completion does not succeed within
+the bounded wait, report BLOCKED with the merged commit. Do not manually close the
+issue or dispatch another worker. If local synchronization fails, likewise report
+BLOCKED and preserve state until control is reconciled.
 
 ## Prevent loops and duplicate work
 
 Record a fingerprint after each selector, assessor, worker, merge, and Linear
-mutation result. A fingerprint includes relevant issue states, dependency edges,
-worker IDs/results and selected model/reasoning, PR head, and local default-branch
-HEAD.
+mutation result. A fingerprint includes relevant issue states, acceptance evidence,
+checklist reconciliation, dependency edges, worker IDs/results and selected
+model/reasoning, PR head, and local default-branch HEAD.
 
 Do not repeat a phase against an unchanged fingerprint unless waiting on an
 explicitly named external signal. Never create duplicate remediation issues,
@@ -315,11 +353,17 @@ When `$find-next-issue` reports COMPLETE:
 2. Verify every implementation, clarification, prerequisite, split child, and
    coordination parent is in a completed state permitted by its contract.
 3. Verify every implementation-bearing issue has confirmed merged GitHub evidence.
-4. Verify no active worker remains and no open Mara implementation PR remains.
-5. Fast-forward and verify the local default branch one final time.
-6. Invoke `$find-next-issue` once more against the unchanged final state and require
+4. For every implementation-bearing issue completed during this run, verify its
+   recorded acceptance matrix is fully `PASS` and its Linear checklist was
+   reconciled after merge. Do not retroactively infer checklist evidence for issues
+   completed before this run.
+5. Verify every coordination parent closed during this run had its evidence-backed
+   aggregate acceptance checklist reconciled by `$find-next-issue`.
+6. Verify no active worker remains and no open Mara implementation PR remains.
+7. Fast-forward and verify the local default branch one final time.
+8. Invoke `$find-next-issue` once more against the unchanged final state and require
    a second COMPLETE result.
-7. Complete the persistent goal only after this audit succeeds.
+9. Complete the persistent goal only after this audit succeeds.
 
 ## Return terminal reports
 
@@ -345,6 +389,7 @@ For completion:
 COMPLETE — all in-scope Mara Linear issues are closed
 Issues completed this run: <IDs and PRs>
 Coordination parents closed: <IDs>
+Acceptance checklists reconciled: <implementation and coordination issue IDs>
 Final default branch: <name and HEAD>
 Open implementation PRs: None
 Active worker tasks: None

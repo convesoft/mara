@@ -81,7 +81,8 @@ Check all of the following for the passed issue:
 
 - It describes one bounded, coherent delivery outcome.
 - Its complete relevant Mara contract is accepted, complete, and non-contradictory.
-- Acceptance criteria map to observable, testable behavior or evidence.
+- It contains an explicit ordered acceptance checklist whose criteria are unchecked
+  Markdown checkboxes that map to observable, testable behavior or evidence.
 - Dependencies and blockers have resolved with required completion signals.
 - The work fits one focused branch and pull request.
 - No substantial product, architecture, schema, methodology, or verification
@@ -157,7 +158,9 @@ Create or reuse one clarification issue in the same team and project containing:
 - the exact gap or contradiction with Mara IDs and source documents;
 - required decision or accepted contract text;
 - bounded documentation scope and non-goals;
-- observable acceptance criteria, including merged contract evidence when required;
+- an explicit ordered acceptance checklist of unchecked Markdown boxes, with
+  required evidence for every criterion, including merged contract evidence when
+  required;
 - the signal for reassessing the passed issue;
 - provenance with kind `clarification`.
 
@@ -172,9 +175,10 @@ outcomes and decomposition materially improves reviewability or sequencing. Do n
 split an issue that is started, In Review, linked to an open implementation PR, or
 already has incompatible children; return BLOCKED.
 
-Define every child’s neutral title, complete scope, non-goals, Mara IDs, acceptance
-criteria, verification evidence, and dependency DAG before writing. Create or reuse
-children in topological order with:
+Define every child’s neutral title, complete scope, non-goals, Mara IDs, explicit
+ordered acceptance checklist of unchecked Markdown boxes, verification evidence,
+and dependency DAG before writing. Create or reuse children in topological order
+with:
 
 - the passed issue as `parentId`;
 - inherited team, project, milestone, and priority when present;
@@ -184,8 +188,9 @@ children in topological order with:
 
 After all children verify, update the passed issue while preserving objective, Mara
 links, non-goals, and history. Add an explicit coordination-parent role, child list,
-dependency order, prohibition on parent-level implementation, and aggregate
-completion criteria.
+dependency order, prohibition on parent-level implementation, and an ordered
+aggregate acceptance checklist of unchecked Markdown boxes whose criteria can be
+verified from child and merge evidence.
 
 Return SPLIT only after every child, relation, and parent conversion verifies. If a
 write fails, stop and return BLOCKED with created/reused IDs, failed operation, and
@@ -196,8 +201,9 @@ recovery action. Never choose which child should execute next.
 When accepted Mara contract clearly requires a concrete prerequisite but no Linear
 blocker represents it, create or reuse one bounded prerequisite issue in the same
 team and project. Include the prerequisite outcome, reason it blocks, controlling
-Mara IDs, scope, non-goals, acceptance and verification criteria, completion signal,
-and provenance kind `prerequisite`.
+Mara IDs, scope, non-goals, an explicit ordered acceptance checklist of unchecked
+Markdown boxes, verification criteria, completion signal, and provenance kind
+`prerequisite`.
 
 Make it block the passed issue and verify both sides. Return the prerequisite issue
 without selecting it as next. If it requires an unapproved product decision, create
