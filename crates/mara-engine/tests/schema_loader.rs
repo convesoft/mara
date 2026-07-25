@@ -1,7 +1,8 @@
 use std::{fs, path::Path};
 
 use mara_core::{
-    Diagnostic, DiagnosticCode, DiagnosticValue, FieldType, Mid, MidFormat, SchemaDiagnosticCode,
+    CardinalityMaximum, DerivedSourceKind, Diagnostic, DiagnosticCode, DiagnosticValue, FieldType,
+    Mid, MidFormat, SchemaDiagnosticCode,
 };
 use mara_engine::{
     project::{LoadedProject, load_from_root},
@@ -86,6 +87,43 @@ flavours:
       required: false
     body: {}
 "#;
+
+const COMPLETE_RELATIONS: &str = r#"  derives_from:
+    source:
+      flavours: [design]
+      derived: [source_span]
+    target:
+      flavours: [requirement]
+      external: [https, linear+v1]
+    inverse: derived_by
+    inverse_authoring: true
+    symmetric: false
+    self_reference: false
+    cardinality:
+      outgoing:
+        min: 1
+        max: many
+      incoming:
+        min: 0
+        max: 3
+  references:
+    source:
+      flavours: [requirement]
+    target:
+      external: [mailto, https]
+  related_to:
+    source:
+      flavours: [requirement, design]
+    target:
+      flavours: [design, requirement]
+    symmetric: true
+    same_flavour: true
+    acyclic: true
+"#;
+
+fn rich_schema_with_relations(relations: &str) -> String {
+    format!("{RICH_SCHEMA}relations:\n{relations}")
+}
 
 struct Fixture {
     _temp: TempDir,
@@ -290,6 +328,7 @@ fn loads_valid_v1_identity_and_preserves_every_decoded_key_and_value_span() {
         "{}"
     );
     assert!(document.relations().unwrap().is_empty());
+    assert!(document.external_mention_schemes().is_empty());
     assert_eq!(
         source_slice(VALID_SCHEMA, document.rules().unwrap().key_source()),
         "rules"
@@ -342,6 +381,7 @@ flavours: {}
 
     assert!(document.flavours().is_empty());
     assert!(document.relations().is_none());
+    assert!(document.external_mention_schemes().is_empty());
     assert!(document.rules().is_none());
 }
 
@@ -454,6 +494,458 @@ fn compiles_guidance_builtins_and_every_scalar_field_into_deterministic_domain_v
     assert!(!*design.title().value().required().unwrap().value());
     assert!(design.fields_source().is_none());
     assert!(design.fields().is_empty());
+}
+
+#[test]
+fn compiles_relation_endpoints_constraints_cardinality_and_external_allowlist_deterministically() {
+    // TEST-SCHEMA-RELATIONS-RULES covers REQ-SCHEMA-RELATIONS and
+    // REQ-SCHEMA-INVERSES for the relation-declaration slice delivered by CON-25.
+    let source = rich_schema_with_relations(COMPLETE_RELATIONS);
+    let first_fixture = Fixture::new(&source);
+    let first = load_schema(&first_fixture.loaded_project()).unwrap();
+    let second_fixture = Fixture::new(&source);
+    let second = load_schema(&second_fixture.loaded_project()).unwrap();
+
+    assert_eq!(first.relations(), second.relations());
+    let relations = first.relations().unwrap();
+    assert_eq!(source_slice(&source, relations.key_source()), "relations");
+    assert_eq!(relations.len(), 3);
+    assert_eq!(
+        relations
+            .definitions()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["derives_from", "references", "related_to"]
+    );
+    assert_eq!(
+        first
+            .external_mention_schemes()
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["https", "linear+v1", "mailto"]
+    );
+
+    let derives_from = relations.get("derives_from").unwrap();
+    assert_eq!(derives_from.name(), "derives_from");
+    assert_eq!(
+        source_slice(&source, derives_from.key_source()),
+        "derives_from"
+    );
+    assert_eq!(
+        derives_from
+            .source()
+            .value()
+            .flavours()
+            .value()
+            .iter()
+            .map(|value| value.value().as_str())
+            .collect::<Vec<_>>(),
+        ["design"]
+    );
+    let derived = derives_from.source().value().derived().unwrap();
+    assert_eq!(derived.value().len(), 1);
+    assert_eq!(*derived.value()[0].value(), DerivedSourceKind::SourceSpan);
+    assert_eq!(
+        source_slice(&source, derived.value()[0].source()),
+        "source_span"
+    );
+    let target = derives_from.target().value();
+    assert_eq!(
+        target
+            .flavours()
+            .unwrap()
+            .value()
+            .iter()
+            .map(|value| value.value().as_str())
+            .collect::<Vec<_>>(),
+        ["requirement"]
+    );
+    assert_eq!(
+        target
+            .external()
+            .unwrap()
+            .value()
+            .iter()
+            .map(|value| value.value().as_str())
+            .collect::<Vec<_>>(),
+        ["https", "linear+v1"]
+    );
+    assert_eq!(derives_from.inverse().unwrap().value(), "derived_by");
+    assert!(derives_from.permits_inverse_authoring());
+    assert!(!derives_from.is_symmetric());
+    assert!(!derives_from.requires_same_flavour());
+    assert!(!derives_from.permits_self_reference());
+    assert!(!derives_from.is_acyclic());
+
+    let cardinality = derives_from.cardinality().unwrap().value();
+    let outgoing = cardinality.outgoing().unwrap().value();
+    assert_eq!(outgoing.minimum(), 1);
+    assert_eq!(outgoing.maximum(), CardinalityMaximum::Many);
+    assert_eq!(
+        source_slice(&source, outgoing.min().unwrap().value_source()),
+        "1"
+    );
+    let incoming = cardinality.incoming().unwrap().value();
+    assert_eq!(incoming.minimum(), 0);
+    assert_eq!(incoming.maximum(), CardinalityMaximum::Bounded(3));
+
+    let related_to = relations.get("related_to").unwrap();
+    assert!(related_to.is_symmetric());
+    assert!(related_to.requires_same_flavour());
+    assert!(related_to.permits_self_reference());
+    assert!(related_to.is_acyclic());
+    assert!(related_to.inverse().is_none());
+    assert!(related_to.cardinality().is_none());
+
+    let references = relations.get("references").unwrap();
+    assert!(references.target().value().flavours().is_none());
+    assert_eq!(
+        references
+            .target()
+            .value()
+            .external()
+            .unwrap()
+            .value()
+            .iter()
+            .map(|value| value.value().as_str())
+            .collect::<Vec<_>>(),
+        ["mailto", "https"]
+    );
+}
+
+#[test]
+fn diagnoses_relation_endpoint_and_external_scheme_defects_at_their_sources() {
+    let cases = [
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "missing",
+            r#"  relation:
+    source: {flavours: [missing]}
+    target: {flavours: [requirement]}
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "missing",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [missing]}
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidName,
+            "Requirement",
+            r#"  relation:
+    source: {flavours: [Requirement]}
+    target: {flavours: [requirement]}
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidName,
+            "HTTPS",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {external: [HTTPS]}
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidName,
+            "'https://'",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {external: ['https://']}
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "source_file",
+            r#"  relation:
+    source: {flavours: [requirement], derived: [source_file]}
+    target: {flavours: [requirement]}
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "[]",
+            r#"  relation:
+    source: {flavours: []}
+    target: {flavours: [requirement]}
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "[]",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {external: []}
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "{}",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {}
+"#,
+        ),
+    ];
+
+    for (code, primary, relation) in cases {
+        let source = rich_schema_with_relations(relation);
+        let error = assert_invalid(&source, code);
+        assert_eq!(
+            source_slice(&source, only_diagnostic(&error).primary().unwrap()),
+            primary
+        );
+    }
+}
+
+#[test]
+fn diagnoses_inverse_symmetry_acyclicity_and_cardinality_contradictions() {
+    let cases = [
+        (
+            "true",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [design]}
+    inverse_authoring: true
+"#,
+        ),
+        (
+            "inverse_name",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [requirement]}
+    inverse: inverse_name
+    symmetric: true
+"#,
+        ),
+        (
+            "false",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [requirement]}
+    inverse_authoring: false
+    symmetric: true
+"#,
+        ),
+        (
+            "{flavours: [design]}",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [design]}
+    symmetric: true
+"#,
+        ),
+        (
+            "true",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [requirement], external: [https]}
+    acyclic: true
+"#,
+        ),
+        (
+            "1",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [requirement]}
+    cardinality:
+      outgoing: {min: 2, max: 1}
+"#,
+        ),
+        (
+            "-1",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [requirement]}
+    cardinality:
+      incoming: {min: -1}
+"#,
+        ),
+        (
+            "some",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [requirement]}
+    cardinality:
+      incoming: {max: some}
+"#,
+        ),
+    ];
+
+    for (primary, relation) in cases {
+        let source = rich_schema_with_relations(relation);
+        let error = assert_invalid(&source, SchemaDiagnosticCode::InvalidDeclaration);
+        assert_eq!(
+            source_slice(&source, only_diagnostic(&error).primary().unwrap()),
+            primary
+        );
+    }
+}
+
+#[test]
+fn enforces_each_flavour_authoring_namespace_collision_class() {
+    let cases = [
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "field",
+            r#"  status:
+    source: {flavours: [requirement]}
+    target: {flavours: [design]}
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "field",
+            r#"  reviewed_by:
+    source: {flavours: [design]}
+    target: {flavours: [requirement]}
+    inverse: status
+    inverse_authoring: true
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "canonical",
+            r#"  blocks:
+    source: {flavours: [requirement]}
+    target: {flavours: [design]}
+  depends_on:
+    source: {flavours: [design]}
+    target: {flavours: [requirement]}
+    inverse: blocks
+    inverse_authoring: true
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "inverse",
+            r#"  one:
+    source: {flavours: [design]}
+    target: {flavours: [requirement]}
+    inverse: backlinks
+    inverse_authoring: true
+  two:
+    source: {flavours: [design]}
+    target: {flavours: [requirement]}
+    inverse: backlinks
+    inverse_authoring: true
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidName,
+            "built_in",
+            r#"  title:
+    source: {flavours: [design]}
+    target: {flavours: [requirement]}
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidName,
+            "reserved",
+            r#"  mentions:
+    source: {flavours: [design]}
+    target: {flavours: [requirement]}
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidName,
+            "built_in",
+            r#"  reviewed_by:
+    source: {flavours: [design]}
+    target: {flavours: [requirement]}
+    inverse: body
+    inverse_authoring: true
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidName,
+            "reserved",
+            r#"  reviewed_by:
+    source: {flavours: [design]}
+    target: {flavours: [requirement]}
+    inverse: source_location
+    inverse_authoring: true
+"#,
+        ),
+    ];
+
+    for (code, collision, relation) in cases {
+        let source = rich_schema_with_relations(relation);
+        let error = assert_invalid(source, code);
+        assert_eq!(
+            detail_string(only_diagnostic(&error), "collision"),
+            Some(collision)
+        );
+    }
+
+    let scoped = rich_schema_with_relations(
+        r#"  status:
+    source: {flavours: [design]}
+    target: {flavours: [requirement]}
+    inverse: mentions
+    inverse_authoring: false
+"#,
+    );
+    let fixture = Fixture::new(scoped);
+    let schema = load_schema(&fixture.loaded_project()).unwrap();
+    assert!(schema.relations().unwrap().get("status").is_some());
+}
+
+#[test]
+fn rejects_unknown_keys_at_every_relation_declaration_boundary() {
+    let cases = [
+        (
+            "relations.relation",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [design]}
+    lifecycle: draft
+"#,
+        ),
+        (
+            "relations.relation.source",
+            r#"  relation:
+    source: {flavours: [requirement], scanner: source_span}
+    target: {flavours: [design]}
+"#,
+        ),
+        (
+            "relations.relation.target",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [design], uri: https}
+"#,
+        ),
+        (
+            "relations.relation.cardinality",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [design]}
+    cardinality: {total: {max: 1}}
+"#,
+        ),
+        (
+            "relations.relation.cardinality.outgoing",
+            r#"  relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [design]}
+    cardinality: {outgoing: {minimum: 1}}
+"#,
+        ),
+    ];
+
+    for (mapping, relation) in cases {
+        let source = rich_schema_with_relations(relation);
+        let error = assert_invalid(source, SchemaDiagnosticCode::UnknownKey);
+        assert_eq!(
+            detail_string(only_diagnostic(&error), "mapping"),
+            Some(mapping)
+        );
+    }
 }
 
 #[test]
@@ -860,13 +1352,13 @@ fn validates_and_drops_deep_profile_values_iteratively() {
     const DEPTH: usize = 20_000;
     let nested = format!("{}leaf", "- ".repeat(DEPTH));
     let source = format!(
-        "format_version: 1\nschema:\n  name: deep-schema\n  version: 1.0.0\nidentity:\n  mid:\n    format: ulid\n    prefix: deep_\nflavours: {{}}\nrelations:\n  deep:\n    {nested}\n"
+        "format_version: 1\nschema:\n  name: deep-schema\n  version: 1.0.0\nidentity:\n  mid:\n    format: ulid\n    prefix: deep_\nflavours: {{}}\nrules:\n  {nested}\n"
     );
 
     let fixture = Fixture::new(source);
     let document = load_schema(&fixture.loaded_project()).unwrap();
 
-    assert_eq!(document.relations().unwrap().len(), 1);
+    assert_eq!(document.rules().unwrap().len(), 1);
 }
 
 #[test]
