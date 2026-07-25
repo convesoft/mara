@@ -11,12 +11,15 @@ use std::{
 
 use mara_core::{
     CardinalityBound, CardinalityMaximum, DerivedSourceKind, Diagnostic, DiagnosticContext,
-    DiagnosticSeverity, DiagnosticValue, DisplayIdDefinition, FieldDefinition, FieldType,
-    FlavourDefinition, FlavourDefinitions, FlavourGuidance, IdentityConfiguration, MidFormat,
-    MidIdentity, RelatedDiagnostic, RelationCardinality, RelationDefinition, RelationDefinitions,
-    RelationSourceEndpoint, RelationTargetEndpoint, RequiredBuiltInDefinition,
-    SchemaDiagnosticCode, SchemaDocument, SchemaField, SchemaIdentity, SchemaSection, SchemaValue,
-    SourceIndex, SourceSpan,
+    DiagnosticSeverity, DiagnosticValue, DisplayIdDefinition, FieldDefinition, FieldRuleSelection,
+    FieldType, FlavourDefinition, FlavourDefinitions, FlavourGuidance, IdentityConfiguration,
+    MidFormat, MidIdentity, OrphanRule, RelatedDiagnostic, RelationCardinality, RelationDefinition,
+    RelationDefinitions, RelationRuleSelection, RelationSourceEndpoint, RelationTargetEndpoint,
+    RequiredBuiltInDefinition, RequiresFieldRule, RequiresRelationRule, RuleApplicability,
+    RuleCondition, RuleConditionNumber, RuleConditionValue, RuleConfiguration, RuleCount,
+    RuleDefinition, RuleDefinitions, RuleDirection, RuleKind, RuleSeverity, SchemaDiagnosticCode,
+    SchemaDocument, SchemaField, SchemaIdentity, SchemaSection, SchemaValue, SourceIndex,
+    SourceSpan,
 };
 use regex::Regex as UnicodeRegex;
 use regex_lite::Regex as LiteRegex;
@@ -1415,18 +1418,21 @@ fn decode_v1_document(
         None
     };
 
+    let relation_namespaces = match optional_entry(entries, "relations") {
+        Some((_, value)) => RelationNamespaces::from_node(value),
+        None => Some(RelationNamespaces::default()),
+    };
     let rules = if let Some((key, value)) = optional_entry(entries, "rules") {
-        if let Some(len) = sequence_len(value) {
-            Some(section(source_map, key, value, len))
-        } else {
-            diagnostics.push(invalid_declaration(
-                "root.rules must be a sequence",
+        collect_compilation(
+            decode_rules(
+                key,
+                value,
+                flavour_namespaces.as_ref(),
+                relation_namespaces.as_ref(),
                 source_map,
-                value.span(),
-                "rules",
-            ));
-            None
-        }
+            ),
+            &mut diagnostics,
+        )
     } else {
         None
     };
@@ -1697,8 +1703,16 @@ fn decode_flavours(
     ))
 }
 
+struct FlavourFieldNamespace {
+    source: SourceSpan,
+    field_type: Option<FieldType>,
+    repeatable: Option<bool>,
+    values: Option<BTreeSet<String>>,
+    pattern: Option<String>,
+}
+
 struct FlavourNamespace {
-    fields: BTreeMap<String, SourceSpan>,
+    fields: BTreeMap<String, FlavourFieldNamespace>,
 }
 
 struct FlavourNamespaces {
@@ -1721,10 +1735,53 @@ impl FlavourNamespaces {
                 && let Some((_, ParsedNode::Mapping { entries, .. })) =
                     optional_entry(entries, "fields")
             {
-                for (field_node, _) in entries {
+                for (field_node, definition_node) in entries {
                     let (field, _) =
                         string_key(field_node).expect("profile validation requires string keys");
-                    fields.insert(field.to_owned(), parser_span(source_map, field_node.span()));
+                    let (field_type, repeatable, values, pattern) = if let ParsedNode::Mapping {
+                        entries,
+                        ..
+                    } = definition_node
+                    {
+                        let field_type = optional_entry(entries, "type")
+                            .and_then(|(_, value)| parsed_string(value))
+                            .and_then(|value| match value {
+                                "string" => Some(FieldType::String),
+                                "integer" => Some(FieldType::Integer),
+                                "number" => Some(FieldType::Number),
+                                "boolean" => Some(FieldType::Boolean),
+                                "enum" => Some(FieldType::Enum),
+                                _ => None,
+                            });
+                        let repeatable = optional_entry(entries, "repeatable")
+                            .and_then(|(_, value)| parsed_boolean(value));
+                        let values = optional_entry(entries, "values").and_then(|(_, value)| {
+                            let ParsedNode::Sequence { values, .. } = value else {
+                                return None;
+                            };
+                            values
+                                .iter()
+                                .map(parsed_string)
+                                .collect::<Option<BTreeSet<_>>>()
+                                .map(|values| values.into_iter().map(str::to_owned).collect())
+                        });
+                        let pattern = optional_entry(entries, "pattern")
+                            .and_then(|(_, value)| parsed_string(value))
+                            .map(str::to_owned);
+                        (field_type, repeatable, values, pattern)
+                    } else {
+                        (None, None, None, None)
+                    };
+                    fields.insert(
+                        field.to_owned(),
+                        FlavourFieldNamespace {
+                            source: parser_span(source_map, field_node.span()),
+                            field_type,
+                            repeatable,
+                            values,
+                            pattern,
+                        },
+                    );
                 }
             }
             definitions.insert(name.to_owned(), FlavourNamespace { fields });
@@ -1736,11 +1793,920 @@ impl FlavourNamespaces {
         self.definitions.contains_key(name)
     }
 
-    fn field(&self, flavour: &str, name: &str) -> Option<&SourceSpan> {
+    fn field(&self, flavour: &str, name: &str) -> Option<&FlavourFieldNamespace> {
         self.definitions
             .get(flavour)
             .and_then(|namespace| namespace.fields.get(name))
     }
+}
+
+#[derive(Default)]
+struct RelationNamespaces {
+    definitions: BTreeSet<String>,
+}
+
+impl RelationNamespaces {
+    fn from_node(node: &ParsedNode) -> Option<Self> {
+        let ParsedNode::Mapping { entries, .. } = node else {
+            return None;
+        };
+        Some(Self {
+            definitions: entries
+                .iter()
+                .map(|(key, _)| {
+                    string_key(key)
+                        .expect("profile validation requires string keys")
+                        .0
+                        .to_owned()
+                })
+                .collect(),
+        })
+    }
+
+    fn contains(&self, name: &str) -> bool {
+        self.definitions.contains(name)
+    }
+}
+
+fn decode_rules(
+    key: &ParsedNode,
+    node: &ParsedNode,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    relation_namespaces: Option<&RelationNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<RuleDefinitions> {
+    let values =
+        expect_sequence(node, "root.rules", source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut definitions = Vec::with_capacity(values.len());
+    let mut names = BTreeMap::<String, SourceSpan>::new();
+    let mut diagnostics = Vec::new();
+
+    for rule_node in values {
+        let duplicate = rule_name_source(rule_node, source_map).is_some_and(|(name, source)| {
+            if let Some(first_source) = names.get(name) {
+                diagnostics.push(
+                    invalid_declaration_at_source(
+                        format!("rule name {name:?} is declared more than once"),
+                        source,
+                        "rules",
+                    )
+                    .with_related(RelatedDiagnostic::new(
+                        "first rule with this name is declared here",
+                        first_source.clone(),
+                    ))
+                    .with_detail("name", name.to_owned()),
+                );
+                true
+            } else {
+                names.insert(name.to_owned(), source);
+                false
+            }
+        });
+        let definition = collect_compilation(
+            decode_rule(
+                rule_node,
+                flavour_namespaces,
+                relation_namespaces,
+                source_map,
+            ),
+            &mut diagnostics,
+        );
+        if !duplicate && let Some(definition) = definition {
+            definitions.push(definition);
+        }
+    }
+
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(RuleDefinitions::new(
+        parser_span(source_map, key.span()),
+        parser_span(source_map, node.span()),
+        definitions,
+    ))
+}
+
+fn rule_name_source<'a>(
+    node: &'a ParsedNode,
+    source_map: &SourceMap<'_>,
+) -> Option<(&'a str, SourceSpan)> {
+    let ParsedNode::Mapping { entries, .. } = node else {
+        return None;
+    };
+    let (_, value) = optional_entry(entries, "name")?;
+    let name = parsed_string(value)?;
+    Some((name, parser_span(source_map, value.span())))
+}
+
+fn decode_rule(
+    node: &ParsedNode,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    relation_namespaces: Option<&RelationNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<RuleDefinition> {
+    let entries =
+        expect_mapping(node, "rules[]", source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut diagnostics = Vec::new();
+
+    let name = collect_decode(
+        required_entry(entries, "name", "rules[]", source_map, node.span()).and_then(
+            |(key, value)| {
+                let name = expect_string(value, "rules[].name", source_map)?;
+                if !valid_snake_name(name) {
+                    return Err(Box::new(invalid_name(
+                        "rule names must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
+                        source_map,
+                        value.span(),
+                        "rules[].name",
+                        name,
+                    )));
+                }
+                Ok(field(source_map, key, value, name.to_owned()))
+            },
+        ),
+        &mut diagnostics,
+    );
+    let kind = collect_decode(
+        required_entry(entries, "kind", "rules[]", source_map, node.span()).and_then(
+            |(key, value)| {
+                let raw = expect_string(value, "rules[].kind", source_map)?;
+                let kind = match raw {
+                    "requires_relation" => RuleKind::RequiresRelation,
+                    "requires_field" => RuleKind::RequiresField,
+                    "orphan" => RuleKind::Orphan,
+                    _ => {
+                        return Err(Box::new(
+                            invalid_declaration(
+                                "rule kind must be requires_relation, requires_field, or orphan",
+                                source_map,
+                                value.span(),
+                                "rules[].kind",
+                            )
+                            .with_detail("value", raw.to_owned()),
+                        ));
+                    }
+                };
+                Ok(field(source_map, key, value, kind))
+            },
+        ),
+        &mut diagnostics,
+    );
+    let severity = collect_decode(
+        required_entry(entries, "severity", "rules[]", source_map, node.span()).and_then(
+            |(key, value)| {
+                let raw = expect_string(value, "rules[].severity", source_map)?;
+                let severity = match raw {
+                    "error" => RuleSeverity::Error,
+                    "warning" => RuleSeverity::Warning,
+                    "info" => RuleSeverity::Info,
+                    _ => {
+                        return Err(Box::new(
+                            invalid_declaration(
+                                "rule severity must be error, warning, or info",
+                                source_map,
+                                value.span(),
+                                "rules[].severity",
+                            )
+                            .with_detail("value", raw.to_owned()),
+                        ));
+                    }
+                };
+                Ok(field(source_map, key, value, severity))
+            },
+        ),
+        &mut diagnostics,
+    );
+    let reference_flavours = rule_reference_flavours(entries);
+    let applies_to = collect_decode(
+        required_entry(entries, "applies_to", "rules[]", source_map, node.span()),
+        &mut diagnostics,
+    )
+    .and_then(|(key, value)| {
+        collect_compilation(
+            decode_rule_applicability(value, flavour_namespaces, source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+    let condition = optional_entry(entries, "when").and_then(|(key, value)| {
+        collect_compilation(
+            decode_rule_condition(
+                value,
+                reference_flavours.as_deref(),
+                flavour_namespaces,
+                source_map,
+            ),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+
+    let configuration = kind.as_ref().and_then(|kind| {
+        let result = match kind.value() {
+            RuleKind::RequiresRelation => {
+                decode_requires_relation_rule(entries, node.span(), relation_namespaces, source_map)
+                    .map(RuleConfiguration::RequiresRelation)
+            }
+            RuleKind::RequiresField => decode_requires_field_rule(
+                entries,
+                node.span(),
+                reference_flavours.as_deref(),
+                flavour_namespaces,
+                source_map,
+            )
+            .map(RuleConfiguration::RequiresField),
+            RuleKind::Orphan => {
+                decode_orphan_rule(entries, node.span(), relation_namespaces, source_map)
+                    .map(RuleConfiguration::Orphan)
+            }
+        };
+        collect_compilation(result, &mut diagnostics)
+    });
+
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(RuleDefinition::new(
+        parser_span(source_map, node.span()),
+        name.expect("valid rule name compilation produced a value"),
+        kind.expect("valid rule kind compilation produced a value"),
+        severity.expect("valid rule severity compilation produced a value"),
+        applies_to.expect("valid rule applicability compilation produced a value"),
+        condition,
+        configuration.expect("valid rule configuration compilation produced a value"),
+    ))
+}
+
+fn rule_reference_flavours(entries: &[(ParsedNode, ParsedNode)]) -> Option<Vec<String>> {
+    let (_, ParsedNode::Mapping { entries, .. }) = optional_entry(entries, "applies_to")? else {
+        return None;
+    };
+    let (_, ParsedNode::Sequence { values, .. }) = optional_entry(entries, "flavours")? else {
+        return None;
+    };
+    Some(
+        values
+            .iter()
+            .filter_map(parsed_string)
+            .filter(|name| valid_snake_name(name))
+            .map(str::to_owned)
+            .collect(),
+    )
+}
+
+fn decode_rule_applicability(
+    node: &ParsedNode,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<RuleApplicability> {
+    let entries = expect_mapping(node, "rules[].applies_to", source_map)
+        .map_err(|diagnostic| vec![*diagnostic])?;
+    let (key, value) = required_entry(
+        entries,
+        "flavours",
+        "rules[].applies_to",
+        source_map,
+        node.span(),
+    )
+    .map_err(|diagnostic| vec![*diagnostic])?;
+    let flavours = decode_rule_flavour_sequence(
+        value,
+        "rules[].applies_to.flavours",
+        flavour_namespaces,
+        source_map,
+    )?;
+    Ok(RuleApplicability::new(field(
+        source_map, key, value, flavours,
+    )))
+}
+
+fn decode_rule_flavour_sequence(
+    node: &ParsedNode,
+    field_name: &str,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<Vec<SchemaValue<String>>> {
+    let values = decode_unique_string_sequence(node, field_name, true, source_map)?;
+    let mut diagnostics = Vec::new();
+    for value in &values {
+        if !valid_snake_name(value.value()) {
+            diagnostics.push(invalid_name_at_source(
+                "rule flavour references must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
+                value.source().clone(),
+                field_name,
+                value.value(),
+            ));
+        } else if flavour_namespaces.is_some_and(|namespaces| !namespaces.contains(value.value())) {
+            diagnostics.push(
+                invalid_declaration_at_source(
+                    format!(
+                        "rule flavour {:?} is not declared by this schema",
+                        value.value()
+                    ),
+                    value.source().clone(),
+                    field_name,
+                )
+                .with_detail("flavour", value.value().clone()),
+            );
+        }
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(values)
+}
+
+fn decode_rule_condition(
+    node: &ParsedNode,
+    applies_to: Option<&[String]>,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<RuleCondition> {
+    let entries =
+        expect_mapping(node, "rules[].when", source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let mut diagnostics = Vec::new();
+    let field_name = collect_decode(
+        required_entry(entries, "field", "rules[].when", source_map, node.span()).and_then(
+            |(key, value)| {
+                let name = expect_string(value, "rules[].when.field", source_map)?;
+                if !valid_snake_name(name) {
+                    return Err(Box::new(invalid_name(
+                        "condition field names must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
+                        source_map,
+                        value.span(),
+                        "rules[].when.field",
+                        name,
+                    )));
+                }
+                Ok(field(source_map, key, value, name.to_owned()))
+            },
+        ),
+        &mut diagnostics,
+    );
+    let values = collect_decode(
+        required_entry(entries, "in", "rules[].when", source_map, node.span()),
+        &mut diagnostics,
+    )
+    .and_then(|(key, value)| {
+        collect_compilation(
+            decode_unique_rule_condition_sequence(value, "rules[].when.in", source_map),
+            &mut diagnostics,
+        )
+        .map(|decoded| field(source_map, key, value, decoded))
+    });
+
+    if let (Some(field_name), Some(values), Some(applies_to), Some(flavour_namespaces)) = (
+        field_name.as_ref(),
+        values.as_ref(),
+        applies_to,
+        flavour_namespaces,
+    ) {
+        diagnostics.extend(validate_rule_condition_references(
+            field_name,
+            values,
+            applies_to,
+            flavour_namespaces,
+        ));
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(RuleCondition::new(
+        field_name.expect("valid condition field compilation produced a value"),
+        values.expect("valid condition values compilation produced a value"),
+    ))
+}
+
+fn validate_rule_condition_references(
+    field: &SchemaField<String>,
+    values: &SchemaField<Vec<SchemaValue<RuleConditionValue>>>,
+    applies_to: &[String],
+    flavour_namespaces: &FlavourNamespaces,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut fields = Vec::new();
+    for flavour in applies_to {
+        if !flavour_namespaces.contains(flavour) {
+            continue;
+        }
+        let Some(definition) = flavour_namespaces.field(flavour, field.value()) else {
+            diagnostics.push(
+                invalid_declaration_at_source(
+                    format!(
+                        "condition field {:?} is not declared on applied flavour {:?}",
+                        field.value(),
+                        flavour
+                    ),
+                    field.value_source().clone(),
+                    "rules[].when.field",
+                )
+                .with_detail("field", field.value().clone())
+                .with_detail("flavour", flavour.clone()),
+            );
+            continue;
+        };
+        if definition.repeatable == Some(true) {
+            diagnostics.push(
+                invalid_declaration_at_source(
+                    format!(
+                        "condition field {:?} is repeatable on applied flavour {:?}",
+                        field.value(),
+                        flavour
+                    ),
+                    field.value_source().clone(),
+                    "rules[].when.field",
+                )
+                .with_related(RelatedDiagnostic::new(
+                    "repeatable field is declared here",
+                    definition.source.clone(),
+                ))
+                .with_detail("field", field.value().clone())
+                .with_detail("flavour", flavour.clone()),
+            );
+            continue;
+        }
+        fields.push(definition);
+    }
+
+    for value in values.value() {
+        let mut known_domain = false;
+        let mut accepted = false;
+        for field in &fields {
+            if let Some(valid) = rule_condition_value_is_valid(value.value(), field) {
+                known_domain = true;
+                accepted |= valid;
+            }
+        }
+        if known_domain && !accepted {
+            diagnostics.push(
+                invalid_declaration_at_source(
+                    format!(
+                        "condition value {:?} is invalid for every applied flavour",
+                        value.value()
+                    ),
+                    value.source().clone(),
+                    "rules[].when.in",
+                )
+                .with_detail("value", rule_condition_value_detail(value.value())),
+            );
+        }
+    }
+    diagnostics
+}
+
+fn rule_condition_value_is_valid(
+    value: &RuleConditionValue,
+    field: &FlavourFieldNamespace,
+) -> Option<bool> {
+    match (field.field_type?, value) {
+        (FieldType::String, RuleConditionValue::String(value)) => match field.pattern.as_deref() {
+            Some(pattern) => UnicodeRegex::new(pattern).ok().map(|pattern| {
+                pattern
+                    .find(value)
+                    .is_some_and(|found| found.start() == 0 && found.end() == value.len())
+            }),
+            None => Some(true),
+        },
+        (FieldType::Integer, RuleConditionValue::Integer(_))
+        | (FieldType::Number, RuleConditionValue::Integer(_))
+        | (FieldType::Number, RuleConditionValue::Number(_))
+        | (FieldType::Boolean, RuleConditionValue::Boolean(_)) => Some(true),
+        (FieldType::Enum, RuleConditionValue::String(value)) => {
+            field.values.as_ref().map(|values| values.contains(value))
+        }
+        _ => Some(false),
+    }
+}
+
+fn rule_condition_value_detail(value: &RuleConditionValue) -> DiagnosticValue {
+    match value {
+        RuleConditionValue::String(value) => DiagnosticValue::String(value.clone()),
+        RuleConditionValue::Integer(value) => DiagnosticValue::Integer(*value),
+        RuleConditionValue::Number(value) => DiagnosticValue::String(value.get().to_string()),
+        RuleConditionValue::Boolean(value) => DiagnosticValue::Boolean(*value),
+    }
+}
+
+fn valid_rule_integer_syntax(value: &str) -> bool {
+    let digits = value.strip_prefix('-').unwrap_or(value);
+    !digits.is_empty()
+        && (digits == "0"
+            || (!digits.starts_with('0') && digits.bytes().all(|byte| byte.is_ascii_digit())))
+}
+
+fn decode_requires_relation_rule(
+    entries: &[(ParsedNode, ParsedNode)],
+    rule_span: ParsedSpan,
+    relation_namespaces: Option<&RelationNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<RequiresRelationRule> {
+    let mut diagnostics = Vec::new();
+    let relations = collect_rule_relation_selection(
+        entries,
+        rule_span,
+        relation_namespaces,
+        source_map,
+        &mut diagnostics,
+    );
+    let direction = collect_decode(
+        required_entry(entries, "direction", "rules[]", source_map, rule_span).and_then(
+            |(key, value)| {
+                let raw = expect_string(value, "rules[].direction", source_map)?;
+                let direction = match raw {
+                    "outgoing" => RuleDirection::Outgoing,
+                    "incoming" => RuleDirection::Incoming,
+                    _ => {
+                        return Err(Box::new(
+                            invalid_declaration(
+                                "rule direction must be outgoing or incoming",
+                                source_map,
+                                value.span(),
+                                "rules[].direction",
+                            )
+                            .with_detail("value", raw.to_owned()),
+                        ));
+                    }
+                };
+                Ok(field(source_map, key, value, direction))
+            },
+        ),
+        &mut diagnostics,
+    );
+    let count = collect_compilation(
+        decode_rule_count(entries, rule_span, source_map),
+        &mut diagnostics,
+    );
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(RequiresRelationRule::new(
+        relations.expect("valid rule relation selection produced a value"),
+        direction.expect("valid rule direction compilation produced a value"),
+        count.expect("valid rule count compilation produced a value"),
+    ))
+}
+
+fn collect_rule_relation_selection(
+    entries: &[(ParsedNode, ParsedNode)],
+    rule_span: ParsedSpan,
+    relation_namespaces: Option<&RelationNamespaces>,
+    source_map: &SourceMap<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<RelationRuleSelection> {
+    let relation = optional_entry(entries, "relation");
+    let any_of = optional_entry(entries, "relation_any_of");
+    if relation.is_some() == any_of.is_some() {
+        diagnostics.push(invalid_declaration(
+            "requires_relation rules require exactly one of relation or relation_any_of",
+            source_map,
+            relation.or(any_of).map_or(rule_span, |(key, _)| key.span()),
+            "rules[]",
+        ));
+    }
+    match (relation, any_of) {
+        (Some((key, value)), None) => collect_compilation(
+            decode_rule_relation_name(value, "rules[].relation", relation_namespaces, source_map),
+            diagnostics,
+        )
+        .map(|name| RelationRuleSelection::Relation(field(source_map, key, value, name))),
+        (None, Some((key, value))) => collect_compilation(
+            decode_rule_relation_sequence(
+                value,
+                "rules[].relation_any_of",
+                relation_namespaces,
+                source_map,
+            ),
+            diagnostics,
+        )
+        .map(|names| RelationRuleSelection::AnyOf(field(source_map, key, value, names))),
+        (Some((_, relation)), Some((_, any_of))) => {
+            let _ = collect_compilation(
+                decode_rule_relation_name(
+                    relation,
+                    "rules[].relation",
+                    relation_namespaces,
+                    source_map,
+                ),
+                diagnostics,
+            );
+            let _ = collect_compilation(
+                decode_rule_relation_sequence(
+                    any_of,
+                    "rules[].relation_any_of",
+                    relation_namespaces,
+                    source_map,
+                ),
+                diagnostics,
+            );
+            None
+        }
+        (None, None) => None,
+    }
+}
+
+fn decode_requires_field_rule(
+    entries: &[(ParsedNode, ParsedNode)],
+    rule_span: ParsedSpan,
+    applies_to: Option<&[String]>,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<RequiresFieldRule> {
+    let mut diagnostics = Vec::new();
+    let fields = collect_rule_field_selection(
+        entries,
+        rule_span,
+        applies_to,
+        flavour_namespaces,
+        source_map,
+        &mut diagnostics,
+    );
+    let count = collect_compilation(
+        decode_rule_count(entries, rule_span, source_map),
+        &mut diagnostics,
+    );
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(RequiresFieldRule::new(
+        fields.expect("valid rule field selection produced a value"),
+        count.expect("valid rule count compilation produced a value"),
+    ))
+}
+
+fn collect_rule_field_selection(
+    entries: &[(ParsedNode, ParsedNode)],
+    rule_span: ParsedSpan,
+    applies_to: Option<&[String]>,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    source_map: &SourceMap<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<FieldRuleSelection> {
+    let field_entry = optional_entry(entries, "field");
+    let any_of = optional_entry(entries, "field_any_of");
+    if field_entry.is_some() == any_of.is_some() {
+        diagnostics.push(invalid_declaration(
+            "requires_field rules require exactly one of field or field_any_of",
+            source_map,
+            field_entry
+                .or(any_of)
+                .map_or(rule_span, |(key, _)| key.span()),
+            "rules[]",
+        ));
+    }
+    match (field_entry, any_of) {
+        (Some((key, value)), None) => collect_compilation(
+            decode_rule_field_name(
+                value,
+                "rules[].field",
+                applies_to,
+                flavour_namespaces,
+                source_map,
+            ),
+            diagnostics,
+        )
+        .map(|name| FieldRuleSelection::Field(field(source_map, key, value, name))),
+        (None, Some((key, value))) => collect_compilation(
+            decode_rule_field_sequence(
+                value,
+                "rules[].field_any_of",
+                applies_to,
+                flavour_namespaces,
+                source_map,
+            ),
+            diagnostics,
+        )
+        .map(|names| FieldRuleSelection::AnyOf(field(source_map, key, value, names))),
+        (Some((_, field)), Some((_, any_of))) => {
+            let _ = collect_compilation(
+                decode_rule_field_name(
+                    field,
+                    "rules[].field",
+                    applies_to,
+                    flavour_namespaces,
+                    source_map,
+                ),
+                diagnostics,
+            );
+            let _ = collect_compilation(
+                decode_rule_field_sequence(
+                    any_of,
+                    "rules[].field_any_of",
+                    applies_to,
+                    flavour_namespaces,
+                    source_map,
+                ),
+                diagnostics,
+            );
+            None
+        }
+        (None, None) => None,
+    }
+}
+
+fn decode_orphan_rule(
+    entries: &[(ParsedNode, ParsedNode)],
+    rule_span: ParsedSpan,
+    relation_namespaces: Option<&RelationNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<OrphanRule> {
+    let (key, value) = required_entry(entries, "relations", "rules[]", source_map, rule_span)
+        .map_err(|diagnostic| vec![*diagnostic])?;
+    let relations =
+        decode_rule_relation_sequence(value, "rules[].relations", relation_namespaces, source_map)?;
+    Ok(OrphanRule::new(field(source_map, key, value, relations)))
+}
+
+fn decode_rule_relation_name(
+    node: &ParsedNode,
+    field_name: &str,
+    relation_namespaces: Option<&RelationNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<String> {
+    let name =
+        expect_string(node, field_name, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let source = parser_span(source_map, node.span());
+    validate_rule_relation_reference(name, source, field_name, relation_namespaces)?;
+    Ok(name.to_owned())
+}
+
+fn decode_rule_relation_sequence(
+    node: &ParsedNode,
+    field_name: &str,
+    relation_namespaces: Option<&RelationNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<Vec<SchemaValue<String>>> {
+    let values = decode_unique_string_sequence(node, field_name, true, source_map)?;
+    let mut diagnostics = Vec::new();
+    for value in &values {
+        if let Err(mut found) = validate_rule_relation_reference(
+            value.value(),
+            value.source().clone(),
+            field_name,
+            relation_namespaces,
+        ) {
+            diagnostics.append(&mut found);
+        }
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(values)
+}
+
+fn validate_rule_relation_reference(
+    name: &str,
+    source: SourceSpan,
+    field_name: &str,
+    relation_namespaces: Option<&RelationNamespaces>,
+) -> CompilationResult<()> {
+    if !valid_snake_name(name) {
+        return Err(vec![invalid_name_at_source(
+            "rule relation references must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
+            source,
+            field_name,
+            name,
+        )]);
+    }
+    if relation_namespaces.is_some_and(|namespaces| !namespaces.contains(name)) {
+        return Err(vec![
+            invalid_declaration_at_source(
+                format!("rule relation {name:?} is not declared by this schema"),
+                source,
+                field_name,
+            )
+            .with_detail("relation", name.to_owned()),
+        ]);
+    }
+    Ok(())
+}
+
+fn decode_rule_field_name(
+    node: &ParsedNode,
+    field_name: &str,
+    applies_to: Option<&[String]>,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<String> {
+    let name =
+        expect_string(node, field_name, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    let source = parser_span(source_map, node.span());
+    validate_rule_field_reference(name, source, field_name, applies_to, flavour_namespaces)?;
+    Ok(name.to_owned())
+}
+
+fn decode_rule_field_sequence(
+    node: &ParsedNode,
+    field_name: &str,
+    applies_to: Option<&[String]>,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<Vec<SchemaValue<String>>> {
+    let values = decode_unique_string_sequence(node, field_name, true, source_map)?;
+    let mut diagnostics = Vec::new();
+    for value in &values {
+        if let Err(mut found) = validate_rule_field_reference(
+            value.value(),
+            value.source().clone(),
+            field_name,
+            applies_to,
+            flavour_namespaces,
+        ) {
+            diagnostics.append(&mut found);
+        }
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(values)
+}
+
+fn validate_rule_field_reference(
+    name: &str,
+    source: SourceSpan,
+    field_name: &str,
+    applies_to: Option<&[String]>,
+    flavour_namespaces: Option<&FlavourNamespaces>,
+) -> CompilationResult<()> {
+    if !valid_snake_name(name) {
+        return Err(vec![invalid_name_at_source(
+            "rule field references must match [a-z][a-z0-9]*(?:_[a-z0-9]+)*",
+            source,
+            field_name,
+            name,
+        )]);
+    }
+    let (Some(applies_to), Some(flavour_namespaces)) = (applies_to, flavour_namespaces) else {
+        return Ok(());
+    };
+    let mut diagnostics = Vec::new();
+    for flavour in applies_to {
+        if !flavour_namespaces.contains(flavour) {
+            continue;
+        }
+        if flavour_namespaces.field(flavour, name).is_none() {
+            diagnostics.push(
+                invalid_declaration_at_source(
+                    format!(
+                        "rule field {name:?} is not declared on applied flavour {:?}",
+                        flavour
+                    ),
+                    source.clone(),
+                    field_name,
+                )
+                .with_detail("field", name.to_owned())
+                .with_detail("flavour", flavour.clone()),
+            );
+        }
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(())
+}
+
+fn decode_rule_count(
+    entries: &[(ParsedNode, ParsedNode)],
+    rule_span: ParsedSpan,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<RuleCount> {
+    let mut diagnostics = Vec::new();
+    let min = collect_decode(
+        required_entry(entries, "min", "rules[]", source_map, rule_span).and_then(
+            |(key, value)| {
+                expect_non_negative_integer(value, "rules[].min", source_map)
+                    .map(|decoded| field(source_map, key, value, decoded))
+            },
+        ),
+        &mut diagnostics,
+    );
+    let max = optional_entry(entries, "max").and_then(|(key, value)| {
+        collect_decode(
+            expect_cardinality_maximum(value, "rules[].max", source_map)
+                .map(|decoded| field(source_map, key, value, decoded)),
+            &mut diagnostics,
+        )
+    });
+    if let (Some(min), Some(maximum)) = (&min, &max)
+        && let CardinalityMaximum::Bounded(maximum_value) = *maximum.value()
+        && maximum_value < *min.value()
+    {
+        diagnostics.push(
+            invalid_declaration_at_source(
+                "rule max must be greater than or equal to min",
+                maximum.value_source().clone(),
+                "rules[].max",
+            )
+            .with_detail("max", DiagnosticValue::Unsigned(maximum_value))
+            .with_detail("min", DiagnosticValue::Unsigned(*min.value())),
+        );
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(RuleCount::new(
+        min.expect("valid rule minimum compilation produced a value"),
+        max,
+    ))
 }
 
 fn decode_relations(
@@ -2611,7 +3577,7 @@ fn validate_authoring_name(
             )
             .with_related(RelatedDiagnostic::new(
                 "conflicting field is declared here",
-                field_source.clone(),
+                field_source.source.clone(),
             ))
             .with_context(DiagnosticContext::new(
                 None,
@@ -3162,6 +4128,108 @@ fn decode_optional_pattern(
     Ok(Some(field(source_map, key, value, pattern.to_owned())))
 }
 
+fn decode_unique_rule_condition_sequence(
+    node: &ParsedNode,
+    field_name: &str,
+    source_map: &SourceMap<'_>,
+) -> CompilationResult<Vec<SchemaValue<RuleConditionValue>>> {
+    let values =
+        expect_sequence(node, field_name, source_map).map_err(|diagnostic| vec![*diagnostic])?;
+    if values.is_empty() {
+        return Err(vec![invalid_declaration(
+            format!("{field_name} must be a non-empty sequence"),
+            source_map,
+            node.span(),
+            field_name,
+        )]);
+    }
+
+    let mut compiled = Vec::with_capacity(values.len());
+    let mut diagnostics = Vec::new();
+    for value_node in values {
+        let Some(value) = collect_decode(
+            decode_rule_condition_value(value_node, field_name, source_map),
+            &mut diagnostics,
+        ) else {
+            continue;
+        };
+        if compiled
+            .iter()
+            .any(|existing: &SchemaValue<RuleConditionValue>| existing.value() == &value)
+        {
+            diagnostics.push(
+                invalid_declaration(
+                    format!("{field_name} entries must be unique"),
+                    source_map,
+                    value_node.span(),
+                    field_name,
+                )
+                .with_detail("value", rule_condition_value_detail(&value)),
+            );
+            continue;
+        }
+        compiled.push(SchemaValue::new(
+            parser_span(source_map, value_node.span()),
+            value,
+        ));
+    }
+    if !diagnostics.is_empty() {
+        return Err(diagnostics);
+    }
+    Ok(compiled)
+}
+
+fn decode_rule_condition_value(
+    node: &ParsedNode,
+    field_name: &str,
+    source_map: &SourceMap<'_>,
+) -> DecodeResult<RuleConditionValue> {
+    let ParsedNode::Scalar {
+        value, style, tag, ..
+    } = node
+    else {
+        return Err(Box::new(invalid_declaration(
+            format!("{field_name} entries must be scalar values"),
+            source_map,
+            node.span(),
+            field_name,
+        )));
+    };
+    let decoded = match resolve_scalar(value, *style, tag.as_ref()).ok() {
+        Some(ScalarKind::String) => Some(RuleConditionValue::String(value.clone())),
+        Some(ScalarKind::Boolean) => parsed_boolean(node).map(RuleConditionValue::Boolean),
+        Some(ScalarKind::Integer) if valid_rule_integer_syntax(value) => value
+            .parse::<i64>()
+            .map(RuleConditionValue::Integer)
+            .ok()
+            .or_else(|| parse_rule_condition_number(value).map(RuleConditionValue::Number)),
+        Some(ScalarKind::Float) => {
+            parse_rule_condition_number(value).map(RuleConditionValue::Number)
+        }
+        _ => None,
+    };
+    decoded.ok_or_else(|| {
+        Box::new(
+            invalid_declaration(
+                format!(
+                    "{field_name} entries must be strings, booleans, signed 64-bit integers, or finite JSON numbers"
+                ),
+                source_map,
+                node.span(),
+                field_name,
+            )
+            .with_detail("value", value.clone()),
+        )
+    })
+}
+
+fn parse_rule_condition_number(value: &str) -> Option<RuleConditionNumber> {
+    serde_json::from_str::<serde_json::Number>(value)
+        .ok()
+        .and_then(|number| number.as_f64())
+        .and_then(RuleConditionNumber::new)
+}
+
 fn decode_unique_string_sequence(
     node: &ParsedNode,
     field_name: &str,
@@ -3360,6 +4428,9 @@ fn v1_unknown_key_diagnostics(
     if let Some((_, ParsedNode::Mapping { entries, .. })) = optional_entry(entries, "relations") {
         collect_relation_unknown_key_diagnostics(entries, source_map, &mut diagnostics);
     }
+    if let Some((_, ParsedNode::Sequence { values, .. })) = optional_entry(entries, "rules") {
+        collect_rule_unknown_key_diagnostics(values, source_map, &mut diagnostics);
+    }
     diagnostics
 }
 
@@ -3537,6 +4608,52 @@ fn collect_relation_unknown_key_diagnostics(
     }
 }
 
+fn collect_rule_unknown_key_diagnostics(
+    rules: &[ParsedNode],
+    source_map: &SourceMap<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for (index, rule) in rules.iter().enumerate() {
+        let ParsedNode::Mapping { entries, .. } = rule else {
+            continue;
+        };
+        let mapping = format!("rules[{index}]");
+        let mut allowed = vec!["name", "kind", "severity", "applies_to", "when"];
+        match optional_entry(entries, "kind").and_then(|(_, value)| parsed_string(value)) {
+            Some("requires_relation") => {
+                allowed.extend(["relation", "relation_any_of", "direction", "min", "max"]);
+            }
+            Some("requires_field") => {
+                allowed.extend(["field", "field_any_of", "min", "max"]);
+            }
+            Some("orphan") => allowed.push("relations"),
+            _ => {}
+        }
+        collect_unknown_key_diagnostics(entries, &allowed, &mapping, source_map, diagnostics);
+
+        if let Some((_, ParsedNode::Mapping { entries, .. })) =
+            optional_entry(entries, "applies_to")
+        {
+            collect_unknown_key_diagnostics(
+                entries,
+                &["flavours"],
+                &format!("{mapping}.applies_to"),
+                source_map,
+                diagnostics,
+            );
+        }
+        if let Some((_, ParsedNode::Mapping { entries, .. })) = optional_entry(entries, "when") {
+            collect_unknown_key_diagnostics(
+                entries,
+                &["field", "in"],
+                &format!("{mapping}.when"),
+                source_map,
+                diagnostics,
+            );
+        }
+    }
+}
+
 fn collect_unknown_key_diagnostics(
     entries: &[(ParsedNode, ParsedNode)],
     allowed: &[&str],
@@ -3617,13 +4734,6 @@ fn expect_string<'a>(
         )));
     }
     Ok(value)
-}
-
-fn sequence_len(node: &ParsedNode) -> Option<usize> {
-    match node {
-        ParsedNode::Sequence { values, .. } => Some(values.len()),
-        _ => None,
-    }
 }
 
 fn field<T>(

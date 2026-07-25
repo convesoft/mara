@@ -1,8 +1,9 @@
 use std::{fs, path::Path};
 
 use mara_core::{
-    CardinalityMaximum, DerivedSourceKind, Diagnostic, DiagnosticCode, DiagnosticValue, FieldType,
-    Mid, MidFormat, SchemaDiagnosticCode, SchemaField,
+    CardinalityMaximum, DerivedSourceKind, Diagnostic, DiagnosticCode, DiagnosticValue,
+    FieldRuleSelection, FieldType, Mid, MidFormat, RelationRuleSelection, RuleConditionValue,
+    RuleConfiguration, RuleDirection, RuleKind, RuleSeverity, SchemaDiagnosticCode, SchemaField,
 };
 use mara_engine::{
     project::{LoadedProject, load_from_root},
@@ -121,8 +122,40 @@ const COMPLETE_RELATIONS: &str = r#"  derives_from:
     acyclic: true
 "#;
 
+const COMPLETE_RULES: &str = r#"  - name: design_has_requirement
+    kind: requires_relation
+    severity: error
+    applies_to:
+      flavours: [design]
+    relation: derives_from
+    direction: outgoing
+    min: 1
+    max: many
+  - name: requirement_has_estimate
+    kind: requires_field
+    severity: warning
+    applies_to:
+      flavours: [requirement]
+    when:
+      field: status
+      in: [draft, approved]
+    field_any_of: [estimate, confidence]
+    min: 1
+    max: 2
+  - name: requirement_is_connected
+    kind: orphan
+    severity: info
+    applies_to:
+      flavours: [requirement]
+    relations: [derives_from, related_to]
+"#;
+
 fn rich_schema_with_relations(relations: &str) -> String {
     format!("{RICH_SCHEMA}relations:\n{relations}")
+}
+
+fn rich_schema_with_relations_and_rules(relations: &str, rules: &str) -> String {
+    format!("{RICH_SCHEMA}relations:\n{relations}rules:\n{rules}")
 }
 
 struct Fixture {
@@ -221,6 +254,13 @@ fn detail_string<'a>(diagnostic: &'a Diagnostic, key: &str) -> Option<&'a str> {
         Some(DiagnosticValue::String(value)) => Some(value),
         _ => None,
     }
+}
+
+fn condition_string(value: &RuleConditionValue) -> &str {
+    let RuleConditionValue::String(value) = value else {
+        panic!("expected a string condition value")
+    };
+    value
 }
 
 #[test]
@@ -735,6 +775,155 @@ fn compiles_relation_endpoints_constraints_cardinality_and_external_allowlist_de
 }
 
 #[test]
+fn compiles_every_rule_shape_in_authored_order_with_complete_source_evidence() {
+    // TEST-SCHEMA-RELATIONS-RULES covers REQ-SCHEMA-RULES and the compiled
+    // rule slice of DES-SCHEMA-META-MODEL delivered by CON-26.
+    let source = rich_schema_with_relations_and_rules(COMPLETE_RELATIONS, COMPLETE_RULES);
+    let first_fixture = Fixture::new(&source);
+    let first = load_schema(&first_fixture.loaded_project()).unwrap();
+    let second_fixture = Fixture::new(&source);
+    let second = load_schema(&second_fixture.loaded_project()).unwrap();
+
+    assert_eq!(first, second);
+    let rules = first.rules().unwrap();
+    assert_eq!(source_slice(&source, rules.key_source()), "rules");
+    assert_eq!(
+        source_slice(&source, rules.value_source()),
+        COMPLETE_RULES
+            .strip_prefix("  ")
+            .expect("the embedded rules are indented under the root key")
+    );
+    assert_eq!(rules.len(), 3);
+    assert_eq!(
+        rules
+            .definitions()
+            .iter()
+            .map(|rule| rule.name().value().as_str())
+            .collect::<Vec<_>>(),
+        [
+            "design_has_requirement",
+            "requirement_has_estimate",
+            "requirement_is_connected"
+        ]
+    );
+
+    let relation = rules.get("design_has_requirement").unwrap();
+    assert_eq!(*relation.kind().value(), RuleKind::RequiresRelation);
+    assert_eq!(*relation.severity().value(), RuleSeverity::Error);
+    assert_field_source(&source, relation.name(), "name", "design_has_requirement");
+    assert_field_source(&source, relation.kind(), "kind", "requires_relation");
+    assert_field_source(&source, relation.severity(), "severity", "error");
+    assert_eq!(
+        source_slice(&source, relation.source()),
+        concat!(
+            "name: design_has_requirement\n",
+            "    kind: requires_relation\n",
+            "    severity: error\n",
+            "    applies_to:\n",
+            "      flavours: [design]\n",
+            "    relation: derives_from\n",
+            "    direction: outgoing\n",
+            "    min: 1\n",
+            "    max: many\n  "
+        )
+    );
+    assert_field_source(
+        &source,
+        relation.applies_to().value().flavours(),
+        "flavours",
+        "[design]",
+    );
+    let RuleConfiguration::RequiresRelation(configuration) = relation.configuration() else {
+        panic!("expected requires_relation configuration")
+    };
+    let RelationRuleSelection::Relation(selected) = configuration.relations() else {
+        panic!("expected singular relation selection")
+    };
+    assert_field_source(&source, selected, "relation", "derives_from");
+    assert_eq!(*configuration.direction().value(), RuleDirection::Outgoing);
+    assert_field_source(&source, configuration.direction(), "direction", "outgoing");
+    assert_eq!(*configuration.count().min().value(), 1);
+    assert_eq!(configuration.count().maximum(), CardinalityMaximum::Many);
+
+    let required_field = rules.get("requirement_has_estimate").unwrap();
+    assert_eq!(*required_field.kind().value(), RuleKind::RequiresField);
+    assert_eq!(*required_field.severity().value(), RuleSeverity::Warning);
+    let condition = required_field.condition().unwrap().value();
+    assert_field_source(&source, condition.field(), "field", "status");
+    assert_eq!(
+        condition
+            .values()
+            .value()
+            .iter()
+            .map(|value| condition_string(value.value()))
+            .collect::<Vec<_>>(),
+        ["draft", "approved"]
+    );
+    assert_eq!(
+        condition
+            .values()
+            .value()
+            .iter()
+            .map(|value| source_slice(&source, value.source()))
+            .collect::<Vec<_>>(),
+        ["draft", "approved"]
+    );
+    let RuleConfiguration::RequiresField(configuration) = required_field.configuration() else {
+        panic!("expected requires_field configuration")
+    };
+    let FieldRuleSelection::AnyOf(selected) = configuration.fields() else {
+        panic!("expected field_any_of selection")
+    };
+    assert_eq!(
+        selected
+            .value()
+            .iter()
+            .map(|value| value.value().as_str())
+            .collect::<Vec<_>>(),
+        ["estimate", "confidence"]
+    );
+    assert_eq!(
+        configuration.count().maximum(),
+        CardinalityMaximum::Bounded(2)
+    );
+
+    let orphan = rules.get("requirement_is_connected").unwrap();
+    assert_eq!(*orphan.kind().value(), RuleKind::Orphan);
+    assert_eq!(*orphan.severity().value(), RuleSeverity::Info);
+    assert!(orphan.condition().is_none());
+    let RuleConfiguration::Orphan(configuration) = orphan.configuration() else {
+        panic!("expected orphan configuration")
+    };
+    assert_eq!(
+        configuration
+            .relations()
+            .value()
+            .iter()
+            .map(|value| value.value().as_str())
+            .collect::<Vec<_>>(),
+        ["derives_from", "related_to"]
+    );
+}
+
+#[test]
+fn compiles_the_repository_schema_through_the_rooted_project_flow() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    let project = load_from_root(root).unwrap();
+    let first = load_schema(&project).unwrap();
+    let second = load_schema(&project).unwrap();
+
+    assert_eq!(first, second);
+    assert!(first.flavours().get("req").is_some());
+    assert!(first.relations().unwrap().get("verifies").is_some());
+    let rules = first.rules().unwrap();
+    assert!(rules.get("test_has_target").is_some());
+    assert!(rules.get("semantic_item_is_not_orphaned").is_some());
+}
+
+#[test]
 fn diagnoses_relation_endpoint_and_external_scheme_defects_at_their_sources() {
     let cases = [
         (
@@ -1161,6 +1350,454 @@ fn rejects_unknown_keys_at_every_relation_declaration_boundary() {
 }
 
 #[test]
+fn diagnoses_unknown_rule_shapes_and_every_reference_class() {
+    let cases = [
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "custom_rule",
+            r#"  - name: unknown_kind
+    kind: custom_rule
+    severity: error
+    applies_to: {flavours: [requirement]}
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "missing",
+            r#"  - name: missing_flavour
+    kind: orphan
+    severity: warning
+    applies_to: {flavours: [missing]}
+    relations: [related_to]
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "missing_relation",
+            r#"  - name: missing_relation
+    kind: requires_relation
+    severity: error
+    applies_to: {flavours: [requirement]}
+    relation: missing_relation
+    direction: outgoing
+    min: 1
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "missing_field",
+            r#"  - name: missing_field
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    field: missing_field
+    min: 1
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "missing_field",
+            r#"  - name: missing_condition_field
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    when: {field: missing_field, in: [draft]}
+    field: estimate
+    min: 1
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "retired",
+            r#"  - name: invalid_condition_value
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    when: {field: status, in: [retired]}
+    field: estimate
+    min: 1
+"#,
+        ),
+        (
+            SchemaDiagnosticCode::InvalidDeclaration,
+            "1",
+            r#"  - name: invalid_bounds
+    kind: requires_relation
+    severity: error
+    applies_to: {flavours: [requirement]}
+    relation: related_to
+    direction: incoming
+    min: 2
+    max: 1
+"#,
+        ),
+    ];
+
+    for (code, primary, rule) in cases {
+        let source = rich_schema_with_relations_and_rules(COMPLETE_RELATIONS, rule);
+        let error = assert_invalid(&source, code);
+        assert_eq!(
+            source_slice(&source, only_diagnostic(&error).primary().unwrap()),
+            primary,
+            "{:#?}",
+            error.diagnostics()
+        );
+    }
+}
+
+#[test]
+fn rejects_unknown_keys_at_every_rule_mapping_boundary() {
+    let cases = [
+        (
+            "rules[0]",
+            r#"  - name: unknown_common_key
+    kind: orphan
+    severity: warning
+    applies_to: {flavours: [requirement]}
+    relations: [related_to]
+    lifecycle: draft
+"#,
+        ),
+        (
+            "rules[0].applies_to",
+            r#"  - name: unknown_applicability_key
+    kind: orphan
+    severity: warning
+    applies_to: {flavours: [requirement], fields: [status]}
+    relations: [related_to]
+"#,
+        ),
+        (
+            "rules[0].when",
+            r#"  - name: unknown_condition_key
+    kind: orphan
+    severity: warning
+    applies_to: {flavours: [requirement]}
+    when: {field: status, in: [draft], mode: any}
+    relations: [related_to]
+"#,
+        ),
+        (
+            "rules[0]",
+            r#"  - name: wrong_kind_key
+    kind: orphan
+    severity: warning
+    applies_to: {flavours: [requirement]}
+    relations: [related_to]
+    direction: incoming
+"#,
+        ),
+    ];
+
+    for (mapping, rule) in cases {
+        let source = rich_schema_with_relations_and_rules(COMPLETE_RELATIONS, rule);
+        let error = assert_invalid(&source, SchemaDiagnosticCode::UnknownKey);
+        assert_eq!(
+            detail_string(only_diagnostic(&error), "mapping"),
+            Some(mapping)
+        );
+    }
+}
+
+#[test]
+fn rejects_duplicate_rule_names_selectors_and_sequence_values() {
+    let cases = [
+        (
+            "duplicate_name",
+            r#"  - name: duplicate_name
+    kind: orphan
+    severity: warning
+    applies_to: {flavours: [requirement]}
+    relations: [related_to]
+  - name: duplicate_name
+    kind: orphan
+    severity: info
+    applies_to: {flavours: [design]}
+    relations: [related_to]
+"#,
+        ),
+        (
+            "relation",
+            r#"  - name: conflicting_selector
+    kind: requires_relation
+    severity: error
+    applies_to: {flavours: [requirement]}
+    relation: related_to
+    relation_any_of: [related_to]
+    direction: incoming
+    min: 1
+"#,
+        ),
+        (
+            "related_to",
+            r#"  - name: duplicate_relation
+    kind: orphan
+    severity: warning
+    applies_to: {flavours: [requirement]}
+    relations: [related_to, related_to]
+"#,
+        ),
+        (
+            "draft",
+            r#"  - name: duplicate_condition_value
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    when: {field: status, in: [draft, draft]}
+    field: estimate
+    min: 1
+"#,
+        ),
+    ];
+
+    for (primary, rule) in cases {
+        let source = rich_schema_with_relations_and_rules(COMPLETE_RELATIONS, rule);
+        let error = assert_invalid(&source, SchemaDiagnosticCode::InvalidDeclaration);
+        assert_eq!(
+            source_slice(&source, only_diagnostic(&error).primary().unwrap()),
+            primary,
+            "{:#?}",
+            error.diagnostics()
+        );
+    }
+}
+
+fn cross_flavour_condition_schema(values: &str, design_repeatable: bool) -> String {
+    format!(
+        r#"format_version: 1
+schema:
+  name: condition-schema
+  version: 1.0.0
+identity:
+  mid:
+    format: ulid
+    prefix: condition_
+flavours:
+  requirement:
+    label: Requirement
+    description: A verifiable obligation.
+    guidance:
+      use_when: [Define an obligation.]
+      avoid_when: [Describe a solution.]
+    id: {{}}
+    title: {{}}
+    body: {{}}
+    fields:
+      status:
+        type: enum
+        values: [draft, approved]
+  design:
+    label: Design
+    description: A chosen solution.
+    guidance:
+      use_when: [Describe a solution.]
+      avoid_when: [Define an obligation.]
+    id: {{}}
+    title: {{}}
+    body: {{}}
+    fields:
+      status:
+        type: enum
+        repeatable: {design_repeatable}
+        values: [draft, accepted]
+relations:
+  related_to:
+    source: {{flavours: [requirement, design]}}
+    target: {{flavours: [requirement, design]}}
+    symmetric: true
+rules:
+  - name: accepted_items_are_connected
+    kind: orphan
+    severity: warning
+    applies_to: {{flavours: [requirement, design]}}
+    when: {{field: status, in: [{values}]}}
+    relations: [related_to]
+"#
+    )
+}
+
+#[test]
+fn applies_cross_flavour_condition_union_semantics_and_rejects_repeatable_fields() {
+    let union = cross_flavour_condition_schema("approved, accepted", false);
+    let fixture = Fixture::new(&union);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+    let condition = document.rules().unwrap().definitions()[0]
+        .condition()
+        .unwrap()
+        .value();
+    assert_eq!(
+        condition
+            .values()
+            .value()
+            .iter()
+            .map(|value| condition_string(value.value()))
+            .collect::<Vec<_>>(),
+        ["approved", "accepted"]
+    );
+
+    let outside_union = cross_flavour_condition_schema("approved, retired", false);
+    let error = assert_invalid(&outside_union, SchemaDiagnosticCode::InvalidDeclaration);
+    assert_eq!(
+        source_slice(&outside_union, only_diagnostic(&error).primary().unwrap()),
+        "retired"
+    );
+
+    let repeatable = cross_flavour_condition_schema("approved", true);
+    let error = assert_invalid(&repeatable, SchemaDiagnosticCode::InvalidDeclaration);
+    let diagnostic = only_diagnostic(&error);
+    assert_eq!(
+        source_slice(&repeatable, diagnostic.primary().unwrap()),
+        "status"
+    );
+    assert_eq!(detail_string(diagnostic, "flavour"), Some("design"));
+}
+
+#[test]
+fn compiles_typed_condition_values_against_each_scalar_field_domain() {
+    let source = rich_schema_with_relations_and_rules(
+        COMPLETE_RELATIONS,
+        r#"  - name: estimate_condition
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement]}
+    when: {field: estimate, in: [-2, 1]}
+    field: estimate
+    min: 1
+  - name: confidence_condition
+    kind: requires_field
+    severity: warning
+    applies_to: {flavours: [requirement]}
+    when: {field: confidence, in: [1, 2.5]}
+    field: confidence
+    min: 1
+  - name: automation_condition
+    kind: requires_field
+    severity: info
+    applies_to: {flavours: [requirement]}
+    when: {field: automated, in: [true, false]}
+    field: automated
+    min: 1
+"#,
+    );
+    let fixture = Fixture::new(source);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+    let rules = document.rules().unwrap();
+
+    assert!(matches!(
+        rules
+            .get("estimate_condition")
+            .unwrap()
+            .condition()
+            .unwrap()
+            .value()
+            .values()
+            .value()[0]
+            .value(),
+        RuleConditionValue::Integer(-2)
+    ));
+    assert!(matches!(
+        rules
+            .get("confidence_condition")
+            .unwrap()
+            .condition()
+            .unwrap()
+            .value()
+            .values()
+            .value()[0]
+            .value(),
+        RuleConditionValue::Integer(1)
+    ));
+    let RuleConditionValue::Number(number) = rules
+        .get("confidence_condition")
+        .unwrap()
+        .condition()
+        .unwrap()
+        .value()
+        .values()
+        .value()[1]
+        .value()
+    else {
+        panic!("expected a floating-point condition value")
+    };
+    assert_eq!(number.get(), 2.5);
+    assert!(matches!(
+        rules
+            .get("automation_condition")
+            .unwrap()
+            .condition()
+            .unwrap()
+            .value()
+            .values()
+            .value()[0]
+            .value(),
+        RuleConditionValue::Boolean(true)
+    ));
+}
+
+#[test]
+fn preserves_independent_diagnostics_across_the_normative_compilation_stages() {
+    let source = rich_schema_with_relations_and_rules(
+        r#"  broken_relation:
+    source: {flavours: [requirement]}
+    target: {flavours: [missing_flavour]}
+"#,
+        r#"  - name: broken_rule
+    kind: requires_relation
+    severity: error
+    applies_to: {flavours: [requirement]}
+    relation: missing_relation
+    direction: outgoing
+    min: 1
+"#,
+    )
+    .replacen("name: rich-schema", "name: Invalid_Name", 1)
+    .replacen("label: Requirement", "label: ''", 1);
+    let fixture = Fixture::new(&source);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+
+    assert_eq!(
+        error
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| source_slice(&source, diagnostic.primary().unwrap()))
+            .collect::<Vec<_>>(),
+        ["Invalid_Name", "''", "missing_flavour", "missing_relation"]
+    );
+
+    let same_rule = rich_schema_with_relations_and_rules(
+        COMPLETE_RELATIONS,
+        r#"  - name: independently_broken_rule
+    kind: requires_field
+    severity: error
+    applies_to: {flavours: [requirement, missing_flavour]}
+    when: {field: missing_condition, in: [draft]}
+    field: missing_field
+    min: 1
+"#,
+    );
+    let fixture = Fixture::new(&same_rule);
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
+    assert_eq!(
+        error
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| source_slice(&same_rule, diagnostic.primary().unwrap()))
+            .collect::<Vec<_>>(),
+        ["missing_flavour", "missing_condition", "missing_field"]
+    );
+}
+
+#[test]
+fn rejects_a_non_sequence_rule_root_without_producing_a_schema_model() {
+    let source = VALID_SCHEMA.replace("rules: []", "rules: {}");
+    let error = assert_invalid(&source, SchemaDiagnosticCode::InvalidDeclaration);
+    assert_eq!(
+        source_slice(&source, only_diagnostic(&error).primary().unwrap()),
+        "{}"
+    );
+}
+
+#[test]
 fn accepts_unicode_rust_patterns_and_rejects_invalid_patterns_at_the_value() {
     let unicode = RICH_SCHEMA.replace("pattern: REQ-[0-9]+", "pattern: '\\p{Greek}+'");
     let fixture = Fixture::new(&unicode);
@@ -1560,7 +2197,7 @@ fn accepts_yaml_1_2_directive_and_rejects_other_directives() {
 }
 
 #[test]
-fn validates_and_drops_deep_profile_values_iteratively() {
+fn validates_and_drops_deep_invalid_rule_values_iteratively() {
     const DEPTH: usize = 20_000;
     let nested = format!("{}leaf", "- ".repeat(DEPTH));
     let source = format!(
@@ -1568,9 +2205,13 @@ fn validates_and_drops_deep_profile_values_iteratively() {
     );
 
     let fixture = Fixture::new(source);
-    let document = load_schema(&fixture.loaded_project()).unwrap();
+    let error = load_schema(&fixture.loaded_project()).unwrap_err();
 
-    assert_eq!(document.rules().unwrap().len(), 1);
+    assert_eq!(error.diagnostics().len(), 1);
+    assert_eq!(
+        error.diagnostics()[0].message(),
+        "rules[] must be a mapping"
+    );
 }
 
 #[test]
