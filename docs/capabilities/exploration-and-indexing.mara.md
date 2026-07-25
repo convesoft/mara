@@ -218,6 +218,25 @@ macOS, and Windows with equivalent path normalization, document semantics,
 diagnostic codes, and normalized JSON output.
 :::
 
+:::decision m_01KYDMFST0EY73VM8ZVCNZKHV5
+:id: ADR-0014
+:title: Defer Windows runtime qualification from bootstrap delivery
+:status: accepted
+:kind: process
+:justifies: REQ-PORTABLE-CLI
+
+Mara v0.1 bootstrap delivery shall proceed on non-Windows hosts while Windows
+runtime support remains unclaimed and unverified. Windows is not a supported
+Mara v0.1 runtime until the dedicated portability qualification has completed.
+Incidental compilation, cross-compilation, or partial compatibility is not
+verification evidence and does not constitute a support guarantee.
+
+The dedicated Windows delivery shall establish native behavioural CI and close
+the remaining platform-specific implementation and verification work before
+Mara claims Windows runtime support. Deferring that qualification does not block
+the current non-Windows bootstrap scope.
+:::
+
 :::req m_01KY7YA2D2VJ961QCVMGTNNK21
 :id: REQ-PERFORMANCE-TARGET
 :title: Full validation shall meet the v0.1 scale budget
@@ -401,7 +420,9 @@ prove that no new index or hash is reported and any previous index is unchanged.
 :verifies: REQ-PORTABLE-CLI
 :verifies: REQ-PERFORMANCE-TARGET
 
-CI shall run behavioural suites on Linux, macOS, and Windows and shall benchmark
-the documented 10,000-item, 100,000-edge fixture on the designated reference
-runner against time and memory budgets.
+The dedicated portability qualification shall run behavioural suites on Linux,
+macOS, and Windows before support is claimed for those runtimes. It shall also
+benchmark the documented 10,000-item, 100,000-edge fixture on the designated
+reference runner against time and memory budgets. Passing non-Windows CI or
+cross-compilation alone shall not verify Windows runtime support.
 :::
