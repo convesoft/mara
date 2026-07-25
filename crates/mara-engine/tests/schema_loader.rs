@@ -366,6 +366,7 @@ fn accepts_yaml_1_2_directive_and_rejects_other_directives() {
         ("%YAML 1.1\n---\n", "unsupported_yaml_version"),
         ("%YAML1.2\n---\n", "unsupported_directive"),
         ("%TAG !e! tag:example.com,2026:\n---\n", "custom_tag"),
+        ("%TAGGED value\n---\n", "unsupported_directive"),
         ("%FUTURE value\n---\n", "unsupported_directive"),
     ];
     for (directive, feature) in cases {
@@ -383,6 +384,20 @@ fn accepts_yaml_1_2_directive_and_rejects_other_directives() {
     assert_eq!(detail_string(diagnostic, "feature"), Some("custom_tag"));
     assert_eq!(diagnostic.primary().unwrap().start_line(), 2);
     assert_eq!(diagnostic.primary().unwrap().start_column(), 1);
+}
+
+#[test]
+fn validates_and_drops_deep_profile_values_iteratively() {
+    const DEPTH: usize = 20_000;
+    let nested = format!("{}leaf", "- ".repeat(DEPTH));
+    let source = format!(
+        "format_version: 1\nschema:\n  name: deep-schema\n  version: 1.0.0\nidentity:\n  mid:\n    format: ulid\n    prefix: deep_\nflavours:\n  deep:\n    {nested}\n"
+    );
+
+    let fixture = Fixture::new(source);
+    let document = load_schema(&fixture.loaded_project()).unwrap();
+
+    assert_eq!(document.flavours().len(), 1);
 }
 
 #[test]

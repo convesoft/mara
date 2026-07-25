@@ -205,8 +205,16 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
     let parser_start_byte = source.len() - parser_source.len();
     let source_map = SourceMap::new(path, source, parser_start_byte);
     let mut receiver = TreeBuilder::new(&source_map);
-    if let Err(error) = Parser::new_from_str(parser_source).load(&mut receiver, true) {
+    let parse_error = Parser::new_from_str(parser_source).find_map(|result| match result {
+        Ok((event, span)) => {
+            receiver.on_event(event, span);
+            None
+        }
+        Err(error) => Some(error),
+    });
+    if let Some(error) = parse_error {
         let primary = marker_span(&source_map, source_map.position(*error.marker()));
+        receiver.drain_nodes();
         return Err(SchemaLoadError::invalid(vec![
             Diagnostic::new(
                 SchemaDiagnosticCode::Syntax,
@@ -217,6 +225,7 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
         ]));
     }
     if let Some((message, span)) = receiver.error.take() {
+        receiver.drain_nodes();
         return Err(SchemaLoadError::invalid(vec![Diagnostic::new(
             SchemaDiagnosticCode::Syntax,
             message,
@@ -250,6 +259,7 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
                 "multiple_documents",
             )
         };
+        receiver.drain_nodes();
         return Err(SchemaLoadError::invalid(vec![
             Diagnostic::new(
                 SchemaDiagnosticCode::Syntax,
@@ -263,12 +273,22 @@ fn decode_schema(bytes: &[u8], path: &str) -> Result<SchemaDocument, SchemaLoadE
     let root = receiver.documents.pop().expect("one document was checked");
     let mut profile = Vec::new();
     validate_profile(&root, &source_map, &mut profile);
-    if !profile.is_empty() {
-        return Err(SchemaLoadError::invalid(profile));
-    }
+    let result = if profile.is_empty() {
+        decode_v1_document(&source_map, &root)
+            .map_err(|failure| SchemaLoadError::invalid(failure.into_diagnostics()))
+    } else {
+        Err(SchemaLoadError::invalid(profile))
+    };
+    drop_parsed_nodes_iteratively([root]);
+    result
+}
 
-    decode_v1_document(&source_map, root)
-        .map_err(|failure| SchemaLoadError::invalid(failure.into_diagnostics()))
+fn directive_arguments<'a>(content: &'a str, name: &str) -> Option<&'a str> {
+    let rest = content.strip_prefix(name)?;
+    rest.as_bytes()
+        .first()
+        .is_some_and(|byte| matches!(*byte, b' ' | b'\t'))
+        .then_some(rest)
 }
 
 fn validate_document_directives(source: &str, path: &str) -> Option<Diagnostic> {
@@ -291,23 +311,17 @@ fn validate_document_directives(source: &str, path: &str) -> Option<Diagnostic> 
             break;
         }
 
-        let feature = if let Some(rest) = content.strip_prefix("%YAML") {
-            let has_separator = rest
-                .as_bytes()
-                .first()
-                .is_some_and(|byte| matches!(*byte, b' ' | b'\t'));
+        let feature = if let Some(rest) = directive_arguments(content, "%YAML") {
             let version = rest.split_whitespace().next().unwrap_or("");
-            if has_separator && version == "1.2" {
+            if version == "1.2" {
                 byte_offset = next_offset;
                 line += 1;
                 continue;
             }
-            if has_separator {
-                "unsupported_yaml_version"
-            } else {
-                "unsupported_directive"
-            }
-        } else if content.starts_with("%TAG") {
+            "unsupported_yaml_version"
+        } else if content.starts_with("%YAML") {
+            "unsupported_directive"
+        } else if directive_arguments(content, "%TAG").is_some() {
             "custom_tag"
         } else {
             "unsupported_directive"
@@ -689,6 +703,22 @@ impl ParsedNode {
     }
 }
 
+fn drop_parsed_nodes_iteratively(nodes: impl IntoIterator<Item = ParsedNode>) {
+    let mut pending = nodes.into_iter().collect::<Vec<_>>();
+    while let Some(node) = pending.pop() {
+        match node {
+            ParsedNode::Sequence { values, .. } => pending.extend(values),
+            ParsedNode::Mapping { entries, .. } => {
+                for (key, value) in entries {
+                    pending.push(key);
+                    pending.push(value);
+                }
+            }
+            ParsedNode::Scalar { .. } | ParsedNode::Alias { .. } => {}
+        }
+    }
+}
+
 #[derive(Debug)]
 enum PendingContainer {
     Sequence {
@@ -737,6 +767,18 @@ impl<'map, 'source> TreeBuilder<'map, 'source> {
         if self.error.is_none() {
             self.error = Some((message.into(), span));
         }
+    }
+
+    fn drain_nodes(&mut self) {
+        let mut nodes = std::mem::take(&mut self.documents);
+        for container in &mut self.stack {
+            match container {
+                PendingContainer::Sequence { values, .. }
+                | PendingContainer::Mapping { values, .. } => nodes.append(values),
+            }
+        }
+        self.stack.clear();
+        drop_parsed_nodes_iteratively(nodes);
     }
 }
 
@@ -831,64 +873,110 @@ enum ScalarKind {
     Float,
 }
 
+enum ProfileTask<'node> {
+    Visit(&'node ParsedNode),
+    MappingEntry {
+        key: &'node ParsedNode,
+        value: &'node ParsedNode,
+        mapping: usize,
+    },
+    CheckMappingKey {
+        key: &'node ParsedNode,
+        mapping: usize,
+        diagnostic_count: usize,
+    },
+}
+
 fn validate_profile(
     node: &ParsedNode,
     source_map: &SourceMap<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    match node {
-        ParsedNode::Alias { span } => diagnostics.push(profile_diagnostic(
-            "YAML aliases are not permitted in schema documents",
-            source_map,
-            *span,
-            "alias",
-        )),
-        ParsedNode::Scalar {
-            value,
-            style,
-            anchor,
-            tag,
-            span,
-        } => {
-            validate_anchor(*anchor, source_map, *span, diagnostics);
-            match resolve_scalar(value, *style, tag.as_ref()) {
-                Ok(ScalarKind::Null) => diagnostics.push(profile_diagnostic(
-                    "null values are not permitted in schema documents",
-                    source_map,
-                    *span,
-                    "null",
-                )),
-                Ok(_) => {}
-                Err(message) => {
-                    diagnostics.push(profile_diagnostic(message, source_map, *span, "custom_tag"))
+    let mut tasks = vec![ProfileTask::Visit(node)];
+    let mut mapping_keys = Vec::<HashMap<String, ParsedSpan>>::new();
+    while let Some(task) = tasks.pop() {
+        match task {
+            ProfileTask::Visit(ParsedNode::Alias { span }) => diagnostics.push(profile_diagnostic(
+                "YAML aliases are not permitted in schema documents",
+                source_map,
+                *span,
+                "alias",
+            )),
+            ProfileTask::Visit(ParsedNode::Scalar {
+                value,
+                style,
+                anchor,
+                tag,
+                span,
+            }) => {
+                validate_anchor(*anchor, source_map, *span, diagnostics);
+                match resolve_scalar(value, *style, tag.as_ref()) {
+                    Ok(ScalarKind::Null) => diagnostics.push(profile_diagnostic(
+                        "null values are not permitted in schema documents",
+                        source_map,
+                        *span,
+                        "null",
+                    )),
+                    Ok(_) => {}
+                    Err(message) => diagnostics.push(profile_diagnostic(
+                        message,
+                        source_map,
+                        *span,
+                        "custom_tag",
+                    )),
                 }
             }
-        }
-        ParsedNode::Sequence {
-            values,
-            anchor,
-            tag,
-            span,
-        } => {
-            validate_anchor(*anchor, source_map, *span, diagnostics);
-            validate_collection_tag(tag.as_ref(), "seq", source_map, *span, diagnostics);
-            for value in values {
-                validate_profile(value, source_map, diagnostics);
+            ProfileTask::Visit(ParsedNode::Sequence {
+                values,
+                anchor,
+                tag,
+                span,
+            }) => {
+                validate_anchor(*anchor, source_map, *span, diagnostics);
+                validate_collection_tag(tag.as_ref(), "seq", source_map, *span, diagnostics);
+                tasks.extend(values.iter().rev().map(ProfileTask::Visit));
             }
-        }
-        ParsedNode::Mapping {
-            entries,
-            anchor,
-            tag,
-            span,
-        } => {
-            validate_anchor(*anchor, source_map, *span, diagnostics);
-            validate_collection_tag(tag.as_ref(), "map", source_map, *span, diagnostics);
-            let mut seen = HashMap::<String, SourceSpan>::new();
-            for (key, value) in entries {
-                let before = diagnostics.len();
-                validate_profile(key, source_map, diagnostics);
-                if diagnostics.len() == before {
+            ProfileTask::Visit(ParsedNode::Mapping {
+                entries,
+                anchor,
+                tag,
+                span,
+            }) => {
+                validate_anchor(*anchor, source_map, *span, diagnostics);
+                validate_collection_tag(tag.as_ref(), "map", source_map, *span, diagnostics);
+                let mapping = mapping_keys.len();
+                mapping_keys.push(HashMap::new());
+                tasks.extend(
+                    entries
+                        .iter()
+                        .rev()
+                        .map(|(key, value)| ProfileTask::MappingEntry {
+                            key,
+                            value,
+                            mapping,
+                        }),
+                );
+            }
+            ProfileTask::MappingEntry {
+                key,
+                value,
+                mapping,
+            } => {
+                let diagnostic_count = diagnostics.len();
+                tasks.push(ProfileTask::Visit(value));
+                tasks.push(ProfileTask::CheckMappingKey {
+                    key,
+                    mapping,
+                    diagnostic_count,
+                });
+                tasks.push(ProfileTask::Visit(key));
+            }
+            ProfileTask::CheckMappingKey {
+                key,
+                mapping,
+                diagnostic_count,
+            } => {
+                if diagnostics.len() == diagnostic_count {
                     match string_key(key) {
                         Ok((_name, is_merge)) if is_merge => diagnostics.push(profile_diagnostic(
                             "YAML merge keys are not permitted in schema documents",
@@ -897,22 +985,21 @@ fn validate_profile(
                             "merge_key",
                         )),
                         Ok((name, _)) => {
-                            let key_source = parser_span(source_map, key.span());
-                            if let Some(first) = seen.get(name) {
+                            if let Some(first) = mapping_keys[mapping].get(name).copied() {
                                 diagnostics.push(
                                     Diagnostic::new(
                                         SchemaDiagnosticCode::DuplicateKey,
                                         format!("mapping key {name:?} is declared more than once"),
-                                        Some(key_source),
+                                        Some(parser_span(source_map, key.span())),
                                     )
                                     .with_related(RelatedDiagnostic::new(
                                         "first declaration of this key",
-                                        first.clone(),
+                                        parser_span(source_map, first),
                                     ))
                                     .with_detail("key", name.to_owned()),
                                 );
                             } else {
-                                seen.insert(name.to_owned(), key_source);
+                                mapping_keys[mapping].insert(name.to_owned(), key.span());
                             }
                         }
                         Err(()) => diagnostics.push(profile_diagnostic(
@@ -923,7 +1010,6 @@ fn validate_profile(
                         )),
                     }
                 }
-                validate_profile(value, source_map, diagnostics);
             }
         }
     }
@@ -1124,7 +1210,7 @@ fn is_core_float(value: &str) -> bool {
 
 fn decode_v1_document(
     source_map: &SourceMap<'_>,
-    root: ParsedNode,
+    root: &ParsedNode,
 ) -> Result<SchemaDocument, DocumentDecodeFailure> {
     let ParsedNode::Mapping {
         entries,
@@ -1142,21 +1228,21 @@ fn decode_v1_document(
     };
 
     let (format_key, format_value) =
-        required_entry(&entries, "format_version", "root", source_map, root_span)?;
+        required_entry(entries, "format_version", "root", source_map, *root_span)?;
     let format_version = decode_format_version(format_key, format_value, source_map)?;
 
-    let unknown_keys = v1_unknown_key_diagnostics(&entries, source_map);
+    let unknown_keys = v1_unknown_key_diagnostics(entries, source_map);
     if !unknown_keys.is_empty() {
         return Err(DocumentDecodeFailure::Diagnostics(unknown_keys));
     }
 
     let (schema_key, schema_value) =
-        required_entry(&entries, "schema", "root", source_map, root_span)?;
+        required_entry(entries, "schema", "root", source_map, *root_span)?;
     let schema_identity = decode_schema_identity(schema_value, source_map)?;
     let schema = field(source_map, schema_key, schema_value, schema_identity);
 
     let (identity_key, identity_value) =
-        required_entry(&entries, "identity", "root", source_map, root_span)?;
+        required_entry(entries, "identity", "root", source_map, *root_span)?;
     let identity_configuration = decode_identity(identity_value, source_map)?;
     let identity = field(
         source_map,
@@ -1166,7 +1252,7 @@ fn decode_v1_document(
     );
 
     let (flavours_key, flavours_value) =
-        required_entry(&entries, "flavours", "root", source_map, root_span)?;
+        required_entry(entries, "flavours", "root", source_map, *root_span)?;
     let flavours_len = mapping_len(flavours_value).ok_or_else(|| {
         invalid_declaration(
             "root.flavours must be a mapping",
@@ -1177,7 +1263,7 @@ fn decode_v1_document(
     })?;
     let flavours = section(source_map, flavours_key, flavours_value, flavours_len);
 
-    let relations = if let Some((key, value)) = optional_entry(&entries, "relations") {
+    let relations = if let Some((key, value)) = optional_entry(entries, "relations") {
         let Some(len) = mapping_len(value) else {
             return Err(invalid_declaration(
                 "root.relations must be a mapping",
@@ -1192,7 +1278,7 @@ fn decode_v1_document(
         None
     };
 
-    let rules = if let Some((key, value)) = optional_entry(&entries, "rules") {
+    let rules = if let Some((key, value)) = optional_entry(entries, "rules") {
         let Some(len) = sequence_len(value) else {
             return Err(invalid_declaration(
                 "root.rules must be a sequence",
