@@ -13,8 +13,8 @@ use toml::Spanned;
 pub const PROJECT_DIRECTORY: &str = ".mara";
 pub const PROJECT_CONFIG_FILE: &str = "project.toml";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FileIdentity {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FileIdentity {
     volume: u64,
     file: u64,
 }
@@ -1082,7 +1082,7 @@ fn validate_glob(glob: &str) -> Result<(), &'static str> {
     if glob.contains('\\') {
         return Err("backslash escaping and platform separators are unsupported");
     }
-    if glob.contains('{') || glob.contains('}') {
+    if contains_brace_extension(glob) {
         return Err("brace expansion is unsupported");
     }
     if glob.split('/').any(str::is_empty) {
@@ -1100,7 +1100,22 @@ fn validate_glob(glob: &str) -> Result<(), &'static str> {
         }
         validate_glob_segment(segment)?;
     }
+    crate::content::compile_content_glob(glob)
+        .map_err(|_| "glob cannot be compiled by the content matcher")?;
     Ok(())
+}
+
+fn contains_brace_extension(glob: &str) -> bool {
+    let mut in_class = false;
+    for character in glob.chars() {
+        match character {
+            '[' if !in_class => in_class = true,
+            ']' if in_class => in_class = false,
+            '{' | '}' if !in_class => return true,
+            _ => {}
+        }
+    }
+    false
 }
 
 fn validate_glob_segment(segment: &str) -> Result<(), &'static str> {
@@ -1109,12 +1124,12 @@ fn validate_glob_segment(segment: &str) -> Result<(), &'static str> {
     while index < characters.len() {
         match characters[index] {
             '[' => {
-                let close_offset = characters[index + 1..]
-                    .iter()
-                    .position(|character| *character == ']')
+                let close = crate::content::content_glob_class_close(&characters, index)
                     .ok_or("glob contains an unclosed character class")?;
-                let close = index + 1 + close_offset;
                 let mut content = &characters[index + 1..close];
+                if content.first() == Some(&'^') {
+                    return Err("character classes use `!`, not `^`, for negation");
+                }
                 if content.first() == Some(&'!') {
                     content = &content[1..];
                 }
@@ -1289,17 +1304,17 @@ fn check_output_write_access(path: &Path, _directory: bool) -> io::Result<()> {
 }
 
 #[cfg(unix)]
-fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
 
     fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NOFOLLOW)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
         .open(path)
 }
 
 #[cfg(unix)]
-fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
+pub(crate) fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
     use std::os::unix::fs::MetadataExt;
 
     let metadata = file.metadata()?;
@@ -1310,7 +1325,10 @@ fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
 }
 
 #[cfg(unix)]
-fn path_identity(_path: &Path, metadata: &fs::Metadata) -> io::Result<Option<FileIdentity>> {
+pub(crate) fn path_identity(
+    _path: &Path,
+    metadata: &fs::Metadata,
+) -> io::Result<Option<FileIdentity>> {
     use std::os::unix::fs::MetadataExt;
 
     Ok(Some(FileIdentity {
@@ -1320,7 +1338,7 @@ fn path_identity(_path: &Path, metadata: &fs::Metadata) -> io::Result<Option<Fil
 }
 
 #[cfg(windows)]
-fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
     use std::os::windows::fs::OpenOptionsExt;
 
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
@@ -1331,7 +1349,7 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(windows)]
-fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
+pub(crate) fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
         BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
@@ -1352,19 +1370,23 @@ fn file_identity(file: &fs::File) -> io::Result<Option<FileIdentity>> {
 }
 
 #[cfg(windows)]
-fn path_identity(path: &Path, _metadata: &fs::Metadata) -> io::Result<Option<FileIdentity>> {
+pub(crate) fn path_identity(
+    path: &Path,
+    _metadata: &fs::Metadata,
+) -> io::Result<Option<FileIdentity>> {
     use std::os::windows::fs::OpenOptionsExt;
 
     const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
     let file = fs::OpenOptions::new()
         .access_mode(0)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
         .open(path)?;
     file_identity(&file)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
+pub(crate) fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink() {
         return Err(io::Error::other("refusing to follow an input symlink"));
@@ -1373,12 +1395,15 @@ fn open_read_no_follow(path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn file_identity(_file: &fs::File) -> io::Result<Option<FileIdentity>> {
+pub(crate) fn file_identity(_file: &fs::File) -> io::Result<Option<FileIdentity>> {
     Ok(None)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn path_identity(_path: &Path, _metadata: &fs::Metadata) -> io::Result<Option<FileIdentity>> {
+pub(crate) fn path_identity(
+    _path: &Path,
+    _metadata: &fs::Metadata,
+) -> io::Result<Option<FileIdentity>> {
     Ok(None)
 }
 

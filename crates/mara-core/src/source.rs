@@ -1,14 +1,14 @@
 use std::{error::Error, fmt};
 
 /// A reusable index of every legal source-span boundary in one UTF-8 source.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceIndex {
     path: String,
     source_len: usize,
     positions: Vec<IndexedPosition>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct IndexedPosition {
     byte: usize,
     line: u64,
@@ -126,11 +126,146 @@ impl SourceIndex {
         Ok((position.line, position.column))
     }
 
+    /// Returns the exact half-open span of the complete indexed source.
+    pub fn document_span(&self) -> SourceSpan {
+        let end = *self
+            .positions
+            .last()
+            .expect("a source index always contains its initial position");
+        SourceSpan {
+            path: self.path.clone(),
+            start_byte: 0,
+            end_byte: self.source_len as u64,
+            start_line: 1,
+            start_column: 1,
+            end_line: end.line,
+            end_column: end.column,
+        }
+    }
+
     fn position(&self, byte: usize) -> Result<IndexedPosition, InvalidSourceSpan> {
         self.positions
             .binary_search_by_key(&byte, |position| position.byte)
             .map(|index| self.positions[index])
             .map_err(|_| InvalidSourceSpan::InvalidBoundary)
+    }
+}
+
+/// The line-ending style retained for one complete source text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum LineEnding {
+    Lf,
+    CrLf,
+    Mixed,
+    None,
+}
+
+impl LineEnding {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Lf => "lf",
+            Self::CrLf => "crlf",
+            Self::Mixed => "mixed",
+            Self::None => "none",
+        }
+    }
+}
+
+/// Complete, unnormalized UTF-8 source text retained before structural parsing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceText {
+    text: String,
+    line_ending: LineEnding,
+}
+
+impl SourceText {
+    pub fn new(text: String) -> Self {
+        let line_ending = detect_line_ending(text.as_bytes());
+        Self { text, line_ending }
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+
+    pub const fn line_ending(&self) -> LineEnding {
+        self.line_ending
+    }
+
+    pub fn into_string(self) -> String {
+        self.text
+    }
+}
+
+impl From<String> for SourceText {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+/// One complete project source document with stable logical provenance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceDocument {
+    source: SourceText,
+    source_index: SourceIndex,
+    span: SourceSpan,
+}
+
+impl SourceDocument {
+    pub fn try_new(path: impl Into<String>, source: SourceText) -> Result<Self, InvalidSourceSpan> {
+        let source_index = SourceIndex::try_new(path, source.as_str())?;
+        let span = source_index.document_span();
+        Ok(Self {
+            source,
+            source_index,
+            span,
+        })
+    }
+
+    pub fn path(&self) -> &str {
+        self.span.path()
+    }
+
+    pub const fn source(&self) -> &SourceText {
+        &self.source
+    }
+
+    pub const fn source_index(&self) -> &SourceIndex {
+        &self.source_index
+    }
+
+    pub const fn span(&self) -> &SourceSpan {
+        &self.span
+    }
+}
+
+fn detect_line_ending(bytes: &[u8]) -> LineEnding {
+    let mut saw_lf = false;
+    let mut saw_crlf = false;
+    let mut saw_other_cr = false;
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
+                saw_crlf = true;
+                index += 2;
+            }
+            b'\r' => {
+                saw_other_cr = true;
+                index += 1;
+            }
+            b'\n' => {
+                saw_lf = true;
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+    match (saw_lf, saw_crlf, saw_other_cr) {
+        (false, false, false) => LineEnding::None,
+        (true, false, false) => LineEnding::Lf,
+        (false, true, false) => LineEnding::CrLf,
+        _ => LineEnding::Mixed,
     }
 }
 
@@ -338,5 +473,30 @@ mod tests {
             SourceSpan::try_new("schema.yaml", source, 0, 2, 1, 1, 1, 3),
             Err(InvalidSourceSpan::CoordinateMismatch)
         );
+    }
+
+    #[test]
+    fn source_documents_retain_text_provenance_and_line_endings() {
+        for (source, expected) in [
+            ("plain", LineEnding::None),
+            ("a\nb\n", LineEnding::Lf),
+            ("a\r\nb\r\n", LineEnding::CrLf),
+            ("a\r\nb\n", LineEnding::Mixed),
+        ] {
+            let document =
+                SourceDocument::try_new("docs/example.mara.md", SourceText::new(source.to_owned()))
+                    .unwrap();
+            assert_eq!(document.path(), "docs/example.mara.md");
+            assert_eq!(document.source().as_str(), source);
+            assert_eq!(document.source().line_ending(), expected);
+            assert_eq!(document.span().end_byte(), source.len() as u64);
+            assert_eq!(
+                document
+                    .source_index()
+                    .coordinates_at(source.len() as u64)
+                    .unwrap(),
+                (document.span().end_line(), document.span().end_column())
+            );
+        }
     }
 }

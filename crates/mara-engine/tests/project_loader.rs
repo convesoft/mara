@@ -392,7 +392,12 @@ fn validates_every_supported_glob_form_without_discovering_content() {
         "[!abc]",
         "**",
         "docs/**/[?].mara.md",
+        "docs/**/**/*.mara.md",
         ".hidden/*.mara.md",
+        "docs/name,part.md",
+        "docs/name:part.md",
+        "docs/[a-b-c].md",
+        "docs/[{]draft[}].md",
     ];
     fixture.write_config(config_with(
         ".mara/schema.yaml",
@@ -432,6 +437,7 @@ fn rejects_empty_duplicate_and_unsupported_globs() {
         vec!["docs/**suffix.md"],
         vec!["docs/[abc.md"],
         vec!["docs/[].md"],
+        vec!["docs/[^a].md"],
         vec!["docs/[z-a].md"],
         vec!["docs/a].md"],
     ] {
