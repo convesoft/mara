@@ -83,6 +83,9 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                     .and_then(|path| normalized_relative_path(&project.root, path));
                 let is_loop = is_walk_loop(&error);
                 if !is_loop
+                    && walk_error_path(&error).is_some_and(|path| {
+                        fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
+                    })
                     && source_path
                         .as_deref()
                         .is_some_and(|path| !is_selected(&includes, &excludes, path))
@@ -107,14 +110,18 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 continue;
             }
         };
-        if entry.error().is_some() {
-            let source_path = normalized_relative_path(&project.root, entry.path());
-            if source_path
-                .as_deref()
-                .is_some_and(|path| !is_selected(&includes, &excludes, path))
+        if let Some(error) = entry.error() {
+            let affected_path = normalized_relative_path(&project.root, entry.path());
+            if entry.file_type().is_some_and(|kind| kind.is_file())
+                && affected_path
+                    .as_deref()
+                    .is_some_and(|path| !is_selected(&includes, &excludes, path))
             {
                 continue;
             }
+            let source_path = walk_error_path(error)
+                .and_then(|path| normalized_relative_path(&project.root, path))
+                .or(affected_path);
             let source_path = source_path.unwrap_or_else(|| ".mara/project.toml".to_owned());
             diagnostics.push(
                 diagnostic_at_start(
@@ -326,7 +333,16 @@ fn compile_globs(patterns: &[String]) -> Vec<Glob<'static>> {
 }
 
 pub(crate) fn compile_content_glob(pattern: &str) -> Result<Glob<'static>, wax::BuildError> {
-    let pattern = wax_expression(pattern);
+    let pattern = pattern
+        .split('/')
+        .fold(Vec::new(), |mut segments, segment| {
+            if segment != "**" || segments.last() != Some(&"**") {
+                segments.push(segment);
+            }
+            segments
+        })
+        .join("/");
+    let pattern = wax_expression(&pattern);
     let expression = if let Some(pattern) = pattern.strip_prefix("**/") {
         format!("**/(?-i){pattern}")
     } else if pattern == "**" {

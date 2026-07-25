@@ -392,6 +392,7 @@ fn validates_every_supported_glob_form_without_discovering_content() {
         "[!abc]",
         "**",
         "docs/**/[?].mara.md",
+        "docs/**/**/*.mara.md",
         ".hidden/*.mara.md",
         "docs/name,part.md",
         "docs/name:part.md",
