@@ -226,10 +226,10 @@ impl RelationDiagnosticCode {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Unknown => "relation.unknown",
-            Self::InvalidSourceFlavour => "relation.invalid_source_flavour",
-            Self::InvalidTargetFlavour => "relation.invalid_target_flavour",
+            Self::InvalidSourceFlavour => "relation.invalid_source",
+            Self::InvalidTargetFlavour => "relation.invalid_target",
             Self::SelfReference => "relation.self_reference",
-            Self::Duplicate => "relation.duplicate",
+            Self::Duplicate => "relation.duplicate_occurrence",
         }
     }
 
@@ -731,10 +731,10 @@ mod tests {
             RelationDiagnosticCode::ALL.map(RelationDiagnosticCode::as_str),
             [
                 "relation.unknown",
-                "relation.invalid_source_flavour",
-                "relation.invalid_target_flavour",
+                "relation.invalid_source",
+                "relation.invalid_target",
                 "relation.self_reference",
-                "relation.duplicate",
+                "relation.duplicate_occurrence",
             ]
         );
     }

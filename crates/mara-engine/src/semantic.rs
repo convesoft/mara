@@ -239,6 +239,24 @@ fn normalize_relations(
                 continue;
             }
 
+            if definition.requires_same_flavour() && source_flavour != target_flavour {
+                diagnostics.push(
+                    relation_diagnostic(
+                        RelationDiagnosticCode::InvalidTargetFlavour,
+                        format!(
+                            "relation {:?} requires equal source and target flavours",
+                            definition.name()
+                        ),
+                        definition,
+                        item,
+                        reference,
+                    )
+                    .with_detail("source_flavour", source_flavour)
+                    .with_detail("target_flavour", target_flavour),
+                );
+                continue;
+            }
+
             if canonical_source == canonical_target && !definition.permits_self_reference() {
                 diagnostics.push(relation_diagnostic(
                     RelationDiagnosticCode::SelfReference,
@@ -1176,6 +1194,29 @@ mod tests {
             None,
             None,
         );
+        let matches = RelationDefinition::new(
+            "matches".to_owned(),
+            span(),
+            span(),
+            field(RelationSourceEndpoint::new(
+                field(vec![value("req".to_owned()), value("test".to_owned())]),
+                None,
+            )),
+            field(RelationTargetEndpoint::new(
+                Some(field(vec![
+                    value("req".to_owned()),
+                    value("test".to_owned()),
+                ])),
+                None,
+            )),
+            None,
+            None,
+            None,
+            Some(field(true)),
+            None,
+            None,
+            None,
+        );
         let mid = MidIdentity::new(field(MidFormat::Ulid), field("m_".to_owned()));
         SchemaDocument::new(
             span(),
@@ -1194,6 +1235,7 @@ mod tests {
                 span(),
                 span(),
                 BTreeMap::from([
+                    ("matches".to_owned(), matches),
                     ("relates".to_owned(), relates),
                     ("traces".to_owned(), traces),
                 ]),
@@ -1601,6 +1643,10 @@ Body.\n\
             .collect::<Vec<_>>();
         assert_eq!(duplicates.len(), 1);
         assert_eq!(duplicates[0].severity(), DiagnosticSeverity::Warning);
+        assert_eq!(
+            duplicates[0].code().as_str(),
+            "relation.duplicate_occurrence"
+        );
         assert_eq!(duplicates[0].context().relation(), Some("traces"));
         assert_eq!(duplicates[0].context().target(), Some("REQ-TWO"));
     }
@@ -1639,10 +1685,56 @@ Body.\n\
             .collect::<BTreeSet<_>>();
 
         assert!(!result.is_valid());
-        assert!(codes.contains("relation.invalid_source_flavour"));
-        assert!(codes.contains("relation.invalid_target_flavour"));
+        assert!(codes.contains("relation.invalid_source"));
+        assert!(codes.contains("relation.invalid_target"));
         assert!(codes.contains("relation.self_reference"));
         assert!(codes.contains("reference.unresolved"));
+        assert!(result.relations().edges().is_empty());
+    }
+
+    #[test]
+    fn same_flavour_rejects_cross_flavour_edges_allowed_by_both_endpoint_sets() {
+        let schema = schema();
+        let parsed = document(
+            "same-flavour.mara.md",
+            ":::req m_00000000000000000000000001\n\
+:id: REQ-ONE\n\
+:title: First\n\
+:custom_state: approved\n\
+:tag: alpha\n\
+:matches: TEST-ONE\n\
+\n\
+Body.\n\
+:::\n\
+\n\
+:::test m_00000000000000000000000002\n\
+:id: TEST-ONE\n\
+:title: Test\n\
+\n\
+Body.\n\
+:::\n",
+            &schema,
+        );
+
+        let result = compile_documents(&schema, &[parsed]);
+        let diagnostic = result
+            .diagnostics()
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code() == RelationDiagnosticCode::InvalidTargetFlavour.into()
+                    && diagnostic.context().relation() == Some("matches")
+            })
+            .unwrap();
+
+        assert_eq!(diagnostic.code().as_str(), "relation.invalid_target");
+        assert_eq!(
+            diagnostic.details().get("source_flavour"),
+            Some(&DiagnosticValue::String("req".to_owned()))
+        );
+        assert_eq!(
+            diagnostic.details().get("target_flavour"),
+            Some(&DiagnosticValue::String("test".to_owned()))
+        );
         assert!(result.relations().edges().is_empty());
     }
 
