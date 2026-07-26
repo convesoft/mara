@@ -755,3 +755,67 @@ fn writer_enforces_the_configured_clean_relevant_inputs_policy() {
         previous
     );
 }
+
+#[test]
+fn writer_rejects_stale_validation_preimages_outside_git() {
+    let fixture = tempfile::tempdir().unwrap();
+    write_project(fixture.path(), false);
+    let validated = check_project(fixture.path()).unwrap();
+    let destination = fixture.path().join(".mara/index.json");
+    let previous = b"previous complete index\n";
+    fs::write(&destination, previous).unwrap();
+    fs::write(
+        fixture.path().join("docs/project.mara.md"),
+        format!("{CONTENT}\n"),
+    )
+    .unwrap();
+
+    let error = write_index(&validated).unwrap_err();
+
+    assert!(matches!(
+        &error,
+        mara_engine::IndexError::InputStateChanged { .. }
+    ));
+    assert_eq!(error.command_code(), "io.failed");
+    assert_eq!(
+        error
+            .path()
+            .unwrap()
+            .strip_prefix(fixture.path().canonicalize().unwrap())
+            .unwrap(),
+        Path::new("docs/project.mara.md")
+    );
+    assert_eq!(fs::read(&destination).unwrap(), previous);
+    assert!(
+        fs::read_dir(fixture.path().join(".mara"))
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains(".mara-"))
+    );
+}
+
+#[test]
+fn writer_rejects_a_changed_selected_content_set() {
+    let fixture = tempfile::tempdir().unwrap();
+    write_project(fixture.path(), false);
+    let validated = check_project(fixture.path()).unwrap();
+    let destination = fixture.path().join(".mara/index.json");
+    let previous = b"previous complete index\n";
+    fs::write(&destination, previous).unwrap();
+    fs::write(
+        fixture.path().join("docs/z-added.mara.md"),
+        "New narrative input.\n",
+    )
+    .unwrap();
+
+    let error = write_index(&validated).unwrap_err();
+
+    assert!(matches!(
+        &error,
+        mara_engine::IndexError::InputStateChanged { .. }
+    ));
+    assert_eq!(fs::read(&destination).unwrap(), previous);
+}

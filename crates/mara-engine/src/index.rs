@@ -21,8 +21,8 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     SemanticCompilation, ValidationResult,
-    content::select_configured_content_paths,
-    project::LoadedProject,
+    content::{discover_content, select_configured_content_paths},
+    project::{LoadedProject, load_from_root},
     semantic::{relation_inverse_wire_name, relation_occurrence_wire_origin},
 };
 
@@ -111,6 +111,7 @@ impl IndexProjection {
             .flat_map(ParsedDocument::items)
             .map(|item| (item.mid().clone(), item))
             .collect::<BTreeMap<_, _>>();
+        let mut adjacency = ItemAdjacency::build(&components.edges, &components.mentions);
         let mut items = semantic
             .items()
             .iter()
@@ -122,12 +123,14 @@ impl IndexProjection {
                         .ok_or(IndexError::InvalidModel {
                             reason: "normalized item has no parsed source item",
                         })?;
+                let mid = item.mid().as_str();
                 Ok(ItemWire::new(
                     item,
                     parsed,
                     schema.model,
-                    &components.edges,
-                    &components.mentions,
+                    adjacency.outgoing.remove(mid).unwrap_or_default(),
+                    adjacency.incoming.remove(mid).unwrap_or_default(),
+                    adjacency.mentions.remove(mid).unwrap_or_default(),
                 ))
             })
             .collect::<Result<Vec<_>, IndexError>>()?;
@@ -225,7 +228,7 @@ fn write_index_with_checkpoint(
     checkpoint(IndexWriteCheckpoint::Serialized)?;
 
     atomic_replace(project, &bytes, checkpoint, &mut || {
-        verify_current_git(result, &projection.git)
+        verify_current_state(result, &projection.git)
     })?;
     Ok(IndexWriteResult {
         path: normalized_relative_path(&project.root, &project.index_path)?,
@@ -292,7 +295,7 @@ fn atomic_replace(
     result
 }
 
-fn verify_current_git(result: &ValidationResult, expected: &GitWire) -> Result<(), IndexError> {
+fn verify_current_state(result: &ValidationResult, expected: &GitWire) -> Result<(), IndexError> {
     let project = result.project().ok_or(IndexError::InvalidModel {
         reason: "project model is unavailable",
     })?;
@@ -303,11 +306,67 @@ fn verify_current_git(result: &ValidationResult, expected: &GitWire) -> Result<(
             reason: "validation Git anchor is unavailable",
         })?
         .verify(current.anchor.as_ref())?;
-    if current.wire == *expected {
-        Ok(())
-    } else {
-        Err(IndexError::GitStateChanged)
+    if current.wire != *expected {
+        return Err(IndexError::GitStateChanged);
     }
+    verify_current_input_preimages(result)
+}
+
+fn verify_current_input_preimages(result: &ValidationResult) -> Result<(), IndexError> {
+    let project = result.project().ok_or(IndexError::InvalidModel {
+        reason: "project model is unavailable",
+    })?;
+    let current_project =
+        load_from_root(&project.root).map_err(|_| IndexError::InputStateChanged {
+            path: project.config_path.clone(),
+        })?;
+    if &current_project != project {
+        return Err(IndexError::InputStateChanged {
+            path: project.config_path.clone(),
+        });
+    }
+
+    let expected_schema = result.schema_source().ok_or(IndexError::InvalidModel {
+        reason: "validated schema source is unavailable",
+    })?;
+    let current_schema =
+        fs::read(&current_project.schema_path).map_err(|source| IndexError::Io {
+            operation: "read schema before index replacement",
+            path: current_project.schema_path.clone(),
+            source,
+        })?;
+    if current_schema != expected_schema {
+        return Err(IndexError::InputStateChanged {
+            path: current_project.schema_path.clone(),
+        });
+    }
+
+    let current_content = discover_content(&current_project);
+    if let Some(diagnostic) = current_content.diagnostics().first() {
+        let path = diagnostic
+            .primary()
+            .map(|source| project.root.join(source.path()))
+            .unwrap_or_else(|| project.config_path.clone());
+        return Err(IndexError::InputStateChanged { path });
+    }
+    let expected_documents = result.documents();
+    let current_documents = current_content.documents();
+    let document_count = expected_documents.len().max(current_documents.len());
+    for index in 0..document_count {
+        let expected = expected_documents.get(index).map(ParsedDocument::source);
+        let current = current_documents.get(index);
+        let expected_path = result.content_paths().get(index);
+        let current_path = current_content.resolved_paths().get(index);
+        if expected != current || expected_path != current_path {
+            let path = current
+                .map(|source| source.path())
+                .or_else(|| expected.map(|source| source.path()))
+                .map(|path| project.root.join(path))
+                .unwrap_or_else(|| project.config_path.clone());
+            return Err(IndexError::InputStateChanged { path });
+        }
+    }
+    Ok(())
 }
 
 fn prepare_output_path(
@@ -463,6 +522,9 @@ pub enum IndexError {
     },
     DirtyWorktree,
     GitStateChanged,
+    InputStateChanged {
+        path: PathBuf,
+    },
     Io {
         operation: &'static str,
         path: PathBuf,
@@ -477,7 +539,9 @@ pub enum IndexError {
 impl IndexError {
     pub fn path(&self) -> Option<&Path> {
         match self {
-            Self::Io { path, .. } | Self::UnsafePath { path, .. } => Some(path),
+            Self::InputStateChanged { path }
+            | Self::Io { path, .. }
+            | Self::UnsafePath { path, .. } => Some(path),
             Self::InvalidModel { .. }
             | Self::Serialization(_)
             | Self::Randomness(_)
@@ -498,7 +562,9 @@ impl IndexError {
             | Self::GitCommand { .. }
             | Self::DirtyWorktree
             | Self::GitStateChanged => "git.precondition",
-            Self::Io { .. } | Self::UnsafePath { .. } => "io.failed",
+            Self::InputStateChanged { .. } | Self::Io { .. } | Self::UnsafePath { .. } => {
+                "io.failed"
+            }
             Self::InvalidModel { .. } | Self::Serialization(_) | Self::Randomness(_) => {
                 "internal.failed"
             }
@@ -510,6 +576,7 @@ impl IndexError {
             Self::GitIo { .. } | Self::GitCommand { .. } => "Git provenance could not be collected",
             Self::DirtyWorktree => "relevant Git inputs must be clean before writing",
             Self::GitStateChanged => "Git state changed while the project was being validated",
+            Self::InputStateChanged { .. } => "project inputs changed after validation",
             Self::Io { .. } | Self::UnsafePath { .. } => {
                 "the configured index could not be written atomically"
             }
@@ -536,6 +603,9 @@ impl fmt::Display for IndexError {
             Self::GitStateChanged => {
                 formatter.write_str("Git state changed while the project was being validated")
             }
+            Self::InputStateChanged { .. } => {
+                formatter.write_str("project inputs changed after validation")
+            }
         }
     }
 }
@@ -550,6 +620,7 @@ impl Error for IndexError {
             | Self::GitCommand { .. }
             | Self::DirtyWorktree
             | Self::GitStateChanged
+            | Self::InputStateChanged { .. }
             | Self::UnsafePath { .. } => None,
         }
     }
@@ -1318,13 +1389,53 @@ struct ItemWire {
     mentions: Vec<MentionWire>,
 }
 
+#[derive(Debug, Default)]
+struct ItemAdjacency {
+    outgoing: BTreeMap<String, Vec<EdgeWire>>,
+    incoming: BTreeMap<String, Vec<EdgeWire>>,
+    mentions: BTreeMap<String, Vec<MentionWire>>,
+}
+
+impl ItemAdjacency {
+    fn build(edges: &[EdgeProjection], mentions: &[MentionProjection]) -> Self {
+        let mut adjacency = Self::default();
+        for edge in edges {
+            if let Some(mid) = edge.source.mid() {
+                adjacency
+                    .outgoing
+                    .entry(mid.as_str().to_owned())
+                    .or_default()
+                    .push(edge.wire.clone());
+            }
+            if let Some(mid) = edge.target.mid() {
+                adjacency
+                    .incoming
+                    .entry(mid.as_str().to_owned())
+                    .or_default()
+                    .push(edge.wire.clone());
+            }
+        }
+        for mention in mentions {
+            if let Some(mid) = &mention.source_item_mid {
+                adjacency
+                    .mentions
+                    .entry(mid.clone())
+                    .or_default()
+                    .push(mention.wire.clone());
+            }
+        }
+        adjacency
+    }
+}
+
 impl ItemWire {
     fn new(
         item: &NormalizedItem,
         parsed: &ParsedItem,
         schema: &SchemaDocument,
-        edges: &[EdgeProjection],
-        mentions: &[MentionProjection],
+        outgoing: Vec<EdgeWire>,
+        incoming: Vec<EdgeWire>,
+        mentions: Vec<MentionWire>,
     ) -> Self {
         Self {
             mid: item.mid().as_str().to_owned(),
@@ -1367,21 +1478,9 @@ impl ItemWire {
                     }
                 })
                 .collect(),
-            outgoing: edges
-                .iter()
-                .filter(|edge| edge.source.mid() == Some(item.mid()))
-                .map(|edge| edge.wire.clone())
-                .collect(),
-            incoming: edges
-                .iter()
-                .filter(|edge| edge.target.mid() == Some(item.mid()))
-                .map(|edge| edge.wire.clone())
-                .collect(),
-            mentions: mentions
-                .iter()
-                .filter(|mention| mention.source_item_mid.as_deref() == Some(item.mid().as_str()))
-                .map(|mention| mention.wire.clone())
-                .collect(),
+            outgoing,
+            incoming,
+            mentions,
         }
     }
 }
@@ -1834,7 +1933,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use mara_core::{ProjectionEdge, QueryGraph, SourceSpan};
+    use mara_core::{Mid, ProjectionEdge, QueryGraph, SourceSpan};
 
     use super::*;
 
@@ -2148,6 +2247,49 @@ Body.
 
         assert_eq!(value["edges"][0]["source"]["source"]["start_byte"], 10);
         assert_eq!(value["edges"][1]["source"]["source"]["start_byte"], 2);
+    }
+
+    #[test]
+    fn item_adjacency_indexes_the_acceptance_scale_in_one_edge_pass() {
+        const ITEM_COUNT: usize = 10_000;
+        const EDGE_COUNT: usize = 100_000;
+
+        let fixture = fixture();
+        let result = crate::check_project(fixture.path()).unwrap();
+        let identity = result.schema().unwrap().identity().value().mid().value();
+        let mids = (0..ITEM_COUNT)
+            .map(|value| Mid::from_ulid_value(identity, value as u128))
+            .collect::<Vec<_>>();
+        let edges = (0..EDGE_COUNT)
+            .map(|index| {
+                let source = NodeRef::item(mids[index % ITEM_COUNT].clone());
+                let target = NodeRef::item(mids[(index + 1) % ITEM_COUNT].clone());
+                EdgeProjection {
+                    source: source.clone(),
+                    target: target.clone(),
+                    wire: EdgeWire {
+                        source: NodeRefWire::from(&source),
+                        relation: "links".to_owned(),
+                        inverse_name: None,
+                        target: NodeRefWire::from(&target),
+                        occurrences: Vec::new(),
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let adjacency = ItemAdjacency::build(&edges, &[]);
+
+        assert_eq!(adjacency.outgoing.len(), ITEM_COUNT);
+        assert_eq!(adjacency.incoming.len(), ITEM_COUNT);
+        assert_eq!(
+            adjacency.outgoing.values().map(Vec::len).sum::<usize>(),
+            EDGE_COUNT
+        );
+        assert_eq!(
+            adjacency.incoming.values().map(Vec::len).sum::<usize>(),
+            EDGE_COUNT
+        );
     }
 
     #[test]

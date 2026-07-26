@@ -608,6 +608,22 @@ fn abandoned_index_temporaries_are_ignored_through_the_configured_parent_alias()
     assert!(discovery.diagnostics().is_empty());
 }
 
+#[cfg(any(unix, windows))]
+#[test]
+fn abandoned_index_temporaries_are_ignored_through_any_directory_alias() {
+    let fixture = Fixture::new(&["alias/**/*.tmp"], &[], false, true, false);
+    symlink_directory(fixture.root.join(".mara"), fixture.root.join("alias"));
+    fixture.write(
+        ".mara/.index.json.mara-0123456789abcdef01234567.tmp",
+        "abandoned derived bytes",
+    );
+
+    let discovery = discover_content(&fixture.load());
+
+    assert!(discovery.documents().is_empty());
+    assert!(discovery.diagnostics().is_empty());
+}
+
 #[cfg(unix)]
 #[test]
 fn write_only_index_alias_is_diagnosed_before_content_open() {

@@ -360,6 +360,12 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
         }
         match open_candidate(project, &candidate) {
             Ok(opened) => {
+                let resolves_to_index_temporary =
+                    normalized_relative_path(&project.root, &opened.resolved_path)
+                        .is_some_and(|path| is_configured_index_temporary_path(project, &path));
+                if resolves_to_index_temporary {
+                    continue;
+                }
                 let aliases_index = opened.resolved_path == project.index_path
                     || matches!((opened.identity, index_identity), (Some(left), Some(right)) if left == right);
                 if aliases_index {
@@ -881,7 +887,20 @@ pub(crate) fn is_configured_index_temporary_path(project: &LoadedProject, path: 
     let Some(index_path) = normalized_relative_path(&project.root, &project.index_path) else {
         return false;
     };
-    is_index_temporary_for(&index_path, path)
+    if is_index_temporary_for(&index_path, path) {
+        return true;
+    }
+    let index_name = index_path
+        .rsplit_once('/')
+        .map_or(index_path.as_str(), |(_, name)| name);
+    let path_name = path.rsplit_once('/').map_or(path, |(_, name)| name);
+    if !is_index_temporary_name(index_name, path_name) {
+        return false;
+    }
+    fs::canonicalize(project.root.join(path))
+        .ok()
+        .and_then(|resolved| normalized_relative_path(&project.root, &resolved))
+        .is_some_and(|resolved| is_index_temporary_for(&index_path, &resolved))
 }
 
 fn is_index_temporary_for(index_path: &str, path: &str) -> bool {
@@ -890,6 +909,10 @@ fn is_index_temporary_for(index_path: &str, path: &str) -> bool {
     if parent != index_parent {
         return false;
     }
+    is_index_temporary_name(index_name, name)
+}
+
+fn is_index_temporary_name(index_name: &str, name: &str) -> bool {
     let prefix = format!(".{index_name}.mara-");
     let Some(random) = name
         .strip_prefix(&prefix)
@@ -1740,6 +1763,7 @@ mod tests {
     fn loaded_project(root: PathBuf) -> LoadedProject {
         LoadedProject {
             config_path: root.join(".mara/project.toml"),
+            config_source: Vec::new(),
             format_version: 1,
             name: "test".to_owned(),
             schema_source_path: ".mara/schema.yaml".to_owned(),
