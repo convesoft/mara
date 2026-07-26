@@ -832,6 +832,18 @@ fn is_selected(includes: &[Glob<'_>], excludes: &[Glob<'_>], path: &str) -> bool
     matches_any(includes, path) && !matches_any(excludes, path)
 }
 
+pub(crate) fn select_configured_content_paths(
+    project: &LoadedProject,
+    paths: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    let includes = compile_globs(&project.content.include);
+    let excludes = compile_globs(&project.content.exclude);
+    paths
+        .into_iter()
+        .filter(|path| is_selected(&includes, &excludes, path))
+        .collect()
+}
+
 fn is_fully_excluded_tree(excludes: &[String], path: &str) -> bool {
     excludes.iter().any(|pattern| {
         let segments = pattern.split('/').collect::<Vec<_>>();

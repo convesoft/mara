@@ -3,7 +3,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fmt,
     fs::{self, File, OpenOptions},
     io::{self, Write},
@@ -20,7 +20,10 @@ use mara_markdown::{NarrativeKind, ParsedBlock, ParsedDocument, ParsedItem, Pars
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::{SemanticCompilation, ValidationResult, project::LoadedProject};
+use crate::{
+    SemanticCompilation, ValidationResult, content::select_configured_content_paths,
+    project::LoadedProject,
+};
 
 const PROJECT_CONFIG_PATH: &str = ".mara/project.toml";
 
@@ -38,6 +41,12 @@ pub struct IndexProjection {
     mentions: Vec<MentionWire>,
     external_nodes: Vec<ExternalNodeWire>,
     diagnostics: Vec<DiagnosticWire>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ValidatedSchemaSnapshot<'a> {
+    model: &'a SchemaDocument,
+    source: &'a [u8],
 }
 
 impl IndexProjection {
@@ -60,11 +69,17 @@ impl IndexProjection {
         let graph = result.graph().ok_or(IndexError::InvalidModel {
             reason: "graph model is unavailable",
         })?;
+        let schema_source = result.schema_source().ok_or(IndexError::InvalidModel {
+            reason: "validated schema source is unavailable",
+        })?;
 
         let git = GitWire::discover(project, result.documents())?;
         Self::from_parts(
             project,
-            schema,
+            ValidatedSchemaSnapshot {
+                model: schema,
+                source: schema_source,
+            },
             result.documents(),
             semantic,
             graph,
@@ -75,18 +90,14 @@ impl IndexProjection {
 
     fn from_parts(
         project: &LoadedProject,
-        schema: &SchemaDocument,
+        schema: ValidatedSchemaSnapshot<'_>,
         documents: &[ParsedDocument],
         semantic: &SemanticCompilation,
         graph: &QueryGraph,
         diagnostics: &[Diagnostic],
         git: GitWire,
     ) -> Result<Self, IndexError> {
-        let schema_bytes = fs::read(&project.schema_path).map_err(|source| IndexError::Io {
-            operation: "read schema for index digest",
-            source,
-        })?;
-        let components = ProjectionComponents::build(schema, semantic, graph);
+        let components = ProjectionComponents::build(schema.model, semantic, graph);
 
         let parsed_items = documents
             .iter()
@@ -107,7 +118,7 @@ impl IndexProjection {
                 Ok(ItemWire::new(
                     item,
                     parsed,
-                    schema,
+                    schema.model,
                     &components.edges,
                     &components.mentions,
                 ))
@@ -127,11 +138,11 @@ impl IndexProjection {
             project: IndexProjectWire {
                 name: project.name.clone(),
                 schema: IndexSchemaWire {
-                    name: schema.schema().value().name().value().clone(),
-                    version: schema.schema().value().version().value().clone(),
-                    format_version: *schema.format_version().value(),
+                    name: schema.model.schema().value().name().value().clone(),
+                    version: schema.model.schema().value().version().value().clone(),
+                    format_version: *schema.model.format_version().value(),
                     path: project.schema_source_path.clone(),
-                    sha256: sha256_hex(&schema_bytes),
+                    sha256: sha256_hex(schema.source),
                 },
                 content: IndexContentWire {
                     include: project.content.include.clone(),
@@ -237,11 +248,13 @@ fn atomic_replace(
     let result = (|| {
         file.write_all(bytes).map_err(|source| IndexError::Io {
             operation: "write temporary index",
+            path: destination.to_path_buf(),
             source,
         })?;
         checkpoint(IndexWriteCheckpoint::TemporaryWritten)?;
         file.sync_all().map_err(|source| IndexError::Io {
             operation: "flush temporary index",
+            path: destination.to_path_buf(),
             source,
         })?;
         checkpoint(IndexWriteCheckpoint::TemporaryFlushed)?;
@@ -249,11 +262,12 @@ fn atomic_replace(
         checkpoint(IndexWriteCheckpoint::BeforeReplace)?;
         fs::rename(&temporary, destination).map_err(|source| IndexError::Io {
             operation: "replace configured index",
+            path: destination.to_path_buf(),
             source,
         })?;
         replaced = true;
         checkpoint(IndexWriteCheckpoint::Replaced)?;
-        sync_directory(parent)?;
+        sync_directory(parent, destination)?;
         checkpoint(IndexWriteCheckpoint::ParentFlushed)
     })();
 
@@ -270,6 +284,7 @@ fn prepare_output_path(
 ) -> Result<(), IndexError> {
     let root = fs::canonicalize(&project.root).map_err(|source| IndexError::Io {
         operation: "resolve project root before index write",
+        path: project.root.clone(),
         source,
     })?;
     let mut existing_ancestor = parent;
@@ -284,6 +299,7 @@ fn prepare_output_path(
             Err(source) => {
                 return Err(IndexError::Io {
                     operation: "inspect index parent before creation",
+                    path: destination.to_path_buf(),
                     source,
                 });
             }
@@ -292,6 +308,7 @@ fn prepare_output_path(
     let resolved_ancestor =
         fs::canonicalize(existing_ancestor).map_err(|source| IndexError::Io {
             operation: "resolve index parent ancestor before creation",
+            path: destination.to_path_buf(),
             source,
         })?;
     if !resolved_ancestor.starts_with(&root) || !resolved_ancestor.is_dir() {
@@ -301,10 +318,12 @@ fn prepare_output_path(
     }
     fs::create_dir_all(parent).map_err(|source| IndexError::Io {
         operation: "create index parent directory",
+        path: destination.to_path_buf(),
         source,
     })?;
     let resolved_parent = fs::canonicalize(parent).map_err(|source| IndexError::Io {
         operation: "resolve index parent before write",
+        path: destination.to_path_buf(),
         source,
     })?;
     if !resolved_parent.starts_with(&root) {
@@ -320,6 +339,7 @@ fn prepare_output_path(
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(IndexError::Io {
             operation: "inspect configured index before write",
+            path: destination.to_path_buf(),
             source,
         }),
     }
@@ -346,6 +366,7 @@ fn create_temporary(parent: &Path, destination: &Path) -> Result<(PathBuf, File)
             Err(source) => {
                 return Err(IndexError::Io {
                     operation: "create temporary index",
+                    path: destination.to_path_buf(),
                     source,
                 });
             }
@@ -372,13 +393,15 @@ fn open_exclusive(path: &Path) -> io::Result<File> {
     OpenOptions::new().write(true).create_new(true).open(path)
 }
 
-fn sync_directory(path: &Path) -> Result<(), IndexError> {
+fn sync_directory(path: &Path, destination: &Path) -> Result<(), IndexError> {
     let directory = File::open(path).map_err(|source| IndexError::Io {
         operation: "open index parent for flush",
+        path: destination.to_path_buf(),
         source,
     })?;
     directory.sync_all().map_err(|source| IndexError::Io {
         operation: "flush index parent directory",
+        path: destination.to_path_buf(),
         source,
     })
 }
@@ -401,6 +424,7 @@ pub enum IndexError {
     },
     Io {
         operation: &'static str,
+        path: PathBuf,
         source: io::Error,
     },
     UnsafePath {
@@ -409,6 +433,22 @@ pub enum IndexError {
 }
 
 impl IndexError {
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            Self::Io { path, .. } => Some(path),
+            Self::InvalidModel { .. }
+            | Self::Serialization(_)
+            | Self::Randomness(_)
+            | Self::GitIo { .. }
+            | Self::GitCommand { .. }
+            | Self::UnsafePath { .. } => None,
+        }
+    }
+
+    pub(crate) fn project_relative_path(&self, root: &Path) -> Option<String> {
+        normalized_relative_path(root, self.path()?).ok()
+    }
+
     pub const fn command_code(&self) -> &'static str {
         match self {
             Self::GitIo { .. } | Self::GitCommand { .. } => "git.precondition",
@@ -502,14 +542,29 @@ impl GitWire {
     }
 
     fn discover(project: &LoadedProject, documents: &[ParsedDocument]) -> Result<Self, IndexError> {
-        let top_level = git_output(
+        Self::discover_with_program(project, documents, OsStr::new("git"))
+    }
+
+    fn discover_with_program(
+        project: &LoadedProject,
+        documents: &[ParsedDocument],
+        program: &OsStr,
+    ) -> Result<Self, IndexError> {
+        let top_level = match git_output(
+            program,
             &project.root,
             [
                 OsString::from("rev-parse"),
                 OsString::from("--show-toplevel"),
             ],
             "discover Git worktree",
-        )?;
+        ) {
+            Ok(output) => output,
+            Err(IndexError::GitIo { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+                return Ok(Self::unavailable());
+            }
+            Err(error) => return Err(error),
+        };
         if !top_level.status.success() {
             return Ok(Self::unavailable());
         }
@@ -522,6 +577,7 @@ impl GitWire {
         let project_path = normalized_relative_path(&repository_root, &project.root)?;
 
         let commit_output = git_output(
+            program,
             &repository_root,
             [
                 OsString::from("rev-parse"),
@@ -533,6 +589,7 @@ impl GitWire {
         let commit = successful_text(commit_output, "resolve Git HEAD commit")?;
 
         let branch_output = git_output(
+            program,
             &repository_root,
             [
                 OsString::from("symbolic-ref"),
@@ -564,6 +621,39 @@ impl GitWire {
                 .iter()
                 .map(|document| join_project_path(&project_path, document.source().path())),
         );
+        let deleted_output = git_output(
+            program,
+            &repository_root,
+            [
+                OsString::from("--literal-pathspecs"),
+                OsString::from("diff"),
+                OsString::from("--name-only"),
+                OsString::from("--diff-filter=D"),
+                OsString::from("-z"),
+                OsString::from("HEAD"),
+                OsString::from("--"),
+                OsString::from(&project_path),
+            ],
+            "enumerate content deleted from Git HEAD",
+        )?;
+        if !deleted_output.status.success() {
+            return Err(IndexError::GitCommand {
+                operation: "enumerate content deleted from Git HEAD",
+                status: deleted_output.status.code(),
+            });
+        }
+        let deleted_content = deleted_output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|path| !path.is_empty())
+            .filter_map(|path| std::str::from_utf8(path).ok())
+            .filter_map(|path| project_relative_git_path(&project_path, path))
+            .map(str::to_owned);
+        relevant.extend(
+            select_configured_content_paths(project, deleted_content)
+                .into_iter()
+                .map(|path| join_project_path(&project_path, &path)),
+        );
         let mut arguments = vec![
             OsString::from("--literal-pathspecs"),
             OsString::from("status"),
@@ -574,7 +664,12 @@ impl GitWire {
             OsString::from("--"),
         ];
         arguments.extend(relevant.into_iter().map(OsString::from));
-        let status_output = git_output(&repository_root, arguments, "inspect relevant Git status")?;
+        let status_output = git_output(
+            program,
+            &repository_root,
+            arguments,
+            "inspect relevant Git status",
+        )?;
         if !status_output.status.success() {
             return Err(IndexError::GitCommand {
                 operation: "inspect relevant Git status",
@@ -593,16 +688,27 @@ impl GitWire {
 }
 
 fn git_output(
+    program: &OsStr,
     root: &Path,
     arguments: impl IntoIterator<Item = OsString>,
     operation: &'static str,
 ) -> Result<Output, IndexError> {
-    Command::new("git")
+    Command::new(program)
         .arg("-C")
         .arg(root)
         .args(arguments)
         .output()
         .map_err(|source| IndexError::GitIo { operation, source })
+}
+
+fn project_relative_git_path<'a>(project_path: &str, repository_path: &'a str) -> Option<&'a str> {
+    if project_path == "." {
+        Some(repository_path)
+    } else {
+        repository_path
+            .strip_prefix(project_path)
+            .and_then(|path| path.strip_prefix('/'))
+    }
 }
 
 fn successful_text(output: Output, operation: &'static str) -> Result<String, IndexError> {
@@ -1113,7 +1219,7 @@ fn edge_projections(
         });
     }
 
-    edges
+    let mut projections = edges
         .into_values()
         .map(|mut edge| {
             edge.occurrences.sort_by(|left, right| {
@@ -1143,7 +1249,19 @@ fn edge_projections(
                 },
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+    projections.sort_by_cached_key(|edge| {
+        (
+            canonical_node_ref_bytes(&edge.wire.source),
+            edge.wire.relation.as_bytes().to_vec(),
+            canonical_node_ref_bytes(&edge.wire.target),
+        )
+    });
+    projections
+}
+
+fn canonical_node_ref_bytes(node: &NodeRefWire) -> Vec<u8> {
+    serde_json::to_vec(node).expect("NodeRef wire values always serialize to canonical JSON")
 }
 
 fn projection_occurrences(
@@ -1539,6 +1657,90 @@ Body.
     }
 
     #[test]
+    fn missing_git_executable_is_explicitly_unavailable() {
+        let fixture = fixture();
+        let result = crate::check_project(fixture.path()).unwrap();
+        let missing = fixture.path().join("missing-git-executable");
+
+        let git = GitWire::discover_with_program(
+            result.project().unwrap(),
+            result.documents(),
+            missing.as_os_str(),
+        )
+        .unwrap();
+
+        assert!(!git.available);
+        assert!(git.commit.is_none());
+        assert!(git.branch.is_none());
+        assert!(git.project_path.is_none());
+        assert!(git.dirty.is_none());
+    }
+
+    #[test]
+    fn index_io_errors_retain_the_logical_destination_path() {
+        let fixture = fixture();
+        let destination = fixture.path().join(".mara/index.json");
+        let missing_parent = fixture.path().join("missing-parent");
+
+        let error = sync_directory(&missing_parent, &destination).unwrap_err();
+
+        assert_eq!(error.path(), Some(destination.as_path()));
+        assert_eq!(
+            error.project_relative_path(fixture.path()).as_deref(),
+            Some(".mara/index.json")
+        );
+    }
+
+    #[test]
+    fn canonical_edges_sort_by_serialized_node_ref_bytes() {
+        let fixture = fixture();
+        let result = crate::check_project(fixture.path()).unwrap();
+        let semantic = result.semantic().unwrap();
+        let target = semantic.items()[0].mid().clone();
+        let source_text = "01234567890";
+        let at_two = SourceSpan::try_new("src/lib.rs", source_text, 2, 3, 1, 3, 1, 4).unwrap();
+        let at_ten = SourceSpan::try_new("src/lib.rs", source_text, 10, 11, 1, 11, 1, 12).unwrap();
+        let edge_at_two = ProjectionEdge::new(
+            "implements",
+            NodeRef::source_span(at_two, None),
+            NodeRef::item(target.clone()),
+        )
+        .unwrap();
+        let edge_at_ten = ProjectionEdge::new(
+            "implements",
+            NodeRef::source_span(at_ten, None),
+            NodeRef::item(target),
+        )
+        .unwrap();
+        let graph = QueryGraph::build(
+            result.graph().unwrap().nodes().iter().cloned().chain([
+                edge_at_two.source().clone(),
+                edge_at_ten.source().clone(),
+                edge_at_two.target().clone(),
+            ]),
+            [edge_at_two, edge_at_ten],
+        );
+        let projection = IndexProjection::from_parts(
+            result.project().unwrap(),
+            ValidatedSchemaSnapshot {
+                model: result.schema().unwrap(),
+                source: result.schema_source().unwrap(),
+            },
+            result.documents(),
+            semantic,
+            &graph,
+            result.diagnostics(),
+            GitWire::unavailable(),
+        )
+        .unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&projection.to_canonical_json().unwrap()).unwrap();
+
+        assert_eq!(value["edges"][0]["source"]["source"]["start_byte"], 10);
+        assert_eq!(value["edges"][1]["source"]["source"]["start_byte"], 2);
+    }
+
+    #[test]
     fn derived_source_nodes_are_deduplicated_and_embedded_as_incoming_backlinks() {
         let fixture = fixture();
         let result = crate::check_project(fixture.path()).unwrap();
@@ -1569,7 +1771,10 @@ Body.
         );
         let projection = IndexProjection::from_parts(
             result.project().unwrap(),
-            result.schema().unwrap(),
+            ValidatedSchemaSnapshot {
+                model: result.schema().unwrap(),
+                source: result.schema_source().unwrap(),
+            },
             result.documents(),
             semantic,
             &graph,

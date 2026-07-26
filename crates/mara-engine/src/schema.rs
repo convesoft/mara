@@ -136,6 +136,13 @@ impl Error for SchemaLoadError {
 
 /// Loads and decodes only the schema selected by an already rooted project.
 pub fn load_schema(project: &LoadedProject) -> Result<SchemaDocument, SchemaLoadError> {
+    load_schema_with_source(project).map(|(schema, _)| schema)
+}
+
+/// Loads one immutable schema source snapshot and decodes that exact byte sequence.
+pub(crate) fn load_schema_with_source(
+    project: &LoadedProject,
+) -> Result<(SchemaDocument, Vec<u8>), SchemaLoadError> {
     let source_path = schema_source_path(project).map_err(|source| {
         SchemaLoadError::io(
             project.schema_path.clone(),
@@ -156,7 +163,8 @@ pub fn load_schema(project: &LoadedProject) -> Result<SchemaDocument, SchemaLoad
     file.read_to_end(&mut bytes).map_err(|source| {
         SchemaLoadError::io(project.schema_path.clone(), &source_path, "read", source)
     })?;
-    decode_schema(&bytes, &source_path)
+    let schema = decode_schema(&bytes, &source_path)?;
+    Ok((schema, bytes))
 }
 
 fn schema_source_path(project: &LoadedProject) -> Result<String, io::Error> {

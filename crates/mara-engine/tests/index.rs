@@ -235,6 +235,40 @@ fn complete_unversioned_projection_is_canonical_and_repeatable() {
 }
 
 #[test]
+fn projection_hashes_the_schema_snapshot_that_validation_consumed() {
+    let fixture = tempfile::tempdir().unwrap();
+    write_project(fixture.path(), false);
+    let result = check_project(fixture.path()).unwrap();
+    let before = IndexProjection::from_validation(&result)
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+
+    fs::write(
+        fixture.path().join(".mara/schema.yaml"),
+        format!("{SCHEMA}# changed after validation\n"),
+    )
+    .unwrap();
+    let same_snapshot = IndexProjection::from_validation(&result)
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+    let fresh_snapshot = IndexProjection::from_validation(&check_project(fixture.path()).unwrap())
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+
+    assert_eq!(
+        json(&same_snapshot)["project"]["schema"]["sha256"],
+        json(&before)["project"]["schema"]["sha256"]
+    );
+    assert_ne!(
+        json(&fresh_snapshot)["project"]["schema"]["sha256"],
+        json(&before)["project"]["schema"]["sha256"]
+    );
+}
+
+#[test]
 fn filesystem_creation_order_does_not_change_projection_bytes() {
     let first = tempfile::tempdir().unwrap();
     let second = tempfile::tempdir().unwrap();
@@ -294,6 +328,7 @@ fn git_provenance_distinguishes_clean_modified_and_untracked_project_inputs() {
         &["config", "user.email", "mara@example.test"],
     );
     write_project(&project_root, false);
+    fs::write(project_root.join("notes.txt"), "unselected fixture\n").unwrap();
     git(fixture.path(), &["add", "."]);
     git(fixture.path(), &["commit", "-m", "fixture"]);
     let commit = git(fixture.path(), &["rev-parse", "HEAD"]);
@@ -315,6 +350,24 @@ fn git_provenance_distinguishes_clean_modified_and_untracked_project_inputs() {
         .to_canonical_json()
         .unwrap();
     assert_eq!(repeated_clean, clean_bytes);
+
+    fs::remove_file(project_root.join("notes.txt")).unwrap();
+    let unrelated_deletion =
+        IndexProjection::from_validation(&check_project(&project_root).unwrap())
+            .unwrap()
+            .to_canonical_json()
+            .unwrap();
+    assert_eq!(json(&unrelated_deletion)["git"]["dirty"], false);
+    fs::write(project_root.join("notes.txt"), "unselected fixture\n").unwrap();
+
+    fs::remove_file(project_root.join("docs/project.mara.md")).unwrap();
+    let deleted = IndexProjection::from_validation(&check_project(&project_root).unwrap())
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+    assert_eq!(json(&deleted)["git"]["dirty"], true);
+    assert_eq!(json(&deleted)["documents"].as_array().unwrap().len(), 0);
+    fs::write(project_root.join("docs/project.mara.md"), CONTENT).unwrap();
 
     fs::write(
         project_root.join("docs/project.mara.md"),

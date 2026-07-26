@@ -20,7 +20,7 @@ use serde::Serialize;
 use crate::{
     ValidationResult, check_project, check_schema, compile_scalar,
     identity::generate_mid,
-    index::write_index,
+    index::{IndexError, write_index},
     project::{
         LoadedProject, ProjectLoadError, ProjectLoadOperationalErrorCode, discover_and_load,
     },
@@ -781,8 +781,16 @@ pub fn run_index(start: impl AsRef<Path>) -> CommandOutput {
             CommandName::Index,
             project_wire,
             diagnostics,
-            OperationalErrorWire::new(error.command_code(), error.command_message()),
+            operational_index_error(&error, project),
         ),
+    }
+}
+
+fn operational_index_error(error: &IndexError, project: &LoadedProject) -> OperationalErrorWire {
+    let wire = OperationalErrorWire::new(error.command_code(), error.command_message());
+    match error.project_relative_path(&project.root) {
+        Some(path) => wire.with_detail("path", path),
+        None => wire,
     }
 }
 
@@ -1721,4 +1729,28 @@ fn write_new(path: &Path, contents: &str) -> Result<(), OperationalErrorWire> {
 
 fn io_failure(_error: io::Error, message: &'static str) -> OperationalErrorWire {
     OperationalErrorWire::new("io.failed", message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn index_io_error_envelope_uses_the_project_relative_affected_path() {
+        let fixture = tempfile::tempdir().unwrap();
+        initialize_project(fixture.path(), "index-error").unwrap();
+        let project = discover_and_load(fixture.path()).unwrap();
+        let error = IndexError::Io {
+            operation: "write temporary index",
+            path: project.index_path.clone(),
+            source: io::Error::new(io::ErrorKind::PermissionDenied, "fixture"),
+        };
+
+        let wire = operational_index_error(&error, &project);
+        let value = serde_json::to_value(wire).unwrap();
+
+        assert_eq!(value["code"], "io.failed");
+        assert_eq!(value["details"]["path"], ".mara/index.json");
+        assert!(!value.to_string().contains(fixture.path().to_str().unwrap()));
+    }
 }

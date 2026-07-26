@@ -10,7 +10,7 @@ use crate::{
     SemanticCompilation, compile_documents,
     content::discover_content,
     project::{LoadedProject, ProjectLoadError, discover_and_load},
-    schema::load_schema,
+    schema::load_schema_with_source,
 };
 
 /// Immutable evidence and diagnostics produced from already parsed inputs.
@@ -18,6 +18,7 @@ use crate::{
 pub struct ValidationResult {
     project: Option<LoadedProject>,
     schema: Option<SchemaDocument>,
+    schema_source: Option<Vec<u8>>,
     documents: Vec<ParsedDocument>,
     semantic: Option<SemanticCompilation>,
     graph: Option<QueryGraph>,
@@ -34,6 +35,10 @@ impl ValidationResult {
 
     pub const fn schema(&self) -> Option<&SchemaDocument> {
         self.schema.as_ref()
+    }
+
+    pub(crate) fn schema_source(&self) -> Option<&[u8]> {
+        self.schema_source.as_deref()
     }
 
     pub fn documents(&self) -> &[ParsedDocument] {
@@ -131,6 +136,7 @@ pub fn validate_documents(
     ValidationResult {
         project: None,
         schema: Some(schema.clone()),
+        schema_source: None,
         documents: documents.to_vec(),
         semantic: Some(semantic),
         graph,
@@ -145,8 +151,8 @@ pub fn validate_documents(
 pub fn check_project(start: impl AsRef<Path>) -> Result<ValidationResult, ProjectLoadError> {
     let project = discover_and_load(start)?;
     let content = discover_content(&project);
-    match load_schema(&project) {
-        Ok(schema) => {
+    match load_schema_with_source(&project) {
+        Ok((schema, schema_source)) => {
             let documents = content
                 .documents()
                 .iter()
@@ -158,6 +164,7 @@ pub fn check_project(start: impl AsRef<Path>) -> Result<ValidationResult, Projec
             let mut result =
                 validate_documents(&schema, &documents, project.validation.warnings_as_errors);
             result.project = Some(project);
+            result.schema_source = Some(schema_source);
             result.phases[0] = ValidationPhaseResult::new(
                 ValidationPhase::Project,
                 ValidationPhaseState::Completed,
@@ -190,12 +197,13 @@ pub fn check_project(start: impl AsRef<Path>) -> Result<ValidationResult, Projec
 pub fn check_schema(start: impl AsRef<Path>) -> Result<ValidationResult, ProjectLoadError> {
     let project = discover_and_load(start)?;
     let warnings_as_errors = project.validation.warnings_as_errors;
-    match load_schema(&project) {
-        Ok(schema) => {
+    match load_schema_with_source(&project) {
+        Ok((schema, schema_source)) => {
             let diagnostics = Vec::new();
             Ok(ValidationResult {
                 project: Some(project),
                 schema: Some(schema),
+                schema_source: Some(schema_source),
                 documents: Vec::new(),
                 semantic: None,
                 graph: None,
@@ -225,6 +233,7 @@ fn skipped_after_schema_failure(
     ValidationResult {
         project: Some(project),
         schema: None,
+        schema_source: None,
         documents: Vec::new(),
         semantic: None,
         graph: None,
