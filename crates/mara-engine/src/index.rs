@@ -731,7 +731,7 @@ impl GitAnchor {
         if !top_level.status.success() {
             return Ok(None);
         }
-        let repository_root = PathBuf::from(output_text(&top_level, "read Git worktree root")?);
+        let repository_root = output_path(&top_level, "read Git worktree root")?;
         let repository_root =
             fs::canonicalize(repository_root).map_err(|source| IndexError::GitIo {
                 operation: "resolve Git worktree root",
@@ -1127,6 +1127,25 @@ fn output_text(output: &Output, operation: &'static str) -> Result<String, Index
         });
     }
     Ok(text.to_owned())
+}
+
+#[cfg(unix)]
+fn output_path(output: &Output, operation: &'static str) -> Result<PathBuf, IndexError> {
+    use std::os::unix::ffi::OsStringExt;
+
+    let bytes = output.stdout.strip_suffix(b"\n").unwrap_or(&output.stdout);
+    if bytes.is_empty() {
+        return Err(IndexError::GitCommand {
+            operation,
+            status: output.status.code(),
+        });
+    }
+    Ok(PathBuf::from(OsString::from_vec(bytes.to_vec())))
+}
+
+#[cfg(not(unix))]
+fn output_path(output: &Output, operation: &'static str) -> Result<PathBuf, IndexError> {
+    output_text(output, operation).map(PathBuf::from)
 }
 
 fn join_project_path(project_path: &str, path: &str) -> String {
@@ -2151,6 +2170,66 @@ Body.
         assert!(git.wire.branch.is_none());
         assert!(git.wire.project_path.is_none());
         assert!(git.wire.dirty.is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn git_provenance_supports_a_non_utf8_worktree_root() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture
+            .path()
+            .join(OsString::from_vec(b"worktree-\xff".to_vec()));
+        fs::create_dir_all(root.join(".mara")).unwrap();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join(".mara/project.toml"), PROJECT).unwrap();
+        fs::write(root.join(".mara/schema.yaml"), SCHEMA).unwrap();
+        fs::write(root.join("docs/item.mara.md"), CONTENT).unwrap();
+
+        let git = |arguments: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(&root)
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {arguments:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-b", "main"]);
+        git(&["config", "user.name", "Mara Test"]);
+        git(&["config", "user.email", "mara@example.test"]);
+        git(&["add", "."]);
+        git(&["commit", "-m", "fixture"]);
+
+        let result = crate::check_project(&root).unwrap();
+        let projection = IndexProjection::from_validation(&result).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&projection.to_canonical_json().unwrap()).unwrap();
+
+        assert_eq!(value["git"]["available"], true);
+        assert_eq!(value["git"]["project_path"], ".");
+        assert_eq!(value["git"]["dirty"], false);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_worktree_output_preserves_non_utf8_os_bytes() {
+        use std::{os::unix::ffi::OsStrExt, process::ExitStatus};
+
+        let output = Output {
+            status: ExitStatus::default(),
+            stdout: b"/tmp/worktree-\xff\n".to_vec(),
+            stderr: Vec::new(),
+        };
+
+        let path = output_path(&output, "read Git worktree root").unwrap();
+
+        assert_eq!(path.as_os_str().as_bytes(), b"/tmp/worktree-\xff");
     }
 
     #[test]
