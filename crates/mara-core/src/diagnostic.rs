@@ -188,15 +188,17 @@ impl FieldDiagnosticCode {
 pub enum ReferenceDiagnosticCode {
     Unresolved,
     Ambiguous,
+    ExternalScheme,
 }
 
 impl ReferenceDiagnosticCode {
-    pub const ALL: [Self; 2] = [Self::Unresolved, Self::Ambiguous];
+    pub const ALL: [Self; 3] = [Self::Unresolved, Self::Ambiguous, Self::ExternalScheme];
 
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Unresolved => "reference.unresolved",
             Self::Ambiguous => "reference.ambiguous",
+            Self::ExternalScheme => "reference.external_scheme",
         }
     }
 
@@ -211,15 +213,19 @@ pub enum RelationDiagnosticCode {
     InvalidSourceFlavour,
     InvalidTargetFlavour,
     SelfReference,
+    Cardinality,
+    Cycle,
     Duplicate,
 }
 
 impl RelationDiagnosticCode {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
         Self::Unknown,
         Self::InvalidSourceFlavour,
         Self::InvalidTargetFlavour,
         Self::SelfReference,
+        Self::Cardinality,
+        Self::Cycle,
         Self::Duplicate,
     ];
 
@@ -229,6 +235,8 @@ impl RelationDiagnosticCode {
             Self::InvalidSourceFlavour => "relation.invalid_source",
             Self::InvalidTargetFlavour => "relation.invalid_target",
             Self::SelfReference => "relation.self_reference",
+            Self::Cardinality => "relation.cardinality",
+            Self::Cycle => "relation.cycle",
             Self::Duplicate => "relation.duplicate_occurrence",
         }
     }
@@ -239,7 +247,35 @@ impl RelationDiagnosticCode {
             Self::Unknown
             | Self::InvalidSourceFlavour
             | Self::InvalidTargetFlavour
-            | Self::SelfReference => DiagnosticSeverity::Error,
+            | Self::SelfReference
+            | Self::Cardinality
+            | Self::Cycle => DiagnosticSeverity::Error,
+        }
+    }
+}
+
+/// The schema-configured validation-rule diagnostic family in wire format version 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum RuleDiagnosticCode {
+    Failed,
+    Skipped,
+}
+
+impl RuleDiagnosticCode {
+    pub const ALL: [Self; 2] = [Self::Failed, Self::Skipped];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Failed => "rule.failed",
+            Self::Skipped => "rule.skipped",
+        }
+    }
+
+    /// `None` denotes the schema-selected severity required by `rule.failed`.
+    pub const fn default_severity(self) -> Option<DiagnosticSeverity> {
+        match self {
+            Self::Failed => None,
+            Self::Skipped => Some(DiagnosticSeverity::Info),
         }
     }
 }
@@ -297,6 +333,7 @@ pub enum DiagnosticCode {
     Field(FieldDiagnosticCode),
     Reference(ReferenceDiagnosticCode),
     Relation(RelationDiagnosticCode),
+    Rule(RuleDiagnosticCode),
     Schema(SchemaDiagnosticCode),
 }
 
@@ -311,21 +348,23 @@ impl DiagnosticCode {
             Self::Field(code) => code.as_str(),
             Self::Reference(code) => code.as_str(),
             Self::Relation(code) => code.as_str(),
+            Self::Rule(code) => code.as_str(),
             Self::Schema(code) => code.as_str(),
         }
     }
 
-    pub const fn default_severity(self) -> DiagnosticSeverity {
+    pub const fn default_severity(self) -> Option<DiagnosticSeverity> {
         match self {
-            Self::Project(code) => code.default_severity(),
-            Self::Content(code) => code.default_severity(),
-            Self::Syntax(code) => code.default_severity(),
-            Self::Identity(code) => code.default_severity(),
-            Self::Item(code) => code.default_severity(),
-            Self::Field(code) => code.default_severity(),
-            Self::Reference(code) => code.default_severity(),
-            Self::Relation(code) => code.default_severity(),
-            Self::Schema(code) => code.default_severity(),
+            Self::Project(code) => Some(code.default_severity()),
+            Self::Content(code) => Some(code.default_severity()),
+            Self::Syntax(code) => Some(code.default_severity()),
+            Self::Identity(code) => Some(code.default_severity()),
+            Self::Item(code) => Some(code.default_severity()),
+            Self::Field(code) => Some(code.default_severity()),
+            Self::Reference(code) => Some(code.default_severity()),
+            Self::Relation(code) => Some(code.default_severity()),
+            Self::Rule(code) => code.default_severity(),
+            Self::Schema(code) => Some(code.default_severity()),
         }
     }
 }
@@ -375,6 +414,12 @@ impl From<ReferenceDiagnosticCode> for DiagnosticCode {
 impl From<RelationDiagnosticCode> for DiagnosticCode {
     fn from(value: RelationDiagnosticCode) -> Self {
         Self::Relation(value)
+    }
+}
+
+impl From<RuleDiagnosticCode> for DiagnosticCode {
+    fn from(value: RuleDiagnosticCode) -> Self {
+        Self::Rule(value)
     }
 }
 
@@ -518,8 +563,28 @@ impl Diagnostic {
     ) -> Self {
         let code = code.into();
         Self {
-            severity: code.default_severity(),
+            severity: code
+                .default_severity()
+                .expect("rule.failed diagnostics require a configured severity"),
             code,
+            message: message.into(),
+            primary,
+            related: Vec::new(),
+            item: None,
+            context: DiagnosticContext::default(),
+            details: BTreeMap::new(),
+        }
+    }
+
+    /// Constructs the only v1 diagnostic whose severity is selected by the schema.
+    pub fn rule_failure(
+        severity: DiagnosticSeverity,
+        message: impl Into<String>,
+        primary: Option<SourceSpan>,
+    ) -> Self {
+        Self {
+            code: RuleDiagnosticCode::Failed.into(),
+            severity,
             message: message.into(),
             primary,
             related: Vec::new(),
@@ -725,7 +790,11 @@ mod tests {
         );
         assert_eq!(
             ReferenceDiagnosticCode::ALL.map(ReferenceDiagnosticCode::as_str),
-            ["reference.unresolved", "reference.ambiguous"]
+            [
+                "reference.unresolved",
+                "reference.ambiguous",
+                "reference.external_scheme",
+            ]
         );
         assert_eq!(
             RelationDiagnosticCode::ALL.map(RelationDiagnosticCode::as_str),
@@ -734,8 +803,35 @@ mod tests {
                 "relation.invalid_source",
                 "relation.invalid_target",
                 "relation.self_reference",
+                "relation.cardinality",
+                "relation.cycle",
                 "relation.duplicate_occurrence",
             ]
+        );
+        assert_eq!(
+            RuleDiagnosticCode::ALL.map(RuleDiagnosticCode::as_str),
+            ["rule.failed", "rule.skipped"]
+        );
+        assert_eq!(
+            RuleDiagnosticCode::Failed.default_severity(),
+            None,
+            "rule.failed severity is schema-configured"
+        );
+        assert_eq!(
+            RuleDiagnosticCode::Skipped.default_severity(),
+            Some(DiagnosticSeverity::Info)
+        );
+        assert_eq!(
+            ReferenceDiagnosticCode::ExternalScheme.default_severity(),
+            DiagnosticSeverity::Error
+        );
+        assert_eq!(
+            RelationDiagnosticCode::Cardinality.default_severity(),
+            DiagnosticSeverity::Error
+        );
+        assert_eq!(
+            RelationDiagnosticCode::Cycle.default_severity(),
+            DiagnosticSeverity::Error
         );
     }
 

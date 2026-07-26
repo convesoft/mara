@@ -475,6 +475,55 @@ impl QueryGraph {
         self.node_indexes.contains_key(node)
     }
 
+    /// Returns the first deterministic concrete directed cycle for one relation.
+    pub fn cycle_path(&self, relation: &str) -> Option<Vec<NodeRef>> {
+        for start in &self.nodes {
+            let mut path = vec![start.clone()];
+            let mut visiting = BTreeSet::from([start.clone()]);
+            if let Some(cycle) =
+                self.find_cycle_from(start, start, relation, &mut path, &mut visiting)
+            {
+                return Some(cycle);
+            }
+        }
+        None
+    }
+
+    fn find_cycle_from(
+        &self,
+        start: &NodeRef,
+        current: &NodeRef,
+        relation: &str,
+        path: &mut Vec<NodeRef>,
+        visiting: &mut BTreeSet<NodeRef>,
+    ) -> Option<Vec<NodeRef>> {
+        let mut targets = self
+            .edges
+            .iter()
+            .filter(|edge| edge.relation() == relation && edge.source() == current)
+            .map(|edge| edge.target().clone())
+            .collect::<Vec<_>>();
+        targets.sort();
+        targets.dedup();
+        for target in targets {
+            if &target == start {
+                let mut cycle = path.clone();
+                cycle.push(target);
+                return Some(cycle);
+            }
+            if !visiting.insert(target.clone()) {
+                continue;
+            }
+            path.push(target.clone());
+            if let Some(cycle) = self.find_cycle_from(start, &target, relation, path, visiting) {
+                return Some(cycle);
+            }
+            path.pop();
+            visiting.remove(&target);
+        }
+        None
+    }
+
     /// Returns every selected simple edge path with one through `max_depth` steps.
     pub fn trace(
         &self,
