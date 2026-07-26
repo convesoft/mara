@@ -2,6 +2,7 @@
 
 pub mod diagnostic;
 pub mod identity;
+pub mod query;
 pub mod schema;
 pub mod semantic;
 pub mod source;
@@ -14,6 +15,10 @@ pub use diagnostic::{
     sort_diagnostics,
 };
 pub use identity::{Mid, MidParseError};
+pub use query::{
+    NodeRef, ProjectionEdge, ProjectionEdgeError, QueryGraph, TraceDirection, TraceError,
+    TracePath, TraceResult, TraceStep, TraversalDirection,
+};
 pub use schema::{
     CardinalityBound, CardinalityMaximum, DerivedSourceKind, DisplayIdDefinition, FieldDefinition,
     FieldRuleSelection, FieldType, FlavourDefinition, FlavourDefinitions, FlavourGuidance,

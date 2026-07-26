@@ -29,4 +29,5 @@ wax = "0.7"
 rushdown = "0.18.0"
 tempfile = "3"
 libc = "0.2"
+petgraph = { version = "0.8", default-features = false }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem"] }
