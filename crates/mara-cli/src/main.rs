@@ -2,8 +2,8 @@ use std::{path::PathBuf, process::ExitCode};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mara_engine::command::{
-    CommandOutput, OutputFormat, generate_project_mid, initialize_project, run_check, run_list,
-    run_show, run_trace,
+    CommandOutput, OutputFormat, generate_project_mid, initialize_project, run_check, run_index,
+    run_list, run_show, run_trace,
 };
 use mara_engine::transaction::{RecoveryMode, recover_transaction};
 
@@ -32,6 +32,10 @@ enum Command {
         command: SchemaCommand,
     },
     Check {
+        #[arg(long, value_enum, default_value_t)]
+        format: Format,
+    },
+    Index {
         #[arg(long, value_enum, default_value_t)]
         format: Format,
     },
@@ -146,6 +150,7 @@ fn main() -> ExitCode {
             command: SchemaCommand::Check { format },
         } => emit(run_check(".", true), format),
         Command::Check { format } => emit(run_check(".", false), format),
+        Command::Index { format } => emit(run_index("."), format),
         Command::List {
             format,
             flavour,

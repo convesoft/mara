@@ -583,6 +583,91 @@ fn summary_counts_bare_external_mentions_and_external_nodes() {
 }
 
 #[test]
+fn index_writes_the_configured_projection_and_reports_stable_evidence() {
+    let fixture = project(VALID_ITEMS);
+    let first = run(fixture.path(), &["index", "--format", "json"]);
+
+    assert_eq!(first.status.code(), Some(0));
+    let first_envelope = json(&first);
+    assert_eq!(first_envelope["command"], "index");
+    assert_eq!(first_envelope["status"], "ok");
+    assert_eq!(first_envelope["data"]["path"], ".mara/index.json");
+    assert_eq!(first_envelope["data"]["sha256"].as_str().unwrap().len(), 64);
+    assert_eq!(first_envelope["data"]["summary"]["documents"], 1);
+    assert_eq!(first_envelope["data"]["summary"]["items"], 2);
+    assert_eq!(first_envelope["data"]["summary"]["edges"], 1);
+    assert!(first_envelope["error"].is_null());
+
+    let path = fixture.path().join(".mara/index.json");
+    let first_index = fs::read(&path).unwrap();
+    let projection: serde_json::Value = serde_json::from_slice(&first_index).unwrap();
+    assert_eq!(projection["format"], "mara.index");
+    assert_eq!(projection["version"], 1);
+    assert_eq!(projection["items"].as_array().unwrap().len(), 2);
+
+    let second = run(fixture.path(), &["index", "--format", "json"]);
+    assert_eq!(second.status.code(), Some(0));
+    assert_eq!(
+        json(&second)["data"]["sha256"],
+        first_envelope["data"]["sha256"]
+    );
+    assert_eq!(fs::read(&path).unwrap(), first_index);
+
+    let human = run(fixture.path(), &["index"]);
+    assert_eq!(human.status.code(), Some(0));
+    assert!(
+        String::from_utf8(human.stdout)
+            .unwrap()
+            .starts_with("wrote .mara/index.json (")
+    );
+}
+
+#[test]
+fn index_preserves_the_previous_file_when_validation_policy_fails() {
+    let warning_content =
+        VALID_ITEMS.replace(":connects: BETA-B", ":connects: BETA-B\n:connects: BETA-B");
+    let warning_fixture = project(&warning_content);
+    let warning = run(warning_fixture.path(), &["index", "--format", "json"]);
+    assert_eq!(warning.status.code(), Some(0));
+    let warning_envelope = json(&warning);
+    assert_eq!(
+        warning_envelope["diagnostics"][0]["code"],
+        "relation.duplicate_occurrence"
+    );
+    let warning_projection: serde_json::Value =
+        serde_json::from_slice(&fs::read(warning_fixture.path().join(".mara/index.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        warning_projection["diagnostics"][0]["code"],
+        "relation.duplicate_occurrence"
+    );
+
+    let escalated_fixture = project(&warning_content);
+    fs::write(
+        escalated_fixture.path().join(".mara/project.toml"),
+        PROJECT_CONFIG.replace("warnings_as_errors = false", "warnings_as_errors = true"),
+    )
+    .unwrap();
+    let escalated_path = escalated_fixture.path().join(".mara/index.json");
+    fs::write(&escalated_path, b"previous index\n").unwrap();
+    let escalated = run(escalated_fixture.path(), &["index", "--format", "json"]);
+    assert_eq!(escalated.status.code(), Some(1));
+    let escalated_envelope = json(&escalated);
+    assert_eq!(escalated_envelope["status"], "invalid");
+    assert!(escalated_envelope["data"].is_null());
+    assert!(escalated_envelope["error"].is_null());
+    assert_eq!(fs::read(&escalated_path).unwrap(), b"previous index\n");
+
+    let invalid_fixture = project(DUPLICATE_DISPLAY_ID_ITEMS);
+    let invalid_path = invalid_fixture.path().join(".mara/index.json");
+    fs::write(&invalid_path, b"previous index\n").unwrap();
+    let invalid = run(invalid_fixture.path(), &["index", "--format", "json"]);
+    assert_eq!(invalid.status.code(), Some(1));
+    assert_eq!(json(&invalid)["status"], "invalid");
+    assert_eq!(fs::read(&invalid_path).unwrap(), b"previous index\n");
+}
+
+#[test]
 fn transaction_recovery_requires_exactly_one_explicit_mode() {
     let fixture = project(VALID_ITEMS);
     for arguments in [

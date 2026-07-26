@@ -20,6 +20,7 @@ use serde::Serialize;
 use crate::{
     ValidationResult, check_project, check_schema, compile_scalar,
     identity::generate_mid,
+    index::write_index,
     project::{
         LoadedProject, ProjectLoadError, ProjectLoadOperationalErrorCode, discover_and_load,
     },
@@ -42,6 +43,7 @@ pub enum CommandName {
     List,
     Show,
     Trace,
+    Index,
 }
 
 impl CommandName {
@@ -52,6 +54,7 @@ impl CommandName {
             Self::List => "list",
             Self::Show => "show",
             Self::Trace => "trace",
+            Self::Index => "index",
         }
     }
 }
@@ -294,12 +297,20 @@ pub struct TraceData {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct IndexData {
+    path: String,
+    sha256: String,
+    summary: SummaryWire,
+}
+
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum CommandData {
     Check(CheckData),
     List(ListData),
     Show(Box<ShowData>),
     Trace(TraceData),
+    Index(IndexData),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -352,6 +363,22 @@ impl CommandOutput {
             CommandStatus::Failed,
             None,
             Vec::new(),
+            None,
+            Some(error),
+        )
+    }
+
+    fn failed_with_project(
+        command: CommandName,
+        project: ProjectWire,
+        diagnostics: Vec<DiagnosticWire>,
+        error: OperationalErrorWire,
+    ) -> Self {
+        Self::new(
+            command,
+            CommandStatus::Failed,
+            Some(project),
+            diagnostics,
             None,
             Some(error),
         )
@@ -433,6 +460,9 @@ impl CommandOutput {
                 .collect(),
             Some(CommandData::Show(data)) => data.item.render_human(),
             Some(CommandData::Trace(data)) => data.render_human(),
+            Some(CommandData::Index(data)) => {
+                format!("wrote {} ({})\n", data.path, data.sha256)
+            }
             None => String::new(),
         };
         output.push_str(&diagnostics);
@@ -707,6 +737,53 @@ pub fn run_trace(
             .collect(),
         CommandData::Trace(data),
     )
+}
+
+/// Validates the complete project and atomically writes its configured JSON index.
+pub fn run_index(start: impl AsRef<Path>) -> CommandOutput {
+    let result = match check_project(start) {
+        Ok(result) => result,
+        Err(error) => return project_load_output(CommandName::Index, error),
+    };
+    if !result.is_valid() {
+        return validation_invalid(CommandName::Index, &result);
+    }
+    let Some(project) = result.project() else {
+        return CommandOutput::failed(
+            CommandName::Index,
+            OperationalErrorWire::new("internal.failed", "project model is unavailable"),
+        );
+    };
+    let Some(schema) = result.schema() else {
+        return CommandOutput::failed(
+            CommandName::Index,
+            OperationalErrorWire::new("internal.failed", "schema model is unavailable"),
+        );
+    };
+    let project_wire = project_wire(project, schema);
+    let diagnostics = result
+        .diagnostics()
+        .iter()
+        .map(DiagnosticWire::from)
+        .collect::<Vec<_>>();
+    match write_index(&result) {
+        Ok(written) => CommandOutput::ok(
+            CommandName::Index,
+            project_wire,
+            diagnostics,
+            CommandData::Index(IndexData {
+                path: written.path().to_owned(),
+                sha256: written.sha256().to_owned(),
+                summary: summary(&result),
+            }),
+        ),
+        Err(error) => CommandOutput::failed_with_project(
+            CommandName::Index,
+            project_wire,
+            diagnostics,
+            OperationalErrorWire::new(error.command_code(), error.command_message()),
+        ),
+    }
 }
 
 fn validation_output(command: CommandName, result: ValidationResult) -> CommandOutput {
