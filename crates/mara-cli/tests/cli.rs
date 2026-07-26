@@ -1,4 +1,8 @@
-use std::{fs, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 const PROJECT_CONFIG: &str = r#"format_version = 1
 [project]
@@ -78,6 +82,21 @@ Beta body.
 :::
 "#;
 
+const DUPLICATE_DISPLAY_ID_ITEMS: &str = r#":::alpha m_00000000000000000000000003
+:id: DUPLICATE
+:title: First duplicate
+
+First body.
+:::
+
+:::alpha m_00000000000000000000000004
+:id: DUPLICATE
+:title: Second duplicate
+
+Second body.
+:::
+"#;
+
 fn mara() -> Command {
     Command::new(env!("CARGO_BIN_EXE_mara"))
 }
@@ -106,6 +125,78 @@ fn run(root: &std::path::Path, args: &[&str]) -> std::process::Output {
 
 fn json(output: &std::process::Output) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).expect("command emits one JSON envelope")
+}
+
+fn repository_mara_documents(root: &Path) -> Vec<PathBuf> {
+    let mut directories = vec![root.join("docs")];
+    let mut documents = Vec::new();
+
+    while let Some(directory) = directories.pop() {
+        let entries = fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()));
+        for entry in entries {
+            let path = entry.expect("read repository docs entry").path();
+            if path.is_dir() {
+                directories.push(path);
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".mara.md"))
+            {
+                documents.push(path);
+            }
+        }
+    }
+
+    documents.sort();
+    documents
+}
+
+#[test]
+fn self_hosting_acceptance_validates_the_repository_deterministically() {
+    // TEST-VERIFICATION-STRATEGY and REQ-SELF-HOSTING-GATE.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .expect("resolve repository root");
+    let documents = repository_mara_documents(&root);
+    assert!(!documents.is_empty(), "repository Mara corpus is empty");
+
+    let first = run(&root, &["check", "--format", "json"]);
+    let second = run(&root, &["check", "--format", "json"]);
+
+    assert_eq!(first.status.code(), Some(0));
+    assert_eq!(second.status.code(), Some(0));
+    assert!(first.stderr.is_empty());
+    assert!(second.stderr.is_empty());
+    assert_eq!(first.stdout, second.stdout);
+
+    let output = json(&first);
+    assert_eq!(output["status"], "ok");
+    assert_eq!(output["diagnostics"], serde_json::json!([]));
+    assert_eq!(
+        output["data"]["summary"]["documents"],
+        serde_json::json!(documents.len()),
+        "repository Mara corpus: {documents:#?}"
+    );
+    assert_eq!(output["data"]["summary"]["errors"], 0);
+    assert_eq!(output["data"]["summary"]["warnings"], 0);
+}
+
+#[test]
+fn self_hosting_negative_fixture_rejects_duplicate_display_ids() {
+    // TEST-VERIFICATION-STRATEGY proves the acceptance gate detects a known defect.
+    let temp = project(DUPLICATE_DISPLAY_ID_ITEMS);
+    let output = run(temp.path(), &["check", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let output = json(&output);
+    assert_eq!(output["status"], "invalid");
+    assert_eq!(
+        output["diagnostics"][0]["code"],
+        "identity.duplicate_display_id"
+    );
 }
 
 #[test]

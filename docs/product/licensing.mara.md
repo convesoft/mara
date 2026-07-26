@@ -27,7 +27,7 @@ license texts, and state the same licensing choice in its public documentation.
 :::
 
 :::decision m_01KY9JQZC7BJ819BG8G8SRMV5B
-:id: ADR-0013
+:id: ADR-0015
 :title: License Mara under MIT OR Apache-2.0
 :status: accepted
 :kind: process
