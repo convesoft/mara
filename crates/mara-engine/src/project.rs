@@ -40,6 +40,8 @@ pub struct LoadedProject {
     /// Canonical path of the existing schema input.
     pub schema_path: PathBuf,
     pub content: ContentConfig,
+    /// Normalized project-relative path selected by `index.path`.
+    pub index_source_path: String,
     /// Canonicalized destination path, including a normalized absent suffix.
     pub index_path: PathBuf,
     pub validation: ValidationConfig,
@@ -516,7 +518,14 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
         &index_value,
         index_location,
     )?;
-    if crate::content::configured_content_path_is_selected(&include, &exclude, &index_value) {
+    let resolved_index_value =
+        crate::content::normalized_relative_path(&location.root, &index_path);
+    let index_is_selected =
+        crate::content::configured_content_path_is_selected(&include, &exclude, &index_value)
+            || resolved_index_value.as_deref().is_some_and(|path| {
+                crate::content::configured_content_path_is_selected(&include, &exclude, path)
+            });
+    if index_is_selected {
         return Err(unsafe_path(
             ProjectLoadErrorCode::ProjectDuplicateFile,
             &location.config_path,
@@ -556,6 +565,7 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
             follow_directory_symlinks: raw.content.follow_directory_symlinks,
             allow_internal_file_symlinks: raw.content.allow_internal_file_symlinks,
         },
+        index_source_path: index_value,
         index_path,
         validation: ValidationConfig {
             warnings_as_errors: raw.validation.warnings_as_errors,

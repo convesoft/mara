@@ -30,6 +30,18 @@ pub(crate) const fn relation_occurrence_wire_origin(
     }
 }
 
+pub(crate) fn relation_inverse_wire_name(
+    schema: &SchemaDocument,
+    relation: &str,
+) -> Option<String> {
+    let definition = schema.relations()?.get(relation)?;
+    if definition.is_symmetric() {
+        Some(relation.to_owned())
+    } else {
+        definition.inverse().map(|inverse| inverse.value().clone())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticCompilation {
     items: Vec<NormalizedItem>,

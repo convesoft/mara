@@ -316,6 +316,67 @@ Beta body with [[connected_by:ALPHA-A]].
 }
 
 #[test]
+fn symmetric_edges_use_the_canonical_name_for_inverse_presentation() {
+    let fixture = tempfile::tempdir().unwrap();
+    write_project(fixture.path(), false);
+    let schema = SCHEMA.replacen(
+        "relations:\n",
+        r#"relations:
+  related_to:
+    source:
+      flavours: [alpha]
+    target:
+      flavours: [alpha]
+    symmetric: true
+"#,
+        1,
+    );
+    fs::write(fixture.path().join(".mara/schema.yaml"), schema).unwrap();
+    fs::write(
+        fixture.path().join("docs/project.mara.md"),
+        r#":::alpha m_00000000000000000000000001
+:id: ALPHA-A
+:title: Alpha A
+:related_to: ALPHA-B
+
+Alpha A body.
+:::
+
+:::alpha m_00000000000000000000000003
+:id: ALPHA-B
+:title: Alpha B
+
+Alpha B body.
+:::
+"#,
+    )
+    .unwrap();
+    let result = check_project(fixture.path()).unwrap();
+    assert!(result.is_valid(), "diagnostics: {:?}", result.diagnostics());
+    let index = json(
+        &IndexProjection::from_validation(&result)
+            .unwrap()
+            .to_canonical_json()
+            .unwrap(),
+    );
+    let edge = index["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|edge| edge["relation"] == "related_to")
+        .unwrap();
+    let show: serde_json::Value =
+        serde_json::from_str(&run_show(fixture.path(), "ALPHA-A").render(OutputFormat::Json))
+            .unwrap();
+
+    assert_eq!(edge["inverse_name"], "related_to");
+    assert_eq!(
+        show["data"]["item"]["outgoing"][0]["inverse_name"],
+        edge["inverse_name"]
+    );
+}
+
+#[test]
 fn filesystem_creation_order_does_not_change_projection_bytes() {
     let first = tempfile::tempdir().unwrap();
     let second = tempfile::tempdir().unwrap();
@@ -649,4 +710,48 @@ fn git_provenance_detects_changes_hidden_by_index_flags() {
         .to_canonical_json()
         .unwrap();
     assert_eq!(json(&skipped)["git"]["dirty"], true);
+}
+
+#[test]
+fn writer_enforces_the_configured_clean_relevant_inputs_policy() {
+    let fixture = tempfile::tempdir().unwrap();
+    let project_root = fixture.path().join("nested");
+    git(fixture.path(), &["init", "-b", "main"]);
+    git(fixture.path(), &["config", "user.name", "Mara Test"]);
+    git(
+        fixture.path(),
+        &["config", "user.email", "mara@example.test"],
+    );
+    write_project(&project_root, false);
+    git(fixture.path(), &["add", "."]);
+    git(fixture.path(), &["commit", "-m", "fixture"]);
+
+    let destination = project_root.join(".mara/index.json");
+    let previous = b"previous complete index\n";
+    fs::write(&destination, previous).unwrap();
+    fs::write(
+        project_root.join("docs/project.mara.md"),
+        format!("{CONTENT}\n"),
+    )
+    .unwrap();
+    let dirty = check_project(&project_root).unwrap();
+
+    let error = write_index(&dirty).unwrap_err();
+
+    assert!(matches!(error, mara_engine::IndexError::DirtyWorktree));
+    assert_eq!(error.command_code(), "git.precondition");
+    assert_eq!(fs::read(&destination).unwrap(), previous);
+
+    let config_path = project_root.join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path).unwrap().replace(
+        "require_clean_worktree_for_writes = true",
+        "require_clean_worktree_for_writes = false",
+    );
+    fs::write(config_path, config).unwrap();
+    let allowed = check_project(&project_root).unwrap();
+    let written = write_index(&allowed).unwrap();
+    assert_ne!(
+        fs::read(project_root.join(written.path())).unwrap(),
+        previous
+    );
 }

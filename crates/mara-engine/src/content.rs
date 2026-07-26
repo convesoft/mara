@@ -268,9 +268,10 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                     continue;
                 }
                 if entry.file_type().is_some_and(|kind| kind.is_file())
-                    && affected_path
-                        .as_deref()
-                        .is_some_and(|path| !is_selected(&includes, &excludes, path))
+                    && affected_path.as_deref().is_some_and(|path| {
+                        !is_selected(&includes, &excludes, path)
+                            || is_configured_index_temporary_path(project, path)
+                    })
                 {
                     continue;
                 }
@@ -317,7 +318,12 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 continue;
             }
             match candidate_from_path(&project.root, logical_path, &includes, &excludes) {
-                Ok(Some(candidate)) => candidates.push(candidate),
+                Ok(Some(candidate))
+                    if !is_configured_index_temporary_path(project, &candidate.source_path) =>
+                {
+                    candidates.push(candidate);
+                }
+                Ok(Some(_)) => {}
                 Ok(None) => {}
                 Err(diagnostic) => diagnostics.push(*diagnostic),
             }
@@ -853,7 +859,10 @@ pub(crate) fn select_configured_content_paths(
     let excludes = compile_globs(&project.content.exclude);
     paths
         .into_iter()
-        .filter(|path| is_selected(&includes, &excludes, path))
+        .filter(|path| {
+            is_selected(&includes, &excludes, path)
+                && !is_configured_index_temporary_path(project, path)
+        })
         .collect()
 }
 
@@ -863,6 +872,35 @@ pub(crate) fn configured_content_path_is_selected(
     path: &str,
 ) -> bool {
     is_selected(&compile_globs(includes), &compile_globs(excludes), path)
+}
+
+pub(crate) fn is_configured_index_temporary_path(project: &LoadedProject, path: &str) -> bool {
+    if is_index_temporary_for(&project.index_source_path, path) {
+        return true;
+    }
+    let Some(index_path) = normalized_relative_path(&project.root, &project.index_path) else {
+        return false;
+    };
+    is_index_temporary_for(&index_path, path)
+}
+
+fn is_index_temporary_for(index_path: &str, path: &str) -> bool {
+    let (index_parent, index_name) = index_path.rsplit_once('/').unwrap_or(("", index_path));
+    let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
+    if parent != index_parent {
+        return false;
+    }
+    let prefix = format!(".{index_name}.mara-");
+    let Some(random) = name
+        .strip_prefix(&prefix)
+        .and_then(|suffix| suffix.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    random.len() == 24
+        && random
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn is_fully_excluded_tree(excludes: &[String], path: &str) -> bool {
@@ -1618,7 +1656,7 @@ fn open_failure_diagnostic(
     }
 }
 
-fn normalized_relative_path(root: &Path, path: &Path) -> Option<String> {
+pub(crate) fn normalized_relative_path(root: &Path, path: &Path) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
     let mut output = String::new();
     for component in relative.components() {
@@ -1713,6 +1751,7 @@ mod tests {
                 follow_directory_symlinks: true,
                 allow_internal_file_symlinks: false,
             },
+            index_source_path: ".mara/index.json".to_owned(),
             index_path: root.join(".mara/index.json"),
             validation: crate::project::ValidationConfig {
                 warnings_as_errors: false,

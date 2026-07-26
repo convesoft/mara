@@ -836,6 +836,28 @@ fn normalizes_a_missing_output_beneath_an_internal_symlinked_directory() {
 
 #[cfg(any(unix, windows))]
 #[test]
+fn rejects_an_index_selected_only_after_resolving_its_parent_symlink() {
+    let fixture = Fixture::new();
+    fs::create_dir(fixture.root.join("docs")).unwrap();
+    symlink_directory(fixture.root.join("docs"), fixture.root.join("output"));
+    fixture.write_config(config_with(
+        ".mara/schema.yaml",
+        "output/generated/index.mara.md",
+        &["docs/**/*.mara.md"],
+        &["output/**"],
+    ));
+
+    let error = load_from_root(&fixture.root).unwrap_err();
+
+    assert_eq!(
+        error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ProjectDuplicateFile)
+    );
+    assert_unsafe_field(error, "index.path");
+}
+
+#[cfg(any(unix, windows))]
+#[test]
 fn rejects_a_project_configuration_marker_that_resolves_outside_the_root() {
     let fixture = Fixture::new();
     let outside = tempfile::tempdir().unwrap();

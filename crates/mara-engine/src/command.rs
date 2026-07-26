@@ -25,7 +25,7 @@ use crate::{
         LoadedProject, ProjectLoadError, ProjectLoadOperationalErrorCode, discover_and_load,
     },
     schema::load_schema,
-    semantic::relation_occurrence_wire_origin,
+    semantic::{relation_inverse_wire_name, relation_occurrence_wire_origin},
 };
 
 const PROJECT_FILE: &str = ".mara/project.toml";
@@ -1430,11 +1430,7 @@ impl ItemWire {
 }
 
 fn edge_wire(edge: &mara_core::CanonicalRelationEdge, schema: &SchemaDocument) -> EdgeWire {
-    let inverse_name = schema
-        .relations()
-        .and_then(|relations| relations.get(edge.relation()))
-        .and_then(|relation| relation.inverse())
-        .map(|inverse| inverse.value().clone());
+    let inverse_name = relation_inverse_wire_name(schema, edge.relation());
     EdgeWire {
         source: NodeRefWire::Item {
             mid: edge.source().as_str().to_owned(),
@@ -1466,11 +1462,7 @@ fn projection_edge_wire(
     item: &NormalizedItem,
     schema: &SchemaDocument,
 ) -> EdgeWire {
-    let inverse_name = schema
-        .relations()
-        .and_then(|relations| relations.get(edge.relation()))
-        .and_then(|relation| relation.inverse())
-        .map(|inverse| inverse.value().clone());
+    let inverse_name = relation_inverse_wire_name(schema, edge.relation());
     let occurrences = item
         .authored_references()
         .iter()

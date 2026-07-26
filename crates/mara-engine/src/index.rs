@@ -20,8 +20,10 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    SemanticCompilation, ValidationResult, content::select_configured_content_paths,
-    project::LoadedProject, semantic::relation_occurrence_wire_origin,
+    SemanticCompilation, ValidationResult,
+    content::select_configured_content_paths,
+    project::LoadedProject,
+    semantic::{relation_inverse_wire_name, relation_occurrence_wire_origin},
 };
 
 const PROJECT_CONFIG_PATH: &str = ".mara/project.toml";
@@ -212,13 +214,16 @@ fn write_index_with_checkpoint(
     checkpoint: &mut dyn FnMut(IndexWriteCheckpoint) -> Result<(), IndexError>,
 ) -> Result<IndexWriteResult, IndexError> {
     checkpoint(IndexWriteCheckpoint::BeforeSerialization)?;
-    let projection = IndexProjection::from_validation(result)?;
-    let bytes = projection.to_canonical_json()?;
-    checkpoint(IndexWriteCheckpoint::Serialized)?;
-
     let project = result.project().ok_or(IndexError::InvalidModel {
         reason: "project model is unavailable",
     })?;
+    let projection = IndexProjection::from_validation(result)?;
+    if project.git.require_clean_worktree_for_writes && projection.git.dirty == Some(true) {
+        return Err(IndexError::DirtyWorktree);
+    }
+    let bytes = projection.to_canonical_json()?;
+    checkpoint(IndexWriteCheckpoint::Serialized)?;
+
     atomic_replace(project, &bytes, checkpoint, &mut || {
         verify_current_git(result, &projection.git)
     })?;
@@ -456,6 +461,7 @@ pub enum IndexError {
         operation: &'static str,
         status: Option<i32>,
     },
+    DirtyWorktree,
     GitStateChanged,
     Io {
         operation: &'static str,
@@ -477,6 +483,7 @@ impl IndexError {
             | Self::Randomness(_)
             | Self::GitIo { .. }
             | Self::GitCommand { .. }
+            | Self::DirtyWorktree
             | Self::GitStateChanged => None,
         }
     }
@@ -487,9 +494,10 @@ impl IndexError {
 
     pub const fn command_code(&self) -> &'static str {
         match self {
-            Self::GitIo { .. } | Self::GitCommand { .. } | Self::GitStateChanged => {
-                "git.precondition"
-            }
+            Self::GitIo { .. }
+            | Self::GitCommand { .. }
+            | Self::DirtyWorktree
+            | Self::GitStateChanged => "git.precondition",
             Self::Io { .. } | Self::UnsafePath { .. } => "io.failed",
             Self::InvalidModel { .. } | Self::Serialization(_) | Self::Randomness(_) => {
                 "internal.failed"
@@ -500,6 +508,7 @@ impl IndexError {
     pub const fn command_message(&self) -> &'static str {
         match self {
             Self::GitIo { .. } | Self::GitCommand { .. } => "Git provenance could not be collected",
+            Self::DirtyWorktree => "relevant Git inputs must be clean before writing",
             Self::GitStateChanged => "Git state changed while the project was being validated",
             Self::Io { .. } | Self::UnsafePath { .. } => {
                 "the configured index could not be written atomically"
@@ -523,6 +532,7 @@ impl fmt::Display for IndexError {
             Self::GitIo { operation, .. }
             | Self::GitCommand { operation, .. }
             | Self::Io { operation, .. } => formatter.write_str(operation),
+            Self::DirtyWorktree => formatter.write_str("relevant Git inputs are dirty"),
             Self::GitStateChanged => {
                 formatter.write_str("Git state changed while the project was being validated")
             }
@@ -538,6 +548,7 @@ impl Error for IndexError {
             Self::GitIo { source, .. } | Self::Io { source, .. } => Some(source),
             Self::InvalidModel { .. }
             | Self::GitCommand { .. }
+            | Self::DirtyWorktree
             | Self::GitStateChanged
             | Self::UnsafePath { .. } => None,
         }
@@ -1604,11 +1615,7 @@ fn projection_occurrences(
 }
 
 fn inverse_name(schema: &SchemaDocument, relation: &str) -> Option<String> {
-    schema
-        .relations()
-        .and_then(|relations| relations.get(relation))
-        .and_then(|definition| definition.inverse())
-        .map(|inverse| inverse.value().clone())
+    relation_inverse_wire_name(schema, relation)
 }
 
 #[derive(Debug, Clone, Serialize)]

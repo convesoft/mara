@@ -569,6 +569,45 @@ fn configured_index_destination_cannot_also_be_selected_content() {
     );
 }
 
+#[test]
+fn abandoned_configured_index_temporaries_are_not_authored_content() {
+    let fixture = Fixture::new(&["**/*.tmp"], &[], false, false, false);
+    fixture.write(
+        ".mara/.index.json.mara-0123456789abcdef01234567.tmp",
+        "abandoned derived bytes",
+    );
+    fixture.write("docs/ordinary.tmp", "ordinary authored bytes");
+
+    let discovery = discover_content(&fixture.load());
+
+    assert_eq!(document_paths(&discovery), ["docs/ordinary.tmp"]);
+    assert!(discovery.diagnostics().is_empty());
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn abandoned_index_temporaries_are_ignored_through_the_configured_parent_alias() {
+    let fixture = Fixture::new(&["output/**/*.tmp"], &[], false, true, false);
+    fs::create_dir(fixture.root.join("real-output")).unwrap();
+    symlink_directory(
+        fixture.root.join("real-output"),
+        fixture.root.join("output"),
+    );
+    let config = fs::read_to_string(fixture.root.join(".mara/project.toml"))
+        .unwrap()
+        .replace(".mara/index.json", "output/index.json");
+    fs::write(fixture.root.join(".mara/project.toml"), config).unwrap();
+    fixture.write(
+        "real-output/.index.json.mara-0123456789abcdef01234567.tmp",
+        "abandoned derived bytes",
+    );
+
+    let discovery = discover_content(&fixture.load());
+
+    assert!(discovery.documents().is_empty());
+    assert!(discovery.diagnostics().is_empty());
+}
+
 #[cfg(unix)]
 #[test]
 fn write_only_index_alias_is_diagnosed_before_content_open() {
