@@ -662,7 +662,7 @@ fn identity_record(schema: &SchemaDocument, item: &ParsedItem) -> IdentityRecord
         .collect::<Vec<_>>();
     let display_id = entries.first().and_then(|entry| {
         (!entry.value().is_empty())
-            .then(|| Provenanced::new(entry.value().to_owned(), entry.source().clone()))
+            .then(|| Provenanced::new(entry.value().to_owned(), entry.value_source().clone()))
     });
     let active = entries.len() == 1
         && display_id.as_ref().is_some_and(|display_id| {
@@ -739,6 +739,7 @@ fn normalize_item(
                         item_origin(item, display_id.as_ref()),
                         entry.source().clone(),
                     )
+                    .with_target_source(entry.value_source().clone())
                     .with_syntax(AuthoredReferenceSyntax::Metadata),
                 );
             }
@@ -843,7 +844,7 @@ fn normalize_display_id(
     repetition_diagnostics(item, None, "id", &entries, diagnostics);
     let display_id = entries.first().and_then(|entry| {
         (!entry.value().is_empty())
-            .then(|| Provenanced::new(entry.value().to_owned(), entry.source().clone()))
+            .then(|| Provenanced::new(entry.value().to_owned(), entry.value_source().clone()))
     });
     if flavour.display_id().value().is_required() && display_id.is_none() {
         let source = entries
@@ -1125,13 +1126,16 @@ fn normalize_inline_item_references(
                 );
                 return None;
             }
-            Some(AuthoredReference::new(
-                target.to_owned(),
-                reference.label().map(str::to_owned),
-                relation.map(str::to_owned),
-                item_origin(item, display_id),
-                reference.source().clone(),
-            ))
+            Some(
+                AuthoredReference::new(
+                    target.to_owned(),
+                    reference.label().map(str::to_owned),
+                    relation.map(str::to_owned),
+                    item_origin(item, display_id),
+                    reference.source().clone(),
+                )
+                .with_target_source(reference.target_source().clone()),
+            )
         })
         .collect()
 }
@@ -1198,6 +1202,7 @@ fn authored_narrative_reference(
         ReferenceOrigin::Narrative(narrative_source),
         reference.source().clone(),
     )
+    .with_target_source(reference.target_source().clone())
 }
 
 fn item_origin(item: &ParsedItem, display_id: Option<&Provenanced<String>>) -> ReferenceOrigin {

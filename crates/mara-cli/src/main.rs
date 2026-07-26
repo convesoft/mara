@@ -5,6 +5,7 @@ use mara_engine::command::{
     CommandOutput, OutputFormat, generate_project_mid, initialize_project, run_check, run_list,
     run_show, run_trace,
 };
+use mara_engine::transaction::{RecoveryMode, recover_transaction};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -56,6 +57,10 @@ enum Command {
         #[arg(long, default_value_t = 1)]
         depth: usize,
     },
+    Transaction {
+        #[command(subcommand)]
+        command: TransactionCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -63,6 +68,20 @@ enum SchemaCommand {
     Check {
         #[arg(long, value_enum, default_value_t)]
         format: Format,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TransactionCommand {
+    Recover {
+        #[arg(
+            long,
+            required_unless_present = "complete",
+            conflicts_with = "complete"
+        )]
+        rollback: bool,
+        #[arg(long, required_unless_present = "rollback")]
+        complete: bool,
     },
 }
 
@@ -139,6 +158,26 @@ fn main() -> ExitCode {
             direction,
             depth,
         } => emit(run_trace(".", &reference, direction.into(), depth), format),
+        Command::Transaction {
+            command: TransactionCommand::Recover { rollback, complete },
+        } => {
+            let mode = if rollback {
+                RecoveryMode::Rollback
+            } else {
+                debug_assert!(complete);
+                RecoveryMode::Complete
+            };
+            match recover_transaction(".", mode) {
+                Ok(result) => {
+                    println!("recovered transaction {}", result.transaction_id());
+                    ExitCode::SUCCESS
+                }
+                Err(error) => {
+                    eprintln!("{error}");
+                    ExitCode::from(2)
+                }
+            }
+        }
     }
 }
 
