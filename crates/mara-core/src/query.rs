@@ -150,20 +150,30 @@ pub struct ProjectionEdge {
 }
 
 impl ProjectionEdge {
-    pub fn new(relation: impl Into<String>, source: NodeRef, target: NodeRef) -> Self {
-        Self {
+    pub fn new(
+        relation: impl Into<String>,
+        source: NodeRef,
+        target: NodeRef,
+    ) -> Result<Self, ProjectionEdgeError> {
+        if matches!(source, NodeRef::External { .. }) {
+            return Err(ProjectionEdgeError::InvalidSource { source });
+        }
+        if matches!(target, NodeRef::SourceSpan { .. }) {
+            return Err(ProjectionEdgeError::InvalidTarget { target });
+        }
+        Ok(Self {
             relation: relation.into(),
             source,
             target,
-        }
+        })
     }
 
     pub fn from_canonical(edge: &CanonicalRelationEdge) -> Self {
-        Self::new(
-            edge.relation(),
-            NodeRef::item(edge.source().clone()),
-            NodeRef::item(edge.target().clone()),
-        )
+        Self {
+            relation: edge.relation().to_owned(),
+            source: NodeRef::item(edge.source().clone()),
+            target: NodeRef::item(edge.target().clone()),
+        }
     }
 
     pub fn relation(&self) -> &str {
@@ -178,6 +188,28 @@ impl ProjectionEdge {
         &self.target
     }
 }
+
+/// Endpoint-shape failures rejected before an edge can enter a query projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectionEdgeError {
+    InvalidSource { source: NodeRef },
+    InvalidTarget { target: NodeRef },
+}
+
+impl fmt::Display for ProjectionEdgeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidSource { .. } => {
+                formatter.write_str("canonical edge source must be an item or source span")
+            }
+            Self::InvalidTarget { .. } => {
+                formatter.write_str("canonical edge target must be an item or external object")
+            }
+        }
+    }
+}
+
+impl Error for ProjectionEdgeError {}
 
 impl From<&CanonicalRelationEdge> for ProjectionEdge {
     fn from(edge: &CanonicalRelationEdge) -> Self {
@@ -749,7 +781,7 @@ mod tests {
     }
 
     fn edge(relation: &str, source: u8, target: u8) -> ProjectionEdge {
-        ProjectionEdge::new(relation, item(source), item(target))
+        ProjectionEdge::new(relation, item(source), item(target)).unwrap()
     }
 
     fn canonical_input(
@@ -791,7 +823,7 @@ mod tests {
         );
 
         let step = trace_step(
-            &ProjectionEdge::new("uses", item(1), item(2)),
+            &ProjectionEdge::new("uses", item(1), item(2)).unwrap(),
             TraversalDirection::Incoming,
         );
         assert_eq!(
@@ -801,6 +833,27 @@ mod tests {
                 mid(1),
                 mid(2)
             )
+        );
+    }
+
+    #[test]
+    fn external_nodes_cannot_be_canonical_edge_sources() {
+        let source = NodeRef::external("linear://CON-17");
+        assert_eq!(
+            ProjectionEdge::new("invalid", source.clone(), item(1)),
+            Err(ProjectionEdgeError::InvalidSource { source })
+        );
+    }
+
+    #[test]
+    fn source_span_nodes_cannot_be_canonical_edge_targets() {
+        let target = NodeRef::source_span(
+            span("src/lib.rs", "fn traced() {}", 3, 9),
+            Some("traced".to_owned()),
+        );
+        assert_eq!(
+            ProjectionEdge::new("invalid", item(1), target.clone()),
+            Err(ProjectionEdgeError::InvalidTarget { target })
         );
     }
 
@@ -981,8 +1034,8 @@ mod tests {
             [&mid(1)],
             [],
             [
-                ProjectionEdge::new("mentions", source.clone(), focus.clone()),
-                ProjectionEdge::new("delivered_by", focus.clone(), external.clone()),
+                ProjectionEdge::new("mentions", source.clone(), focus.clone()).unwrap(),
+                ProjectionEdge::new("delivered_by", focus.clone(), external.clone()).unwrap(),
             ],
         );
         let result = graph

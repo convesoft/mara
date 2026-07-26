@@ -16,8 +16,8 @@ pub use diagnostic::{
 };
 pub use identity::{Mid, MidParseError};
 pub use query::{
-    NodeRef, ProjectionEdge, QueryGraph, TraceDirection, TraceError, TracePath, TraceResult,
-    TraceStep, TraversalDirection,
+    NodeRef, ProjectionEdge, ProjectionEdgeError, QueryGraph, TraceDirection, TraceError,
+    TracePath, TraceResult, TraceStep, TraversalDirection,
 };
 pub use schema::{
     CardinalityBound, CardinalityMaximum, DerivedSourceKind, DisplayIdDefinition, FieldDefinition,
