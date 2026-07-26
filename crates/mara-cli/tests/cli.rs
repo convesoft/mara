@@ -83,11 +83,15 @@ fn mara() -> Command {
 }
 
 fn project(content: &str) -> tempfile::TempDir {
+    project_with_schema(SCHEMA, content)
+}
+
+fn project_with_schema(schema: &str, content: &str) -> tempfile::TempDir {
     let temp = tempfile::tempdir().expect("create isolated CLI fixture");
     fs::create_dir_all(temp.path().join(".mara")).unwrap();
     fs::create_dir_all(temp.path().join("docs")).unwrap();
     fs::write(temp.path().join(".mara/project.toml"), PROJECT_CONFIG).unwrap();
-    fs::write(temp.path().join(".mara/schema.yaml"), SCHEMA).unwrap();
+    fs::write(temp.path().join(".mara/schema.yaml"), schema).unwrap();
     fs::write(temp.path().join("docs/items.mara.md"), content).unwrap();
     temp
 }
@@ -364,4 +368,125 @@ fn query_input_findings_are_invalid_and_json_is_repeatable() {
     let first = run(fixture.path(), &["check", "--format", "json"]);
     let second = run(fixture.path(), &["check", "--format", "json"]);
     assert_eq!(first.stdout, second.stdout);
+}
+
+#[test]
+fn every_repeated_field_filter_value_must_convert() {
+    let fixture = project(VALID_ITEMS);
+    let output = run(
+        fixture.path(),
+        &[
+            "list",
+            "--field",
+            "state=active",
+            "--field",
+            "state=typo",
+            "--format",
+            "json",
+        ],
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    let envelope = json(&output);
+    assert_eq!(envelope["status"], "invalid");
+    assert_eq!(envelope["diagnostics"][0]["code"], "field.invalid_scalar");
+    assert_eq!(envelope["diagnostics"][0]["context"]["field"], "state");
+    assert_eq!(envelope["diagnostics"][0]["details"]["value"], "typo");
+}
+
+#[test]
+fn non_failing_warnings_do_not_suppress_successful_human_payloads() {
+    let content = VALID_ITEMS.replace(":connects: BETA-B", ":connects: BETA-B\n:connects: BETA-B");
+    let fixture = project(&content);
+    let cases = [
+        (vec!["check"], "ok: 1 documents, 2 items, 1 edges"),
+        (
+            vec!["list"],
+            "m_00000000000000000000000001\tALPHA-A\talpha\tFirst",
+        ),
+        (vec!["show", "ALPHA-A"], "Alpha body."),
+        (
+            vec!["trace", "ALPHA-A"],
+            "focus: m_00000000000000000000000001",
+        ),
+    ];
+
+    for (arguments, requested_data) in cases {
+        let output = run(fixture.path(), &arguments);
+        assert_eq!(output.status.code(), Some(0), "arguments: {arguments:?}");
+        let human = String::from_utf8(output.stdout).unwrap();
+        assert!(human.contains(requested_data), "actual output:\n{human}");
+        assert!(
+            human.contains("warning[relation.duplicate_occurrence]"),
+            "actual output:\n{human}"
+        );
+    }
+}
+
+#[test]
+fn duplicated_display_ids_are_command_specific_ambiguous_query_findings() {
+    let content = VALID_ITEMS
+        .replace(
+            ":connects: BETA-B",
+            ":connects: m_00000000000000000000000002",
+        )
+        .replace(":id: BETA-B", ":id: ALPHA-A");
+    let fixture = project(&content);
+
+    for arguments in [
+        vec!["show", "ALPHA-A", "--format", "json"],
+        vec!["trace", "ALPHA-A", "--format", "json"],
+    ] {
+        let output = run(fixture.path(), &arguments);
+        assert_eq!(output.status.code(), Some(1));
+        let envelope = json(&output);
+        assert_eq!(envelope["diagnostics"].as_array().unwrap().len(), 1);
+        assert_eq!(envelope["diagnostics"][0]["code"], "reference.ambiguous");
+        assert_eq!(
+            envelope["diagnostics"][0]["details"]["candidate_mids"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            envelope["diagnostics"][0]["related"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+}
+
+#[test]
+fn incoming_human_trace_renders_the_traversed_source_endpoint() {
+    let fixture = project(VALID_ITEMS);
+    let output = run(
+        fixture.path(),
+        &["trace", "BETA-B", "--direction", "incoming"],
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    let human = String::from_utf8(output.stdout).unwrap();
+    assert!(human.contains("--connects:incoming--> m_00000000000000000000000001"));
+}
+
+#[test]
+fn summary_counts_bare_external_mentions_and_external_nodes() {
+    let schema = SCHEMA.replace(
+        "rules: []",
+        "  external_link:\n    source:\n      flavours: [alpha]\n    target:\n      external: [https]\nrules: []",
+    );
+    let content = VALID_ITEMS.replace(
+        "Alpha body.",
+        "Alpha body with [[https://example.test/work]].",
+    );
+    let fixture = project_with_schema(&schema, &content);
+    let output = run(fixture.path(), &["check", "--format", "json"]);
+
+    assert_eq!(output.status.code(), Some(0));
+    let envelope = json(&output);
+    assert_eq!(envelope["data"]["summary"]["mentions"], 1);
+    assert_eq!(envelope["data"]["summary"]["external_nodes"], 1);
 }

@@ -402,41 +402,11 @@ impl CommandOutput {
         if let Some(error) = &self.error {
             return format!("error[{}]: {}\n", error.code, error.message);
         }
-        if !self.diagnostics.is_empty() {
-            let mut output = String::new();
-            let mut errors = 0;
-            let mut warnings = 0;
-            let mut info = 0;
-            for diagnostic in &self.diagnostics {
-                match diagnostic.severity.as_str() {
-                    "error" => errors += 1,
-                    "warning" => warnings += 1,
-                    "info" => info += 1,
-                    _ => unreachable!("diagnostic severity is a closed set"),
-                }
-                if let Some(primary) = &diagnostic.primary {
-                    output.push_str(&format!(
-                        "{}:{}:{}: {}[{}]: {}\n",
-                        primary.path,
-                        primary.start_line,
-                        primary.start_column,
-                        diagnostic.severity,
-                        diagnostic.code,
-                        diagnostic.message
-                    ));
-                } else {
-                    output.push_str(&format!(
-                        "<project>: {}[{}]: {}\n",
-                        diagnostic.severity, diagnostic.code, diagnostic.message
-                    ));
-                }
-            }
-            output.push_str(&format!(
-                "{errors} errors, {warnings} warnings, {info} info\n"
-            ));
-            return output;
+        let diagnostics = self.render_human_diagnostics();
+        if self.status == "invalid" {
+            return diagnostics;
         }
-        match self.data.as_ref() {
+        let mut output = match self.data.as_ref() {
             Some(CommandData::Check(data)) => format!(
                 "ok: {} documents, {} items, {} edges; 0 errors, {} warnings, {} info\n",
                 data.summary.documents,
@@ -464,7 +434,47 @@ impl CommandOutput {
             Some(CommandData::Show(data)) => data.item.render_human(),
             Some(CommandData::Trace(data)) => data.render_human(),
             None => String::new(),
+        };
+        output.push_str(&diagnostics);
+        output
+    }
+
+    fn render_human_diagnostics(&self) -> String {
+        if self.diagnostics.is_empty() {
+            return String::new();
         }
+        let mut output = String::new();
+        let mut errors = 0;
+        let mut warnings = 0;
+        let mut info = 0;
+        for diagnostic in &self.diagnostics {
+            match diagnostic.severity.as_str() {
+                "error" => errors += 1,
+                "warning" => warnings += 1,
+                "info" => info += 1,
+                _ => unreachable!("diagnostic severity is a closed set"),
+            }
+            if let Some(primary) = &diagnostic.primary {
+                output.push_str(&format!(
+                    "{}:{}:{}: {}[{}]: {}\n",
+                    primary.path,
+                    primary.start_line,
+                    primary.start_column,
+                    diagnostic.severity,
+                    diagnostic.code,
+                    diagnostic.message
+                ));
+            } else {
+                output.push_str(&format!(
+                    "<project>: {}[{}]: {}\n",
+                    diagnostic.severity, diagnostic.code, diagnostic.message
+                ));
+            }
+        }
+        output.push_str(&format!(
+            "{errors} errors, {warnings} warnings, {info} info\n"
+        ));
+        output
     }
 }
 
@@ -597,6 +607,9 @@ pub fn run_show(start: impl AsRef<Path>, reference: &str) -> CommandOutput {
         Ok(result) => result,
         Err(error) => return project_load_output(CommandName::Show, error),
     };
+    if let Some(output) = ambiguous_query_output(CommandName::Show, &result, reference) {
+        return output;
+    }
     if !result.is_valid() {
         return validation_invalid(CommandName::Show, &result);
     }
@@ -627,7 +640,11 @@ pub fn run_show(start: impl AsRef<Path>, reference: &str) -> CommandOutput {
     CommandOutput::ok(
         CommandName::Show,
         project_wire(project, schema),
-        Vec::new(),
+        result
+            .diagnostics()
+            .iter()
+            .map(DiagnosticWire::from)
+            .collect(),
         CommandData::Show(Box::new(ShowData { item: wire })),
     )
 }
@@ -642,6 +659,9 @@ pub fn run_trace(
         Ok(result) => result,
         Err(error) => return project_load_output(CommandName::Trace, error),
     };
+    if let Some(output) = ambiguous_query_output(CommandName::Trace, &result, reference) {
+        return output;
+    }
     if !result.is_valid() {
         return validation_invalid(CommandName::Trace, &result);
     }
@@ -680,7 +700,11 @@ pub fn run_trace(
     CommandOutput::ok(
         CommandName::Trace,
         project_wire(project, schema),
-        Vec::new(),
+        result
+            .diagnostics()
+            .iter()
+            .map(DiagnosticWire::from)
+            .collect(),
         CommandData::Trace(data),
     )
 }
@@ -811,6 +835,23 @@ fn query_inputs(
     Some((result.project()?, result.schema()?, result.semantic()?))
 }
 
+fn ambiguous_query_output(
+    command: CommandName,
+    result: &ValidationResult,
+    reference: &str,
+) -> Option<CommandOutput> {
+    let (project, schema, semantic) = query_inputs(result)?;
+    let diagnostic = resolve_reference(schema, semantic.identity_index(), reference).err()?;
+    if diagnostic.code != ReferenceDiagnosticCode::Ambiguous.as_str() {
+        return None;
+    }
+    Some(CommandOutput::invalid(
+        command,
+        Some(project_wire(project, schema)),
+        vec![*diagnostic],
+    ))
+}
+
 fn project_wire(project: &LoadedProject, schema: &SchemaDocument) -> ProjectWire {
     ProjectWire {
         name: project.name.clone(),
@@ -842,6 +883,14 @@ fn summary(result: &ValidationResult) -> SummaryWire {
             }
         }
     }
+    if let Some(semantic) = result.semantic() {
+        external_nodes.extend(
+            semantic
+                .external_mentions()
+                .iter()
+                .map(|reference| reference.target().to_owned()),
+        );
+    }
     let counts = result.severity_counts();
     SummaryWire {
         documents: result.documents().len(),
@@ -850,9 +899,9 @@ fn summary(result: &ValidationResult) -> SummaryWire {
             .map_or(0, |semantic| semantic.items().len()),
         source_nodes: source_nodes.len(),
         edges: result.graph().map_or(0, mara_core::QueryGraph::edge_count),
-        mentions: result
-            .semantic()
-            .map_or(0, |semantic| semantic.relations().weak_mentions().len()),
+        mentions: result.semantic().map_or(0, |semantic| {
+            semantic.relations().weak_mentions().len() + semantic.external_mentions().len()
+        }),
         external_nodes: external_nodes.len(),
         errors: counts.errors(),
         warnings: counts.warnings(),
@@ -950,6 +999,7 @@ fn compile_filters(
         raw_values.dedup();
         let mut compiled = Vec::new();
         let mut by_flavour = BTreeMap::new();
+        let mut converted_raw_values = BTreeSet::new();
         for flavour_name in &candidate_names {
             let Some(flavour) = schema.flavours().get(flavour_name) else {
                 continue;
@@ -957,10 +1007,13 @@ fn compile_filters(
             let Some(definition) = flavour.fields().get(&name) else {
                 continue;
             };
-            let mut values = raw_values
-                .iter()
-                .filter_map(|value| compile_scalar(definition, value))
-                .collect::<Vec<_>>();
+            let mut values = Vec::new();
+            for raw_value in &raw_values {
+                if let Some(value) = compile_scalar(definition, raw_value) {
+                    converted_raw_values.insert(raw_value.clone());
+                    values.push(value);
+                }
+            }
             values.sort_by_key(scalar_key);
             values.dedup();
             if !values.is_empty() {
@@ -977,6 +1030,23 @@ fn compile_filters(
                 FieldDiagnosticCode::InvalidScalar.as_str(),
                 format!("field filter {name:?} is unknown or has no convertible value"),
             ));
+        } else {
+            for raw_value in &raw_values {
+                if !converted_raw_values.contains(raw_value) {
+                    let mut diagnostic = DiagnosticWire::invalid_argument(
+                        FieldDiagnosticCode::InvalidScalar.as_str(),
+                        format!(
+                            "field filter value {raw_value:?} does not convert for any candidate flavour"
+                        ),
+                    );
+                    diagnostic.context.field = Some(name.clone());
+                    diagnostic.details.insert(
+                        "value".to_owned(),
+                        serde_json::Value::String(raw_value.clone()),
+                    );
+                    diagnostics.push(diagnostic);
+                }
+            }
         }
         fields_wire.push(FieldFilterWire {
             name: name.clone(),
@@ -1483,7 +1553,12 @@ impl TraceData {
             output.push_str(&format!("path {}:", index + 1));
             for edge in &path.edges {
                 output.push_str(&format!(" --{}:{}--> ", edge.relation, edge.traversal));
-                match &edge.target {
+                let traversed_endpoint = if edge.traversal == "incoming" {
+                    &edge.source
+                } else {
+                    &edge.target
+                };
+                match traversed_endpoint {
                     NodeRefWire::Item { mid } => output.push_str(mid),
                     NodeRefWire::SourceSpan { source, .. } => output.push_str(&format!(
                         "{}:{}:{}",
