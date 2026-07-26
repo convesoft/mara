@@ -1,6 +1,6 @@
 interface:
   display_name: "Implement Issue"
-  short_description: "Deliver an issue to merge-ready and report the caller"
+  short_description: "Deliver one issue in an assigned Git worktree"
   default_prompt: "$implement-issue CON-99"
 
 policy:

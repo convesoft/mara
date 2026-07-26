@@ -15,8 +15,14 @@ Base branch:
 Worker branch:
 {{WORKER_BRANCH}}
 
-You are running in a dedicated Codex Git worktree assigned exclusively to
-`{{WORKER_BRANCH}}`.
+Worker worktree:
+{{WORKTREE_ROOT}}
+
+You are assigned a dedicated Git worktree at `{{WORKTREE_ROOT}}`. In orchestrated
+execution the root remains in the primary checkout; in direct execution the user's
+primary checkout remains separate. Never edit or switch the primary checkout. All
+repository reads, edits, commands, commits, and validation belong in the assigned
+worktree only.
 
 Your responsibility lasts from initial issue analysis through implementation, validation, review, pull-request maintenance, and a verified merge-ready handoff to the control plane.
 
@@ -60,17 +66,33 @@ WORKTREE AND BRANCH GATE
 
 After creating the persistent goal and before any repository edit:
 
-1. Inspect the current worktree root, branch, HEAD, and status, and inspect the
-   repository worktree list.
-2. Confirm that the worktree is clean and is attached to exactly
-   `{{WORKER_BRANCH}}`.
-3. If the exact branch already exists, use it only when it belongs to this
+1. Normalize `{{WORKTREE_ROOT}}`, use it as the explicit working directory for
+   every repository command, and use absolute paths beneath it for every edit.
+2. Inspect the repository worktree list and confirm that `{{WORKTREE_ROOT}}` is a
+   registered worktree for the expected repository, is not the primary checkout,
+   and is not assigned to another issue.
+3. Inspect the assigned worktree's branch, HEAD, and status. On initial execution,
+   require it to be clean. On same-agent or direct-task resumption, permit a dirty
+   worktree only when this resumed worker owns the prior changes, its matching goal
+   and durable issue artifacts identify the same delivery attempt, and no other
+   writer is active. On replacement recovery, additionally require the root
+   contract to have closed the prior writer. In every recovery case, require the
+   exact issue branch for dirty recovery and inspect the complete diff to verify
+   every change is issue-owned. A clean replacement worktree may instead remain
+   detached at the recorded base revision so step 5 can attach the initial issue
+   branch. Preserve and inventory verified recovery changes before editing; if
+   ownership is ambiguous, stop without cleaning, stashing, resetting, or
+   overwriting them.
+   Before initial branch attachment the clean worktree may be detached at the
+   verified base revision; it must not be attached to an unrelated branch.
+4. If the exact branch already exists, use it only when it belongs to this
    worktree or can be attached here without moving another worktree's branch or
    discarding changes.
-4. If the exact branch does not exist, create it in this worktree from the
+5. If the exact branch does not exist, create it in this worktree from the
    verified `{{BASE_BRANCH}}` starting revision.
-5. Verify again that the current branch is exactly `{{WORKER_BRANCH}}`, the
-   worktree is clean, and HEAD has the intended base ancestry before continuing.
+6. Verify again that the current branch is exactly `{{WORKER_BRANCH}}`, HEAD has the
+   intended base ancestry, and the worktree is either clean or contains only the
+   inventoried issue-owned recovery changes before continuing.
 
 The worktree path does not determine branch identity. Do not silently use the
 branch inherited when the worktree was created, a Linear-suggested `feature/*`
@@ -78,10 +100,16 @@ branch, a detached HEAD, or an automatically suffixed alternative. Do not edit,
 commit, push, or open a pull request from any branch other than
 `{{WORKER_BRANCH}}`.
 
-If the exact branch is checked out in another worktree, the current worktree is
-already dirty, or correcting the mismatch would move or rewrite existing work,
-stop and report the conflict to the control plane. Never perform a late manual
-branch correction after implementation has started.
+If the exact branch is checked out in another worktree, the current worktree has
+dirty changes that did not pass the recovery checks above, or correcting a branch
+mismatch would move or rewrite existing work, stop and report the conflict to the
+control plane. Never perform a late manual branch correction after implementation
+has started.
+
+The subagent's startup directory may be the primary checkout. Do not run a
+repository command there, rely on an implicit current directory, or use a relative
+edit path that could escape `{{WORKTREE_ROOT}}`. If a required tool cannot be
+confined to the assigned worktree, stop and report the limitation before using it.
 
 INITIAL ORIENTATION
 

@@ -1,6 +1,6 @@
 interface:
   display_name: "Iterate Linear"
-  short_description: "Implement and close every Mara Linear issue"
+  short_description: "Deliver Mara issues through isolated subagents"
   default_prompt: "$iterate-linear"
 
 policy:
