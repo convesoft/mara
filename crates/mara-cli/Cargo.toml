@@ -6,7 +6,12 @@ license.workspace = true
 
 [dependencies]
 mara-engine.workspace = true
+clap.workspace = true
 
 [[bin]]
 name = "mara"
 path = "src/main.rs"
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true

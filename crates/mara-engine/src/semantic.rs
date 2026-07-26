@@ -22,6 +22,7 @@ use regex::Regex;
 pub struct SemanticCompilation {
     items: Vec<NormalizedItem>,
     narrative_references: Vec<ResolvedReference>,
+    external_mentions: Vec<AuthoredReference>,
     relations: CanonicalRelations,
     projection_edges: Vec<ProjectionEdge>,
     identity_index: IdentityIndex,
@@ -35,6 +36,10 @@ impl SemanticCompilation {
 
     pub fn narrative_references(&self) -> &[ResolvedReference] {
         &self.narrative_references
+    }
+
+    pub fn external_mentions(&self) -> &[AuthoredReference] {
+        &self.external_mentions
     }
 
     pub const fn relations(&self) -> &CanonicalRelations {
@@ -110,11 +115,18 @@ pub fn compile_documents(
 
     let identity = schema.identity().value().mid().value();
     let mut projection_edges = Vec::new();
+    let mut external_mentions = Vec::new();
     let mut external_metadata_edges = BTreeSet::new();
     for item in &mut items {
         let mut resolved = Vec::new();
         for reference in item.authored_references() {
             if let Some(scheme) = external_uri_scheme(reference.target()) {
+                if reference.relation().is_none() {
+                    if validate_external_mention(schema, reference, scheme, &mut diagnostics) {
+                        external_mentions.push(reference.clone());
+                    }
+                    continue;
+                }
                 if let Some(edge) =
                     validate_external_reference(schema, item, reference, scheme, &mut diagnostics)
                 {
@@ -156,7 +168,9 @@ pub fn compile_documents(
     let mut narrative_references = Vec::new();
     for reference in narrative_authored {
         if let Some(scheme) = external_uri_scheme(reference.target()) {
-            validate_external_mention(schema, &reference, scheme, &mut diagnostics);
+            if validate_external_mention(schema, &reference, scheme, &mut diagnostics) {
+                external_mentions.push(reference);
+            }
             continue;
         }
         match identity_index.resolve(&reference, identity) {
@@ -171,6 +185,7 @@ pub fn compile_documents(
     SemanticCompilation {
         items,
         narrative_references,
+        external_mentions,
         relations,
         projection_edges,
         identity_index,
@@ -185,10 +200,9 @@ fn validate_external_reference(
     scheme: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<ProjectionEdge> {
-    let Some(authored_name) = reference.relation() else {
-        validate_external_mention(schema, reference, scheme, diagnostics);
-        return None;
-    };
+    let authored_name = reference
+        .relation()
+        .expect("unqualified external references are collected as mentions");
     let (definition, origin) = authored_relation(schema, item.flavour(), authored_name)?;
     if origin == AuthoredRelationOrigin::InverseNormalized {
         diagnostics.push(
@@ -298,9 +312,9 @@ fn validate_external_mention(
     reference: &AuthoredReference,
     scheme: &str,
     diagnostics: &mut Vec<Diagnostic>,
-) {
+) -> bool {
     if schema.external_mention_schemes().contains(scheme) {
-        return;
+        return true;
     }
     let mut allowed_schemes = schema
         .external_mention_schemes()
@@ -332,6 +346,7 @@ fn validate_external_mention(
         diagnostic = diagnostic.with_item(DiagnosticItem::new(mid.clone(), display_id.clone()));
     }
     diagnostics.push(diagnostic);
+    false
 }
 
 fn external_reference_diagnostic(
@@ -905,60 +920,80 @@ fn normalize_scalar(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<NormalizedFieldValue> {
     let value = entry.value();
-    let normalized = match definition.field_type().value() {
-        FieldType::String => {
-            if definition.is_required() && value.is_empty() {
-                diagnostics.push(missing_value(
+    if definition.field_type().value() == &FieldType::String
+        && definition.is_required()
+        && value.is_empty()
+    {
+        diagnostics.push(missing_value(
+            item,
+            display_id,
+            definition.name(),
+            entry.source(),
+        ));
+        return None;
+    }
+    let normalized = match compile_scalar(definition, value) {
+        Some(value) => value,
+        None => {
+            let diagnostic = match definition.field_type().value() {
+                FieldType::String if definition.pattern().is_some() => field_diagnostic(
+                    FieldDiagnosticCode::PatternMismatch,
+                    "string value does not match its field pattern",
                     item,
                     display_id,
                     definition.name(),
                     entry.source(),
-                ));
+                )
+                .with_detail(
+                    "pattern",
+                    definition
+                        .pattern()
+                        .expect("pattern is present")
+                        .value()
+                        .clone(),
+                )
+                .with_detail("value", value),
+                FieldType::Enum => field_diagnostic(
+                    FieldDiagnosticCode::InvalidEnum,
+                    "value is not one of the field's declared enum values",
+                    item,
+                    display_id,
+                    definition.name(),
+                    entry.source(),
+                )
+                .with_detail("value", value),
+                _ => invalid_scalar(item, display_id, definition, entry),
+            };
+            diagnostics.push(diagnostic);
+            return None;
+        }
+    };
+    Some(Provenanced::new(normalized, entry.source().clone()))
+}
+
+/// Converts text using the same schema scalar rules as authored metadata.
+pub fn compile_scalar(definition: &FieldDefinition, value: &str) -> Option<NormalizedScalar> {
+    match definition.field_type().value() {
+        FieldType::String => {
+            if definition.is_required() && value.is_empty() {
                 return None;
             }
             if let Some(pattern) = definition.pattern()
                 && !whole_pattern(pattern.value()).is_match(value)
             {
-                diagnostics.push(
-                    field_diagnostic(
-                        FieldDiagnosticCode::PatternMismatch,
-                        "string value does not match its field pattern",
-                        item,
-                        display_id,
-                        definition.name(),
-                        entry.source(),
-                    )
-                    .with_detail("pattern", pattern.value().clone())
-                    .with_detail("value", value),
-                );
                 return None;
             }
-            NormalizedScalar::String(value.to_owned())
+            Some(NormalizedScalar::String(value.to_owned()))
         }
-        FieldType::Integer => match parse_integer(value) {
-            Some(value) => NormalizedScalar::Integer(value),
-            None => {
-                diagnostics.push(invalid_scalar(item, display_id, definition, entry));
-                return None;
-            }
-        },
-        FieldType::Number => match serde_json::from_str::<f64>(value)
+        FieldType::Integer => parse_integer(value).map(NormalizedScalar::Integer),
+        FieldType::Number => serde_json::from_str::<f64>(value)
             .ok()
             .and_then(NormalizedNumber::new)
-        {
-            Some(value) => NormalizedScalar::Number(value),
-            None => {
-                diagnostics.push(invalid_scalar(item, display_id, definition, entry));
-                return None;
-            }
-        },
+            .map(NormalizedScalar::Number),
         FieldType::Boolean => match value {
-            "true" => NormalizedScalar::Boolean(true),
-            "false" => NormalizedScalar::Boolean(false),
-            _ => {
-                diagnostics.push(invalid_scalar(item, display_id, definition, entry));
-                return None;
-            }
+            "true" => Some(NormalizedScalar::Boolean(true)),
+            "false" => Some(NormalizedScalar::Boolean(false)),
+            _ => None,
         },
         FieldType::Enum => {
             let valid = definition.values().is_some_and(|values| {
@@ -968,23 +1003,11 @@ fn normalize_scalar(
                     .any(|candidate| candidate.value() == value)
             });
             if !valid {
-                diagnostics.push(
-                    field_diagnostic(
-                        FieldDiagnosticCode::InvalidEnum,
-                        "value is not one of the field's declared enum values",
-                        item,
-                        display_id,
-                        definition.name(),
-                        entry.source(),
-                    )
-                    .with_detail("value", value),
-                );
                 return None;
             }
-            NormalizedScalar::Enum(value.to_owned())
+            Some(NormalizedScalar::Enum(value.to_owned()))
         }
-    };
-    Some(Provenanced::new(normalized, entry.source().clone()))
+    }
 }
 
 fn invalid_scalar(
