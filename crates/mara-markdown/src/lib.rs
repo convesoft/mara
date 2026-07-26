@@ -363,6 +363,7 @@ pub struct InlineReference {
     label: Option<String>,
     context: InlineReferenceContext,
     source: SourceSpan,
+    target_source: SourceSpan,
 }
 
 impl InlineReference {
@@ -380,6 +381,10 @@ impl InlineReference {
 
     pub const fn source(&self) -> &SourceSpan {
         &self.source
+    }
+
+    pub const fn target_source(&self) -> &SourceSpan {
+        &self.target_source
     }
 }
 
@@ -435,6 +440,7 @@ pub struct ParsedMetadataEntry {
     raw_value: String,
     value: String,
     source: SourceSpan,
+    value_source: SourceSpan,
 }
 
 impl ParsedMetadataEntry {
@@ -452,6 +458,10 @@ impl ParsedMetadataEntry {
 
     pub const fn source(&self) -> &SourceSpan {
         &self.source
+    }
+
+    pub const fn value_source(&self) -> &SourceSpan {
+        &self.value_source
     }
 }
 
@@ -530,6 +540,7 @@ struct MaraItemBlockNode {
 #[derive(Debug)]
 struct MaraInlineReferenceNode {
     index: text::Index,
+    target_index: text::Index,
     target: String,
     label: Option<String>,
 }
@@ -589,6 +600,7 @@ impl InlineParser for MaraInlineReferenceParser {
         reader.advance(length);
         Some(arena.new_node(MaraInlineReferenceNode {
             index: text::Index::new(segment.start(), segment.start() + length),
+            target_index: text::Index::new(segment.start() + 2, segment.start() + 2 + target.len()),
             target: target.to_owned(),
             label: label.map(str::to_owned),
         }))
@@ -880,12 +892,18 @@ fn parse_metadata(
         }
 
         match parse_metadata_line(text) {
-            Ok((key, raw_value, value)) => entries.push(ParsedMetadataEntry {
-                key,
-                raw_value,
-                value,
-                source: span(document, content.start(), content.stop()),
-            }),
+            Ok((key, raw_value, value)) => {
+                let raw_start = 1 + key.len() + 1;
+                let leading = raw_value.len() - raw_value.trim_start_matches([' ', '\t']).len();
+                let value_start = content.start() + raw_start + leading;
+                entries.push(ParsedMetadataEntry {
+                    key,
+                    raw_value,
+                    value: value.clone(),
+                    source: span(document, content.start(), content.stop()),
+                    value_source: span(document, value_start, value_start + value.len()),
+                });
+            }
             Err(reason) => {
                 valid = false;
                 diagnostics.push(
@@ -1336,6 +1354,11 @@ fn collect_inline_references_from_node(
                 label: node.label.clone(),
                 context,
                 source: span(document, range.0, range.1),
+                target_source: span(
+                    document,
+                    node.target_index.start(),
+                    node.target_index.stop(),
+                ),
             });
         }
         return;

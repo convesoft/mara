@@ -90,6 +90,7 @@ fn valid_items_are_lossless_and_keep_structural_header_values_out_of_metadata() 
     );
     assert_eq!(item.metadata()[0].raw_value(), "  REQ-1 ");
     assert_eq!(item.metadata()[0].value(), "REQ-1");
+    assert_eq!(slice(&source, item.metadata()[0].value_source()), "REQ-1");
     assert_eq!(item.metadata()[1].value(), "TEST-1");
     assert_eq!(item.metadata()[2].value(), "TEST-2");
     assert_eq!(
@@ -259,6 +260,7 @@ fn crlf_source_spans_and_empty_bodies_remain_exact() {
     assert_eq!(item.metadata()[0].raw_value(), "\tX ");
     assert_eq!(item.metadata()[0].value(), "X");
     assert_eq!(slice(&source, item.metadata()[0].source()), ":id:\tX ");
+    assert_eq!(slice(&source, item.metadata()[0].value_source()), "X");
 }
 
 #[test]
@@ -320,6 +322,7 @@ fn mixed_document_hierarchy_and_inline_contexts_remain_lossless() {
     assert_eq!(item.references()[0].target(), "ITEM");
     assert_eq!(item.references()[0].context(), InlineReferenceContext::Text);
     assert_eq!(slice(&source, item.references()[0].source()), "[[ITEM]]");
+    assert_eq!(slice(&source, item.references()[0].target_source()), "ITEM");
     assert_eq!(slice(&source, top.heading_source()), "# Top [[TOP|label]]");
 }
 

@@ -490,3 +490,17 @@ fn summary_counts_bare_external_mentions_and_external_nodes() {
     assert_eq!(envelope["data"]["summary"]["mentions"], 1);
     assert_eq!(envelope["data"]["summary"]["external_nodes"], 1);
 }
+
+#[test]
+fn transaction_recovery_requires_exactly_one_explicit_mode() {
+    let fixture = project(VALID_ITEMS);
+    for arguments in [
+        vec!["transaction", "recover"],
+        vec!["transaction", "recover", "--rollback", "--complete"],
+    ] {
+        let output = run(fixture.path(), &arguments);
+        assert_eq!(output.status.code(), Some(2));
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains("--rollback") || stderr.contains("--complete"));
+    }
+}

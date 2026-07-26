@@ -7,6 +7,7 @@ pub mod identity;
 pub mod project;
 pub mod schema;
 pub mod semantic;
+pub mod transaction;
 pub mod validation;
 
 pub use semantic::{SemanticCompilation, compile_documents, compile_scalar};

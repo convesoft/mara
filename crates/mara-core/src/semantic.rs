@@ -78,6 +78,7 @@ pub struct AuthoredReference {
     origin: ReferenceOrigin,
     syntax: AuthoredReferenceSyntax,
     source: SourceSpan,
+    target_source: SourceSpan,
 }
 
 impl AuthoredReference {
@@ -98,8 +99,14 @@ impl AuthoredReference {
             relation,
             origin,
             syntax,
+            target_source: source.clone(),
             source,
         }
+    }
+
+    pub fn with_target_source(mut self, target_source: SourceSpan) -> Self {
+        self.target_source = target_source;
+        self
     }
 
     pub fn with_syntax(mut self, syntax: AuthoredReferenceSyntax) -> Self {
@@ -129,6 +136,10 @@ impl AuthoredReference {
 
     pub const fn source(&self) -> &SourceSpan {
         &self.source
+    }
+
+    pub const fn target_source(&self) -> &SourceSpan {
+        &self.target_source
     }
 }
 
