@@ -33,6 +33,8 @@ pub struct ProjectLocation {
 pub struct LoadedProject {
     pub root: PathBuf,
     pub config_path: PathBuf,
+    /// Canonical path of the opened project configuration input.
+    pub(crate) config_resolved_path: PathBuf,
     pub(crate) config_source: Vec<u8>,
     pub format_version: u32,
     pub name: String,
@@ -555,6 +557,7 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
     Ok(LoadedProject {
         root: location.root,
         config_path: location.config_path,
+        config_resolved_path: resolved_config_path,
         config_source: bytes,
         format_version: 1,
         name,

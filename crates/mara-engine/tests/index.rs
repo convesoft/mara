@@ -623,6 +623,53 @@ fn git_provenance_tracks_resolved_internal_symlink_targets() {
     assert_eq!(modified["git"]["dirty"], true);
 }
 
+#[cfg(unix)]
+#[test]
+fn git_provenance_tracks_the_resolved_project_config_target() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = tempfile::tempdir().unwrap();
+    let project_root = fixture.path().join("nested");
+    git(fixture.path(), &["init", "-b", "main"]);
+    git(fixture.path(), &["config", "user.name", "Mara Test"]);
+    git(
+        fixture.path(),
+        &["config", "user.email", "mara@example.test"],
+    );
+    write_project(&project_root, false);
+    fs::create_dir(project_root.join("config")).unwrap();
+    let target = project_root.join("config/project.toml");
+    fs::rename(project_root.join(".mara/project.toml"), &target).unwrap();
+    symlink(
+        "../config/project.toml",
+        project_root.join(".mara/project.toml"),
+    )
+    .unwrap();
+    git(fixture.path(), &["add", "."]);
+    git(fixture.path(), &["commit", "-m", "fixture"]);
+
+    let clean = check_project(&project_root).unwrap();
+    let clean_projection = IndexProjection::from_validation(&clean)
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+    assert_eq!(json(&clean_projection)["git"]["dirty"], false);
+
+    let changed = format!("{}\n", fs::read_to_string(&target).unwrap());
+    fs::write(&target, changed).unwrap();
+    let modified = check_project(&project_root).unwrap();
+    let modified_projection = IndexProjection::from_validation(&modified)
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+
+    assert_eq!(json(&modified_projection)["git"]["dirty"], true);
+    assert!(matches!(
+        write_index(&modified),
+        Err(mara_engine::IndexError::DirtyWorktree)
+    ));
+}
+
 #[test]
 fn git_provenance_rejects_head_changes_after_validation_started() {
     let fixture = tempfile::tempdir().unwrap();

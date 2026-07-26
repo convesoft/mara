@@ -1763,6 +1763,7 @@ mod tests {
     fn loaded_project(root: PathBuf) -> LoadedProject {
         LoadedProject {
             config_path: root.join(".mara/project.toml"),
+            config_resolved_path: root.join(".mara/project.toml"),
             config_source: Vec::new(),
             format_version: 1,
             name: "test".to_owned(),

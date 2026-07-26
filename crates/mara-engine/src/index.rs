@@ -817,6 +817,10 @@ impl GitWire {
             repository_root,
             &project.config_path,
         )?);
+        relevant.insert(normalized_relative_path(
+            repository_root,
+            &project.config_resolved_path,
+        )?);
         relevant.insert(join_project_path(
             &project_path,
             &project.schema_source_path,
