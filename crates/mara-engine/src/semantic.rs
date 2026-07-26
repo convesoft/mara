@@ -1693,4 +1693,51 @@ Body.\n\
             ReferenceOrigin::Item { .. }
         ));
     }
+
+    #[test]
+    fn relation_output_and_diagnostics_are_independent_of_document_order() {
+        let schema = schema();
+        let first = document(
+            "z.mara.md",
+            ":::req m_00000000000000000000000001\n\
+:id: REQ-ONE\n\
+:title: First\n\
+:custom_state: approved\n\
+:tag: alpha\n\
+:traces: REQ-TWO\n\
+:traces: REQ-TWO\n\
+\n\
+Broken [[traces:MISSING]].\n\
+:::\n",
+            &schema,
+        );
+        let second = document(
+            "a.mara.md",
+            ":::req m_00000000000000000000000002\n\
+:id: REQ-TWO\n\
+:title: Second\n\
+:custom_state: approved\n\
+:tag: beta\n\
+\n\
+Body.\n\
+:::\n",
+            &schema,
+        );
+
+        let forward = compile_documents(&schema, &[first.clone(), second.clone()]);
+        let reverse = compile_documents(&schema, &[second, first]);
+
+        assert_eq!(forward, reverse);
+        assert!(
+            forward.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code() == RelationDiagnosticCode::Duplicate.into()
+            })
+        );
+        assert!(
+            forward
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| { diagnostic.code().as_str() == "reference.unresolved" })
+        );
+    }
 }
