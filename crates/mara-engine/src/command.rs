@@ -1752,5 +1752,13 @@ mod tests {
         assert_eq!(value["code"], "io.failed");
         assert_eq!(value["details"]["path"], ".mara/index.json");
         assert!(!value.to_string().contains(fixture.path().to_str().unwrap()));
+
+        let error = IndexError::UnsafePath {
+            reason: "fixture unsafe path",
+            path: project.index_path.clone(),
+        };
+        let value = serde_json::to_value(operational_index_error(&error, &project)).unwrap();
+        assert_eq!(value["code"], "io.failed");
+        assert_eq!(value["details"]["path"], ".mara/index.json");
     }
 }

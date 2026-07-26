@@ -4,7 +4,7 @@ use mara_core::{
 };
 use mara_markdown::ParsedDocument;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::{
     SemanticCompilation, compile_documents,
@@ -20,6 +20,7 @@ pub struct ValidationResult {
     schema: Option<SchemaDocument>,
     schema_source: Option<Vec<u8>>,
     documents: Vec<ParsedDocument>,
+    content_paths: Vec<PathBuf>,
     semantic: Option<SemanticCompilation>,
     graph: Option<QueryGraph>,
     phases: Vec<ValidationPhaseResult>,
@@ -43,6 +44,10 @@ impl ValidationResult {
 
     pub fn documents(&self) -> &[ParsedDocument] {
         &self.documents
+    }
+
+    pub(crate) fn content_paths(&self) -> &[PathBuf] {
+        &self.content_paths
     }
 
     pub const fn semantic(&self) -> Option<&SemanticCompilation> {
@@ -138,6 +143,7 @@ pub fn validate_documents(
         schema: Some(schema.clone()),
         schema_source: None,
         documents: documents.to_vec(),
+        content_paths: Vec::new(),
         semantic: Some(semantic),
         graph,
         phases,
@@ -165,6 +171,7 @@ pub fn check_project(start: impl AsRef<Path>) -> Result<ValidationResult, Projec
                 validate_documents(&schema, &documents, project.validation.warnings_as_errors);
             result.project = Some(project);
             result.schema_source = Some(schema_source);
+            result.content_paths = content.resolved_paths().to_vec();
             result.phases[0] = ValidationPhaseResult::new(
                 ValidationPhase::Project,
                 ValidationPhaseState::Completed,
@@ -205,6 +212,7 @@ pub fn check_schema(start: impl AsRef<Path>) -> Result<ValidationResult, Project
                 schema: Some(schema),
                 schema_source: Some(schema_source),
                 documents: Vec::new(),
+                content_paths: Vec::new(),
                 semantic: None,
                 graph: None,
                 phases: schema_only_phases(),
@@ -235,6 +243,7 @@ fn skipped_after_schema_failure(
         schema: None,
         schema_source: None,
         documents: Vec::new(),
+        content_paths: Vec::new(),
         semantic: None,
         graph: None,
         phases: vec![

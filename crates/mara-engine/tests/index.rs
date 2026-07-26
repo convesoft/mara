@@ -404,3 +404,113 @@ fn git_provenance_distinguishes_clean_modified_and_untracked_project_inputs() {
     assert!(detached["git"]["branch"].is_null());
     assert_eq!(detached["git"]["dirty"], false);
 }
+
+#[test]
+fn git_provenance_counts_selected_ignored_content_when_ignore_handling_is_disabled() {
+    let fixture = tempfile::tempdir().unwrap();
+    let project_root = fixture.path().join("nested");
+    git(fixture.path(), &["init", "-b", "main"]);
+    git(fixture.path(), &["config", "user.name", "Mara Test"]);
+    git(
+        fixture.path(),
+        &["config", "user.email", "mara@example.test"],
+    );
+    write_project(&project_root, false);
+    let config_path = project_root.join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path)
+        .unwrap()
+        .replace("respect_gitignore = true", "respect_gitignore = false");
+    fs::write(config_path, config).unwrap();
+    fs::write(
+        fixture.path().join(".gitignore"),
+        "nested/docs/ignored.mara.md\n",
+    )
+    .unwrap();
+    fs::write(
+        project_root.join("docs/ignored.mara.md"),
+        "Ignored but selected narrative.\n",
+    )
+    .unwrap();
+    git(fixture.path(), &["add", "."]);
+    git(fixture.path(), &["commit", "-m", "fixture"]);
+
+    let projection = IndexProjection::from_validation(&check_project(&project_root).unwrap())
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+    let projection = json(&projection);
+
+    assert_eq!(projection["documents"].as_array().unwrap().len(), 2);
+    assert_eq!(projection["git"]["dirty"], true);
+}
+
+#[test]
+fn git_provenance_detects_selected_content_renamed_out_of_selection() {
+    let fixture = tempfile::tempdir().unwrap();
+    let project_root = fixture.path().join("nested");
+    git(fixture.path(), &["init", "-b", "main"]);
+    git(fixture.path(), &["config", "user.name", "Mara Test"]);
+    git(
+        fixture.path(),
+        &["config", "user.email", "mara@example.test"],
+    );
+    git(fixture.path(), &["config", "diff.renames", "true"]);
+    write_project(&project_root, false);
+    git(fixture.path(), &["add", "."]);
+    git(fixture.path(), &["commit", "-m", "fixture"]);
+    git(
+        fixture.path(),
+        &["mv", "nested/docs/project.mara.md", "nested/renamed.txt"],
+    );
+
+    let projection = IndexProjection::from_validation(&check_project(&project_root).unwrap())
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+    let projection = json(&projection);
+
+    assert!(projection["documents"].as_array().unwrap().is_empty());
+    assert_eq!(projection["git"]["dirty"], true);
+}
+
+#[cfg(unix)]
+#[test]
+fn git_provenance_tracks_resolved_internal_symlink_targets() {
+    use std::os::unix::fs::symlink;
+
+    let fixture = tempfile::tempdir().unwrap();
+    let project_root = fixture.path().join("nested");
+    git(fixture.path(), &["init", "-b", "main"]);
+    git(fixture.path(), &["config", "user.name", "Mara Test"]);
+    git(
+        fixture.path(),
+        &["config", "user.email", "mara@example.test"],
+    );
+    write_project(&project_root, false);
+    fs::remove_file(project_root.join("docs/project.mara.md")).unwrap();
+    fs::create_dir_all(project_root.join("sources")).unwrap();
+    let target = project_root.join("sources/actual.md");
+    fs::write(&target, CONTENT).unwrap();
+    symlink(
+        "../sources/actual.md",
+        project_root.join("docs/link.mara.md"),
+    )
+    .unwrap();
+    git(fixture.path(), &["add", "."]);
+    git(fixture.path(), &["commit", "-m", "fixture"]);
+
+    let clean = IndexProjection::from_validation(&check_project(&project_root).unwrap())
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+    assert_eq!(json(&clean)["git"]["dirty"], false);
+
+    fs::write(&target, format!("{CONTENT}\n")).unwrap();
+    let modified = IndexProjection::from_validation(&check_project(&project_root).unwrap())
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+    let modified = json(&modified);
+    assert_eq!(modified["documents"][0]["path"], "docs/link.mara.md");
+    assert_eq!(modified["git"]["dirty"], true);
+}

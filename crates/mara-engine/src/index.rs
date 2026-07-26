@@ -73,7 +73,7 @@ impl IndexProjection {
             reason: "validated schema source is unavailable",
         })?;
 
-        let git = GitWire::discover(project, result.documents())?;
+        let git = GitWire::discover(project, result.documents(), result.content_paths())?;
         Self::from_parts(
             project,
             ValidatedSchemaSnapshot {
@@ -240,6 +240,7 @@ fn atomic_replace(
     let destination = &project.index_path;
     let parent = destination.parent().ok_or(IndexError::UnsafePath {
         reason: "configured index has no parent directory",
+        path: destination.to_path_buf(),
     })?;
     prepare_output_path(project, destination, parent)?;
 
@@ -294,6 +295,7 @@ fn prepare_output_path(
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 existing_ancestor = existing_ancestor.parent().ok_or(IndexError::UnsafePath {
                     reason: "configured index has no existing parent ancestor",
+                    path: destination.to_path_buf(),
                 })?;
             }
             Err(source) => {
@@ -314,6 +316,7 @@ fn prepare_output_path(
     if !resolved_ancestor.starts_with(&root) || !resolved_ancestor.is_dir() {
         return Err(IndexError::UnsafePath {
             reason: "configured index parent ancestor is outside the project or not a directory",
+            path: destination.to_path_buf(),
         });
     }
     fs::create_dir_all(parent).map_err(|source| IndexError::Io {
@@ -329,12 +332,14 @@ fn prepare_output_path(
     if !resolved_parent.starts_with(&root) {
         return Err(IndexError::UnsafePath {
             reason: "configured index parent escaped the project root",
+            path: destination.to_path_buf(),
         });
     }
     match fs::symlink_metadata(destination) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(()),
         Ok(_) => Err(IndexError::UnsafePath {
             reason: "configured index is not a regular file",
+            path: destination.to_path_buf(),
         }),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(source) => Err(IndexError::Io {
@@ -351,6 +356,7 @@ fn create_temporary(parent: &Path, destination: &Path) -> Result<(PathBuf, File)
         .and_then(|name| name.to_str())
         .ok_or(IndexError::UnsafePath {
             reason: "configured index file name is not UTF-8",
+            path: destination.to_path_buf(),
         })?;
     for _ in 0..16 {
         let mut random = [0_u8; 12];
@@ -374,6 +380,7 @@ fn create_temporary(parent: &Path, destination: &Path) -> Result<(PathBuf, File)
     }
     Err(IndexError::UnsafePath {
         reason: "could not allocate a unique sibling index temporary",
+        path: destination.to_path_buf(),
     })
 }
 
@@ -429,19 +436,19 @@ pub enum IndexError {
     },
     UnsafePath {
         reason: &'static str,
+        path: PathBuf,
     },
 }
 
 impl IndexError {
     pub fn path(&self) -> Option<&Path> {
         match self {
-            Self::Io { path, .. } => Some(path),
+            Self::Io { path, .. } | Self::UnsafePath { path, .. } => Some(path),
             Self::InvalidModel { .. }
             | Self::Serialization(_)
             | Self::Randomness(_)
             | Self::GitIo { .. }
-            | Self::GitCommand { .. }
-            | Self::UnsafePath { .. } => None,
+            | Self::GitCommand { .. } => None,
         }
     }
 
@@ -476,7 +483,7 @@ impl IndexError {
 impl fmt::Display for IndexError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidModel { reason } | Self::UnsafePath { reason } => {
+            Self::InvalidModel { reason } | Self::UnsafePath { reason, .. } => {
                 formatter.write_str(reason)
             }
             Self::Serialization(_) => formatter.write_str("index serialization failed"),
@@ -541,13 +548,18 @@ impl GitWire {
         }
     }
 
-    fn discover(project: &LoadedProject, documents: &[ParsedDocument]) -> Result<Self, IndexError> {
-        Self::discover_with_program(project, documents, OsStr::new("git"))
+    fn discover(
+        project: &LoadedProject,
+        documents: &[ParsedDocument],
+        content_paths: &[PathBuf],
+    ) -> Result<Self, IndexError> {
+        Self::discover_with_program(project, documents, content_paths, OsStr::new("git"))
     }
 
     fn discover_with_program(
         project: &LoadedProject,
         documents: &[ParsedDocument],
+        content_paths: &[PathBuf],
         program: &OsStr,
     ) -> Result<Self, IndexError> {
         let top_level = match git_output(
@@ -612,21 +624,33 @@ impl GitWire {
 
         let mut relevant = BTreeSet::new();
         relevant.insert(join_project_path(&project_path, PROJECT_CONFIG_PATH));
+        relevant.insert(normalized_relative_path(
+            &repository_root,
+            &project.config_path,
+        )?);
         relevant.insert(join_project_path(
             &project_path,
             &project.schema_source_path,
         ));
+        relevant.insert(normalized_relative_path(
+            &repository_root,
+            &project.schema_path,
+        )?);
         relevant.extend(
             documents
                 .iter()
                 .map(|document| join_project_path(&project_path, document.source().path())),
         );
+        for path in content_paths {
+            relevant.insert(normalized_relative_path(&repository_root, path)?);
+        }
         let deleted_output = git_output(
             program,
             &repository_root,
             [
                 OsString::from("--literal-pathspecs"),
                 OsString::from("diff"),
+                OsString::from("--no-renames"),
                 OsString::from("--name-only"),
                 OsString::from("--diff-filter=D"),
                 OsString::from("-z"),
@@ -660,6 +684,7 @@ impl GitWire {
             OsString::from("--porcelain=v1"),
             OsString::from("-z"),
             OsString::from("--untracked-files=all"),
+            OsString::from("--ignored=matching"),
             OsString::from("--ignore-submodules=none"),
             OsString::from("--"),
         ];
@@ -693,12 +718,23 @@ fn git_output(
     arguments: impl IntoIterator<Item = OsString>,
     operation: &'static str,
 ) -> Result<Output, IndexError> {
-    Command::new(program)
-        .arg("-C")
-        .arg(root)
+    git_command(program, root)
         .args(arguments)
         .output()
         .map_err(|source| IndexError::GitIo { operation, source })
+}
+
+fn git_command(program: &OsStr, root: &Path) -> Command {
+    let mut command = Command::new(program);
+    command
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .args(["-c", "core.fsmonitor=false"])
+        .arg("-C")
+        .arg(root);
+    command
 }
 
 fn project_relative_git_path<'a>(project_path: &str, repository_path: &'a str) -> Option<&'a str> {
@@ -722,8 +758,12 @@ fn successful_text(output: Output, operation: &'static str) -> Result<String, In
 }
 
 fn output_text(output: &Output, operation: &'static str) -> Result<String, IndexError> {
-    let text = std::str::from_utf8(&output.stdout).map_err(|_| IndexError::UnsafePath {
-        reason: "Git returned non-UTF-8 provenance",
+    let text = std::str::from_utf8(&output.stdout).map_err(|_| IndexError::GitIo {
+        operation,
+        source: io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Git returned non-UTF-8 provenance",
+        ),
     })?;
     let text = text.trim_end_matches(['\r', '\n']);
     if text.is_empty() {
@@ -1487,6 +1527,7 @@ fn normalized_relative_path(root: &Path, path: &Path) -> Result<String, IndexErr
         .strip_prefix(root)
         .map_err(|_| IndexError::UnsafePath {
             reason: "path is outside its expected root",
+            path: path.to_path_buf(),
         })?;
     if relative.as_os_str().is_empty() {
         return Ok(".".to_owned());
@@ -1497,12 +1538,14 @@ fn normalized_relative_path(root: &Path, path: &Path) -> Result<String, IndexErr
             Component::Normal(value) => {
                 parts.push(value.to_str().ok_or(IndexError::UnsafePath {
                     reason: "project-relative path is not UTF-8",
+                    path: path.to_path_buf(),
                 })?)
             }
             Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
                 return Err(IndexError::UnsafePath {
                     reason: "project-relative path is not normalized",
+                    path: path.to_path_buf(),
                 });
             }
         }
@@ -1665,6 +1708,7 @@ Body.
         let git = GitWire::discover_with_program(
             result.project().unwrap(),
             result.documents(),
+            result.content_paths(),
             missing.as_os_str(),
         )
         .unwrap();
@@ -1677,6 +1721,28 @@ Body.
     }
 
     #[test]
+    fn git_commands_clear_repository_overrides_and_disable_fsmonitor() {
+        let fixture = fixture();
+        let command = git_command(OsStr::new("git"), fixture.path());
+        let environment = command.get_envs().collect::<BTreeMap<_, _>>();
+
+        for name in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_INDEX_FILE",
+        ] {
+            assert_eq!(environment.get(OsStr::new(name)), Some(&None));
+        }
+        let arguments = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(arguments[0..2], ["-c", "core.fsmonitor=false"]);
+        assert_eq!(arguments[2], "-C");
+    }
+
+    #[test]
     fn index_io_errors_retain_the_logical_destination_path() {
         let fixture = fixture();
         let destination = fixture.path().join(".mara/index.json");
@@ -1684,6 +1750,16 @@ Body.
 
         let error = sync_directory(&missing_parent, &destination).unwrap_err();
 
+        assert_eq!(error.path(), Some(destination.as_path()));
+        assert_eq!(
+            error.project_relative_path(fixture.path()).as_deref(),
+            Some(".mara/index.json")
+        );
+
+        let error = IndexError::UnsafePath {
+            reason: "fixture unsafe path",
+            path: destination.clone(),
+        };
         assert_eq!(error.path(), Some(destination.as_path()));
         assert_eq!(
             error.project_relative_path(fixture.path()).as_deref(),

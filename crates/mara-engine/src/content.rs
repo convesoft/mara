@@ -30,6 +30,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentDiscovery {
     documents: Vec<SourceDocument>,
+    resolved_paths: Vec<PathBuf>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -40,6 +41,10 @@ impl ContentDiscovery {
 
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
+    }
+
+    pub(crate) fn resolved_paths(&self) -> &[PathBuf] {
+        &self.resolved_paths
     }
 
     pub const fn is_valid(&self) -> bool {
@@ -338,6 +343,7 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
 
     candidates.sort_by(|left, right| left.source_path.cmp(&right.source_path));
     let mut documents = Vec::new();
+    let mut resolved_paths = Vec::new();
     let mut selected_identities = HashMap::<FileIdentity, String>::new();
     let mut selected_paths = HashMap::<PathBuf, String>::new();
     let index_identity = opened_file_identity(&project.index_path);
@@ -373,9 +379,13 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 if let Some(identity) = opened.identity {
                     selected_identities.insert(identity, candidate.source_path.clone());
                 }
+                let resolved_path = opened.resolved_path.clone();
                 selected_paths.insert(opened.resolved_path, candidate.source_path.clone());
                 match decode_candidate(&candidate, opened.file) {
-                    Ok(document) => documents.push(document),
+                    Ok(document) => {
+                        documents.push(document);
+                        resolved_paths.push(resolved_path);
+                    }
                     Err(diagnostic) => diagnostics.push(*diagnostic),
                 }
             }
@@ -384,10 +394,13 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
     }
 
     documents.sort_by(|left, right| left.path().cmp(right.path()));
+    resolved_paths.sort();
+    resolved_paths.dedup();
     finalize_diagnostics(&mut diagnostics);
 
     ContentDiscovery {
         documents,
+        resolved_paths,
         diagnostics,
     }
 }
