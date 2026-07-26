@@ -477,49 +477,53 @@ impl QueryGraph {
 
     /// Returns the first deterministic concrete directed cycle for one relation.
     pub fn cycle_path(&self, relation: &str) -> Option<Vec<NodeRef>> {
-        for start in &self.nodes {
-            let mut path = vec![start.clone()];
-            let mut visiting = BTreeSet::from([start.clone()]);
-            if let Some(cycle) =
-                self.find_cycle_from(start, start, relation, &mut path, &mut visiting)
-            {
-                return Some(cycle);
-            }
+        let mut adjacency = BTreeMap::<NodeRef, Vec<NodeRef>>::new();
+        for edge in self.edges.iter().filter(|edge| edge.relation() == relation) {
+            adjacency
+                .entry(edge.source().clone())
+                .or_default()
+                .push(edge.target().clone());
         }
-        None
-    }
+        for targets in adjacency.values_mut() {
+            targets.sort();
+            targets.dedup();
+        }
 
-    fn find_cycle_from(
-        &self,
-        start: &NodeRef,
-        current: &NodeRef,
-        relation: &str,
-        path: &mut Vec<NodeRef>,
-        visiting: &mut BTreeSet<NodeRef>,
-    ) -> Option<Vec<NodeRef>> {
-        let mut targets = self
-            .edges
-            .iter()
-            .filter(|edge| edge.relation() == relation && edge.source() == current)
-            .map(|edge| edge.target().clone())
-            .collect::<Vec<_>>();
-        targets.sort();
-        targets.dedup();
-        for target in targets {
-            if &target == start {
-                let mut cycle = path.clone();
-                cycle.push(target);
-                return Some(cycle);
-            }
-            if !visiting.insert(target.clone()) {
+        let mut completed = BTreeSet::new();
+        for start in &self.nodes {
+            if completed.contains(start) {
                 continue;
             }
-            path.push(target.clone());
-            if let Some(cycle) = self.find_cycle_from(start, &target, relation, path, visiting) {
-                return Some(cycle);
+
+            let mut path = vec![start.clone()];
+            let mut active_positions = BTreeMap::from([(start.clone(), 0_usize)]);
+            let mut stack = vec![(start.clone(), 0_usize)];
+
+            while let Some((current, next_target)) = stack.last_mut() {
+                let targets = adjacency.get(current).map_or(&[][..], Vec::as_slice);
+                if *next_target == targets.len() {
+                    let (finished, _) = stack.pop().expect("the DFS stack is not empty");
+                    active_positions.remove(&finished);
+                    path.pop();
+                    completed.insert(finished);
+                    continue;
+                }
+
+                let target = targets[*next_target].clone();
+                *next_target += 1;
+                if let Some(&cycle_start) = active_positions.get(&target) {
+                    let mut cycle = path[cycle_start..].to_vec();
+                    cycle.push(target);
+                    return Some(cycle);
+                }
+                if completed.contains(&target) {
+                    continue;
+                }
+
+                active_positions.insert(target.clone(), path.len());
+                path.push(target.clone());
+                stack.push((target, 0));
             }
-            path.pop();
-            visiting.remove(&target);
         }
         None
     }
@@ -812,11 +816,11 @@ mod tests {
         )
     }
 
-    fn mid(number: u8) -> Mid {
+    fn mid(number: u32) -> Mid {
         Mid::parse(&format!("m_{number:026}"), &identity()).unwrap()
     }
 
-    fn item(number: u8) -> NodeRef {
+    fn item(number: u32) -> NodeRef {
         NodeRef::item(mid(number))
     }
 
@@ -829,14 +833,14 @@ mod tests {
             .unwrap()
     }
 
-    fn edge(relation: &str, source: u8, target: u8) -> ProjectionEdge {
+    fn edge(relation: &str, source: u32, target: u32) -> ProjectionEdge {
         ProjectionEdge::new(relation, item(source), item(target)).unwrap()
     }
 
     fn canonical_input(
         relation: &str,
-        source: u8,
-        target: u8,
+        source: u32,
+        target: u32,
         path: &str,
     ) -> CanonicalRelationInput {
         let source_mid = mid(source);
@@ -1022,6 +1026,23 @@ mod tests {
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn cycle_detection_uses_one_iterative_relation_traversal() {
+        let nodes = (0..10_000).map(item).collect::<Vec<_>>();
+        let edges = (0..9_999)
+            .map(|number| edge("next", number, number + 1))
+            .chain([edge("next", 9_999, 9_998)])
+            .chain([edge("other", 9_999, 0)])
+            .collect::<Vec<_>>();
+        let graph = QueryGraph::build(nodes, edges);
+
+        assert_eq!(
+            graph.cycle_path("next"),
+            Some(vec![item(9_998), item(9_999), item(9_998)])
+        );
+        assert_eq!(graph.cycle_path("other"), None);
     }
 
     #[test]

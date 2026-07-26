@@ -426,7 +426,7 @@ fn globally_ambiguous_identity_skips_graph_rules_but_continues_field_rules() {
         "docs/first.mara.md",
         r#":::alpha m_00000000000000000000000001
 :id: ALPHA-A
-:state: active
+:state: unknown
 :tag: present
 :note: present
 
@@ -438,7 +438,8 @@ fn globally_ambiguous_identity_skips_graph_rules_but_continues_field_rules() {
         "docs/second.mara.md",
         r#":::alpha m_00000000000000000000000001
 :id: ALPHA-B
-:state: inactive
+:state: active
+:tag: present
 
 :::
 "#,
@@ -454,18 +455,20 @@ fn globally_ambiguous_identity_skips_graph_rules_but_continues_field_rules() {
         })
     ));
     assert!(result.graph().is_none());
-    assert_eq!(
-        result
-            .diagnostics()
-            .iter()
-            .filter(|diagnostic| diagnostic.code() == RuleDiagnosticCode::Skipped.into())
-            .count(),
-        3
-    );
-    assert!(result.diagnostics().iter().any(|diagnostic| {
+    let detail_rule = DiagnosticValue::String("active_alpha_has_details".to_owned());
+    let detail_diagnostics = result
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.details().get("rule") == Some(&detail_rule))
+        .collect::<Vec<_>>();
+    assert_eq!(detail_diagnostics.len(), 2);
+    assert!(detail_diagnostics.iter().any(|diagnostic| {
+        diagnostic.code() == RuleDiagnosticCode::Skipped.into()
+            && diagnostic.item().unwrap().id() == Some("ALPHA-A")
+    }));
+    assert!(detail_diagnostics.iter().any(|diagnostic| {
         diagnostic.code() == RuleDiagnosticCode::Failed.into()
-            && diagnostic.details().get("kind")
-                == Some(&DiagnosticValue::String("requires_field".to_owned()))
+            && diagnostic.item().unwrap().id() == Some("ALPHA-B")
     }));
 }
 
@@ -524,6 +527,14 @@ fn unavailable_relation_rules_are_skipped_without_cascading_failures() {
 :acyclic_link: MISSING
 
 :::
+
+:::alpha m_00000000000000000000000002
+:id: ALPHA-B
+:state: inactive
+:tag: present
+:free_link: ALPHA-C
+
+:::
 "#,
     );
 
@@ -532,29 +543,89 @@ fn unavailable_relation_rules_are_skipped_without_cascading_failures() {
     assert!(result.diagnostics().iter().any(|diagnostic| {
         diagnostic.code() == DiagnosticCode::Reference(ReferenceDiagnosticCode::Unresolved)
     }));
-    let skipped = result
+    let item_rule_diagnostics = result
         .diagnostics()
         .iter()
-        .filter(|diagnostic| diagnostic.code() == RuleDiagnosticCode::Skipped.into())
+        .filter(|diagnostic| {
+            diagnostic
+                .item()
+                .is_some_and(|item| item.id() == Some("ALPHA-C"))
+        })
+        .filter(|diagnostic| {
+            matches!(
+                diagnostic.code(),
+                DiagnosticCode::Rule(RuleDiagnosticCode::Failed | RuleDiagnosticCode::Skipped)
+            )
+        })
         .collect::<Vec<_>>();
-    assert_eq!(skipped.len(), 2);
     assert_eq!(
-        skipped
+        item_rule_diagnostics
             .iter()
-            .map(|diagnostic| diagnostic.details().get("rule"))
+            .map(|diagnostic| (diagnostic.code(), diagnostic.details().get("rule")))
             .collect::<Vec<_>>(),
-        [
+        [(
+            DiagnosticCode::Rule(RuleDiagnosticCode::Skipped),
             Some(&DiagnosticValue::String("alpha_has_direct_link".to_owned())),
-            Some(&DiagnosticValue::String(
-                "alpha_has_incoming_link".to_owned()
-            )),
-        ]
+        )]
     );
-    assert!(!result.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == RuleDiagnosticCode::Failed.into()
-            && diagnostic.details().get("rule")
-                == Some(&DiagnosticValue::String("alpha_has_direct_link".to_owned()))
-    }));
+    let unresolved = result
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.code() == DiagnosticCode::Reference(ReferenceDiagnosticCode::Unresolved)
+        })
+        .unwrap();
+    assert_eq!(
+        unresolved.details().get("canonical_direction"),
+        Some(&DiagnosticValue::String("outgoing".to_owned()))
+    );
+}
+
+#[test]
+fn external_duplicate_occurrences_warn_before_projection_and_honor_escalation() {
+    let schema_source =
+        VALIDATION_SCHEMA.replace("outgoing: {min: 1, max: 1}", "outgoing: {min: 0, max: 1}");
+    let schema_source = schema_source[..schema_source.find("rules:").unwrap()].to_owned();
+    let fixture = Fixture::new(schema_source, false);
+    let schema = fixture.schema();
+    let document = parsed(
+        &schema,
+        "docs/external-duplicate.mara.md",
+        r#":::alpha m_00000000000000000000000001
+:id: ALPHA-A
+:links: https://example.test/same
+:links: https://example.test/same
+
+:::
+"#,
+    );
+
+    let ordinary = validate_documents(&schema, std::slice::from_ref(&document), false);
+    let escalated = validate_documents(&schema, &[document], true);
+
+    assert_eq!(
+        ordinary.semantic().unwrap().items()[0]
+            .authored_references()
+            .len(),
+        2
+    );
+    assert_eq!(ordinary.graph().unwrap().edge_count(), 1);
+    let duplicate = ordinary
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code() == RelationDiagnosticCode::Duplicate.into())
+        .unwrap();
+    assert_eq!(duplicate.severity(), DiagnosticSeverity::Warning);
+    assert_eq!(duplicate.context().relation(), Some("links"));
+    assert_eq!(
+        duplicate.details().get("target_uri"),
+        Some(&DiagnosticValue::String(
+            "https://example.test/same".to_owned()
+        ))
+    );
+    assert!(ordinary.is_valid());
+    assert!(!escalated.is_valid());
+    assert_eq!(ordinary.diagnostics(), escalated.diagnostics());
 }
 
 #[test]

@@ -191,13 +191,6 @@ fn evaluate_relation_constraints(
                         .map(|edge| edge.source().clone()),
                 );
                 for source in sources {
-                    if node_relation_prerequisite_unavailable(
-                        &source,
-                        definition.name(),
-                        prerequisite_diagnostics,
-                    ) {
-                        continue;
-                    }
                     let count = graph
                         .edges()
                         .iter()
@@ -205,6 +198,18 @@ fn evaluate_relation_constraints(
                             edge.relation() == definition.name() && edge.source() == &source
                         })
                         .count() as u64;
+                    if node_relation_prerequisite_unavailable(
+                        &source,
+                        definition.name(),
+                        RuleDirection::Outgoing,
+                        prerequisite_diagnostics,
+                    ) && count_outcome_uncertain(
+                        count,
+                        outgoing.value().minimum(),
+                        outgoing.value().maximum(),
+                    ) {
+                        continue;
+                    }
                     if !count_satisfies(count, outgoing.value()) {
                         diagnostics.push(cardinality_diagnostic(
                             definition,
@@ -231,13 +236,6 @@ fn evaluate_relation_constraints(
                         .map(|edge| edge.target().clone()),
                 );
                 for target in targets {
-                    if node_relation_prerequisite_unavailable(
-                        &target,
-                        definition.name(),
-                        prerequisite_diagnostics,
-                    ) {
-                        continue;
-                    }
                     let count = graph
                         .edges()
                         .iter()
@@ -245,6 +243,18 @@ fn evaluate_relation_constraints(
                             edge.relation() == definition.name() && edge.target() == &target
                         })
                         .count() as u64;
+                    if node_relation_prerequisite_unavailable(
+                        &target,
+                        definition.name(),
+                        RuleDirection::Incoming,
+                        prerequisite_diagnostics,
+                    ) && count_outcome_uncertain(
+                        count,
+                        incoming.value().minimum(),
+                        incoming.value().maximum(),
+                    ) {
+                        continue;
+                    }
                     if !count_satisfies(count, incoming.value()) {
                         diagnostics.push(cardinality_diagnostic(
                             definition,
@@ -455,13 +465,32 @@ fn evaluate_rules(
                 }
                 RuleConfiguration::RequiresRelation(configuration) => {
                     let relations = selected_relations(configuration.relations());
+                    let node = NodeRef::item(item.mid().clone());
+                    let direction = *configuration.direction().value();
+                    let count = graph
+                        .expect("relation rules were skipped when the graph was unavailable")
+                        .edges()
+                        .iter()
+                        .filter(|edge| {
+                            relations.iter().any(|relation| relation == edge.relation())
+                                && match direction {
+                                    RuleDirection::Outgoing => edge.source() == &node,
+                                    RuleDirection::Incoming => edge.target() == &node,
+                                }
+                        })
+                        .count() as u64;
                     if relations.iter().any(|relation| {
                         item_relation_prerequisite_unavailable(
                             item,
                             relation,
+                            direction,
                             prerequisite_diagnostics,
                         )
-                    }) {
+                    }) && count_outcome_uncertain(
+                        count,
+                        *configuration.count().min().value(),
+                        configuration.count().maximum(),
+                    ) {
                         diagnostics.push(rule_skipped(
                             rule,
                             Some(item),
@@ -470,19 +499,6 @@ fn evaluate_rules(
                         ));
                         continue;
                     }
-                    let node = NodeRef::item(item.mid().clone());
-                    let count = graph
-                        .expect("relation rules were skipped when the graph was unavailable")
-                        .edges()
-                        .iter()
-                        .filter(|edge| {
-                            relations.iter().any(|relation| relation == edge.relation())
-                                && match configuration.direction().value() {
-                                    RuleDirection::Outgoing => edge.source() == &node,
-                                    RuleDirection::Incoming => edge.target() == &node,
-                                }
-                        })
-                        .count() as u64;
                     if !rule_count_satisfies(count, configuration.count()) {
                         diagnostics.push(rule_failure(
                             rule,
@@ -497,21 +513,6 @@ fn evaluate_rules(
                 }
                 RuleConfiguration::Orphan(configuration) => {
                     let relations = sorted_schema_values(configuration.relations().value());
-                    if relations.iter().any(|relation| {
-                        item_relation_prerequisite_unavailable(
-                            item,
-                            relation,
-                            prerequisite_diagnostics,
-                        )
-                    }) {
-                        diagnostics.push(rule_skipped(
-                            rule,
-                            Some(item),
-                            "configured connectivity is unavailable",
-                            "relation",
-                        ));
-                        continue;
-                    }
                     let node = NodeRef::item(item.mid().clone());
                     let connected = graph
                         .expect("orphan rules were skipped when the graph was unavailable")
@@ -521,6 +522,29 @@ fn evaluate_rules(
                             relations.iter().any(|relation| relation == edge.relation())
                                 && (edge.source() == &node || edge.target() == &node)
                         });
+                    if !connected
+                        && relations.iter().any(|relation| {
+                            item_relation_prerequisite_unavailable(
+                                item,
+                                relation,
+                                RuleDirection::Outgoing,
+                                prerequisite_diagnostics,
+                            ) || item_relation_prerequisite_unavailable(
+                                item,
+                                relation,
+                                RuleDirection::Incoming,
+                                prerequisite_diagnostics,
+                            )
+                        })
+                    {
+                        diagnostics.push(rule_skipped(
+                            rule,
+                            Some(item),
+                            "configured connectivity is unavailable",
+                            "relation",
+                        ));
+                        continue;
+                    }
                     if !connected {
                         diagnostics.push(rule_failure(
                             rule,
@@ -714,9 +738,7 @@ fn item_field_prerequisite_unavailable(
     diagnostics: &[Diagnostic],
 ) -> bool {
     diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .item()
-            .is_some_and(|candidate| candidate.mid() == item.mid())
+        diagnostic_belongs_to_item(diagnostic, item)
             && diagnostic.context().field() == Some(field)
             && matches!(
                 diagnostic.code(),
@@ -733,15 +755,16 @@ fn item_field_prerequisite_unavailable(
 fn item_relation_prerequisite_unavailable(
     item: &NormalizedItem,
     relation: &str,
+    direction: RuleDirection,
     diagnostics: &[Diagnostic],
 ) -> bool {
     diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .item()
-            .is_some_and(|candidate| candidate.mid() == item.mid())
+        diagnostic_belongs_to_item(diagnostic, item)
             && (diagnostic.context().relation() == Some(relation)
                 || diagnostic.details().get("canonical_relation")
                     == Some(&DiagnosticValue::String(relation.to_owned())))
+            && diagnostic_direction_matches(diagnostic, direction)
+            && diagnostic.severity() == DiagnosticSeverity::Error
             && matches!(
                 diagnostic.code(),
                 DiagnosticCode::Reference(
@@ -783,6 +806,7 @@ fn rule_context(rule: &RuleDefinition) -> DiagnosticContext {
 fn node_relation_prerequisite_unavailable(
     node: &NodeRef,
     relation: &str,
+    direction: RuleDirection,
     diagnostics: &[Diagnostic],
 ) -> bool {
     let Some(mid) = node.mid() else {
@@ -793,8 +817,43 @@ fn node_relation_prerequisite_unavailable(
             && (diagnostic.context().relation() == Some(relation)
                 || diagnostic.details().get("canonical_relation")
                     == Some(&DiagnosticValue::String(relation.to_owned())))
+            && diagnostic_direction_matches(diagnostic, direction)
             && diagnostic.severity() == DiagnosticSeverity::Error
     })
+}
+
+fn diagnostic_belongs_to_item(diagnostic: &Diagnostic, item: &NormalizedItem) -> bool {
+    diagnostic
+        .item()
+        .is_some_and(|candidate| candidate.mid() == item.mid())
+        && diagnostic
+            .primary()
+            .is_some_and(|primary| span_is_within(primary, item.source()))
+}
+
+fn span_is_within(candidate: &SourceSpan, container: &SourceSpan) -> bool {
+    candidate.path() == container.path()
+        && candidate.start_byte() >= container.start_byte()
+        && candidate.end_byte() <= container.end_byte()
+}
+
+fn diagnostic_direction_matches(diagnostic: &Diagnostic, direction: RuleDirection) -> bool {
+    diagnostic
+        .details()
+        .get("canonical_direction")
+        .is_none_or(|candidate| {
+            candidate == &DiagnosticValue::String(direction.as_str().to_owned())
+        })
+}
+
+fn count_outcome_uncertain(count: u64, minimum: u64, maximum: CardinalityMaximum) -> bool {
+    if count < minimum {
+        return true;
+    }
+    match maximum {
+        CardinalityMaximum::Bounded(maximum) => count <= maximum,
+        CardinalityMaximum::Many => false,
+    }
 }
 
 fn node_item<'a>(items: &'a [NormalizedItem], node: &NodeRef) -> Option<&'a NormalizedItem> {

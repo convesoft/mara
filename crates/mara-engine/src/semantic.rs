@@ -1,4 +1,7 @@
-use std::{cmp::Ordering, collections::BTreeMap};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use mara_core::{
     AuthoredReference, AuthoredReferenceSyntax, AuthoredRelationOrigin, CanonicalRelationInput,
@@ -107,6 +110,7 @@ pub fn compile_documents(
 
     let identity = schema.identity().value().mid().value();
     let mut projection_edges = Vec::new();
+    let mut external_metadata_edges = BTreeSet::new();
     for item in &mut items {
         let mut resolved = Vec::new();
         for reference in item.authored_references() {
@@ -114,6 +118,16 @@ pub fn compile_documents(
                 if let Some(edge) =
                     validate_external_reference(schema, item, reference, scheme, &mut diagnostics)
                 {
+                    if reference.syntax() == AuthoredReferenceSyntax::Metadata
+                        && !external_metadata_edges.insert((
+                            edge.relation().to_owned(),
+                            item.mid().clone(),
+                            item.source().clone(),
+                            reference.target().to_owned(),
+                        ))
+                    {
+                        diagnostics.push(external_duplicate_diagnostic(item, reference, &edge));
+                    }
                     projection_edges.push(edge);
                 }
                 continue;
@@ -123,11 +137,12 @@ pub fn compile_documents(
                 Err(diagnostic) => {
                     let mut diagnostic = *diagnostic;
                     if let Some(authored_name) = reference.relation()
-                        && let Some((definition, _)) =
+                        && let Some((definition, origin)) =
                             authored_relation(schema, item.flavour(), authored_name)
                     {
-                        diagnostic =
-                            diagnostic.with_detail("canonical_relation", definition.name());
+                        diagnostic = diagnostic
+                            .with_detail("canonical_direction", canonical_direction(origin))
+                            .with_detail("canonical_relation", definition.name());
                     }
                     diagnostics.push(diagnostic);
                 }
@@ -184,6 +199,7 @@ fn validate_external_reference(
                 reference,
                 scheme,
             )
+            .with_detail("canonical_direction", canonical_direction(origin))
             .with_detail("canonical_relation", definition.name())
             .with_detail("source_kind", "external"),
         );
@@ -198,6 +214,7 @@ fn validate_external_reference(
                 reference,
                 scheme,
             )
+            .with_detail("canonical_direction", canonical_direction(origin))
             .with_detail("canonical_relation", definition.name())
             .with_detail("target_kind", "external"),
         );
@@ -222,6 +239,7 @@ fn validate_external_reference(
                 reference,
                 scheme,
             )
+            .with_detail("canonical_direction", canonical_direction(origin))
             .with_detail(
                 "allowed_schemes",
                 DiagnosticValue::Array(
@@ -241,6 +259,38 @@ fn validate_external_reference(
         NodeRef::external(reference.target()),
     )
     .ok()
+}
+
+fn external_duplicate_diagnostic(
+    item: &NormalizedItem,
+    reference: &AuthoredReference,
+    edge: &ProjectionEdge,
+) -> Diagnostic {
+    Diagnostic::new(
+        RelationDiagnosticCode::Duplicate,
+        "exact duplicate relation metadata occurrence",
+        Some(reference.source().clone()),
+    )
+    .with_item(DiagnosticItem::new(
+        item.mid().clone(),
+        item.display_id().map(|id| id.value().clone()),
+    ))
+    .with_context(DiagnosticContext::new(
+        None,
+        reference.relation().map(str::to_owned),
+        Some(reference.target().to_owned()),
+    ))
+    .with_detail("canonical_direction", "outgoing")
+    .with_detail("canonical_relation", edge.relation())
+    .with_detail("source_mid", item.mid().to_string())
+    .with_detail("target_uri", reference.target())
+}
+
+const fn canonical_direction(origin: AuthoredRelationOrigin) -> &'static str {
+    match origin {
+        AuthoredRelationOrigin::Direct => "outgoing",
+        AuthoredRelationOrigin::InverseNormalized => "incoming",
+    }
 }
 
 fn validate_external_mention(
@@ -359,21 +409,24 @@ fn normalize_relations(
                 .iter()
                 .any(|candidate| candidate.value() == source_flavour);
             if !source_allowed {
-                diagnostics.push(relation_endpoint_diagnostic(
-                    RelationDiagnosticCode::InvalidSourceFlavour,
-                    "source",
-                    definition,
-                    item,
-                    reference,
-                    source_flavour,
-                    definition
-                        .source()
-                        .value()
-                        .flavours()
-                        .value()
-                        .iter()
-                        .map(|candidate| candidate.value().clone()),
-                ));
+                diagnostics.push(
+                    relation_endpoint_diagnostic(
+                        RelationDiagnosticCode::InvalidSourceFlavour,
+                        "source",
+                        definition,
+                        item,
+                        reference,
+                        source_flavour,
+                        definition
+                            .source()
+                            .value()
+                            .flavours()
+                            .value()
+                            .iter()
+                            .map(|candidate| candidate.value().clone()),
+                    )
+                    .with_detail("canonical_direction", canonical_direction(origin)),
+                );
                 continue;
             }
 
@@ -388,21 +441,24 @@ fn normalize_relations(
                         .any(|candidate| candidate.value() == target_flavour)
                 });
             if !target_allowed {
-                diagnostics.push(relation_endpoint_diagnostic(
-                    RelationDiagnosticCode::InvalidTargetFlavour,
-                    "target",
-                    definition,
-                    item,
-                    reference,
-                    target_flavour,
-                    definition
-                        .target()
-                        .value()
-                        .flavours()
-                        .into_iter()
-                        .flat_map(|flavours| flavours.value())
-                        .map(|candidate| candidate.value().clone()),
-                ));
+                diagnostics.push(
+                    relation_endpoint_diagnostic(
+                        RelationDiagnosticCode::InvalidTargetFlavour,
+                        "target",
+                        definition,
+                        item,
+                        reference,
+                        target_flavour,
+                        definition
+                            .target()
+                            .value()
+                            .flavours()
+                            .into_iter()
+                            .flat_map(|flavours| flavours.value())
+                            .map(|candidate| candidate.value().clone()),
+                    )
+                    .with_detail("canonical_direction", canonical_direction(origin)),
+                );
                 continue;
             }
 
@@ -418,6 +474,7 @@ fn normalize_relations(
                         item,
                         reference,
                     )
+                    .with_detail("canonical_direction", canonical_direction(origin))
                     .with_detail("source_flavour", source_flavour)
                     .with_detail("target_flavour", target_flavour),
                 );
@@ -425,13 +482,16 @@ fn normalize_relations(
             }
 
             if canonical_source == canonical_target && !definition.permits_self_reference() {
-                diagnostics.push(relation_diagnostic(
-                    RelationDiagnosticCode::SelfReference,
-                    "relation does not permit a source item to reference itself",
-                    definition,
-                    item,
-                    reference,
-                ));
+                diagnostics.push(
+                    relation_diagnostic(
+                        RelationDiagnosticCode::SelfReference,
+                        "relation does not permit a source item to reference itself",
+                        definition,
+                        item,
+                        reference,
+                    )
+                    .with_detail("canonical_direction", canonical_direction(origin)),
+                );
                 continue;
             }
 
