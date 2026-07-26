@@ -30,6 +30,19 @@ cargo test --all-targets --all-features
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the authority boundaries between Mara,
 Linear, and GitHub and for the contribution workflow.
 
+## Bootstrap acceptance
+
+From the repository root, build the CLI and validate Mara's canonical corpus
+with the exact bootstrap acceptance command:
+
+```shell
+cargo build --locked --bin mara
+./target/debug/mara check --format json
+```
+
+CI runs the built `mara check` command twice and compares the complete JSON
+outputs byte for byte.
+
 ## License
 
 Mara is licensed under either of the following licenses, at your option:
