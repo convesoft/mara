@@ -1,4 +1,8 @@
-use std::{fs, process::Command};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 const PROJECT_CONFIG: &str = r#"format_version = 1
 [project]
@@ -123,6 +127,31 @@ fn json(output: &std::process::Output) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).expect("command emits one JSON envelope")
 }
 
+fn repository_mara_documents(root: &Path) -> Vec<PathBuf> {
+    let mut directories = vec![root.join("docs")];
+    let mut documents = Vec::new();
+
+    while let Some(directory) = directories.pop() {
+        let entries = fs::read_dir(&directory)
+            .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()));
+        for entry in entries {
+            let path = entry.expect("read repository docs entry").path();
+            if path.is_dir() {
+                directories.push(path);
+            } else if path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".mara.md"))
+            {
+                documents.push(path);
+            }
+        }
+    }
+
+    documents.sort();
+    documents
+}
+
 #[test]
 fn self_hosting_acceptance_validates_the_repository_deterministically() {
     // TEST-VERIFICATION-STRATEGY and REQ-SELF-HOSTING-GATE.
@@ -130,6 +159,8 @@ fn self_hosting_acceptance_validates_the_repository_deterministically() {
         .join("../..")
         .canonicalize()
         .expect("resolve repository root");
+    let documents = repository_mara_documents(&root);
+    assert!(!documents.is_empty(), "repository Mara corpus is empty");
 
     let first = run(&root, &["check", "--format", "json"]);
     let second = run(&root, &["check", "--format", "json"]);
@@ -143,6 +174,11 @@ fn self_hosting_acceptance_validates_the_repository_deterministically() {
     let output = json(&first);
     assert_eq!(output["status"], "ok");
     assert_eq!(output["diagnostics"], serde_json::json!([]));
+    assert_eq!(
+        output["data"]["summary"]["documents"],
+        serde_json::json!(documents.len()),
+        "repository Mara corpus: {documents:#?}"
+    );
     assert_eq!(output["data"]["summary"]["errors"], 0);
     assert_eq!(output["data"]["summary"]["warnings"], 0);
 }

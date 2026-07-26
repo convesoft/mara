@@ -65,6 +65,32 @@ jobs:
           first="$(mktemp)"
           second="$(mktemp)"
           trap 'rm -f "$first" "$second"' EXIT
+
+          set +e
           ./target/debug/mara check --format json > "$first"
+          first_status=$?
           ./target/debug/mara check --format json > "$second"
-          cmp "$first" "$second"
+          second_status=$?
+          set -e
+
+          failed=0
+          if [ "$first_status" -ne 0 ]; then
+            printf 'First self-hosting run failed with status %s:\n' "$first_status" >&2
+            cat "$first" >&2
+            failed=1
+          fi
+          if [ "$second_status" -ne 0 ]; then
+            printf 'Second self-hosting run failed with status %s:\n' "$second_status" >&2
+            cat "$second" >&2
+            failed=1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            exit 1
+          fi
+
+          if ! cmp -s "$first" "$second"; then
+            printf 'Self-hosting output was not deterministic:\n' >&2
+            sha256sum "$first" "$second" >&2
+            diff -u --label first-run.json --label second-run.json "$first" "$second" >&2 || true
+            exit 1
+          fi
