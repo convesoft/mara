@@ -403,7 +403,7 @@ fn validates_every_supported_glob_form_without_discovering_content() {
         ".mara/schema.yaml",
         ".mara/index.json",
         &globs,
-        &[],
+        &[".mara/index.json"],
     ));
 
     let project = load_from_root(&fixture.root).unwrap();
@@ -778,6 +778,38 @@ fn rejects_hard_linked_index_aliases_to_configuration_or_schema() {
     );
 }
 
+#[test]
+fn rejects_a_missing_index_destination_selected_by_content_globs() {
+    let fixture = Fixture::new();
+    let index = "generated/index.mara.md";
+    fixture.write_config(config_with(
+        ".mara/schema.yaml",
+        index,
+        &["**/*.mara.md"],
+        &[],
+    ));
+    assert!(!fixture.root.join(index).exists());
+
+    let error = load_from_root(&fixture.root).unwrap_err();
+    assert_eq!(
+        error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ProjectDuplicateFile)
+    );
+    assert_unsafe_field(error, "index.path");
+
+    let excluded = Fixture::new();
+    excluded.write_config(config_with(
+        ".mara/schema.yaml",
+        index,
+        &["**/*.mara.md"],
+        &["generated/**"],
+    ));
+    assert_eq!(
+        load_from_root(&excluded.root).unwrap().index_path,
+        excluded.root.join(index)
+    );
+}
+
 #[cfg(any(unix, windows))]
 #[test]
 fn normalizes_a_missing_output_beneath_an_internal_symlinked_directory() {
@@ -800,6 +832,28 @@ fn normalizes_a_missing_output_beneath_an_internal_symlinked_directory() {
         loaded.index_path,
         fixture.root.join("real-output/generated/index.json")
     );
+}
+
+#[cfg(any(unix, windows))]
+#[test]
+fn rejects_an_index_selected_only_after_resolving_its_parent_symlink() {
+    let fixture = Fixture::new();
+    fs::create_dir(fixture.root.join("docs")).unwrap();
+    symlink_directory(fixture.root.join("docs"), fixture.root.join("output"));
+    fixture.write_config(config_with(
+        ".mara/schema.yaml",
+        "output/generated/index.mara.md",
+        &["docs/**/*.mara.md"],
+        &["output/**"],
+    ));
+
+    let error = load_from_root(&fixture.root).unwrap_err();
+
+    assert_eq!(
+        error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ProjectDuplicateFile)
+    );
+    assert_unsafe_field(error, "index.path");
 }
 
 #[cfg(any(unix, windows))]

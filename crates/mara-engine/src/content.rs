@@ -30,6 +30,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentDiscovery {
     documents: Vec<SourceDocument>,
+    resolved_paths: Vec<PathBuf>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -40,6 +41,10 @@ impl ContentDiscovery {
 
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics
+    }
+
+    pub(crate) fn resolved_paths(&self) -> &[PathBuf] {
+        &self.resolved_paths
     }
 
     pub const fn is_valid(&self) -> bool {
@@ -263,9 +268,10 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                     continue;
                 }
                 if entry.file_type().is_some_and(|kind| kind.is_file())
-                    && affected_path
-                        .as_deref()
-                        .is_some_and(|path| !is_selected(&includes, &excludes, path))
+                    && affected_path.as_deref().is_some_and(|path| {
+                        !is_selected(&includes, &excludes, path)
+                            || is_configured_index_temporary_path(project, path)
+                    })
                 {
                     continue;
                 }
@@ -312,7 +318,12 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 continue;
             }
             match candidate_from_path(&project.root, logical_path, &includes, &excludes) {
-                Ok(Some(candidate)) => candidates.push(candidate),
+                Ok(Some(candidate))
+                    if !is_configured_index_temporary_path(project, &candidate.source_path) =>
+                {
+                    candidates.push(candidate);
+                }
+                Ok(Some(_)) => {}
                 Ok(None) => {}
                 Err(diagnostic) => diagnostics.push(*diagnostic),
             }
@@ -338,6 +349,7 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
 
     candidates.sort_by(|left, right| left.source_path.cmp(&right.source_path));
     let mut documents = Vec::new();
+    let mut resolved_paths = Vec::new();
     let mut selected_identities = HashMap::<FileIdentity, String>::new();
     let mut selected_paths = HashMap::<PathBuf, String>::new();
     let index_identity = opened_file_identity(&project.index_path);
@@ -348,6 +360,12 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
         }
         match open_candidate(project, &candidate) {
             Ok(opened) => {
+                let resolves_to_index_temporary =
+                    normalized_relative_path(&project.root, &opened.resolved_path)
+                        .is_some_and(|path| is_configured_index_temporary_path(project, &path));
+                if resolves_to_index_temporary {
+                    continue;
+                }
                 let aliases_index = opened.resolved_path == project.index_path
                     || matches!((opened.identity, index_identity), (Some(left), Some(right)) if left == right);
                 if aliases_index {
@@ -373,9 +391,13 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
                 if let Some(identity) = opened.identity {
                     selected_identities.insert(identity, candidate.source_path.clone());
                 }
+                let resolved_path = opened.resolved_path.clone();
                 selected_paths.insert(opened.resolved_path, candidate.source_path.clone());
                 match decode_candidate(&candidate, opened.file) {
-                    Ok(document) => documents.push(document),
+                    Ok(document) => {
+                        documents.push(document);
+                        resolved_paths.push(resolved_path);
+                    }
                     Err(diagnostic) => diagnostics.push(*diagnostic),
                 }
             }
@@ -384,10 +406,13 @@ pub fn discover_content(project: &LoadedProject) -> ContentDiscovery {
     }
 
     documents.sort_by(|left, right| left.path().cmp(right.path()));
+    resolved_paths.sort();
+    resolved_paths.dedup();
     finalize_diagnostics(&mut diagnostics);
 
     ContentDiscovery {
         documents,
+        resolved_paths,
         diagnostics,
     }
 }
@@ -830,6 +855,75 @@ fn matches_any(patterns: &[Glob<'_>], path: &str) -> bool {
 
 fn is_selected(includes: &[Glob<'_>], excludes: &[Glob<'_>], path: &str) -> bool {
     matches_any(includes, path) && !matches_any(excludes, path)
+}
+
+pub(crate) fn select_configured_content_paths(
+    project: &LoadedProject,
+    paths: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    let includes = compile_globs(&project.content.include);
+    let excludes = compile_globs(&project.content.exclude);
+    paths
+        .into_iter()
+        .filter(|path| {
+            is_selected(&includes, &excludes, path)
+                && !is_configured_index_temporary_path(project, path)
+        })
+        .collect()
+}
+
+pub(crate) fn configured_content_path_is_selected(
+    includes: &[String],
+    excludes: &[String],
+    path: &str,
+) -> bool {
+    is_selected(&compile_globs(includes), &compile_globs(excludes), path)
+}
+
+pub(crate) fn is_configured_index_temporary_path(project: &LoadedProject, path: &str) -> bool {
+    if is_index_temporary_for(&project.index_source_path, path) {
+        return true;
+    }
+    let Some(index_path) = normalized_relative_path(&project.root, &project.index_path) else {
+        return false;
+    };
+    if is_index_temporary_for(&index_path, path) {
+        return true;
+    }
+    let index_name = index_path
+        .rsplit_once('/')
+        .map_or(index_path.as_str(), |(_, name)| name);
+    let path_name = path.rsplit_once('/').map_or(path, |(_, name)| name);
+    if !is_index_temporary_name(index_name, path_name) {
+        return false;
+    }
+    fs::canonicalize(project.root.join(path))
+        .ok()
+        .and_then(|resolved| normalized_relative_path(&project.root, &resolved))
+        .is_some_and(|resolved| is_index_temporary_for(&index_path, &resolved))
+}
+
+fn is_index_temporary_for(index_path: &str, path: &str) -> bool {
+    let (index_parent, index_name) = index_path.rsplit_once('/').unwrap_or(("", index_path));
+    let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
+    if parent != index_parent {
+        return false;
+    }
+    is_index_temporary_name(index_name, name)
+}
+
+fn is_index_temporary_name(index_name: &str, name: &str) -> bool {
+    let prefix = format!(".{index_name}.mara-");
+    let Some(random) = name
+        .strip_prefix(&prefix)
+        .and_then(|suffix| suffix.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    random.len() == 24
+        && random
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 fn is_fully_excluded_tree(excludes: &[String], path: &str) -> bool {
@@ -1585,7 +1679,7 @@ fn open_failure_diagnostic(
     }
 }
 
-fn normalized_relative_path(root: &Path, path: &Path) -> Option<String> {
+pub(crate) fn normalized_relative_path(root: &Path, path: &Path) -> Option<String> {
     let relative = path.strip_prefix(root).ok()?;
     let mut output = String::new();
     for component in relative.components() {
@@ -1669,6 +1763,8 @@ mod tests {
     fn loaded_project(root: PathBuf) -> LoadedProject {
         LoadedProject {
             config_path: root.join(".mara/project.toml"),
+            config_resolved_path: root.join(".mara/project.toml"),
+            config_source: Vec::new(),
             format_version: 1,
             name: "test".to_owned(),
             schema_source_path: ".mara/schema.yaml".to_owned(),
@@ -1680,6 +1776,7 @@ mod tests {
                 follow_directory_symlinks: true,
                 allow_internal_file_symlinks: false,
             },
+            index_source_path: ".mara/index.json".to_owned(),
             index_path: root.join(".mara/index.json"),
             validation: crate::project::ValidationConfig {
                 warnings_as_errors: false,

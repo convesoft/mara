@@ -10,9 +10,9 @@ use std::{
 pub use mara_core::TraceDirection;
 
 use mara_core::{
-    AuthoredReference, AuthoredReferenceSyntax, AuthoredRelationOrigin, Diagnostic,
-    DiagnosticValue, FieldDiagnosticCode, ItemDiagnosticCode, Mid, NodeRef, NormalizedItem,
-    NormalizedScalar, ReferenceDiagnosticCode, SchemaDocument, SourceSpan, TraceResult,
+    AuthoredReference, AuthoredReferenceSyntax, Diagnostic, DiagnosticValue, FieldDiagnosticCode,
+    ItemDiagnosticCode, Mid, NodeRef, NormalizedItem, NormalizedScalar, ReferenceDiagnosticCode,
+    SchemaDocument, SourceSpan, TraceResult,
 };
 use mara_markdown::{ParsedDocument, ParsedItem};
 use serde::Serialize;
@@ -20,10 +20,12 @@ use serde::Serialize;
 use crate::{
     ValidationResult, check_project, check_schema, compile_scalar,
     identity::generate_mid,
+    index::{IndexError, write_index},
     project::{
         LoadedProject, ProjectLoadError, ProjectLoadOperationalErrorCode, discover_and_load,
     },
     schema::load_schema,
+    semantic::{relation_inverse_wire_name, relation_occurrence_wire_origin},
 };
 
 const PROJECT_FILE: &str = ".mara/project.toml";
@@ -42,6 +44,7 @@ pub enum CommandName {
     List,
     Show,
     Trace,
+    Index,
 }
 
 impl CommandName {
@@ -52,6 +55,7 @@ impl CommandName {
             Self::List => "list",
             Self::Show => "show",
             Self::Trace => "trace",
+            Self::Index => "index",
         }
     }
 }
@@ -294,12 +298,20 @@ pub struct TraceData {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct IndexData {
+    path: String,
+    sha256: String,
+    summary: SummaryWire,
+}
+
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum CommandData {
     Check(CheckData),
     List(ListData),
     Show(Box<ShowData>),
     Trace(TraceData),
+    Index(IndexData),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -352,6 +364,22 @@ impl CommandOutput {
             CommandStatus::Failed,
             None,
             Vec::new(),
+            None,
+            Some(error),
+        )
+    }
+
+    fn failed_with_project(
+        command: CommandName,
+        project: ProjectWire,
+        diagnostics: Vec<DiagnosticWire>,
+        error: OperationalErrorWire,
+    ) -> Self {
+        Self::new(
+            command,
+            CommandStatus::Failed,
+            Some(project),
+            diagnostics,
             None,
             Some(error),
         )
@@ -433,6 +461,9 @@ impl CommandOutput {
                 .collect(),
             Some(CommandData::Show(data)) => data.item.render_human(),
             Some(CommandData::Trace(data)) => data.render_human(),
+            Some(CommandData::Index(data)) => {
+                format!("wrote {} ({})\n", data.path, data.sha256)
+            }
             None => String::new(),
         };
         output.push_str(&diagnostics);
@@ -707,6 +738,61 @@ pub fn run_trace(
             .collect(),
         CommandData::Trace(data),
     )
+}
+
+/// Validates the complete project and atomically writes its configured JSON index.
+pub fn run_index(start: impl AsRef<Path>) -> CommandOutput {
+    let result = match check_project(start) {
+        Ok(result) => result,
+        Err(error) => return project_load_output(CommandName::Index, error),
+    };
+    if !result.is_valid() {
+        return validation_invalid(CommandName::Index, &result);
+    }
+    let Some(project) = result.project() else {
+        return CommandOutput::failed(
+            CommandName::Index,
+            OperationalErrorWire::new("internal.failed", "project model is unavailable"),
+        );
+    };
+    let Some(schema) = result.schema() else {
+        return CommandOutput::failed(
+            CommandName::Index,
+            OperationalErrorWire::new("internal.failed", "schema model is unavailable"),
+        );
+    };
+    let project_wire = project_wire(project, schema);
+    let diagnostics = result
+        .diagnostics()
+        .iter()
+        .map(DiagnosticWire::from)
+        .collect::<Vec<_>>();
+    match write_index(&result) {
+        Ok(written) => CommandOutput::ok(
+            CommandName::Index,
+            project_wire,
+            diagnostics,
+            CommandData::Index(IndexData {
+                path: written.path().to_owned(),
+                sha256: written.sha256().to_owned(),
+                summary: summary(&result),
+            }),
+        ),
+        Err(error) => CommandOutput::failed_with_project(
+            CommandName::Index,
+            project_wire,
+            diagnostics,
+            operational_index_error(&error, project),
+        ),
+    }
+}
+
+fn operational_index_error(error: &IndexError, project: &LoadedProject) -> OperationalErrorWire {
+    let wire = OperationalErrorWire::new(error.command_code(), error.command_message());
+    match error.project_relative_path(&project.root) {
+        Some(path) => wire.with_detail("path", path),
+        None => wire,
+    }
 }
 
 fn validation_output(command: CommandName, result: ValidationResult) -> CommandOutput {
@@ -1344,11 +1430,7 @@ impl ItemWire {
 }
 
 fn edge_wire(edge: &mara_core::CanonicalRelationEdge, schema: &SchemaDocument) -> EdgeWire {
-    let inverse_name = schema
-        .relations()
-        .and_then(|relations| relations.get(edge.relation()))
-        .and_then(|relation| relation.inverse())
-        .map(|inverse| inverse.value().clone());
+    let inverse_name = relation_inverse_wire_name(schema, edge.relation());
     EdgeWire {
         source: NodeRefWire::Item {
             mid: edge.source().as_str().to_owned(),
@@ -1363,11 +1445,8 @@ fn edge_wire(edge: &mara_core::CanonicalRelationEdge, schema: &SchemaDocument) -
             .iter()
             .map(|occurrence| {
                 let authored = occurrence.reference().authored();
-                let origin = match (occurrence.origin(), authored.syntax()) {
-                    (AuthoredRelationOrigin::InverseNormalized, _) => "inverse_metadata",
-                    (_, AuthoredReferenceSyntax::Inline) => "typed_inline",
-                    _ => "canonical_metadata",
-                };
+                let origin =
+                    relation_occurrence_wire_origin(occurrence.origin(), authored.syntax());
                 EdgeOccurrenceWire {
                     origin: origin.to_owned(),
                     authoring_name: authored.relation().unwrap_or(edge.relation()).to_owned(),
@@ -1383,11 +1462,7 @@ fn projection_edge_wire(
     item: &NormalizedItem,
     schema: &SchemaDocument,
 ) -> EdgeWire {
-    let inverse_name = schema
-        .relations()
-        .and_then(|relations| relations.get(edge.relation()))
-        .and_then(|relation| relation.inverse())
-        .map(|inverse| inverse.value().clone());
+    let inverse_name = relation_inverse_wire_name(schema, edge.relation());
     let occurrences = item
         .authored_references()
         .iter()
@@ -1644,4 +1719,36 @@ fn write_new(path: &Path, contents: &str) -> Result<(), OperationalErrorWire> {
 
 fn io_failure(_error: io::Error, message: &'static str) -> OperationalErrorWire {
     OperationalErrorWire::new("io.failed", message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn index_io_error_envelope_uses_the_project_relative_affected_path() {
+        let fixture = tempfile::tempdir().unwrap();
+        initialize_project(fixture.path(), "index-error").unwrap();
+        let project = discover_and_load(fixture.path()).unwrap();
+        let error = IndexError::Io {
+            operation: "write temporary index",
+            path: project.index_path.clone(),
+            source: io::Error::new(io::ErrorKind::PermissionDenied, "fixture"),
+        };
+
+        let wire = operational_index_error(&error, &project);
+        let value = serde_json::to_value(wire).unwrap();
+
+        assert_eq!(value["code"], "io.failed");
+        assert_eq!(value["details"]["path"], ".mara/index.json");
+        assert!(!value.to_string().contains(fixture.path().to_str().unwrap()));
+
+        let error = IndexError::UnsafePath {
+            reason: "fixture unsafe path",
+            path: project.index_path.clone(),
+        };
+        let value = serde_json::to_value(operational_index_error(&error, &project)).unwrap();
+        assert_eq!(value["code"], "io.failed");
+        assert_eq!(value["details"]["path"], ".mara/index.json");
+    }
 }

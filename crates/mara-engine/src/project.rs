@@ -33,6 +33,9 @@ pub struct ProjectLocation {
 pub struct LoadedProject {
     pub root: PathBuf,
     pub config_path: PathBuf,
+    /// Canonical path of the opened project configuration input.
+    pub(crate) config_resolved_path: PathBuf,
+    pub(crate) config_source: Vec<u8>,
     pub format_version: u32,
     pub name: String,
     /// Normalized project-relative path selected by `project.schema`.
@@ -40,6 +43,8 @@ pub struct LoadedProject {
     /// Canonical path of the existing schema input.
     pub schema_path: PathBuf,
     pub content: ContentConfig,
+    /// Normalized project-relative path selected by `index.path`.
+    pub index_source_path: String,
     /// Canonicalized destination path, including a normalized absent suffix.
     pub index_path: PathBuf,
     pub validation: ValidationConfig,
@@ -516,6 +521,24 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
         &index_value,
         index_location,
     )?;
+    let resolved_index_value =
+        crate::content::normalized_relative_path(&location.root, &index_path);
+    let index_is_selected =
+        crate::content::configured_content_path_is_selected(&include, &exclude, &index_value)
+            || resolved_index_value.as_deref().is_some_and(|path| {
+                crate::content::configured_content_path_is_selected(&include, &exclude, path)
+            });
+    if index_is_selected {
+        return Err(unsafe_path(
+            ProjectLoadErrorCode::ProjectDuplicateFile,
+            &location.config_path,
+            "index.path",
+            &index_value,
+            "index destination matches configured content selection",
+            Some(index_path),
+            index_location,
+        ));
+    }
     let index_aliases_input = existing_file_identity(&index_path)?.is_some_and(|index_identity| {
         config_identity == Some(index_identity) || schema_identity == Some(index_identity)
     });
@@ -534,6 +557,8 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
     Ok(LoadedProject {
         root: location.root,
         config_path: location.config_path,
+        config_resolved_path: resolved_config_path,
+        config_source: bytes,
         format_version: 1,
         name,
         schema_source_path,
@@ -545,6 +570,7 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
             follow_directory_symlinks: raw.content.follow_directory_symlinks,
             allow_internal_file_symlinks: raw.content.allow_internal_file_symlinks,
         },
+        index_source_path: index_value,
         index_path,
         validation: ValidationConfig {
             warnings_as_errors: raw.validation.warnings_as_errors,

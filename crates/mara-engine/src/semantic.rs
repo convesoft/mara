@@ -18,6 +18,30 @@ use mara_markdown::{
 };
 use regex::Regex;
 
+pub(crate) const fn relation_occurrence_wire_origin(
+    origin: AuthoredRelationOrigin,
+    syntax: AuthoredReferenceSyntax,
+) -> &'static str {
+    match (origin, syntax) {
+        (AuthoredRelationOrigin::InverseNormalized, _) => "inverse_metadata",
+        (_, AuthoredReferenceSyntax::Inline) => "typed_inline",
+        (_, AuthoredReferenceSyntax::Narrative) => "derived_source",
+        (_, AuthoredReferenceSyntax::Metadata) => "canonical_metadata",
+    }
+}
+
+pub(crate) fn relation_inverse_wire_name(
+    schema: &SchemaDocument,
+    relation: &str,
+) -> Option<String> {
+    let definition = schema.relations()?.get(relation)?;
+    if definition.is_symmetric() {
+        Some(relation.to_owned())
+    } else {
+        definition.inverse().map(|inverse| inverse.value().clone())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemanticCompilation {
     items: Vec<NormalizedItem>,
