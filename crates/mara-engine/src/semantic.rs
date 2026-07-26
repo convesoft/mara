@@ -1,11 +1,13 @@
 use std::{cmp::Ordering, collections::BTreeMap};
 
 use mara_core::{
-    AuthoredReference, Diagnostic, DiagnosticContext, DiagnosticItem, FieldDefinition,
-    FieldDiagnosticCode, FieldType, FlavourDefinition, IdentityDiagnosticCode, IdentityIndex,
-    IdentityRecord, ItemDiagnosticCode, NormalizedFieldValue, NormalizedItem, NormalizedNumber,
-    NormalizedScalar, Provenanced, ReferenceOrigin, RelationDiagnosticCode, ResolvedReference,
-    SchemaDocument, SourceSpan, sort_diagnostics,
+    AuthoredReference, AuthoredReferenceSyntax, AuthoredRelationOrigin, CanonicalRelationInput,
+    CanonicalRelations, Diagnostic, DiagnosticContext, DiagnosticItem, DiagnosticSeverity,
+    DiagnosticValue, FieldDefinition, FieldDiagnosticCode, FieldType, FlavourDefinition,
+    IdentityDiagnosticCode, IdentityIndex, IdentityRecord, ItemDiagnosticCode,
+    NormalizedFieldValue, NormalizedItem, NormalizedNumber, NormalizedScalar, Provenanced,
+    ReferenceOrigin, RelationDefinition, RelationDiagnosticCode, RelationOccurrence,
+    ResolvedReference, SchemaDocument, SourceSpan, WeakMention, sort_diagnostics,
 };
 use mara_markdown::{
     InlineReference, ParsedBlock, ParsedDocument, ParsedItem, ParsedMetadataEntry,
@@ -16,6 +18,7 @@ use regex::Regex;
 pub struct SemanticCompilation {
     items: Vec<NormalizedItem>,
     narrative_references: Vec<ResolvedReference>,
+    relations: CanonicalRelations,
     identity_index: IdentityIndex,
     diagnostics: Vec<Diagnostic>,
 }
@@ -29,6 +32,10 @@ impl SemanticCompilation {
         &self.narrative_references
     }
 
+    pub const fn relations(&self) -> &CanonicalRelations {
+        &self.relations
+    }
+
     pub const fn identity_index(&self) -> &IdentityIndex {
         &self.identity_index
     }
@@ -38,7 +45,10 @@ impl SemanticCompilation {
     }
 
     pub fn is_valid(&self) -> bool {
-        self.diagnostics.is_empty()
+        !self
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity() == DiagnosticSeverity::Error)
     }
 
     pub fn into_parts(
@@ -46,12 +56,14 @@ impl SemanticCompilation {
     ) -> (
         Vec<NormalizedItem>,
         Vec<ResolvedReference>,
+        CanonicalRelations,
         IdentityIndex,
         Vec<Diagnostic>,
     ) {
         (
             self.items,
             self.narrative_references,
+            self.relations,
             self.identity_index,
             self.diagnostics,
         )
@@ -113,13 +125,273 @@ pub fn compile_documents(
         }
     }
 
+    let relations = normalize_relations(schema, &items, &narrative_references, &mut diagnostics);
+
     sort_diagnostics(&mut diagnostics);
     SemanticCompilation {
         items,
         narrative_references,
+        relations,
         identity_index,
         diagnostics,
     }
+}
+
+fn normalize_relations(
+    schema: &SchemaDocument,
+    items: &[NormalizedItem],
+    narrative_references: &[ResolvedReference],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CanonicalRelations {
+    let items_by_mid = items
+        .iter()
+        .map(|item| (item.mid().clone(), item))
+        .collect::<BTreeMap<_, _>>();
+    let mut inputs = Vec::new();
+    let mut weak_mentions = narrative_references
+        .iter()
+        .cloned()
+        .map(WeakMention::new)
+        .collect::<Vec<_>>();
+
+    for item in items {
+        for reference in item.resolved_references() {
+            let Some(authored_name) = reference.authored().relation() else {
+                weak_mentions.push(WeakMention::new(reference.clone()));
+                continue;
+            };
+            let Some((definition, origin)) =
+                authored_relation(schema, item.flavour(), authored_name)
+            else {
+                continue;
+            };
+            let Some(authored_target) = items_by_mid.get(reference.target()).copied() else {
+                continue;
+            };
+            let (canonical_source, source_flavour, canonical_target, target_flavour) = match origin
+            {
+                AuthoredRelationOrigin::Direct => (
+                    item.mid().clone(),
+                    item.flavour(),
+                    reference.target().clone(),
+                    authored_target.flavour(),
+                ),
+                AuthoredRelationOrigin::InverseNormalized => (
+                    reference.target().clone(),
+                    authored_target.flavour(),
+                    item.mid().clone(),
+                    item.flavour(),
+                ),
+            };
+
+            let source_allowed = definition
+                .source()
+                .value()
+                .flavours()
+                .value()
+                .iter()
+                .any(|candidate| candidate.value() == source_flavour);
+            if !source_allowed {
+                diagnostics.push(relation_endpoint_diagnostic(
+                    RelationDiagnosticCode::InvalidSourceFlavour,
+                    "source",
+                    definition,
+                    item,
+                    reference,
+                    source_flavour,
+                    definition
+                        .source()
+                        .value()
+                        .flavours()
+                        .value()
+                        .iter()
+                        .map(|candidate| candidate.value().clone()),
+                ));
+                continue;
+            }
+
+            let target_allowed = definition
+                .target()
+                .value()
+                .flavours()
+                .is_some_and(|flavours| {
+                    flavours
+                        .value()
+                        .iter()
+                        .any(|candidate| candidate.value() == target_flavour)
+                });
+            if !target_allowed {
+                diagnostics.push(relation_endpoint_diagnostic(
+                    RelationDiagnosticCode::InvalidTargetFlavour,
+                    "target",
+                    definition,
+                    item,
+                    reference,
+                    target_flavour,
+                    definition
+                        .target()
+                        .value()
+                        .flavours()
+                        .into_iter()
+                        .flat_map(|flavours| flavours.value())
+                        .map(|candidate| candidate.value().clone()),
+                ));
+                continue;
+            }
+
+            if canonical_source == canonical_target && !definition.permits_self_reference() {
+                diagnostics.push(relation_diagnostic(
+                    RelationDiagnosticCode::SelfReference,
+                    "relation does not permit a source item to reference itself",
+                    definition,
+                    item,
+                    reference,
+                ));
+                continue;
+            }
+
+            inputs.push(
+                CanonicalRelationInput::new(
+                    definition.name().to_owned(),
+                    canonical_source,
+                    canonical_target,
+                    RelationOccurrence::new(reference.clone(), origin),
+                )
+                .with_inverse_relation(definition.inverse().map(|inverse| inverse.value().clone()))
+                .with_symmetric(definition.is_symmetric()),
+            );
+        }
+    }
+
+    let relations = CanonicalRelations::build(inputs, weak_mentions);
+    for edge in relations.edges() {
+        for duplicate in edge.duplicate_metadata_occurrences() {
+            let authored = duplicate.reference().authored();
+            let mut diagnostic = Diagnostic::new(
+                RelationDiagnosticCode::Duplicate,
+                "exact duplicate relation metadata occurrence",
+                Some(authored.source().clone()),
+            )
+            .with_context(DiagnosticContext::new(
+                None,
+                authored.relation().map(str::to_owned),
+                Some(authored.target().to_owned()),
+            ))
+            .with_detail("canonical_relation", edge.relation())
+            .with_detail("source_mid", edge.source().to_string())
+            .with_detail("target_mid", edge.target().to_string());
+            if let ReferenceOrigin::Item { mid, display_id } = authored.origin() {
+                diagnostic =
+                    diagnostic.with_item(DiagnosticItem::new(mid.clone(), display_id.clone()));
+            }
+            diagnostics.push(diagnostic);
+        }
+    }
+    relations
+}
+
+fn authored_relation<'a>(
+    schema: &'a SchemaDocument,
+    source_flavour: &str,
+    authored_name: &str,
+) -> Option<(&'a RelationDefinition, AuthoredRelationOrigin)> {
+    let definitions = schema.relations()?.definitions();
+    if let Some(definition) = definitions.get(authored_name)
+        && definition
+            .source()
+            .value()
+            .flavours()
+            .value()
+            .iter()
+            .any(|candidate| candidate.value() == source_flavour)
+    {
+        return Some((definition, AuthoredRelationOrigin::Direct));
+    }
+    definitions.values().find_map(|definition| {
+        (definition.permits_inverse_authoring()
+            && definition
+                .inverse()
+                .is_some_and(|inverse| inverse.value() == authored_name)
+            && definition
+                .target()
+                .value()
+                .flavours()
+                .is_some_and(|flavours| {
+                    flavours
+                        .value()
+                        .iter()
+                        .any(|candidate| candidate.value() == source_flavour)
+                }))
+        .then_some((definition, AuthoredRelationOrigin::InverseNormalized))
+    })
+}
+
+fn schema_relation<'a>(
+    schema: &'a SchemaDocument,
+    authored_name: &str,
+) -> Option<&'a RelationDefinition> {
+    let definitions = schema.relations()?.definitions();
+    definitions.get(authored_name).or_else(|| {
+        definitions.values().find(|definition| {
+            definition
+                .inverse()
+                .is_some_and(|inverse| inverse.value() == authored_name)
+        })
+    })
+}
+
+fn relation_endpoint_diagnostic(
+    code: RelationDiagnosticCode,
+    endpoint: &str,
+    definition: &RelationDefinition,
+    item: &NormalizedItem,
+    reference: &ResolvedReference,
+    actual_flavour: &str,
+    allowed_flavours: impl IntoIterator<Item = String>,
+) -> Diagnostic {
+    relation_diagnostic(
+        code,
+        format!(
+            "relation {:?} does not permit {actual_flavour:?} as its {endpoint} flavour",
+            definition.name()
+        ),
+        definition,
+        item,
+        reference,
+    )
+    .with_detail("endpoint", endpoint)
+    .with_detail("actual_flavour", actual_flavour)
+    .with_detail(
+        "allowed_flavours",
+        DiagnosticValue::Array(
+            allowed_flavours
+                .into_iter()
+                .map(DiagnosticValue::String)
+                .collect(),
+        ),
+    )
+}
+
+fn relation_diagnostic(
+    code: RelationDiagnosticCode,
+    message: impl Into<String>,
+    definition: &RelationDefinition,
+    item: &NormalizedItem,
+    reference: &ResolvedReference,
+) -> Diagnostic {
+    let authored = reference.authored();
+    Diagnostic::new(code, message, Some(authored.source().clone()))
+        .with_item(DiagnosticItem::new(
+            item.mid().clone(),
+            item.display_id()
+                .map(|display_id| display_id.value().clone()),
+        ))
+        .with_context(DiagnosticContext::new(
+            None,
+            authored.relation().map(str::to_owned),
+            Some(authored.target().to_owned()),
+        ))
+        .with_detail("canonical_relation", definition.name())
 }
 
 fn identity_record(schema: &SchemaDocument, item: &ParsedItem) -> IdentityRecord {
@@ -199,13 +471,38 @@ fn normalize_item(
             fields.insert(key, values);
         } else if authorable_relations.contains_key(&key) {
             for entry in entries {
-                references.push(AuthoredReference::new(
-                    entry.value().to_owned(),
-                    None,
-                    Some(key.clone()),
-                    item_origin(item, display_id.as_ref()),
-                    entry.source().clone(),
-                ));
+                references.push(
+                    AuthoredReference::new(
+                        entry.value().to_owned(),
+                        None,
+                        Some(key.clone()),
+                        item_origin(item, display_id.as_ref()),
+                        entry.source().clone(),
+                    )
+                    .with_syntax(AuthoredReferenceSyntax::Metadata),
+                );
+            }
+        } else if schema_relation(schema, &key).is_some() {
+            for entry in entries {
+                diagnostics.push(
+                    item_diagnostic(
+                        RelationDiagnosticCode::InvalidSourceFlavour,
+                        format!(
+                            "relation {key:?} is not authorable for flavour {:?}",
+                            item.flavour()
+                        ),
+                        item,
+                        display_id.as_ref(),
+                        entry.source(),
+                    )
+                    .with_context(DiagnosticContext::new(
+                        None,
+                        Some(key.clone()),
+                        Some(entry.value().to_owned()),
+                    ))
+                    .with_detail("relation", key.clone())
+                    .with_detail("source_flavour", item.flavour()),
+                );
             }
         } else {
             for entry in entries {
@@ -818,8 +1115,49 @@ mod tests {
             None,
             fields,
         );
-        let relation = RelationDefinition::new(
+        let test = FlavourDefinition::new(
+            "test".to_owned(),
+            span(),
+            span(),
+            field("Test".to_owned()),
+            field("A test".to_owned()),
+            field(FlavourGuidance::new(
+                field(vec![value("use".to_owned())]),
+                field(vec![value("avoid".to_owned())]),
+                None,
+                BTreeMap::new(),
+            )),
+            field(DisplayIdDefinition::new(
+                Some(field(true)),
+                Some(field("TEST-[A-Z]+".to_owned())),
+            )),
+            field(RequiredBuiltInDefinition::new(Some(field(true)))),
+            field(RequiredBuiltInDefinition::new(None)),
+            None,
+            BTreeMap::new(),
+        );
+        let traces = RelationDefinition::new(
             "traces".to_owned(),
+            span(),
+            span(),
+            field(RelationSourceEndpoint::new(
+                field(vec![value("req".to_owned())]),
+                None,
+            )),
+            field(RelationTargetEndpoint::new(
+                Some(field(vec![value("req".to_owned())])),
+                None,
+            )),
+            Some(field("traced_by".to_owned())),
+            Some(field(true)),
+            None,
+            None,
+            Some(field(false)),
+            None,
+            None,
+        );
+        let relates = RelationDefinition::new(
+            "relates".to_owned(),
             span(),
             span(),
             field(RelationSourceEndpoint::new(
@@ -832,7 +1170,7 @@ mod tests {
             )),
             None,
             None,
-            None,
+            Some(field(true)),
             None,
             None,
             None,
@@ -847,11 +1185,18 @@ mod tests {
                 field("1.0.0".to_owned()),
             )),
             field(IdentityConfiguration::new(field(mid))),
-            FlavourDefinitions::new(span(), span(), BTreeMap::from([("req".to_owned(), req)])),
+            FlavourDefinitions::new(
+                span(),
+                span(),
+                BTreeMap::from([("req".to_owned(), req), ("test".to_owned(), test)]),
+            ),
             Some(RelationDefinitions::new(
                 span(),
                 span(),
-                BTreeMap::from([("traces".to_owned(), relation)]),
+                BTreeMap::from([
+                    ("relates".to_owned(), relates),
+                    ("traces".to_owned(), traces),
+                ]),
             )),
             None,
         )
@@ -928,6 +1273,9 @@ Body.\n\
             forward.narrative_references()[0].authored().source().path(),
             "a.mara.md"
         );
+        assert_eq!(forward.relations().edges().len(), 1);
+        assert_eq!(forward.relations().edges()[0].relation(), "traces");
+        assert_eq!(forward.relations().weak_mentions().len(), 3);
     }
 
     #[test]
@@ -1131,5 +1479,218 @@ Body.\n\
                 .any(|diagnostic| diagnostic.code().as_str() == "reference.unresolved")
         );
         assert!(result.narrative_references().is_empty());
+    }
+
+    #[test]
+    fn direct_inverse_typed_and_symmetric_occurrences_normalize_to_canonical_edges() {
+        let schema = schema();
+        let first = document(
+            "z.mara.md",
+            ":::req m_00000000000000000000000001\n\
+:id: REQ-ONE\n\
+:title: First\n\
+:custom_state: approved\n\
+:tag: alpha\n\
+:traces: REQ-TWO\n\
+:relates: REQ-TWO\n\
+\n\
+Also [[traces:REQ-TWO]].\n\
+:::\n",
+            &schema,
+        );
+        let second = document(
+            "a.mara.md",
+            ":::req m_00000000000000000000000002\n\
+:id: REQ-TWO\n\
+:title: Second\n\
+:custom_state: approved\n\
+:tag: beta\n\
+:traced_by: REQ-ONE\n\
+:relates: REQ-ONE\n\
+\n\
+Body.\n\
+:::\n",
+            &schema,
+        );
+
+        let result = compile_documents(&schema, &[first, second]);
+
+        assert!(result.is_valid(), "{:?}", result.diagnostics());
+        assert_eq!(result.relations().edges().len(), 2);
+        let relates = result
+            .relations()
+            .edges()
+            .iter()
+            .find(|edge| edge.relation() == "relates")
+            .unwrap();
+        assert_eq!(relates.occurrences().len(), 2);
+        assert_eq!(relates.source().as_str(), "m_00000000000000000000000001");
+        assert_eq!(relates.target().as_str(), "m_00000000000000000000000002");
+        let traces = result
+            .relations()
+            .edges()
+            .iter()
+            .find(|edge| edge.relation() == "traces")
+            .unwrap();
+        assert_eq!(traces.occurrences().len(), 3);
+        assert_eq!(
+            traces
+                .occurrences()
+                .iter()
+                .map(RelationOccurrence::origin)
+                .collect::<Vec<_>>(),
+            vec![
+                AuthoredRelationOrigin::InverseNormalized,
+                AuthoredRelationOrigin::Direct,
+                AuthoredRelationOrigin::Direct,
+            ]
+        );
+        assert!(
+            traces.occurrences().iter().any(|occurrence| occurrence
+                .reference()
+                .authored()
+                .syntax()
+                == AuthoredReferenceSyntax::Inline)
+        );
+        assert!(result.relations().derived_views().iter().any(|view| {
+            view.relation() == "traced_by"
+                && view.origin() == mara_core::DerivedRelationOrigin::Inverse
+        }));
+        assert!(result.relations().derived_views().iter().any(|view| {
+            view.relation() == "relates"
+                && view.origin() == mara_core::DerivedRelationOrigin::Symmetric
+        }));
+    }
+
+    #[test]
+    fn repeated_exact_metadata_warns_and_keeps_every_occurrence() {
+        let schema = schema();
+        let parsed = document(
+            "repeated.mara.md",
+            ":::req m_00000000000000000000000001\n\
+:id: REQ-ONE\n\
+:title: First\n\
+:custom_state: approved\n\
+:tag: alpha\n\
+:traces: REQ-TWO\n\
+:traces: REQ-TWO\n\
+\n\
+Body.\n\
+:::\n\
+\n\
+:::req m_00000000000000000000000002\n\
+:id: REQ-TWO\n\
+:title: Second\n\
+:custom_state: approved\n\
+:tag: beta\n\
+\n\
+Body.\n\
+:::\n",
+            &schema,
+        );
+
+        let result = compile_documents(&schema, &[parsed]);
+
+        assert!(result.is_valid());
+        assert_eq!(result.relations().edges().len(), 1);
+        assert_eq!(result.relations().edges()[0].occurrences().len(), 2);
+        let duplicates = result
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| diagnostic.code() == RelationDiagnosticCode::Duplicate.into())
+            .collect::<Vec<_>>();
+        assert_eq!(duplicates.len(), 1);
+        assert_eq!(duplicates[0].severity(), DiagnosticSeverity::Warning);
+        assert_eq!(duplicates[0].context().relation(), Some("traces"));
+        assert_eq!(duplicates[0].context().target(), Some("REQ-TWO"));
+    }
+
+    #[test]
+    fn invalid_relation_endpoints_self_reference_and_broken_targets_are_diagnosed() {
+        let schema = schema();
+        let parsed = document(
+            "invalid-relations.mara.md",
+            ":::req m_00000000000000000000000001\n\
+:id: REQ-ONE\n\
+:title: First\n\
+:custom_state: approved\n\
+:tag: alpha\n\
+:traces: TEST-ONE\n\
+:traces: REQ-ONE\n\
+\n\
+Broken [[traces:MISSING]].\n\
+:::\n\
+\n\
+:::test m_00000000000000000000000002\n\
+:id: TEST-ONE\n\
+:title: Test\n\
+:traces: REQ-ONE\n\
+\n\
+Body.\n\
+:::\n",
+            &schema,
+        );
+
+        let result = compile_documents(&schema, &[parsed]);
+        let codes = result
+            .diagnostics()
+            .iter()
+            .map(|diagnostic| diagnostic.code().as_str())
+            .collect::<BTreeSet<_>>();
+
+        assert!(!result.is_valid());
+        assert!(codes.contains("relation.invalid_source_flavour"));
+        assert!(codes.contains("relation.invalid_target_flavour"));
+        assert!(codes.contains("relation.self_reference"));
+        assert!(codes.contains("reference.unresolved"));
+        assert!(result.relations().edges().is_empty());
+    }
+
+    #[test]
+    fn bare_item_and_narrative_references_remain_weak_mentions() {
+        let schema = schema();
+        let parsed = document(
+            "mentions.mara.md",
+            "Narrative [[REQ-TWO]].\n\
+\n\
+:::req m_00000000000000000000000001\n\
+:id: REQ-ONE\n\
+:title: First\n\
+:custom_state: approved\n\
+:tag: alpha\n\
+\n\
+Item [[REQ-TWO]].\n\
+:::\n\
+\n\
+:::req m_00000000000000000000000002\n\
+:id: REQ-TWO\n\
+:title: Second\n\
+:custom_state: approved\n\
+:tag: beta\n\
+\n\
+Body.\n\
+:::\n",
+            &schema,
+        );
+
+        let result = compile_documents(&schema, &[parsed]);
+
+        assert!(result.is_valid());
+        assert!(result.relations().edges().is_empty());
+        assert_eq!(result.relations().weak_mentions().len(), 2);
+        assert!(matches!(
+            result.relations().weak_mentions()[0]
+                .reference()
+                .authored()
+                .origin(),
+            ReferenceOrigin::Narrative(_)
+        ));
+        assert!(matches!(
+            result.relations().weak_mentions()[1]
+                .reference()
+                .authored()
+                .origin(),
+            ReferenceOrigin::Item { .. }
+        ));
     }
 }

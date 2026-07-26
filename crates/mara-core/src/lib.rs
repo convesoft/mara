@@ -25,9 +25,11 @@ pub use schema::{
     SchemaDocument, SchemaField, SchemaIdentity, SchemaSection, SchemaValue,
 };
 pub use semantic::{
-    AuthoredReference, IdentityCandidate, IdentityIndex, IdentityIndexBuild, IdentityRecord,
+    AuthoredReference, AuthoredReferenceSyntax, AuthoredRelationOrigin, CanonicalRelationEdge,
+    CanonicalRelationInput, CanonicalRelationKey, CanonicalRelations, DerivedRelationOrigin,
+    DerivedRelationView, IdentityCandidate, IdentityIndex, IdentityIndexBuild, IdentityRecord,
     NormalizedFieldValue, NormalizedItem, NormalizedNumber, NormalizedScalar, Provenanced,
-    ReferenceOrigin, ResolvedReference,
+    ReferenceOrigin, RelationOccurrence, ResolvedReference, WeakMention,
 };
 pub use source::{
     InvalidSourceSpan, LineEnding, SourceDocument, SourceIndex, SourceSpan, SourceText,
