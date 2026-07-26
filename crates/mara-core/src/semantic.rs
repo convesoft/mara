@@ -1,4 +1,7 @@
-use std::{cmp::Ordering, collections::BTreeMap};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use crate::{
     Diagnostic, DiagnosticContext, DiagnosticItem, DiagnosticValue, IdentityDiagnosticCode, Mid,
@@ -60,12 +63,20 @@ pub enum ReferenceOrigin {
     Narrative(SourceSpan),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AuthoredReferenceSyntax {
+    Inline,
+    Metadata,
+    Narrative,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthoredReference {
     target: String,
     label: Option<String>,
     relation: Option<String>,
     origin: ReferenceOrigin,
+    syntax: AuthoredReferenceSyntax,
     source: SourceSpan,
 }
 
@@ -77,13 +88,23 @@ impl AuthoredReference {
         origin: ReferenceOrigin,
         source: SourceSpan,
     ) -> Self {
+        let syntax = match origin {
+            ReferenceOrigin::Item { .. } => AuthoredReferenceSyntax::Inline,
+            ReferenceOrigin::Narrative(_) => AuthoredReferenceSyntax::Narrative,
+        };
         Self {
             target,
             label,
             relation,
             origin,
+            syntax,
             source,
         }
+    }
+
+    pub fn with_syntax(mut self, syntax: AuthoredReferenceSyntax) -> Self {
+        self.syntax = syntax;
+        self
     }
 
     pub fn target(&self) -> &str {
@@ -100,6 +121,10 @@ impl AuthoredReference {
 
     pub const fn origin(&self) -> &ReferenceOrigin {
         &self.origin
+    }
+
+    pub const fn syntax(&self) -> AuthoredReferenceSyntax {
+        self.syntax
     }
 
     pub const fn source(&self) -> &SourceSpan {
@@ -125,6 +150,309 @@ impl ResolvedReference {
     pub const fn authored(&self) -> &AuthoredReference {
         &self.authored
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AuthoredRelationOrigin {
+    Direct,
+    InverseNormalized,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationOccurrence {
+    reference: ResolvedReference,
+    origin: AuthoredRelationOrigin,
+}
+
+impl RelationOccurrence {
+    pub fn new(reference: ResolvedReference, origin: AuthoredRelationOrigin) -> Self {
+        Self { reference, origin }
+    }
+
+    pub const fn reference(&self) -> &ResolvedReference {
+        &self.reference
+    }
+
+    pub const fn origin(&self) -> AuthoredRelationOrigin {
+        self.origin
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CanonicalRelationKey {
+    relation: String,
+    source: Mid,
+    target: Mid,
+}
+
+impl CanonicalRelationKey {
+    pub fn new(relation: String, source: Mid, target: Mid) -> Self {
+        Self {
+            relation,
+            source,
+            target,
+        }
+    }
+
+    pub fn relation(&self) -> &str {
+        &self.relation
+    }
+
+    pub const fn source(&self) -> &Mid {
+        &self.source
+    }
+
+    pub const fn target(&self) -> &Mid {
+        &self.target
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalRelationInput {
+    relation: String,
+    source: Mid,
+    target: Mid,
+    occurrence: RelationOccurrence,
+    inverse_relation: Option<String>,
+    symmetric: bool,
+}
+
+impl CanonicalRelationInput {
+    pub fn new(relation: String, source: Mid, target: Mid, occurrence: RelationOccurrence) -> Self {
+        Self {
+            relation,
+            source,
+            target,
+            occurrence,
+            inverse_relation: None,
+            symmetric: false,
+        }
+    }
+
+    pub fn with_inverse_relation(mut self, inverse_relation: Option<String>) -> Self {
+        self.inverse_relation = inverse_relation;
+        self
+    }
+
+    pub fn with_symmetric(mut self, symmetric: bool) -> Self {
+        self.symmetric = symmetric;
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CanonicalRelationEdge {
+    key: CanonicalRelationKey,
+    occurrences: Vec<RelationOccurrence>,
+}
+
+impl CanonicalRelationEdge {
+    pub const fn key(&self) -> &CanonicalRelationKey {
+        &self.key
+    }
+
+    pub fn relation(&self) -> &str {
+        self.key.relation()
+    }
+
+    pub const fn source(&self) -> &Mid {
+        self.key.source()
+    }
+
+    pub const fn target(&self) -> &Mid {
+        self.key.target()
+    }
+
+    pub fn occurrences(&self) -> &[RelationOccurrence] {
+        &self.occurrences
+    }
+
+    pub fn duplicate_metadata_occurrences(&self) -> Vec<&RelationOccurrence> {
+        let mut seen = BTreeSet::new();
+        self.occurrences
+            .iter()
+            .filter(|occurrence| {
+                let authored = occurrence.reference().authored();
+                authored.syntax() == AuthoredReferenceSyntax::Metadata
+                    && !seen.insert((
+                        occurrence.origin(),
+                        authored.relation().map(str::to_owned),
+                        authored.target().to_owned(),
+                    ))
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WeakMention {
+    reference: ResolvedReference,
+}
+
+impl WeakMention {
+    pub fn new(reference: ResolvedReference) -> Self {
+        Self { reference }
+    }
+
+    pub const fn reference(&self) -> &ResolvedReference {
+        &self.reference
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum DerivedRelationOrigin {
+    Backlink,
+    Inverse,
+    Symmetric,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DerivedRelationView {
+    relation: String,
+    source: Mid,
+    target: Mid,
+    canonical: CanonicalRelationKey,
+    origin: DerivedRelationOrigin,
+}
+
+impl DerivedRelationView {
+    pub fn relation(&self) -> &str {
+        &self.relation
+    }
+
+    pub const fn source(&self) -> &Mid {
+        &self.source
+    }
+
+    pub const fn target(&self) -> &Mid {
+        &self.target
+    }
+
+    pub const fn canonical(&self) -> &CanonicalRelationKey {
+        &self.canonical
+    }
+
+    pub const fn origin(&self) -> DerivedRelationOrigin {
+        self.origin
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CanonicalRelations {
+    edges: Vec<CanonicalRelationEdge>,
+    weak_mentions: Vec<WeakMention>,
+    derived_views: Vec<DerivedRelationView>,
+}
+
+impl CanonicalRelations {
+    pub fn build(
+        inputs: impl IntoIterator<Item = CanonicalRelationInput>,
+        weak_mentions: impl IntoIterator<Item = WeakMention>,
+    ) -> Self {
+        let mut grouped = BTreeMap::<
+            CanonicalRelationKey,
+            (Vec<RelationOccurrence>, BTreeSet<RelationViewSpecification>),
+        >::new();
+        for input in inputs {
+            let (source, target) = if input.symmetric && input.target < input.source {
+                (input.target, input.source)
+            } else {
+                (input.source, input.target)
+            };
+            let key = CanonicalRelationKey::new(input.relation, source, target);
+            let (occurrences, views) = grouped.entry(key).or_default();
+            occurrences.push(input.occurrence);
+            views.insert(RelationViewSpecification::Backlink);
+            if let Some(inverse) = input.inverse_relation {
+                views.insert(RelationViewSpecification::Inverse(inverse));
+            }
+            if input.symmetric {
+                views.insert(RelationViewSpecification::Symmetric);
+            }
+        }
+
+        let mut edges = Vec::with_capacity(grouped.len());
+        let mut derived_views = Vec::new();
+        for (key, (mut occurrences, views)) in grouped {
+            occurrences.sort_by(compare_relation_occurrences);
+            for view in views {
+                derived_views.push(view.materialize(&key));
+            }
+            edges.push(CanonicalRelationEdge { key, occurrences });
+        }
+        derived_views.sort_by(compare_derived_views);
+
+        let mut weak_mentions = weak_mentions.into_iter().collect::<Vec<_>>();
+        weak_mentions.sort_by(|left, right| {
+            compare_resolved_references(left.reference(), right.reference())
+        });
+
+        Self {
+            edges,
+            weak_mentions,
+            derived_views,
+        }
+    }
+
+    pub fn edges(&self) -> &[CanonicalRelationEdge] {
+        &self.edges
+    }
+
+    pub fn weak_mentions(&self) -> &[WeakMention] {
+        &self.weak_mentions
+    }
+
+    pub fn derived_views(&self) -> &[DerivedRelationView] {
+        &self.derived_views
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum RelationViewSpecification {
+    Backlink,
+    Inverse(String),
+    Symmetric,
+}
+
+impl RelationViewSpecification {
+    fn materialize(self, canonical: &CanonicalRelationKey) -> DerivedRelationView {
+        let (relation, origin) = match self {
+            Self::Backlink => (canonical.relation.clone(), DerivedRelationOrigin::Backlink),
+            Self::Inverse(relation) => (relation, DerivedRelationOrigin::Inverse),
+            Self::Symmetric => (canonical.relation.clone(), DerivedRelationOrigin::Symmetric),
+        };
+        DerivedRelationView {
+            relation,
+            source: canonical.target.clone(),
+            target: canonical.source.clone(),
+            canonical: canonical.clone(),
+            origin,
+        }
+    }
+}
+
+fn compare_relation_occurrences(left: &RelationOccurrence, right: &RelationOccurrence) -> Ordering {
+    compare_resolved_references(left.reference(), right.reference())
+        .then_with(|| left.origin().cmp(&right.origin()))
+}
+
+fn compare_resolved_references(left: &ResolvedReference, right: &ResolvedReference) -> Ordering {
+    compare_spans(left.authored().source(), right.authored().source())
+        .then_with(|| left.target().cmp(right.target()))
+        .then_with(|| left.authored().target().cmp(right.authored().target()))
+        .then_with(|| left.authored().relation().cmp(&right.authored().relation()))
+        .then_with(|| left.authored().label().cmp(&right.authored().label()))
+        .then_with(|| left.authored().syntax().cmp(&right.authored().syntax()))
+}
+
+fn compare_derived_views(left: &DerivedRelationView, right: &DerivedRelationView) -> Ordering {
+    left.relation
+        .as_bytes()
+        .cmp(right.relation.as_bytes())
+        .then_with(|| left.source.cmp(&right.source))
+        .then_with(|| left.target.cmp(&right.target))
+        .then_with(|| left.origin.cmp(&right.origin))
+        .then_with(|| left.canonical.cmp(&right.canonical))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -548,6 +876,38 @@ mod tests {
         )
     }
 
+    fn relation_input(
+        relation: &str,
+        source: Mid,
+        target: Mid,
+        path: &str,
+        authored_relation: &str,
+        origin: AuthoredRelationOrigin,
+    ) -> CanonicalRelationInput {
+        let reference_source = span(path, "ref", 0, 3);
+        let (authored_source, authored_target) = match origin {
+            AuthoredRelationOrigin::Direct => (source.clone(), target.clone()),
+            AuthoredRelationOrigin::InverseNormalized => (target.clone(), source.clone()),
+        };
+        let authored = AuthoredReference::new(
+            authored_target.to_string(),
+            None,
+            Some(authored_relation.to_owned()),
+            ReferenceOrigin::Item {
+                mid: authored_source,
+                display_id: None,
+            },
+            reference_source,
+        )
+        .with_syntax(AuthoredReferenceSyntax::Metadata);
+        CanonicalRelationInput::new(
+            relation.to_owned(),
+            source,
+            target,
+            RelationOccurrence::new(ResolvedReference::new(authored_target, authored), origin),
+        )
+    }
+
     #[test]
     fn exact_mid_wins_and_display_ids_are_exact_without_alias_fallback() {
         let first = mid("00000000000000000000000001");
@@ -644,5 +1004,168 @@ mod tests {
                 .code(),
             ReferenceDiagnosticCode::Unresolved.into()
         );
+    }
+
+    #[test]
+    fn canonical_edges_deduplicate_and_preserve_sorted_authored_occurrences() {
+        let source = mid("00000000000000000000000001");
+        let target = mid("00000000000000000000000002");
+        let direct = relation_input(
+            "blocks",
+            source.clone(),
+            target.clone(),
+            "z.md",
+            "blocks",
+            AuthoredRelationOrigin::Direct,
+        )
+        .with_inverse_relation(Some("blocked_by".to_owned()));
+        let inverse = relation_input(
+            "blocks",
+            source.clone(),
+            target.clone(),
+            "a.md",
+            "blocked_by",
+            AuthoredRelationOrigin::InverseNormalized,
+        )
+        .with_inverse_relation(Some("blocked_by".to_owned()));
+
+        let model = CanonicalRelations::build([direct.clone(), inverse.clone()], []);
+        let reversed = CanonicalRelations::build([inverse, direct], []);
+
+        assert_eq!(model, reversed);
+        assert_eq!(model.edges().len(), 1);
+        let edge = &model.edges()[0];
+        assert_eq!(edge.relation(), "blocks");
+        assert_eq!(edge.source(), &source);
+        assert_eq!(edge.target(), &target);
+        assert_eq!(edge.occurrences().len(), 2);
+        assert_eq!(
+            edge.occurrences()[0].reference().authored().source().path(),
+            "a.md"
+        );
+        assert_eq!(
+            edge.occurrences()[0].origin(),
+            AuthoredRelationOrigin::InverseNormalized
+        );
+        assert_eq!(
+            edge.occurrences()[1].reference().authored().source().path(),
+            "z.md"
+        );
+    }
+
+    #[test]
+    fn symmetric_identity_and_all_derived_views_are_explicit_and_deterministic() {
+        let first = mid("00000000000000000000000001");
+        let second = mid("00000000000000000000000002");
+        let input = relation_input(
+            "related_to",
+            second.clone(),
+            first.clone(),
+            "relation.md",
+            "related_to",
+            AuthoredRelationOrigin::Direct,
+        )
+        .with_symmetric(true);
+
+        let model = CanonicalRelations::build([input], []);
+
+        assert_eq!(model.edges()[0].source(), &first);
+        assert_eq!(model.edges()[0].target(), &second);
+        assert_eq!(model.derived_views().len(), 2);
+        assert_eq!(
+            model
+                .derived_views()
+                .iter()
+                .map(DerivedRelationView::origin)
+                .collect::<Vec<_>>(),
+            vec![
+                DerivedRelationOrigin::Backlink,
+                DerivedRelationOrigin::Symmetric,
+            ]
+        );
+        assert!(
+            model
+                .derived_views()
+                .iter()
+                .all(|view| view.canonical() == model.edges()[0].key())
+        );
+    }
+
+    #[test]
+    fn exact_metadata_duplicates_are_reported_without_dropping_provenance() {
+        let source = mid("00000000000000000000000001");
+        let target = mid("00000000000000000000000002");
+        let first = relation_input(
+            "blocks",
+            source.clone(),
+            target.clone(),
+            "a.md",
+            "blocks",
+            AuthoredRelationOrigin::Direct,
+        );
+        let duplicate = relation_input(
+            "blocks",
+            source,
+            target,
+            "b.md",
+            "blocks",
+            AuthoredRelationOrigin::Direct,
+        );
+
+        let model = CanonicalRelations::build([duplicate, first], []);
+        let edge = &model.edges()[0];
+
+        assert_eq!(edge.occurrences().len(), 2);
+        assert_eq!(edge.duplicate_metadata_occurrences().len(), 1);
+        assert_eq!(
+            edge.duplicate_metadata_occurrences()[0]
+                .reference()
+                .authored()
+                .source()
+                .path(),
+            "b.md"
+        );
+    }
+
+    #[test]
+    fn weak_mentions_keep_item_and_narrative_provenance_in_source_order() {
+        let source = mid("00000000000000000000000001");
+        let target = mid("00000000000000000000000002");
+        let item = AuthoredReference::new(
+            target.to_string(),
+            None,
+            None,
+            ReferenceOrigin::Item {
+                mid: source,
+                display_id: Some("REQ-ONE".to_owned()),
+            },
+            span("z.md", "ref", 0, 3),
+        );
+        let narrative = AuthoredReference::new(
+            target.to_string(),
+            None,
+            None,
+            ReferenceOrigin::Narrative(span("a.md", "ref", 0, 3)),
+            span("a.md", "ref", 0, 3),
+        );
+
+        let model = CanonicalRelations::build(
+            [],
+            [
+                WeakMention::new(ResolvedReference::new(target.clone(), item)),
+                WeakMention::new(ResolvedReference::new(target, narrative)),
+            ],
+        );
+
+        assert!(model.edges().is_empty());
+        assert_eq!(model.weak_mentions().len(), 2);
+        assert!(matches!(
+            model.weak_mentions()[0].reference().authored().origin(),
+            ReferenceOrigin::Narrative(_)
+        ));
+        assert!(matches!(
+            model.weak_mentions()[1].reference().authored().origin(),
+            ReferenceOrigin::Item { .. }
+        ));
     }
 }

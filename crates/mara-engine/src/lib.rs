@@ -6,3 +6,5 @@ pub mod identity;
 pub mod project;
 pub mod schema;
 pub mod semantic;
+
+pub use semantic::{SemanticCompilation, compile_documents};

@@ -208,19 +208,39 @@ impl ReferenceDiagnosticCode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RelationDiagnosticCode {
     Unknown,
+    InvalidSourceFlavour,
+    InvalidTargetFlavour,
+    SelfReference,
+    Duplicate,
 }
 
 impl RelationDiagnosticCode {
-    pub const ALL: [Self; 1] = [Self::Unknown];
+    pub const ALL: [Self; 5] = [
+        Self::Unknown,
+        Self::InvalidSourceFlavour,
+        Self::InvalidTargetFlavour,
+        Self::SelfReference,
+        Self::Duplicate,
+    ];
 
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Unknown => "relation.unknown",
+            Self::InvalidSourceFlavour => "relation.invalid_source",
+            Self::InvalidTargetFlavour => "relation.invalid_target",
+            Self::SelfReference => "relation.self_reference",
+            Self::Duplicate => "relation.duplicate_occurrence",
         }
     }
 
     pub const fn default_severity(self) -> DiagnosticSeverity {
-        DiagnosticSeverity::Error
+        match self {
+            Self::Duplicate => DiagnosticSeverity::Warning,
+            Self::Unknown
+            | Self::InvalidSourceFlavour
+            | Self::InvalidTargetFlavour
+            | Self::SelfReference => DiagnosticSeverity::Error,
+        }
     }
 }
 
@@ -709,7 +729,13 @@ mod tests {
         );
         assert_eq!(
             RelationDiagnosticCode::ALL.map(RelationDiagnosticCode::as_str),
-            ["relation.unknown"]
+            [
+                "relation.unknown",
+                "relation.invalid_source",
+                "relation.invalid_target",
+                "relation.self_reference",
+                "relation.duplicate_occurrence",
+            ]
         );
     }
 
