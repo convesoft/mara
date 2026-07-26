@@ -5,6 +5,7 @@ use mara_engine::{
     command::{OutputFormat, run_show},
     write_index,
 };
+use sha2::{Digest, Sha256};
 
 const SCHEMA: &str = r#"format_version: 1
 schema:
@@ -145,6 +146,11 @@ fn complete_unversioned_projection_is_canonical_and_repeatable() {
         .to_canonical_json()
         .unwrap();
     assert_eq!(first, second);
+    // Byte-exact golden for the complete nested projection asserted below.
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&first)),
+        "e08c7416cc097e7d36469b09422b0a02f3f3ac2ed22c87cd2359f4f9585728b8"
+    );
     assert!(first.ends_with(b"\n"));
     assert!(!first.ends_with(b"\n\n"));
     assert!(!first.contains(&b'\r'));

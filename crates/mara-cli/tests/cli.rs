@@ -658,6 +658,21 @@ fn index_preserves_the_previous_file_when_validation_policy_fails() {
     assert!(escalated_envelope["error"].is_null());
     assert_eq!(fs::read(&escalated_path).unwrap(), b"previous index\n");
 
+    fs::write(
+        escalated_fixture.path().join("docs/items.mara.md"),
+        VALID_ITEMS,
+    )
+    .unwrap();
+    let rebuilt = run(escalated_fixture.path(), &["index", "--format", "json"]);
+    assert_eq!(rebuilt.status.code(), Some(0));
+    assert_eq!(json(&rebuilt)["status"], "ok");
+    let rebuilt_index = fs::read(&escalated_path).unwrap();
+    assert_ne!(rebuilt_index, b"previous index\n");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&rebuilt_index).unwrap()["format"],
+        "mara.index"
+    );
+
     let invalid_fixture = project(DUPLICATE_DISPLAY_ID_ITEMS);
     let invalid_path = invalid_fixture.path().join(".mara/index.json");
     fs::write(&invalid_path, b"previous index\n").unwrap();
