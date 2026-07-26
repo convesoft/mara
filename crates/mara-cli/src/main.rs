@@ -5,7 +5,9 @@ use mara_engine::command::{
     CommandOutput, OutputFormat, generate_project_mid, initialize_project, run_check, run_index,
     run_list, run_show, run_trace,
 };
-use mara_engine::transaction::{RecoveryMode, recover_transaction};
+use mara_engine::transaction::{
+    RecoveryMode, RenameOptions, recover_transaction, rename_display_id,
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -61,6 +63,10 @@ enum Command {
         #[arg(long, default_value_t = 1)]
         depth: usize,
     },
+    Id {
+        #[command(subcommand)]
+        command: IdCommand,
+    },
     Transaction {
         #[command(subcommand)]
         command: TransactionCommand,
@@ -72,6 +78,16 @@ enum SchemaCommand {
     Check {
         #[arg(long, value_enum, default_value_t)]
         format: Format,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum IdCommand {
+    Rename {
+        old: String,
+        new: String,
+        #[arg(long)]
+        allow_dirty: bool,
     },
 }
 
@@ -163,6 +179,27 @@ fn main() -> ExitCode {
             direction,
             depth,
         } => emit(run_trace(".", &reference, direction.into(), depth), format),
+        Command::Id {
+            command:
+                IdCommand::Rename {
+                    old,
+                    new,
+                    allow_dirty,
+                },
+        } => match rename_display_id(".", &old, &new, RenameOptions { allow_dirty }) {
+            Ok(result) => {
+                println!("renamed display ID {old} to {new}");
+                println!("transaction: {}", result.transaction_id());
+                for path in result.files_changed() {
+                    println!("changed: {path}");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("{error}");
+                ExitCode::from(2)
+            }
+        },
         Command::Transaction {
             command: TransactionCommand::Recover { rollback, complete },
         } => {

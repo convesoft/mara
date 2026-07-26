@@ -123,6 +123,72 @@ fn run(root: &std::path::Path, args: &[&str]) -> std::process::Output {
         .expect("run mara command")
 }
 
+fn git(root: &Path, args: &[&str]) -> std::process::Output {
+    Command::new("git")
+        .current_dir(root)
+        .args(args)
+        .output()
+        .expect("run Git command")
+}
+
+fn initialize_git_repository(root: &Path) {
+    for arguments in [
+        &["init", "--quiet"][..],
+        &["config", "user.email", "mara-cli@example.invalid"],
+        &["config", "user.name", "Mara CLI Test"],
+        &["add", "."],
+        &["commit", "--quiet", "-m", "test: initialize fixture"],
+    ] {
+        let output = git(root, arguments);
+        assert!(
+            output.status.success(),
+            "Git command {arguments:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+fn create_incomplete_transaction(root: &Path) -> &'static str {
+    let transaction = "tx_00000000000000000000000000";
+    let directory = root.join(".mara/transactions").join(transaction);
+    fs::create_dir_all(&directory).unwrap();
+    let prefix = format!("docs/.mara-{transaction}-000000");
+    let journal = serde_json::json!({
+        "format": "mara.transaction",
+        "version": 1,
+        "id": transaction,
+        "operation": "display_id_rename",
+        "phase": "preparing",
+        "outcome": null,
+        "allow_dirty": false,
+        "source_mid": "m_00000000000000000000000002",
+        "old_id": "BETA-B",
+        "new_id": "BETA-RENAMED",
+        "files": [{
+            "ordinal": 0,
+            "path": "docs/items.mara.md",
+            "file_identity": "fixture-file",
+            "original_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "replacement_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "original_size": 0,
+            "replacement_size": 0,
+            "readonly": false,
+            "unix_mode": null,
+            "stage_path": format!("{prefix}.stage"),
+            "stage_identity": null,
+            "backup_path": format!("{prefix}.backup"),
+            "backup_identity": null,
+            "state": "declared"
+        }]
+    });
+    fs::write(
+        directory.join("journal.json"),
+        serde_json::to_vec_pretty(&journal).unwrap(),
+    )
+    .unwrap();
+    transaction
+}
+
 fn json(output: &std::process::Output) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).expect("command emits one JSON envelope")
 }
@@ -694,4 +760,130 @@ fn transaction_recovery_requires_exactly_one_explicit_mode() {
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert!(stderr.contains("--rollback") || stderr.contains("--complete"));
     }
+}
+
+#[test]
+fn display_id_rename_reports_success_and_rewrites_the_project() {
+    // TEST-DISPLAY-ID and TEST-EDIT-PREFLIGHT.
+    let fixture = project(VALID_ITEMS);
+    let output = run(fixture.path(), &["id", "rename", "BETA-B", "BETA-RENAMED"]);
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    let human = String::from_utf8(output.stdout).unwrap();
+    assert!(human.starts_with("renamed display ID BETA-B to BETA-RENAMED\ntransaction: tx_"));
+    assert!(human.ends_with("\nchanged: docs/items.mara.md\n"));
+    let source = fs::read_to_string(fixture.path().join("docs/items.mara.md")).unwrap();
+    assert!(!source.contains("BETA-B"));
+    assert_eq!(source.matches("BETA-RENAMED").count(), 2);
+}
+
+#[test]
+fn display_id_rename_rejects_an_invalid_replacement_without_writing() {
+    // TEST-DISPLAY-ID and TEST-EDIT-PREFLIGHT.
+    let schema = SCHEMA.replacen(
+        "  beta:\n    label: Beta\n    description: Fixture target.\n    guidance:\n      use_when: [Testing target items.]\n      avoid_when: [Testing source items.]\n    id: {}",
+        "  beta:\n    label: Beta\n    description: Fixture target.\n    guidance:\n      use_when: [Testing target items.]\n      avoid_when: [Testing source items.]\n    id:\n      pattern: BETA-[A-Z]+",
+        1,
+    );
+    let fixture = project_with_schema(&schema, VALID_ITEMS);
+    let before = fs::read(fixture.path().join("docs/items.mara.md")).unwrap();
+    let output = run(fixture.path(), &["id", "rename", "BETA-B", "invalid"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "project validation failed: the complete renamed project is invalid\n"
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("docs/items.mara.md")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn display_id_rename_rejects_a_duplicate_id_without_writing() {
+    // TEST-DISPLAY-ID and REQ-DISPLAY-ID-RENAME.
+    let fixture = project(VALID_ITEMS);
+    let before = fs::read(fixture.path().join("docs/items.mara.md")).unwrap();
+    let output = run(fixture.path(), &["id", "rename", "BETA-B", "ALPHA-A"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "invalid display-ID rename: display ID \"ALPHA-A\" is already in use\n"
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("docs/items.mara.md")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn display_id_rename_rejects_a_dirty_worktree_by_default() {
+    // TEST-EDIT-PREFLIGHT and REQ-EDIT-WORKTREE-POLICY.
+    let fixture = project(VALID_ITEMS);
+    initialize_git_repository(fixture.path());
+    fs::write(fixture.path().join("notes.txt"), "uncommitted\n").unwrap();
+    let before = fs::read(fixture.path().join("docs/items.mara.md")).unwrap();
+    let output = run(fixture.path(), &["id", "rename", "BETA-B", "BETA-RENAMED"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        "Git worktree is not clean\n"
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("docs/items.mara.md")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn display_id_rename_allows_a_dirty_worktree_only_when_explicit() {
+    // TEST-EDIT-PREFLIGHT, REQ-EDIT-WORKTREE-POLICY, and REQ-EDIT-NO-COMMIT.
+    let fixture = project(VALID_ITEMS);
+    initialize_git_repository(fixture.path());
+    let head = git(fixture.path(), &["rev-parse", "HEAD"]).stdout;
+    fs::write(fixture.path().join("notes.txt"), "uncommitted\n").unwrap();
+    let output = run(
+        fixture.path(),
+        &["id", "rename", "BETA-B", "BETA-RENAMED", "--allow-dirty"],
+    );
+
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    assert_eq!(git(fixture.path(), &["rev-parse", "HEAD"]).stdout, head);
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("notes.txt")).unwrap(),
+        "uncommitted\n"
+    );
+    assert!(
+        fs::read_to_string(fixture.path().join("docs/items.mara.md"))
+            .unwrap()
+            .contains("BETA-RENAMED")
+    );
+}
+
+#[test]
+fn display_id_rename_blocks_on_an_incomplete_transaction() {
+    // TEST-EDIT-RECOVERY and REQ-EDIT-RECOVERY.
+    let fixture = project(VALID_ITEMS);
+    let transaction = create_incomplete_transaction(fixture.path());
+    let before = fs::read(fixture.path().join("docs/items.mara.md")).unwrap();
+    let output = run(fixture.path(), &["id", "rename", "BETA-B", "BETA-RENAMED"]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8(output.stderr).unwrap(),
+        format!("transaction {transaction} requires explicit recovery\n")
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("docs/items.mara.md")).unwrap(),
+        before
+    );
 }
