@@ -413,6 +413,7 @@ struct RenamePlan {
     new_id: String,
     allow_dirty: bool,
     patches: Vec<FilePatch>,
+    canonical_endpoints: Vec<(String, String, String)>,
 }
 
 /// Plans, validates, journals, and applies one repository-wide display-ID rename.
@@ -449,14 +450,31 @@ pub fn recover_transaction(
             reason: "no incomplete transaction exists".to_owned(),
         })?;
     let mut journal = load_reconciled_journal(&root, &transaction)?;
+    let canonical_endpoints = if mode == RecoveryMode::Complete
+        && matches!(
+            journal.phase,
+            JournalPhase::Verified | JournalPhase::Cleaning | JournalPhase::Complete
+        ) {
+        Vec::new()
+    } else {
+        original_canonical_endpoints(&validation, &root, &journal)?
+    };
     let files_changed = journal.files.iter().map(|file| file.path.clone()).collect();
     match mode {
-        RecoveryMode::Complete => {
-            complete_recovery(&root, &transaction, &mut journal, &mut |_| Ok(()))?
-        }
-        RecoveryMode::Rollback => {
-            rollback_recovery(&root, &transaction, &mut journal, &mut |_| Ok(()))?
-        }
+        RecoveryMode::Complete => complete_recovery(
+            &root,
+            &transaction,
+            &mut journal,
+            &canonical_endpoints,
+            &mut |_| Ok(()),
+        )?,
+        RecoveryMode::Rollback => rollback_recovery(
+            &root,
+            &transaction,
+            &mut journal,
+            &canonical_endpoints,
+            &mut |_| Ok(()),
+        )?,
     }
     Ok(RenameResult {
         transaction_id: transaction,
@@ -590,6 +608,7 @@ fn plan_display_id_rename(
         new_id: new_id.to_owned(),
         allow_dirty: options.allow_dirty,
         patches,
+        canonical_endpoints: canonical_endpoints(semantic),
     })
 }
 
@@ -725,7 +744,7 @@ fn validate_rename_result(
 }
 
 fn canonical_endpoints(semantic: &SemanticCompilation) -> Vec<(String, String, String)> {
-    semantic
+    let mut endpoints = semantic
         .relations()
         .edges()
         .iter()
@@ -737,7 +756,9 @@ fn canonical_endpoints(semantic: &SemanticCompilation) -> Vec<(String, String, S
                 key.target().as_str().to_owned(),
             )
         })
-        .collect()
+        .collect::<Vec<_>>();
+    endpoints.sort();
+    endpoints
 }
 
 fn execute_rename(
@@ -767,6 +788,7 @@ fn execute_rename(
         &transaction_id,
         &mut journal,
         &plan.patches,
+        &plan.canonical_endpoints,
         checkpoint,
     );
     match result {
@@ -777,7 +799,13 @@ fn execute_rename(
         Err(error @ TransactionError::Interrupted { .. }) => Err(error),
         Err(error) => {
             let cause = error.to_string();
-            match rollback_recovery(&plan.root, &transaction_id, &mut journal, &mut |_| Ok(())) {
+            match rollback_recovery(
+                &plan.root,
+                &transaction_id,
+                &mut journal,
+                &plan.canonical_endpoints,
+                &mut |_| Ok(()),
+            ) {
                 Ok(()) => Err(error),
                 Err(rollback) => Err(TransactionError::RollbackFailed {
                     cause,
@@ -865,6 +893,7 @@ fn run_forward(
     transaction_id: &str,
     journal: &mut TransactionJournal,
     patches: &[FilePatch],
+    canonical_endpoints: &[(String, String, String)],
     checkpoint: &mut dyn FnMut(FaultPoint) -> Result<(), TransactionError>,
 ) -> Result<(), TransactionError> {
     let transaction_dir = transaction_directory(root, transaction_id);
@@ -882,7 +911,12 @@ fn run_forward(
     write_journal(&transaction_dir, journal, checkpoint)?;
     journal.phase = JournalPhase::Verifying;
     write_journal(&transaction_dir, journal, checkpoint)?;
-    postcheck_from_journal(root, journal, JournalOutcome::Replacement)?;
+    postcheck_from_journal(
+        root,
+        journal,
+        JournalOutcome::Replacement,
+        canonical_endpoints,
+    )?;
     journal.outcome = Some(JournalOutcome::Replacement);
     journal.phase = JournalPhase::Verified;
     write_journal(&transaction_dir, journal, checkpoint)?;
@@ -994,6 +1028,7 @@ fn complete_recovery(
     root: &Path,
     transaction_id: &str,
     journal: &mut TransactionJournal,
+    canonical_endpoints: &[(String, String, String)],
     checkpoint: &mut dyn FnMut(FaultPoint) -> Result<(), TransactionError>,
 ) -> Result<(), TransactionError> {
     if matches!(
@@ -1044,7 +1079,12 @@ fn complete_recovery(
         write_journal(&transaction_dir, journal, checkpoint)?;
     }
     if journal.phase == JournalPhase::Verifying {
-        postcheck_from_journal(root, journal, JournalOutcome::Replacement)?;
+        postcheck_from_journal(
+            root,
+            journal,
+            JournalOutcome::Replacement,
+            canonical_endpoints,
+        )?;
         journal.outcome = Some(JournalOutcome::Replacement);
         journal.phase = JournalPhase::Verified;
         write_journal(&transaction_dir, journal, checkpoint)?;
@@ -1111,7 +1151,7 @@ fn reconcile_or_apply_file(
 ) -> Result<(), TransactionError> {
     let entry = journal.files[index].clone();
     if entry.state == JournalFileState::Applied {
-        return verify_destination(
+        verify_destination(
             root,
             &entry,
             &entry.replacement_sha256,
@@ -1122,6 +1162,20 @@ fn reconcile_or_apply_file(
                     transaction: journal.id.clone(),
                     reason: "applied file has no stage identity".to_owned(),
                 })?,
+        )?;
+        let backup_identity =
+            entry
+                .backup_identity
+                .as_deref()
+                .ok_or_else(|| TransactionError::JournalConflict {
+                    transaction: journal.id.clone(),
+                    reason: "applied file has no backup identity".to_owned(),
+                })?;
+        return verify_temporary(
+            root,
+            &entry.backup_path,
+            Some(backup_identity),
+            &entry.original_sha256,
         );
     }
     if entry.state != JournalFileState::Pending {
@@ -1157,6 +1211,7 @@ fn rollback_recovery(
     root: &Path,
     transaction_id: &str,
     journal: &mut TransactionJournal,
+    canonical_endpoints: &[(String, String, String)],
     checkpoint: &mut dyn FnMut(FaultPoint) -> Result<(), TransactionError>,
 ) -> Result<(), TransactionError> {
     if matches!(
@@ -1174,7 +1229,7 @@ fn rollback_recovery(
     for index in (0..journal.files.len()).rev() {
         restore_file(root, &transaction_dir, journal, index, checkpoint)?;
     }
-    postcheck_from_journal(root, journal, JournalOutcome::Original)?;
+    postcheck_from_journal(root, journal, JournalOutcome::Original, canonical_endpoints)?;
     journal.outcome = Some(JournalOutcome::Original);
     journal.phase = JournalPhase::RolledBack;
     write_journal(&transaction_dir, journal, checkpoint)?;
@@ -1296,6 +1351,7 @@ fn postcheck_from_journal(
     root: &Path,
     journal: &TransactionJournal,
     outcome: JournalOutcome,
+    expected_endpoints: &[(String, String, String)],
 ) -> Result<(), TransactionError> {
     let result = check_project(root).map_err(|error| TransactionError::ProjectInvalid {
         reason: error.to_string(),
@@ -1337,7 +1393,94 @@ fn postcheck_from_journal(
             reason: "rename identity postcheck failed".to_owned(),
         });
     }
+    if canonical_endpoints(semantic) != expected_endpoints {
+        return Err(TransactionError::ProjectInvalid {
+            reason: "canonical relation endpoints changed during recovery".to_owned(),
+        });
+    }
     Ok(())
+}
+
+fn original_canonical_endpoints(
+    validation: &ValidationResult,
+    root: &Path,
+    journal: &TransactionJournal,
+) -> Result<Vec<(String, String, String)>, TransactionError> {
+    let schema = validation
+        .schema()
+        .ok_or_else(|| TransactionError::ProjectInvalid {
+            reason: "compiled schema is unavailable during recovery".to_owned(),
+        })?;
+    let mut originals = BTreeMap::new();
+    for entry in &journal.files {
+        let destination = root.join(&entry.path);
+        let (identity, digest, destination_bytes) = identity_digest_and_bytes(&destination)?;
+        let bytes = if digest == entry.original_sha256
+            && (identity == entry.file_identity
+                || entry.backup_identity.as_deref() == Some(identity.as_str()))
+        {
+            destination_bytes
+        } else {
+            let backup_identity = entry.backup_identity.as_deref().ok_or_else(|| {
+                TransactionError::JournalConflict {
+                    transaction: journal.id.clone(),
+                    reason: format!("{} has no recoverable original", entry.path),
+                }
+            })?;
+            let backup = root.join(&entry.backup_path);
+            let (actual_identity, actual_digest, bytes) = identity_digest_and_bytes(&backup)?;
+            if actual_identity != backup_identity || actual_digest != entry.original_sha256 {
+                return conflict(
+                    &entry.backup_path,
+                    "temporary identity or digest does not match journal",
+                );
+            }
+            bytes
+        };
+        originals.insert(entry.path.as_str(), bytes);
+    }
+    let documents = validation
+        .documents()
+        .iter()
+        .map(|document| {
+            let path = document.source().path();
+            let source = match originals.remove(path) {
+                Some(bytes) => {
+                    String::from_utf8(bytes).map_err(|_| TransactionError::ProjectInvalid {
+                        reason: format!("original recovery source {path} is not UTF-8"),
+                    })?
+                }
+                None => document.source().source().as_str().to_owned(),
+            };
+            let source =
+                SourceDocument::try_new(path, SourceText::new(source)).map_err(|error| {
+                    TransactionError::ProjectInvalid {
+                        reason: error.to_string(),
+                    }
+                })?;
+            Ok(parse_document(
+                source,
+                schema.identity().value().mid().value(),
+            ))
+        })
+        .collect::<Result<Vec<_>, TransactionError>>()?;
+    if !originals.is_empty() {
+        return Err(TransactionError::ProjectInvalid {
+            reason: "journal source is absent from the recovered project".to_owned(),
+        });
+    }
+    let result = validate_documents(schema, &documents, validation.warnings_as_errors());
+    if !result.is_valid() {
+        return Err(TransactionError::ProjectInvalid {
+            reason: "the journal-derived original project is invalid".to_owned(),
+        });
+    }
+    let semantic = result
+        .semantic()
+        .ok_or_else(|| TransactionError::ProjectInvalid {
+            reason: "the original recovery semantic model is unavailable".to_owned(),
+        })?;
+    Ok(canonical_endpoints(semantic))
 }
 
 fn find_incomplete_transaction(root: &Path) -> Result<Option<String>, TransactionError> {
@@ -1379,6 +1522,7 @@ fn find_incomplete_transaction(root: &Path) -> Result<Option<String>, Transactio
             continue;
         }
         files.sort_by_key(std::fs::DirEntry::file_name);
+        validate_transaction_directory_entries(&entry.path(), &name, &files)?;
         let journal = load_reconciled_journal(root, &name)?;
         if journal.phase == JournalPhase::Complete {
             remove_complete_transaction(root, &name)?;
@@ -1401,6 +1545,12 @@ fn load_reconciled_journal(
     transaction_id: &str,
 ) -> Result<TransactionJournal, TransactionError> {
     let directory = transaction_directory(root, transaction_id);
+    let mut entries = fs::read_dir(&directory)
+        .map_err(|error| io_error(&directory, error))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| io_error(&directory, error))?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    validate_transaction_directory_entries(&directory, transaction_id, &entries)?;
     let current_path = directory.join("journal.json");
     let next_path = directory.join("journal.next");
     let current_exists = path_exists(&current_path)?;
@@ -1429,6 +1579,38 @@ fn load_reconciled_journal(
         }
         (false, false) => conflict(transaction_id, "transaction directory has no journal"),
     }
+}
+
+fn validate_transaction_directory_entries(
+    directory: &Path,
+    transaction_id: &str,
+    entries: &[fs::DirEntry],
+) -> Result<(), TransactionError> {
+    for entry in entries {
+        let name =
+            entry
+                .file_name()
+                .into_string()
+                .map_err(|_| TransactionError::JournalConflict {
+                    transaction: transaction_id.to_owned(),
+                    reason: "transaction directory contains a non-UTF-8 entry".to_owned(),
+                })?;
+        if !matches!(name.as_str(), "journal.json" | "journal.next") {
+            return conflict(
+                transaction_id,
+                "transaction directory contains an unknown entry",
+            );
+        }
+        let metadata = fs::symlink_metadata(entry.path())
+            .map_err(|error| io_error(&directory.join(&name), error))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return conflict(
+                transaction_id,
+                "transaction journal entry is not a regular file",
+            );
+        }
+    }
+    Ok(())
 }
 
 fn validate_initial_next(
@@ -1514,7 +1696,111 @@ fn validate_journal(
         }
         prior_path = Some(&file.path);
     }
+    if !valid_journal_state(journal) {
+        return conflict(
+            transaction_id,
+            "journal phase, outcome, and file states are inconsistent",
+        );
+    }
     Ok(())
+}
+
+fn valid_journal_state(journal: &TransactionJournal) -> bool {
+    if journal.files.iter().any(|file| match file.state {
+        JournalFileState::Declared => {
+            file.stage_identity.is_some() || file.backup_identity.is_some()
+        }
+        JournalFileState::Staged => file.stage_identity.is_none() || file.backup_identity.is_some(),
+        JournalFileState::Pending | JournalFileState::Applied => {
+            file.stage_identity.is_none() || file.backup_identity.is_none()
+        }
+        JournalFileState::Restored | JournalFileState::Cleaned => {
+            file.backup_identity.is_some() && file.stage_identity.is_none()
+        }
+    }) {
+        return false;
+    }
+
+    let files = journal.files.as_slice();
+    match (journal.phase, journal.outcome) {
+        (JournalPhase::Preparing, None) => preparing_file_states(files),
+        (JournalPhase::Prepared, None) => all_files_are(files, JournalFileState::Pending),
+        (JournalPhase::Applying, None) => applying_file_states(files),
+        (JournalPhase::Applied | JournalPhase::Verifying, None) => {
+            all_files_are(files, JournalFileState::Applied)
+        }
+        (JournalPhase::Verified, Some(JournalOutcome::Replacement)) => {
+            all_files_are(files, JournalFileState::Applied)
+        }
+        (JournalPhase::RollingBack, None) => rolling_back_file_states(files),
+        (JournalPhase::RolledBack, Some(JournalOutcome::Original)) => {
+            all_files_are(files, JournalFileState::Restored)
+        }
+        (JournalPhase::Cleaning, Some(outcome)) => cleaning_file_states(files, outcome),
+        (JournalPhase::Complete, Some(_)) => all_files_are(files, JournalFileState::Cleaned),
+        _ => false,
+    }
+}
+
+fn all_files_are(files: &[JournalFile], state: JournalFileState) -> bool {
+    files.iter().all(|file| file.state == state)
+}
+
+fn preparing_file_states(files: &[JournalFile]) -> bool {
+    let mut staged = false;
+    let mut declared = false;
+    files.iter().all(|file| match file.state {
+        JournalFileState::Pending if !staged && !declared => true,
+        JournalFileState::Staged if !staged && !declared => {
+            staged = true;
+            true
+        }
+        JournalFileState::Declared => {
+            declared = true;
+            true
+        }
+        _ => false,
+    })
+}
+
+fn applying_file_states(files: &[JournalFile]) -> bool {
+    let mut pending = false;
+    files.iter().all(|file| match file.state {
+        JournalFileState::Applied if !pending => true,
+        JournalFileState::Pending => {
+            pending = true;
+            true
+        }
+        _ => false,
+    })
+}
+
+fn rolling_back_file_states(files: &[JournalFile]) -> bool {
+    let restored_start = files
+        .iter()
+        .position(|file| file.state == JournalFileState::Restored)
+        .unwrap_or(files.len());
+    files[restored_start..]
+        .iter()
+        .all(|file| file.state == JournalFileState::Restored)
+        && (preparing_file_states(&files[..restored_start])
+            || applying_file_states(&files[..restored_start]))
+}
+
+fn cleaning_file_states(files: &[JournalFile], outcome: JournalOutcome) -> bool {
+    let remaining = match outcome {
+        JournalOutcome::Replacement => JournalFileState::Applied,
+        JournalOutcome::Original => JournalFileState::Restored,
+    };
+    let mut remaining_seen = false;
+    files.iter().all(|file| match file.state {
+        JournalFileState::Cleaned if !remaining_seen => true,
+        state if state == remaining => {
+            remaining_seen = true;
+            true
+        }
+        _ => false,
+    })
 }
 
 fn same_immutable_journal(left: &TransactionJournal, right: &TransactionJournal) -> bool {
@@ -1543,7 +1829,27 @@ fn same_immutable_journal(left: &TransactionJournal, right: &TransactionJournal)
 }
 
 fn legal_next_journal(current: &TransactionJournal, next: &TransactionJournal) -> bool {
-    if current.outcome != next.outcome && next.outcome.is_none() {
+    let legal_outcome = current.outcome == next.outcome
+        || matches!(
+            (current.phase, current.outcome, next.phase, next.outcome),
+            (
+                JournalPhase::Verifying,
+                None,
+                JournalPhase::Verified,
+                Some(JournalOutcome::Replacement)
+            ) | (
+                JournalPhase::RollingBack,
+                None,
+                JournalPhase::RolledBack,
+                Some(JournalOutcome::Original)
+            ) | (
+                JournalPhase::Verified,
+                Some(JournalOutcome::Replacement),
+                JournalPhase::RollingBack,
+                None
+            )
+        );
+    if !legal_outcome {
         return false;
     }
     let file_changes = current
@@ -1808,6 +2114,10 @@ fn remove_temporary_if_present(
 }
 
 fn identity_and_digest(path: &Path) -> Result<(String, String), TransactionError> {
+    identity_digest_and_bytes(path).map(|(identity, digest, _)| (identity, digest))
+}
+
+fn identity_digest_and_bytes(path: &Path) -> Result<(String, String, Vec<u8>), TransactionError> {
     let mut file = open_read_no_follow(path)?;
     let metadata = file.metadata().map_err(|error| io_error(path, error))?;
     if !metadata.is_file() {
@@ -1818,7 +2128,8 @@ fn identity_and_digest(path: &Path) -> Result<(String, String), TransactionError
     }
     let identity = file_identity(&metadata)?;
     let bytes = read_all(&mut file, path)?;
-    Ok((identity, sha256(&bytes)))
+    let digest = sha256(&bytes);
+    Ok((identity, digest, bytes))
 }
 
 fn path_identity(path: &Path) -> Result<String, TransactionError> {
@@ -2088,6 +2399,29 @@ MID [[m_00000000000000000000000002]] and unrelated BETA-B prose.
         }
     }
 
+    fn only_transaction_dir(fixture: &TempDir) -> PathBuf {
+        fs::read_dir(fixture.path().join(TRANSACTION_DIRECTORY))
+            .unwrap()
+            .next()
+            .expect("one transaction")
+            .unwrap()
+            .path()
+    }
+
+    fn write_committed_journal(directory: &Path, journal: &TransactionJournal) {
+        let mut bytes = serde_json::to_vec_pretty(journal).unwrap();
+        bytes.push(b'\n');
+        fs::write(directory.join("journal.json"), bytes).unwrap();
+    }
+
+    fn set_applied(journal: &mut TransactionJournal) {
+        for file in &mut journal.files {
+            file.stage_identity = Some(format!("stage-{}", file.ordinal));
+            file.backup_identity = Some(format!("backup-{}", file.ordinal));
+            file.state = JournalFileState::Applied;
+        }
+    }
+
     fn document(path: &str, source: &str) -> SourceDocument {
         SourceDocument::try_new(path, SourceText::new(source.to_owned())).expect("valid fixture")
     }
@@ -2328,5 +2662,186 @@ MID [[m_00000000000000000000000002]] and unrelated BETA-B prose.
             fs::read(fixture.path().join("docs/target.mara.md")).unwrap(),
             TARGET.as_bytes()
         );
+    }
+
+    #[test]
+    fn applied_reconciliation_requires_the_recorded_original_backup() {
+        for case in ["missing", "mismatched"] {
+            let fixture = project();
+            let plan = plan_display_id_rename(
+                fixture.path(),
+                "BETA-B",
+                "BETA-RENAMED",
+                RenameOptions::default(),
+            )
+            .unwrap();
+            execute_rename(plan, &mut interrupt_once(FaultPoint::DestinationReplaced)).unwrap_err();
+
+            let directory = only_transaction_dir(&fixture);
+            let transaction_id = directory.file_name().unwrap().to_str().unwrap().to_owned();
+            let mut journal =
+                read_journal(&directory.join("journal.json"), &transaction_id).unwrap();
+            journal.files[0].state = JournalFileState::Applied;
+            let backup = fixture.path().join(&journal.files[0].backup_path);
+            write_committed_journal(&directory, &journal);
+            if case == "missing" {
+                fs::remove_file(backup).unwrap();
+            } else {
+                fs::write(backup, b"not the original").unwrap();
+            }
+
+            assert!(
+                reconcile_or_apply_file(fixture.path(), &directory, &mut journal, 0, &mut |_| Ok(
+                    ()
+                ))
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn verified_replacement_may_durably_begin_rollback_with_no_outcome() {
+        let fixture = project();
+        let plan = plan_display_id_rename(
+            fixture.path(),
+            "BETA-B",
+            "BETA-RENAMED",
+            RenameOptions::default(),
+        )
+        .unwrap();
+        let transaction_id = "tx_01JX0TV1P2V1N0VJ3M3J6W9Y7R";
+        let mut current = initial_journal(&plan, transaction_id).unwrap();
+        set_applied(&mut current);
+        current.phase = JournalPhase::Verified;
+        current.outcome = Some(JournalOutcome::Replacement);
+        let mut next = current.clone();
+        next.phase = JournalPhase::RollingBack;
+        next.outcome = None;
+
+        validate_journal(&current, transaction_id).unwrap();
+        validate_journal(&next, transaction_id).unwrap();
+        assert!(legal_next_journal(&current, &next));
+    }
+
+    #[test]
+    fn journal_validation_rejects_impossible_phase_outcome_and_file_states() {
+        let fixture = project();
+        let plan = plan_display_id_rename(
+            fixture.path(),
+            "BETA-B",
+            "BETA-RENAMED",
+            RenameOptions::default(),
+        )
+        .unwrap();
+        let transaction_id = "tx_01JX0TV1P2V1N0VJ3M3J6W9Y7R";
+        let initial = initial_journal(&plan, transaction_id).unwrap();
+
+        let mut prepared_with_declared = initial.clone();
+        prepared_with_declared.phase = JournalPhase::Prepared;
+        let mut preparing_with_outcome = initial.clone();
+        preparing_with_outcome.outcome = Some(JournalOutcome::Replacement);
+        let mut staged_without_identity = initial.clone();
+        staged_without_identity.files[0].state = JournalFileState::Staged;
+        let mut preparation_out_of_order = initial.clone();
+        preparation_out_of_order.files[1].stage_identity = Some("stage-1".to_owned());
+        preparation_out_of_order.files[1].backup_identity = Some("backup-1".to_owned());
+        preparation_out_of_order.files[1].state = JournalFileState::Pending;
+
+        for journal in [
+            prepared_with_declared,
+            preparing_with_outcome,
+            staged_without_identity,
+            preparation_out_of_order,
+        ] {
+            assert!(matches!(
+                validate_journal(&journal, transaction_id),
+                Err(TransactionError::JournalConflict { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn recovery_rejects_every_unrecognized_transaction_directory_entry() {
+        for case in ["unknown", "directory", "link"] {
+            let fixture = project();
+            let plan = plan_display_id_rename(
+                fixture.path(),
+                "BETA-B",
+                "BETA-RENAMED",
+                RenameOptions::default(),
+            )
+            .unwrap();
+            execute_rename(plan, &mut interrupt_once(FaultPoint::JournalReplaced)).unwrap_err();
+            let directory = only_transaction_dir(&fixture);
+            match case {
+                "unknown" => fs::write(directory.join("unexpected"), b"unknown").unwrap(),
+                "directory" => fs::create_dir(directory.join("journal.next")).unwrap(),
+                "link" => {
+                    #[cfg(unix)]
+                    std::os::unix::fs::symlink("journal.json", directory.join("journal.next"))
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+
+            assert!(matches!(
+                recover_transaction(fixture.path(), RecoveryMode::Rollback),
+                Err(TransactionError::JournalConflict { .. })
+            ));
+        }
+
+        let fixture = project();
+        let empty = fixture
+            .path()
+            .join(TRANSACTION_DIRECTORY)
+            .join("tx_01JX0TV1P2V1N0VJ3M3J6W9Y7R");
+        fs::create_dir_all(&empty).unwrap();
+        assert_eq!(find_incomplete_transaction(fixture.path()).unwrap(), None);
+        assert!(!empty.exists());
+    }
+
+    #[test]
+    fn recovered_postcheck_preserves_preflight_canonical_relation_endpoints() {
+        let fixture = project();
+        let second_target = r#"
+:::beta m_00000000000000000000000003
+:id: BETA-ALTERED
+:title: Alternate target
+
+:::
+"#;
+        fs::write(fixture.path().join("docs/alternate.mara.md"), second_target).unwrap();
+        let plan = plan_display_id_rename(
+            fixture.path(),
+            "BETA-B",
+            "BETA-RENAMED",
+            RenameOptions::default(),
+        )
+        .unwrap();
+        execute_rename(plan, &mut interrupt_once(FaultPoint::DestinationReplaced)).unwrap_err();
+
+        let directory = only_transaction_dir(&fixture);
+        let transaction_id = directory.file_name().unwrap().to_str().unwrap().to_owned();
+        let mut journal = read_journal(&directory.join("journal.json"), &transaction_id).unwrap();
+        let source_path = fixture.path().join("docs/source.mara.md");
+        let changed = fs::read_to_string(&source_path).unwrap().replacen(
+            ":connects: BETA-RENAMED",
+            ":connects: BETA-ALTERED",
+            1,
+        );
+        fs::write(&source_path, &changed).unwrap();
+        let source = journal
+            .files
+            .iter_mut()
+            .find(|file| file.path == "docs/source.mara.md")
+            .unwrap();
+        source.replacement_sha256 = sha256(changed.as_bytes());
+        write_committed_journal(&directory, &journal);
+
+        assert!(matches!(
+            recover_transaction(fixture.path(), RecoveryMode::Complete),
+            Err(TransactionError::ProjectInvalid { reason })
+                if reason.contains("canonical relation endpoints")
+        ));
     }
 }
