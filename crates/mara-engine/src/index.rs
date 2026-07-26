@@ -729,6 +729,12 @@ impl GitAnchor {
             Err(error) => return Err(error),
         };
         if !top_level.status.success() {
+            if git_repository_marker_exists(root)? {
+                return Err(IndexError::GitCommand {
+                    operation: "discover Git worktree",
+                    status: top_level.status.code(),
+                });
+            }
             return Ok(None);
         }
         let repository_root = output_path(&top_level, "read Git worktree root")?;
@@ -959,6 +965,22 @@ fn git_command(program: &OsStr, root: &Path) -> Command {
         .arg("-C")
         .arg(root);
     command
+}
+
+fn git_repository_marker_exists(root: &Path) -> Result<bool, IndexError> {
+    for directory in root.ancestors() {
+        match fs::symlink_metadata(directory.join(".git")) {
+            Ok(_) => return Ok(true),
+            Err(source) if source.kind() == io::ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(IndexError::GitIo {
+                    operation: "inspect Git repository marker",
+                    source,
+                });
+            }
+        }
+    }
+    Ok(false)
 }
 
 fn project_relative_git_path<'a>(project_path: &str, repository_path: &'a str) -> Option<&'a str> {
@@ -2174,6 +2196,24 @@ Body.
         assert!(git.wire.branch.is_none());
         assert!(git.wire.project_path.is_none());
         assert!(git.wire.dirty.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_discovery_failure_with_a_repository_marker_is_a_precondition_error() {
+        let fixture = fixture();
+        fs::create_dir(fixture.path().join(".git")).unwrap();
+
+        let error = GitAnchor::discover_with_program(fixture.path(), OsStr::new("false"))
+            .expect_err("a repository discovery failure must not become unavailable");
+
+        assert!(matches!(
+            error,
+            IndexError::GitCommand {
+                operation: "discover Git worktree",
+                status: Some(1)
+            }
+        ));
     }
 
     #[cfg(target_os = "linux")]
