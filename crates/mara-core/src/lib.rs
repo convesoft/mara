@@ -6,13 +6,14 @@ pub mod query;
 pub mod schema;
 pub mod semantic;
 pub mod source;
+pub mod validation;
 
 pub use diagnostic::{
     ContentDiagnosticCode, Diagnostic, DiagnosticCode, DiagnosticContext, DiagnosticItem,
     DiagnosticNumber, DiagnosticSeverity, DiagnosticValue, FieldDiagnosticCode,
     IdentityDiagnosticCode, ItemDiagnosticCode, ProjectDiagnosticCode, ReferenceDiagnosticCode,
-    RelatedDiagnostic, RelationDiagnosticCode, SchemaDiagnosticCode, SyntaxDiagnosticCode,
-    sort_diagnostics,
+    RelatedDiagnostic, RelationDiagnosticCode, RuleDiagnosticCode, SchemaDiagnosticCode,
+    SyntaxDiagnosticCode, sort_diagnostics,
 };
 pub use identity::{Mid, MidParseError};
 pub use query::{
@@ -38,4 +39,7 @@ pub use semantic::{
 };
 pub use source::{
     InvalidSourceSpan, LineEnding, SourceDocument, SourceIndex, SourceSpan, SourceText,
+};
+pub use validation::{
+    SeverityCounts, ValidationPhase, ValidationPhaseResult, ValidationPhaseState, evaluate_model,
 };

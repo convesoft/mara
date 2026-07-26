@@ -1,13 +1,17 @@
-use std::{cmp::Ordering, collections::BTreeMap};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use mara_core::{
     AuthoredReference, AuthoredReferenceSyntax, AuthoredRelationOrigin, CanonicalRelationInput,
     CanonicalRelations, Diagnostic, DiagnosticContext, DiagnosticItem, DiagnosticSeverity,
     DiagnosticValue, FieldDefinition, FieldDiagnosticCode, FieldType, FlavourDefinition,
-    IdentityDiagnosticCode, IdentityIndex, IdentityRecord, ItemDiagnosticCode,
-    NormalizedFieldValue, NormalizedItem, NormalizedNumber, NormalizedScalar, Provenanced,
-    ReferenceOrigin, RelationDefinition, RelationDiagnosticCode, RelationOccurrence,
-    ResolvedReference, SchemaDocument, SourceSpan, WeakMention, sort_diagnostics,
+    IdentityDiagnosticCode, IdentityIndex, IdentityRecord, ItemDiagnosticCode, NodeRef,
+    NormalizedFieldValue, NormalizedItem, NormalizedNumber, NormalizedScalar, ProjectionEdge,
+    Provenanced, ReferenceDiagnosticCode, ReferenceOrigin, RelationDefinition,
+    RelationDiagnosticCode, RelationOccurrence, ResolvedReference, SchemaDocument, SourceSpan,
+    WeakMention, sort_diagnostics,
 };
 use mara_markdown::{
     InlineReference, ParsedBlock, ParsedDocument, ParsedItem, ParsedMetadataEntry,
@@ -19,6 +23,7 @@ pub struct SemanticCompilation {
     items: Vec<NormalizedItem>,
     narrative_references: Vec<ResolvedReference>,
     relations: CanonicalRelations,
+    projection_edges: Vec<ProjectionEdge>,
     identity_index: IdentityIndex,
     diagnostics: Vec<Diagnostic>,
 }
@@ -34,6 +39,10 @@ impl SemanticCompilation {
 
     pub const fn relations(&self) -> &CanonicalRelations {
         &self.relations
+    }
+
+    pub fn projection_edges(&self) -> &[ProjectionEdge] {
+        &self.projection_edges
     }
 
     pub const fn identity_index(&self) -> &IdentityIndex {
@@ -57,6 +66,7 @@ impl SemanticCompilation {
         Vec<NormalizedItem>,
         Vec<ResolvedReference>,
         CanonicalRelations,
+        Vec<ProjectionEdge>,
         IdentityIndex,
         Vec<Diagnostic>,
     ) {
@@ -64,6 +74,7 @@ impl SemanticCompilation {
             self.items,
             self.narrative_references,
             self.relations,
+            self.projection_edges,
             self.identity_index,
             self.diagnostics,
         )
@@ -98,15 +109,43 @@ pub fn compile_documents(
     items.sort_by(compare_items);
 
     let identity = schema.identity().value().mid().value();
+    let mut projection_edges = Vec::new();
+    let mut external_metadata_edges = BTreeSet::new();
     for item in &mut items {
         let mut resolved = Vec::new();
         for reference in item.authored_references() {
-            if external_uri_scheme(reference.target()).is_some() {
+            if let Some(scheme) = external_uri_scheme(reference.target()) {
+                if let Some(edge) =
+                    validate_external_reference(schema, item, reference, scheme, &mut diagnostics)
+                {
+                    if reference.syntax() == AuthoredReferenceSyntax::Metadata
+                        && !external_metadata_edges.insert((
+                            edge.relation().to_owned(),
+                            item.mid().clone(),
+                            item.source().clone(),
+                            reference.target().to_owned(),
+                        ))
+                    {
+                        diagnostics.push(external_duplicate_diagnostic(item, reference, &edge));
+                    }
+                    projection_edges.push(edge);
+                }
                 continue;
             }
             match identity_index.resolve(reference, identity) {
                 Ok(reference) => resolved.push(reference),
-                Err(diagnostic) => diagnostics.push(*diagnostic),
+                Err(diagnostic) => {
+                    let mut diagnostic = *diagnostic;
+                    if let Some(authored_name) = reference.relation()
+                        && let Some((definition, origin)) =
+                            authored_relation(schema, item.flavour(), authored_name)
+                    {
+                        diagnostic = diagnostic
+                            .with_detail("canonical_direction", canonical_direction(origin))
+                            .with_detail("canonical_relation", definition.name());
+                    }
+                    diagnostics.push(diagnostic);
+                }
             }
         }
         item.set_resolved_references(resolved);
@@ -116,7 +155,8 @@ pub fn compile_documents(
     narrative_authored.sort_by(|left, right| compare_spans(left.source(), right.source()));
     let mut narrative_references = Vec::new();
     for reference in narrative_authored {
-        if external_uri_scheme(reference.target()).is_some() {
+        if let Some(scheme) = external_uri_scheme(reference.target()) {
+            validate_external_mention(schema, &reference, scheme, &mut diagnostics);
             continue;
         }
         match identity_index.resolve(&reference, identity) {
@@ -132,9 +172,186 @@ pub fn compile_documents(
         items,
         narrative_references,
         relations,
+        projection_edges,
         identity_index,
         diagnostics,
     }
+}
+
+fn validate_external_reference(
+    schema: &SchemaDocument,
+    item: &NormalizedItem,
+    reference: &AuthoredReference,
+    scheme: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<ProjectionEdge> {
+    let Some(authored_name) = reference.relation() else {
+        validate_external_mention(schema, reference, scheme, diagnostics);
+        return None;
+    };
+    let (definition, origin) = authored_relation(schema, item.flavour(), authored_name)?;
+    if origin == AuthoredRelationOrigin::InverseNormalized {
+        diagnostics.push(
+            external_reference_diagnostic(
+                RelationDiagnosticCode::InvalidSourceFlavour,
+                "an inverse-authored relation cannot normalize an external source",
+                item,
+                reference,
+                scheme,
+            )
+            .with_detail("canonical_direction", canonical_direction(origin))
+            .with_detail("canonical_relation", definition.name())
+            .with_detail("source_kind", "external"),
+        );
+        return None;
+    }
+    let Some(allowed) = definition.target().value().external() else {
+        diagnostics.push(
+            external_reference_diagnostic(
+                RelationDiagnosticCode::InvalidTargetFlavour,
+                "relation does not permit an external target",
+                item,
+                reference,
+                scheme,
+            )
+            .with_detail("canonical_direction", canonical_direction(origin))
+            .with_detail("canonical_relation", definition.name())
+            .with_detail("target_kind", "external"),
+        );
+        return None;
+    };
+    if !allowed
+        .value()
+        .iter()
+        .any(|candidate| candidate.value() == scheme)
+    {
+        let mut allowed_schemes = allowed
+            .value()
+            .iter()
+            .map(|candidate| candidate.value().clone())
+            .collect::<Vec<_>>();
+        allowed_schemes.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+        diagnostics.push(
+            external_reference_diagnostic(
+                ReferenceDiagnosticCode::ExternalScheme,
+                "external target scheme is not permitted for this relation",
+                item,
+                reference,
+                scheme,
+            )
+            .with_detail("canonical_direction", canonical_direction(origin))
+            .with_detail(
+                "allowed_schemes",
+                DiagnosticValue::Array(
+                    allowed_schemes
+                        .into_iter()
+                        .map(DiagnosticValue::String)
+                        .collect(),
+                ),
+            )
+            .with_detail("canonical_relation", definition.name()),
+        );
+        return None;
+    }
+    ProjectionEdge::new(
+        definition.name(),
+        NodeRef::item(item.mid().clone()),
+        NodeRef::external(reference.target()),
+    )
+    .ok()
+}
+
+fn external_duplicate_diagnostic(
+    item: &NormalizedItem,
+    reference: &AuthoredReference,
+    edge: &ProjectionEdge,
+) -> Diagnostic {
+    Diagnostic::new(
+        RelationDiagnosticCode::Duplicate,
+        "exact duplicate relation metadata occurrence",
+        Some(reference.source().clone()),
+    )
+    .with_item(DiagnosticItem::new(
+        item.mid().clone(),
+        item.display_id().map(|id| id.value().clone()),
+    ))
+    .with_context(DiagnosticContext::new(
+        None,
+        reference.relation().map(str::to_owned),
+        Some(reference.target().to_owned()),
+    ))
+    .with_detail("canonical_direction", "outgoing")
+    .with_detail("canonical_relation", edge.relation())
+    .with_detail("source_mid", item.mid().to_string())
+    .with_detail("target_uri", reference.target())
+}
+
+const fn canonical_direction(origin: AuthoredRelationOrigin) -> &'static str {
+    match origin {
+        AuthoredRelationOrigin::Direct => "outgoing",
+        AuthoredRelationOrigin::InverseNormalized => "incoming",
+    }
+}
+
+fn validate_external_mention(
+    schema: &SchemaDocument,
+    reference: &AuthoredReference,
+    scheme: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if schema.external_mention_schemes().contains(scheme) {
+        return;
+    }
+    let mut allowed_schemes = schema
+        .external_mention_schemes()
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    allowed_schemes.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+    let mut diagnostic = Diagnostic::new(
+        ReferenceDiagnosticCode::ExternalScheme,
+        "external target scheme is not permitted",
+        Some(reference.source().clone()),
+    )
+    .with_context(DiagnosticContext::new(
+        None,
+        reference.relation().map(str::to_owned),
+        Some(reference.target().to_owned()),
+    ))
+    .with_detail(
+        "allowed_schemes",
+        DiagnosticValue::Array(
+            allowed_schemes
+                .into_iter()
+                .map(DiagnosticValue::String)
+                .collect(),
+        ),
+    )
+    .with_detail("scheme", scheme);
+    if let ReferenceOrigin::Item { mid, display_id } = reference.origin() {
+        diagnostic = diagnostic.with_item(DiagnosticItem::new(mid.clone(), display_id.clone()));
+    }
+    diagnostics.push(diagnostic);
+}
+
+fn external_reference_diagnostic(
+    code: impl Into<mara_core::DiagnosticCode>,
+    message: impl Into<String>,
+    item: &NormalizedItem,
+    reference: &AuthoredReference,
+    scheme: &str,
+) -> Diagnostic {
+    Diagnostic::new(code, message, Some(reference.source().clone()))
+        .with_item(DiagnosticItem::new(
+            item.mid().clone(),
+            item.display_id().map(|id| id.value().clone()),
+        ))
+        .with_context(DiagnosticContext::new(
+            None,
+            reference.relation().map(str::to_owned),
+            Some(reference.target().to_owned()),
+        ))
+        .with_detail("scheme", scheme)
 }
 
 fn normalize_relations(
@@ -192,21 +409,24 @@ fn normalize_relations(
                 .iter()
                 .any(|candidate| candidate.value() == source_flavour);
             if !source_allowed {
-                diagnostics.push(relation_endpoint_diagnostic(
-                    RelationDiagnosticCode::InvalidSourceFlavour,
-                    "source",
-                    definition,
-                    item,
-                    reference,
-                    source_flavour,
-                    definition
-                        .source()
-                        .value()
-                        .flavours()
-                        .value()
-                        .iter()
-                        .map(|candidate| candidate.value().clone()),
-                ));
+                diagnostics.push(
+                    relation_endpoint_diagnostic(
+                        RelationDiagnosticCode::InvalidSourceFlavour,
+                        "source",
+                        definition,
+                        item,
+                        reference,
+                        source_flavour,
+                        definition
+                            .source()
+                            .value()
+                            .flavours()
+                            .value()
+                            .iter()
+                            .map(|candidate| candidate.value().clone()),
+                    )
+                    .with_detail("canonical_direction", canonical_direction(origin)),
+                );
                 continue;
             }
 
@@ -221,21 +441,24 @@ fn normalize_relations(
                         .any(|candidate| candidate.value() == target_flavour)
                 });
             if !target_allowed {
-                diagnostics.push(relation_endpoint_diagnostic(
-                    RelationDiagnosticCode::InvalidTargetFlavour,
-                    "target",
-                    definition,
-                    item,
-                    reference,
-                    target_flavour,
-                    definition
-                        .target()
-                        .value()
-                        .flavours()
-                        .into_iter()
-                        .flat_map(|flavours| flavours.value())
-                        .map(|candidate| candidate.value().clone()),
-                ));
+                diagnostics.push(
+                    relation_endpoint_diagnostic(
+                        RelationDiagnosticCode::InvalidTargetFlavour,
+                        "target",
+                        definition,
+                        item,
+                        reference,
+                        target_flavour,
+                        definition
+                            .target()
+                            .value()
+                            .flavours()
+                            .into_iter()
+                            .flat_map(|flavours| flavours.value())
+                            .map(|candidate| candidate.value().clone()),
+                    )
+                    .with_detail("canonical_direction", canonical_direction(origin)),
+                );
                 continue;
             }
 
@@ -251,6 +474,7 @@ fn normalize_relations(
                         item,
                         reference,
                     )
+                    .with_detail("canonical_direction", canonical_direction(origin))
                     .with_detail("source_flavour", source_flavour)
                     .with_detail("target_flavour", target_flavour),
                 );
@@ -258,13 +482,16 @@ fn normalize_relations(
             }
 
             if canonical_source == canonical_target && !definition.permits_self_reference() {
-                diagnostics.push(relation_diagnostic(
-                    RelationDiagnosticCode::SelfReference,
-                    "relation does not permit a source item to reference itself",
-                    definition,
-                    item,
-                    reference,
-                ));
+                diagnostics.push(
+                    relation_diagnostic(
+                        RelationDiagnosticCode::SelfReference,
+                        "relation does not permit a source item to reference itself",
+                        definition,
+                        item,
+                        reference,
+                    )
+                    .with_detail("canonical_direction", canonical_direction(origin)),
+                );
                 continue;
             }
 
