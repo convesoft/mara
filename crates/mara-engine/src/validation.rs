@@ -9,7 +9,8 @@ use std::path::{Path, PathBuf};
 use crate::{
     SemanticCompilation, compile_documents,
     content::discover_content,
-    project::{LoadedProject, ProjectLoadError, discover_and_load},
+    index::{ValidationGitAnchor, capture_validation_git_anchor},
+    project::{LoadedProject, ProjectLoadError, discover_project, load_from_root},
     schema::load_schema_with_source,
 };
 
@@ -21,6 +22,7 @@ pub struct ValidationResult {
     schema_source: Option<Vec<u8>>,
     documents: Vec<ParsedDocument>,
     content_paths: Vec<PathBuf>,
+    git_anchor: Option<ValidationGitAnchor>,
     semantic: Option<SemanticCompilation>,
     graph: Option<QueryGraph>,
     phases: Vec<ValidationPhaseResult>,
@@ -48,6 +50,10 @@ impl ValidationResult {
 
     pub(crate) fn content_paths(&self) -> &[PathBuf] {
         &self.content_paths
+    }
+
+    pub(crate) const fn git_anchor(&self) -> Option<&ValidationGitAnchor> {
+        self.git_anchor.as_ref()
     }
 
     pub const fn semantic(&self) -> Option<&SemanticCompilation> {
@@ -144,6 +150,7 @@ pub fn validate_documents(
         schema_source: None,
         documents: documents.to_vec(),
         content_paths: Vec::new(),
+        git_anchor: None,
         semantic: Some(semantic),
         graph,
         phases,
@@ -155,7 +162,9 @@ pub fn validate_documents(
 
 /// Runs the complete read-only project validation pipeline from a filesystem start path.
 pub fn check_project(start: impl AsRef<Path>) -> Result<ValidationResult, ProjectLoadError> {
-    let project = discover_and_load(start)?;
+    let location = discover_project(start)?;
+    let git_anchor = capture_validation_git_anchor(&location.root);
+    let project = load_from_root(&location.root)?;
     let content = discover_content(&project);
     match load_schema_with_source(&project) {
         Ok((schema, schema_source)) => {
@@ -172,6 +181,7 @@ pub fn check_project(start: impl AsRef<Path>) -> Result<ValidationResult, Projec
             result.project = Some(project);
             result.schema_source = Some(schema_source);
             result.content_paths = content.resolved_paths().to_vec();
+            result.git_anchor = Some(git_anchor);
             result.phases[0] = ValidationPhaseResult::new(
                 ValidationPhase::Project,
                 ValidationPhaseState::Completed,
@@ -195,6 +205,7 @@ pub fn check_project(start: impl AsRef<Path>) -> Result<ValidationResult, Projec
                 diagnostics,
                 warnings_as_errors,
                 true,
+                git_anchor,
             ))
         }
     }
@@ -202,7 +213,9 @@ pub fn check_project(start: impl AsRef<Path>) -> Result<ValidationResult, Projec
 
 /// Loads and checks only project configuration and schema, without content discovery or parsing.
 pub fn check_schema(start: impl AsRef<Path>) -> Result<ValidationResult, ProjectLoadError> {
-    let project = discover_and_load(start)?;
+    let location = discover_project(start)?;
+    let git_anchor = capture_validation_git_anchor(&location.root);
+    let project = load_from_root(&location.root)?;
     let warnings_as_errors = project.validation.warnings_as_errors;
     match load_schema_with_source(&project) {
         Ok((schema, schema_source)) => {
@@ -213,6 +226,7 @@ pub fn check_schema(start: impl AsRef<Path>) -> Result<ValidationResult, Project
                 schema_source: Some(schema_source),
                 documents: Vec::new(),
                 content_paths: Vec::new(),
+                git_anchor: Some(git_anchor),
                 semantic: None,
                 graph: None,
                 phases: schema_only_phases(),
@@ -226,6 +240,7 @@ pub fn check_schema(start: impl AsRef<Path>) -> Result<ValidationResult, Project
             error.diagnostics().to_vec(),
             warnings_as_errors,
             false,
+            git_anchor,
         )),
     }
 }
@@ -235,6 +250,7 @@ fn skipped_after_schema_failure(
     mut diagnostics: Vec<Diagnostic>,
     warnings_as_errors: bool,
     content_completed: bool,
+    git_anchor: ValidationGitAnchor,
 ) -> ValidationResult {
     sort_diagnostics(&mut diagnostics);
     let severity_counts = SeverityCounts::from_diagnostics(&diagnostics);
@@ -244,6 +260,7 @@ fn skipped_after_schema_failure(
         schema_source: None,
         documents: Vec::new(),
         content_paths: Vec::new(),
+        git_anchor: Some(git_anchor),
         semantic: None,
         graph: None,
         phases: vec![

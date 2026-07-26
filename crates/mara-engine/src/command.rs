@@ -10,9 +10,9 @@ use std::{
 pub use mara_core::TraceDirection;
 
 use mara_core::{
-    AuthoredReference, AuthoredReferenceSyntax, AuthoredRelationOrigin, Diagnostic,
-    DiagnosticValue, FieldDiagnosticCode, ItemDiagnosticCode, Mid, NodeRef, NormalizedItem,
-    NormalizedScalar, ReferenceDiagnosticCode, SchemaDocument, SourceSpan, TraceResult,
+    AuthoredReference, AuthoredReferenceSyntax, Diagnostic, DiagnosticValue, FieldDiagnosticCode,
+    ItemDiagnosticCode, Mid, NodeRef, NormalizedItem, NormalizedScalar, ReferenceDiagnosticCode,
+    SchemaDocument, SourceSpan, TraceResult,
 };
 use mara_markdown::{ParsedDocument, ParsedItem};
 use serde::Serialize;
@@ -25,6 +25,7 @@ use crate::{
         LoadedProject, ProjectLoadError, ProjectLoadOperationalErrorCode, discover_and_load,
     },
     schema::load_schema,
+    semantic::relation_occurrence_wire_origin,
 };
 
 const PROJECT_FILE: &str = ".mara/project.toml";
@@ -1448,11 +1449,8 @@ fn edge_wire(edge: &mara_core::CanonicalRelationEdge, schema: &SchemaDocument) -
             .iter()
             .map(|occurrence| {
                 let authored = occurrence.reference().authored();
-                let origin = match (occurrence.origin(), authored.syntax()) {
-                    (AuthoredRelationOrigin::InverseNormalized, _) => "inverse_metadata",
-                    (_, AuthoredReferenceSyntax::Inline) => "typed_inline",
-                    _ => "canonical_metadata",
-                };
+                let origin =
+                    relation_occurrence_wire_origin(occurrence.origin(), authored.syntax());
                 EdgeOccurrenceWire {
                     origin: origin.to_owned(),
                     authoring_name: authored.relation().unwrap_or(edge.relation()).to_owned(),

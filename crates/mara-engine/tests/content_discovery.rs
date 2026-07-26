@@ -1,7 +1,10 @@
 use std::{fs, path::Path, process::Command};
 
 use mara_core::{ContentDiagnosticCode, DiagnosticCode, LineEnding, ProjectDiagnosticCode};
-use mara_engine::{content::discover_content, project::load_from_root};
+use mara_engine::{
+    content::discover_content,
+    project::{ProjectLoadErrorCode, load_from_root},
+};
 use tempfile::TempDir;
 
 struct Fixture {
@@ -559,17 +562,10 @@ fn configured_index_destination_cannot_also_be_selected_content() {
         .replace(".mara/index.json", "index.mara.md");
     fs::write(fixture.root.join(".mara/project.toml"), config).unwrap();
 
-    let discovery = discover_content(&fixture.load());
-
-    assert!(discovery.documents().is_empty());
-    assert_eq!(discovery.diagnostics().len(), 1);
+    let error = load_from_root(&fixture.root).unwrap_err();
     assert_eq!(
-        discovery.diagnostics()[0].code(),
-        DiagnosticCode::Project(ProjectDiagnosticCode::DuplicateFile)
-    );
-    assert_eq!(
-        discovery.diagnostics()[0].primary().unwrap().path(),
-        "index.mara.md"
+        error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ProjectDuplicateFile)
     );
 }
 
@@ -578,14 +574,19 @@ fn configured_index_destination_cannot_also_be_selected_content() {
 fn write_only_index_alias_is_diagnosed_before_content_open() {
     use std::os::unix::fs::PermissionsExt;
 
-    let fixture = Fixture::new(&["**/*.mara.md"], &[], false, false, false);
-    fixture.write("index.mara.md", "derived output");
+    let fixture = Fixture::new(&["docs/**/*.mara.md"], &[], false, false, true);
+    fixture.write("generated/index.json", "derived output");
+    fs::create_dir_all(fixture.root.join("docs")).unwrap();
+    symlink_file(
+        "../generated/index.json",
+        fixture.root.join("docs/index.mara.md"),
+    );
     let config = fs::read_to_string(fixture.root.join(".mara/project.toml"))
         .unwrap()
-        .replace(".mara/index.json", "index.mara.md");
+        .replace(".mara/index.json", "generated/index.json");
     fs::write(fixture.root.join(".mara/project.toml"), config).unwrap();
     fs::set_permissions(
-        fixture.root.join("index.mara.md"),
+        fixture.root.join("generated/index.json"),
         fs::Permissions::from_mode(0o200),
     )
     .unwrap();

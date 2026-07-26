@@ -403,7 +403,7 @@ fn validates_every_supported_glob_form_without_discovering_content() {
         ".mara/schema.yaml",
         ".mara/index.json",
         &globs,
-        &[],
+        &[".mara/index.json"],
     ));
 
     let project = load_from_root(&fixture.root).unwrap();
@@ -775,6 +775,38 @@ fn rejects_hard_linked_index_aliases_to_configuration_or_schema() {
     assert_unsafe_field(
         load_from_root(&schema_alias.root).unwrap_err(),
         "index.path",
+    );
+}
+
+#[test]
+fn rejects_a_missing_index_destination_selected_by_content_globs() {
+    let fixture = Fixture::new();
+    let index = "generated/index.mara.md";
+    fixture.write_config(config_with(
+        ".mara/schema.yaml",
+        index,
+        &["**/*.mara.md"],
+        &[],
+    ));
+    assert!(!fixture.root.join(index).exists());
+
+    let error = load_from_root(&fixture.root).unwrap_err();
+    assert_eq!(
+        error.diagnostic_code(),
+        Some(ProjectLoadErrorCode::ProjectDuplicateFile)
+    );
+    assert_unsafe_field(error, "index.path");
+
+    let excluded = Fixture::new();
+    excluded.write_config(config_with(
+        ".mara/schema.yaml",
+        index,
+        &["**/*.mara.md"],
+        &["generated/**"],
+    ));
+    assert_eq!(
+        load_from_root(&excluded.root).unwrap().index_path,
+        excluded.root.join(index)
     );
 }
 

@@ -1,6 +1,10 @@
 use std::{fs, path::Path, process::Command};
 
-use mara_engine::{IndexProjection, check_project, write_index};
+use mara_engine::{
+    IndexProjection, check_project,
+    command::{OutputFormat, run_show},
+    write_index,
+};
 
 const SCHEMA: &str = r#"format_version: 1
 schema:
@@ -44,6 +48,7 @@ relations:
     target:
       flavours: [beta]
     inverse: connected_by
+    inverse_authoring: true
   external_link:
     source:
       flavours: [alpha]
@@ -265,6 +270,48 @@ fn projection_hashes_the_schema_snapshot_that_validation_consumed() {
     assert_ne!(
         json(&fresh_snapshot)["project"]["schema"]["sha256"],
         json(&before)["project"]["schema"]["sha256"]
+    );
+}
+
+#[test]
+fn index_and_show_share_inverse_inline_occurrence_provenance() {
+    let fixture = tempfile::tempdir().unwrap();
+    write_project(fixture.path(), false);
+    fs::write(
+        fixture.path().join("docs/project.mara.md"),
+        r#":::alpha m_00000000000000000000000001
+:id: ALPHA-A
+:title: Alpha
+
+Alpha body.
+:::
+
+:::beta m_00000000000000000000000002
+:id: BETA-B
+:title: Beta
+
+Beta body with [[connected_by:ALPHA-A]].
+:::
+"#,
+    )
+    .unwrap();
+    let result = check_project(fixture.path()).unwrap();
+    assert!(result.is_valid(), "diagnostics: {:?}", result.diagnostics());
+    let index = IndexProjection::from_validation(&result)
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+    let index = json(&index);
+    let show = run_show(fixture.path(), "ALPHA-A");
+    let show: serde_json::Value = serde_json::from_str(&show.render(OutputFormat::Json)).unwrap();
+
+    assert_eq!(
+        index["edges"][0]["occurrences"][0]["origin"],
+        "inverse_metadata"
+    );
+    assert_eq!(
+        show["data"]["item"]["outgoing"][0]["occurrences"][0]["origin"],
+        index["edges"][0]["occurrences"][0]["origin"]
     );
 }
 
@@ -513,4 +560,93 @@ fn git_provenance_tracks_resolved_internal_symlink_targets() {
     let modified = json(&modified);
     assert_eq!(modified["documents"][0]["path"], "docs/link.mara.md");
     assert_eq!(modified["git"]["dirty"], true);
+}
+
+#[test]
+fn git_provenance_rejects_head_changes_after_validation_started() {
+    let fixture = tempfile::tempdir().unwrap();
+    let project_root = fixture.path().join("nested");
+    git(fixture.path(), &["init", "-b", "main"]);
+    git(fixture.path(), &["config", "user.name", "Mara Test"]);
+    git(
+        fixture.path(),
+        &["config", "user.email", "mara@example.test"],
+    );
+    write_project(&project_root, false);
+    git(fixture.path(), &["add", "."]);
+    git(fixture.path(), &["commit", "-m", "first"]);
+    let validated = check_project(&project_root).unwrap();
+
+    fs::write(
+        project_root.join("docs/project.mara.md"),
+        format!("{CONTENT}\n"),
+    )
+    .unwrap();
+    git(fixture.path(), &["add", "."]);
+    git(fixture.path(), &["commit", "-m", "second"]);
+
+    let error = IndexProjection::from_validation(&validated).unwrap_err();
+    assert!(matches!(&error, mara_engine::IndexError::GitStateChanged));
+    assert_eq!(error.command_code(), "git.precondition");
+}
+
+#[test]
+fn git_provenance_detects_changes_hidden_by_index_flags() {
+    let fixture = tempfile::tempdir().unwrap();
+    let project_root = fixture.path().join("nested");
+    let content_path = "nested/docs/project.mara.md";
+    git(fixture.path(), &["init", "-b", "main"]);
+    git(fixture.path(), &["config", "user.name", "Mara Test"]);
+    git(
+        fixture.path(),
+        &["config", "user.email", "mara@example.test"],
+    );
+    write_project(&project_root, false);
+    git(fixture.path(), &["add", "."]);
+    git(fixture.path(), &["commit", "-m", "fixture"]);
+
+    git(
+        fixture.path(),
+        &["update-index", "--assume-unchanged", content_path],
+    );
+    let assumed_clean = IndexProjection::from_validation(&check_project(&project_root).unwrap())
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+    assert_eq!(json(&assumed_clean)["git"]["dirty"], false);
+    fs::write(
+        project_root.join("docs/project.mara.md"),
+        format!("{CONTENT}\n"),
+    )
+    .unwrap();
+    let assumed = IndexProjection::from_validation(&check_project(&project_root).unwrap())
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+    assert_eq!(json(&assumed)["git"]["dirty"], true);
+    fs::write(project_root.join("docs/project.mara.md"), CONTENT).unwrap();
+    git(
+        fixture.path(),
+        &["update-index", "--no-assume-unchanged", content_path],
+    );
+
+    git(
+        fixture.path(),
+        &["update-index", "--skip-worktree", content_path],
+    );
+    let skipped_clean = IndexProjection::from_validation(&check_project(&project_root).unwrap())
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+    assert_eq!(json(&skipped_clean)["git"]["dirty"], false);
+    fs::write(
+        project_root.join("docs/project.mara.md"),
+        format!("{CONTENT}\n"),
+    )
+    .unwrap();
+    let skipped = IndexProjection::from_validation(&check_project(&project_root).unwrap())
+        .unwrap()
+        .to_canonical_json()
+        .unwrap();
+    assert_eq!(json(&skipped)["git"]["dirty"], true);
 }

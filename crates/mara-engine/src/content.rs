@@ -857,6 +857,14 @@ pub(crate) fn select_configured_content_paths(
         .collect()
 }
 
+pub(crate) fn configured_content_path_is_selected(
+    includes: &[String],
+    excludes: &[String],
+    path: &str,
+) -> bool {
+    is_selected(&compile_globs(includes), &compile_globs(excludes), path)
+}
+
 fn is_fully_excluded_tree(excludes: &[String], path: &str) -> bool {
     excludes.iter().any(|pattern| {
         let segments = pattern.split('/').collect::<Vec<_>>();

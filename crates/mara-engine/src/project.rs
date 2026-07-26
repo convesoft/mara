@@ -516,6 +516,17 @@ fn load_location(location: ProjectLocation) -> Result<LoadedProject, ProjectLoad
         &index_value,
         index_location,
     )?;
+    if crate::content::configured_content_path_is_selected(&include, &exclude, &index_value) {
+        return Err(unsafe_path(
+            ProjectLoadErrorCode::ProjectDuplicateFile,
+            &location.config_path,
+            "index.path",
+            &index_value,
+            "index destination matches configured content selection",
+            Some(index_path),
+            index_location,
+        ));
+    }
     let index_aliases_input = existing_file_identity(&index_path)?.is_some_and(|index_identity| {
         config_identity == Some(index_identity) || schema_identity == Some(index_identity)
     });

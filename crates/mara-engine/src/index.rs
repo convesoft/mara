@@ -8,13 +8,12 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Write},
     path::{Component, Path, PathBuf},
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
 };
 
 use mara_core::{
-    AuthoredReference, AuthoredReferenceSyntax, AuthoredRelationOrigin, Diagnostic,
-    DiagnosticValue, NodeRef, NormalizedItem, NormalizedScalar, QueryGraph, ReferenceOrigin,
-    SchemaDocument, SourceSpan,
+    AuthoredReference, AuthoredReferenceSyntax, Diagnostic, DiagnosticValue, NodeRef,
+    NormalizedItem, NormalizedScalar, QueryGraph, ReferenceOrigin, SchemaDocument, SourceSpan,
 };
 use mara_markdown::{NarrativeKind, ParsedBlock, ParsedDocument, ParsedItem, ParsedSection};
 use serde::Serialize;
@@ -22,7 +21,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     SemanticCompilation, ValidationResult, content::select_configured_content_paths,
-    project::LoadedProject,
+    project::LoadedProject, semantic::relation_occurrence_wire_origin,
 };
 
 const PROJECT_CONFIG_PATH: &str = ".mara/project.toml";
@@ -74,6 +73,12 @@ impl IndexProjection {
         })?;
 
         let git = GitWire::discover(project, result.documents(), result.content_paths())?;
+        result
+            .git_anchor()
+            .ok_or(IndexError::InvalidModel {
+                reason: "validation Git anchor is unavailable",
+            })?
+            .verify(git.anchor.as_ref())?;
         Self::from_parts(
             project,
             ValidatedSchemaSnapshot {
@@ -84,7 +89,7 @@ impl IndexProjection {
             semantic,
             graph,
             result.diagnostics(),
-            git,
+            git.wire,
         )
     }
 
@@ -214,7 +219,9 @@ fn write_index_with_checkpoint(
     let project = result.project().ok_or(IndexError::InvalidModel {
         reason: "project model is unavailable",
     })?;
-    atomic_replace(project, &bytes, checkpoint)?;
+    atomic_replace(project, &bytes, checkpoint, &mut || {
+        verify_current_git(result, &projection.git)
+    })?;
     Ok(IndexWriteResult {
         path: normalized_relative_path(&project.root, &project.index_path)?,
         sha256: sha256_hex(&bytes),
@@ -236,6 +243,7 @@ fn atomic_replace(
     project: &LoadedProject,
     bytes: &[u8],
     checkpoint: &mut dyn FnMut(IndexWriteCheckpoint) -> Result<(), IndexError>,
+    verify_before_replace: &mut dyn FnMut() -> Result<(), IndexError>,
 ) -> Result<(), IndexError> {
     let destination = &project.index_path;
     let parent = destination.parent().ok_or(IndexError::UnsafePath {
@@ -261,6 +269,7 @@ fn atomic_replace(
         checkpoint(IndexWriteCheckpoint::TemporaryFlushed)?;
         drop(file);
         checkpoint(IndexWriteCheckpoint::BeforeReplace)?;
+        verify_before_replace()?;
         fs::rename(&temporary, destination).map_err(|source| IndexError::Io {
             operation: "replace configured index",
             path: destination.to_path_buf(),
@@ -276,6 +285,24 @@ fn atomic_replace(
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+fn verify_current_git(result: &ValidationResult, expected: &GitWire) -> Result<(), IndexError> {
+    let project = result.project().ok_or(IndexError::InvalidModel {
+        reason: "project model is unavailable",
+    })?;
+    let current = GitWire::discover(project, result.documents(), result.content_paths())?;
+    result
+        .git_anchor()
+        .ok_or(IndexError::InvalidModel {
+            reason: "validation Git anchor is unavailable",
+        })?
+        .verify(current.anchor.as_ref())?;
+    if current.wire == *expected {
+        Ok(())
+    } else {
+        Err(IndexError::GitStateChanged)
+    }
 }
 
 fn prepare_output_path(
@@ -429,6 +456,7 @@ pub enum IndexError {
         operation: &'static str,
         status: Option<i32>,
     },
+    GitStateChanged,
     Io {
         operation: &'static str,
         path: PathBuf,
@@ -448,7 +476,8 @@ impl IndexError {
             | Self::Serialization(_)
             | Self::Randomness(_)
             | Self::GitIo { .. }
-            | Self::GitCommand { .. } => None,
+            | Self::GitCommand { .. }
+            | Self::GitStateChanged => None,
         }
     }
 
@@ -458,7 +487,9 @@ impl IndexError {
 
     pub const fn command_code(&self) -> &'static str {
         match self {
-            Self::GitIo { .. } | Self::GitCommand { .. } => "git.precondition",
+            Self::GitIo { .. } | Self::GitCommand { .. } | Self::GitStateChanged => {
+                "git.precondition"
+            }
             Self::Io { .. } | Self::UnsafePath { .. } => "io.failed",
             Self::InvalidModel { .. } | Self::Serialization(_) | Self::Randomness(_) => {
                 "internal.failed"
@@ -469,6 +500,7 @@ impl IndexError {
     pub const fn command_message(&self) -> &'static str {
         match self {
             Self::GitIo { .. } | Self::GitCommand { .. } => "Git provenance could not be collected",
+            Self::GitStateChanged => "Git state changed while the project was being validated",
             Self::Io { .. } | Self::UnsafePath { .. } => {
                 "the configured index could not be written atomically"
             }
@@ -491,6 +523,9 @@ impl fmt::Display for IndexError {
             Self::GitIo { operation, .. }
             | Self::GitCommand { operation, .. }
             | Self::Io { operation, .. } => formatter.write_str(operation),
+            Self::GitStateChanged => {
+                formatter.write_str("Git state changed while the project was being validated")
+            }
         }
     }
 }
@@ -501,7 +536,10 @@ impl Error for IndexError {
             Self::Serialization(source) => Some(source),
             Self::Randomness(source) => Some(source),
             Self::GitIo { source, .. } | Self::Io { source, .. } => Some(source),
-            Self::InvalidModel { .. } | Self::GitCommand { .. } | Self::UnsafePath { .. } => None,
+            Self::InvalidModel { .. }
+            | Self::GitCommand { .. }
+            | Self::GitStateChanged
+            | Self::UnsafePath { .. } => None,
         }
     }
 }
@@ -528,7 +566,7 @@ struct IndexContentWire {
     exclude: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct GitWire {
     available: bool,
     commit: Option<String>,
@@ -537,34 +575,65 @@ struct GitWire {
     dirty: Option<bool>,
 }
 
-impl GitWire {
-    fn unavailable() -> Self {
-        Self {
-            available: false,
-            commit: None,
-            branch: None,
-            project_path: None,
-            dirty: None,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct GitAnchor {
+    repository_root: PathBuf,
+    commit: String,
+    branch: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ValidationGitAnchor {
+    Unavailable,
+    Available(GitAnchor),
+    Failed {
+        operation: &'static str,
+        status: Option<i32>,
+    },
+}
+
+impl ValidationGitAnchor {
+    fn verify(&self, current: Option<&GitAnchor>) -> Result<(), IndexError> {
+        match (self, current) {
+            (Self::Unavailable, None) => Ok(()),
+            (Self::Available(expected), Some(actual)) if expected == actual => Ok(()),
+            (Self::Failed { operation, status }, _) => Err(IndexError::GitCommand {
+                operation,
+                status: *status,
+            }),
+            (Self::Unavailable | Self::Available(_), _) => Err(IndexError::GitStateChanged),
         }
     }
+}
 
-    fn discover(
-        project: &LoadedProject,
-        documents: &[ParsedDocument],
-        content_paths: &[PathBuf],
-    ) -> Result<Self, IndexError> {
-        Self::discover_with_program(project, documents, content_paths, OsStr::new("git"))
+struct GitDiscovery {
+    wire: GitWire,
+    anchor: Option<GitAnchor>,
+}
+
+pub(crate) fn capture_validation_git_anchor(root: &Path) -> ValidationGitAnchor {
+    match GitAnchor::discover_with_program(root, OsStr::new("git")) {
+        Ok(Some(anchor)) => ValidationGitAnchor::Available(anchor),
+        Ok(None) => ValidationGitAnchor::Unavailable,
+        Err(IndexError::GitIo { operation, .. }) => ValidationGitAnchor::Failed {
+            operation,
+            status: None,
+        },
+        Err(IndexError::GitCommand { operation, status }) => {
+            ValidationGitAnchor::Failed { operation, status }
+        }
+        Err(_) => ValidationGitAnchor::Failed {
+            operation: "capture Git validation anchor",
+            status: None,
+        },
     }
+}
 
-    fn discover_with_program(
-        project: &LoadedProject,
-        documents: &[ParsedDocument],
-        content_paths: &[PathBuf],
-        program: &OsStr,
-    ) -> Result<Self, IndexError> {
+impl GitAnchor {
+    fn discover_with_program(root: &Path, program: &OsStr) -> Result<Option<Self>, IndexError> {
         let top_level = match git_output(
             program,
-            &project.root,
+            root,
             [
                 OsString::from("rev-parse"),
                 OsString::from("--show-toplevel"),
@@ -573,12 +642,12 @@ impl GitWire {
         ) {
             Ok(output) => output,
             Err(IndexError::GitIo { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
-                return Ok(Self::unavailable());
+                return Ok(None);
             }
             Err(error) => return Err(error),
         };
         if !top_level.status.success() {
-            return Ok(Self::unavailable());
+            return Ok(None);
         }
         let repository_root = PathBuf::from(output_text(&top_level, "read Git worktree root")?);
         let repository_root =
@@ -586,8 +655,6 @@ impl GitWire {
                 operation: "resolve Git worktree root",
                 source,
             })?;
-        let project_path = normalized_relative_path(&repository_root, &project.root)?;
-
         let commit_output = git_output(
             program,
             &repository_root,
@@ -599,7 +666,6 @@ impl GitWire {
             "resolve Git HEAD commit",
         )?;
         let commit = successful_text(commit_output, "resolve Git HEAD commit")?;
-
         let branch_output = git_output(
             program,
             &repository_root,
@@ -621,11 +687,52 @@ impl GitWire {
                 status: branch_output.status.code(),
             });
         };
+        Ok(Some(Self {
+            repository_root,
+            commit,
+            branch,
+        }))
+    }
+}
+
+impl GitWire {
+    fn unavailable() -> Self {
+        Self {
+            available: false,
+            commit: None,
+            branch: None,
+            project_path: None,
+            dirty: None,
+        }
+    }
+
+    fn discover(
+        project: &LoadedProject,
+        documents: &[ParsedDocument],
+        content_paths: &[PathBuf],
+    ) -> Result<GitDiscovery, IndexError> {
+        Self::discover_with_program(project, documents, content_paths, OsStr::new("git"))
+    }
+
+    fn discover_with_program(
+        project: &LoadedProject,
+        documents: &[ParsedDocument],
+        content_paths: &[PathBuf],
+        program: &OsStr,
+    ) -> Result<GitDiscovery, IndexError> {
+        let Some(anchor) = GitAnchor::discover_with_program(&project.root, program)? else {
+            return Ok(GitDiscovery {
+                wire: Self::unavailable(),
+                anchor: None,
+            });
+        };
+        let repository_root = &anchor.repository_root;
+        let project_path = normalized_relative_path(repository_root, &project.root)?;
 
         let mut relevant = BTreeSet::new();
         relevant.insert(join_project_path(&project_path, PROJECT_CONFIG_PATH));
         relevant.insert(normalized_relative_path(
-            &repository_root,
+            repository_root,
             &project.config_path,
         )?);
         relevant.insert(join_project_path(
@@ -633,7 +740,7 @@ impl GitWire {
             &project.schema_source_path,
         ));
         relevant.insert(normalized_relative_path(
-            &repository_root,
+            repository_root,
             &project.schema_path,
         )?);
         relevant.extend(
@@ -642,11 +749,11 @@ impl GitWire {
                 .map(|document| join_project_path(&project_path, document.source().path())),
         );
         for path in content_paths {
-            relevant.insert(normalized_relative_path(&repository_root, path)?);
+            relevant.insert(normalized_relative_path(repository_root, path)?);
         }
         let deleted_output = git_output(
             program,
-            &repository_root,
+            repository_root,
             [
                 OsString::from("--literal-pathspecs"),
                 OsString::from("diff"),
@@ -688,10 +795,10 @@ impl GitWire {
             OsString::from("--ignore-submodules=none"),
             OsString::from("--"),
         ];
-        arguments.extend(relevant.into_iter().map(OsString::from));
+        arguments.extend(relevant.iter().map(OsString::from));
         let status_output = git_output(
             program,
-            &repository_root,
+            repository_root,
             arguments,
             "inspect relevant Git status",
         )?;
@@ -702,12 +809,18 @@ impl GitWire {
             });
         }
 
-        Ok(Self {
+        let dirty = !status_output.stdout.is_empty()
+            || flagged_relevant_input_differs(program, repository_root, &relevant)?;
+        let wire = Self {
             available: true,
-            commit: Some(commit),
-            branch,
+            commit: Some(anchor.commit.clone()),
+            branch: anchor.branch.clone(),
             project_path: Some(project_path),
-            dirty: Some(!status_output.stdout.is_empty()),
+            dirty: Some(dirty),
+        };
+        Ok(GitDiscovery {
+            wire,
+            anchor: Some(anchor),
         })
     }
 }
@@ -721,6 +834,31 @@ fn git_output(
     git_command(program, root)
         .args(arguments)
         .output()
+        .map_err(|source| IndexError::GitIo { operation, source })
+}
+
+fn git_output_with_input(
+    program: &OsStr,
+    root: &Path,
+    arguments: impl IntoIterator<Item = OsString>,
+    input: &[u8],
+    operation: &'static str,
+) -> Result<Output, IndexError> {
+    let mut child = git_command(program, root)
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|source| IndexError::GitIo { operation, source })?;
+    child
+        .stdin
+        .take()
+        .expect("piped Git input has a child handle")
+        .write_all(input)
+        .map_err(|source| IndexError::GitIo { operation, source })?;
+    child
+        .wait_with_output()
         .map_err(|source| IndexError::GitIo { operation, source })
 }
 
@@ -745,6 +883,140 @@ fn project_relative_git_path<'a>(project_path: &str, repository_path: &'a str) -
             .strip_prefix(project_path)
             .and_then(|path| path.strip_prefix('/'))
     }
+}
+
+fn flagged_relevant_input_differs(
+    program: &OsStr,
+    repository_root: &Path,
+    relevant: &BTreeSet<String>,
+) -> Result<bool, IndexError> {
+    let mut arguments = vec![
+        OsString::from("--literal-pathspecs"),
+        OsString::from("ls-files"),
+        OsString::from("-v"),
+        OsString::from("-z"),
+        OsString::from("--"),
+    ];
+    arguments.extend(relevant.iter().map(OsString::from));
+    let output = git_output(
+        program,
+        repository_root,
+        arguments,
+        "inspect relevant Git index flags",
+    )?;
+    if !output.status.success() {
+        return Err(IndexError::GitCommand {
+            operation: "inspect relevant Git index flags",
+            status: output.status.code(),
+        });
+    }
+    for entry in output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+    {
+        let Some((&tag, path)) = entry.split_first() else {
+            continue;
+        };
+        let path = path.strip_prefix(b" ").ok_or_else(|| IndexError::GitIo {
+            operation: "decode relevant Git index flags",
+            source: io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Git returned a malformed flag entry",
+            ),
+        })?;
+        if tag != b'S' && !tag.is_ascii_lowercase() {
+            continue;
+        }
+        let path = std::str::from_utf8(path).map_err(|_| IndexError::GitIo {
+            operation: "decode relevant Git index flags",
+            source: io::Error::new(io::ErrorKind::InvalidData, "Git returned a non-UTF-8 path"),
+        })?;
+        if worktree_path_differs_from_head(program, repository_root, path)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn worktree_path_differs_from_head(
+    program: &OsStr,
+    repository_root: &Path,
+    path: &str,
+) -> Result<bool, IndexError> {
+    let revision = format!("HEAD:{path}");
+    let head = git_output(
+        program,
+        repository_root,
+        [
+            OsString::from("rev-parse"),
+            OsString::from("--verify"),
+            OsString::from("--end-of-options"),
+            OsString::from(revision),
+        ],
+        "resolve relevant Git HEAD blob",
+    )?;
+    if !head.status.success() {
+        return Ok(true);
+    }
+    let head = output_text(&head, "read relevant Git HEAD blob")?;
+    let absolute = repository_root.join(path);
+    let metadata = match fs::symlink_metadata(&absolute) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(true),
+        Err(source) => {
+            return Err(IndexError::GitIo {
+                operation: "inspect flagged relevant worktree path",
+                source,
+            });
+        }
+    };
+    let current = if metadata.file_type().is_symlink() {
+        let target = symlink_target_bytes(&absolute).map_err(|source| IndexError::GitIo {
+            operation: "read flagged relevant symlink target",
+            source,
+        })?;
+        let output = git_output_with_input(
+            program,
+            repository_root,
+            [OsString::from("hash-object"), OsString::from("--stdin")],
+            &target,
+            "hash flagged relevant symlink target",
+        )?;
+        successful_text(output, "hash flagged relevant symlink target")?
+    } else if metadata.is_file() {
+        let output = git_output(
+            program,
+            repository_root,
+            [
+                OsString::from("hash-object"),
+                OsString::from(format!("--path={path}")),
+                OsString::from("--"),
+                OsString::from(path),
+            ],
+            "hash flagged relevant worktree file",
+        )?;
+        successful_text(output, "hash flagged relevant worktree file")?
+    } else {
+        return Ok(true);
+    };
+    Ok(current != head)
+}
+
+#[cfg(unix)]
+fn symlink_target_bytes(path: &Path) -> io::Result<Vec<u8>> {
+    use std::os::unix::ffi::OsStrExt;
+
+    fs::read_link(path).map(|target| target.as_os_str().as_bytes().to_vec())
+}
+
+#[cfg(not(unix))]
+fn symlink_target_bytes(path: &Path) -> io::Result<Vec<u8>> {
+    let target = fs::read_link(path)?;
+    target
+        .to_str()
+        .map(|target| target.as_bytes().to_vec())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "symlink target is not UTF-8"))
 }
 
 fn successful_text(output: Output, operation: &'static str) -> Result<String, IndexError> {
@@ -1190,16 +1462,8 @@ fn edge_projections(
             .iter()
             .map(|occurrence| {
                 let authored = occurrence.reference().authored();
-                let origin = match authored.syntax() {
-                    AuthoredReferenceSyntax::Inline => "typed_inline",
-                    AuthoredReferenceSyntax::Narrative => "derived_source",
-                    AuthoredReferenceSyntax::Metadata
-                        if occurrence.origin() == AuthoredRelationOrigin::InverseNormalized =>
-                    {
-                        "inverse_metadata"
-                    }
-                    AuthoredReferenceSyntax::Metadata => "canonical_metadata",
-                };
+                let origin =
+                    relation_occurrence_wire_origin(occurrence.origin(), authored.syntax());
                 EdgeOccurrenceWire {
                     origin: origin.to_owned(),
                     authoring_name: authored.relation().unwrap_or(edge.relation()).to_owned(),
@@ -1700,6 +1964,68 @@ Body.
     }
 
     #[test]
+    fn git_change_before_replace_preserves_the_previous_index() {
+        let fixture = fixture();
+        let git = |arguments: &[&str]| {
+            let output = Command::new("git")
+                .arg("-c")
+                .arg("commit.gpgsign=false")
+                .arg("-C")
+                .arg(fixture.path())
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {arguments:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-b", "main"]);
+        git(&["config", "user.name", "Mara Test"]);
+        git(&["config", "user.email", "mara@example.test"]);
+        git(&[
+            "add",
+            ".mara/project.toml",
+            ".mara/schema.yaml",
+            "docs/item.mara.md",
+        ]);
+        git(&["commit", "-m", "fixture"]);
+
+        let result = crate::check_project(fixture.path()).unwrap();
+        let destination = fixture.path().join(".mara/index.json");
+        let previous = b"previous complete index\n";
+        fs::write(&destination, previous).unwrap();
+        let mut changed = false;
+        let error = write_index_with_checkpoint(&result, &mut |point| {
+            if point == IndexWriteCheckpoint::BeforeReplace && !changed {
+                fs::write(
+                    fixture.path().join("docs/item.mara.md"),
+                    format!("{CONTENT}\n"),
+                )
+                .unwrap();
+                git(&["add", "docs/item.mara.md"]);
+                git(&["commit", "-m", "change HEAD before replacement"]);
+                changed = true;
+            }
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert!(matches!(error, IndexError::GitStateChanged));
+        assert_eq!(fs::read(&destination).unwrap(), previous);
+        assert!(
+            fs::read_dir(fixture.path().join(".mara"))
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".mara-"))
+        );
+    }
+
+    #[test]
     fn missing_git_executable_is_explicitly_unavailable() {
         let fixture = fixture();
         let result = crate::check_project(fixture.path()).unwrap();
@@ -1713,11 +2039,12 @@ Body.
         )
         .unwrap();
 
-        assert!(!git.available);
-        assert!(git.commit.is_none());
-        assert!(git.branch.is_none());
-        assert!(git.project_path.is_none());
-        assert!(git.dirty.is_none());
+        assert!(git.anchor.is_none());
+        assert!(!git.wire.available);
+        assert!(git.wire.commit.is_none());
+        assert!(git.wire.branch.is_none());
+        assert!(git.wire.project_path.is_none());
+        assert!(git.wire.dirty.is_none());
     }
 
     #[test]
