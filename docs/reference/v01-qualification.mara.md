@@ -82,7 +82,8 @@ another tmpfs or ramfs, another worktree, a copied Cargo target, repository, or
 corpus. Source-repository reads are limited to the exact debug xtask executable,
 exact release Mara executable, Git metadata for repository discovery, git
 rev-parse HEAD, worktree enumeration and isolation checks, and
-tests/qualification/scale-v01.SHA256SUMS.
+tests/qualification/scale-v01.SHA256SUMS and
+tests/qualification/verify-scale-v01.sh.
 
 Before any Cargo command or generation, and again after qualification before
 upload, the workflow records df -h /tmp "$repo_root" and the KiB used by the
@@ -287,11 +288,12 @@ file_types=ok or file_types=failed in file-type-check.txt.
 
 It parses the expected manifest independently, requiring exactly twelve paths
 once and in order, a lowercase 64-digit hash, exactly two ASCII spaces, a
-nonempty whitespace-free path, and no extra bytes; it records expected and
-actual paths in manifest-path-check.txt and parse stderr separately. Linux uses
-sha256sum --check; macOS uses shasum -a 256 -c; all other hosts record an
-unsupported-host result and fail. The raw digest output is retained as
-fixture-sha256-check.txt.
+nonempty whitespace-free path, and no extra bytes; it records the raw manifest
+SHA-256 and the ordered parsed path/digest mapping in manifest-path-check.txt
+and parse stderr separately. Linux uses sha256sum --check; macOS uses shasum -a
+256 -c; all other hosts record an unsupported-host result and fail.
+fixture-sha256-check.txt retains each manifest path's expected and independently
+observed digest plus the raw digest output.
 
 The oracle captures the expected failed git -C "$fixture" rev-parse
 --show-toplevel invocation in separate stdout and stderr files, records its
@@ -351,11 +353,13 @@ summary is failed. If it cannot invoke or capture the oracle at all, every
 record has the same field values and error oracle_unavailable, and the summary
 is inconclusive.
 
-Immediately after a successful oracle and before child setup, the runner
-independently parses the expected manifest once and retains its SHA-256 and
-ordered path/digest mapping as the immutable oracle-approved manifest pin. If it
-cannot obtain that pin, no child starts; all five records use unavailable nullable
-fields, timed_out false, fixture_verified null, passed false, and error
+Immediately after a successful oracle and before child setup, the runner loads
+the raw manifest SHA-256 and ordered path/digest mapping from the oracle's
+retained manifest-path-check.txt and retains them as the immutable
+oracle-approved manifest pin. It must not construct the pin by rereading the
+live manifest after the oracle completes. If it cannot obtain that pin, no child
+starts; all five records use unavailable nullable fields, timed_out false,
+fixture_verified null, passed false, and error
 fixture_revalidation_unavailable, and the summary is inconclusive.
 
 After per-run setup, the Rust runner records std::time::Instant immediately
@@ -478,6 +482,15 @@ observed_sha256, and matched. Before that pin is obtainable,
 expected_manifest_sha256 is null and fixture_files is an empty array. Runs
 contains the five run objects in order; each maximum is the maximum available
 unsigned value or null.
+
+After a manifest pin, fixture_files starts from the successful oracle's ordered
+observations. Each completed post-child revalidation, including an integrity
+mismatch, replaces that snapshot with twelve objects: observed_sha256 is the
+lowercase 64-digit digest for a regular readable listed fixture file and null
+otherwise, and matched is true only for an observed digest equal to its expected
+digest. An unavailable revalidation never partially updates fixture_files: it
+retains the prior complete snapshot while the affected run record carries
+fixture_verified null and fixture_revalidation_unavailable.
 
 Overall result is passed only when both storage records, every oracle check,
 all twelve observed hashes, all five fixture_verified values, all five passing

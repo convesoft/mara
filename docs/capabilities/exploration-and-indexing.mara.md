@@ -472,20 +472,23 @@ child, write five records with nullable measurement fields null, timed_out false
 fixture_verified null, passed false, and error oracle_failed, and make the
 summary failed; an unavailable oracle instead uses oracle_unavailable and is
 inconclusive. After success, pin the expected manifest SHA-256 and parsed mapping
-before child setup; inability to pin it starts no child and makes all records
-fixture_revalidation_unavailable and the summary inconclusive. After every reaped
-child and before a later child starts, require the live manifest hash to equal
-that pin and independently revalidate the complete fixture entry set and every
-fixture file against the pinned mapping; reject that run and withhold later
-measurements on any completed mismatch, including changed manifest, missing or
-unexpected fixture entry, wrong type, symlink, or digest change. The mismatch
-run records fixture_verified false and withheld slots null. Treat unavailable
-live-manifest reading (including a missing expected manifest) or fixture
-reading/hashing caused by non-missing I/O or permission failure as an operational
-capture failure: record fixture_verified null and error
-fixture_revalidation_unavailable for the current and withheld later runs, make
-the summary inconclusive, and start no later child. Before a manifest pin,
-serialize expected_manifest_sha256 as null and fixture_files as an empty array.
+from the oracle's retained records before child setup; inability to pin it starts
+no child and makes all records fixture_revalidation_unavailable and the summary
+inconclusive. After every reaped child and before a later child starts, require
+the live manifest hash to equal that pin and independently revalidate the
+complete fixture entry set and every fixture file against the pinned mapping;
+reject that run and withhold later measurements on any completed mismatch,
+including changed manifest, missing or unexpected fixture entry, wrong type,
+symlink, or digest change. The mismatch run records fixture_verified false and
+withheld slots null. Treat unavailable live-manifest reading (including a missing
+expected manifest) or fixture reading/hashing caused by non-missing I/O or
+permission failure as an operational capture failure: record fixture_verified
+null and error fixture_revalidation_unavailable for the current and withheld
+later runs, make the summary inconclusive, and start no later child. Before a
+manifest pin, serialize expected_manifest_sha256 as null and fixture_files as an
+empty array; after a pin, initialize it from oracle observations, replace it only
+after a completed revalidation, and retain that last complete snapshot on an
+unavailable revalidation.
 Verify the complete record set, hash manifest, source provenance, storage
 preconditions, five passing runs, and maxima against the stated limits. Retain
 the records and perform the required upload and finally cleanup for passed,
