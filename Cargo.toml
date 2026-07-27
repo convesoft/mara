@@ -26,7 +26,7 @@ sha2 = "0.10"
 saphyr-parser = "0.0.11"
 ulid = { version = "3.0.0", default-features = false }
 getrandom = "0.4.3"
-toml = "0.8"
+toml = "1.1"
 ignore = "0.4"
 wax = "0.7"
 rushdown = "0.18.0"
