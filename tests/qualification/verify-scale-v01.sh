@@ -60,16 +60,19 @@ done
 
 case $(uname -s) in
     Linux)
+        host_supported=1
         manifest_digest() { sha256sum "$manifest" | awk '{print $1}'; }
         fixture_digest() { sha256sum "$1" | awk '{print $1}'; }
         verify_digests() { (CDPATH= cd -- "$fixture" && sha256sum --check "$manifest"); }
         ;;
     Darwin)
+        host_supported=1
         manifest_digest() { shasum -a 256 "$manifest" | awk '{print $1}'; }
         fixture_digest() { shasum -a 256 "$1" | awk '{print $1}'; }
         verify_digests() { (CDPATH= cd -- "$fixture" && shasum -a 256 -c "$manifest"); }
         ;;
     *)
+        host_supported=0
         manifest_digest() { return 1; }
         fixture_digest() { return 1; }
         verify_digests() { return 1; }
@@ -91,7 +94,7 @@ items-006.mara.md
 items-007.mara.md
 items-008.mara.md
 items-009.mara.md'
-actual_entries=$(CDPATH= cd -- "$fixture" && find . -mindepth 1 -print 2>"$evidence/file-set-check.stderr" | sed 's|^\./||' | sort) || failed=1
+actual_entries=$(CDPATH= cd -- "$fixture" && find . -print 2>"$evidence/file-set-check.stderr" | sed '/^\.$/d; s|^\./||' | sort) || failed=1
 {
     printf '%s\n' 'expected:'
     printf '%s\n' "$expected_entries"
@@ -170,6 +173,10 @@ fi
 
 (
     digest_ok=1
+    if [ "$host_supported" -ne 1 ]; then
+        printf '%s\n' 'host=unsupported'
+        digest_ok=0
+    fi
     verify_digests || digest_ok=0
     for path in .mara/project.toml .mara/schema.yaml items-000.mara.md items-001.mara.md \
         items-002.mara.md items-003.mara.md items-004.mara.md items-005.mara.md \

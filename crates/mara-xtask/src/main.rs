@@ -836,10 +836,6 @@ fn path_is_in_source_control(root: &Path, source_repo: &Path) -> Result<bool> {
     if root.starts_with(source_repo) {
         return Ok(true);
     }
-    let tmp = fs::canonicalize("/tmp").unwrap_or_else(|_| PathBuf::from("/tmp"));
-    if root.starts_with(&tmp) {
-        return Ok(true);
-    }
     for worktree in git_worktrees(source_repo)? {
         if root.starts_with(&worktree) {
             return Ok(true);
@@ -1755,6 +1751,20 @@ mod tests {
         assert!(ensure_isolated_root(&source.join("not-external"), &source, &source).is_err());
     }
 
+    #[test]
+    fn a_tmp_root_is_not_labeled_as_source_control() {
+        let source = fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+            .expect("source repository");
+        let tmp = fs::canonicalize("/tmp").expect("canonical /tmp");
+        assert!(
+            !path_is_in_source_control(
+                &tmp.join("mara-qualification-not-source-controlled"),
+                &source
+            )
+            .expect("source-control classification")
+        );
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn revalidation_detects_an_oracle_pinned_fixture_mismatch() {
@@ -1936,6 +1946,41 @@ mod tests {
             fs::read_to_string(qualification_root.join("evidence/preflight-check-exit.txt"))
                 .expect("preflight evidence");
         assert!(preflight_evidence.contains("json_validation=1"));
+
+        let unsupported_root = temporary.path().join("unsupported-qualification-root");
+        let unsupported_fixture = unsupported_root.join("fixture");
+        fs::create_dir(&unsupported_root).expect("unsupported qualification root");
+        fs::create_dir(&unsupported_fixture).expect("unsupported fixture directory");
+        write_fixture(&unsupported_fixture).expect("unsupported fixture");
+        fs::create_dir(unsupported_root.join("evidence")).expect("unsupported evidence directory");
+        let fake_bin = temporary.path().join("fake-bin");
+        fs::create_dir(&fake_bin).expect("fake executable directory");
+        let fake_uname = fake_bin.join("uname");
+        fs::write(&fake_uname, "#!/bin/sh\nprintf '%s\\n' Unsupported\n").expect("fake uname");
+        let mut permissions = fs::metadata(&fake_uname)
+            .expect("fake uname metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&fake_uname, permissions).expect("fake uname permissions");
+        let inherited_path = env::var_os("PATH").expect("PATH");
+        let path = format!(
+            "{}:{}",
+            fake_bin.display(),
+            inherited_path.to_string_lossy()
+        );
+        let status = Command::new("sh")
+            .current_dir(&repo)
+            .env("PATH", path)
+            .arg(&verifier)
+            .arg("--qualification-root")
+            .arg(&unsupported_root)
+            .status()
+            .expect("run unsupported-host verifier");
+        assert!(!status.success());
+        let unsupported_evidence =
+            fs::read_to_string(unsupported_root.join("evidence/fixture-sha256-check.txt"))
+                .expect("unsupported-host evidence");
+        assert!(unsupported_evidence.contains("host=unsupported"));
     }
 
     fn fixture_digests(root: &Path) -> BTreeMap<String, String> {
