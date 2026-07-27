@@ -344,6 +344,13 @@ measured interval. It runs numbers 1 through 5 sequentially, with no warm-up.
 Each child has the fixture as current directory and invokes the absolute release
 binary with exactly check --format json.
 
+If the completed oracle exits unsuccessfully, no child starts. The runner writes
+all five run records with every nullable measurement field null, timed_out
+false, fixture_verified null, passed false, and error oracle_failed, and the
+summary is failed. If it cannot invoke or capture the oracle at all, every
+record has the same field values and error oracle_unavailable, and the summary
+is inconclusive.
+
 After per-run setup, the Rust runner records std::time::Instant immediately
 before spawn and computes elapsed nanoseconds from that same Instant immediately
 after the exact child is reaped. Only spawning, executing, and reaping that
@@ -364,7 +371,9 @@ child measurements, and writes each later run record with passed false and error
 fixture_integrity_changed. A completed revalidation is a mismatch when the
 expected manifest is malformed or when a fixture entry is missing or unexpected,
 has the wrong type or is a symlink, or has a different listed digest; a missing
-entry is a mismatch even when its lookup reports ENOENT.
+fixture entry is a mismatch even when its lookup reports ENOENT. The current
+mismatch record has fixture_verified false; each later withheld record has
+fixture_verified null because its revalidation did not run.
 
 If the revalidation cannot complete because parsing the expected manifest or
 reading, stating, or hashing a required fixture entry is unavailable through an
@@ -372,7 +381,9 @@ I/O or permission error other than a missing entry, it is an operational capture
 failure, not a fixture mismatch. The current record has fixture_verified null,
 passed false, and error fixture_revalidation_unavailable; no later child starts,
 every withheld later record has fixture_verified null, passed false, and that
-same error, and the summary is inconclusive.
+same error, and the summary is inconclusive. The expected manifest is not a
+fixture entry: its absence or unreadability is likewise unavailable, whereas
+successfully reading malformed expected-manifest contents is a mismatch.
 
 Before exec, the child becomes leader of a fresh process group. The parent polls
 only that PID with Linux wait4(child_pid, ..., WNOHANG, &rusage), never sleeps
@@ -441,7 +452,10 @@ revalidation is unavailable, its current and all withheld later run records have
 fixture_verified null, passed false, and error
 fixture_revalidation_unavailable; an operational capture failure, or a run
 withheld after fixture_integrity_changed, may have both termination values null
-and requires a non-null error.
+and requires a non-null error. An unsuccessful completed oracle writes all five
+records with nullable measurement fields null, timed_out false,
+fixture_verified null, passed false, and error oracle_failed; an unavailable
+oracle uses oracle_unavailable and makes the summary inconclusive.
 
 qualification-summary.json contains exactly format, version, source_commit,
 xtask_sha256, mara_sha256, expected_manifest_sha256, fixture_files, runs,

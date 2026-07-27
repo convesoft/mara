@@ -467,15 +467,21 @@ cross-compilation alone shall not verify Windows runtime support.
 On the documented native Linux reference runner, build the bounded Rust tool,
 create the unique external qualification root, generate the fixed project, and
 run the independent oracle exactly once immediately before run 1, retaining its
-fixed evidence outputs unchanged. After every reaped child and before a later
-child starts, independently revalidate the complete fixture entry set and every
-fixture file against the expected manifest; reject that run and withhold later
-measurements on any completed mismatch, including malformed manifest, missing or
-unexpected entry, wrong type, symlink, or digest change. Treat unavailable
-manifest parsing or fixture reading/hashing caused by non-missing I/O or
-permission failure as an operational capture failure: record fixture_verified
-null and error fixture_revalidation_unavailable for the current and withheld
-later runs, make the summary inconclusive, and start no later child.
+fixed evidence outputs unchanged. On an unsuccessful completed oracle, start no
+child, write five records with nullable measurement fields null, timed_out false,
+fixture_verified null, passed false, and error oracle_failed, and make the
+summary failed; an unavailable oracle instead uses oracle_unavailable and is
+inconclusive. After every reaped child and before a later child starts,
+independently revalidate the complete fixture entry set and every fixture file
+against the expected manifest; reject that run and withhold later measurements
+on any completed mismatch, including malformed manifest, missing or unexpected
+fixture entry, wrong type, symlink, or digest change. The mismatch run records
+fixture_verified false and withheld slots null. Treat unavailable manifest
+reading (including a missing expected manifest) or fixture reading/hashing caused
+by non-missing I/O or permission failure as an operational capture failure:
+record fixture_verified null and error fixture_revalidation_unavailable for the
+current and withheld later runs, make the summary inconclusive, and start no
+later child.
 Verify the complete record set, hash manifest, source provenance, storage
 preconditions, five passing runs, and maxima against the stated limits. Retain
 the records and perform the required upload and finally cleanup for passed,
