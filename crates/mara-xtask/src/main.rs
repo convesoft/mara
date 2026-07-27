@@ -250,22 +250,53 @@ fn generate_scale_v01(argument_root: &Path) -> Result<()> {
             candidate.root.display()
         ))
     })?;
-    let root = fs::canonicalize(&candidate.root).map_err(|error| {
-        ToolError(format!(
-            "cannot canonicalize qualification root {}: {error}",
-            candidate.root.display()
-        ))
-    })?;
-    ensure_isolated_root(&root, &source_repo, &candidate.parent)?;
+    if let Err(error) = require_real_directory(&candidate.root, "qualification root") {
+        return Err(rollback_created_root(&candidate.root, error.to_string()));
+    }
+    let root = match fs::canonicalize(&candidate.root) {
+        Ok(root) => root,
+        Err(error) => {
+            return Err(rollback_created_root(
+                &candidate.root,
+                format!(
+                    "cannot canonicalize qualification root {}: {error}",
+                    candidate.root.display()
+                ),
+            ));
+        }
+    };
+    if root != candidate.root {
+        return Err(rollback_created_root(
+            &candidate.root,
+            "qualification root changed after creation".into(),
+        ));
+    }
+    if let Err(error) = require_real_directory(&candidate.root, "qualification root") {
+        return Err(rollback_created_root(&candidate.root, error.to_string()));
+    }
+    if let Err(error) = ensure_isolated_root(&root, &source_repo, &candidate.parent) {
+        return Err(rollback_created_root(&candidate.root, error.to_string()));
+    }
     let created_storage = match storage_info(&root) {
         Ok(storage) => storage,
         Err(error) => {
-            return Err(rollback_created_root(&root, format!("{error}")));
+            return Err(reject_created_root(
+                &source_repo,
+                &candidate,
+                &root,
+                None,
+                "storage_unavailable",
+                error.to_string(),
+            ));
         }
     };
     if let Some(error) = storage_precondition_error(&created_storage, false) {
-        return Err(rollback_created_root(
+        return Err(reject_created_root(
+            &source_repo,
+            &candidate,
             &root,
+            Some(&created_storage),
+            error,
             format!("qualification root no longer satisfies storage preconditions: {error}"),
         ));
     }
@@ -304,6 +335,32 @@ fn rollback_created_root(root: &Path, cause: String) -> ToolError {
             "{cause}; cannot remove newly created qualification root {}: {error}",
             root.display()
         )),
+    }
+}
+
+fn reject_created_root(
+    source_repo: &Path,
+    candidate: &CandidateRoot,
+    root: &Path,
+    storage: Option<&StorageInfo>,
+    precondition_error: &str,
+    cause: String,
+) -> ToolError {
+    let evidence_error = emit_precondition(
+        Some(source_repo),
+        Some(&candidate.parent),
+        Some(root),
+        storage,
+        false,
+        precondition_error,
+    )
+    .err();
+    let rollback_error = rollback_created_root(&candidate.root, cause);
+    match evidence_error {
+        Some(error) => ToolError(format!(
+            "{rollback_error}; cannot emit precondition record: {error}"
+        )),
+        None => rollback_error,
     }
 }
 
@@ -365,9 +422,7 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
     let candidate = candidate_root(argument_root, true)?;
     let root = candidate.root;
     ensure_isolated_root(&root, &source_repo, &candidate.parent)?;
-    if root.join(".git").exists() {
-        return Err(ToolError("qualification root must not contain .git".into()));
-    }
+    ensure_root_has_no_git_entry(&root)?;
     let fixture = root.join("fixture");
     let evidence = root.join("evidence");
     require_real_directory(&fixture, "fixture")?;
@@ -735,6 +790,16 @@ fn ensure_isolated_root(root: &Path, source_repo: &Path, candidate_parent: &Path
         ));
     }
     Ok(())
+}
+
+fn ensure_root_has_no_git_entry(root: &Path) -> Result<()> {
+    match fs::symlink_metadata(root.join(".git")) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Ok(_) => Err(ToolError("qualification root must not contain .git".into())),
+        Err(error) => Err(ToolError(format!(
+            "cannot inspect qualification root .git entry: {error}"
+        ))),
+    }
 }
 
 fn path_is_in_source_control(root: &Path, source_repo: &Path) -> Result<bool> {
@@ -1610,6 +1675,32 @@ mod tests {
         assert_eq!(error.to_string(), "storage gate failed");
         assert!(!root.exists());
         fs::create_dir(&root).expect("safe retry can recreate qualification root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn qualification_root_rejects_a_dangling_git_entry() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().expect("temporary root");
+        let root = temporary.path().join("qualification-root");
+        fs::create_dir(&root).expect("qualification root");
+        symlink(root.join("missing-git-directory"), root.join(".git"))
+            .expect("dangling .git entry");
+        assert!(ensure_root_has_no_git_entry(&root).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_created_root_must_remain_a_real_directory() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().expect("temporary root");
+        let real_root = temporary.path().join("real-root");
+        fs::create_dir(&real_root).expect("real root");
+        let candidate_root = temporary.path().join("qualification-root");
+        symlink(&real_root, &candidate_root).expect("replaced root");
+        assert!(require_real_directory(&candidate_root, "qualification root").is_err());
     }
 
     #[test]
