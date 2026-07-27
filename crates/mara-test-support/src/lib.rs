@@ -141,32 +141,29 @@ impl ProjectSandbox {
             .map_err(|source| ProjectSandboxError::io("create sandbox", &parent, source))?;
         let raw_root = temporary.path().to_path_buf();
 
-        if fs::symlink_metadata(&raw_root)
-            .map_err(|source| ProjectSandboxError::io("inspect sandbox", &raw_root, source))?
-            .file_type()
-            .is_symlink()
-        {
+        let metadata = match fs::symlink_metadata(&raw_root) {
+            Ok(metadata) => metadata,
+            Err(source) => {
+                return Err(cleanup_temporary_initialization_failure(
+                    temporary,
+                    ProjectSandboxError::io("inspect sandbox", &raw_root, source),
+                ));
+            }
+        };
+        if metadata.file_type().is_symlink() {
             let error = ProjectSandboxError::io(
                 "create sandbox with a non-symlink final component",
                 &raw_root,
                 io::Error::other("sandbox final component is a symlink"),
             );
-            let retained = temporary.keep();
-            return Err(complete_initialization_cleanup(
-                error,
-                remove_sandbox(&retained),
-            ));
+            return Err(cleanup_temporary_initialization_failure(temporary, error));
         }
 
         let root = match raw_root.canonicalize() {
             Ok(root) => root,
             Err(source) => {
                 let error = ProjectSandboxError::io("canonicalize sandbox", &raw_root, source);
-                let retained = temporary.keep();
-                return Err(complete_initialization_cleanup(
-                    error,
-                    remove_sandbox(&retained),
-                ));
+                return Err(cleanup_temporary_initialization_failure(temporary, error));
             }
         };
         let _ = temporary.keep();
@@ -273,25 +270,69 @@ impl ProjectSandbox {
     }
 
     fn initialize_git(&self) -> Result<(), ProjectSandboxError> {
+        let template_directory = self.root.join(".git-template");
+        fs::create_dir(&template_directory).map_err(|source| {
+            ProjectSandboxError::io(
+                "create empty Git template directory",
+                &template_directory,
+                source,
+            )
+        })?;
+        let mut command = Command::new("git");
+        self.configure_command(&mut command)
+            .args(["init", "--quiet", "--template"])
+            .arg(&template_directory);
+        run_git_command(command)?;
+        fs::remove_dir(&template_directory).map_err(|source| {
+            ProjectSandboxError::io(
+                "remove empty Git template directory",
+                &template_directory,
+                source,
+            )
+        })?;
+
+        let git_directory = self.root.join(".git");
+        let hooks_directory = git_directory.join("hooks");
+        let excludes_directory = git_directory.join("info");
+        let excludes_file = excludes_directory.join("exclude");
+        fs::create_dir_all(&hooks_directory).map_err(|source| {
+            ProjectSandboxError::io(
+                "create isolated Git hooks directory",
+                &hooks_directory,
+                source,
+            )
+        })?;
+        fs::create_dir_all(&excludes_directory).map_err(|source| {
+            ProjectSandboxError::io(
+                "create isolated Git excludes directory",
+                &excludes_directory,
+                source,
+            )
+        })?;
+        fs::write(&excludes_file, "").map_err(|source| {
+            ProjectSandboxError::io("create isolated Git excludes file", &excludes_file, source)
+        })?;
+
+        for (name, value) in [
+            ("core.hooksPath", hooks_directory.as_os_str()),
+            ("core.excludesFile", excludes_file.as_os_str()),
+            ("user.email", OsStr::new("mara-test@example.invalid")),
+            ("user.name", OsStr::new("Mara ProjectSandbox")),
+            ("commit.gpgSign", OsStr::new("false")),
+        ] {
+            let mut command = Command::new("git");
+            self.configure_command(&mut command)
+                .args(["config", "--local", name])
+                .arg(value);
+            run_git_command(command)?;
+        }
         for arguments in [
-            &["init", "--quiet"][..],
-            &["config", "user.email", "mara-test@example.invalid"],
-            &["config", "user.name", "Mara ProjectSandbox"],
-            &["config", "commit.gpgSign", "false"],
-            &["add", "."],
+            &["add", "."][..],
             &["commit", "--quiet", "-m", "test: initialize ProjectSandbox"],
         ] {
             let mut command = Command::new("git");
             self.configure_command(&mut command).args(arguments);
-            let output = command
-                .output()
-                .map_err(|source| ProjectSandboxError::command("run Git", source))?;
-            if !output.status.success() {
-                return Err(ProjectSandboxError::command(
-                    "initialize Git sandbox",
-                    io::Error::other(String::from_utf8_lossy(&output.stderr).trim().to_owned()),
-                ));
-            }
+            run_git_command(command)?;
         }
         Ok(())
     }
@@ -318,7 +359,20 @@ fn canonical_temp_parent() -> Result<PathBuf, ProjectSandboxError> {
     #[cfg(unix)]
     candidates.push(PathBuf::from("/var/tmp"));
 
+    canonical_temp_parent_from(candidates)
+}
+
+fn canonical_temp_parent_from(
+    candidates: impl IntoIterator<Item = PathBuf>,
+) -> Result<PathBuf, ProjectSandboxError> {
     for candidate in candidates {
+        let metadata = match fs::symlink_metadata(&candidate) {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            continue;
+        }
         let parent = match candidate.canonicalize() {
             Ok(parent) => parent,
             Err(_) => continue,
@@ -428,6 +482,28 @@ fn complete_initialization_cleanup(
     }
 }
 
+fn cleanup_temporary_initialization_failure(
+    temporary: tempfile::TempDir,
+    error: ProjectSandboxError,
+) -> ProjectSandboxError {
+    let retained = temporary.keep();
+    complete_initialization_cleanup(error, remove_sandbox(&retained))
+}
+
+fn run_git_command(mut command: Command) -> Result<(), ProjectSandboxError> {
+    let output = command
+        .output()
+        .map_err(|source| ProjectSandboxError::command("run Git", source))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(ProjectSandboxError::command(
+            "initialize Git sandbox",
+            io::Error::other(String::from_utf8_lossy(&output.stderr).trim().to_owned()),
+        ))
+    }
+}
+
 fn cleanup_with(
     root: &Path,
     remove: impl FnOnce(&Path) -> io::Result<()>,
@@ -495,6 +571,29 @@ mod tests {
     }
 
     #[test]
+    fn clean_git_sandbox_overrides_host_hook_and_exclusion_configuration() {
+        let sandbox = ProjectSandbox::new(ProjectSandboxMode::CleanGit).unwrap();
+        for (name, expected) in [
+            ("core.hooksPath", sandbox.path().join(".git/hooks")),
+            (
+                "core.excludesFile",
+                sandbox.path().join(".git/info/exclude"),
+            ),
+        ] {
+            let mut command = Command::new("git");
+            sandbox
+                .configure_command(&mut command)
+                .args(["config", "--local", "--get", name]);
+            let output = command.output().unwrap();
+            assert!(output.status.success());
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap().trim_end(),
+                expected.to_str().unwrap()
+            );
+        }
+    }
+
+    #[test]
     fn sandbox_path_is_canonical_and_outside_checkout_and_worktrees() {
         let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty).unwrap();
         let source_checkout = workspace_root().unwrap();
@@ -503,6 +602,25 @@ mod tests {
         for worktree in worktree_paths(&source_checkout).unwrap() {
             assert!(!sandbox.path().starts_with(worktree));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_parent_rejects_a_symlink_final_component() {
+        let parent = canonical_temp_parent().unwrap();
+        let temporary = tempfile::Builder::new()
+            .prefix("mara-project-sandbox-parent-test-")
+            .tempdir_in(&parent)
+            .unwrap();
+        let real = temporary.path().join("real-parent");
+        let symlink = temporary.path().join("symlink-parent");
+        fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, &symlink).unwrap();
+
+        assert_eq!(
+            canonical_temp_parent_from([symlink, real.clone()]).unwrap(),
+            real.canonicalize().unwrap()
+        );
     }
 
     #[test]
@@ -602,6 +720,23 @@ mod tests {
             Path::new("/canonical/retained-sandbox")
         );
         assert!(error.to_string().contains("injected cleanup failure"));
+    }
+
+    #[test]
+    fn failed_temporary_initialization_cleans_up_before_returning_the_error() {
+        let parent = canonical_temp_parent().unwrap();
+        let temporary = tempfile::Builder::new().tempdir_in(parent).unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        let error = cleanup_temporary_initialization_failure(
+            temporary,
+            ProjectSandboxError::io(
+                "inspect sandbox",
+                &root,
+                io::Error::other("injected inspection failure"),
+            ),
+        );
+        assert!(error.cleanup_error().is_none());
+        assert!(!root.exists());
     }
 
     #[test]
