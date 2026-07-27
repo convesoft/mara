@@ -2062,7 +2062,12 @@ mod tests {
         assert!(!workflow.contains("/usr/libexec/PlistBuddy"));
         assert!(!workflow.contains("sha256sum --check"));
         assert!(!workflow.contains("shasum -a 256 -c"));
-        assert!(workflow.contains("tmp_used_kib=\"$(du -sk \"$tmp_root\""));
+        assert_eq!(
+            workflow
+                .matches("du -sk \"$tmp_root\" 2>/dev/null || true")
+                .count(),
+            3
+        );
         assert!(workflow.contains("df -h \"$tmp_root\" \"$repo_root\""));
         assert!(workflow.contains("resource-before-cleanup.txt"));
         assert!(workflow.contains("df -h \"$tmp_root\" \"$repo_root\" \"$root\""));
