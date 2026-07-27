@@ -76,18 +76,48 @@ impl Fixture {
         if template_directory.is_some() {
             let hooks = self.root.join(".git/hooks");
             let excludes = self.root.join(".git/info/fixture-global-excludes");
+            let attributes = self.root.join(".git/info/fixture-global-attributes");
             fs::create_dir_all(&hooks).expect("create isolated Git hooks directory");
             fs::create_dir_all(excludes.parent().unwrap())
                 .expect("create isolated Git excludes directory");
             fs::write(&excludes, "").expect("create isolated Git excludes file");
+            fs::write(&attributes, "").expect("create isolated Git attributes file");
             for (name, value) in [
                 ("core.hooksPath", hooks.to_str().unwrap()),
                 ("core.excludesFile", excludes.to_str().unwrap()),
+                ("core.attributesFile", attributes.to_str().unwrap()),
+                ("core.fsmonitor", "false"),
                 ("commit.gpgSign", "false"),
             ] {
                 self.git(&["config", "--local", name, value]);
             }
         }
+    }
+}
+
+#[test]
+fn manual_git_fixture_isolates_global_attributes_and_fsmonitor() {
+    let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
+    fixture.git(&["init", "--quiet"]);
+
+    for (name, expected) in [
+        (
+            "core.attributesFile",
+            fixture.root.join(".git/info/fixture-global-attributes"),
+        ),
+        ("core.fsmonitor", std::path::PathBuf::from("false")),
+    ] {
+        let mut command = Command::new("git");
+        fixture
+            ._sandbox
+            .configure_command(&mut command)
+            .args(["config", "--local", "--get", name]);
+        let output = command.output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim_end(),
+            expected.to_str().unwrap()
+        );
     }
 }
 
