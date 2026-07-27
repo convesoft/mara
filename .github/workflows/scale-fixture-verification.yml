@@ -29,7 +29,7 @@ jobs:
           repo_root="$(pwd -P)"
           tmp_root="$(CDPATH= cd -- /tmp && pwd -P)"
           runner_temp_parent="$(CDPATH= cd -- "$RUNNER_TEMP/.." && pwd -P)"
-          tmp_used_kib="$(df -Pk "$tmp_root" | awk 'NR == 2 { print $3 }')"
+          tmp_used_kib="$(du -sk "$tmp_root" | awk '{ print $1 }')"
           total_kib="$(df -Pk "$runner_temp_parent" | awk 'NR == 2 { print $2 }')"
           available_kib="$(df -Pk "$runner_temp_parent" | awk 'NR == 2 { print $4 }')"
           {
@@ -92,7 +92,7 @@ jobs:
           repo_root="$(pwd -P)"
           tmp_root="$(CDPATH= cd -- /tmp && pwd -P)"
           runner_temp_parent="$(CDPATH= cd -- "$RUNNER_TEMP/.." && pwd -P)"
-          tmp_used_kib="$(df -Pk "$tmp_root" | awk 'NR == 2 { print $3 }')"
+          tmp_used_kib="$(du -sk "$tmp_root" | awk '{ print $1 }')"
           root_used_kib="$(df -Pk "$root" | awk 'NR == 2 { print $3 }')"
           total_kib="$(df -Pk "$runner_temp_parent" | awk 'NR == 2 { print $2 }')"
           available_kib="$(df -Pk "$runner_temp_parent" | awk 'NR == 2 { print $4 }')"
@@ -147,5 +147,5 @@ jobs:
             printf 'qualification root remained after cleanup: %s\n' "$root" >&2
             exit 1
           fi
-          printf 'post_cleanup_tmp_used_kib=%s\n' "$(df -Pk "$tmp_root" | awk 'NR == 2 { print $3 }')"
+          printf 'post_cleanup_tmp_used_kib=%s\n' "$(du -sk "$tmp_root" | awk '{ print $1 }')"
           df -h "$tmp_root" "$repo_root"
