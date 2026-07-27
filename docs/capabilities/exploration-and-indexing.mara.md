@@ -470,7 +470,11 @@ run the independent oracle exactly once immediately before run 1, retaining its
 fixed evidence outputs unchanged. After every reaped child and before a later
 child starts, independently revalidate the complete fixture entry set and every
 fixture file against the expected manifest; reject that run and withhold later
-measurements on any mismatch.
+measurements on any mismatch. Treat unavailable manifest parsing or fixture
+reading/hashing caused by I/O or permission failure as an operational capture
+failure: record fixture_verified null and error
+fixture_revalidation_unavailable for the current and withheld later runs, make
+the summary inconclusive, and start no later child.
 Verify the complete record set, hash manifest, source provenance, storage
 preconditions, five passing runs, and maxima against the stated limits. Retain
 the records and perform the required upload and finally cleanup for passed,

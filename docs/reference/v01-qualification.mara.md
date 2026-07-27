@@ -362,6 +362,14 @@ any oracle evidence output. A mismatch fails the current run, prevents later
 child measurements, and writes each later run record with passed false and error
 fixture_integrity_changed.
 
+If the revalidation cannot complete because parsing the expected manifest or
+reading, stating, or hashing a required fixture entry is unavailable through an
+I/O or permission error, it is an operational capture failure, not a fixture
+mismatch. The current record has fixture_verified null, passed false, and error
+fixture_revalidation_unavailable; no later child starts, every withheld later
+record has fixture_verified null, passed false, and that same error, and the
+summary is inconclusive.
+
 Before exec, the child becomes leader of a fresh process group. The parent polls
 only that PID with Linux wait4(child_pid, ..., WNOHANG, &rusage), never sleeps
 past the same 5,000,000,000-nanosecond deadline. At deadline it sends SIGKILL
@@ -423,10 +431,13 @@ unsigned or null when unobtainable; exit and signal are integer or null; timeout
 and pass are booleans; fixture_verified is boolean or null only when its
 revalidation could not run; hashes are lowercase 64-digit SHA-256 or null only
 when complete capture was impossible; status is string or null; error is null or
-stable machine-readable string. A normally captured termination has exactly one
-of exit or signal and null error. Operational capture failure, or a run withheld
-after fixture_integrity_changed, may have both termination values null and
-requires a non-null error.
+stable machine-readable string. A normally captured child without a subsequent
+operational error has exactly one of exit or signal and null error. When fixture
+revalidation is unavailable, its current and all withheld later run records have
+fixture_verified null, passed false, and error
+fixture_revalidation_unavailable; an operational capture failure, or a run
+withheld after fixture_integrity_changed, may have both termination values null
+and requires a non-null error.
 
 qualification-summary.json contains exactly format, version, source_commit,
 xtask_sha256, mara_sha256, expected_manifest_sha256, fixture_files, runs,
