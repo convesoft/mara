@@ -215,6 +215,7 @@ fn main() -> ExitCode {
 
 fn generate_scale_v01(argument_root: &Path) -> Result<()> {
     let source_repo = source_repository()?;
+    canonical_xtask_executable(&source_repo)?;
     let candidate = candidate_root(argument_root, false)?;
     let inside_source_control = path_is_in_source_control(&candidate.root, &source_repo)?;
     let storage = match storage_info(&candidate.parent) {
@@ -419,6 +420,7 @@ fn measure_scale_v01(argument_root: &Path) -> Result<()> {
 #[cfg(target_os = "linux")]
 fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
     let source_repo = source_repository()?;
+    let xtask = canonical_xtask_executable(&source_repo)?;
     let candidate = candidate_root(argument_root, true)?;
     let root = candidate.root;
     ensure_isolated_root(&root, &source_repo, &candidate.parent)?;
@@ -461,11 +463,7 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
     require_regular_file(&script, "tests/qualification/verify-scale-v01.sh")?;
 
     let source_commit = git_output(&source_repo, ["rev-parse", "HEAD"])?;
-    let xtask_sha256 = hash_file(&env::current_exe().map_err(|error| {
-        ToolError(format!(
-            "cannot find running mara-xtask executable: {error}"
-        ))
-    })?)?;
+    let xtask_sha256 = hash_file(&xtask)?;
     let mara_sha256 = hash_file(&mara)?;
 
     let oracle = Command::new(&script)
@@ -700,6 +698,38 @@ fn source_repository() -> Result<PathBuf> {
         ));
     }
     Ok(root)
+}
+
+fn canonical_xtask_executable(source_repo: &Path) -> Result<PathBuf> {
+    let current = fs::canonicalize(env::current_exe().map_err(|error| {
+        ToolError(format!(
+            "cannot find running mara-xtask executable: {error}"
+        ))
+    })?)
+    .map_err(|error| {
+        ToolError(format!(
+            "cannot canonicalize running mara-xtask executable: {error}"
+        ))
+    })?;
+    let expected = source_repo.join("target/debug/mara-xtask");
+    require_regular_file(&expected, "target/debug/mara-xtask")?;
+    let expected = fs::canonicalize(&expected).map_err(|error| {
+        ToolError(format!(
+            "cannot canonicalize target/debug/mara-xtask: {error}"
+        ))
+    })?;
+    require_exact_xtask_executable(&current, &expected)
+}
+
+fn require_exact_xtask_executable(current: &Path, expected: &Path) -> Result<PathBuf> {
+    require_regular_file(expected, "target/debug/mara-xtask")?;
+    if current != expected {
+        return Err(ToolError(
+            "qualification commands must use the canonical target/debug/mara-xtask executable"
+                .into(),
+        ));
+    }
+    Ok(expected.to_path_buf())
 }
 
 struct CandidateRoot {
@@ -1573,6 +1603,21 @@ mod tests {
     }
 
     #[test]
+    fn qualification_xtask_must_be_the_canonical_debug_executable() {
+        let temporary = tempfile::tempdir().expect("temporary root");
+        let expected = temporary.path().join("target/debug/mara-xtask");
+        let copied = temporary.path().join("copied-mara-xtask");
+        fs::create_dir_all(expected.parent().expect("target directory")).expect("target directory");
+        fs::write(&expected, "canonical").expect("canonical executable");
+        fs::write(&copied, "canonical").expect("copied executable");
+        assert_eq!(
+            require_exact_xtask_executable(&expected, &expected).expect("canonical executable"),
+            expected
+        );
+        assert!(require_exact_xtask_executable(&copied, &expected).is_err());
+    }
+
+    #[test]
     fn storage_capacity_and_tmpfs_are_rejected() {
         let low_capacity = StorageInfo {
             filesystem_type: "ext4".into(),
@@ -1812,6 +1857,8 @@ mod tests {
         assert!(upload < cleanup);
         assert!(workflow[cleanup..].contains("rm -rf -- \"$root\""));
         assert!(workflow[cleanup..].contains("qualification root remained after cleanup"));
+        assert!(workflow.contains("/usr/sbin/diskutil info -plist \"$RUNNER_TEMP\""));
+        assert!(!workflow.contains("macOS) filesystem_type=\"$(stat -f %T"));
     }
 
     #[cfg(unix)]
@@ -1849,7 +1896,7 @@ mod tests {
         .expect("verifier");
         fs::write(
             &mara,
-            "#!/bin/sh\nprintf '%s\\n' '{ \"status\": \"ok\", \"diagnostics\": [], \"data\": { \"summary\": { \"documents\": 10, \"items\": 10000, \"edges\": 100000 } } }'\n",
+            "#!/bin/sh\ncat <<'JSON'\n{\n  \"format\": \"mara.command\",\n  \"version\": 1,\n  \"command\": \"check\",\n  \"status\": \"ok\",\n  \"project\": {\n    \"name\": \"mara-scale-v01\",\n    \"root\": \".\",\n    \"schema_name\": \"mara-scale-v01\",\n    \"schema_version\": \"0.1.0\",\n    \"schema_path\": \".mara/schema.yaml\"\n  },\n  \"diagnostics\": [],\n  \"data\": {\n    \"summary\": {\n      \"documents\": 10,\n      \"items\": 10000,\n      \"source_nodes\": 0,\n      \"edges\": 100000,\n      \"mentions\": 0,\n      \"external_nodes\": 0,\n      \"errors\": 0,\n      \"warnings\": 0,\n      \"info\": 0\n    }\n  },\n  \"error\": null\n}\nJSON\n",
         )
         .expect("Mara fixture command");
         for path in [&verifier, &mara] {
@@ -1885,6 +1932,10 @@ mod tests {
         assert_eq!(digest_evidence.matches("matched=true").count(), 12);
         assert!(digest_evidence.contains("expected_sha256="));
         assert!(digest_evidence.contains("observed_sha256="));
+        let preflight_evidence =
+            fs::read_to_string(qualification_root.join("evidence/preflight-check-exit.txt"))
+                .expect("preflight evidence");
+        assert!(preflight_evidence.contains("json_validation=1"));
     }
 
     fn fixture_digests(root: &Path) -> BTreeMap<String, String> {

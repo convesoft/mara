@@ -252,14 +252,50 @@ set +e
 (CDPATH= cd -- "$fixture" && "$mara" check --format json) >"$evidence/preflight-check.json" 2>"$evidence/preflight-check.stderr"
 preflight_status=$?
 set -e
-printf 'exit_code=%s\n' "$preflight_status" >"$evidence/preflight-check-exit.txt"
-if [ "$preflight_status" -ne 0 ] || \
-    ! grep -q '"status": "ok"' "$evidence/preflight-check.json" || \
-    ! grep -q '"diagnostics": \[\]' "$evidence/preflight-check.json" || \
-    ! grep -q '"documents": 10' "$evidence/preflight-check.json" || \
-    ! grep -q '"items": 10000' "$evidence/preflight-check.json" || \
-    ! grep -q '"edges": 100000' "$evidence/preflight-check.json"
+preflight_json_valid=0
+if [ "$preflight_status" -eq 0 ] && awk '
+    BEGIN {
+        expected[1] = "{";
+        expected[2] = "  \"format\": \"mara.command\",";
+        expected[3] = "  \"version\": 1,";
+        expected[4] = "  \"command\": \"check\",";
+        expected[5] = "  \"status\": \"ok\",";
+        expected[6] = "  \"project\": {";
+        expected[7] = "    \"name\": \"mara-scale-v01\",";
+        expected[8] = "    \"root\": \".\",";
+        expected[9] = "    \"schema_name\": \"mara-scale-v01\",";
+        expected[10] = "    \"schema_version\": \"0.1.0\",";
+        expected[11] = "    \"schema_path\": \".mara/schema.yaml\"";
+        expected[12] = "  },";
+        expected[13] = "  \"diagnostics\": [],";
+        expected[14] = "  \"data\": {";
+        expected[15] = "    \"summary\": {";
+        expected[16] = "      \"documents\": 10,";
+        expected[17] = "      \"items\": 10000,";
+        expected[18] = "      \"source_nodes\": 0,";
+        expected[19] = "      \"edges\": 100000,";
+        expected[20] = "      \"mentions\": 0,";
+        expected[21] = "      \"external_nodes\": 0,";
+        expected[22] = "      \"errors\": 0,";
+        expected[23] = "      \"warnings\": 0,";
+        expected[24] = "      \"info\": 0";
+        expected[25] = "    }";
+        expected[26] = "  },";
+        expected[27] = "  \"error\": null";
+        expected[28] = "}";
+        valid = 1;
+    }
+    { if (NR > 28 || $0 != expected[NR]) valid = 0; }
+    END { exit(NR == 28 && valid ? 0 : 1); }
+' "$evidence/preflight-check.json"
 then
+    preflight_json_valid=1
+fi
+{
+    printf 'exit_code=%s\n' "$preflight_status"
+    printf 'json_validation=%s\n' "$preflight_json_valid"
+} >"$evidence/preflight-check-exit.txt"
+if [ "$preflight_status" -ne 0 ] || [ "$preflight_json_valid" -ne 1 ]; then
     failed=1
 fi
 
