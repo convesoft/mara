@@ -119,8 +119,8 @@ impl std::error::Error for ProjectSandboxCleanupError {
 ///
 /// The sandbox is always created below the canonical system temporary-directory
 /// parent, after proving that its root is outside the source checkout and every
-/// registered Git worktree. Its default drop cleanup reports deletion failures to
-/// the test output. Call [`Self::cleanup`] when the test must assert cleanup
+/// registered Git worktree. Its default drop cleanup fails a successful test
+/// when deletion fails. Call [`Self::cleanup`] when the test must assert cleanup
 /// directly.
 pub struct ProjectSandbox {
     root: PathBuf,
@@ -154,10 +154,10 @@ impl ProjectSandbox {
             ));
         }
 
-        let root = temporary.keep();
-        let root = root
+        let root = raw_root
             .canonicalize()
-            .map_err(|source| ProjectSandboxError::io("canonicalize sandbox", root, source))?;
+            .map_err(|source| ProjectSandboxError::io("canonicalize sandbox", &raw_root, source))?;
+        let _ = temporary.keep();
 
         if root.starts_with(&source_checkout)
             || worktrees.iter().any(|worktree| root.starts_with(worktree))
@@ -193,11 +193,7 @@ impl ProjectSandbox {
         &self,
         command: &'command mut Command,
     ) -> &'command mut Command {
-        for (name, _) in env::vars_os() {
-            if is_git_variable(&name) {
-                command.env_remove(name);
-            }
-        }
+        clear_git_environment(command);
         let explicit_git_variables: Vec<OsString> = command
             .get_envs()
             .filter(|(name, _)| is_git_variable(name))
@@ -297,7 +293,7 @@ impl Drop for ProjectSandbox {
             return;
         }
         if let Err(error) = remove_sandbox(&self.root) {
-            eprintln!("{error}");
+            report_default_cleanup_failure(error);
         }
     }
 }
@@ -378,7 +374,14 @@ fn path_from_git_record(record: &[u8]) -> PathBuf {
 }
 
 fn clear_git_environment(command: &mut Command) {
-    for (name, _) in env::vars_os() {
+    clear_git_environment_from(command, env::vars_os());
+}
+
+fn clear_git_environment_from(
+    command: &mut Command,
+    variables: impl IntoIterator<Item = (OsString, OsString)>,
+) {
+    for (name, _) in variables {
         if is_git_variable(&name) {
             command.env_remove(name);
         }
@@ -416,6 +419,14 @@ fn cleanup_with(
         retained_path: root.to_path_buf(),
         source,
     })
+}
+
+fn report_default_cleanup_failure(error: ProjectSandboxCleanupError) {
+    if std::thread::panicking() {
+        eprintln!("{error}");
+    } else {
+        panic!("{error}");
+    }
 }
 
 fn initial_project_toml() -> &'static str {
@@ -513,6 +524,26 @@ mod tests {
     }
 
     #[test]
+    fn inherited_git_variables_are_cleared_before_child_configuration() {
+        let mut command = Command::new("git");
+        clear_git_environment_from(
+            &mut command,
+            [(
+                OsString::from("GIT_PROJECT_SANDBOX_INHERITED"),
+                OsString::from("must-be-cleared"),
+            )],
+        );
+        let environments: BTreeMap<_, _> = command
+            .get_envs()
+            .map(|(name, value)| (name.to_os_string(), value.map(OsStr::to_os_string)))
+            .collect();
+        assert_eq!(
+            environments.get(OsStr::new("GIT_PROJECT_SANDBOX_INHERITED")),
+            Some(&None)
+        );
+    }
+
+    #[test]
     fn explicit_cleanup_deletes_the_sandbox() {
         let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty).unwrap();
         let root = sandbox.path().to_path_buf();
@@ -554,6 +585,17 @@ mod tests {
             Path::new("/canonical/retained-sandbox")
         );
         assert!(error.to_string().contains("injected cleanup failure"));
+    }
+
+    #[test]
+    fn default_cleanup_failures_fail_successful_tests() {
+        let result = std::panic::catch_unwind(|| {
+            report_default_cleanup_failure(ProjectSandboxCleanupError {
+                retained_path: PathBuf::from("/canonical/retained-sandbox"),
+                source: io::Error::new(io::ErrorKind::PermissionDenied, "injected cleanup failure"),
+            });
+        });
+        assert!(result.is_err());
     }
 
     #[test]

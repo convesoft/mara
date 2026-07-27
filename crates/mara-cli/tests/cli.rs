@@ -123,6 +123,19 @@ fn run(sandbox: &ProjectSandbox, args: &[&str]) -> std::process::Output {
     command.output().expect("run mara command")
 }
 
+fn run_at_sandbox_path(
+    sandbox: &ProjectSandbox,
+    root: &Path,
+    args: &[&str],
+) -> std::process::Output {
+    let mut command = mara();
+    sandbox
+        .configure_command(&mut command)
+        .current_dir(root)
+        .args(args);
+    command.output().expect("run mara command")
+}
+
 fn run_at_path(root: &Path, args: &[&str]) -> std::process::Output {
     mara()
         .current_dir(root)
@@ -275,7 +288,7 @@ fn self_hosting_negative_fixture_rejects_duplicate_display_ids() {
 fn init_creates_a_valid_process_neutral_project_that_check_accepts() {
     let temp = ProjectSandbox::new(ProjectSandboxMode::Empty)
         .expect("create isolated empty CLI project sandbox");
-    let root = temp.path().to_path_buf();
+    let root = temp.path().join("project");
 
     let init = run(
         &temp,
@@ -296,7 +309,8 @@ fn init_creates_a_valid_process_neutral_project_that_check_accepts() {
             .contains("flavours: {}\nrelations: {}\nrules: []\n")
     );
 
-    let check = run(&temp, &["check", "--format", "json"]);
+    let root = root.canonicalize().unwrap();
+    let check = run_at_sandbox_path(&temp, &root, &["check", "--format", "json"]);
 
     assert_eq!(check.status.code(), Some(0));
     assert!(check.stderr.is_empty());
