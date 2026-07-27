@@ -538,12 +538,16 @@ GIT_CEILING_DIRECTORIES to exactly the canonical sandbox parent. This allows
 the clean-Git and dirty-Git modes to discover only their project repository and
 prevents every mode from discovering a repository above the sandbox.
 
-It creates no repository or Cargo-target copy. Cleanup is default and reports
-each deletion failure with canonical retained path and error. A bounded opt-in
-preserve-on-failure option may retain only a failed sandbox for diagnosis; it
-never retains a successful sandbox. Pure parser, domain, and in-memory tests
-shall not use the helper, and it shall not become a general test framework,
-fixture generator, temporary-directory manager, or command runner.
+It creates no repository or Cargo-target copy. Cleanup is default. For an
+uncaught panic, Drop performs best-effort cleanup and reports each deletion
+failure with canonical retained path and error. A caller that catches a panic
+shall invoke explicit `ProjectSandbox::cleanup()` after `catch_unwind`; any
+cleanup error is an observable test failure and shall not allow that
+caught-panic path to appear successful. A bounded opt-in preserve-on-failure
+option may retain only a failed sandbox for diagnosis; it never retains a
+successful sandbox. Pure parser, domain, and in-memory tests shall not use the
+helper, and it shall not become a general test framework, fixture generator,
+temporary-directory manager, or command runner.
 :::
 
 ## Decisions and stable outputs

@@ -540,6 +540,9 @@ clean-Git, and dirty-Git modes. They shall verify a canonical unique project
 outside the source checkout and every worktree, explicit child current
 directory, clearing of every inherited GIT_* variable, the exact canonical
 sandbox-parent GIT_CEILING_DIRECTORIES value, default cleanup, deletion-error
-reporting, and failure-only opt-in preservation. Parser, domain, and in-memory
+reporting, and failure-only opt-in preservation. A test that catches a panic
+shall call explicit `ProjectSandbox::cleanup()` after `catch_unwind` and treat
+any cleanup error as an observable test failure; best-effort Drop cleanup for
+an uncaught panic shall report deletion errors. Parser, domain, and in-memory
 tests shall demonstrably avoid this helper.
 :::
