@@ -2058,6 +2058,31 @@ Body.
     #[test]
     fn fault_injection_never_exposes_partial_index_bytes() {
         let fixture = fixture();
+        let git = |arguments: &[&str]| {
+            let output = Command::new("git")
+                .arg("-c")
+                .arg("commit.gpgsign=false")
+                .arg("-C")
+                .arg(fixture.path())
+                .args(arguments)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {arguments:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        git(&["init", "-b", "main"]);
+        git(&["config", "user.name", "Mara Test"]);
+        git(&["config", "user.email", "mara@example.test"]);
+        git(&[
+            "add",
+            ".mara/project.toml",
+            ".mara/schema.yaml",
+            "docs/item.mara.md",
+        ]);
+        git(&["commit", "-m", "fixture"]);
         let result = crate::check_project(fixture.path()).unwrap();
         let destination = fixture.path().join(".mara/index.json");
         let previous = b"previous complete index\n";
