@@ -253,6 +253,27 @@ On a documented CI reference runner, a clean full check of 10,000 items and
 
 ## Design, rationale, risk, and artifacts
 
+:::design m_01KZ7YA2D7EJ73VM8ZVCNZKHV5
+:id: DES-V01-QUALIFICATION-METHOD
+:title: v0.1 qualification architecture umbrella
+:status: accepted
+:kind: architecture
+:satisfies: REQ-PERFORMANCE-TARGET
+:refines: REQ-PORTABLE-CLI
+:relates_to: TEST-PORTABILITY-PERFORMANCE
+
+This proposed umbrella keeps the v0.1 scale and native non-Windows
+qualification method coherent without changing the approved requirement, test,
+or Windows boundary in [[ADR-0014]]. The focused command, external-storage,
+fixture, oracle, measurement, evidence-format, and project-sandbox contracts
+are defined in [v0.1 qualification](../reference/v01-qualification.mara.md).
+
+Those contracts define reusable verification procedures and stable planned
+outputs, not execution evidence or a runtime-support claim. Native Windows
+behavioural qualification remains deferred by [[ADR-0014]]; Linux and macOS
+results or Windows cross-compilation do not establish that support boundary.
+:::
+
 :::design m_01KY7YA2D74S6NC0FGAZ2ZKFT2
 :id: DES-QUERY-INDEX
 :title: Shared in-memory project model with projection adapters
@@ -425,4 +446,75 @@ macOS, and Windows before support is claimed for those runtimes. It shall also
 benchmark the documented 10,000-item, 100,000-edge fixture on the designated
 reference runner against time and memory budgets. Passing non-Windows CI or
 cross-compilation alone shall not verify Windows runtime support.
+:::
+
+:::test m_01KYHDXJ5V9EWWGCFCNB5KK0JB
+:id: TEST-V01-SCALE-QUALIFICATION
+:title: Scale-v0.1 deterministic qualification procedure
+:status: approved
+:kind: verification
+:method: automated
+:level: system
+:verifies: REQ-PERFORMANCE-TARGET
+:verifies: DES-V01-QUALIFICATION-CLI
+:verifies: DES-V01-QUALIFICATION-WORKSPACE
+:verifies: DES-V01-SCALE-FIXTURE
+:verifies: DES-V01-SCALE-ORACLE
+:verifies: DES-V01-MEASUREMENT-RUNNER
+:verifies: DES-V01-QUALIFICATION-EVIDENCE-FORMAT
+:depends_on: TEST-PORTABILITY-PERFORMANCE
+
+On the documented native Linux reference runner, build the bounded Rust tool,
+create the unique external qualification root, generate the fixed project, and
+run every independent oracle assertion before five exact-child measurements.
+Verify the complete record set, hash manifest, source provenance, storage
+preconditions, five passing runs, and maxima against the stated limits. Retain
+the records and perform the required upload and finally cleanup for passed,
+failed, and inconclusive outcomes.
+:::
+
+:::test m_01KYHDXJ6DPHS94EPM4WGTKKS8
+:id: TEST-V01-NATIVE-NONWINDOWS-QUALIFICATION
+:title: Native Linux and macOS qualification procedure
+:status: approved
+:kind: verification
+:method: automated
+:level: system
+:verifies: REQ-PORTABLE-CLI
+:verifies: DES-V01-QUALIFICATION-WORKSPACE
+:verifies: DES-V01-SCALE-ORACLE
+:depends_on: TEST-PORTABILITY-PERFORMANCE
+:relates_to: ADR-0014
+
+From a clean source worktree on native GitHub-hosted ubuntu-24.04 and macos-14,
+derive a nonexistent job-unique root, record pre-resource state, assert Linux
+or Darwin as applicable, use current stable Rust with CARGO_TARGET_DIR unset,
+and run cargo fmt --all -- --check, cargo clippy --all-targets --all-features
+-- -D warnings, the built qualification generator, and
+TMPDIR="$qualification_root/test-tmp" cargo test --all-targets --all-features.
+Delete that test workspace immediately, build the native release binary in the
+source target directory, and run the external standalone fixture's storage
+gates, no-Git oracle, and provenance capture. macOS stops after native
+behavioural qualification; only the Linux x64 reference runner, after requiring
+RUNNER_ARCH X64 and uname -m x86_64, performs the five-run performance
+measurement. The procedure does not make a Windows runtime claim.
+:::
+
+:::test m_01KYHDXJ6Z9JDF9Y83X6GENF74
+:id: TEST-PROJECT-SANDBOX
+:title: ProjectSandbox isolation procedure
+:status: approved
+:kind: verification
+:method: automated
+:level: integration
+:verifies: DES-PROJECT-SANDBOX
+:relates_to: TEST-PORTABILITY-PERFORMANCE
+
+Project-oriented integration tests shall exercise exactly the empty, configured,
+clean-Git, and dirty-Git modes. They shall verify a canonical unique project
+outside the source checkout and every worktree, explicit child current
+directory, clearing of every inherited GIT_* variable, the exact canonical
+sandbox-parent GIT_CEILING_DIRECTORIES value, default cleanup, deletion-error
+reporting, and failure-only opt-in preservation. Parser, domain, and in-memory
+tests shall demonstrably avoid this helper.
 :::
