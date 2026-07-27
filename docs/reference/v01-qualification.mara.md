@@ -339,9 +339,13 @@ general test framework, command runner, parser, or source analyzer.
 measure-scale-v01 runs only after generation, successful oracle checks, and
 cargo build --locked --release --bin mara. Its own build, generation, oracle,
 provenance collection, result serialization, and runner setup are outside every
-measured interval. It runs numbers 1 through 5 sequentially, with no warm-up.
-Each child has the fixture as current directory and invokes the absolute release
-binary with exactly check --format json.
+measured interval. Before run 1, it removes write permission from every fixture
+entry and verifies that the fixture tree is read-only; it retains that protection
+through run 5 and does not restore write permission before final cleanup. Failure
+to protect or verify the fixture tree is an operational capture failure. It runs
+numbers 1 through 5 sequentially, with no warm-up. Each child has the protected
+fixture as current directory and invokes the absolute release binary with exactly
+check --format json.
 
 After per-run setup, the Rust runner records std::time::Instant immediately
 before spawn and computes elapsed nanoseconds from that same Instant immediately
