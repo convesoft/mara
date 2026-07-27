@@ -5,10 +5,12 @@ use mara_engine::{
     content::discover_content,
     project::{ProjectLoadErrorCode, load_from_root},
 };
+use mara_test_support::{ProjectSandbox, ProjectSandboxMode};
 use tempfile::TempDir;
 
 struct Fixture {
-    _temp: TempDir,
+    _sandbox: ProjectSandbox,
+    _outside: TempDir,
     root: std::path::PathBuf,
 }
 
@@ -20,9 +22,10 @@ impl Fixture {
         follow_directory_symlinks: bool,
         allow_internal_file_symlinks: bool,
     ) -> Self {
-        let temp = tempfile::tempdir().expect("create isolated fixture");
-        let root = temp.path().join("project");
-        fs::create_dir_all(root.join(".mara")).unwrap();
+        let sandbox = ProjectSandbox::new(ProjectSandboxMode::Configured)
+            .expect("create isolated project sandbox");
+        let outside = tempfile::tempdir().expect("create isolated external fixture area");
+        let root = sandbox.path().to_path_buf();
         fs::write(root.join(".mara/schema.yaml"), "format_version: 1\n").unwrap();
         fs::write(
             root.join(".mara/project.toml"),
@@ -36,8 +39,9 @@ impl Fixture {
         )
         .unwrap();
         Self {
-            _temp: temp,
-            root: root.canonicalize().unwrap(),
+            _sandbox: sandbox,
+            _outside: outside,
+            root,
         }
     }
 
@@ -52,28 +56,20 @@ impl Fixture {
     }
 
     fn git(&self, args: &[&str]) {
-        let status = Command::new("git")
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_COMMON_DIR")
-            .env_remove("GIT_INDEX_FILE")
-            .arg("-C")
-            .arg(&self.root)
-            .args(args)
-            .status()
-            .expect("run Git for isolated fixture");
+        let mut command = Command::new("git");
+        self._sandbox.configure_command(&mut command).args(args);
+        let status = command.status().expect("run Git for isolated fixture");
         assert!(status.success(), "Git command failed: {args:?}");
         if args.first() == Some(&"init") {
             let excludes = self.root.join(".git/fixture-global-excludes");
             fs::write(&excludes, "").unwrap();
-            let status = Command::new("git")
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE")
-                .env_remove("GIT_COMMON_DIR")
-                .env_remove("GIT_INDEX_FILE")
-                .arg("-C")
-                .arg(&self.root)
-                .args(["config", "core.excludesFile", excludes.to_str().unwrap()])
+            let mut command = Command::new("git");
+            self._sandbox.configure_command(&mut command).args([
+                "config",
+                "core.excludesFile",
+                excludes.to_str().unwrap(),
+            ]);
+            let status = command
                 .status()
                 .expect("isolate fixture from ambient Git excludes");
             assert!(status.success());
@@ -342,8 +338,8 @@ fn git_discovery_does_not_execute_configured_fsmonitor_hooks() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
     fixture.write("selected.mara.md", "selected");
     fixture.git(&["init", "--quiet"]);
-    let marker = fixture._temp.path().join("fsmonitor-ran");
-    let hook = fixture._temp.path().join("fsmonitor-hook");
+    let marker = fixture._outside.path().join("fsmonitor-ran");
+    let hook = fixture._outside.path().join("fsmonitor-hook");
     fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
     fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
     fixture.git(&["config", "core.fsmonitor", hook.to_str().unwrap()]);
@@ -420,7 +416,7 @@ fn unreadable_ignore_rules_are_reported_without_hiding_independent_content() {
 fn unreadable_external_ignore_rules_are_reported_without_host_path_provenance() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
     fixture.git(&["init", "--quiet"]);
-    let external_ignore = fixture._temp.path().join("external-global-ignore");
+    let external_ignore = fixture._outside.path().join("external-global-ignore");
     fs::create_dir(&external_ignore).unwrap();
     fixture.git(&[
         "config",
@@ -443,7 +439,7 @@ fn unreadable_external_ignore_rules_are_reported_without_host_path_provenance() 
 fn repository_configured_excludes_are_applied_to_untracked_content() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
     fixture.git(&["init", "--quiet"]);
-    let external_ignore = fixture._temp.path().join("effective-excludes");
+    let external_ignore = fixture._outside.path().join("effective-excludes");
     fs::write(&external_ignore, "ignored.mara.md\n").unwrap();
     fixture.git(&[
         "config",
@@ -478,7 +474,7 @@ fn readable_special_files_are_valid_configured_excludes() {
 fn symlinked_worktree_ignore_files_are_not_followed() {
     let fixture = Fixture::new(&["**/*.mara.md"], &[], true, false, false);
     fixture.git(&["init", "--quiet"]);
-    let outside_ignore = fixture._temp.path().join("outside-ignore");
+    let outside_ignore = fixture._outside.path().join("outside-ignore");
     fs::write(&outside_ignore, "selected.mara.md\n").unwrap();
     symlink_file(&outside_ignore, fixture.root.join(".gitignore"));
     fixture.write("selected.mara.md", "selected");
@@ -707,7 +703,7 @@ fn unselected_dangling_symlinks_do_not_invalidate_discovery() {
 #[test]
 fn external_file_symlink_targets_are_rejected() {
     let fixture = Fixture::new(&["*.mara.md"], &[], false, false, true);
-    let outside = fixture._temp.path().join("outside-source.md");
+    let outside = fixture._outside.path().join("outside-source.md");
     fs::write(&outside, "outside").unwrap();
     symlink_file(&outside, fixture.root.join("external.mara.md"));
 
@@ -733,7 +729,7 @@ fn directory_symlink_policy_contains_targets_and_recovers_from_cycles() {
     fixture.write("real/inside.mara.md", "inside");
     symlink_directory("real", fixture.root.join("alias"));
     symlink_directory("..", fixture.root.join("real/cycle"));
-    let outside = fixture._temp.path().join("outside");
+    let outside = fixture._outside.path().join("outside");
     fs::create_dir(&outside).unwrap();
     fs::write(outside.join("outside.mara.md"), "outside").unwrap();
     symlink_directory(&outside, fixture.root.join("external"));
@@ -814,7 +810,7 @@ fn tracked_directory_symlinks_remain_skipped_when_following_is_disabled() {
 fn full_include_shape_prunes_unreachable_symlink_trees_before_policy_checks() {
     let fixture = Fixture::new(&["docs/*/selected/*.mara.md"], &[], false, true, false);
     fixture.write("docs/group/selected/source.mara.md", "selected");
-    let outside = fixture._temp.path().join("outside-include");
+    let outside = fixture._outside.path().join("outside-include");
     fs::create_dir(&outside).unwrap();
     fs::create_dir_all(fixture.root.join("docs/group")).unwrap();
     symlink_directory(&outside, fixture.root.join("docs/group/unreachable"));
@@ -833,7 +829,7 @@ fn full_include_shape_prunes_unreachable_symlink_trees_before_policy_checks() {
 fn fully_excluded_symlink_trees_are_pruned_before_policy_checks() {
     let fixture = Fixture::new(&["**/*.mara.md"], &["external/**"], false, true, false);
     fixture.write("ordinary.mara.md", "ordinary");
-    let outside = fixture._temp.path().join("outside-exclude");
+    let outside = fixture._outside.path().join("outside-exclude");
     fs::create_dir(&outside).unwrap();
     fs::write(outside.join("outside.mara.md"), "outside").unwrap();
     symlink_directory(&outside, fixture.root.join("external"));
@@ -849,7 +845,7 @@ fn fully_excluded_symlink_trees_are_pruned_before_policy_checks() {
 fn recursive_wildcard_excludes_prune_the_complete_tree_before_policy_checks() {
     let fixture = Fixture::new(&["**/*.mara.md"], &["external/**/*"], false, true, false);
     fixture.write("ordinary.mara.md", "ordinary");
-    let outside = fixture._temp.path().join("outside-recursive-exclude");
+    let outside = fixture._outside.path().join("outside-recursive-exclude");
     fs::create_dir(&outside).unwrap();
     fs::write(outside.join("outside.mara.md"), "outside").unwrap();
     symlink_directory(&outside, fixture.root.join("external"));

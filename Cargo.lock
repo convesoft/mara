@@ -441,8 +441,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "mara-engine",
+ "mara-test-support",
  "serde_json",
- "tempfile",
 ]
 
 [[package]]
@@ -463,6 +463,7 @@ dependencies = [
  "libc",
  "mara-core",
  "mara-markdown",
+ "mara-test-support",
  "regex",
  "regex-lite",
  "saphyr-parser",
@@ -482,6 +483,13 @@ version = "0.1.0"
 dependencies = [
  "mara-core",
  "rushdown",
+]
+
+[[package]]
+name = "mara-test-support"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
 ]
 
 [[package]]

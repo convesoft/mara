@@ -9,7 +9,7 @@ use mara_engine::{
     check_project, check_schema, project::load_from_root, schema::load_schema, validate_documents,
 };
 use mara_markdown::{ParsedDocument, parse_document};
-use tempfile::TempDir;
+use mara_test_support::{ProjectSandbox, ProjectSandboxMode};
 
 const VALIDATION_SCHEMA: &str = r#"format_version: 1
 schema:
@@ -150,15 +150,15 @@ const ITEMS_TWO: &str = r#":::alpha m_00000000000000000000000003
 "#;
 
 struct Fixture {
-    _temp: TempDir,
+    _sandbox: ProjectSandbox,
     root: std::path::PathBuf,
 }
 
 impl Fixture {
     fn new(schema: impl AsRef<[u8]>, warnings_as_errors: bool) -> Self {
-        let temp = tempfile::tempdir().expect("create isolated fixture");
-        let root = temp.path().join("project");
-        fs::create_dir_all(root.join(".mara")).unwrap();
+        let sandbox = ProjectSandbox::new(ProjectSandboxMode::Configured)
+            .expect("create isolated project sandbox");
+        let root = sandbox.path().to_path_buf();
         fs::write(root.join(".mara/schema.yaml"), schema).unwrap();
         fs::write(
             root.join(".mara/project.toml"),
@@ -166,8 +166,8 @@ impl Fixture {
         )
         .unwrap();
         Self {
-            _temp: temp,
-            root: root.canonicalize().unwrap(),
+            _sandbox: sandbox,
+            root,
         }
     }
 

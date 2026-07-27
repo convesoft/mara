@@ -13,5 +13,5 @@ name = "mara"
 path = "src/main.rs"
 
 [dev-dependencies]
+mara-test-support = { path = "../mara-test-support" }
 serde_json.workspace = true
-tempfile.workspace = true

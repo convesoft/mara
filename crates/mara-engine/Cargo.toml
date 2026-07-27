@@ -26,4 +26,5 @@ libc.workspace = true
 windows-sys.workspace = true
 
 [dev-dependencies]
+mara-test-support = { path = "../mara-test-support" }
 tempfile.workspace = true

@@ -5,6 +5,7 @@ members = [
     "crates/mara-markdown",
     "crates/mara-engine",
     "crates/mara-cli",
+    "crates/mara-test-support",
 ]
 
 [workspace.package]
