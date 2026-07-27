@@ -31,7 +31,7 @@ jobs:
           test "$available_kib" -ge 2097152
           case "$RUNNER_OS" in
             Linux) filesystem_type="$(stat -f -c %T "$RUNNER_TEMP")" ;;
-            macOS) filesystem_type="$(/usr/sbin/diskutil info -plist "$RUNNER_TEMP" | /usr/libexec/PlistBuddy -c 'Print :FilesystemType' /dev/stdin)" ;;
+            macOS) filesystem_type="$(/usr/sbin/diskutil info -plist "$RUNNER_TEMP" | /usr/bin/plutil -extract FilesystemType raw -o - -)" ;;
             *) printf 'unsupported native runner: %s\n' "$RUNNER_OS" >&2; exit 1 ;;
           esac
           case "$filesystem_type" in

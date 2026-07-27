@@ -1925,7 +1925,9 @@ mod tests {
         assert!(workflow[cleanup..].contains("|| [ -L \"$root\" ]"));
         assert!(workflow[cleanup..].contains("qualification root remained after cleanup"));
         assert!(workflow.contains("/usr/sbin/diskutil info -plist \"$RUNNER_TEMP\""));
+        assert!(workflow.contains("/usr/bin/plutil -extract FilesystemType raw -o - -"));
         assert!(!workflow.contains("macOS) filesystem_type=\"$(stat -f %T"));
+        assert!(!workflow.contains("/usr/libexec/PlistBuddy"));
         assert!(!workflow.contains("sha256sum --check"));
         assert!(!workflow.contains("shasum -a 256 -c"));
     }
