@@ -31,9 +31,10 @@ jobs:
           test "$available_kib" -ge 2097152
           case "$RUNNER_OS" in
             Linux) filesystem_type="$(stat -f -c %T "$RUNNER_TEMP")" ;;
-            macOS) filesystem_type="$(/usr/sbin/diskutil info -plist "$RUNNER_TEMP" | /usr/bin/plutil -extract FilesystemType raw -o - -)" ;;
+            macOS) filesystem_type="$(/usr/sbin/diskutil info "$RUNNER_TEMP" | /usr/bin/awk -F ': *' '/^[[:space:]]*File System Personality:/ { print tolower($2); exit }')" ;;
             *) printf 'unsupported native runner: %s\n' "$RUNNER_OS" >&2; exit 1 ;;
           esac
+          test -n "$filesystem_type"
           case "$filesystem_type" in
             tmpfs|ramfs) printf 'volatile runner storage: %s\n' "$filesystem_type" >&2; exit 1 ;;
           esac

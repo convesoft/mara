@@ -1,13 +1,20 @@
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
+#[cfg(any(target_os = "linux", test))]
 use sha2::{Digest, Sha256};
 #[cfg(test)]
 use std::collections::BTreeMap;
+#[cfg(target_os = "linux")]
 use std::collections::BTreeSet;
 use std::env;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::ffi::CString;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+#[cfg(any(target_os = "linux", test))]
+use std::fs::File;
+use std::fs::{self, OpenOptions};
+#[cfg(any(target_os = "linux", test))]
+use std::io::Read;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 #[cfg(target_os = "linux")]
 use std::process::Stdio;
@@ -18,9 +25,12 @@ use std::time::{Duration, Instant};
 const ITEM_COUNT: usize = 10_000;
 const DOCUMENT_COUNT: usize = 10;
 const EDGES_PER_ITEM: usize = 10;
+#[cfg(any(target_os = "linux", test))]
 const RUN_COUNT: usize = 5;
 const MINIMUM_AVAILABLE_BYTES: u64 = 2_147_483_648;
+#[cfg(any(target_os = "linux", test))]
 const ELAPSED_LIMIT_NS: u64 = 5_000_000_000;
+#[cfg(any(target_os = "linux", test))]
 const PEAK_RSS_LIMIT_KIB: u64 = 524_288;
 
 const PROJECT_TOML: &str = "format_version = 1\n\n[project]\nname = \"mara-scale-v01\"\nschema = \".mara/schema.yaml\"\n\n[content]\ninclude = [\"items-*.mara.md\"]\nexclude = []\nrespect_gitignore = false\nfollow_directory_symlinks = false\nallow_internal_file_symlinks = false\n\n[index]\npath = \".mara/index.json\"\n\n[validation]\nwarnings_as_errors = true\n\n[git]\nrequire_clean_worktree_for_writes = true\n";
@@ -128,6 +138,7 @@ struct StorageRecord {
     passed: bool,
 }
 
+#[cfg(any(target_os = "linux", test))]
 #[derive(Debug, Clone, Serialize)]
 struct FixtureFile {
     path: String,
@@ -136,6 +147,7 @@ struct FixtureFile {
     matched: bool,
 }
 
+#[cfg(any(target_os = "linux", test))]
 #[derive(Debug, Clone, Serialize)]
 struct MeasurementRecord {
     run: u8,
@@ -156,6 +168,7 @@ struct MeasurementRecord {
     error: Option<String>,
 }
 
+#[cfg(any(target_os = "linux", test))]
 #[derive(Serialize)]
 struct QualificationSummary {
     format: &'static str,
@@ -173,6 +186,7 @@ struct QualificationSummary {
     result: &'static str,
 }
 
+#[cfg(any(target_os = "linux", test))]
 struct SummaryInputs {
     source_commit: String,
     xtask_sha256: String,
@@ -183,12 +197,14 @@ struct SummaryInputs {
     result: &'static str,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone)]
 struct ManifestPin {
     sha256: String,
     entries: Vec<(String, String)>,
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone)]
 struct FixtureRevalidation {
     files: Vec<FixtureFile>,
@@ -385,6 +401,7 @@ fn reject_created_root(
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn validate_generation_storage_record(
     evidence: &Path,
     source_repo: &Path,
@@ -426,9 +443,9 @@ fn measure_scale_v01(argument_root: &Path) -> Result<()> {
     #[cfg(not(target_os = "linux"))]
     {
         let _ = argument_root;
-        return Err(ToolError(
+        Err(ToolError(
             "measure-scale-v01 is supported only on Linux".into(),
-        ));
+        ))
     }
 
     #[cfg(target_os = "linux")]
@@ -478,55 +495,42 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
     let mara = source_repo.join("target/release/mara");
     require_regular_file(&mara, "target/release/mara")?;
     let manifest = source_repo.join("tests/qualification/scale-v01.SHA256SUMS");
-    require_regular_file(&manifest, "tests/qualification/scale-v01.SHA256SUMS")?;
     let script = source_repo.join("tests/qualification/verify-scale-v01.sh");
-    require_regular_file(&script, "tests/qualification/verify-scale-v01.sh")?;
 
     let source_commit = git_output(&source_repo, ["rev-parse", "HEAD"])?;
     let xtask_sha256 = hash_file(&xtask)?;
     let mara_sha256 = hash_file(&mara)?;
 
-    let oracle = Command::new(&script)
-        .current_dir(&source_repo)
-        .arg("--qualification-root")
-        .arg(&root)
-        .status();
-    let pin = match oracle {
-        Err(_) => Err("oracle_unavailable"),
-        Ok(status) if status.success() => {
-            parse_manifest_pin(&evidence.join("manifest-path-check.txt"))
-                .map_err(|_| "fixture_revalidation_unavailable")
+    let pin = if require_regular_file(&manifest, "tests/qualification/scale-v01.SHA256SUMS")
+        .is_err()
+        || require_regular_file(&script, "tests/qualification/verify-scale-v01.sh").is_err()
+    {
+        Err("oracle_unavailable")
+    } else {
+        match Command::new(&script)
+            .current_dir(&source_repo)
+            .arg("--qualification-root")
+            .arg(&root)
+            .status()
+        {
+            Err(_) => Err("oracle_unavailable"),
+            Ok(status) if status.success() => {
+                parse_manifest_pin(&evidence.join("manifest-path-check.txt"))
+                    .map_err(|_| "fixture_revalidation_unavailable")
+            }
+            Ok(_) => Err("oracle_failed"),
         }
-        Ok(_) => Err("oracle_failed"),
     };
 
     let mut records = Vec::with_capacity(RUN_COUNT);
     let pin = match pin {
         Err(oracle_error) => {
-            let result = if oracle_error == "oracle_failed" {
-                "failed"
-            } else {
-                "inconclusive"
-            };
-            for run in 1..=RUN_COUNT {
-                let record = unavailable_record(run as u8, oracle_error);
-                write_json(
-                    &evidence.join(format!("run-{run:02}.measurement.json")),
-                    &record,
-                )?;
-                records.push(record);
-            }
-            write_summary(
+            persist_oracle_unavailable_summary(
                 &evidence,
-                SummaryInputs {
-                    source_commit,
-                    xtask_sha256,
-                    mara_sha256,
-                    expected_manifest_sha256: None,
-                    fixture_files: Vec::new(),
-                    records,
-                    result,
-                },
+                source_commit,
+                xtask_sha256,
+                mara_sha256,
+                oracle_error,
             )?;
             return Err(ToolError(oracle_error.into()));
         }
@@ -841,6 +845,7 @@ fn ensure_isolated_root(root: &Path, source_repo: &Path, candidate_parent: &Path
     Ok(())
 }
 
+#[cfg(any(target_os = "linux", all(unix, test)))]
 fn ensure_root_has_no_git_entry(root: &Path) -> Result<()> {
     match fs::symlink_metadata(root.join(".git")) {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -1035,6 +1040,7 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     write_bytes(path, &rendered)
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn hash_file(path: &Path) -> Result<String> {
     let mut file = File::open(path)
         .map_err(|error| ToolError(format!("cannot open {}: {error}", path.display())))?;
@@ -1052,6 +1058,7 @@ fn hash_file(path: &Path) -> Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
+#[cfg(target_os = "linux")]
 fn hash_bytes(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -1080,6 +1087,7 @@ fn require_regular_file(path: &Path, label: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn ensure_fixture_has_no_git_context(fixture: &Path) -> Result<()> {
     if fixture.join(".git").exists() {
         return Err(ToolError("fixture must not contain .git".into()));
@@ -1090,6 +1098,7 @@ fn ensure_fixture_has_no_git_context(fixture: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn parse_manifest_pin(path: &Path) -> Result<ManifestPin> {
     let contents = fs::read_to_string(path)
         .map_err(|error| ToolError(format!("cannot read oracle manifest record: {error}")))?;
@@ -1122,6 +1131,7 @@ fn parse_manifest_pin(path: &Path) -> Result<ManifestPin> {
     Ok(ManifestPin { sha256, entries })
 }
 
+#[cfg(target_os = "linux")]
 fn is_lowercase_sha256(value: &str) -> bool {
     value.len() == 64
         && value
@@ -1129,6 +1139,7 @@ fn is_lowercase_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn unavailable_record(run: u8, error: &str) -> MeasurementRecord {
     MeasurementRecord {
         run,
@@ -1150,10 +1161,12 @@ fn unavailable_record(run: u8, error: &str) -> MeasurementRecord {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn withheld_record(run: u8, error: &str) -> MeasurementRecord {
     unavailable_record(run, error)
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn persist_unavailable_records(
     evidence: &Path,
     records: &mut Vec<MeasurementRecord>,
@@ -1169,6 +1182,34 @@ fn persist_unavailable_records(
         records.push(record);
     }
     Ok(())
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn persist_oracle_unavailable_summary(
+    evidence: &Path,
+    source_commit: String,
+    xtask_sha256: String,
+    mara_sha256: String,
+    error: &str,
+) -> Result<()> {
+    let mut records = Vec::with_capacity(RUN_COUNT);
+    persist_unavailable_records(evidence, &mut records, 1, error)?;
+    write_summary(
+        evidence,
+        SummaryInputs {
+            source_commit,
+            xtask_sha256,
+            mara_sha256,
+            expected_manifest_sha256: None,
+            fixture_files: Vec::new(),
+            records,
+            result: if error == "oracle_failed" {
+                "failed"
+            } else {
+                "inconclusive"
+            },
+        },
+    )
 }
 
 #[cfg(target_os = "linux")]
@@ -1534,6 +1575,7 @@ fn measurement_record(
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn write_summary(evidence: &Path, inputs: SummaryInputs) -> Result<()> {
     let max_elapsed_ns = inputs
         .records
@@ -1909,6 +1951,32 @@ mod tests {
         assert!(temporary.path().join("run-05.measurement.json").is_file());
     }
 
+    #[test]
+    fn unavailable_oracle_serializes_all_required_evidence_before_returning() {
+        let temporary = tempfile::tempdir().expect("temporary root");
+        persist_oracle_unavailable_summary(
+            temporary.path(),
+            "source-commit".into(),
+            "xtask-sha256".into(),
+            "mara-sha256".into(),
+            "oracle_unavailable",
+        )
+        .expect("unavailable oracle evidence");
+
+        for run in 1..=RUN_COUNT {
+            let record = fs::read_to_string(
+                temporary
+                    .path()
+                    .join(format!("run-{run:02}.measurement.json")),
+            )
+            .expect("unavailable record");
+            assert!(record.contains("oracle_unavailable"));
+        }
+        let summary = fs::read_to_string(temporary.path().join("qualification-summary.json"))
+            .expect("unavailable oracle summary");
+        assert!(summary.contains("\"result\": \"inconclusive\""));
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn workflow_uploads_evidence_before_a_cleanup_failure_can_fail_the_job() {
@@ -1924,9 +1992,11 @@ mod tests {
         assert!(workflow.contains("test ! -L \"$root\""));
         assert!(workflow[cleanup..].contains("|| [ -L \"$root\" ]"));
         assert!(workflow[cleanup..].contains("qualification root remained after cleanup"));
-        assert!(workflow.contains("/usr/sbin/diskutil info -plist \"$RUNNER_TEMP\""));
-        assert!(workflow.contains("/usr/bin/plutil -extract FilesystemType raw -o - -"));
+        assert!(workflow.contains("/usr/sbin/diskutil info \"$RUNNER_TEMP\""));
+        assert!(workflow.contains("File System Personality:"));
         assert!(!workflow.contains("macOS) filesystem_type=\"$(stat -f %T"));
+        assert!(!workflow.contains("-plist \"$RUNNER_TEMP\""));
+        assert!(!workflow.contains("/usr/bin/plutil"));
         assert!(!workflow.contains("/usr/libexec/PlistBuddy"));
         assert!(!workflow.contains("sha256sum --check"));
         assert!(!workflow.contains("shasum -a 256 -c"));
