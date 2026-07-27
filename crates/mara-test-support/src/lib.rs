@@ -316,6 +316,7 @@ impl ProjectSandbox {
         let hooks_directory = git_directory.join("hooks");
         let excludes_directory = git_directory.join("info");
         let excludes_file = excludes_directory.join("exclude");
+        let attributes_file = excludes_directory.join("attributes");
         fs::create_dir_all(&hooks_directory).map_err(|source| {
             ProjectSandboxError::io(
                 "create isolated Git hooks directory",
@@ -333,10 +334,18 @@ impl ProjectSandbox {
         fs::write(&excludes_file, "").map_err(|source| {
             ProjectSandboxError::io("create isolated Git excludes file", &excludes_file, source)
         })?;
+        fs::write(&attributes_file, "").map_err(|source| {
+            ProjectSandboxError::io(
+                "create isolated Git attributes file",
+                &attributes_file,
+                source,
+            )
+        })?;
 
         for (name, value) in [
             ("core.hooksPath", hooks_directory.as_os_str()),
             ("core.excludesFile", excludes_file.as_os_str()),
+            ("core.attributesFile", attributes_file.as_os_str()),
             ("core.fsmonitor", OsStr::new("false")),
             ("user.email", OsStr::new("mara-test@example.invalid")),
             ("user.name", OsStr::new("Mara ProjectSandbox")),
@@ -695,6 +704,10 @@ mod tests {
                 "core.excludesFile",
                 sandbox.path().join(".git/info/exclude"),
             ),
+            (
+                "core.attributesFile",
+                sandbox.path().join(".git/info/attributes"),
+            ),
         ] {
             let mut command = Command::new("git");
             sandbox
@@ -724,12 +737,17 @@ mod tests {
     fn clean_git_sandbox_ignores_hostile_global_git_configuration() {
         const CHILD_MARKER: &str = "MARA_TEST_SUPPORT_HOSTILE_GIT_CONFIG_CHILD";
         const FSMONITOR_MARKER: &str = "MARA_TEST_SUPPORT_FSMONITOR_MARKER";
+        const ATTRIBUTES_MARKER: &str = "MARA_TEST_SUPPORT_ATTRIBUTES_MARKER";
         if env::var_os(CHILD_MARKER).is_some() {
             let sandbox = ProjectSandbox::new(ProjectSandboxMode::CleanGit).unwrap();
             assert_eq!(git_status(&sandbox), "");
             assert!(
                 !PathBuf::from(env::var_os(FSMONITOR_MARKER).unwrap()).exists(),
                 "sandbox initialization must not execute an inherited fsmonitor hook"
+            );
+            assert!(
+                !PathBuf::from(env::var_os(ATTRIBUTES_MARKER).unwrap()).exists(),
+                "sandbox initialization must not execute an inherited attributes filter"
             );
             return;
         }
@@ -739,10 +757,13 @@ mod tests {
         let template = hostile.path().join("template");
         let hooks = hostile.path().join("hooks");
         let excludes = hostile.path().join("excludes");
+        let attributes = hostile.path().join("attributes");
         let fsmonitor_marker = hostile.path().join("fsmonitor-ran");
+        let attributes_marker = hostile.path().join("attributes-filter-ran");
         let template_hook = template.join("hooks/pre-commit");
         let hostile_hook = hooks.join("pre-commit");
         let fsmonitor_hook = hostile.path().join("fsmonitor");
+        let attributes_filter = hostile.path().join("attributes-filter");
         fs::create_dir_all(template.join("hooks")).unwrap();
         fs::create_dir_all(&hooks).unwrap();
         fs::write(&template_hook, "#!/bin/sh\nexit 1\n").unwrap();
@@ -752,20 +773,29 @@ mod tests {
             format!("#!/bin/sh\ntouch {}\n", fsmonitor_marker.display()),
         )
         .unwrap();
+        fs::write(
+            &attributes_filter,
+            format!("#!/bin/sh\ntouch {}\ncat\n", attributes_marker.display()),
+        )
+        .unwrap();
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&template_hook, fs::Permissions::from_mode(0o755)).unwrap();
         fs::set_permissions(&hostile_hook, fs::Permissions::from_mode(0o755)).unwrap();
         fs::set_permissions(&fsmonitor_hook, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&attributes_filter, fs::Permissions::from_mode(0o755)).unwrap();
         fs::write(&excludes, "*\n").unwrap();
+        fs::write(&attributes, "* filter=hostile\n").unwrap();
         fs::create_dir(&home).unwrap();
         fs::write(
             home.join(".gitconfig"),
             format!(
-                "[init]\n\ttemplateDir = {}\n[core]\n\thooksPath = {}\n\texcludesFile = {}\n\tfsmonitor = {}\n[commit]\n\tgpgSign = true\n",
+                "[init]\n\ttemplateDir = {}\n[core]\n\thooksPath = {}\n\texcludesFile = {}\n\tattributesFile = {}\n\tfsmonitor = {}\n[filter \"hostile\"]\n\tclean = {}\n[commit]\n\tgpgSign = true\n",
                 template.display(),
                 hooks.display(),
                 excludes.display(),
+                attributes.display(),
                 fsmonitor_hook.display(),
+                attributes_filter.display(),
             ),
         )
         .unwrap();
@@ -778,6 +808,7 @@ mod tests {
             ])
             .env(CHILD_MARKER, "1")
             .env(FSMONITOR_MARKER, &fsmonitor_marker)
+            .env(ATTRIBUTES_MARKER, &attributes_marker)
             .env("HOME", &home)
             .env("XDG_CONFIG_HOME", hostile.path().join("xdg"))
             .env_remove("GIT_CONFIG_GLOBAL")
