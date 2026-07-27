@@ -436,7 +436,7 @@ fn writer_creates_a_missing_contained_parent_before_atomic_replacement() {
 #[test]
 fn git_provenance_distinguishes_clean_modified_and_untracked_project_inputs() {
     let fixture = sandbox();
-    let project_root = fixture.path().to_path_buf();
+    let project_root = fixture.path().join("nested");
     git(&fixture, &["init", "-b", "main"]);
     git(&fixture, &["config", "user.name", "Mara Test"]);
     git(&fixture, &["config", "user.email", "mara@example.test"]);
@@ -455,7 +455,7 @@ fn git_provenance_distinguishes_clean_modified_and_untracked_project_inputs() {
     assert_eq!(clean["git"]["available"], true);
     assert_eq!(clean["git"]["commit"], commit);
     assert_eq!(clean["git"]["branch"], "main");
-    assert_eq!(clean["git"]["project_path"], ".");
+    assert_eq!(clean["git"]["project_path"], "nested");
     assert_eq!(clean["git"]["dirty"], false);
     write_index(&clean_result).unwrap();
     let repeated_clean = IndexProjection::from_validation(&check_project(&project_root).unwrap())

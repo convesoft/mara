@@ -31,6 +31,7 @@ pub struct ProjectSandboxError {
     operation: &'static str,
     path: Option<PathBuf>,
     source: io::Error,
+    cleanup: Option<ProjectSandboxCleanupError>,
 }
 
 impl ProjectSandboxError {
@@ -39,6 +40,7 @@ impl ProjectSandboxError {
             operation,
             path: Some(path.into()),
             source,
+            cleanup: None,
         }
     }
 
@@ -47,7 +49,18 @@ impl ProjectSandboxError {
             operation,
             path: None,
             source,
+            cleanup: None,
         }
+    }
+
+    fn with_cleanup(mut self, cleanup: ProjectSandboxCleanupError) -> Self {
+        self.cleanup = Some(cleanup);
+        self
+    }
+
+    /// Returns the cleanup failure that also occurred, if sandbox initialization failed.
+    pub fn cleanup_error(&self) -> Option<&ProjectSandboxCleanupError> {
+        self.cleanup.as_ref()
     }
 }
 
@@ -57,7 +70,11 @@ impl fmt::Display for ProjectSandboxError {
         if let Some(path) = &self.path {
             write!(formatter, " at {}", path.display())?;
         }
-        write!(formatter, ": {}", self.source)
+        write!(formatter, ": {}", self.source)?;
+        if let Some(cleanup) = &self.cleanup {
+            write!(formatter, "; cleanup also failed: {cleanup}")?;
+        }
+        Ok(())
     }
 }
 
@@ -160,8 +177,7 @@ impl ProjectSandbox {
             preserve_on_failure: false,
         };
         if let Err(error) = sandbox.initialize(mode) {
-            let _ = sandbox.cleanup();
-            return Err(error);
+            return Err(complete_initialization_cleanup(error, sandbox.cleanup()));
         }
         Ok(sandbox)
     }
@@ -250,6 +266,7 @@ impl ProjectSandbox {
             &["init", "--quiet"][..],
             &["config", "user.email", "mara-test@example.invalid"],
             &["config", "user.name", "Mara ProjectSandbox"],
+            &["config", "commit.gpgSign", "false"],
             &["add", "."],
             &["commit", "--quiet", "-m", "test: initialize ProjectSandbox"],
         ] {
@@ -381,6 +398,16 @@ fn remove_sandbox(root: &Path) -> Result<(), ProjectSandboxCleanupError> {
     cleanup_with(root, |path| fs::remove_dir_all(path))
 }
 
+fn complete_initialization_cleanup(
+    error: ProjectSandboxError,
+    cleanup: Result<(), ProjectSandboxCleanupError>,
+) -> ProjectSandboxError {
+    match cleanup {
+        Ok(()) => error,
+        Err(cleanup) => error.with_cleanup(cleanup),
+    }
+}
+
 fn cleanup_with(
     root: &Path,
     remove: impl FnOnce(&Path) -> io::Result<()>,
@@ -428,6 +455,12 @@ mod tests {
 
         let clean = ProjectSandbox::new(ProjectSandboxMode::CleanGit).unwrap();
         assert_eq!(git_status(&clean), "");
+        let mut command = Command::new("git");
+        clean
+            .configure_command(&mut command)
+            .args(["config", "--get", "commit.gpgSign"]);
+        let output = command.output().unwrap();
+        assert_eq!(output.stdout, b"false\n");
 
         let dirty = ProjectSandbox::new(ProjectSandboxMode::DirtyGit).unwrap();
         assert_eq!(git_status(&dirty), "?? .project-sandbox-dirty\n");
@@ -501,6 +534,26 @@ mod tests {
         assert_eq!(error.retained_path(), root);
         assert!(root.exists(), "failed cleanup keeps the sandbox available");
         assert!(error.to_string().contains("injected deletion failure"));
+    }
+
+    #[test]
+    fn initialization_cleanup_failures_remain_observable() {
+        let cleanup = ProjectSandboxCleanupError {
+            retained_path: PathBuf::from("/canonical/retained-sandbox"),
+            source: io::Error::new(io::ErrorKind::PermissionDenied, "injected cleanup failure"),
+        };
+        let error = complete_initialization_cleanup(
+            ProjectSandboxError::command(
+                "initialize sandbox",
+                io::Error::other("injected initialization failure"),
+            ),
+            Err(cleanup),
+        );
+        assert_eq!(
+            error.cleanup_error().unwrap().retained_path(),
+            Path::new("/canonical/retained-sandbox")
+        );
+        assert!(error.to_string().contains("injected cleanup failure"));
     }
 
     #[test]
