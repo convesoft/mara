@@ -169,6 +169,9 @@ impl ProjectSandbox {
         if let Err(error) = confirm_sandbox_root(&raw_root, &root) {
             return Err(cleanup_temporary_initialization_failure(temporary, error));
         }
+        if let Err(error) = confirm_sandbox_parent(&root, &parent) {
+            return Err(cleanup_temporary_initialization_failure(temporary, error));
+        }
 
         if root.starts_with(&source_checkout)
             || worktrees.iter().any(|worktree| root.starts_with(worktree))
@@ -492,6 +495,18 @@ fn confirm_sandbox_root(raw_root: &Path, root: &Path) -> Result<(), ProjectSandb
     Ok(())
 }
 
+fn confirm_sandbox_parent(root: &Path, parent: &Path) -> Result<(), ProjectSandboxError> {
+    if root.parent() == Some(parent) {
+        Ok(())
+    } else {
+        Err(ProjectSandboxError::io(
+            "confirm sandbox parent",
+            root,
+            io::Error::other("sandbox parent changed during initialization"),
+        ))
+    }
+}
+
 fn remove_sandbox(root: &Path) -> Result<(), ProjectSandboxCleanupError> {
     cleanup_with(root, |path| match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => fs::remove_file(path),
@@ -643,10 +658,15 @@ mod tests {
         let template = hostile.path().join("template");
         let hooks = hostile.path().join("hooks");
         let excludes = hostile.path().join("excludes");
+        let template_hook = template.join("hooks/pre-commit");
+        let hostile_hook = hooks.join("pre-commit");
         fs::create_dir_all(template.join("hooks")).unwrap();
         fs::create_dir_all(&hooks).unwrap();
-        fs::write(template.join("hooks/pre-commit"), "#!/bin/sh\nexit 1\n").unwrap();
-        fs::write(hooks.join("pre-commit"), "#!/bin/sh\nexit 1\n").unwrap();
+        fs::write(&template_hook, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::write(&hostile_hook, "#!/bin/sh\nexit 1\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&template_hook, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&hostile_hook, fs::Permissions::from_mode(0o755)).unwrap();
         fs::write(&excludes, "*\n").unwrap();
         fs::create_dir(&home).unwrap();
         fs::write(
@@ -732,6 +752,15 @@ mod tests {
         remove_sandbox(&raw_root).unwrap();
         assert!(!raw_root.exists());
         assert!(target.exists());
+    }
+
+    #[test]
+    fn sandbox_parent_must_remain_the_validated_parent() {
+        let validated = tempfile::tempdir().unwrap();
+        let swapped = tempfile::tempdir().unwrap();
+        let error =
+            confirm_sandbox_parent(&swapped.path().join("sandbox"), validated.path()).unwrap_err();
+        assert!(error.to_string().contains("sandbox parent changed"));
     }
 
     #[test]
