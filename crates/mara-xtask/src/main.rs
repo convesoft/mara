@@ -79,6 +79,21 @@ struct StorageInfo {
     on_tmpfs_or_ramfs: bool,
 }
 
+fn storage_precondition_error(
+    storage: &StorageInfo,
+    inside_source_control: bool,
+) -> Option<&'static str> {
+    if inside_source_control {
+        Some("inside_source_control")
+    } else if storage.on_tmpfs_or_ramfs {
+        Some("tmpfs_or_ramfs")
+    } else if storage.available_bytes < MINIMUM_AVAILABLE_BYTES {
+        Some("insufficient_capacity")
+    } else {
+        None
+    }
+}
+
 #[derive(Serialize)]
 struct PreconditionRecord<'a> {
     format: &'static str,
@@ -170,6 +185,12 @@ struct ManifestPin {
     entries: Vec<(String, String)>,
 }
 
+#[derive(Debug, Clone)]
+struct FixtureRevalidation {
+    files: Vec<FixtureFile>,
+    integrity_matches: bool,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
@@ -211,17 +232,7 @@ fn generate_scale_v01(argument_root: &Path) -> Result<()> {
         }
     };
 
-    if inside_source_control
-        || storage.on_tmpfs_or_ramfs
-        || storage.available_bytes < MINIMUM_AVAILABLE_BYTES
-    {
-        let error = if inside_source_control {
-            "inside_source_control"
-        } else if storage.on_tmpfs_or_ramfs {
-            "tmpfs_or_ramfs"
-        } else {
-            "insufficient_capacity"
-        };
+    if let Some(error) = storage_precondition_error(&storage, inside_source_control) {
         emit_precondition(
             Some(&source_repo),
             Some(&candidate.parent),
@@ -246,6 +257,12 @@ fn generate_scale_v01(argument_root: &Path) -> Result<()> {
         ))
     })?;
     ensure_isolated_root(&root, &source_repo, &candidate.parent)?;
+    let created_storage = storage_info(&root)?;
+    if let Some(error) = storage_precondition_error(&created_storage, false) {
+        return Err(ToolError(format!(
+            "qualification root no longer satisfies storage preconditions: {error}"
+        )));
+    }
 
     let fixture = root.join("fixture");
     let evidence = root.join("evidence");
@@ -258,11 +275,11 @@ fn generate_scale_v01(argument_root: &Path) -> Result<()> {
         source_repo: &path_text(&source_repo),
         qualification_parent: &path_text(&candidate.parent),
         qualification_root: &path_text(&root),
-        filesystem_type: &storage.filesystem_type,
-        total_bytes: storage.total_bytes,
-        available_bytes: storage.available_bytes,
+        filesystem_type: &created_storage.filesystem_type,
+        total_bytes: created_storage.total_bytes,
+        available_bytes: created_storage.available_bytes,
         minimum_available_bytes: MINIMUM_AVAILABLE_BYTES,
-        on_tmpfs_or_ramfs: storage.on_tmpfs_or_ramfs,
+        on_tmpfs_or_ramfs: created_storage.on_tmpfs_or_ramfs,
         inside_source_control: false,
         passed: true,
     };
@@ -305,7 +322,7 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
     ensure_fixture_has_no_git_context(&fixture)?;
 
     let storage = storage_info(&root)?;
-    if storage.on_tmpfs_or_ramfs || storage.available_bytes < MINIMUM_AVAILABLE_BYTES {
+    if storage_precondition_error(&storage, false).is_some() {
         return Err(ToolError(
             "qualification root no longer satisfies storage preconditions".into(),
         ));
@@ -399,9 +416,22 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
             matched: true,
         })
         .collect();
+    let mut inconclusive = false;
 
     for run in 1..=RUN_COUNT {
-        let outcome = run_exact_child(&mara, &fixture)?;
+        let outcome = match run_exact_child(&mara, &fixture) {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                inconclusive = true;
+                persist_unavailable_records(
+                    &evidence,
+                    &mut records,
+                    run as u8,
+                    "capture_unavailable",
+                )?;
+                break;
+            }
+        };
         write_bytes(
             &evidence.join(format!("run-{run:02}.stdout.json")),
             &outcome.stdout,
@@ -414,7 +444,7 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
         let revalidation = revalidate_fixture(&fixture, &manifest, &pin);
         let mut record = measurement_record(run as u8, outcome, &revalidation);
         if let Ok(snapshot) = &revalidation {
-            fixture_files = snapshot.clone();
+            fixture_files = snapshot.files.clone();
         }
         write_json(
             &evidence.join(format!("run-{run:02}.measurement.json")),
@@ -424,8 +454,7 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
 
         match revalidation {
             Ok(snapshot) => {
-                let integrity_matches = snapshot.iter().all(|entry| entry.matched);
-                if !integrity_matches {
+                if !snapshot.integrity_matches {
                     for withheld in run + 1..=RUN_COUNT {
                         let withheld_record =
                             withheld_record(withheld as u8, "fixture_integrity_changed");
@@ -439,6 +468,7 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
                 }
             }
             Err(_) => {
+                inconclusive = true;
                 record.fixture_verified = None;
                 record.passed = false;
                 record.error = Some("fixture_revalidation_unavailable".into());
@@ -460,7 +490,13 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
     }
 
     let passed = records.len() == RUN_COUNT && records.iter().all(|record| record.passed);
-    let result = if passed { "passed" } else { "failed" };
+    let result = if inconclusive {
+        "inconclusive"
+    } else if passed {
+        "passed"
+    } else {
+        "failed"
+    };
     write_summary(
         &evidence,
         SummaryInputs {
@@ -959,6 +995,23 @@ fn withheld_record(run: u8, error: &str) -> MeasurementRecord {
     unavailable_record(run, error)
 }
 
+fn persist_unavailable_records(
+    evidence: &Path,
+    records: &mut Vec<MeasurementRecord>,
+    first_run: u8,
+    error: &str,
+) -> Result<()> {
+    for run in first_run..=RUN_COUNT as u8 {
+        let record = unavailable_record(run, error);
+        write_json(
+            &evidence.join(format!("run-{run:02}.measurement.json")),
+            &record,
+        )?;
+        records.push(record);
+    }
+    Ok(())
+}
+
 #[cfg(target_os = "linux")]
 struct ChildOutcome {
     elapsed_ns: u64,
@@ -972,12 +1025,27 @@ struct ChildOutcome {
 
 #[cfg(target_os = "linux")]
 fn run_exact_child(mara: &Path, fixture: &Path) -> Result<ChildOutcome> {
+    run_exact_child_with_limit(
+        mara,
+        fixture,
+        &["check", "--format", "json"],
+        Duration::from_nanos(ELAPSED_LIMIT_NS),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn run_exact_child_with_limit(
+    program: &Path,
+    directory: &Path,
+    arguments: &[&str],
+    limit: Duration,
+) -> Result<ChildOutcome> {
     use std::os::unix::process::CommandExt;
 
-    let mut command = Command::new(mara);
+    let mut command = Command::new(program);
     command
-        .current_dir(fixture)
-        .args(["check", "--format", "json"])
+        .current_dir(directory)
+        .args(arguments)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     unsafe {
@@ -1005,7 +1073,7 @@ fn run_exact_child(mara: &Path, fixture: &Path) -> Result<ChildOutcome> {
     let stdout_reader = std::thread::spawn(move || read_pipe(stdout));
     let stderr_reader = std::thread::spawn(move || read_pipe(stderr));
 
-    let deadline = started + Duration::from_nanos(ELAPSED_LIMIT_NS);
+    let deadline = started + limit;
     let mut status = 0;
     let mut usage = unsafe { std::mem::zeroed::<libc::rusage>() };
     let mut timed_out = false;
@@ -1084,15 +1152,26 @@ fn revalidate_fixture(
     fixture: &Path,
     manifest: &Path,
     pin: &ManifestPin,
-) -> Result<Vec<FixtureFile>> {
+) -> Result<FixtureRevalidation> {
     if hash_file(manifest)? != pin.sha256 {
-        return fixture_mismatch_snapshot(fixture, pin);
+        return Ok(FixtureRevalidation {
+            files: fixture_mismatch_snapshot(fixture, pin)?,
+            integrity_matches: false,
+        });
     }
     match fs::symlink_metadata(fixture.join(".mara")) {
         Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
-        Ok(_) => return fixture_mismatch_snapshot(fixture, pin),
+        Ok(_) => {
+            return Ok(FixtureRevalidation {
+                files: fixture_mismatch_snapshot(fixture, pin)?,
+                integrity_matches: false,
+            });
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return fixture_mismatch_snapshot(fixture, pin);
+            return Ok(FixtureRevalidation {
+                files: fixture_mismatch_snapshot(fixture, pin)?,
+                integrity_matches: false,
+            });
         }
         Err(error) => {
             return Err(ToolError(format!(
@@ -1108,7 +1187,10 @@ fn revalidate_fixture(
         .collect::<BTreeSet<_>>();
     let actual_names = fixture_entry_set(fixture)?;
     if actual_names != expected_names {
-        return fixture_mismatch_snapshot(fixture, pin);
+        return Ok(FixtureRevalidation {
+            files: fixture_mismatch_snapshot(fixture, pin)?,
+            integrity_matches: false,
+        });
     }
     let mut entries = Vec::new();
     for (path, expected_sha256) in &pin.entries {
@@ -1122,18 +1204,22 @@ fn revalidate_fixture(
             matched,
         });
     }
-    Ok(entries)
+    Ok(FixtureRevalidation {
+        integrity_matches: entries.iter().all(|entry| entry.matched),
+        files: entries,
+    })
 }
 
 #[cfg(target_os = "linux")]
 fn fixture_mismatch_snapshot(fixture: &Path, pin: &ManifestPin) -> Result<Vec<FixtureFile>> {
     let mut entries = Vec::new();
     for (path, expected_sha256) in &pin.entries {
+        let observed_sha256 = file_digest_if_regular(&fixture.join(path))?;
         entries.push(FixtureFile {
             path: path.clone(),
             expected_sha256: expected_sha256.clone(),
-            observed_sha256: file_digest_if_regular(&fixture.join(path))?,
-            matched: false,
+            observed_sha256: observed_sha256.clone(),
+            matched: observed_sha256.as_deref() == Some(expected_sha256),
         });
     }
     Ok(entries)
@@ -1180,7 +1266,7 @@ fn file_digest_if_regular(path: &Path) -> Result<Option<String>> {
 fn measurement_record(
     run: u8,
     outcome: ChildOutcome,
-    revalidation: &Result<Vec<FixtureFile>>,
+    revalidation: &Result<FixtureRevalidation>,
 ) -> MeasurementRecord {
     let parsed = serde_json::from_slice::<serde_json::Value>(&outcome.stdout).ok();
     let status = parsed
@@ -1209,7 +1295,7 @@ fn measurement_record(
     let fixture_verified = revalidation
         .as_ref()
         .ok()
-        .map(|entries| entries.iter().all(|entry| entry.matched));
+        .map(|snapshot| snapshot.integrity_matches);
     let passed = outcome.exit_code == Some(0)
         && status.as_deref() == Some("ok")
         && diagnostic_count == Some(0)
@@ -1224,10 +1310,8 @@ fn measurement_record(
         Some("fixture_revalidation_unavailable".into())
     } else if fixture_verified == Some(false) {
         Some("fixture_integrity_changed".into())
-    } else if passed {
-        None
     } else {
-        Some("child_failed".into())
+        None
     };
     MeasurementRecord {
         run,
@@ -1281,7 +1365,13 @@ fn write_summary(evidence: &Path, inputs: SummaryInputs) -> Result<()> {
 }
 
 #[cfg(test)]
-#[allow(clippy::items_after_test_module)]
+fn manifest_paths() -> Vec<String> {
+    let mut paths = vec![".mara/project.toml".into(), ".mara/schema.yaml".into()];
+    paths.extend((0..DOCUMENT_COUNT).map(|index| format!("items-{index:03}.mara.md")));
+    paths
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use clap::Parser;
@@ -1329,12 +1419,22 @@ mod tests {
             available_bytes: MINIMUM_AVAILABLE_BYTES - 1,
             on_tmpfs_or_ramfs: false,
         };
-        assert!(low_capacity.available_bytes < MINIMUM_AVAILABLE_BYTES);
+        assert_eq!(
+            storage_precondition_error(&low_capacity, false),
+            Some("insufficient_capacity")
+        );
         let volatile = StorageInfo {
             on_tmpfs_or_ramfs: true,
             ..low_capacity
         };
-        assert!(volatile.on_tmpfs_or_ramfs);
+        assert_eq!(
+            storage_precondition_error(&volatile, false),
+            Some("tmpfs_or_ramfs")
+        );
+        assert_eq!(
+            storage_precondition_error(&volatile, true),
+            Some("inside_source_control")
+        );
     }
 
     #[test]
@@ -1358,12 +1458,9 @@ mod tests {
         };
         let manifest = temporary.path().join("manifest");
         fs::write(&manifest, "not the pinned manifest\n").expect("manifest");
-        assert!(
-            revalidate_fixture(&fixture, &manifest, &pin)
-                .expect("revalidation")
-                .iter()
-                .all(|entry| !entry.matched)
-        );
+        let snapshot = revalidate_fixture(&fixture, &manifest, &pin).expect("revalidation");
+        assert!(!snapshot.integrity_matches);
+        assert!(snapshot.files.iter().all(|entry| entry.matched));
     }
 
     #[cfg(target_os = "linux")]
@@ -1377,7 +1474,7 @@ mod tests {
         permissions.set_mode(0o755);
         fs::set_permissions(&script, permissions).expect("permissions");
         let outcome =
-            run_exact_child_with_limit(&script, temporary.path(), Duration::from_millis(10))
+            run_exact_child_with_limit(&script, temporary.path(), &[], Duration::from_millis(10))
                 .expect("child outcome");
         assert!(outcome.timed_out);
     }
@@ -1390,30 +1487,116 @@ mod tests {
             run_exact_child_with_limit(
                 &temporary.path().join("missing-mara"),
                 temporary.path(),
+                &[],
                 Duration::from_millis(10),
             )
             .is_err()
         );
     }
 
+    #[test]
+    fn capture_failure_is_serialized_for_the_current_and_withheld_runs() {
+        let temporary = tempfile::tempdir().expect("temporary root");
+        let mut records = Vec::new();
+        persist_unavailable_records(temporary.path(), &mut records, 3, "capture_unavailable")
+            .expect("capture evidence");
+        assert_eq!(records.len(), 3);
+        assert_eq!(
+            records.iter().map(|record| record.run).collect::<Vec<_>>(),
+            vec![3, 4, 5]
+        );
+        let current = fs::read_to_string(temporary.path().join("run-03.measurement.json"))
+            .expect("current run evidence");
+        assert!(current.contains("capture_unavailable"));
+        assert!(temporary.path().join("run-05.measurement.json").is_file());
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
-    fn cleanup_failure_is_observable() {
+    fn workflow_uploads_evidence_before_a_cleanup_failure_can_fail_the_job() {
+        let workflow = include_str!("../../../.github/workflows/scale-fixture-verification.yml");
+        let upload = workflow
+            .find("- name: Upload fixture-verification evidence\n        if: always()")
+            .expect("always-upload evidence step");
+        let cleanup = workflow
+            .find("- name: Remove disposable external workspace\n        if: always()")
+            .expect("always-run cleanup step");
+        assert!(upload < cleanup);
+        assert!(workflow[cleanup..].contains("rm -rf -- \"$root\""));
+        assert!(workflow[cleanup..].contains("qualification root remained after cleanup"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn verifier_rejects_a_manifest_without_a_final_newline_and_retains_digest_evidence() {
         use std::os::unix::fs::PermissionsExt;
 
         let temporary = tempfile::tempdir().expect("temporary root");
-        let parent = temporary.path().join("parent");
-        let child = parent.join("qualification-root");
-        fs::create_dir(&parent).expect("parent");
-        fs::create_dir(&child).expect("child");
-        let mut permissions = fs::metadata(&parent).expect("metadata").permissions();
-        permissions.set_mode(0o555);
-        fs::set_permissions(&parent, permissions).expect("read-only parent");
-        assert!(fs::remove_dir_all(&child).is_err());
-        let mut permissions = fs::metadata(&parent).expect("metadata").permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&parent, permissions).expect("restored parent");
-        fs::remove_dir_all(&child).expect("explicit cleanup after failure");
+        let repo = temporary.path().join("source-repository");
+        let qualification_root = temporary.path().join("qualification-root");
+        let verifier = repo.join("tests/qualification/verify-scale-v01.sh");
+        let manifest = repo.join("tests/qualification/scale-v01.SHA256SUMS");
+        let mara = repo.join("target/release/mara");
+        fs::create_dir(&repo).expect("source repository");
+        fs::create_dir_all(verifier.parent().expect("verifier parent")).expect("verifier parent");
+        fs::create_dir_all(mara.parent().expect("mara parent")).expect("mara parent");
+        Command::new("git")
+            .arg("init")
+            .arg("--quiet")
+            .arg(&repo)
+            .status()
+            .expect("initialize source Git repository")
+            .success()
+            .then_some(())
+            .expect("source Git repository initialized");
+
+        let mut manifest_bytes =
+            include_bytes!("../../../tests/qualification/scale-v01.SHA256SUMS").to_vec();
+        assert_eq!(manifest_bytes.pop(), Some(b'\n'));
+        fs::write(&manifest, manifest_bytes).expect("manifest without final newline");
+        fs::write(
+            &verifier,
+            include_str!("../../../tests/qualification/verify-scale-v01.sh"),
+        )
+        .expect("verifier");
+        fs::write(
+            &mara,
+            "#!/bin/sh\nprintf '%s\\n' '{ \"status\": \"ok\", \"diagnostics\": [], \"data\": { \"summary\": { \"documents\": 10, \"items\": 10000, \"edges\": 100000 } } }'\n",
+        )
+        .expect("Mara fixture command");
+        for path in [&verifier, &mara] {
+            let mut permissions = fs::metadata(path)
+                .expect("executable metadata")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(path, permissions).expect("executable permissions");
+        }
+
+        fs::create_dir(&qualification_root).expect("qualification root");
+        let fixture = qualification_root.join("fixture");
+        fs::create_dir(&fixture).expect("fixture directory");
+        write_fixture(&fixture).expect("fixture");
+        fs::create_dir(qualification_root.join("evidence")).expect("evidence directory");
+
+        let status = Command::new("sh")
+            .current_dir(&repo)
+            .arg(&verifier)
+            .arg("--qualification-root")
+            .arg(&qualification_root)
+            .status()
+            .expect("run verifier");
+        assert!(!status.success());
+
+        let manifest_evidence =
+            fs::read_to_string(qualification_root.join("evidence/manifest-path-check.txt"))
+                .expect("manifest evidence");
+        assert!(manifest_evidence.contains("manifest_error=missing_final_lf"));
+        let digest_evidence =
+            fs::read_to_string(qualification_root.join("evidence/fixture-sha256-check.txt"))
+                .expect("digest evidence");
+        assert_eq!(digest_evidence.matches("matched=true").count(), 12);
+        assert!(digest_evidence.contains("expected_sha256="));
+        assert!(digest_evidence.contains("observed_sha256="));
     }
 
     fn fixture_digests(root: &Path) -> BTreeMap<String, String> {
@@ -1423,75 +1606,4 @@ mod tests {
         }
         values
     }
-}
-
-#[cfg(test)]
-fn manifest_paths() -> Vec<String> {
-    let mut paths = vec![".mara/project.toml".into(), ".mara/schema.yaml".into()];
-    paths.extend((0..DOCUMENT_COUNT).map(|index| format!("items-{index:03}.mara.md")));
-    paths
-}
-
-#[cfg(all(test, target_os = "linux"))]
-fn run_exact_child_with_limit(
-    program: &Path,
-    directory: &Path,
-    limit: Duration,
-) -> Result<ChildOutcome> {
-    use std::os::unix::process::CommandExt;
-    let mut command = Command::new(program);
-    command
-        .current_dir(directory)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setpgid(0, 0) != 0 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-    let started = Instant::now();
-    let mut child = command
-        .spawn()
-        .map_err(|error| ToolError(format!("cannot spawn test child: {error}")))?;
-    let pid = child.id() as libc::pid_t;
-    let stdout = child.stdout.take().expect("piped stdout");
-    let stderr = child.stderr.take().expect("piped stderr");
-    let stdout_reader = std::thread::spawn(move || read_pipe(stdout));
-    let stderr_reader = std::thread::spawn(move || read_pipe(stderr));
-    let deadline = started + limit;
-    let mut status = 0;
-    let mut usage = unsafe { std::mem::zeroed::<libc::rusage>() };
-    let mut timed_out = false;
-    loop {
-        let waited = unsafe { libc::wait4(pid, &mut status, libc::WNOHANG, &mut usage) };
-        if waited == pid {
-            break;
-        }
-        if Instant::now() >= deadline {
-            timed_out = true;
-            if unsafe { libc::kill(-pid, libc::SIGKILL) } != 0 {
-                return Err(ToolError("cannot kill test process group".into()));
-            }
-            if unsafe { libc::wait4(pid, &mut status, 0, &mut usage) } != pid {
-                return Err(ToolError("cannot reap test child".into()));
-            }
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(1));
-    }
-    let stdout = stdout_reader.join().expect("stdout reader")?;
-    let stderr = stderr_reader.join().expect("stderr reader")?;
-    let signal = status & 0x7f;
-    Ok(ChildOutcome {
-        elapsed_ns: started.elapsed().as_nanos() as u64,
-        peak_rss_kib: usage.ru_maxrss as u64,
-        exit_code: (signal == 0).then_some((status >> 8) & 0xff),
-        term_signal: (signal != 0).then_some(signal),
-        timed_out,
-        stdout,
-        stderr,
-    })
 }

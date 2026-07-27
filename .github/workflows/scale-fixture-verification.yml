@@ -22,6 +22,21 @@ jobs:
         uses: actions/checkout@v7
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+      - name: Check qualification resource preconditions
+        shell: bash
+        run: |
+          set -euo pipefail
+          available_kib="$(df -Pk "$RUNNER_TEMP" | awk 'NR == 2 { print $4 }')"
+          test -n "$available_kib"
+          test "$available_kib" -ge 2097152
+          case "$RUNNER_OS" in
+            Linux) filesystem_type="$(stat -f -c %T "$RUNNER_TEMP")" ;;
+            macOS) filesystem_type="$(stat -f %T "$RUNNER_TEMP")" ;;
+            *) printf 'unsupported native runner: %s\n' "$RUNNER_OS" >&2; exit 1 ;;
+          esac
+          case "$filesystem_type" in
+            tmpfs|ramfs) printf 'volatile runner storage: %s\n' "$filesystem_type" >&2; exit 1 ;;
+          esac
       - name: Build bounded qualification tools
         run: |
           cargo build --locked -p mara-xtask

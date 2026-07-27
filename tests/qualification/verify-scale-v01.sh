@@ -61,14 +61,17 @@ done
 case $(uname -s) in
     Linux)
         manifest_digest() { sha256sum "$manifest" | awk '{print $1}'; }
+        fixture_digest() { sha256sum "$1" | awk '{print $1}'; }
         verify_digests() { (CDPATH= cd -- "$fixture" && sha256sum --check "$manifest"); }
         ;;
     Darwin)
         manifest_digest() { shasum -a 256 "$manifest" | awk '{print $1}'; }
+        fixture_digest() { shasum -a 256 "$1" | awk '{print $1}'; }
         verify_digests() { (CDPATH= cd -- "$fixture" && shasum -a 256 -c "$manifest"); }
         ;;
     *)
         manifest_digest() { return 1; }
+        fixture_digest() { return 1; }
         verify_digests() { return 1; }
         ;;
 esac
@@ -127,9 +130,13 @@ if ! grep -qx 'file_types=ok' "$evidence/file-type-check.txt"; then
 fi
 
 manifest_hash=$(manifest_digest 2>>"$evidence/manifest-path-check.stderr") || manifest_hash=
+manifest_final_lf=0
+if [ -s "$manifest" ] && [ "$(tail -c 1 "$manifest" | od -An -tu1 | tr -d '[:space:]')" = '10' ]; then
+    manifest_final_lf=1
+fi
 {
     printf 'manifest_sha256=%s\n' "$manifest_hash"
-    awk '
+    awk -v manifest_final_lf="$manifest_final_lf" '
         BEGIN {
             expected[1] = ".mara/project.toml";
             expected[2] = ".mara/schema.yaml";
@@ -149,6 +156,7 @@ manifest_hash=$(manifest_digest 2>>"$evidence/manifest-path-check.stderr") || ma
             printf "manifest_entry=%s %s\n", path, digest;
         }
         END {
+            if (manifest_final_lf != 1) { ok = 0; printf "manifest_error=missing_final_lf\n"; }
             if (NR != 12) { ok = 0; printf "manifest_error=line_count\n"; }
             for (i = 1; i <= 12; i++) if (seen[expected[i]] != 1) { ok = 0; }
             if (ok) printf "manifest_syntax=ok\n"; else printf "manifest_syntax=failed\n";
@@ -160,7 +168,34 @@ if ! grep -qx 'manifest_syntax=ok' "$evidence/manifest-path-check.txt"; then
     failed=1
 fi
 
-verify_digests >"$evidence/fixture-sha256-check.txt" 2>&1 || failed=1
+(
+    digest_ok=1
+    verify_digests || digest_ok=0
+    for path in .mara/project.toml .mara/schema.yaml items-000.mara.md items-001.mara.md \
+        items-002.mara.md items-003.mara.md items-004.mara.md items-005.mara.md \
+        items-006.mara.md items-007.mara.md items-008.mara.md items-009.mara.md
+    do
+        expected_sha256=$(awk -v expected_path="$path" '$2 == expected_path { print $1 }' "$manifest")
+        observed_sha256=$(fixture_digest "$fixture/$path" 2>/dev/null) || observed_sha256=
+        matched=false
+        if [ "$expected_sha256" = "$observed_sha256" ] && [ -n "$expected_sha256" ]; then
+            matched=true
+        else
+            digest_ok=0
+        fi
+        printf 'path=%s expected_sha256=%s observed_sha256=%s matched=%s\n' \
+            "$path" "$expected_sha256" "$observed_sha256" "$matched"
+    done
+    if [ "$digest_ok" -eq 1 ]; then
+        printf '%s\n' 'digest_check=ok'
+    else
+        printf '%s\n' 'digest_check=failed'
+        exit 1
+    fi
+) >"$evidence/fixture-sha256-check.txt" 2>&1 || failed=1
+if ! grep -qx 'digest_check=ok' "$evidence/fixture-sha256-check.txt"; then
+    failed=1
+fi
 
 set +e
 git -C "$fixture" rev-parse --show-toplevel >"$evidence/fixture-git-context.stdout" 2>"$evidence/fixture-git-context.stderr"
