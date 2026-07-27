@@ -351,6 +351,13 @@ summary is failed. If it cannot invoke or capture the oracle at all, every
 record has the same field values and error oracle_unavailable, and the summary
 is inconclusive.
 
+Immediately after a successful oracle and before child setup, the runner
+independently parses the expected manifest once and retains its SHA-256 and
+ordered path/digest mapping as the immutable oracle-approved manifest pin. If it
+cannot obtain that pin, no child starts; all five records use unavailable nullable
+fields, timed_out false, fixture_verified null, passed false, and error
+fixture_revalidation_unavailable, and the summary is inconclusive.
+
 After per-run setup, the Rust runner records std::time::Instant immediately
 before spawn and computes elapsed nanoseconds from that same Instant immediately
 after the exact child is reaped. Only spawning, executing, and reaping that
@@ -359,31 +366,32 @@ validation, hashing, thread joins, and evidence writes happen after the timer
 stops.
 
 After every exact child is reaped, and before accepting that run or starting a
-later child, the runner independently reparses the expected manifest and
-recomputes every listed fixture-file SHA-256. This untimed revalidation requires
-the complete fixture entry set to remain exactly .mara, .mara/project.toml,
-.mara/schema.yaml, and items-000.mara.md through items-009.mara.md; fixture and
-.mara to remain real directories; all twelve manifest paths to remain regular
-non-symlink files; and every digest to match. It writes the resulting
-fixture_verified value in that run's record and does not recreate or overwrite
-any oracle evidence output. A mismatch fails the current run, prevents later
-child measurements, and writes each later run record with passed false and error
-fixture_integrity_changed. A completed revalidation is a mismatch when the
-expected manifest is malformed or when a fixture entry is missing or unexpected,
-has the wrong type or is a symlink, or has a different listed digest; a missing
-fixture entry is a mismatch even when its lookup reports ENOENT. The current
-mismatch record has fixture_verified false; each later withheld record has
-fixture_verified null because its revalidation did not run.
+later child, the runner independently hashes the live expected manifest and
+requires it to equal the oracle-approved pin, then recomputes every listed
+fixture-file SHA-256 against the pinned mapping. This untimed revalidation
+requires the complete fixture entry set to remain exactly .mara,
+.mara/project.toml, .mara/schema.yaml, and items-000.mara.md through
+items-009.mara.md; fixture and .mara to remain real directories; all twelve
+manifest paths to remain regular non-symlink files; and every digest to match.
+It writes the resulting fixture_verified value in that run's record and does not
+recreate or overwrite any oracle evidence output. A mismatch fails the current
+run, prevents later child measurements, and writes each later run record with
+passed false and error fixture_integrity_changed. A completed revalidation is a
+mismatch when the live expected-manifest hash differs from its pin or when a
+fixture entry is missing or unexpected, has the wrong type or is a symlink, or
+has a different listed digest; a missing fixture entry is a mismatch even when
+its lookup reports ENOENT. The current mismatch record has fixture_verified
+false; each later withheld record has fixture_verified null because its
+revalidation did not run.
 
-If the revalidation cannot complete because parsing the expected manifest or
-reading, stating, or hashing a required fixture entry is unavailable through an
-I/O or permission error other than a missing entry, it is an operational capture
-failure, not a fixture mismatch. The current record has fixture_verified null,
-passed false, and error fixture_revalidation_unavailable; no later child starts,
-every withheld later record has fixture_verified null, passed false, and that
-same error, and the summary is inconclusive. The expected manifest is not a
-fixture entry: its absence or unreadability is likewise unavailable, whereas
-successfully reading malformed expected-manifest contents is a mismatch.
+If the revalidation cannot complete because hashing the live expected manifest
+or reading, stating, or hashing a required fixture entry is unavailable through
+an I/O or permission error other than a missing fixture entry, it is an
+operational capture failure, not a fixture mismatch. The current record has
+fixture_verified null, passed false, and error fixture_revalidation_unavailable;
+no later child starts, every withheld later record has fixture_verified null,
+passed false, and that same error, and the summary is inconclusive. The expected
+manifest is not a fixture entry: its absence or unreadability is unavailable.
 
 Before exec, the child becomes leader of a fresh process group. The parent polls
 only that PID with Linux wait4(child_pid, ..., WNOHANG, &rusage), never sleeps
@@ -461,12 +469,15 @@ qualification-summary.json contains exactly format, version, source_commit,
 xtask_sha256, mara_sha256, expected_manifest_sha256, fixture_files, runs,
 max_elapsed_ns, max_peak_rss_kib, elapsed_limit_ns, peak_rss_limit_kib, and
 result. Its format is mara.qualification.scale-v01, version is unsigned 1,
-source commit is the exact git rev-parse HEAD output, top-level hashes are
+source commit is the exact git rev-parse HEAD output, xtask and mara hashes are
 lowercase 64-digit SHA-256, limits are 5000000000 and 524288, and result is
-exactly passed, failed, or inconclusive. fixture_files has exactly twelve
-objects in manifest order, each exactly path, expected_sha256, observed_sha256,
-and matched; runs contains the five run objects in order; each maximum is the
-maximum available unsigned value or null.
+exactly passed, failed, or inconclusive. After an oracle-approved manifest pin,
+expected_manifest_sha256 is its lowercase 64-digit SHA-256 and fixture_files has
+exactly twelve objects in manifest order, each exactly path, expected_sha256,
+observed_sha256, and matched. Before that pin is obtainable,
+expected_manifest_sha256 is null and fixture_files is an empty array. Runs
+contains the five run objects in order; each maximum is the maximum available
+unsigned value or null.
 
 Overall result is passed only when both storage records, every oracle check,
 all twelve observed hashes, all five fixture_verified values, all five passing
