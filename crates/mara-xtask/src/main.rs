@@ -2035,7 +2035,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn verifier_rejects_a_malformed_manifest_without_reading_its_fixture_paths() {
+    fn verifier_rejects_noncanonical_roots_and_malformed_manifests_without_reading_fixture_paths() {
         use std::os::unix::fs::{PermissionsExt, symlink};
 
         let temporary = tempfile::tempdir().expect("temporary root");
@@ -2082,6 +2082,26 @@ mod tests {
         fs::create_dir(&fixture).expect("fixture directory");
         write_fixture(&fixture).expect("fixture");
         fs::create_dir(qualification_root.join("evidence")).expect("evidence directory");
+
+        let aliased_root = qualification_root.join("..").join("qualification-root");
+        let alias_output = Command::new("sh")
+            .current_dir(&repo)
+            .arg(&verifier)
+            .arg("--qualification-root")
+            .arg(aliased_root)
+            .output()
+            .expect("reject noncanonical qualification root");
+        assert_eq!(alias_output.status.code(), Some(66));
+        assert_eq!(
+            String::from_utf8(alias_output.stderr).expect("canonical root diagnostic"),
+            "qualification root must be canonical\n"
+        );
+        assert!(
+            fs::read_dir(qualification_root.join("evidence"))
+                .expect("empty evidence directory")
+                .next()
+                .is_none()
+        );
 
         let status = Command::new("sh")
             .current_dir(&repo)

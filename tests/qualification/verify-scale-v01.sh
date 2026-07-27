@@ -32,6 +32,10 @@ root=$(CDPATH= cd -- "$2" && pwd -P) || {
     printf '%s\n' 'qualification root must exist and be canonicalizable' >&2
     exit 66
 }
+if [ "$2" != "$root" ]; then
+    printf '%s\n' 'qualification root must be canonical' >&2
+    exit 66
+fi
 fixture=$root/fixture
 evidence=$root/evidence
 manifest=$repo/tests/qualification/scale-v01.SHA256SUMS
