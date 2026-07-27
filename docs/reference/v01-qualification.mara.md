@@ -19,12 +19,12 @@ expose exactly these two operational qualification commands, invoked from the
 source repository root after cargo build --locked -p mara-xtask with the
 ordinary on-disk workspace target directory:
 
-~~~sh
+```sh
 target/debug/mara-xtask qualification generate-scale-v01 \
   --qualification-root "$qualification_root"
 target/debug/mara-xtask qualification measure-scale-v01 \
   --qualification-root "$qualification_root"
-~~~
+```
 
 Each command requires exactly one absolute --qualification-root argument and
 accepts no count, seed, run-count, limit, executable, or other operational
@@ -121,7 +121,7 @@ files, in this order: .mara/project.toml, .mara/schema.yaml, then
 items-000.mara.md through items-009.mara.md ascending by name. Every file ends
 in exactly one LF. The exact configuration is:
 
-~~~toml
+```toml
 format_version = 1
 
 [project]
@@ -143,11 +143,11 @@ warnings_as_errors = true
 
 [git]
 require_clean_worktree_for_writes = true
-~~~
+```
 
 The exact schema is:
 
-~~~yaml
+```yaml
 format_version: 1
 schema:
   name: mara-scale-v01
@@ -188,7 +188,7 @@ relations:
         min: 10
         max: 10
 rules: []
-~~~
+```
 
 Each items-NNN.mara.md file contains ascending indices NNN × 1,000 through
 NNN × 1,000 + 999, no leading blank line, one empty line between item blocks,
@@ -233,10 +233,10 @@ After generation and before every measured run, the stable POSIX command
 tests/qualification/verify-scale-v01.sh runs from the canonical source
 repository root with exactly this invocation:
 
-~~~sh
+```sh
 tests/qualification/verify-scale-v01.sh \
   --qualification-root "$qualification_root"
-~~~
+```
 
 Its argument surface is exactly one required --qualification-root option with
 one absolute path value. Missing, unknown, repeated, relative, and trailing
