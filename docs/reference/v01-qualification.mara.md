@@ -336,8 +336,9 @@ general test framework, command runner, parser, or source analyzer.
 :depends_on: DES-V01-SCALE-ORACLE
 :depends_on: DES-V01-QUALIFICATION-EVIDENCE-FORMAT
 
-measure-scale-v01 runs only after generation, successful oracle checks, and
-cargo build --locked --release --bin mara. Its own build, generation, oracle,
+measure-scale-v01 runs only after generation and cargo build --locked --release
+--bin mara. Before its child loop it invokes the required oracle once and starts
+run 1 only when that oracle succeeds. Its own build, generation, oracle,
 provenance collection, result serialization, and runner setup are outside every
 measured interval. It runs numbers 1 through 5 sequentially, with no warm-up.
 Each child has the fixture as current directory and invokes the absolute release
@@ -360,15 +361,18 @@ non-symlink files; and every digest to match. It writes the resulting
 fixture_verified value in that run's record and does not recreate or overwrite
 any oracle evidence output. A mismatch fails the current run, prevents later
 child measurements, and writes each later run record with passed false and error
-fixture_integrity_changed.
+fixture_integrity_changed. A completed revalidation is a mismatch when the
+expected manifest is malformed or when a fixture entry is missing or unexpected,
+has the wrong type or is a symlink, or has a different listed digest; a missing
+entry is a mismatch even when its lookup reports ENOENT.
 
 If the revalidation cannot complete because parsing the expected manifest or
 reading, stating, or hashing a required fixture entry is unavailable through an
-I/O or permission error, it is an operational capture failure, not a fixture
-mismatch. The current record has fixture_verified null, passed false, and error
-fixture_revalidation_unavailable; no later child starts, every withheld later
-record has fixture_verified null, passed false, and that same error, and the
-summary is inconclusive.
+I/O or permission error other than a missing entry, it is an operational capture
+failure, not a fixture mismatch. The current record has fixture_verified null,
+passed false, and error fixture_revalidation_unavailable; no later child starts,
+every withheld later record has fixture_verified null, passed false, and that
+same error, and the summary is inconclusive.
 
 Before exec, the child becomes leader of a fresh process group. The parent polls
 only that PID with Linux wait4(child_pid, ..., WNOHANG, &rusage), never sleeps
