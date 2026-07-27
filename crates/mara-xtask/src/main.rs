@@ -219,6 +219,22 @@ fn generate_scale_v01(argument_root: &Path) -> Result<()> {
     canonical_xtask_executable(&source_repo)?;
     let candidate = candidate_root(argument_root, false)?;
     let inside_source_control = path_is_in_source_control(&candidate.root, &source_repo)?;
+    if let Err(error) = ensure_isolated_root(&candidate.root, &source_repo, &candidate.parent) {
+        let precondition_error = if inside_source_control {
+            "inside_source_control"
+        } else {
+            "root_not_isolated"
+        };
+        emit_precondition(
+            Some(&source_repo),
+            Some(&candidate.parent),
+            Some(&candidate.root),
+            None,
+            inside_source_control,
+            precondition_error,
+        )?;
+        return Err(error);
+    }
     let storage = match storage_info(&candidate.parent) {
         Ok(storage) => storage,
         Err(error) => {
@@ -551,17 +567,14 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
 
         let revalidation = revalidate_fixture(&fixture, &manifest, &pin);
         let mut record = measurement_record(run as u8, outcome, &revalidation);
-        if let Ok(snapshot) = &revalidation {
-            fixture_files = snapshot.files.clone();
-        }
-        write_json(
-            &evidence.join(format!("run-{run:02}.measurement.json")),
-            &record,
-        )?;
-        records.push(record.clone());
-
         match revalidation {
             Ok(snapshot) => {
+                fixture_files = snapshot.files.clone();
+                write_json(
+                    &evidence.join(format!("run-{run:02}.measurement.json")),
+                    &record,
+                )?;
+                records.push(record);
                 if !snapshot.integrity_matches {
                     for withheld in run + 1..=RUN_COUNT {
                         let withheld_record =
@@ -580,9 +593,11 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
                 record.fixture_verified = None;
                 record.passed = false;
                 record.error = Some("fixture_revalidation_unavailable".into());
-                let path = evidence.join(format!("run-{run:02}.measurement.json"));
-                write_json(&path, &record)?;
-                *records.last_mut().expect("current record exists") = record;
+                write_json(
+                    &evidence.join(format!("run-{run:02}.measurement.json")),
+                    &record,
+                )?;
+                records.push(record);
                 for withheld in run + 1..=RUN_COUNT {
                     let withheld_record =
                         withheld_record(withheld as u8, "fixture_revalidation_unavailable");
@@ -1007,12 +1022,7 @@ fn write_new_file(path: &Path, contents: &[u8]) -> Result<()> {
 }
 
 fn write_bytes(path: &Path, contents: &[u8]) -> Result<()> {
-    let mut file = File::create(path)
-        .map_err(|error| ToolError(format!("cannot create {}: {error}", path.display())))?;
-    file.write_all(contents)
-        .map_err(|error| ToolError(format!("cannot write {}: {error}", path.display())))?;
-    file.sync_all()
-        .map_err(|error| ToolError(format!("cannot sync {}: {error}", path.display())))
+    write_new_file(path, contents)
 }
 
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
@@ -1583,6 +1593,25 @@ mod tests {
         assert!(contents.contains(":depends_on: SCALE-00010\n\n:::\n"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn evidence_outputs_are_created_once_without_following_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().expect("temporary root");
+        let output = temporary.path().join("evidence.json");
+        write_bytes(&output, b"first").expect("initial output");
+        assert!(write_bytes(&output, b"second").is_err());
+        assert_eq!(fs::read(&output).expect("initial bytes"), b"first");
+
+        let target = temporary.path().join("outside-evidence.json");
+        fs::write(&target, b"outside").expect("outside target");
+        let redirected_output = temporary.path().join("redirected-evidence.json");
+        symlink(&target, &redirected_output).expect("redirected output");
+        assert!(write_bytes(&redirected_output, b"replacement").is_err());
+        assert_eq!(fs::read(&target).expect("outside bytes"), b"outside");
+    }
+
     #[test]
     fn command_surface_rejects_unknown_and_relative_roots() {
         assert!(
@@ -1770,6 +1799,8 @@ mod tests {
         let source = fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .expect("source repository");
         assert!(ensure_isolated_root(&source.join("not-external"), &source, &source).is_err());
+        let tmp = fs::canonicalize("/tmp").expect("canonical /tmp");
+        assert!(ensure_isolated_root(&tmp.join("not-external"), &source, &tmp).is_err());
     }
 
     #[test]
