@@ -233,9 +233,10 @@ generated corpus remains disposable derived state and is never committed.
 :depends_on: DES-V01-SCALE-FIXTURE
 :mitigates: RISK-SELF-VALIDATION-BIAS
 
-After generation and before every measured run, the stable POSIX command
-tests/qualification/verify-scale-v01.sh runs from the canonical source
-repository root with exactly this invocation:
+After generation, the five-run measure-scale-v01 procedure runs the stable
+POSIX command tests/qualification/verify-scale-v01.sh exactly once from the
+canonical source repository root, immediately before run 1, with exactly this
+invocation:
 
 ```sh
 tests/qualification/verify-scale-v01.sh \
@@ -311,6 +312,9 @@ manifest-path, no-Git, digest, count, topology, and preflight assertions must
 pass before measurement. The manifest pins bytes, counts establish volume,
 topology establishes every relation, and Mara validates project resolution, so
 the generator is not its own oracle.
+
+Its listed evidence outputs are created by that one invocation, retained
+unchanged through runs 1 through 5, and are not recreated between measured runs.
 
 The verifier's maintenance scope is only the fixed argument contract, allowed
 inputs, listed evidence outputs, manifest syntax and digest checks, exact

@@ -466,7 +466,8 @@ cross-compilation alone shall not verify Windows runtime support.
 
 On the documented native Linux reference runner, build the bounded Rust tool,
 create the unique external qualification root, generate the fixed project, and
-run every independent oracle assertion before five exact-child measurements.
+run the independent oracle exactly once immediately before run 1, retaining its
+fixed evidence outputs unchanged through five exact-child measurements.
 Verify the complete record set, hash manifest, source provenance, storage
 preconditions, five passing runs, and maxima against the stated limits. Retain
 the records and perform the required upload and finally cleanup for passed,
