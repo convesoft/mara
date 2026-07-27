@@ -516,11 +516,13 @@ and run cargo fmt --all -- --check, cargo clippy --all-targets --all-features
 -- -D warnings, the built qualification generator, and
 TMPDIR="$qualification_root/test-tmp" cargo test --all-targets --all-features.
 Delete that test workspace immediately, build the native release binary in the
-source target directory, and run the external standalone fixture's storage
-gates, no-Git oracle, and provenance capture. macOS stops after native
-behavioural qualification; only the Linux x64 reference runner, after requiring
-RUNNER_ARCH X64 and uname -m x86_64, performs the five-run performance
-measurement. The procedure does not make a Windows runtime claim.
+source target directory. macOS then runs the external standalone fixture's
+storage gates, no-Git oracle, and provenance capture and stops after native
+behavioural qualification. Only the Linux x64 reference runner, after requiring
+RUNNER_ARCH X64 and uname -m x86_64, invokes measure-scale-v01; that command
+performs its own storage gates, provenance capture, single oracle invocation,
+and five-run performance measurement. The procedure does not make a Windows
+runtime claim.
 :::
 
 :::test m_01KYHDXJ6Z9JDF9Y83X6GENF74
