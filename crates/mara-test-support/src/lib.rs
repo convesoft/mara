@@ -162,12 +162,15 @@ impl ProjectSandbox {
         if root.starts_with(&source_checkout)
             || worktrees.iter().any(|worktree| root.starts_with(worktree))
         {
-            let _ = fs::remove_dir_all(&root);
-            return Err(ProjectSandboxError::io(
+            let error = ProjectSandboxError::io(
                 "create sandbox outside the source checkout and every worktree",
-                root,
+                &root,
                 io::Error::other("sandbox is inside a source checkout or worktree"),
-            ));
+            );
+            return match remove_sandbox(&root) {
+                Ok(()) => Err(error),
+                Err(cleanup) => Err(error.with_cleanup(cleanup)),
+            };
         }
 
         let mut sandbox = Self {
@@ -389,7 +392,9 @@ fn clear_git_environment_from(
 }
 
 fn is_git_variable(name: &OsStr) -> bool {
-    name.to_string_lossy().starts_with("GIT_")
+    name.to_string_lossy()
+        .get(..4)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("GIT_"))
 }
 
 fn has_git_marker_ancestor(path: &Path) -> bool {
@@ -529,7 +534,7 @@ mod tests {
         clear_git_environment_from(
             &mut command,
             [(
-                OsString::from("GIT_PROJECT_SANDBOX_INHERITED"),
+                OsString::from("git_project_sandbox_inherited"),
                 OsString::from("must-be-cleared"),
             )],
         );
@@ -538,7 +543,7 @@ mod tests {
             .map(|(name, value)| (name.to_os_string(), value.map(OsStr::to_os_string)))
             .collect();
         assert_eq!(
-            environments.get(OsStr::new("GIT_PROJECT_SANDBOX_INHERITED")),
+            environments.get(OsStr::new("git_project_sandbox_inherited")),
             Some(&None)
         );
     }

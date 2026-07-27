@@ -628,6 +628,10 @@ fn rejects_a_read_only_existing_index_on_windows() {
         error.diagnostic_code(),
         Some(ProjectLoadErrorCode::ConfigInvalidValue)
     );
+
+    let mut permissions = fs::metadata(&index_path).unwrap().permissions();
+    permissions.set_readonly(false);
+    fs::set_permissions(&index_path, permissions).unwrap();
 }
 
 #[cfg(any(unix, windows))]
