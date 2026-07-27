@@ -2096,11 +2096,10 @@ mod tests {
             fs::read_to_string(qualification_root.join("evidence/manifest-path-check.txt"))
                 .expect("manifest evidence");
         assert!(manifest_evidence.contains("manifest_error=missing_final_lf"));
-        assert!(
-            !qualification_root
-                .join("evidence/fixture-sha256-check.txt")
-                .exists()
-        );
+        let digest_evidence =
+            fs::read_to_string(qualification_root.join("evidence/fixture-sha256-check.txt"))
+                .expect("digest evidence");
+        assert_eq!(digest_evidence, "digest_check=skipped\n");
         let preflight_evidence =
             fs::read_to_string(qualification_root.join("evidence/preflight-check-exit.txt"))
                 .expect("preflight evidence");

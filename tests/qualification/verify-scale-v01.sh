@@ -201,9 +201,11 @@ if [ "$type_ok" -eq 1 ] && grep -qx 'manifest_syntax=ok' "$evidence/manifest-pat
         exit 1
     fi
 ) >"$evidence/fixture-sha256-check.txt" 2>&1 || failed=1
+else
+    printf '%s\n' 'digest_check=skipped' >"$evidence/fixture-sha256-check.txt"
+fi
 if ! grep -qx 'digest_check=ok' "$evidence/fixture-sha256-check.txt"; then
     failed=1
-fi
 fi
 
 set +e
