@@ -493,6 +493,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mara-xtask"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

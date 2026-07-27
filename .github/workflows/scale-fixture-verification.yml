@@ -1,0 +1,153 @@
+name: Scale fixture verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify-scale-v01-fixture:
+    name: Verify scale-v0.1 fixture (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Check qualification resource preconditions
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo_root="$(pwd -P)"
+          tmp_root="$(CDPATH= cd -- /tmp && pwd -P)"
+          runner_temp_parent="$(CDPATH= cd -- "$RUNNER_TEMP/.." && pwd -P)"
+          tmp_used_kib="$({ du -sk "$tmp_root" 2>/dev/null || true; } | awk 'NR == 1 { print $1 }')"
+          total_kib="$(df -Pk "$runner_temp_parent" | awk 'NR == 2 { print $2 }')"
+          available_kib="$(df -Pk "$runner_temp_parent" | awk 'NR == 2 { print $4 }')"
+          {
+            printf 'tmp_root=%s\n' "$tmp_root"
+            printf 'tmp_used_kib=%s\n' "$tmp_used_kib"
+            printf 'runner_temp_parent=%s\n' "$runner_temp_parent"
+            printf 'runner_temp_total_kib=%s\n' "$total_kib"
+            printf 'runner_temp_available_kib=%s\n' "$available_kib"
+            df -h "$tmp_root" "$repo_root"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          test -n "$tmp_used_kib"
+          test "$tmp_used_kib" -le 1048576
+          test -n "$total_kib"
+          test -n "$available_kib"
+          test "$available_kib" -ge 2097152
+          case "$RUNNER_OS" in
+            Linux) filesystem_type="$(stat -f -c %T "$runner_temp_parent")" ;;
+            macOS)
+              filesystem_device="$(df -Pk "$runner_temp_parent" | /usr/bin/awk 'NR == 2 { print $1 }')"
+              test -n "$filesystem_device"
+              filesystem_type="$(/usr/sbin/diskutil info "$filesystem_device" | /usr/bin/awk -F ': *' '/^[[:space:]]*File System Personality:/ { print tolower($2); exit }')"
+              ;;
+            *) printf 'unsupported native runner: %s\n' "$RUNNER_OS" >&2; exit 1 ;;
+          esac
+          test -n "$filesystem_type"
+          printf 'runner_temp_filesystem_type=%s\n' "$filesystem_type" | tee -a "$GITHUB_STEP_SUMMARY"
+          case "$filesystem_type" in
+            tmpfs|ramfs) printf 'volatile runner storage: %s\n' "$filesystem_type" >&2; exit 1 ;;
+          esac
+      - name: Build bounded qualification tools
+        run: |
+          cargo build --locked -p mara-xtask
+          cargo build --locked --release --bin mara
+      - name: Generate, recompute, and independently verify the fixture
+        id: fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/mara-scale-v01-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$RUNNER_OS"
+          test ! -e "$root"
+          test ! -L "$root"
+          printf 'root=%s\n' "$root" >> "$GITHUB_OUTPUT"
+
+          env -u CARGO_TARGET_DIR target/debug/mara-xtask qualification generate-scale-v01 \
+            --qualification-root "$root"
+
+          tests/qualification/verify-scale-v01.sh --qualification-root "$root"
+      - name: Record resource gates before upload
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='${{ steps.fixture.outputs.root }}'
+          test -n "$root"
+          test -d "$root"
+          test ! -L "$root"
+          evidence="$root/evidence"
+          test -d "$evidence"
+          test ! -L "$evidence"
+          repo_root="$(pwd -P)"
+          tmp_root="$(CDPATH= cd -- /tmp && pwd -P)"
+          runner_temp_parent="$(CDPATH= cd -- "$RUNNER_TEMP/.." && pwd -P)"
+          tmp_used_kib="$({ du -sk "$tmp_root" 2>/dev/null || true; } | awk 'NR == 1 { print $1 }')"
+          root_used_kib="$(du -sk "$root" | awk '{ print $1 }')"
+          total_kib="$(df -Pk "$runner_temp_parent" | awk 'NR == 2 { print $2 }')"
+          available_kib="$(df -Pk "$runner_temp_parent" | awk 'NR == 2 { print $4 }')"
+          case "$RUNNER_OS" in
+            Linux) filesystem_type="$(stat -f -c %T "$runner_temp_parent")" ;;
+            macOS)
+              filesystem_device="$(df -Pk "$runner_temp_parent" | /usr/bin/awk 'NR == 2 { print $1 }')"
+              test -n "$filesystem_device"
+              filesystem_type="$(/usr/sbin/diskutil info "$filesystem_device" | /usr/bin/awk -F ': *' '/^[[:space:]]*File System Personality:/ { print tolower($2); exit }')"
+              ;;
+            *) printf 'unsupported native runner: %s\n' "$RUNNER_OS" >&2; exit 1 ;;
+          esac
+          {
+            printf 'tmp_root=%s\n' "$tmp_root"
+            printf 'tmp_used_kib=%s\n' "$tmp_used_kib"
+            printf 'qualification_root=%s\n' "$root"
+            printf 'qualification_root_used_kib=%s\n' "$root_used_kib"
+            printf 'runner_temp_parent=%s\n' "$runner_temp_parent"
+            printf 'runner_temp_total_kib=%s\n' "$total_kib"
+            printf 'runner_temp_available_kib=%s\n' "$available_kib"
+            printf 'runner_temp_filesystem_type=%s\n' "$filesystem_type"
+            df -h "$tmp_root" "$repo_root" "$root"
+          } > "$evidence/resource-before-cleanup.txt"
+          test -n "$tmp_used_kib"
+          test "$tmp_used_kib" -le 1048576
+          test -n "$root_used_kib"
+          test -n "$available_kib"
+          test "$available_kib" -ge 2097152
+          test -n "$filesystem_type"
+          case "$filesystem_type" in
+            tmpfs|ramfs) printf 'volatile runner storage: %s\n' "$filesystem_type" >&2; exit 1 ;;
+          esac
+      - name: Upload fixture-verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scale-v01-fixture-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: ${{ steps.fixture.outputs.root }}/evidence
+      - name: Remove disposable external workspace
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='${{ steps.fixture.outputs.root }}'
+          repo_root="$(pwd -P)"
+          tmp_root="$(CDPATH= cd -- /tmp && pwd -P)"
+          if [ -n "$root" ] && { [ -e "$root" ] || [ -L "$root" ]; }; then
+            rm -rf -- "$root"
+          fi
+          if [ -n "$root" ] && { [ -e "$root" ] || [ -L "$root" ]; }; then
+            printf 'qualification root remained after cleanup: %s\n' "$root" >&2
+            exit 1
+          fi
+          post_cleanup_tmp_used_kib="$({ du -sk "$tmp_root" 2>/dev/null || true; } | awk 'NR == 1 { print $1 }')"
+          test -n "$post_cleanup_tmp_used_kib"
+          printf 'post_cleanup_tmp_used_kib=%s\n' "$post_cleanup_tmp_used_kib"
+          df -h "$tmp_root" "$repo_root"
