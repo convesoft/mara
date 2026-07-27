@@ -347,6 +347,7 @@ impl ProjectSandbox {
             ("core.excludesFile", excludes_file.as_os_str()),
             ("core.attributesFile", attributes_file.as_os_str()),
             ("core.fsmonitor", OsStr::new("false")),
+            ("status.showUntrackedFiles", OsStr::new("all")),
             ("user.email", OsStr::new("mara-test@example.invalid")),
             ("user.name", OsStr::new("Mara ProjectSandbox")),
             ("commit.gpgSign", OsStr::new("false")),
@@ -741,6 +742,8 @@ mod tests {
         if env::var_os(CHILD_MARKER).is_some() {
             let sandbox = ProjectSandbox::new(ProjectSandboxMode::CleanGit).unwrap();
             assert_eq!(git_status(&sandbox), "");
+            let dirty = ProjectSandbox::new(ProjectSandboxMode::DirtyGit).unwrap();
+            assert_eq!(git_status(&dirty), "?? .project-sandbox-dirty\n");
             assert!(
                 !PathBuf::from(env::var_os(FSMONITOR_MARKER).unwrap()).exists(),
                 "sandbox initialization must not execute an inherited fsmonitor hook"
@@ -789,7 +792,7 @@ mod tests {
         fs::write(
             home.join(".gitconfig"),
             format!(
-                "[init]\n\ttemplateDir = {}\n[core]\n\thooksPath = {}\n\texcludesFile = {}\n\tattributesFile = {}\n\tfsmonitor = {}\n[filter \"hostile\"]\n\tclean = {}\n[commit]\n\tgpgSign = true\n",
+                "[init]\n\ttemplateDir = {}\n[core]\n\thooksPath = {}\n\texcludesFile = {}\n\tattributesFile = {}\n\tfsmonitor = {}\n[status]\n\tshowUntrackedFiles = no\n[filter \"hostile\"]\n\tclean = {}\n[commit]\n\tgpgSign = true\n",
                 template.display(),
                 hooks.display(),
                 excludes.display(),
