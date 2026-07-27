@@ -1992,7 +1992,8 @@ mod tests {
         assert!(workflow.contains("test ! -L \"$root\""));
         assert!(workflow[cleanup..].contains("|| [ -L \"$root\" ]"));
         assert!(workflow[cleanup..].contains("qualification root remained after cleanup"));
-        assert!(workflow.contains("/usr/sbin/diskutil info \"$RUNNER_TEMP\""));
+        assert!(workflow.contains("filesystem_device=\"$(df -Pk \"$RUNNER_TEMP\""));
+        assert!(workflow.contains("/usr/sbin/diskutil info \"$filesystem_device\""));
         assert!(workflow.contains("File System Personality:"));
         assert!(!workflow.contains("macOS) filesystem_type=\"$(stat -f %T"));
         assert!(!workflow.contains("-plist \"$RUNNER_TEMP\""));

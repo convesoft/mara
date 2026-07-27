@@ -209,7 +209,6 @@ fi
 set +e
 git -C "$fixture" rev-parse --show-toplevel >"$evidence/fixture-git-context.stdout" 2>"$evidence/fixture-git-context.stderr"
 fixture_git_status=$?
-set -e
 printf 'exit_code=%s\n' "$fixture_git_status" >"$evidence/fixture-git-context.txt"
 if [ "$fixture_git_status" -eq 0 ]; then
     failed=1
