@@ -255,8 +255,8 @@ On a documented CI reference runner, a clean full check of 10,000 items and
 
 :::design m_01KZ7YA2D7EJ73VM8ZVCNZKHV5
 :id: DES-V01-QUALIFICATION-METHOD
-:title: Proposed v0.1 qualification architecture umbrella
-:status: proposed
+:title: v0.1 qualification architecture umbrella
+:status: accepted
 :kind: architecture
 :satisfies: REQ-PERFORMANCE-TARGET
 :refines: REQ-PORTABLE-CLI
@@ -451,7 +451,7 @@ cross-compilation alone shall not verify Windows runtime support.
 :::test m_01KYHDXJ5V9EWWGCFCNB5KK0JB
 :id: TEST-V01-SCALE-QUALIFICATION
 :title: Scale-v0.1 deterministic qualification procedure
-:status: draft
+:status: approved
 :kind: verification
 :method: automated
 :level: system
@@ -476,7 +476,7 @@ failed, and inconclusive outcomes.
 :::test m_01KYHDXJ6DPHS94EPM4WGTKKS8
 :id: TEST-V01-NATIVE-NONWINDOWS-QUALIFICATION
 :title: Native Linux and macOS qualification procedure
-:status: draft
+:status: approved
 :kind: verification
 :method: automated
 :level: system
@@ -503,7 +503,7 @@ measurement. The procedure does not make a Windows runtime claim.
 :::test m_01KYHDXJ6Z9JDF9Y83X6GENF74
 :id: TEST-PROJECT-SANDBOX
 :title: ProjectSandbox isolation procedure
-:status: draft
+:status: approved
 :kind: verification
 :method: automated
 :level: integration

@@ -10,8 +10,9 @@ claim.
 :::design m_01KYHDXHZQFTHNFXRDFE6WY1NK
 :id: DES-V01-QUALIFICATION-CLI
 :title: Bounded v0.1 qualification command surface
-:status: proposed
+:status: accepted
 :kind: cli
+:satisfies: REQ-PERFORMANCE-TARGET
 :refines: DES-V01-QUALIFICATION-METHOD
 
 The Rust workspace package and binary mara-xtask at crates/mara-xtask shall
@@ -44,8 +45,9 @@ analyzer.
 :::design m_01KYHDXJ09M7N69VQ2KYM8ZY71
 :id: DES-V01-QUALIFICATION-WORKSPACE
 :title: External qualification workspace isolation and lifecycle
-:status: proposed
+:status: accepted
 :kind: storage
+:satisfies: REQ-PERFORMANCE-TARGET
 :refines: DES-V01-QUALIFICATION-METHOD
 :depends_on: DES-V01-QUALIFICATION-CLI
 :depends_on: DES-V01-QUALIFICATION-EVIDENCE-FORMAT
@@ -104,8 +106,9 @@ cleanup failures each fail the job; neither masks the other.
 :::design m_01KYHDXJ0VBAV2TEZSAVN691D5
 :id: DES-V01-SCALE-FIXTURE
 :title: Fixed scale-v0.1 standalone project fixture
-:status: proposed
+:status: accepted
 :kind: data_model
+:satisfies: REQ-PERFORMANCE-TARGET
 :refines: DES-V01-QUALIFICATION-METHOD
 :depends_on: DES-V01-QUALIFICATION-CLI
 
@@ -223,8 +226,9 @@ generated corpus remains disposable derived state and is never committed.
 :::design m_01KYHDXJ1DB8EQRY5DWBPENQ2T
 :id: DES-V01-SCALE-ORACLE
 :title: Independent scale-v0.1 fixture oracle
-:status: proposed
+:status: accepted
 :kind: algorithm
+:satisfies: REQ-PERFORMANCE-TARGET
 :refines: DES-V01-QUALIFICATION-METHOD
 :depends_on: DES-V01-SCALE-FIXTURE
 :mitigates: RISK-SELF-VALIDATION-BIAS
@@ -321,8 +325,9 @@ general test framework, command runner, parser, or source analyzer.
 :::design m_01KYHDXJ1ZEAR2X6D0MGBZEX3W
 :id: DES-V01-MEASUREMENT-RUNNER
 :title: Exact-child Linux scale measurement runner
-:status: proposed
+:status: accepted
 :kind: algorithm
+:satisfies: REQ-PERFORMANCE-TARGET
 :refines: DES-V01-QUALIFICATION-METHOD
 :depends_on: DES-V01-SCALE-ORACLE
 :depends_on: DES-V01-QUALIFICATION-EVIDENCE-FORMAT
@@ -370,8 +375,9 @@ otherwise exits nonzero after all safely obtainable records are written.
 :::design m_01KYHDXJ2GD069YKRDDP2Y406H
 :id: DES-V01-QUALIFICATION-EVIDENCE-FORMAT
 :title: Versioned scale-v0.1 qualification evidence format
-:status: proposed
+:status: accepted
 :kind: data_model
+:satisfies: REQ-PERFORMANCE-TARGET
 :refines: DES-V01-QUALIFICATION-METHOD
 
 Before a root exists, rejected storage preconditions emit one LF-terminated
@@ -436,8 +442,9 @@ provenance and shall not inherit that commit.
 :::design m_01KYHDXJ32CH4TVSZFSFKC0YFF
 :id: DES-PROJECT-SANDBOX
 :title: Shared external ProjectSandbox for project-oriented tests
-:status: proposed
+:status: accepted
 :kind: module
+:satisfies: REQ-VERIFICATION-LAYERS
 :relates_to: DES-V01-QUALIFICATION-METHOD
 
 ProjectSandbox is a shared Rust helper only for project-oriented integration
@@ -472,7 +479,7 @@ fixture generator, temporary-directory manager, or command runner.
 :::decision m_01KYHDXJ3MNZV8NEZXV7JN7EZ4
 :id: ADR-0016
 :title: Use bounded Rust tooling for generated external qualification
-:status: proposed
+:status: accepted
 :kind: tooling
 :justifies: DES-V01-QUALIFICATION-CLI
 :justifies: DES-V01-QUALIFICATION-WORKSPACE
@@ -493,7 +500,7 @@ host-tool and POSIX awk oracle separate so the generator cannot certify itself.
 :::decision m_01KYHDXJ46VSKZ9BNQTDCP9QBG
 :id: ADR-0017
 :title: Share a bounded ProjectSandbox for project-oriented tests
-:status: proposed
+:status: accepted
 :kind: tooling
 :justifies: DES-PROJECT-SANDBOX
 
