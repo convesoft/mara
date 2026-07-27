@@ -171,6 +171,7 @@ if ! grep -qx 'manifest_syntax=ok' "$evidence/manifest-path-check.txt"; then
     failed=1
 fi
 
+if [ "$type_ok" -eq 1 ]; then
 (
     digest_ok=1
     if [ "$host_supported" -ne 1 ]; then
@@ -243,6 +244,8 @@ awk '
         if (seen_target[source ":" target]++) fail("duplicate_target");
         next;
     }
+    /^:id:/ { fail("malformed_source"); next; }
+    /^:depends_on:/ { fail("malformed_target"); next; }
     END {
         if (source >= 0 && edge_count != 10) fail("edge_count");
         if (item_count != 10000) fail("item_count");
@@ -303,6 +306,9 @@ fi
     printf 'json_validation=%s\n' "$preflight_json_valid"
 } >"$evidence/preflight-check-exit.txt"
 if [ "$preflight_status" -ne 0 ] || [ "$preflight_json_valid" -ne 1 ]; then
+    failed=1
+fi
+else
     failed=1
 fi
 

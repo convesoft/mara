@@ -111,6 +111,7 @@ struct PreconditionRecord<'a> {
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct StorageRecord {
     source_repo: String,
     qualification_parent: String,
@@ -1687,6 +1688,26 @@ mod tests {
         )
         .expect("valid generation storage record");
 
+        let mut unknown_field = serde_json::to_value(&valid).expect("record as JSON");
+        unknown_field
+            .as_object_mut()
+            .expect("record object")
+            .insert("unexpected".into(), serde_json::Value::Bool(true));
+        fs::write(
+            &record_path,
+            serde_json::to_vec(&unknown_field).expect("record with unknown field"),
+        )
+        .expect("unknown-field storage record");
+        assert!(
+            validate_generation_storage_record(
+                &evidence,
+                &source_repo,
+                &qualification_parent,
+                &qualification_root,
+            )
+            .is_err()
+        );
+
         let invalid = StorageRecord {
             passed: false,
             ..valid
@@ -1866,6 +1887,8 @@ mod tests {
             .expect("always-run cleanup step");
         assert!(upload < cleanup);
         assert!(workflow[cleanup..].contains("rm -rf -- \"$root\""));
+        assert!(workflow.contains("test ! -L \"$root\""));
+        assert!(workflow[cleanup..].contains("|| [ -L \"$root\" ]"));
         assert!(workflow[cleanup..].contains("qualification root remained after cleanup"));
         assert!(workflow.contains("/usr/sbin/diskutil info -plist \"$RUNNER_TEMP\""));
         assert!(!workflow.contains("macOS) filesystem_type=\"$(stat -f %T"));
@@ -1874,7 +1897,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn verifier_rejects_a_manifest_without_a_final_newline_and_retains_digest_evidence() {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::{PermissionsExt, symlink};
 
         let temporary = tempfile::tempdir().expect("temporary root");
         let repo = temporary.path().join("source-repository");
@@ -1906,7 +1929,7 @@ mod tests {
         .expect("verifier");
         fs::write(
             &mara,
-            "#!/bin/sh\ncat <<'JSON'\n{\n  \"format\": \"mara.command\",\n  \"version\": 1,\n  \"command\": \"check\",\n  \"status\": \"ok\",\n  \"project\": {\n    \"name\": \"mara-scale-v01\",\n    \"root\": \".\",\n    \"schema_name\": \"mara-scale-v01\",\n    \"schema_version\": \"0.1.0\",\n    \"schema_path\": \".mara/schema.yaml\"\n  },\n  \"diagnostics\": [],\n  \"data\": {\n    \"summary\": {\n      \"documents\": 10,\n      \"items\": 10000,\n      \"source_nodes\": 0,\n      \"edges\": 100000,\n      \"mentions\": 0,\n      \"external_nodes\": 0,\n      \"errors\": 0,\n      \"warnings\": 0,\n      \"info\": 0\n    }\n  },\n  \"error\": null\n}\nJSON\n",
+            "#!/bin/sh\nif [ -n \"${MARA_RAN_MARKER:-}\" ]; then : > \"$MARA_RAN_MARKER\"; fi\ncat <<'JSON'\n{\n  \"format\": \"mara.command\",\n  \"version\": 1,\n  \"command\": \"check\",\n  \"status\": \"ok\",\n  \"project\": {\n    \"name\": \"mara-scale-v01\",\n    \"root\": \".\",\n    \"schema_name\": \"mara-scale-v01\",\n    \"schema_version\": \"0.1.0\",\n    \"schema_path\": \".mara/schema.yaml\"\n  },\n  \"diagnostics\": [],\n  \"data\": {\n    \"summary\": {\n      \"documents\": 10,\n      \"items\": 10000,\n      \"source_nodes\": 0,\n      \"edges\": 100000,\n      \"mentions\": 0,\n      \"external_nodes\": 0,\n      \"errors\": 0,\n      \"warnings\": 0,\n      \"info\": 0\n    }\n  },\n  \"error\": null\n}\nJSON\n",
         )
         .expect("Mara fixture command");
         for path in [&verifier, &mara] {
@@ -1946,6 +1969,73 @@ mod tests {
             fs::read_to_string(qualification_root.join("evidence/preflight-check-exit.txt"))
                 .expect("preflight evidence");
         assert!(preflight_evidence.contains("json_validation=1"));
+
+        fs::write(
+            &manifest,
+            include_bytes!("../../../tests/qualification/scale-v01.SHA256SUMS"),
+        )
+        .expect("restore canonical manifest");
+
+        let topology_root = temporary.path().join("malformed-topology-root");
+        let topology_fixture = topology_root.join("fixture");
+        fs::create_dir(&topology_root).expect("topology qualification root");
+        fs::create_dir(&topology_fixture).expect("topology fixture directory");
+        write_fixture(&topology_fixture).expect("topology fixture");
+        fs::write(
+            topology_fixture.join("items-000.mara.md"),
+            format!(
+                "{}:depends_on: SCALE-bad\\n",
+                fs::read_to_string(topology_fixture.join("items-000.mara.md"))
+                    .expect("topology item document")
+            ),
+        )
+        .expect("malformed topology relation");
+        fs::create_dir(topology_root.join("evidence")).expect("topology evidence directory");
+        let status = Command::new("sh")
+            .current_dir(&repo)
+            .arg(&verifier)
+            .arg("--qualification-root")
+            .arg(&topology_root)
+            .status()
+            .expect("run malformed-topology verifier");
+        assert!(!status.success());
+        let topology_evidence =
+            fs::read_to_string(topology_root.join("evidence/topology-check.txt"))
+                .expect("topology evidence");
+        assert!(topology_evidence.contains("topology_error=malformed_target"));
+
+        let invalid_type_root = temporary.path().join("invalid-type-root");
+        let invalid_type_fixture = invalid_type_root.join("fixture");
+        fs::create_dir(&invalid_type_root).expect("invalid-type qualification root");
+        fs::create_dir(&invalid_type_fixture).expect("invalid-type fixture directory");
+        write_fixture(&invalid_type_fixture).expect("invalid-type fixture");
+        let symlink_target = temporary.path().join("outside-fixture-item");
+        fs::write(&symlink_target, "outside fixture").expect("symlink target");
+        let invalid_item = invalid_type_fixture.join("items-000.mara.md");
+        fs::remove_file(&invalid_item).expect("remove regular fixture item");
+        symlink(&symlink_target, &invalid_item).expect("symlink fixture item");
+        fs::create_dir(invalid_type_root.join("evidence"))
+            .expect("invalid-type evidence directory");
+        let mara_marker = temporary.path().join("mara-ran-marker");
+        let status = Command::new("sh")
+            .current_dir(&repo)
+            .env("MARA_RAN_MARKER", &mara_marker)
+            .arg(&verifier)
+            .arg("--qualification-root")
+            .arg(&invalid_type_root)
+            .status()
+            .expect("run invalid-type verifier");
+        assert!(!status.success());
+        assert!(!mara_marker.exists());
+        let invalid_type_evidence =
+            fs::read_to_string(invalid_type_root.join("evidence/file-type-check.txt"))
+                .expect("invalid-type evidence");
+        assert!(invalid_type_evidence.contains("invalid_type=items-000.mara.md"));
+        assert!(
+            !invalid_type_root
+                .join("evidence/preflight-check.json")
+                .exists()
+        );
 
         let unsupported_root = temporary.path().join("unsupported-qualification-root");
         let unsupported_fixture = unsupported_root.join("fixture");
