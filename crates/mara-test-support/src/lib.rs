@@ -9,7 +9,7 @@ use std::{
     ffi::{OsStr, OsString},
     fmt, fs, io,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, ExitCode, Termination},
 };
 
 /// The only supported starting states for a [`ProjectSandbox`].
@@ -126,7 +126,23 @@ pub struct ProjectSandbox {
     root: PathBuf,
     parent: PathBuf,
     active: bool,
-    preserve_on_failure: bool,
+}
+
+/// An opted-in sandbox that can preserve a failed project-oriented test.
+///
+/// Return [`Self::finish`] from a `#[test]` to let Rust's ordinary test harness
+/// observe the final test result before this sandbox is cleaned or retained.
+pub struct FailurePreservingProjectSandbox {
+    sandbox: ProjectSandbox,
+}
+
+/// The final result of a project-oriented test that opted into preservation.
+///
+/// This is deliberately only a [`Termination`] value, not a test runner: the
+/// standard Rust test harness still runs the test and reports its outcome.
+pub struct ProjectSandboxTestResult<E> {
+    sandbox: ProjectSandbox,
+    result: Result<(), E>,
 }
 
 impl ProjectSandbox {
@@ -189,7 +205,6 @@ impl ProjectSandbox {
             root,
             parent,
             active: true,
-            preserve_on_failure: false,
         };
         if let Err(error) = sandbox.initialize(mode) {
             return Err(complete_initialization_cleanup(error, sandbox.cleanup()));
@@ -222,10 +237,13 @@ impl ProjectSandbox {
             .env("GIT_CEILING_DIRECTORIES", &self.parent)
     }
 
-    /// Retains this sandbox only when its owning test unwinds with a panic.
-    pub fn preserve_on_failure(mut self) -> Self {
-        self.preserve_on_failure = true;
-        self
+    /// Opts this sandbox into retention only when its owning test finally fails.
+    ///
+    /// Return [`FailurePreservingProjectSandbox::finish`] from the test so the
+    /// standard test harness can distinguish a reported failure from a caught
+    /// panic that the test ultimately handles successfully.
+    pub fn preserve_on_failure(self) -> FailurePreservingProjectSandbox {
+        FailurePreservingProjectSandbox { sandbox: self }
     }
 
     /// Deletes this sandbox now, returning the canonical retained path on error.
@@ -341,16 +359,63 @@ impl ProjectSandbox {
     }
 }
 
+impl FailurePreservingProjectSandbox {
+    /// Returns the canonical project directory.
+    pub fn path(&self) -> &Path {
+        self.sandbox.path()
+    }
+
+    /// Configures a test-owned child to execute from this project with isolated
+    /// inherited Git state.
+    pub fn configure_command<'command>(
+        &self,
+        command: &'command mut Command,
+    ) -> &'command mut Command {
+        self.sandbox.configure_command(command)
+    }
+
+    /// Deletes this sandbox now, returning the canonical retained path on error.
+    pub fn cleanup(self) -> Result<(), ProjectSandboxCleanupError> {
+        self.sandbox.cleanup()
+    }
+
+    /// Completes the opted-in sandbox as this test's final result.
+    pub fn finish<E>(self, result: Result<(), E>) -> ProjectSandboxTestResult<E> {
+        ProjectSandboxTestResult {
+            sandbox: self.sandbox,
+            result,
+        }
+    }
+}
+
+impl<E: fmt::Debug> Termination for ProjectSandboxTestResult<E> {
+    fn report(mut self) -> ExitCode {
+        match self.result {
+            Ok(()) => match self.sandbox.cleanup() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("{error}");
+                    ExitCode::FAILURE
+                }
+            },
+            Err(error) => {
+                self.sandbox.active = false;
+                eprintln!(
+                    "preserved failed ProjectSandbox at {}",
+                    self.sandbox.root.display()
+                );
+                <Result<(), E> as Termination>::report(Err(error))
+            }
+        }
+    }
+}
+
 impl Drop for ProjectSandbox {
     fn drop(&mut self) {
         if !self.active {
             return;
         }
         self.active = false;
-        if self.preserve_on_failure && std::thread::panicking() {
-            eprintln!("preserved failed ProjectSandbox at {}", self.root.display());
-            return;
-        }
         if let Err(error) = remove_sandbox(&self.root) {
             report_default_cleanup_failure(error);
         }
@@ -891,7 +956,7 @@ mod tests {
     }
 
     #[test]
-    fn preserve_on_failure_retains_only_an_unwinding_sandbox() {
+    fn preserve_on_failure_tracks_the_final_test_result() {
         let (sender, receiver) = std::sync::mpsc::channel();
         let result = std::thread::spawn(move || {
             let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty)
@@ -902,28 +967,85 @@ mod tests {
         })
         .join();
         assert!(result.is_err());
-        let retained = receiver.recv().unwrap();
-        assert!(retained.exists());
-        fs::remove_dir_all(retained).unwrap();
+        let removed_after_caught_worker_panic = receiver.recv().unwrap();
+        assert!(
+            !removed_after_caught_worker_panic.exists(),
+            "a caught worker panic must not retain a sandbox after this test succeeds"
+        );
 
-        let removed = {
+        let removed_after_success = {
             let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty)
                 .unwrap()
                 .preserve_on_failure();
             sandbox.path().to_path_buf()
         };
-        assert!(!removed.exists());
+        assert!(!removed_after_success.exists());
 
-        let non_unwinding_error: Result<(), PathBuf> = {
+        let removed_after_caught_panic = {
             let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty)
                 .unwrap()
                 .preserve_on_failure();
-            Err(sandbox.path().to_path_buf())
+            let path = sandbox.path().to_path_buf();
+            assert!(std::panic::catch_unwind(|| panic!("caught by the test")).is_err());
+            assert_eq!(
+                sandbox.finish::<PathBuf>(Ok(())).report(),
+                ExitCode::SUCCESS
+            );
+            path
         };
-        let removed = non_unwinding_error.unwrap_err();
+        assert!(!removed_after_caught_panic.exists());
+
+        let retained_after_reported_error = {
+            let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty)
+                .unwrap()
+                .preserve_on_failure();
+            let path = sandbox.path().to_path_buf();
+            assert_eq!(
+                sandbox.finish(Err(path.clone())).report(),
+                ExitCode::FAILURE
+            );
+            path
+        };
+        assert!(retained_after_reported_error.exists());
+        fs::remove_dir_all(retained_after_reported_error).unwrap();
+    }
+
+    #[test]
+    fn preserve_on_failure_reports_through_the_standard_test_harness()
+    -> ProjectSandboxTestResult<PathBuf> {
+        const CHILD_MARKER: &str = "MARA_TEST_SUPPORT_FAILURE_RESULT_CHILD";
+        if env::var_os(CHILD_MARKER).is_some() {
+            let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty)
+                .unwrap()
+                .preserve_on_failure();
+            let path = sandbox.path().to_path_buf();
+            return sandbox.finish(Err(path));
+        }
+
+        let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty)
+            .unwrap()
+            .preserve_on_failure();
+        let output = Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::preserve_on_failure_reports_through_the_standard_test_harness",
+                "--nocapture",
+            ])
+            .env(CHILD_MARKER, "1")
+            .output()
+            .unwrap();
         assert!(
-            !removed.exists(),
-            "non-unwinding errors cannot be observed by the bounded preservation API"
+            !output.status.success(),
+            "a reported failure must fail the ordinary test harness"
         );
+        let output = String::from_utf8_lossy(&output.stderr);
+        let retained = output
+            .lines()
+            .find_map(|line| line.strip_prefix("preserved failed ProjectSandbox at "))
+            .map(PathBuf::from)
+            .expect("the harness must report the retained sandbox path");
+        assert!(retained.exists());
+        fs::remove_dir_all(retained).unwrap();
+        sandbox.finish(Ok(()))
     }
 }

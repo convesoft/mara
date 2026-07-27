@@ -468,12 +468,12 @@ prevents every mode from discovering a repository above the sandbox.
 
 It creates no repository or Cargo-target copy. Cleanup is default and reports
 each deletion failure with canonical retained path and error. A bounded opt-in
-preserve-on-failure option may retain a sandbox only while its owning test
-unwinds for diagnosis; it never retains a successful sandbox. Tests that return
-non-unwinding errors must not rely on the helper to inspect that outcome. Pure
-parser, domain, and in-memory tests shall not use the helper, and it shall not
-become a general test framework, fixture generator, temporary-directory manager,
-or command runner.
+preserve-on-failure option returns the test's final result to the ordinary Rust
+test harness, retaining only a reported failed sandbox for diagnosis while
+cleaning every successful sandbox, including one that catches a panic. It is
+not a general test framework, fixture generator, temporary-directory manager,
+or command runner. Pure parser, domain, and in-memory tests shall not use the
+helper.
 :::
 
 ## Decisions and stable outputs
