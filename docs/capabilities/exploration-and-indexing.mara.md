@@ -466,9 +466,10 @@ cross-compilation alone shall not verify Windows runtime support.
 
 On the documented native Linux reference runner, build the bounded Rust tool,
 create the unique external qualification root, generate the fixed project, and
-run the independent oracle exactly once immediately before run 1, retaining its
-fixed evidence outputs unchanged. On an unsuccessful completed oracle, start no
-child, write five records with nullable measurement fields null, timed_out false,
+invoke measure-scale-v01, which runs the independent oracle exactly once
+immediately before run 1 and retains its fixed evidence outputs unchanged. On an
+unsuccessful completed oracle, start no child, write five records with nullable
+measurement fields null, timed_out false,
 fixture_verified null, passed false, and error oracle_failed, and make the
 summary failed; an unavailable oracle instead uses oracle_unavailable and is
 inconclusive. After success, pin the expected manifest SHA-256 and parsed mapping
