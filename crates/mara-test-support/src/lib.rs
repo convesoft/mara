@@ -337,6 +337,7 @@ impl ProjectSandbox {
         for (name, value) in [
             ("core.hooksPath", hooks_directory.as_os_str()),
             ("core.excludesFile", excludes_file.as_os_str()),
+            ("core.fsmonitor", OsStr::new("false")),
             ("user.email", OsStr::new("mara-test@example.invalid")),
             ("user.name", OsStr::new("Mara ProjectSandbox")),
             ("commit.gpgSign", OsStr::new("false")),
@@ -706,15 +707,30 @@ mod tests {
                 expected.to_str().unwrap()
             );
         }
+        let mut command = Command::new("git");
+        sandbox.configure_command(&mut command).args([
+            "config",
+            "--local",
+            "--get",
+            "core.fsmonitor",
+        ]);
+        let output = command.output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"false\n");
     }
 
     #[cfg(unix)]
     #[test]
     fn clean_git_sandbox_ignores_hostile_global_git_configuration() {
         const CHILD_MARKER: &str = "MARA_TEST_SUPPORT_HOSTILE_GIT_CONFIG_CHILD";
+        const FSMONITOR_MARKER: &str = "MARA_TEST_SUPPORT_FSMONITOR_MARKER";
         if env::var_os(CHILD_MARKER).is_some() {
             let sandbox = ProjectSandbox::new(ProjectSandboxMode::CleanGit).unwrap();
             assert_eq!(git_status(&sandbox), "");
+            assert!(
+                !PathBuf::from(env::var_os(FSMONITOR_MARKER).unwrap()).exists(),
+                "sandbox initialization must not execute an inherited fsmonitor hook"
+            );
             return;
         }
 
@@ -723,24 +739,33 @@ mod tests {
         let template = hostile.path().join("template");
         let hooks = hostile.path().join("hooks");
         let excludes = hostile.path().join("excludes");
+        let fsmonitor_marker = hostile.path().join("fsmonitor-ran");
         let template_hook = template.join("hooks/pre-commit");
         let hostile_hook = hooks.join("pre-commit");
+        let fsmonitor_hook = hostile.path().join("fsmonitor");
         fs::create_dir_all(template.join("hooks")).unwrap();
         fs::create_dir_all(&hooks).unwrap();
         fs::write(&template_hook, "#!/bin/sh\nexit 1\n").unwrap();
         fs::write(&hostile_hook, "#!/bin/sh\nexit 1\n").unwrap();
+        fs::write(
+            &fsmonitor_hook,
+            format!("#!/bin/sh\ntouch {}\n", fsmonitor_marker.display()),
+        )
+        .unwrap();
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(&template_hook, fs::Permissions::from_mode(0o755)).unwrap();
         fs::set_permissions(&hostile_hook, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&fsmonitor_hook, fs::Permissions::from_mode(0o755)).unwrap();
         fs::write(&excludes, "*\n").unwrap();
         fs::create_dir(&home).unwrap();
         fs::write(
             home.join(".gitconfig"),
             format!(
-                "[init]\n\ttemplateDir = {}\n[core]\n\thooksPath = {}\n\texcludesFile = {}\n[commit]\n\tgpgSign = true\n",
+                "[init]\n\ttemplateDir = {}\n[core]\n\thooksPath = {}\n\texcludesFile = {}\n\tfsmonitor = {}\n[commit]\n\tgpgSign = true\n",
                 template.display(),
                 hooks.display(),
                 excludes.display(),
+                fsmonitor_hook.display(),
             ),
         )
         .unwrap();
@@ -752,6 +777,7 @@ mod tests {
                 "--nocapture",
             ])
             .env(CHILD_MARKER, "1")
+            .env(FSMONITOR_MARKER, &fsmonitor_marker)
             .env("HOME", &home)
             .env("XDG_CONFIG_HOME", hostile.path().join("xdg"))
             .env_remove("GIT_CONFIG_GLOBAL")
