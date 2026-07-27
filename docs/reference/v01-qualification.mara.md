@@ -353,11 +353,14 @@ stops.
 After every exact child is reaped, and before accepting that run or starting a
 later child, the runner independently reparses the expected manifest and
 recomputes every listed fixture-file SHA-256. This untimed revalidation requires
-all twelve paths to remain present regular non-symlink files and every digest to
-match. It writes the resulting fixture_verified value in that run's record and
-does not recreate or overwrite any oracle evidence output. A mismatch fails the
-current run, prevents later child measurements, and writes each later run record
-with passed false and error fixture_integrity_changed.
+the complete fixture entry set to remain exactly .mara, .mara/project.toml,
+.mara/schema.yaml, and items-000.mara.md through items-009.mara.md; fixture and
+.mara to remain real directories; all twelve manifest paths to remain regular
+non-symlink files; and every digest to match. It writes the resulting
+fixture_verified value in that run's record and does not recreate or overwrite
+any oracle evidence output. A mismatch fails the current run, prevents later
+child measurements, and writes each later run record with passed false and error
+fixture_integrity_changed.
 
 Before exec, the child becomes leader of a fresh process group. The parent polls
 only that PID with Linux wait4(child_pid, ..., WNOHANG, &rusage), never sleeps
