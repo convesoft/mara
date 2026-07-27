@@ -4,22 +4,24 @@ use mara_engine::project::{
     ProjectLoadError, ProjectLoadErrorCode, ProjectLoadOperationalErrorCode, discover_and_load,
     discover_project, load_from_root,
 };
-use tempfile::TempDir;
+use mara_test_support::{ProjectSandbox, ProjectSandboxMode};
 
 struct Fixture {
-    _temp: TempDir,
+    _sandbox: ProjectSandbox,
     root: std::path::PathBuf,
 }
 
 impl Fixture {
     fn new() -> Self {
-        let temp = tempfile::tempdir().expect("create isolated fixture");
-        let root = temp.path().join("project");
-        fs::create_dir_all(root.join(".mara")).unwrap();
-        let root = root.canonicalize().unwrap();
+        let sandbox = ProjectSandbox::new(ProjectSandboxMode::Configured)
+            .expect("create isolated project sandbox");
+        let root = sandbox.path().to_path_buf();
         fs::write(root.join(".mara/schema.yaml"), "format_version: 1\n").unwrap();
         fs::write(root.join(".mara/project.toml"), valid_config()).unwrap();
-        Self { _temp: temp, root }
+        Self {
+            _sandbox: sandbox,
+            root,
+        }
     }
 
     fn config_path(&self) -> std::path::PathBuf {
@@ -186,8 +188,9 @@ fn a_malformed_nearest_configuration_does_not_fall_back_to_an_outer_project() {
 
 #[test]
 fn reports_when_no_project_marker_exists() {
-    let temp = tempfile::tempdir().unwrap();
-    let error = discover_project(temp.path()).unwrap_err();
+    let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty)
+        .expect("create isolated empty project sandbox");
+    let error = discover_project(sandbox.path()).unwrap_err();
     assert_eq!(
         error.diagnostic_code(),
         Some(ProjectLoadErrorCode::ProjectNotFound)
@@ -625,6 +628,10 @@ fn rejects_a_read_only_existing_index_on_windows() {
         error.diagnostic_code(),
         Some(ProjectLoadErrorCode::ConfigInvalidValue)
     );
+
+    let mut permissions = fs::metadata(&index_path).unwrap().permissions();
+    permissions.set_readonly(false);
+    fs::set_permissions(&index_path, permissions).unwrap();
 }
 
 #[cfg(any(unix, windows))]

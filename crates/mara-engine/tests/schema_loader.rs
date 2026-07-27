@@ -9,7 +9,7 @@ use mara_engine::{
     project::{LoadedProject, load_from_root},
     schema::{SchemaLoadError, load_schema},
 };
-use tempfile::TempDir;
+use mara_test_support::{ProjectSandbox, ProjectSandboxMode};
 
 const VALID_SCHEMA: &str = r#"# strict v1 fixture
 format_version: 1
@@ -174,7 +174,7 @@ fn rich_schema_with_relations_and_rules(relations: &str, rules: &str) -> String 
 }
 
 struct Fixture {
-    _temp: TempDir,
+    _sandbox: ProjectSandbox,
     root: std::path::PathBuf,
     schema_relative: String,
 }
@@ -185,10 +185,9 @@ impl Fixture {
     }
 
     fn with_path(schema_relative: &str, schema: impl AsRef<[u8]>) -> Self {
-        let temp = tempfile::tempdir().expect("create isolated fixture");
-        let root = temp.path().join("project");
-        fs::create_dir_all(root.join(".mara")).unwrap();
-        let root = root.canonicalize().unwrap();
+        let sandbox = ProjectSandbox::new(ProjectSandboxMode::Configured)
+            .expect("create isolated project sandbox");
+        let root = sandbox.path().to_path_buf();
         fs::write(root.join(schema_relative), schema).unwrap();
         fs::write(
             root.join(".mara/project.toml"),
@@ -196,7 +195,7 @@ impl Fixture {
         )
         .unwrap();
         Self {
-            _temp: temp,
+            _sandbox: sandbox,
             root,
             schema_relative: schema_relative.to_owned(),
         }

@@ -5,6 +5,7 @@ use mara_engine::{
     command::{OutputFormat, run_show},
     write_index,
 };
+use mara_test_support::{ProjectSandbox, ProjectSandboxMode};
 use sha2::{Digest, Sha256};
 
 const SCHEMA: &str = r#"format_version: 1
@@ -115,13 +116,18 @@ fn json(bytes: &[u8]) -> serde_json::Value {
     serde_json::from_slice(bytes).expect("canonical index is JSON")
 }
 
-fn git(root: &Path, arguments: &[&str]) -> String {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(arguments)
-        .output()
-        .expect("run git fixture command");
+fn sandbox() -> ProjectSandbox {
+    ProjectSandbox::new(ProjectSandboxMode::Empty).expect("create isolated project sandbox")
+}
+
+fn git_sandbox() -> ProjectSandbox {
+    ProjectSandbox::new(ProjectSandboxMode::CleanGit).expect("create isolated Git project sandbox")
+}
+
+fn git(sandbox: &ProjectSandbox, arguments: &[&str]) -> String {
+    let mut command = Command::new("git");
+    sandbox.configure_command(&mut command).args(arguments);
+    let output = command.output().expect("run git fixture command");
     assert!(
         output.status.success(),
         "git {arguments:?} failed: {}",
@@ -132,7 +138,7 @@ fn git(root: &Path, arguments: &[&str]) -> String {
 
 #[test]
 fn complete_unversioned_projection_is_canonical_and_repeatable() {
-    let fixture = tempfile::tempdir().unwrap();
+    let fixture = sandbox();
     write_project(fixture.path(), false);
     let result = check_project(fixture.path()).unwrap();
     assert!(result.is_valid());
@@ -247,7 +253,7 @@ fn complete_unversioned_projection_is_canonical_and_repeatable() {
 
 #[test]
 fn projection_hashes_the_schema_snapshot_that_validation_consumed() {
-    let fixture = tempfile::tempdir().unwrap();
+    let fixture = sandbox();
     write_project(fixture.path(), false);
     let result = check_project(fixture.path()).unwrap();
     let before = IndexProjection::from_validation(&result)
@@ -281,7 +287,7 @@ fn projection_hashes_the_schema_snapshot_that_validation_consumed() {
 
 #[test]
 fn index_and_show_share_inverse_inline_occurrence_provenance() {
-    let fixture = tempfile::tempdir().unwrap();
+    let fixture = sandbox();
     write_project(fixture.path(), false);
     fs::write(
         fixture.path().join("docs/project.mara.md"),
@@ -323,7 +329,7 @@ Beta body with [[connected_by:ALPHA-A]].
 
 #[test]
 fn symmetric_edges_use_the_canonical_name_for_inverse_presentation() {
-    let fixture = tempfile::tempdir().unwrap();
+    let fixture = sandbox();
     write_project(fixture.path(), false);
     let schema = SCHEMA.replacen(
         "relations:\n",
@@ -384,8 +390,8 @@ Alpha B body.
 
 #[test]
 fn filesystem_creation_order_does_not_change_projection_bytes() {
-    let first = tempfile::tempdir().unwrap();
-    let second = tempfile::tempdir().unwrap();
+    let first = sandbox();
+    let second = sandbox();
     write_project(first.path(), false);
     write_project(second.path(), false);
     fs::write(first.path().join("docs/z.mara.md"), "Z narrative.\n").unwrap();
@@ -415,7 +421,7 @@ fn filesystem_creation_order_does_not_change_projection_bytes() {
 
 #[test]
 fn writer_creates_a_missing_contained_parent_before_atomic_replacement() {
-    let fixture = tempfile::tempdir().unwrap();
+    let fixture = sandbox();
     write_project(fixture.path(), false);
     let config_path = fixture.path().join(".mara/project.toml");
     let config = fs::read_to_string(&config_path).unwrap().replace(
@@ -433,19 +439,13 @@ fn writer_creates_a_missing_contained_parent_before_atomic_replacement() {
 
 #[test]
 fn git_provenance_distinguishes_clean_modified_and_untracked_project_inputs() {
-    let fixture = tempfile::tempdir().unwrap();
+    let fixture = git_sandbox();
     let project_root = fixture.path().join("nested");
-    git(fixture.path(), &["init", "-b", "main"]);
-    git(fixture.path(), &["config", "user.name", "Mara Test"]);
-    git(
-        fixture.path(),
-        &["config", "user.email", "mara@example.test"],
-    );
     write_project(&project_root, false);
     fs::write(project_root.join("notes.txt"), "unselected fixture\n").unwrap();
-    git(fixture.path(), &["add", "."]);
-    git(fixture.path(), &["commit", "-m", "fixture"]);
-    let commit = git(fixture.path(), &["rev-parse", "HEAD"]);
+    git(&fixture, &["add", "."]);
+    git(&fixture, &["commit", "-m", "fixture"]);
+    let commit = git(&fixture, &["rev-parse", "HEAD"]);
 
     let clean_result = check_project(&project_root).unwrap();
     let clean_bytes = IndexProjection::from_validation(&clean_result)
@@ -509,7 +509,7 @@ fn git_provenance_distinguishes_clean_modified_and_untracked_project_inputs() {
     assert_eq!(untracked["documents"].as_array().unwrap().len(), 2);
 
     fs::remove_file(project_root.join("docs/untracked.mara.md")).unwrap();
-    git(fixture.path(), &["checkout", "--detach"]);
+    git(&fixture, &["checkout", "--detach"]);
     let detached = IndexProjection::from_validation(&check_project(&project_root).unwrap())
         .unwrap()
         .to_canonical_json()
@@ -521,32 +521,22 @@ fn git_provenance_distinguishes_clean_modified_and_untracked_project_inputs() {
 
 #[test]
 fn git_provenance_counts_selected_ignored_content_when_ignore_handling_is_disabled() {
-    let fixture = tempfile::tempdir().unwrap();
-    let project_root = fixture.path().join("nested");
-    git(fixture.path(), &["init", "-b", "main"]);
-    git(fixture.path(), &["config", "user.name", "Mara Test"]);
-    git(
-        fixture.path(),
-        &["config", "user.email", "mara@example.test"],
-    );
+    let fixture = git_sandbox();
+    let project_root = fixture.path().to_path_buf();
     write_project(&project_root, false);
     let config_path = project_root.join(".mara/project.toml");
     let config = fs::read_to_string(&config_path)
         .unwrap()
         .replace("respect_gitignore = true", "respect_gitignore = false");
     fs::write(config_path, config).unwrap();
-    fs::write(
-        fixture.path().join(".gitignore"),
-        "nested/docs/ignored.mara.md\n",
-    )
-    .unwrap();
+    fs::write(fixture.path().join(".gitignore"), "docs/ignored.mara.md\n").unwrap();
     fs::write(
         project_root.join("docs/ignored.mara.md"),
         "Ignored but selected narrative.\n",
     )
     .unwrap();
-    git(fixture.path(), &["add", "."]);
-    git(fixture.path(), &["commit", "-m", "fixture"]);
+    git(&fixture, &["add", "."]);
+    git(&fixture, &["commit", "-m", "fixture"]);
 
     let projection = IndexProjection::from_validation(&check_project(&project_root).unwrap())
         .unwrap()
@@ -560,22 +550,13 @@ fn git_provenance_counts_selected_ignored_content_when_ignore_handling_is_disabl
 
 #[test]
 fn git_provenance_detects_selected_content_renamed_out_of_selection() {
-    let fixture = tempfile::tempdir().unwrap();
-    let project_root = fixture.path().join("nested");
-    git(fixture.path(), &["init", "-b", "main"]);
-    git(fixture.path(), &["config", "user.name", "Mara Test"]);
-    git(
-        fixture.path(),
-        &["config", "user.email", "mara@example.test"],
-    );
-    git(fixture.path(), &["config", "diff.renames", "true"]);
+    let fixture = git_sandbox();
+    let project_root = fixture.path().to_path_buf();
+    git(&fixture, &["config", "diff.renames", "true"]);
     write_project(&project_root, false);
-    git(fixture.path(), &["add", "."]);
-    git(fixture.path(), &["commit", "-m", "fixture"]);
-    git(
-        fixture.path(),
-        &["mv", "nested/docs/project.mara.md", "nested/renamed.txt"],
-    );
+    git(&fixture, &["add", "."]);
+    git(&fixture, &["commit", "-m", "fixture"]);
+    git(&fixture, &["mv", "docs/project.mara.md", "renamed.txt"]);
 
     let projection = IndexProjection::from_validation(&check_project(&project_root).unwrap())
         .unwrap()
@@ -592,14 +573,8 @@ fn git_provenance_detects_selected_content_renamed_out_of_selection() {
 fn git_provenance_tracks_resolved_internal_symlink_targets() {
     use std::os::unix::fs::symlink;
 
-    let fixture = tempfile::tempdir().unwrap();
-    let project_root = fixture.path().join("nested");
-    git(fixture.path(), &["init", "-b", "main"]);
-    git(fixture.path(), &["config", "user.name", "Mara Test"]);
-    git(
-        fixture.path(),
-        &["config", "user.email", "mara@example.test"],
-    );
+    let fixture = git_sandbox();
+    let project_root = fixture.path().to_path_buf();
     write_project(&project_root, false);
     fs::remove_file(project_root.join("docs/project.mara.md")).unwrap();
     fs::create_dir_all(project_root.join("sources")).unwrap();
@@ -610,8 +585,8 @@ fn git_provenance_tracks_resolved_internal_symlink_targets() {
         project_root.join("docs/link.mara.md"),
     )
     .unwrap();
-    git(fixture.path(), &["add", "."]);
-    git(fixture.path(), &["commit", "-m", "fixture"]);
+    git(&fixture, &["add", "."]);
+    git(&fixture, &["commit", "-m", "fixture"]);
 
     let clean = IndexProjection::from_validation(&check_project(&project_root).unwrap())
         .unwrap()
@@ -634,14 +609,8 @@ fn git_provenance_tracks_resolved_internal_symlink_targets() {
 fn git_provenance_tracks_the_resolved_project_config_target() {
     use std::os::unix::fs::symlink;
 
-    let fixture = tempfile::tempdir().unwrap();
-    let project_root = fixture.path().join("nested");
-    git(fixture.path(), &["init", "-b", "main"]);
-    git(fixture.path(), &["config", "user.name", "Mara Test"]);
-    git(
-        fixture.path(),
-        &["config", "user.email", "mara@example.test"],
-    );
+    let fixture = git_sandbox();
+    let project_root = fixture.path().to_path_buf();
     write_project(&project_root, false);
     fs::create_dir(project_root.join("config")).unwrap();
     let target = project_root.join("config/project.toml");
@@ -651,8 +620,8 @@ fn git_provenance_tracks_the_resolved_project_config_target() {
         project_root.join(".mara/project.toml"),
     )
     .unwrap();
-    git(fixture.path(), &["add", "."]);
-    git(fixture.path(), &["commit", "-m", "fixture"]);
+    git(&fixture, &["add", "."]);
+    git(&fixture, &["commit", "-m", "fixture"]);
 
     let clean = check_project(&project_root).unwrap();
     let clean_projection = IndexProjection::from_validation(&clean)
@@ -678,17 +647,11 @@ fn git_provenance_tracks_the_resolved_project_config_target() {
 
 #[test]
 fn git_provenance_rejects_head_changes_after_validation_started() {
-    let fixture = tempfile::tempdir().unwrap();
-    let project_root = fixture.path().join("nested");
-    git(fixture.path(), &["init", "-b", "main"]);
-    git(fixture.path(), &["config", "user.name", "Mara Test"]);
-    git(
-        fixture.path(),
-        &["config", "user.email", "mara@example.test"],
-    );
+    let fixture = git_sandbox();
+    let project_root = fixture.path().to_path_buf();
     write_project(&project_root, false);
-    git(fixture.path(), &["add", "."]);
-    git(fixture.path(), &["commit", "-m", "first"]);
+    git(&fixture, &["add", "."]);
+    git(&fixture, &["commit", "-m", "first"]);
     let validated = check_project(&project_root).unwrap();
 
     fs::write(
@@ -696,8 +659,8 @@ fn git_provenance_rejects_head_changes_after_validation_started() {
         format!("{CONTENT}\n"),
     )
     .unwrap();
-    git(fixture.path(), &["add", "."]);
-    git(fixture.path(), &["commit", "-m", "second"]);
+    git(&fixture, &["add", "."]);
+    git(&fixture, &["commit", "-m", "second"]);
 
     let error = IndexProjection::from_validation(&validated).unwrap_err();
     assert!(matches!(&error, mara_engine::IndexError::GitStateChanged));
@@ -706,21 +669,15 @@ fn git_provenance_rejects_head_changes_after_validation_started() {
 
 #[test]
 fn git_provenance_detects_changes_hidden_by_index_flags() {
-    let fixture = tempfile::tempdir().unwrap();
-    let project_root = fixture.path().join("nested");
-    let content_path = "nested/docs/project.mara.md";
-    git(fixture.path(), &["init", "-b", "main"]);
-    git(fixture.path(), &["config", "user.name", "Mara Test"]);
-    git(
-        fixture.path(),
-        &["config", "user.email", "mara@example.test"],
-    );
+    let fixture = git_sandbox();
+    let project_root = fixture.path().to_path_buf();
+    let content_path = "docs/project.mara.md";
     write_project(&project_root, false);
-    git(fixture.path(), &["add", "."]);
-    git(fixture.path(), &["commit", "-m", "fixture"]);
+    git(&fixture, &["add", "."]);
+    git(&fixture, &["commit", "-m", "fixture"]);
 
     git(
-        fixture.path(),
+        &fixture,
         &["update-index", "--assume-unchanged", content_path],
     );
     let assumed_clean = IndexProjection::from_validation(&check_project(&project_root).unwrap())
@@ -740,14 +697,11 @@ fn git_provenance_detects_changes_hidden_by_index_flags() {
     assert_eq!(json(&assumed)["git"]["dirty"], true);
     fs::write(project_root.join("docs/project.mara.md"), CONTENT).unwrap();
     git(
-        fixture.path(),
+        &fixture,
         &["update-index", "--no-assume-unchanged", content_path],
     );
 
-    git(
-        fixture.path(),
-        &["update-index", "--skip-worktree", content_path],
-    );
+    git(&fixture, &["update-index", "--skip-worktree", content_path]);
     let skipped_clean = IndexProjection::from_validation(&check_project(&project_root).unwrap())
         .unwrap()
         .to_canonical_json()
@@ -767,17 +721,11 @@ fn git_provenance_detects_changes_hidden_by_index_flags() {
 
 #[test]
 fn writer_enforces_the_configured_clean_relevant_inputs_policy() {
-    let fixture = tempfile::tempdir().unwrap();
-    let project_root = fixture.path().join("nested");
-    git(fixture.path(), &["init", "-b", "main"]);
-    git(fixture.path(), &["config", "user.name", "Mara Test"]);
-    git(
-        fixture.path(),
-        &["config", "user.email", "mara@example.test"],
-    );
+    let fixture = git_sandbox();
+    let project_root = fixture.path().to_path_buf();
     write_project(&project_root, false);
-    git(fixture.path(), &["add", "."]);
-    git(fixture.path(), &["commit", "-m", "fixture"]);
+    git(&fixture, &["add", "."]);
+    git(&fixture, &["commit", "-m", "fixture"]);
 
     let destination = project_root.join(".mara/index.json");
     let previous = b"previous complete index\n";
@@ -811,7 +759,7 @@ fn writer_enforces_the_configured_clean_relevant_inputs_policy() {
 
 #[test]
 fn writer_rejects_stale_validation_preimages_outside_git() {
-    let fixture = tempfile::tempdir().unwrap();
+    let fixture = sandbox();
     write_project(fixture.path(), false);
     let validated = check_project(fixture.path()).unwrap();
     let destination = fixture.path().join(".mara/index.json");
@@ -852,7 +800,7 @@ fn writer_rejects_stale_validation_preimages_outside_git() {
 
 #[test]
 fn writer_rejects_a_changed_selected_content_set() {
-    let fixture = tempfile::tempdir().unwrap();
+    let fixture = sandbox();
     write_project(fixture.path(), false);
     let validated = check_project(fixture.path()).unwrap();
     let destination = fixture.path().join(".mara/index.json");

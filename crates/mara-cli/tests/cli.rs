@@ -4,6 +4,8 @@ use std::{
     process::Command,
 };
 
+use mara_test_support::{ProjectSandbox, ProjectSandboxMode};
+
 const PROJECT_CONFIG: &str = r#"format_version = 1
 [project]
 name = "fixture"
@@ -101,21 +103,47 @@ fn mara() -> Command {
     Command::new(env!("CARGO_BIN_EXE_mara"))
 }
 
-fn project(content: &str) -> tempfile::TempDir {
-    project_with_schema(SCHEMA, content)
+fn project(content: &str) -> ProjectSandbox {
+    project_with_mode(ProjectSandboxMode::Configured, SCHEMA, content)
 }
 
-fn project_with_schema(schema: &str, content: &str) -> tempfile::TempDir {
-    let temp = tempfile::tempdir().expect("create isolated CLI fixture");
-    fs::create_dir_all(temp.path().join(".mara")).unwrap();
-    fs::create_dir_all(temp.path().join("docs")).unwrap();
-    fs::write(temp.path().join(".mara/project.toml"), PROJECT_CONFIG).unwrap();
-    fs::write(temp.path().join(".mara/schema.yaml"), schema).unwrap();
-    fs::write(temp.path().join("docs/items.mara.md"), content).unwrap();
-    temp
+fn project_with_schema(schema: &str, content: &str) -> ProjectSandbox {
+    project_with_mode(ProjectSandboxMode::Configured, schema, content)
 }
 
-fn run(root: &std::path::Path, args: &[&str]) -> std::process::Output {
+fn git_project(content: &str) -> ProjectSandbox {
+    project_with_mode(ProjectSandboxMode::CleanGit, SCHEMA, content)
+}
+
+fn project_with_mode(mode: ProjectSandboxMode, schema: &str, content: &str) -> ProjectSandbox {
+    let sandbox = ProjectSandbox::new(mode).expect("create isolated CLI project sandbox");
+    fs::create_dir_all(sandbox.path().join("docs")).unwrap();
+    fs::write(sandbox.path().join(".mara/project.toml"), PROJECT_CONFIG).unwrap();
+    fs::write(sandbox.path().join(".mara/schema.yaml"), schema).unwrap();
+    fs::write(sandbox.path().join("docs/items.mara.md"), content).unwrap();
+    sandbox
+}
+
+fn run(sandbox: &ProjectSandbox, args: &[&str]) -> std::process::Output {
+    let mut command = mara();
+    sandbox.configure_command(&mut command).args(args);
+    command.output().expect("run mara command")
+}
+
+fn run_at_sandbox_path(
+    sandbox: &ProjectSandbox,
+    root: &Path,
+    args: &[&str],
+) -> std::process::Output {
+    let mut command = mara();
+    sandbox
+        .configure_command(&mut command)
+        .current_dir(root)
+        .args(args);
+    command.output().expect("run mara command")
+}
+
+fn run_at_path(root: &Path, args: &[&str]) -> std::process::Output {
     mara()
         .current_dir(root)
         .args(args)
@@ -123,23 +151,18 @@ fn run(root: &std::path::Path, args: &[&str]) -> std::process::Output {
         .expect("run mara command")
 }
 
-fn git(root: &Path, args: &[&str]) -> std::process::Output {
-    Command::new("git")
-        .current_dir(root)
-        .args(args)
-        .output()
-        .expect("run Git command")
+fn git(sandbox: &ProjectSandbox, args: &[&str]) -> std::process::Output {
+    let mut command = Command::new("git");
+    sandbox.configure_command(&mut command).args(args);
+    command.output().expect("run Git command")
 }
 
-fn initialize_git_repository(root: &Path) {
+fn commit_project_changes(sandbox: &ProjectSandbox) {
     for arguments in [
-        &["init", "--quiet"][..],
-        &["config", "user.email", "mara-cli@example.invalid"],
-        &["config", "user.name", "Mara CLI Test"],
-        &["add", "."],
-        &["commit", "--quiet", "-m", "test: initialize fixture"],
+        &["add", "."][..],
+        &["commit", "--quiet", "-m", "test: initialize fixture"][..],
     ] {
-        let output = git(root, arguments);
+        let output = git(sandbox, arguments);
         assert!(
             output.status.success(),
             "Git command {arguments:?} failed: {}",
@@ -228,8 +251,8 @@ fn self_hosting_acceptance_validates_the_repository_deterministically() {
     let documents = repository_mara_documents(&root);
     assert!(!documents.is_empty(), "repository Mara corpus is empty");
 
-    let first = run(&root, &["check", "--format", "json"]);
-    let second = run(&root, &["check", "--format", "json"]);
+    let first = run_at_path(&root, &["check", "--format", "json"]);
+    let second = run_at_path(&root, &["check", "--format", "json"]);
 
     assert_eq!(first.status.code(), Some(0));
     assert_eq!(second.status.code(), Some(0));
@@ -253,7 +276,7 @@ fn self_hosting_acceptance_validates_the_repository_deterministically() {
 fn self_hosting_negative_fixture_rejects_duplicate_display_ids() {
     // TEST-VERIFICATION-STRATEGY proves the acceptance gate detects a known defect.
     let temp = project(DUPLICATE_DISPLAY_ID_ITEMS);
-    let output = run(temp.path(), &["check", "--format", "json"]);
+    let output = run(&temp, &["check", "--format", "json"]);
 
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stderr.is_empty());
@@ -267,13 +290,14 @@ fn self_hosting_negative_fixture_rejects_duplicate_display_ids() {
 
 #[test]
 fn init_creates_a_valid_process_neutral_project_that_check_accepts() {
-    let temp = tempfile::tempdir().expect("create isolated CLI fixture");
+    let temp = ProjectSandbox::new(ProjectSandboxMode::Empty)
+        .expect("create isolated empty CLI project sandbox");
     let root = temp.path().join("project");
 
-    let init = mara()
-        .args(["init", root.to_str().unwrap(), "--name", "fixture"])
-        .output()
-        .expect("run mara init");
+    let init = run(
+        &temp,
+        &["init", root.to_str().unwrap(), "--name", "fixture"],
+    );
 
     assert_eq!(init.status.code(), Some(0));
     assert_eq!(
@@ -289,11 +313,8 @@ fn init_creates_a_valid_process_neutral_project_that_check_accepts() {
             .contains("flavours: {}\nrelations: {}\nrules: []\n")
     );
 
-    let check = mara()
-        .current_dir(&root)
-        .args(["check", "--format", "json"])
-        .output()
-        .expect("run mara check");
+    let root = root.canonicalize().unwrap();
+    let check = run_at_sandbox_path(&temp, &root, &["check", "--format", "json"]);
 
     assert_eq!(check.status.code(), Some(0));
     assert!(check.stderr.is_empty());
@@ -308,7 +329,7 @@ fn init_creates_a_valid_process_neutral_project_that_check_accepts() {
 #[test]
 fn mid_uses_project_identity_and_fails_without_a_project() {
     let fixture = project(VALID_ITEMS);
-    let generated = run(fixture.path(), &["mid"]);
+    let generated = run(&fixture, &["mid"]);
     assert_eq!(generated.status.code(), Some(0));
     assert!(generated.stderr.is_empty());
     let mid = String::from_utf8(generated.stdout).unwrap();
@@ -316,8 +337,8 @@ fn mid_uses_project_identity_and_fails_without_a_project() {
     assert!(mid.starts_with("m_"));
     assert!(mid.ends_with('\n'));
 
-    let outside = tempfile::tempdir().unwrap();
-    let failed = run(outside.path(), &["mid"]);
+    let outside = ProjectSandbox::new(ProjectSandboxMode::Empty).unwrap();
+    let failed = run(&outside, &["mid"]);
     assert_eq!(failed.status.code(), Some(2));
     assert_eq!(
         String::from_utf8(failed.stdout).unwrap(),
@@ -330,7 +351,7 @@ fn check_reports_validation_findings_with_actionable_human_and_json_locations() 
     let invalid = VALID_ITEMS.replace(":connects: BETA-B", ":connects: MISSING");
     let fixture = project(&invalid);
 
-    let human = run(fixture.path(), &["check"]);
+    let human = run(&fixture, &["check"]);
     assert_eq!(human.status.code(), Some(1));
     assert!(human.stderr.is_empty());
     let human = String::from_utf8(human.stdout).unwrap();
@@ -338,7 +359,7 @@ fn check_reports_validation_findings_with_actionable_human_and_json_locations() 
         "docs/items.mara.md:6:1: error[reference.unresolved]: internal reference does not resolve to an active item"
     ), "actual human diagnostics:\n{human}");
 
-    let machine = run(fixture.path(), &["check", "--format", "json"]);
+    let machine = run(&fixture, &["check", "--format", "json"]);
     assert_eq!(machine.status.code(), Some(1));
     assert!(machine.stderr.is_empty());
     let envelope = json(&machine);
@@ -354,8 +375,7 @@ fn check_reports_validation_findings_with_actionable_human_and_json_locations() 
 
 #[test]
 fn malformed_configuration_is_invalid_but_missing_project_is_operational() {
-    let malformed = tempfile::tempdir().unwrap();
-    fs::create_dir_all(malformed.path().join(".mara")).unwrap();
+    let malformed = ProjectSandbox::new(ProjectSandboxMode::Configured).unwrap();
     fs::write(
         malformed.path().join(".mara/project.toml"),
         format!("{PROJECT_CONFIG}\nunknown = true\n"),
@@ -363,7 +383,7 @@ fn malformed_configuration_is_invalid_but_missing_project_is_operational() {
     .unwrap();
     fs::write(malformed.path().join(".mara/schema.yaml"), SCHEMA).unwrap();
 
-    let invalid = run(malformed.path(), &["schema", "check", "--format", "json"]);
+    let invalid = run(&malformed, &["schema", "check", "--format", "json"]);
     assert_eq!(invalid.status.code(), Some(1));
     let envelope = json(&invalid);
     assert_eq!(envelope["status"], "invalid");
@@ -373,8 +393,8 @@ fn malformed_configuration_is_invalid_but_missing_project_is_operational() {
         ".mara/project.toml"
     );
 
-    let missing = tempfile::tempdir().unwrap();
-    let failed = run(missing.path(), &["check", "--format", "json"]);
+    let missing = ProjectSandbox::new(ProjectSandboxMode::Empty).unwrap();
+    let failed = run(&missing, &["check", "--format", "json"]);
     assert_eq!(failed.status.code(), Some(2));
     assert!(failed.stderr.is_empty());
     let envelope = json(&failed);
@@ -392,7 +412,7 @@ fn malformed_configuration_is_invalid_but_missing_project_is_operational() {
 fn list_show_and_trace_use_the_shared_deterministic_model() {
     let fixture = project(VALID_ITEMS);
 
-    let listed = run(fixture.path(), &["list"]);
+    let listed = run(&fixture, &["list"]);
     assert_eq!(listed.status.code(), Some(0));
     assert_eq!(
         String::from_utf8(listed.stdout).unwrap(),
@@ -400,7 +420,7 @@ fn list_show_and_trace_use_the_shared_deterministic_model() {
     );
 
     let filtered = run(
-        fixture.path(),
+        &fixture,
         &[
             "list",
             "--format",
@@ -423,7 +443,7 @@ fn list_show_and_trace_use_the_shared_deterministic_model() {
         "m_00000000000000000000000001"
     );
 
-    let shown = run(fixture.path(), &["show", "ALPHA-A", "--format", "json"]);
+    let shown = run(&fixture, &["show", "ALPHA-A", "--format", "json"]);
     assert_eq!(shown.status.code(), Some(0));
     let raw_show = String::from_utf8(shown.stdout.clone()).unwrap();
     let envelope = json(&shown);
@@ -443,7 +463,7 @@ fn list_show_and_trace_use_the_shared_deterministic_model() {
     assert!(raw_show.find("\"body_markdown\"").unwrap() < raw_show.find("\"metadata\"").unwrap());
 
     let traced = run(
-        fixture.path(),
+        &fixture,
         &[
             "trace",
             "ALPHA-A",
@@ -470,14 +490,14 @@ fn list_show_and_trace_use_the_shared_deterministic_model() {
 
 #[test]
 fn init_refuses_overwrite_and_trace_rejects_zero_depth_with_exit_two() {
-    let temp = tempfile::tempdir().unwrap();
-    let first = run(temp.path(), &["init", "--name", "fixture"]);
+    let temp = ProjectSandbox::new(ProjectSandboxMode::Empty).unwrap();
+    let first = run(&temp, &["init", "--name", "fixture"]);
     assert_eq!(first.status.code(), Some(0));
-    let second = run(temp.path(), &["init", "--name", "fixture"]);
+    let second = run(&temp, &["init", "--name", "fixture"]);
     assert_eq!(second.status.code(), Some(2));
 
     let fixture = project(VALID_ITEMS);
-    let trace = run(fixture.path(), &["trace", "ALPHA-A", "--depth", "0"]);
+    let trace = run(&fixture, &["trace", "ALPHA-A", "--depth", "0"]);
     assert_eq!(trace.status.code(), Some(2));
     assert_eq!(
         String::from_utf8(trace.stdout).unwrap(),
@@ -493,7 +513,7 @@ fn query_input_findings_are_invalid_and_json_is_repeatable() {
         vec!["show", "UNKNOWN", "--format", "json"],
         vec!["trace", "UNKNOWN", "--format", "json"],
     ] {
-        let output = run(fixture.path(), &command);
+        let output = run(&fixture, &command);
         assert_eq!(output.status.code(), Some(1));
         let envelope = json(&output);
         assert_eq!(envelope["status"], "invalid");
@@ -503,7 +523,7 @@ fn query_input_findings_are_invalid_and_json_is_repeatable() {
     }
 
     let invalid_filter = run(
-        fixture.path(),
+        &fixture,
         &["list", "--field", "state=unknown", "--format", "json"],
     );
     assert_eq!(invalid_filter.status.code(), Some(1));
@@ -513,7 +533,7 @@ fn query_input_findings_are_invalid_and_json_is_repeatable() {
     );
 
     let unknown_flavour = run(
-        fixture.path(),
+        &fixture,
         &["list", "--flavour", "unknown", "--format", "json"],
     );
     assert_eq!(unknown_flavour.status.code(), Some(1));
@@ -522,8 +542,8 @@ fn query_input_findings_are_invalid_and_json_is_repeatable() {
         "item.unknown_flavour"
     );
 
-    let first = run(fixture.path(), &["check", "--format", "json"]);
-    let second = run(fixture.path(), &["check", "--format", "json"]);
+    let first = run(&fixture, &["check", "--format", "json"]);
+    let second = run(&fixture, &["check", "--format", "json"]);
     assert_eq!(first.stdout, second.stdout);
 }
 
@@ -531,7 +551,7 @@ fn query_input_findings_are_invalid_and_json_is_repeatable() {
 fn every_repeated_field_filter_value_must_convert() {
     let fixture = project(VALID_ITEMS);
     let output = run(
-        fixture.path(),
+        &fixture,
         &[
             "list",
             "--field",
@@ -569,7 +589,7 @@ fn non_failing_warnings_do_not_suppress_successful_human_payloads() {
     ];
 
     for (arguments, requested_data) in cases {
-        let output = run(fixture.path(), &arguments);
+        let output = run(&fixture, &arguments);
         assert_eq!(output.status.code(), Some(0), "arguments: {arguments:?}");
         let human = String::from_utf8(output.stdout).unwrap();
         assert!(human.contains(requested_data), "actual output:\n{human}");
@@ -594,7 +614,7 @@ fn duplicated_display_ids_are_command_specific_ambiguous_query_findings() {
         vec!["show", "ALPHA-A", "--format", "json"],
         vec!["trace", "ALPHA-A", "--format", "json"],
     ] {
-        let output = run(fixture.path(), &arguments);
+        let output = run(&fixture, &arguments);
         assert_eq!(output.status.code(), Some(1));
         let envelope = json(&output);
         assert_eq!(envelope["diagnostics"].as_array().unwrap().len(), 1);
@@ -619,10 +639,7 @@ fn duplicated_display_ids_are_command_specific_ambiguous_query_findings() {
 #[test]
 fn incoming_human_trace_renders_the_traversed_source_endpoint() {
     let fixture = project(VALID_ITEMS);
-    let output = run(
-        fixture.path(),
-        &["trace", "BETA-B", "--direction", "incoming"],
-    );
+    let output = run(&fixture, &["trace", "BETA-B", "--direction", "incoming"]);
 
     assert_eq!(output.status.code(), Some(0));
     let human = String::from_utf8(output.stdout).unwrap();
@@ -640,7 +657,7 @@ fn summary_counts_bare_external_mentions_and_external_nodes() {
         "Alpha body with [[https://example.test/work]].",
     );
     let fixture = project_with_schema(&schema, &content);
-    let output = run(fixture.path(), &["check", "--format", "json"]);
+    let output = run(&fixture, &["check", "--format", "json"]);
 
     assert_eq!(output.status.code(), Some(0));
     let envelope = json(&output);
@@ -651,7 +668,7 @@ fn summary_counts_bare_external_mentions_and_external_nodes() {
 #[test]
 fn index_writes_the_configured_projection_and_reports_stable_evidence() {
     let fixture = project(VALID_ITEMS);
-    let first = run(fixture.path(), &["index", "--format", "json"]);
+    let first = run(&fixture, &["index", "--format", "json"]);
 
     assert_eq!(first.status.code(), Some(0));
     let first_envelope = json(&first);
@@ -671,7 +688,7 @@ fn index_writes_the_configured_projection_and_reports_stable_evidence() {
     assert_eq!(projection["version"], 1);
     assert_eq!(projection["items"].as_array().unwrap().len(), 2);
 
-    let second = run(fixture.path(), &["index", "--format", "json"]);
+    let second = run(&fixture, &["index", "--format", "json"]);
     assert_eq!(second.status.code(), Some(0));
     assert_eq!(
         json(&second)["data"]["sha256"],
@@ -679,7 +696,7 @@ fn index_writes_the_configured_projection_and_reports_stable_evidence() {
     );
     assert_eq!(fs::read(&path).unwrap(), first_index);
 
-    let human = run(fixture.path(), &["index"]);
+    let human = run(&fixture, &["index"]);
     assert_eq!(human.status.code(), Some(0));
     assert!(
         String::from_utf8(human.stdout)
@@ -693,7 +710,7 @@ fn index_preserves_the_previous_file_when_validation_policy_fails() {
     let warning_content =
         VALID_ITEMS.replace(":connects: BETA-B", ":connects: BETA-B\n:connects: BETA-B");
     let warning_fixture = project(&warning_content);
-    let warning = run(warning_fixture.path(), &["index", "--format", "json"]);
+    let warning = run(&warning_fixture, &["index", "--format", "json"]);
     assert_eq!(warning.status.code(), Some(0));
     let warning_envelope = json(&warning);
     assert_eq!(
@@ -716,7 +733,7 @@ fn index_preserves_the_previous_file_when_validation_policy_fails() {
     .unwrap();
     let escalated_path = escalated_fixture.path().join(".mara/index.json");
     fs::write(&escalated_path, b"previous index\n").unwrap();
-    let escalated = run(escalated_fixture.path(), &["index", "--format", "json"]);
+    let escalated = run(&escalated_fixture, &["index", "--format", "json"]);
     assert_eq!(escalated.status.code(), Some(1));
     let escalated_envelope = json(&escalated);
     assert_eq!(escalated_envelope["status"], "invalid");
@@ -729,7 +746,7 @@ fn index_preserves_the_previous_file_when_validation_policy_fails() {
         VALID_ITEMS,
     )
     .unwrap();
-    let rebuilt = run(escalated_fixture.path(), &["index", "--format", "json"]);
+    let rebuilt = run(&escalated_fixture, &["index", "--format", "json"]);
     assert_eq!(rebuilt.status.code(), Some(0));
     assert_eq!(json(&rebuilt)["status"], "ok");
     let rebuilt_index = fs::read(&escalated_path).unwrap();
@@ -742,7 +759,7 @@ fn index_preserves_the_previous_file_when_validation_policy_fails() {
     let invalid_fixture = project(DUPLICATE_DISPLAY_ID_ITEMS);
     let invalid_path = invalid_fixture.path().join(".mara/index.json");
     fs::write(&invalid_path, b"previous index\n").unwrap();
-    let invalid = run(invalid_fixture.path(), &["index", "--format", "json"]);
+    let invalid = run(&invalid_fixture, &["index", "--format", "json"]);
     assert_eq!(invalid.status.code(), Some(1));
     assert_eq!(json(&invalid)["status"], "invalid");
     assert_eq!(fs::read(&invalid_path).unwrap(), b"previous index\n");
@@ -755,7 +772,7 @@ fn transaction_recovery_requires_exactly_one_explicit_mode() {
         vec!["transaction", "recover"],
         vec!["transaction", "recover", "--rollback", "--complete"],
     ] {
-        let output = run(fixture.path(), &arguments);
+        let output = run(&fixture, &arguments);
         assert_eq!(output.status.code(), Some(2));
         let stderr = String::from_utf8(output.stderr).unwrap();
         assert!(stderr.contains("--rollback") || stderr.contains("--complete"));
@@ -766,7 +783,7 @@ fn transaction_recovery_requires_exactly_one_explicit_mode() {
 fn display_id_rename_reports_success_and_rewrites_the_project() {
     // TEST-DISPLAY-ID and TEST-EDIT-PREFLIGHT.
     let fixture = project(VALID_ITEMS);
-    let output = run(fixture.path(), &["id", "rename", "BETA-B", "BETA-RENAMED"]);
+    let output = run(&fixture, &["id", "rename", "BETA-B", "BETA-RENAMED"]);
 
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stderr.is_empty());
@@ -788,7 +805,7 @@ fn display_id_rename_rejects_an_invalid_replacement_without_writing() {
     );
     let fixture = project_with_schema(&schema, VALID_ITEMS);
     let before = fs::read(fixture.path().join("docs/items.mara.md")).unwrap();
-    let output = run(fixture.path(), &["id", "rename", "BETA-B", "invalid"]);
+    let output = run(&fixture, &["id", "rename", "BETA-B", "invalid"]);
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
@@ -807,7 +824,7 @@ fn display_id_rename_rejects_a_duplicate_id_without_writing() {
     // TEST-DISPLAY-ID and REQ-DISPLAY-ID-RENAME.
     let fixture = project(VALID_ITEMS);
     let before = fs::read(fixture.path().join("docs/items.mara.md")).unwrap();
-    let output = run(fixture.path(), &["id", "rename", "BETA-B", "ALPHA-A"]);
+    let output = run(&fixture, &["id", "rename", "BETA-B", "ALPHA-A"]);
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
@@ -824,11 +841,11 @@ fn display_id_rename_rejects_a_duplicate_id_without_writing() {
 #[test]
 fn display_id_rename_rejects_a_dirty_worktree_by_default() {
     // TEST-EDIT-PREFLIGHT and REQ-EDIT-WORKTREE-POLICY.
-    let fixture = project(VALID_ITEMS);
-    initialize_git_repository(fixture.path());
+    let fixture = git_project(VALID_ITEMS);
+    commit_project_changes(&fixture);
     fs::write(fixture.path().join("notes.txt"), "uncommitted\n").unwrap();
     let before = fs::read(fixture.path().join("docs/items.mara.md")).unwrap();
-    let output = run(fixture.path(), &["id", "rename", "BETA-B", "BETA-RENAMED"]);
+    let output = run(&fixture, &["id", "rename", "BETA-B", "BETA-RENAMED"]);
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
@@ -845,18 +862,18 @@ fn display_id_rename_rejects_a_dirty_worktree_by_default() {
 #[test]
 fn display_id_rename_allows_a_dirty_worktree_only_when_explicit() {
     // TEST-EDIT-PREFLIGHT, REQ-EDIT-WORKTREE-POLICY, and REQ-EDIT-NO-COMMIT.
-    let fixture = project(VALID_ITEMS);
-    initialize_git_repository(fixture.path());
-    let head = git(fixture.path(), &["rev-parse", "HEAD"]).stdout;
+    let fixture = git_project(VALID_ITEMS);
+    commit_project_changes(&fixture);
+    let head = git(&fixture, &["rev-parse", "HEAD"]).stdout;
     fs::write(fixture.path().join("notes.txt"), "uncommitted\n").unwrap();
     let output = run(
-        fixture.path(),
+        &fixture,
         &["id", "rename", "BETA-B", "BETA-RENAMED", "--allow-dirty"],
     );
 
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stderr.is_empty());
-    assert_eq!(git(fixture.path(), &["rev-parse", "HEAD"]).stdout, head);
+    assert_eq!(git(&fixture, &["rev-parse", "HEAD"]).stdout, head);
     assert_eq!(
         fs::read_to_string(fixture.path().join("notes.txt")).unwrap(),
         "uncommitted\n"
@@ -874,7 +891,7 @@ fn display_id_rename_blocks_on_an_incomplete_transaction() {
     let fixture = project(VALID_ITEMS);
     let transaction = create_incomplete_transaction(fixture.path());
     let before = fs::read(fixture.path().join("docs/items.mara.md")).unwrap();
-    let output = run(fixture.path(), &["id", "rename", "BETA-B", "BETA-RENAMED"]);
+    let output = run(&fixture, &["id", "rename", "BETA-B", "BETA-RENAMED"]);
 
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
