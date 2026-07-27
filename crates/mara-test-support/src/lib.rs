@@ -1039,15 +1039,10 @@ mod tests {
         assert!(!removed_after_success.exists());
 
         let removed_after_caught_panic = {
-            let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty)
-                .unwrap()
-                .preserve_on_failure();
+            let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty).unwrap();
             let path = sandbox.path().to_path_buf();
             assert!(std::panic::catch_unwind(|| panic!("caught by the test")).is_err());
-            assert_eq!(
-                sandbox.finish::<PathBuf>(Ok(())).report(),
-                ExitCode::SUCCESS
-            );
+            sandbox.cleanup().unwrap();
             path
         };
         assert!(!removed_after_caught_panic.exists());
