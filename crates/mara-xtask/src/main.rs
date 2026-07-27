@@ -1504,7 +1504,14 @@ fn file_digest_if_regular(path: &Path) -> Result<Option<String>> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => Ok(None),
         Ok(_) => hash_file(path).map(Some),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(None)
+        }
         Err(error) => Err(ToolError(format!(
             "cannot inspect fixture file {}: {error}",
             path.display()
@@ -1913,6 +1920,30 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
+    fn revalidation_treats_a_wrong_type_mara_directory_as_a_fixture_mismatch() {
+        let temporary = tempfile::tempdir().expect("temporary root");
+        let fixture = temporary.path().join("fixture");
+        fs::create_dir(&fixture).expect("fixture directory");
+        write_fixture(&fixture).expect("fixture");
+        let manifest = temporary.path().join("manifest");
+        fs::write(&manifest, "pinned manifest\n").expect("manifest");
+        let pin = ManifestPin {
+            sha256: hash_file(&manifest).expect("manifest hash"),
+            entries: fixture_digests(&fixture).into_iter().collect(),
+        };
+        fs::remove_dir_all(fixture.join(".mara")).expect("remove Mara directory");
+        fs::write(fixture.join(".mara"), "wrong type\n").expect("wrong-type Mara entry");
+
+        let snapshot = revalidate_fixture(&fixture, &manifest, &pin).expect("revalidation");
+
+        assert!(!snapshot.integrity_matches);
+        assert!(snapshot.files.iter().any(|entry| {
+            entry.path == ".mara/project.toml" && entry.observed_sha256.is_none() && !entry.matched
+        }));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
     fn exact_child_timeout_is_observable() {
         let temporary = tempfile::tempdir().expect("temporary root");
         let script = temporary.path().join("sleep-forever.sh");
@@ -2022,7 +2053,7 @@ mod tests {
         assert!(workflow.contains("test ! -L \"$root\""));
         assert!(workflow[cleanup..].contains("|| [ -L \"$root\" ]"));
         assert!(workflow[cleanup..].contains("qualification root remained after cleanup"));
-        assert!(workflow.contains("filesystem_device=\"$(df -Pk \"$RUNNER_TEMP\""));
+        assert!(workflow.contains("filesystem_device=\"$(df -Pk \"$runner_temp_parent\""));
         assert!(workflow.contains("/usr/sbin/diskutil info \"$filesystem_device\""));
         assert!(workflow.contains("File System Personality:"));
         assert!(!workflow.contains("macOS) filesystem_type=\"$(stat -f %T"));
@@ -2031,6 +2062,11 @@ mod tests {
         assert!(!workflow.contains("/usr/libexec/PlistBuddy"));
         assert!(!workflow.contains("sha256sum --check"));
         assert!(!workflow.contains("shasum -a 256 -c"));
+        assert!(workflow.contains("tmp_used_kib=\"$(df -Pk \"$tmp_root\""));
+        assert!(workflow.contains("df -h \"$tmp_root\" \"$repo_root\""));
+        assert!(workflow.contains("resource-before-cleanup.txt"));
+        assert!(workflow.contains("df -h \"$tmp_root\" \"$repo_root\" \"$root\""));
+        assert!(workflow.contains("root_used_kib=\"$(df -Pk \"$root\""));
     }
 
     #[cfg(unix)]

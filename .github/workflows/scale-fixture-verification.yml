@@ -26,19 +26,36 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          available_kib="$(df -Pk "$RUNNER_TEMP" | awk 'NR == 2 { print $4 }')"
+          repo_root="$(pwd -P)"
+          tmp_root="$(CDPATH= cd -- /tmp && pwd -P)"
+          runner_temp_parent="$(CDPATH= cd -- "$RUNNER_TEMP/.." && pwd -P)"
+          tmp_used_kib="$(df -Pk "$tmp_root" | awk 'NR == 2 { print $3 }')"
+          total_kib="$(df -Pk "$runner_temp_parent" | awk 'NR == 2 { print $2 }')"
+          available_kib="$(df -Pk "$runner_temp_parent" | awk 'NR == 2 { print $4 }')"
+          {
+            printf 'tmp_root=%s\n' "$tmp_root"
+            printf 'tmp_used_kib=%s\n' "$tmp_used_kib"
+            printf 'runner_temp_parent=%s\n' "$runner_temp_parent"
+            printf 'runner_temp_total_kib=%s\n' "$total_kib"
+            printf 'runner_temp_available_kib=%s\n' "$available_kib"
+            df -h "$tmp_root" "$repo_root"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          test -n "$tmp_used_kib"
+          test "$tmp_used_kib" -le 1048576
+          test -n "$total_kib"
           test -n "$available_kib"
           test "$available_kib" -ge 2097152
           case "$RUNNER_OS" in
-            Linux) filesystem_type="$(stat -f -c %T "$RUNNER_TEMP")" ;;
+            Linux) filesystem_type="$(stat -f -c %T "$runner_temp_parent")" ;;
             macOS)
-              filesystem_device="$(df -Pk "$RUNNER_TEMP" | /usr/bin/awk 'NR == 2 { print $1 }')"
+              filesystem_device="$(df -Pk "$runner_temp_parent" | /usr/bin/awk 'NR == 2 { print $1 }')"
               test -n "$filesystem_device"
               filesystem_type="$(/usr/sbin/diskutil info "$filesystem_device" | /usr/bin/awk -F ': *' '/^[[:space:]]*File System Personality:/ { print tolower($2); exit }')"
               ;;
             *) printf 'unsupported native runner: %s\n' "$RUNNER_OS" >&2; exit 1 ;;
           esac
           test -n "$filesystem_type"
+          printf 'runner_temp_filesystem_type=%s\n' "$filesystem_type" | tee -a "$GITHUB_STEP_SUMMARY"
           case "$filesystem_type" in
             tmpfs|ramfs) printf 'volatile runner storage: %s\n' "$filesystem_type" >&2; exit 1 ;;
           esac
@@ -60,6 +77,54 @@ jobs:
             --qualification-root "$root"
 
           tests/qualification/verify-scale-v01.sh --qualification-root "$root"
+      - name: Record resource gates before upload
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='${{ steps.fixture.outputs.root }}'
+          test -n "$root"
+          test -d "$root"
+          test ! -L "$root"
+          evidence="$root/evidence"
+          test -d "$evidence"
+          test ! -L "$evidence"
+          repo_root="$(pwd -P)"
+          tmp_root="$(CDPATH= cd -- /tmp && pwd -P)"
+          runner_temp_parent="$(CDPATH= cd -- "$RUNNER_TEMP/.." && pwd -P)"
+          tmp_used_kib="$(df -Pk "$tmp_root" | awk 'NR == 2 { print $3 }')"
+          root_used_kib="$(df -Pk "$root" | awk 'NR == 2 { print $3 }')"
+          total_kib="$(df -Pk "$runner_temp_parent" | awk 'NR == 2 { print $2 }')"
+          available_kib="$(df -Pk "$runner_temp_parent" | awk 'NR == 2 { print $4 }')"
+          case "$RUNNER_OS" in
+            Linux) filesystem_type="$(stat -f -c %T "$runner_temp_parent")" ;;
+            macOS)
+              filesystem_device="$(df -Pk "$runner_temp_parent" | /usr/bin/awk 'NR == 2 { print $1 }')"
+              test -n "$filesystem_device"
+              filesystem_type="$(/usr/sbin/diskutil info "$filesystem_device" | /usr/bin/awk -F ': *' '/^[[:space:]]*File System Personality:/ { print tolower($2); exit }')"
+              ;;
+            *) printf 'unsupported native runner: %s\n' "$RUNNER_OS" >&2; exit 1 ;;
+          esac
+          {
+            printf 'tmp_root=%s\n' "$tmp_root"
+            printf 'tmp_used_kib=%s\n' "$tmp_used_kib"
+            printf 'qualification_root=%s\n' "$root"
+            printf 'qualification_root_used_kib=%s\n' "$root_used_kib"
+            printf 'runner_temp_parent=%s\n' "$runner_temp_parent"
+            printf 'runner_temp_total_kib=%s\n' "$total_kib"
+            printf 'runner_temp_available_kib=%s\n' "$available_kib"
+            printf 'runner_temp_filesystem_type=%s\n' "$filesystem_type"
+            df -h "$tmp_root" "$repo_root" "$root"
+          } > "$evidence/resource-before-cleanup.txt"
+          test -n "$tmp_used_kib"
+          test "$tmp_used_kib" -le 1048576
+          test -n "$root_used_kib"
+          test -n "$available_kib"
+          test "$available_kib" -ge 2097152
+          test -n "$filesystem_type"
+          case "$filesystem_type" in
+            tmpfs|ramfs) printf 'volatile runner storage: %s\n' "$filesystem_type" >&2; exit 1 ;;
+          esac
       - name: Upload fixture-verification evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -73,6 +138,8 @@ jobs:
         run: |
           set -euo pipefail
           root='${{ steps.fixture.outputs.root }}'
+          repo_root="$(pwd -P)"
+          tmp_root="$(CDPATH= cd -- /tmp && pwd -P)"
           if [ -n "$root" ] && { [ -e "$root" ] || [ -L "$root" ]; }; then
             rm -rf -- "$root"
           fi
@@ -80,3 +147,5 @@ jobs:
             printf 'qualification root remained after cleanup: %s\n' "$root" >&2
             exit 1
           fi
+          printf 'post_cleanup_tmp_used_kib=%s\n' "$(df -Pk "$tmp_root" | awk 'NR == 2 { print $3 }')"
+          df -h "$tmp_root" "$repo_root"
