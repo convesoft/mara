@@ -1979,6 +1979,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use mara_core::{Mid, ProjectionEdge, QueryGraph, SourceSpan};
+    use mara_test_support::{ProjectSandbox, ProjectSandboxMode};
 
     use super::*;
 
@@ -2057,25 +2058,21 @@ Body.
 
     #[test]
     fn fault_injection_never_exposes_partial_index_bytes() {
-        let fixture = fixture();
+        let fixture = ProjectSandbox::new(ProjectSandboxMode::CleanGit).unwrap();
+        fs::write(fixture.path().join(".mara/project.toml"), PROJECT).unwrap();
+        fs::write(fixture.path().join(".mara/schema.yaml"), SCHEMA).unwrap();
+        fs::create_dir_all(fixture.path().join("docs")).unwrap();
+        fs::write(fixture.path().join("docs/item.mara.md"), CONTENT).unwrap();
         let git = |arguments: &[&str]| {
-            let output = Command::new("git")
-                .arg("-c")
-                .arg("commit.gpgsign=false")
-                .arg("-C")
-                .arg(fixture.path())
-                .args(arguments)
-                .output()
-                .unwrap();
+            let mut command = Command::new("git");
+            fixture.configure_command(&mut command).args(arguments);
+            let output = command.output().unwrap();
             assert!(
                 output.status.success(),
                 "git {arguments:?} failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             );
         };
-        git(&["init", "-b", "main"]);
-        git(&["config", "user.name", "Mara Test"]);
-        git(&["config", "user.email", "mara@example.test"]);
         git(&[
             "add",
             ".mara/project.toml",
