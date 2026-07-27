@@ -1229,14 +1229,7 @@ fn terminate_and_reap_child(
     status: &mut libc::c_int,
     usage: &mut libc::rusage,
 ) -> Result<()> {
-    if unsafe { libc::kill(-pid, libc::SIGKILL) } != 0 {
-        let error = io::Error::last_os_error();
-        if error.raw_os_error() != Some(libc::ESRCH) {
-            return Err(ToolError(format!(
-                "cannot terminate child process group: {error}"
-            )));
-        }
-    }
+    terminate_process_group(pid)?;
     loop {
         let waited = unsafe { libc::wait4(pid, status, 0, usage) };
         if waited == pid {
@@ -1255,6 +1248,19 @@ fn terminate_and_reap_child(
             )));
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn terminate_process_group(pid: libc::pid_t) -> Result<()> {
+    if unsafe { libc::kill(-pid, libc::SIGKILL) } != 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(ToolError(format!(
+                "cannot terminate child process group: {error}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -1338,6 +1344,8 @@ fn run_exact_child_with_limit(
         std::thread::sleep(remaining.min(Duration::from_millis(10)));
     }
     let elapsed_ns = started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+    terminate_process_group(pid)
+        .map_err(|error| ToolError(format!("cannot clean up exact child descendants: {error}")))?;
     let stdout = stdout_reader
         .join()
         .map_err(|_| ToolError("stdout capture thread panicked".into()))??;
@@ -1917,6 +1925,28 @@ mod tests {
             run_exact_child_with_limit(&script, temporary.path(), &[], Duration::from_millis(10))
                 .expect("child outcome");
         assert!(outcome.timed_out);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn child_descendant_cannot_hold_capture_pipes_after_leader_exits() {
+        let temporary = tempfile::tempdir().expect("temporary root");
+        let script = temporary.path().join("leave-descendant.sh");
+        fs::write(&script, "#!/bin/sh\nsleep 30 &\nprintf '{}\\n'\n").expect("script");
+        let mut permissions = fs::metadata(&script).expect("metadata").permissions();
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script, permissions).expect("permissions");
+
+        let started = Instant::now();
+        let outcome =
+            run_exact_child_with_limit(&script, temporary.path(), &[], Duration::from_millis(100))
+                .expect("child outcome");
+
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(!outcome.timed_out);
+        assert_eq!(outcome.exit_code, Some(0));
+        assert_eq!(outcome.stdout, b"{}\n");
     }
 
     #[cfg(target_os = "linux")]
