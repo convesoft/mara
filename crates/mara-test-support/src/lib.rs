@@ -166,7 +166,9 @@ impl ProjectSandbox {
                 return Err(cleanup_temporary_initialization_failure(temporary, error));
             }
         };
-        let _ = temporary.keep();
+        if let Err(error) = confirm_sandbox_root(&raw_root, &root) {
+            return Err(cleanup_temporary_initialization_failure(temporary, error));
+        }
 
         if root.starts_with(&source_checkout)
             || worktrees.iter().any(|worktree| root.starts_with(worktree))
@@ -176,11 +178,9 @@ impl ProjectSandbox {
                 &root,
                 io::Error::other("sandbox is inside a source checkout or worktree"),
             );
-            return match remove_sandbox(&root) {
-                Ok(()) => Err(error),
-                Err(cleanup) => Err(error.with_cleanup(cleanup)),
-            };
+            return Err(cleanup_temporary_initialization_failure(temporary, error));
         }
+        let _ = temporary.keep();
 
         let mut sandbox = Self {
             root,
@@ -469,8 +469,36 @@ fn has_git_marker_ancestor(path: &Path) -> bool {
         .any(|ancestor| ancestor.join(".git").symlink_metadata().is_ok())
 }
 
+fn confirm_sandbox_root(raw_root: &Path, root: &Path) -> Result<(), ProjectSandboxError> {
+    let metadata = fs::symlink_metadata(raw_root)
+        .map_err(|source| ProjectSandboxError::io("reinspect sandbox", raw_root, source))?;
+    if metadata.file_type().is_symlink() {
+        return Err(ProjectSandboxError::io(
+            "confirm sandbox with a non-symlink final component",
+            raw_root,
+            io::Error::other("sandbox final component changed to a symlink"),
+        ));
+    }
+    let confirmed = raw_root
+        .canonicalize()
+        .map_err(|source| ProjectSandboxError::io("recanonicalize sandbox", raw_root, source))?;
+    if confirmed != root {
+        return Err(ProjectSandboxError::io(
+            "confirm stable sandbox path",
+            raw_root,
+            io::Error::other("sandbox path changed during initialization"),
+        ));
+    }
+    Ok(())
+}
+
 fn remove_sandbox(root: &Path) -> Result<(), ProjectSandboxCleanupError> {
-    cleanup_with(root, |path| fs::remove_dir_all(path))
+    cleanup_with(root, |path| match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => fs::remove_file(path),
+        Ok(_) => fs::remove_dir_all(path),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(source),
+    })
 }
 
 fn complete_initialization_cleanup(
@@ -600,6 +628,58 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn clean_git_sandbox_ignores_hostile_global_git_configuration() {
+        const CHILD_MARKER: &str = "MARA_TEST_SUPPORT_HOSTILE_GIT_CONFIG_CHILD";
+        if env::var_os(CHILD_MARKER).is_some() {
+            let sandbox = ProjectSandbox::new(ProjectSandboxMode::CleanGit).unwrap();
+            assert_eq!(git_status(&sandbox), "");
+            return;
+        }
+
+        let hostile = tempfile::tempdir().unwrap();
+        let home = hostile.path().join("home");
+        let template = hostile.path().join("template");
+        let hooks = hostile.path().join("hooks");
+        let excludes = hostile.path().join("excludes");
+        fs::create_dir_all(template.join("hooks")).unwrap();
+        fs::create_dir_all(&hooks).unwrap();
+        fs::write(template.join("hooks/pre-commit"), "#!/bin/sh\nexit 1\n").unwrap();
+        fs::write(hooks.join("pre-commit"), "#!/bin/sh\nexit 1\n").unwrap();
+        fs::write(&excludes, "*\n").unwrap();
+        fs::create_dir(&home).unwrap();
+        fs::write(
+            home.join(".gitconfig"),
+            format!(
+                "[init]\n\ttemplateDir = {}\n[core]\n\thooksPath = {}\n\texcludesFile = {}\n[commit]\n\tgpgSign = true\n",
+                template.display(),
+                hooks.display(),
+                excludes.display(),
+            ),
+        )
+        .unwrap();
+
+        let output = Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::clean_git_sandbox_ignores_hostile_global_git_configuration",
+                "--nocapture",
+            ])
+            .env(CHILD_MARKER, "1")
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", hostile.path().join("xdg"))
+            .env_remove("GIT_CONFIG_GLOBAL")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "hostile global Git configuration broke sandbox initialization:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
     #[test]
     fn sandbox_path_is_canonical_and_outside_checkout_and_worktrees() {
         let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty).unwrap();
@@ -629,6 +709,29 @@ mod tests {
             canonical_temp_parent_from([symlink_with_trailing_separator, real.clone()]).unwrap(),
             real.canonicalize().unwrap()
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn swapped_sandbox_symlinks_are_rejected_and_unlinked_without_touching_the_target() {
+        let parent = canonical_temp_parent().unwrap();
+        let temporary = tempfile::Builder::new()
+            .prefix("mara-project-sandbox-swap-test-")
+            .tempdir_in(&parent)
+            .unwrap();
+        let raw_root = temporary.path().join("sandbox");
+        let target = temporary.path().join("target");
+        fs::create_dir(&raw_root).unwrap();
+        fs::create_dir(&target).unwrap();
+        let root = raw_root.canonicalize().unwrap();
+        fs::remove_dir(&raw_root).unwrap();
+        std::os::unix::fs::symlink(&target, &raw_root).unwrap();
+
+        let error = confirm_sandbox_root(&raw_root, &root).unwrap_err();
+        assert!(error.to_string().contains("changed to a symlink"));
+        remove_sandbox(&raw_root).unwrap();
+        assert!(!raw_root.exists());
+        assert!(target.exists());
     }
 
     #[test]
