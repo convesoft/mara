@@ -280,7 +280,7 @@ impl ProjectSandbox {
         })?;
         let mut command = Command::new("git");
         self.configure_command(&mut command)
-            .args(["init", "--quiet", "--template"])
+            .args(["init", "--quiet", "--initial-branch", "main", "--template"])
             .arg(&template_directory);
         run_git_command(command)?;
         fs::remove_dir(&template_directory).map_err(|source| {
@@ -366,6 +366,7 @@ fn canonical_temp_parent_from(
     candidates: impl IntoIterator<Item = PathBuf>,
 ) -> Result<PathBuf, ProjectSandboxError> {
     for candidate in candidates {
+        let candidate: PathBuf = candidate.components().collect();
         let metadata = match fs::symlink_metadata(&candidate) {
             Ok(metadata) => metadata,
             Err(_) => continue,
@@ -562,6 +563,12 @@ mod tests {
         let mut command = Command::new("git");
         clean
             .configure_command(&mut command)
+            .args(["branch", "--show-current"]);
+        let output = command.output().unwrap();
+        assert_eq!(output.stdout, b"main\n");
+        let mut command = Command::new("git");
+        clean
+            .configure_command(&mut command)
             .args(["config", "--get", "commit.gpgSign"]);
         let output = command.output().unwrap();
         assert_eq!(output.stdout, b"false\n");
@@ -616,9 +623,10 @@ mod tests {
         let symlink = temporary.path().join("symlink-parent");
         fs::create_dir(&real).unwrap();
         std::os::unix::fs::symlink(&real, &symlink).unwrap();
+        let symlink_with_trailing_separator = PathBuf::from(format!("{}/", symlink.display()));
 
         assert_eq!(
-            canonical_temp_parent_from([symlink, real.clone()]).unwrap(),
+            canonical_temp_parent_from([symlink_with_trailing_separator, real.clone()]).unwrap(),
             real.canonicalize().unwrap()
         );
     }

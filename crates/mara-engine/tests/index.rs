@@ -120,6 +120,10 @@ fn sandbox() -> ProjectSandbox {
     ProjectSandbox::new(ProjectSandboxMode::Empty).expect("create isolated project sandbox")
 }
 
+fn git_sandbox() -> ProjectSandbox {
+    ProjectSandbox::new(ProjectSandboxMode::CleanGit).expect("create isolated Git project sandbox")
+}
+
 fn git(sandbox: &ProjectSandbox, arguments: &[&str]) -> String {
     let mut command = Command::new("git");
     sandbox.configure_command(&mut command).args(arguments);
@@ -435,11 +439,8 @@ fn writer_creates_a_missing_contained_parent_before_atomic_replacement() {
 
 #[test]
 fn git_provenance_distinguishes_clean_modified_and_untracked_project_inputs() {
-    let fixture = sandbox();
+    let fixture = git_sandbox();
     let project_root = fixture.path().join("nested");
-    git(&fixture, &["init", "-b", "main"]);
-    git(&fixture, &["config", "user.name", "Mara Test"]);
-    git(&fixture, &["config", "user.email", "mara@example.test"]);
     write_project(&project_root, false);
     fs::write(project_root.join("notes.txt"), "unselected fixture\n").unwrap();
     git(&fixture, &["add", "."]);
@@ -520,11 +521,8 @@ fn git_provenance_distinguishes_clean_modified_and_untracked_project_inputs() {
 
 #[test]
 fn git_provenance_counts_selected_ignored_content_when_ignore_handling_is_disabled() {
-    let fixture = sandbox();
+    let fixture = git_sandbox();
     let project_root = fixture.path().to_path_buf();
-    git(&fixture, &["init", "-b", "main"]);
-    git(&fixture, &["config", "user.name", "Mara Test"]);
-    git(&fixture, &["config", "user.email", "mara@example.test"]);
     write_project(&project_root, false);
     let config_path = project_root.join(".mara/project.toml");
     let config = fs::read_to_string(&config_path)
@@ -552,11 +550,8 @@ fn git_provenance_counts_selected_ignored_content_when_ignore_handling_is_disabl
 
 #[test]
 fn git_provenance_detects_selected_content_renamed_out_of_selection() {
-    let fixture = sandbox();
+    let fixture = git_sandbox();
     let project_root = fixture.path().to_path_buf();
-    git(&fixture, &["init", "-b", "main"]);
-    git(&fixture, &["config", "user.name", "Mara Test"]);
-    git(&fixture, &["config", "user.email", "mara@example.test"]);
     git(&fixture, &["config", "diff.renames", "true"]);
     write_project(&project_root, false);
     git(&fixture, &["add", "."]);
@@ -578,11 +573,8 @@ fn git_provenance_detects_selected_content_renamed_out_of_selection() {
 fn git_provenance_tracks_resolved_internal_symlink_targets() {
     use std::os::unix::fs::symlink;
 
-    let fixture = sandbox();
+    let fixture = git_sandbox();
     let project_root = fixture.path().to_path_buf();
-    git(&fixture, &["init", "-b", "main"]);
-    git(&fixture, &["config", "user.name", "Mara Test"]);
-    git(&fixture, &["config", "user.email", "mara@example.test"]);
     write_project(&project_root, false);
     fs::remove_file(project_root.join("docs/project.mara.md")).unwrap();
     fs::create_dir_all(project_root.join("sources")).unwrap();
@@ -617,11 +609,8 @@ fn git_provenance_tracks_resolved_internal_symlink_targets() {
 fn git_provenance_tracks_the_resolved_project_config_target() {
     use std::os::unix::fs::symlink;
 
-    let fixture = sandbox();
+    let fixture = git_sandbox();
     let project_root = fixture.path().to_path_buf();
-    git(&fixture, &["init", "-b", "main"]);
-    git(&fixture, &["config", "user.name", "Mara Test"]);
-    git(&fixture, &["config", "user.email", "mara@example.test"]);
     write_project(&project_root, false);
     fs::create_dir(project_root.join("config")).unwrap();
     let target = project_root.join("config/project.toml");
@@ -658,11 +647,8 @@ fn git_provenance_tracks_the_resolved_project_config_target() {
 
 #[test]
 fn git_provenance_rejects_head_changes_after_validation_started() {
-    let fixture = sandbox();
+    let fixture = git_sandbox();
     let project_root = fixture.path().to_path_buf();
-    git(&fixture, &["init", "-b", "main"]);
-    git(&fixture, &["config", "user.name", "Mara Test"]);
-    git(&fixture, &["config", "user.email", "mara@example.test"]);
     write_project(&project_root, false);
     git(&fixture, &["add", "."]);
     git(&fixture, &["commit", "-m", "first"]);
@@ -683,12 +669,9 @@ fn git_provenance_rejects_head_changes_after_validation_started() {
 
 #[test]
 fn git_provenance_detects_changes_hidden_by_index_flags() {
-    let fixture = sandbox();
+    let fixture = git_sandbox();
     let project_root = fixture.path().to_path_buf();
     let content_path = "docs/project.mara.md";
-    git(&fixture, &["init", "-b", "main"]);
-    git(&fixture, &["config", "user.name", "Mara Test"]);
-    git(&fixture, &["config", "user.email", "mara@example.test"]);
     write_project(&project_root, false);
     git(&fixture, &["add", "."]);
     git(&fixture, &["commit", "-m", "fixture"]);
@@ -738,11 +721,8 @@ fn git_provenance_detects_changes_hidden_by_index_flags() {
 
 #[test]
 fn writer_enforces_the_configured_clean_relevant_inputs_policy() {
-    let fixture = sandbox();
+    let fixture = git_sandbox();
     let project_root = fixture.path().to_path_buf();
-    git(&fixture, &["init", "-b", "main"]);
-    git(&fixture, &["config", "user.name", "Mara Test"]);
-    git(&fixture, &["config", "user.email", "mara@example.test"]);
     write_project(&project_root, false);
     git(&fixture, &["add", "."]);
     git(&fixture, &["commit", "-m", "fixture"]);

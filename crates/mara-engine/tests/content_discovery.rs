@@ -56,23 +56,37 @@ impl Fixture {
     }
 
     fn git(&self, args: &[&str]) {
+        let template_directory =
+            (args.first() == Some(&"init")).then(|| self.root.join(".git-template"));
+        if let Some(template_directory) = &template_directory {
+            fs::create_dir(template_directory).expect("create isolated Git template directory");
+        }
         let mut command = Command::new("git");
         self._sandbox.configure_command(&mut command).args(args);
+        if let Some(template_directory) = &template_directory {
+            command
+                .args(["--initial-branch", "main", "--template"])
+                .arg(template_directory);
+        }
         let status = command.status().expect("run Git for isolated fixture");
+        if let Some(template_directory) = &template_directory {
+            fs::remove_dir(template_directory).expect("remove isolated Git template directory");
+        }
         assert!(status.success(), "Git command failed: {args:?}");
-        if args.first() == Some(&"init") {
-            let excludes = self.root.join(".git/fixture-global-excludes");
-            fs::write(&excludes, "").unwrap();
-            let mut command = Command::new("git");
-            self._sandbox.configure_command(&mut command).args([
-                "config",
-                "core.excludesFile",
-                excludes.to_str().unwrap(),
-            ]);
-            let status = command
-                .status()
-                .expect("isolate fixture from ambient Git excludes");
-            assert!(status.success());
+        if template_directory.is_some() {
+            let hooks = self.root.join(".git/hooks");
+            let excludes = self.root.join(".git/info/fixture-global-excludes");
+            fs::create_dir_all(&hooks).expect("create isolated Git hooks directory");
+            fs::create_dir_all(excludes.parent().unwrap())
+                .expect("create isolated Git excludes directory");
+            fs::write(&excludes, "").expect("create isolated Git excludes file");
+            for (name, value) in [
+                ("core.hooksPath", hooks.to_str().unwrap()),
+                ("core.excludesFile", excludes.to_str().unwrap()),
+                ("commit.gpgSign", "false"),
+            ] {
+                self.git(&["config", "--local", name, value]);
+            }
         }
     }
 }

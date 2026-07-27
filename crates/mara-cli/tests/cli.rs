@@ -104,12 +104,19 @@ fn mara() -> Command {
 }
 
 fn project(content: &str) -> ProjectSandbox {
-    project_with_schema(SCHEMA, content)
+    project_with_mode(ProjectSandboxMode::Configured, SCHEMA, content)
 }
 
 fn project_with_schema(schema: &str, content: &str) -> ProjectSandbox {
-    let sandbox = ProjectSandbox::new(ProjectSandboxMode::Configured)
-        .expect("create isolated CLI project sandbox");
+    project_with_mode(ProjectSandboxMode::Configured, schema, content)
+}
+
+fn git_project(content: &str) -> ProjectSandbox {
+    project_with_mode(ProjectSandboxMode::CleanGit, SCHEMA, content)
+}
+
+fn project_with_mode(mode: ProjectSandboxMode, schema: &str, content: &str) -> ProjectSandbox {
+    let sandbox = ProjectSandbox::new(mode).expect("create isolated CLI project sandbox");
     fs::create_dir_all(sandbox.path().join("docs")).unwrap();
     fs::write(sandbox.path().join(".mara/project.toml"), PROJECT_CONFIG).unwrap();
     fs::write(sandbox.path().join(".mara/schema.yaml"), schema).unwrap();
@@ -150,13 +157,10 @@ fn git(sandbox: &ProjectSandbox, args: &[&str]) -> std::process::Output {
     command.output().expect("run Git command")
 }
 
-fn initialize_git_repository(sandbox: &ProjectSandbox) {
+fn commit_project_changes(sandbox: &ProjectSandbox) {
     for arguments in [
-        &["init", "--quiet"][..],
-        &["config", "user.email", "mara-cli@example.invalid"],
-        &["config", "user.name", "Mara CLI Test"],
-        &["add", "."],
-        &["commit", "--quiet", "-m", "test: initialize fixture"],
+        &["add", "."][..],
+        &["commit", "--quiet", "-m", "test: initialize fixture"][..],
     ] {
         let output = git(sandbox, arguments);
         assert!(
@@ -837,8 +841,8 @@ fn display_id_rename_rejects_a_duplicate_id_without_writing() {
 #[test]
 fn display_id_rename_rejects_a_dirty_worktree_by_default() {
     // TEST-EDIT-PREFLIGHT and REQ-EDIT-WORKTREE-POLICY.
-    let fixture = project(VALID_ITEMS);
-    initialize_git_repository(&fixture);
+    let fixture = git_project(VALID_ITEMS);
+    commit_project_changes(&fixture);
     fs::write(fixture.path().join("notes.txt"), "uncommitted\n").unwrap();
     let before = fs::read(fixture.path().join("docs/items.mara.md")).unwrap();
     let output = run(&fixture, &["id", "rename", "BETA-B", "BETA-RENAMED"]);
@@ -858,8 +862,8 @@ fn display_id_rename_rejects_a_dirty_worktree_by_default() {
 #[test]
 fn display_id_rename_allows_a_dirty_worktree_only_when_explicit() {
     // TEST-EDIT-PREFLIGHT, REQ-EDIT-WORKTREE-POLICY, and REQ-EDIT-NO-COMMIT.
-    let fixture = project(VALID_ITEMS);
-    initialize_git_repository(&fixture);
+    let fixture = git_project(VALID_ITEMS);
+    commit_project_changes(&fixture);
     let head = git(&fixture, &["rev-parse", "HEAD"]).stdout;
     fs::write(fixture.path().join("notes.txt"), "uncommitted\n").unwrap();
     let output = run(
