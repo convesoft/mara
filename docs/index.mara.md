@@ -36,6 +36,7 @@ are views over this corpus rather than independent sources of truth.
 - [Schema format v1](reference/schema-format.mara.md)
 - [Transaction journal v1](reference/transaction-journal.mara.md)
 - [Wire contracts v1](reference/wire-contracts.mara.md)
+- [v0.1 qualification](reference/v01-qualification.mara.md)
 
 The v0.1 implementation scope is the local deterministic CLI described by
 [[GOAL-BOOTSTRAP]] and its approved requirements. Proposed requirements in the
