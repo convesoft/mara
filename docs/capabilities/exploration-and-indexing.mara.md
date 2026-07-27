@@ -257,7 +257,7 @@ On a documented CI reference runner, a clean full check of 10,000 items and
 :id: DES-V01-QUALIFICATION-METHOD
 :title: Proposed v0.1 qualification architecture umbrella
 :status: proposed
-:kind: cli
+:kind: architecture
 :satisfies: REQ-PERFORMANCE-TARGET
 :refines: REQ-PORTABLE-CLI
 :relates_to: TEST-PORTABILITY-PERFORMANCE
@@ -511,9 +511,10 @@ measurement. The procedure does not make a Windows runtime claim.
 :relates_to: TEST-PORTABILITY-PERFORMANCE
 
 Project-oriented integration tests shall exercise exactly the empty, configured,
-clean-Git, and dirty-Git modes. They shall verify a canonically external unique
-project, explicit child current directory, cleared inherited Git environment,
-Git ceiling isolation, default cleanup, deletion-error reporting, and
-failure-only opt-in preservation. Parser, domain, and in-memory tests shall
-demonstrably avoid this helper.
+clean-Git, and dirty-Git modes. They shall verify a canonical unique project
+outside the source checkout and every worktree, explicit child current
+directory, clearing of every inherited GIT_* variable, the exact canonical
+sandbox-parent GIT_CEILING_DIRECTORIES value, default cleanup, deletion-error
+reporting, and failure-only opt-in preservation. Parser, domain, and in-memory
+tests shall demonstrably avoid this helper.
 :::

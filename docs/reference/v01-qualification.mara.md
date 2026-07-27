@@ -48,6 +48,7 @@ analyzer.
 :kind: storage
 :refines: DES-V01-QUALIFICATION-METHOD
 :depends_on: DES-V01-QUALIFICATION-CLI
+:depends_on: DES-V01-QUALIFICATION-EVIDENCE-FORMAT
 
 The caller derives the job-unique candidate as
 $RUNNER_TEMP/mara-scale-v01-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT-$RUNNER_OS;
@@ -206,27 +207,17 @@ incoming edges, with no self relation or repeated source-target pair.
 
 The expected manifest has exactly twelve LF-terminated lines, in the preceding
 order, each a lowercase 64-digit SHA-256, two ASCII spaces, and a
-fixture-relative path:
+fixture-relative path. The generator neither writes nor updates it.
 
-~~~text
-5335905c433d863f29fdea4c54dc867cfc5c4cec4aa0be86d87dce565224f60c  .mara/project.toml
-fe803cd5e55e09afe1ba177225b2b72b8f94b485f43bf1cff9f74f6c51eb1e66  .mara/schema.yaml
-0f4fdf86e60e92a5d32b1fa6d03885145078705ccae82f00525e410565de16be  items-000.mara.md
-0347b1e741012a0b25fcf77135db5eb358038610375720812014f1a9e1a523aa  items-001.mara.md
-27c7ae3c81af768eef450aef2fb51297856a7fc337b63118b9fc6e234b5a663a  items-002.mara.md
-db19fe7297d4972afa8a720bae8d883135d4d93921ff5fa8e122ba61a0693fe4  items-003.mara.md
-402bf47e5d39456f5449aaa865eb54b5946a8b7b8f90a8ab7a44fc395181624c  items-004.mara.md
-8023c721174252f1bbb95e7be0ce120c9f94ed1c22fa0b4245823b0ce1f21ef0  items-005.mara.md
-6f92ba87f7f2eff138209cfa8d12c681441bbb7a3e746c3c3838f5a7443b827d  items-006.mara.md
-49ccc9ce23f978acdb6d37075296621e09d2ee3705c9655cad7f2fbf7fa0b07a  items-007.mara.md
-d713c0e654a4435239d9fd106aa36a8847c59301931b6d972c0bb3e33d06ad31  items-008.mara.md
-e0e2e773ae5cc14629bbe5acd5c8b11afc6a0522dc00f4d4c82a07d4b4886887  items-009.mara.md
-~~~
-
-The generator neither writes nor updates this manifest. Any change to static
-bytes, serialization, MID mapping, or topology requires a reviewed manifest
-change and applicable contract decision. The generated corpus remains
-disposable derived state and is never committed.
+The proposed manifest is not an active qualification authority until its
+initial values have been populated from the implemented Rust generator and
+independently recomputed with ordinary native SHA-256 tooling after the stable
+oracle command has passed its file-set, file-type, topology, count, no-Git, and
+preflight assertions. Reviewed Ubuntu and macOS recomputations must agree
+before the artifact becomes active or any qualification result may pass.
+Any later change to static bytes, serialization, MID mapping, or topology
+requires the same reviewed manifest update and independent verification. The
+generated corpus remains disposable derived state and is never committed.
 :::
 
 :::design m_01KYHDXJ1DB8EQRY5DWBPENQ2T
@@ -238,12 +229,48 @@ disposable derived state and is never committed.
 :depends_on: DES-V01-SCALE-FIXTURE
 :mitigates: RISK-SELF-VALIDATION-BIAS
 
-After generation and before every measured run, an independent bounded POSIX
-procedure runs from the on-disk worktree using only ordinary host SHA-256 tools,
-the expected manifest, a POSIX awk topology assertion, and the already-built
-release Mara binary. It creates the evidence directory first and uses no
-temporary file. The procedure is deliberately not a second generator and never
-writes or updates the expected manifest.
+After generation and before every measured run, the stable POSIX command
+tests/qualification/verify-scale-v01.sh runs from the canonical source
+repository root with exactly this invocation:
+
+~~~sh
+tests/qualification/verify-scale-v01.sh \
+  --qualification-root "$qualification_root"
+~~~
+
+Its argument surface is exactly one required --qualification-root option with
+one absolute path value. Missing, unknown, repeated, relative, and trailing
+arguments fail. It requires the canonical qualification root and its existing
+fixture and evidence directories, the fixed expected manifest, and the already
+built canonical target/release/mara executable. It verifies that the current
+directory is the canonical source repository root and that none of its output
+files already exists.
+
+The command may read only its own script, the expected manifest, the complete
+fixture entry tree, the release executable, source Git metadata needed to
+confirm the invocation root, and host executables needed for POSIX file
+inspection, Git discovery, SHA-256, and Mara preflight. It sets LC_ALL=C for
+ordered text processing and consumes no network, time, randomness, locale, or
+other generated-data input.
+
+The command writes only these files beneath the existing evidence directory:
+
+- file-set-check.txt and file-set-check.stderr;
+- file-type-check.txt;
+- manifest-path-check.txt and manifest-path-check.stderr;
+- fixture-git-context.stdout, fixture-git-context.stderr, and
+  fixture-git-context.txt;
+- fixture-sha256-check.txt;
+- count-check.txt and count-check.stderr;
+- topology-check.txt;
+- preflight-check.json, preflight-check.stderr, and
+  preflight-check-exit.txt.
+
+It creates no temporary files, modifies no generated fixture or manifest byte,
+and writes no other output file. It runs every independent assertion that
+remains safe after another assertion fails, exits zero only when all assertions
+pass, and otherwise exits nonzero after retaining every safely obtainable
+listed output.
 
 It compares the complete fixture entry set, in bytewise sorted order, with
 exactly .mara, .mara/project.toml, .mara/schema.yaml, and the ten
@@ -272,13 +299,21 @@ proves each source has target sequence (source + 1) through (source + 10)
 modulo 10,000 and retains the result in topology-check.txt.
 
 Finally it invokes the canonical absolute release executable from the fixture
-as mara check --format json, retaining stdout, stderr, and exit code. It
+as mara check --format json, retaining stdout as preflight-check.json, stderr
+as preflight-check.stderr, and the exit code as preflight-check-exit.txt. It
 requires exit code zero, JSON status ok, empty diagnostics, and summary counts
 of 10 documents, 10,000 items, and 100,000 edges. All entry, file-type,
 manifest-path, no-Git, digest, count, topology, and preflight assertions must
 pass before measurement. The manifest pins bytes, counts establish volume,
 topology establishes every relation, and Mara validates project resolution, so
 the generator is not its own oracle.
+
+The verifier's maintenance scope is only the fixed argument contract, allowed
+inputs, listed evidence outputs, manifest syntax and digest checks, exact
+fixture structure and counts, independent POSIX awk topology formula,
+no-Git assertion, and Mara preflight. It shall not generate data, update
+expected values, manage temporary storage, run measurements, or become a
+general test framework, command runner, parser, or source analyzer.
 :::
 
 ## Measurement and records
@@ -290,6 +325,7 @@ the generator is not its own oracle.
 :kind: algorithm
 :refines: DES-V01-QUALIFICATION-METHOD
 :depends_on: DES-V01-SCALE-ORACLE
+:depends_on: DES-V01-QUALIFICATION-EVIDENCE-FORMAT
 
 measure-scale-v01 runs only after generation, successful oracle checks, and
 cargo build --locked --release --bin mara. Its own build, generation, oracle,
@@ -337,7 +373,6 @@ otherwise exits nonzero after all safely obtainable records are written.
 :status: proposed
 :kind: data_model
 :refines: DES-V01-QUALIFICATION-METHOD
-:depends_on: DES-V01-MEASUREMENT-RUNNER
 
 Before a root exists, rejected storage preconditions emit one LF-terminated
 JSON object to standard output with exactly format, version, source_repo,
@@ -409,13 +444,20 @@ ProjectSandbox is a shared Rust helper only for project-oriented integration
 tests. It is not a mara-xtask command, has no production command-line surface,
 and does not enlarge the two-command qualification interface.
 
-Its API is limited to creating one canonically external, unique fixture project
-in exactly empty, configured, clean-Git, or dirty-Git mode; exposing the project
-path; configuring a test-owned subprocess with that path as explicit current
-directory; and explicit cleanup. Before configuring a child it clears inherited
-GIT_* variables and sets GIT_CEILING_DIRECTORIES at the verified sandbox parent,
-or uses an equivalently verified parent-discovery isolation, so Git cannot
-discover a repository above the sandbox.
+Before creation, the helper canonicalizes the source checkout, every path from
+git worktree list --porcelain, and the existing candidate parent. It rejects a
+symlinked final component. After creation, it canonicalizes the unique sandbox
+root and requires it to be outside and not beneath the source checkout or any
+listed worktree.
+
+Its API is limited to creating one such project in exactly empty, configured,
+clean-Git, or dirty-Git mode; exposing the canonical project path; configuring
+a test-owned subprocess with that path as explicit current directory; and
+explicit cleanup. Before configuring each child it clears every inherited
+environment variable whose name starts with GIT_, then sets
+GIT_CEILING_DIRECTORIES to exactly the canonical sandbox parent. This allows
+the clean-Git and dirty-Git modes to discover only their project repository and
+prevents every mode from discovering a repository above the sandbox.
 
 It creates no repository or Cargo-target copy. Cleanup is default and reports
 each deletion failure with canonical retained path and error. A bounded opt-in
@@ -443,8 +485,9 @@ The large corpus must remain disposable rather than Git-tracked, while its
 exact bytes, standalone no-Git context, external on-disk storage, and
 exact-child Linux measurement must remain reproducible. A small Rust xtask
 keeps those platform checks, serialization, and capture semantics within one
-bounded reviewable implementation. The independent host-tool oracle remains
-separate so the generator cannot certify itself.
+bounded reviewable implementation. The stable
+tests/qualification/verify-scale-v01.sh command keeps the independent
+host-tool and POSIX awk oracle separate so the generator cannot certify itself.
 :::
 
 :::decision m_01KYHDXJ46VSKZ9BNQTDCP9QBG
@@ -481,11 +524,25 @@ qualification command surface.
 :id: ART-SCALE-V01-HASH-MANIFEST
 :title: Scale-v0.1 expected hash manifest
 :status: proposed
-:kind: document
+:kind: file_format
 :uri: tests/qualification/scale-v01.SHA256SUMS
 :implements: DES-V01-SCALE-FIXTURE
 :implements: DES-V01-SCALE-ORACLE
 
-This stable manifest pins the twelve deterministic fixture files without
-checking the generated corpus into Git.
+This stable manifest format pins the twelve deterministic fixture files without
+checking the generated corpus into Git. It remains proposed until its initial
+values satisfy the independent population and verification condition in
+[[DES-V01-SCALE-FIXTURE]].
+:::
+
+:::artifact m_01KYHEQS6CBVNWWP4DW9VYNA6M
+:id: ART-SCALE-V01-VERIFIER
+:title: Independent scale-v0.1 verifier command
+:status: proposed
+:kind: command
+:uri: tests/qualification/verify-scale-v01.sh
+:implements: DES-V01-SCALE-ORACLE
+
+This stable POSIX command implements the bounded independent oracle without
+embedding generated fixture data or a second parser.
 :::
