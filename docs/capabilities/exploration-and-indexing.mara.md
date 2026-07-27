@@ -253,6 +253,217 @@ On a documented CI reference runner, a clean full check of 10,000 items and
 
 ## Design, rationale, risk, and artifacts
 
+:::design m_01KZ7YA2D7EJ73VM8ZVCNZKHV5
+:id: DES-V01-QUALIFICATION-METHOD
+:title: Proposed v0.1 scale and non-Windows qualification method
+:status: proposed
+:kind: cli
+:satisfies: REQ-PERFORMANCE-TARGET
+:refines: REQ-PORTABLE-CLI
+:relates_to: TEST-PORTABILITY-PERFORMANCE
+
+This proposed method makes the v0.1 qualification of
+[[TEST-PORTABILITY-PERFORMANCE]] reproducible without changing the approval
+state of that test, [[REQ-PERFORMANCE-TARGET]], or [[ADR-0014]]. It becomes
+authoritative only after the human approval recorded for CON-46 and acceptance
+of this design in the Git-tracked Mara corpus; until both occur it is a
+reviewable proposal and no passing evidence or platform-support claim may rely
+on it.
+
+### Reference runner and evidence
+
+The v0.1 performance reference runner is a GitHub-hosted
+`ubuntu-24.04` `x64` GitHub Actions runner. The qualification must not use the
+moving `ubuntu-latest` label or a self-hosted runner as the reference runner.
+Its immutable evidence record shall identify the exact source commit containing
+the release binary and fixture, and retain the complete command output and
+measurement files. It shall also record the workflow run URI and identifier,
+the `ubuntu-24.04` label, `RUNNER_OS`, `RUNNER_ARCH`, `RUNNER_NAME`, `ImageOS`,
+and `ImageVersion`; the raw output of `uname -a`, `lscpu`, and `free -b`; the
+`rustup show active-toolchain`, `rustc -Vv`, `cargo -V`, `python3 --version`,
+and `/usr/bin/time --version` output; and the release binary SHA-256. These
+values document the actual image, CPU model and logical CPU count, memory
+capacity, toolchain, and measurement utility rather than assuming that a
+hosted-runner label fixes them permanently.
+
+### Deterministic scale fixture
+
+The checked-in source project at `tests/fixtures/scale-v01` shall contain
+exactly ten document files named `items-000.mara.md` through
+`items-009.mara.md`, its ordinary Mara project configuration and schema, and no
+generated index or cache. Its committed `SHA256SUMS` manifest shall list
+`.mara/project.toml`, `.mara/schema.yaml`, and every fixture source file except
+itself, pinning the exact fixture bytes and therefore its required ID set,
+relation declarations, validation rules, and relation topology. The documents
+shall contain exactly 10,000 distinct items with
+display IDs `SCALE-00000` through `SCALE-09999`; each item has a fixed, distinct
+MID in the committed source. For each integer `i` from 0 through 9,999, the
+five-digit `SCALE` display ID for `i` shall have exactly ten `depends_on`
+relations to the five-digit `SCALE` display IDs for `(i + d) modulo 10,000`,
+for each `d` from 1 through 10. The formula has no self relation or repeated
+source-target pair, so a successful full check resolves exactly
+10,000 × 10 = 100,000 directed edges.
+
+Before every qualification run, the following ordinary shell checks shall prove
+the authored fixture counts; the `mara check` summary then independently proves
+that those authored references resolve to 10,000 items and 100,000 edges in the
+fixture project:
+
+```sh
+set -e
+repo_root=$(git rev-parse --show-toplevel)
+fixture="$repo_root/tests/fixtures/scale-v01"
+case "$(uname -s)" in
+  Linux) (cd "$fixture" && sha256sum --check SHA256SUMS) ;;
+  Darwin) (cd "$fixture" && shasum -a 256 -c SHA256SUMS) ;;
+  *) exit 1 ;;
+esac
+test "$(grep -hE '^:id: SCALE-[0-9]{5}$' "$fixture"/items-*.mara.md | wc -l | tr -d '[:space:]')" -eq 10000
+test "$(grep -hE '^:depends_on: SCALE-[0-9]{5}$' "$fixture"/items-*.mara.md | wc -l | tr -d '[:space:]')" -eq 100000
+awk '
+  function fail(message) { print "scale-v01 topology: " message > "/dev/stderr"; bad = 1 }
+  function clear_edges(  target) { for (target in edge) delete edge[target] }
+  function finish_item(  source_index, d, target) {
+    if (source == "") return
+    if (seen[source]++) fail("duplicate source " source)
+    if (edge_count != 10) fail(source " has " edge_count " depends_on relations")
+    source_index = substr(source, 7) + 0
+    for (d = 1; d <= 10; d++) {
+      target = sprintf("SCALE-%05d", (source_index + d) % 10000)
+      expected[target] = 1
+      if (!(target in edge)) fail(source " is missing " target)
+    }
+    for (target in edge) if (!(target in expected)) fail(source " has unexpected " target)
+    for (target in expected) delete expected[target]
+    item_count++
+  }
+  /^:id: / {
+    finish_item()
+    source = $2
+    if (source !~ /^SCALE-[0-9][0-9][0-9][0-9][0-9]$/) fail("invalid source " source)
+    edge_count = 0
+    clear_edges()
+    next
+  }
+  /^:depends_on: / {
+    if (source == "") fail("relation before source")
+    edge[$2]++
+    edge_count++
+  }
+  END {
+    finish_item()
+    if (item_count != 10000) fail("expected 10000 items, found " item_count)
+    exit bad
+  }
+' "$fixture"/items-*.mara.md
+check_output=$(mktemp)
+(cd "$fixture" && "$repo_root/target/release/mara" check --format json) > "$check_output"
+grep -Eq '^[[:space:]]*"status": "ok",' "$check_output"
+grep -Eq '^[[:space:]]*"diagnostics": \[\],' "$check_output"
+grep -Eq '^[[:space:]]*"documents": 10,' "$check_output"
+grep -Eq '^[[:space:]]*"items": 10000,' "$check_output"
+grep -Eq '^[[:space:]]*"edges": 100000,' "$check_output"
+cat "$check_output"
+rm "$check_output"
+```
+
+This proposal introduces no persisted fixture generator, benchmark helper, or
+verification tool. It does propose the non-persisted inline `awk` topology
+assertion above as a narrowly bounded custom verification helper. Its invariant
+is that the committed fixture must have exactly the prescribed ten outgoing
+`depends_on` edges for every `SCALE` item; the manifest proves fixed source
+bytes and the count checks prove only aggregate counts, so neither alone
+independently checks that topology. The helper's only input is the ten
+`items-*.mara.md` files; it reads only `:id:` and `:depends_on:` lines, writes a
+diagnostic to standard error on a violated invariant, and exits non-zero on any
+violation. It has no generated output, stored state, command-line API, or
+runtime dependency beyond POSIX `awk`; its maintenance scope is this method and
+the fixed fixture contract, and it may change only when the fixture invariant
+changes through a separately approved contract.
+
+The Mara product/architecture owner must explicitly approve this helper with
+the rest of this proposed method before any delivery issue implements or relies
+on it. If a future delivery requires any other custom generator, helper, or
+verification tool, it must stop before implementation and record its invariant,
+why the fixed fixture and ordinary mechanisms are insufficient, the proposed
+tool, its bounded syntax or API surface, its bounded maintenance scope, and
+explicit human approval alongside an accepted applicable Mara contract, as
+required by [[REQ-VERIFICATION-LAYERS]].
+
+### Native behavioural and performance procedure
+
+The native behavioural matrix consists of GitHub-hosted `ubuntu-24.04` and
+`macos-14` jobs. Each job shall first assert its native host with
+`test "$(uname -s)" = Linux` or `test "$(uname -s)" = Darwin`, respectively;
+select current stable Rust with
+`rustup toolchain install stable --profile minimal --component rustfmt --component clippy`
+and `rustup default stable`; run `cargo fmt --all -- --check`,
+`cargo clippy --all-targets --all-features -- -D warnings`, and
+`cargo test --all-targets --all-features`; build the default native target with
+`cargo build --locked --release --bin mara`; and run the fixture-count
+checks and clean `mara check` invocation above. A successful fixture check has
+exit status 0, JSON `status` `ok`, and no diagnostics. The macOS job records its
+workflow URI, commit, `sw_vers`, `uname -a`, `sysctl -n hw.logicalcpu`,
+`sysctl -n hw.memsize`, and Rust toolchain version with the behavioural result.
+Neither cross-compilation nor a job whose asserted host differs from its matrix
+entry is native behavioural evidence.
+
+On the Linux reference runner only, perform five measured clean checks after
+the release build and fixture-count checks. A clean check means a new `mara`
+process over the checked-in fixture with no Mara-generated index or cache; it
+does not require privileged operating-system cache flushing. Run this exact
+procedure from a clean source worktree:
+
+```sh
+set -euo pipefail
+repo_root=$(git rev-parse --show-toplevel)
+fixture="$repo_root/tests/fixtures/scale-v01"
+binary="$repo_root/target/release/mara"
+results_dir=$(mktemp -d)
+test -z "$(git -C "$repo_root" status --porcelain=v1)"
+
+for run in 1 2 3 4 5; do
+  start_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
+  (
+    cd "$fixture"
+    /usr/bin/time --output="$results_dir/run-$run.time" \
+      --format='peak_rss_kib=%M' \
+      "$binary" check --format json > "$results_dir/run-$run.json"
+  )
+  end_ns=$(python3 -c 'import time; print(time.monotonic_ns())')
+  { printf 'elapsed_nanoseconds=%s\n' "$((end_ns - start_ns))"; cat "$results_dir/run-$run.time"; } \
+    > "$results_dir/run-$run.measurement"
+  grep -Eq '^[[:space:]]*"status": "ok",' "$results_dir/run-$run.json"
+  grep -Eq '^[[:space:]]*"diagnostics": \[\],' "$results_dir/run-$run.json"
+done
+
+awk -F= '$1 == "elapsed_nanoseconds" { n++; if ($2 + 0 > 5000000000) bad = 1 } END { exit (n != 5 || bad) }' \
+  "$results_dir"/run-*.measurement
+awk -F= '$1 == "peak_rss_kib" { n++; if ($2 + 0 > 524288) bad = 1 } END { exit (n != 5 || bad) }' \
+  "$results_dir"/run-*.measurement
+```
+
+Python's `time.monotonic_ns()` records elapsed time against a monotonic clock as
+an integer number of nanoseconds, while `/usr/bin/time` reports peak resident
+set size in KiB as `%M`; 5 seconds is 5,000,000,000 nanoseconds and 512 MiB is
+524,288 KiB. The performance pass calculation is strict: all five `mara check`
+processes must exit successfully with JSON `status` `ok` and no diagnostics,
+all five measurement files must contain one value for each metric, the greatest
+elapsed time must be at most 5,000,000,000 nanoseconds, and the greatest peak
+RSS must be at most 524,288 KiB. The evidence record shall retain all five JSON
+and measurement files, not only a selected or median result.
+
+Windows has no job or support claim in this proposal. Native Windows behavioural
+qualification remains deferred by [[ADR-0014]]; passing the Linux and macOS
+matrix or any Windows cross-compilation does not close that boundary. After an
+approved method is executed, the resulting immutable evidence item must link to
+[[TEST-PORTABILITY-PERFORMANCE]] and the exact verified commit in accordance
+with [[REQ-EVIDENCE-REVISION-ANCHOR]]. Its observable reassessment signal for
+CON-32 is a five-run Linux result satisfying both maxima together with passing
+native Linux and macOS behavioural records. Linear retains the CON-32 blocker
+and scheduling state and uses that signal for reassessment.
+:::
+
 :::design m_01KY7YA2D74S6NC0FGAZ2ZKFT2
 :id: DES-QUERY-INDEX
 :title: Shared in-memory project model with projection adapters
