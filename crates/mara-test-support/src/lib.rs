@@ -146,17 +146,29 @@ impl ProjectSandbox {
             .file_type()
             .is_symlink()
         {
-            let _ = fs::remove_dir_all(&raw_root);
-            return Err(ProjectSandboxError::io(
+            let error = ProjectSandboxError::io(
                 "create sandbox with a non-symlink final component",
-                raw_root,
+                &raw_root,
                 io::Error::other("sandbox final component is a symlink"),
+            );
+            let retained = temporary.keep();
+            return Err(complete_initialization_cleanup(
+                error,
+                remove_sandbox(&retained),
             ));
         }
 
-        let root = raw_root
-            .canonicalize()
-            .map_err(|source| ProjectSandboxError::io("canonicalize sandbox", &raw_root, source))?;
+        let root = match raw_root.canonicalize() {
+            Ok(root) => root,
+            Err(source) => {
+                let error = ProjectSandboxError::io("canonicalize sandbox", &raw_root, source);
+                let retained = temporary.keep();
+                return Err(complete_initialization_cleanup(
+                    error,
+                    remove_sandbox(&retained),
+                ));
+            }
+        };
         let _ = temporary.keep();
 
         if root.starts_with(&source_checkout)
