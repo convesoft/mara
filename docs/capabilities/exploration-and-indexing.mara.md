@@ -467,8 +467,9 @@ cross-compilation alone shall not verify Windows runtime support.
 On the documented native Linux reference runner, build the bounded Rust tool,
 create the unique external qualification root, generate the fixed project, and
 run the independent oracle exactly once immediately before run 1, retaining its
-fixed evidence outputs unchanged. Before run 1, make the oracle-verified fixture
-tree read-only and retain that protection through five exact-child measurements.
+fixed evidence outputs unchanged. After every reaped child and before a later
+child starts, independently revalidate every fixture file against the expected
+manifest; reject that run and withhold later measurements on any mismatch.
 Verify the complete record set, hash manifest, source provenance, storage
 preconditions, five passing runs, and maxima against the stated limits. Retain
 the records and perform the required upload and finally cleanup for passed,

@@ -339,13 +339,9 @@ general test framework, command runner, parser, or source analyzer.
 measure-scale-v01 runs only after generation, successful oracle checks, and
 cargo build --locked --release --bin mara. Its own build, generation, oracle,
 provenance collection, result serialization, and runner setup are outside every
-measured interval. Before run 1, it removes write permission from every fixture
-entry and verifies that the fixture tree is read-only; it retains that protection
-through run 5 and does not restore write permission before final cleanup. Failure
-to protect or verify the fixture tree is an operational capture failure. It runs
-numbers 1 through 5 sequentially, with no warm-up. Each child has the protected
-fixture as current directory and invokes the absolute release binary with exactly
-check --format json.
+measured interval. It runs numbers 1 through 5 sequentially, with no warm-up.
+Each child has the fixture as current directory and invokes the absolute release
+binary with exactly check --format json.
 
 After per-run setup, the Rust runner records std::time::Instant immediately
 before spawn and computes elapsed nanoseconds from that same Instant immediately
@@ -353,6 +349,15 @@ after the exact child is reaped. Only spawning, executing, and reaping that
 external process are timed. Concurrent pipe reads only avoid deadlock; JSON
 validation, hashing, thread joins, and evidence writes happen after the timer
 stops.
+
+After every exact child is reaped, and before accepting that run or starting a
+later child, the runner independently reparses the expected manifest and
+recomputes every listed fixture-file SHA-256. This untimed revalidation requires
+all twelve paths to remain present regular non-symlink files and every digest to
+match. It writes the resulting fixture_verified value in that run's record and
+does not recreate or overwrite any oracle evidence output. A mismatch fails the
+current run, prevents later child measurements, and writes each later run record
+with passed false and error fixture_integrity_changed.
 
 Before exec, the child becomes leader of a fresh process group. The parent polls
 only that PID with Linux wait4(child_pid, ..., WNOHANG, &rusage), never sleeps
@@ -372,7 +377,8 @@ run-05.stderr.
 A run passes only when exit code is zero; JSON status is ok; diagnostics are
 empty; document, item, and edge counts are 10, 10,000, and 100,000; it did not
 time out and has no operational error; elapsed time is at most 5,000,000,000
-nanoseconds; and exact-child peak RSS is at most 524,288 KiB. Child-level
+nanoseconds; exact-child peak RSS is at most 524,288 KiB; and fixture_verified
+is true. Child-level
 failure records that run and continues if safe capture remains possible.
 Operational capture failure writes all five numbered records, using unavailable
 null fields and non-null errors for later unsafe runs, and makes the overall
@@ -406,16 +412,18 @@ values unsigned integers, and the last three values booleans. A passing record
 has minimum availability 2147483648, false tmpfs/ramfs and source-control
 values, and true passed.
 
-Every attempted run writes run-NN.measurement.json with exactly run, elapsed_ns,
+Every run slot writes run-NN.measurement.json with exactly run, elapsed_ns,
 peak_rss_kib, exit_code, term_signal, timed_out, stdout_sha256, stderr_sha256,
-mara_status, diagnostic_count, documents, items, edges, passed, and error. Run
-is unsigned 1–5; elapsed, RSS, and four parsed counts are unsigned or null when
-unobtainable; exit and signal are integer or null; timeout and pass are
-booleans; hashes are lowercase 64-digit SHA-256 or null only when complete
-capture was impossible; status is string or null; error is null or stable
-machine-readable string. A normally captured termination has exactly one of
-exit or signal and null error. Operational capture failure may have both
-termination values null and requires a non-null error.
+mara_status, diagnostic_count, documents, items, edges, fixture_verified,
+passed, and error. Run is unsigned 1–5; elapsed, RSS, and four parsed counts are
+unsigned or null when unobtainable; exit and signal are integer or null; timeout
+and pass are booleans; fixture_verified is boolean or null only when its
+revalidation could not run; hashes are lowercase 64-digit SHA-256 or null only
+when complete capture was impossible; status is string or null; error is null or
+stable machine-readable string. A normally captured termination has exactly one
+of exit or signal and null error. Operational capture failure, or a run withheld
+after fixture_integrity_changed, may have both termination values null and
+requires a non-null error.
 
 qualification-summary.json contains exactly format, version, source_commit,
 xtask_sha256, mara_sha256, expected_manifest_sha256, fixture_files, runs,
@@ -429,10 +437,10 @@ and matched; runs contains the five run objects in order; each maximum is the
 maximum available unsigned value or null.
 
 Overall result is passed only when both storage records, every oracle check,
-all twelve observed hashes, all five passing run records, and both maxima meet
-their limits. No median, selected run, successful subset, or unchecked fixture
-can pass. Failed assertions yield failed; unsafe operational capture yields
-inconclusive.
+all twelve observed hashes, all five fixture_verified values, all five passing
+run records, and both maxima meet their limits. No median, selected run,
+successful subset, or unchecked fixture can pass. Failed assertions yield failed;
+unsafe operational capture yields inconclusive.
 
 The evidence upload retains workflow URI and identifier; exact verified
 source/tool commit; runner OS, architecture, name, image, and version; raw
