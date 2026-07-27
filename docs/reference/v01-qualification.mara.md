@@ -82,7 +82,8 @@ another tmpfs or ramfs, another worktree, a copied Cargo target, repository, or
 corpus. Source-repository reads are limited to the exact debug xtask executable,
 exact release Mara executable, Git metadata for repository discovery, git
 rev-parse HEAD, worktree enumeration and isolation checks, and
-tests/qualification/scale-v01.SHA256SUMS.
+tests/qualification/scale-v01.SHA256SUMS and
+tests/qualification/verify-scale-v01.sh.
 
 Before any Cargo command or generation, and again after qualification before
 upload, the workflow records df -h /tmp "$repo_root" and the KiB used by the
@@ -233,9 +234,10 @@ generated corpus remains disposable derived state and is never committed.
 :depends_on: DES-V01-SCALE-FIXTURE
 :mitigates: RISK-SELF-VALIDATION-BIAS
 
-After generation and before every measured run, the stable POSIX command
-tests/qualification/verify-scale-v01.sh runs from the canonical source
-repository root with exactly this invocation:
+After generation, the five-run measure-scale-v01 procedure runs the stable
+POSIX command tests/qualification/verify-scale-v01.sh exactly once from the
+canonical source repository root, immediately before run 1, with exactly this
+invocation:
 
 ```sh
 tests/qualification/verify-scale-v01.sh \
@@ -286,11 +288,12 @@ file_types=ok or file_types=failed in file-type-check.txt.
 
 It parses the expected manifest independently, requiring exactly twelve paths
 once and in order, a lowercase 64-digit hash, exactly two ASCII spaces, a
-nonempty whitespace-free path, and no extra bytes; it records expected and
-actual paths in manifest-path-check.txt and parse stderr separately. Linux uses
-sha256sum --check; macOS uses shasum -a 256 -c; all other hosts record an
-unsupported-host result and fail. The raw digest output is retained as
-fixture-sha256-check.txt.
+nonempty whitespace-free path, and no extra bytes; it records the raw manifest
+SHA-256 and the ordered parsed path/digest mapping in manifest-path-check.txt
+and parse stderr separately. Linux uses sha256sum --check; macOS uses shasum -a
+256 -c; all other hosts record an unsupported-host result and fail.
+fixture-sha256-check.txt retains each manifest path's expected and independently
+observed digest plus the raw digest output.
 
 The oracle captures the expected failed git -C "$fixture" rev-parse
 --show-toplevel invocation in separate stdout and stderr files, records its
@@ -312,6 +315,9 @@ pass before measurement. The manifest pins bytes, counts establish volume,
 topology establishes every relation, and Mara validates project resolution, so
 the generator is not its own oracle.
 
+Its listed evidence outputs are created by that one invocation, retained
+unchanged through runs 1 through 5, and are not recreated between measured runs.
+
 The verifier's maintenance scope is only the fixed argument contract, allowed
 inputs, listed evidence outputs, manifest syntax and digest checks, exact
 fixture structure and counts, independent POSIX awk topology formula,
@@ -332,12 +338,29 @@ general test framework, command runner, parser, or source analyzer.
 :depends_on: DES-V01-SCALE-ORACLE
 :depends_on: DES-V01-QUALIFICATION-EVIDENCE-FORMAT
 
-measure-scale-v01 runs only after generation, successful oracle checks, and
-cargo build --locked --release --bin mara. Its own build, generation, oracle,
+measure-scale-v01 runs only after generation and cargo build --locked --release
+--bin mara. Before its child loop it invokes the required oracle once and starts
+run 1 only when that oracle succeeds. Its own build, generation, oracle,
 provenance collection, result serialization, and runner setup are outside every
 measured interval. It runs numbers 1 through 5 sequentially, with no warm-up.
 Each child has the fixture as current directory and invokes the absolute release
 binary with exactly check --format json.
+
+If the completed oracle exits unsuccessfully, no child starts. The runner writes
+all five run records with every nullable measurement field null, timed_out
+false, fixture_verified null, passed false, and error oracle_failed, and the
+summary is failed. If it cannot invoke or capture the oracle at all, every
+record has the same field values and error oracle_unavailable, and the summary
+is inconclusive.
+
+Immediately after a successful oracle and before child setup, the runner loads
+the raw manifest SHA-256 and ordered path/digest mapping from the oracle's
+retained manifest-path-check.txt and retains them as the immutable
+oracle-approved manifest pin. It must not construct the pin by rereading the
+live manifest after the oracle completes. If it cannot obtain that pin, no child
+starts; all five records use unavailable nullable fields, timed_out false,
+fixture_verified null, passed false, and error
+fixture_revalidation_unavailable, and the summary is inconclusive.
 
 After per-run setup, the Rust runner records std::time::Instant immediately
 before spawn and computes elapsed nanoseconds from that same Instant immediately
@@ -345,6 +368,34 @@ after the exact child is reaped. Only spawning, executing, and reaping that
 external process are timed. Concurrent pipe reads only avoid deadlock; JSON
 validation, hashing, thread joins, and evidence writes happen after the timer
 stops.
+
+After every exact child is reaped, and before accepting that run or starting a
+later child, the runner independently hashes the live expected manifest and
+requires it to equal the oracle-approved pin, then recomputes every listed
+fixture-file SHA-256 against the pinned mapping. This untimed revalidation
+requires the complete fixture entry set to remain exactly .mara,
+.mara/project.toml, .mara/schema.yaml, and items-000.mara.md through
+items-009.mara.md; fixture and .mara to remain real directories; all twelve
+manifest paths to remain regular non-symlink files; and every digest to match.
+It writes the resulting fixture_verified value in that run's record and does not
+recreate or overwrite any oracle evidence output. A mismatch fails the current
+run, prevents later child measurements, and writes each later run record with
+passed false and error fixture_integrity_changed. A completed revalidation is a
+mismatch when the live expected-manifest hash differs from its pin or when a
+fixture entry is missing or unexpected, has the wrong type or is a symlink, or
+has a different listed digest; a missing fixture entry is a mismatch even when
+its lookup reports ENOENT. The current mismatch record has fixture_verified
+false; each later withheld record has fixture_verified null because its
+revalidation did not run.
+
+If the revalidation cannot complete because hashing the live expected manifest
+or reading, stating, or hashing a required fixture entry is unavailable through
+an I/O or permission error other than a missing fixture entry, it is an
+operational capture failure, not a fixture mismatch. The current record has
+fixture_verified null, passed false, and error fixture_revalidation_unavailable;
+no later child starts, every withheld later record has fixture_verified null,
+passed false, and that same error, and the summary is inconclusive. The expected
+manifest is not a fixture entry: its absence or unreadability is unavailable.
 
 Before exec, the child becomes leader of a fresh process group. The parent polls
 only that PID with Linux wait4(child_pid, ..., WNOHANG, &rusage), never sleeps
@@ -364,7 +415,8 @@ run-05.stderr.
 A run passes only when exit code is zero; JSON status is ok; diagnostics are
 empty; document, item, and edge counts are 10, 10,000, and 100,000; it did not
 time out and has no operational error; elapsed time is at most 5,000,000,000
-nanoseconds; and exact-child peak RSS is at most 524,288 KiB. Child-level
+nanoseconds; exact-child peak RSS is at most 524,288 KiB; and fixture_verified
+is true. Child-level
 failure records that run and continues if safe capture remains possible.
 Operational capture failure writes all five numbered records, using unavailable
 null fields and non-null errors for later unsafe runs, and makes the overall
@@ -398,33 +450,53 @@ values unsigned integers, and the last three values booleans. A passing record
 has minimum availability 2147483648, false tmpfs/ramfs and source-control
 values, and true passed.
 
-Every attempted run writes run-NN.measurement.json with exactly run, elapsed_ns,
+Every run slot writes run-NN.measurement.json with exactly run, elapsed_ns,
 peak_rss_kib, exit_code, term_signal, timed_out, stdout_sha256, stderr_sha256,
-mara_status, diagnostic_count, documents, items, edges, passed, and error. Run
-is unsigned 1–5; elapsed, RSS, and four parsed counts are unsigned or null when
-unobtainable; exit and signal are integer or null; timeout and pass are
-booleans; hashes are lowercase 64-digit SHA-256 or null only when complete
-capture was impossible; status is string or null; error is null or stable
-machine-readable string. A normally captured termination has exactly one of
-exit or signal and null error. Operational capture failure may have both
-termination values null and requires a non-null error.
+mara_status, diagnostic_count, documents, items, edges, fixture_verified,
+passed, and error. Run is unsigned 1–5; elapsed, RSS, and four parsed counts are
+unsigned or null when unobtainable; exit and signal are integer or null; timeout
+and pass are booleans; fixture_verified is boolean or null only when its
+revalidation could not run; hashes are lowercase 64-digit SHA-256 or null only
+when complete capture was impossible; status is string or null; error is null or
+stable machine-readable string. A normally captured child without a subsequent
+operational error has exactly one of exit or signal and null error. When fixture
+revalidation is unavailable, its current and all withheld later run records have
+fixture_verified null, passed false, and error
+fixture_revalidation_unavailable; an operational capture failure, or a run
+withheld after fixture_integrity_changed, may have both termination values null
+and requires a non-null error. An unsuccessful completed oracle writes all five
+records with nullable measurement fields null, timed_out false,
+fixture_verified null, passed false, and error oracle_failed; an unavailable
+oracle uses oracle_unavailable and makes the summary inconclusive.
 
 qualification-summary.json contains exactly format, version, source_commit,
 xtask_sha256, mara_sha256, expected_manifest_sha256, fixture_files, runs,
 max_elapsed_ns, max_peak_rss_kib, elapsed_limit_ns, peak_rss_limit_kib, and
 result. Its format is mara.qualification.scale-v01, version is unsigned 1,
-source commit is the exact git rev-parse HEAD output, top-level hashes are
+source commit is the exact git rev-parse HEAD output, xtask and mara hashes are
 lowercase 64-digit SHA-256, limits are 5000000000 and 524288, and result is
-exactly passed, failed, or inconclusive. fixture_files has exactly twelve
-objects in manifest order, each exactly path, expected_sha256, observed_sha256,
-and matched; runs contains the five run objects in order; each maximum is the
-maximum available unsigned value or null.
+exactly passed, failed, or inconclusive. After an oracle-approved manifest pin,
+expected_manifest_sha256 is its lowercase 64-digit SHA-256 and fixture_files has
+exactly twelve objects in manifest order, each exactly path, expected_sha256,
+observed_sha256, and matched. Before that pin is obtainable,
+expected_manifest_sha256 is null and fixture_files is an empty array. Runs
+contains the five run objects in order; each maximum is the maximum available
+unsigned value or null.
+
+After a manifest pin, fixture_files starts from the successful oracle's ordered
+observations. Each completed post-child revalidation, including an integrity
+mismatch, replaces that snapshot with twelve objects: observed_sha256 is the
+lowercase 64-digit digest for a regular readable listed fixture file and null
+otherwise, and matched is true only for an observed digest equal to its expected
+digest. An unavailable revalidation never partially updates fixture_files: it
+retains the prior complete snapshot while the affected run record carries
+fixture_verified null and fixture_revalidation_unavailable.
 
 Overall result is passed only when both storage records, every oracle check,
-all twelve observed hashes, all five passing run records, and both maxima meet
-their limits. No median, selected run, successful subset, or unchecked fixture
-can pass. Failed assertions yield failed; unsafe operational capture yields
-inconclusive.
+all twelve observed hashes, all five fixture_verified values, all five passing
+run records, and both maxima meet their limits. No median, selected run,
+successful subset, or unchecked fixture can pass. Failed assertions yield failed;
+unsafe operational capture yields inconclusive.
 
 The evidence upload retains workflow URI and identifier; exact verified
 source/tool commit; runner OS, architecture, name, image, and version; raw
