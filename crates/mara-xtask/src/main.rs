@@ -238,22 +238,6 @@ fn generate_scale_v01(argument_root: &Path) -> Result<()> {
     canonical_xtask_executable(&source_repo)?;
     let candidate = candidate_root(argument_root, false)?;
     let inside_source_control = path_is_in_source_control(&candidate.root, &source_repo)?;
-    if let Err(error) = ensure_isolated_root(&candidate.root, &source_repo, &candidate.parent) {
-        let precondition_error = if inside_source_control {
-            "inside_source_control"
-        } else {
-            "root_not_isolated"
-        };
-        emit_precondition(
-            Some(&source_repo),
-            Some(&candidate.parent),
-            Some(&candidate.root),
-            None,
-            inside_source_control,
-            precondition_error,
-        )?;
-        return Err(error);
-    }
     let storage = match storage_info(&candidate.parent) {
         Ok(storage) => storage,
         Err(error) => {
@@ -268,6 +252,22 @@ fn generate_scale_v01(argument_root: &Path) -> Result<()> {
             return Err(error);
         }
     };
+    if let Err(error) = ensure_isolated_root(&candidate.root, &source_repo, &candidate.parent) {
+        let precondition_error = if inside_source_control {
+            "inside_source_control"
+        } else {
+            "root_not_isolated"
+        };
+        emit_precondition(
+            Some(&source_repo),
+            Some(&candidate.parent),
+            Some(&candidate.root),
+            Some(&storage),
+            inside_source_control,
+            precondition_error,
+        )?;
+        return Err(error);
+    }
 
     if let Some(error) = storage_precondition_error(&storage, inside_source_control) {
         emit_precondition(
