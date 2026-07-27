@@ -781,5 +781,17 @@ mod tests {
             sandbox.path().to_path_buf()
         };
         assert!(!removed.exists());
+
+        let non_unwinding_error: Result<(), PathBuf> = {
+            let sandbox = ProjectSandbox::new(ProjectSandboxMode::Empty)
+                .unwrap()
+                .preserve_on_failure();
+            Err(sandbox.path().to_path_buf())
+        };
+        let removed = non_unwinding_error.unwrap_err();
+        assert!(
+            !removed.exists(),
+            "non-unwinding errors cannot be observed by the bounded preservation API"
+        );
     }
 }
