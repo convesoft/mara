@@ -2071,7 +2071,7 @@ mod tests {
         assert!(workflow.contains("df -h \"$tmp_root\" \"$repo_root\""));
         assert!(workflow.contains("resource-before-cleanup.txt"));
         assert!(workflow.contains("df -h \"$tmp_root\" \"$repo_root\" \"$root\""));
-        assert!(workflow.contains("root_used_kib=\"$(df -Pk \"$root\""));
+        assert!(workflow.contains("root_used_kib=\"$(du -sk \"$root\""));
     }
 
     #[cfg(unix)]
@@ -2227,11 +2227,36 @@ mod tests {
             fs::read_to_string(invalid_type_root.join("evidence/file-type-check.txt"))
                 .expect("invalid-type evidence");
         assert!(invalid_type_evidence.contains("invalid_type=items-000.mara.md"));
-        assert!(
-            !invalid_type_root
-                .join("evidence/preflight-check.json")
-                .exists()
+        assert_eq!(
+            fs::read_to_string(invalid_type_root.join("evidence/count-check.txt"))
+                .expect("skipped count evidence"),
+            "count_check=skipped_due_to_unsafe_fixture_file_type\n"
         );
+        assert_eq!(
+            fs::read_to_string(invalid_type_root.join("evidence/count-check.stderr"))
+                .expect("skipped count stderr"),
+            "skipped_due_to_unsafe_fixture_file_type\n"
+        );
+        assert_eq!(
+            fs::read_to_string(invalid_type_root.join("evidence/topology-check.txt"))
+                .expect("skipped topology evidence"),
+            "topology=skipped_due_to_unsafe_fixture_file_type\n"
+        );
+        let skipped_preflight =
+            fs::read_to_string(invalid_type_root.join("evidence/preflight-check.json"))
+                .expect("skipped preflight evidence");
+        assert!(skipped_preflight.contains("\"status\": \"skipped\""));
+        assert!(skipped_preflight.contains("\"reason\": \"unsafe_fixture_file_type\""));
+        assert_eq!(
+            fs::read_to_string(invalid_type_root.join("evidence/preflight-check.stderr"))
+                .expect("skipped preflight stderr"),
+            "skipped_due_to_unsafe_fixture_file_type\n"
+        );
+        let skipped_preflight_exit =
+            fs::read_to_string(invalid_type_root.join("evidence/preflight-check-exit.txt"))
+                .expect("skipped preflight exit evidence");
+        assert!(skipped_preflight_exit.contains("exit_code=skipped"));
+        assert!(skipped_preflight_exit.contains("json_validation=skipped"));
 
         let unsupported_root = temporary.path().join("unsupported-qualification-root");
         let unsupported_fixture = unsupported_root.join("fixture");

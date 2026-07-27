@@ -327,6 +327,21 @@ if [ "$preflight_status" -ne 0 ] || [ "$preflight_json_valid" -ne 1 ]; then
     failed=1
 fi
 else
+    printf '%s\n' 'count_check=skipped_due_to_unsafe_fixture_file_type' >"$evidence/count-check.txt"
+    printf '%s\n' 'skipped_due_to_unsafe_fixture_file_type' >"$evidence/count-check.stderr"
+    printf '%s\n' 'topology=skipped_due_to_unsafe_fixture_file_type' >"$evidence/topology-check.txt"
+    {
+        printf '%s\n' '{'
+        printf '%s\n' '  "status": "skipped",'
+        printf '%s\n' '  "reason": "unsafe_fixture_file_type"'
+        printf '%s\n' '}'
+    } >"$evidence/preflight-check.json"
+    printf '%s\n' 'skipped_due_to_unsafe_fixture_file_type' >"$evidence/preflight-check.stderr"
+    {
+        printf '%s\n' 'exit_code=skipped'
+        printf '%s\n' 'json_validation=skipped'
+        printf '%s\n' 'reason=unsafe_fixture_file_type'
+    } >"$evidence/preflight-check-exit.txt"
     failed=1
 fi
 
