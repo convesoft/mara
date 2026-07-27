@@ -171,7 +171,7 @@ if ! grep -qx 'manifest_syntax=ok' "$evidence/manifest-path-check.txt"; then
     failed=1
 fi
 
-if [ "$type_ok" -eq 1 ]; then
+if [ "$type_ok" -eq 1 ] && grep -qx 'manifest_syntax=ok' "$evidence/manifest-path-check.txt"; then
 (
     digest_ok=1
     if [ "$host_supported" -ne 1 ]; then
@@ -204,6 +204,7 @@ if [ "$type_ok" -eq 1 ]; then
 if ! grep -qx 'digest_check=ok' "$evidence/fixture-sha256-check.txt"; then
     failed=1
 fi
+fi
 
 set +e
 git -C "$fixture" rev-parse --show-toplevel >"$evidence/fixture-git-context.stdout" 2>"$evidence/fixture-git-context.stderr"
@@ -214,9 +215,18 @@ if [ "$fixture_git_status" -eq 0 ]; then
     failed=1
 fi
 
+if [ "$type_ok" -eq 1 ]; then
 {
-    item_count=$(grep -h '^:id: SCALE-[0-9][0-9][0-9][0-9][0-9]$' "$fixture"/items-*.mara.md | wc -l | tr -d ' ')
-    edge_count=$(grep -h '^:depends_on: SCALE-[0-9][0-9][0-9][0-9][0-9]$' "$fixture"/items-*.mara.md | wc -l | tr -d ' ')
+    item_count=$(grep -h '^:id: SCALE-[0-9][0-9][0-9][0-9][0-9]$' \
+        "$fixture/items-000.mara.md" "$fixture/items-001.mara.md" "$fixture/items-002.mara.md" \
+        "$fixture/items-003.mara.md" "$fixture/items-004.mara.md" "$fixture/items-005.mara.md" \
+        "$fixture/items-006.mara.md" "$fixture/items-007.mara.md" "$fixture/items-008.mara.md" \
+        "$fixture/items-009.mara.md" | wc -l | tr -d ' ')
+    edge_count=$(grep -h '^:depends_on: SCALE-[0-9][0-9][0-9][0-9][0-9]$' \
+        "$fixture/items-000.mara.md" "$fixture/items-001.mara.md" "$fixture/items-002.mara.md" \
+        "$fixture/items-003.mara.md" "$fixture/items-004.mara.md" "$fixture/items-005.mara.md" \
+        "$fixture/items-006.mara.md" "$fixture/items-007.mara.md" "$fixture/items-008.mara.md" \
+        "$fixture/items-009.mara.md" | wc -l | tr -d ' ')
     printf 'items=%s\n' "$item_count"
     printf 'edges=%s\n' "$edge_count"
 } >"$evidence/count-check.txt" 2>"$evidence/count-check.stderr"
@@ -253,7 +263,10 @@ awk '
         if (ok) print "topology=ok"; else print "topology=failed";
         exit(ok ? 0 : 1);
     }
-' "$fixture"/items-*.mara.md >"$evidence/topology-check.txt" || failed=1
+' "$fixture/items-000.mara.md" "$fixture/items-001.mara.md" "$fixture/items-002.mara.md" \
+    "$fixture/items-003.mara.md" "$fixture/items-004.mara.md" "$fixture/items-005.mara.md" \
+    "$fixture/items-006.mara.md" "$fixture/items-007.mara.md" "$fixture/items-008.mara.md" \
+    "$fixture/items-009.mara.md" >"$evidence/topology-check.txt" || failed=1
 if ! grep -qx 'topology=ok' "$evidence/topology-check.txt"; then
     failed=1
 fi

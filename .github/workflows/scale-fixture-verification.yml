@@ -54,12 +54,6 @@ jobs:
           env -u CARGO_TARGET_DIR target/debug/mara-xtask qualification generate-scale-v01 \
             --qualification-root "$root"
 
-          case "$RUNNER_OS" in
-            Linux) (cd "$root/fixture" && sha256sum --check "$GITHUB_WORKSPACE/tests/qualification/scale-v01.SHA256SUMS") ;;
-            macOS) (cd "$root/fixture" && shasum -a 256 -c "$GITHUB_WORKSPACE/tests/qualification/scale-v01.SHA256SUMS") ;;
-            *) printf 'unsupported native runner: %s\n' "$RUNNER_OS" >&2; exit 1 ;;
-          esac
-
           tests/qualification/verify-scale-v01.sh --qualification-root "$root"
       - name: Upload fixture-verification evidence
         if: always()

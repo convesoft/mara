@@ -9,7 +9,10 @@ use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode, Stdio};
+#[cfg(target_os = "linux")]
+use std::process::Stdio;
+use std::process::{Command, ExitCode};
+#[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
 const ITEM_COUNT: usize = 10_000;
@@ -1923,11 +1926,13 @@ mod tests {
         assert!(workflow[cleanup..].contains("qualification root remained after cleanup"));
         assert!(workflow.contains("/usr/sbin/diskutil info -plist \"$RUNNER_TEMP\""));
         assert!(!workflow.contains("macOS) filesystem_type=\"$(stat -f %T"));
+        assert!(!workflow.contains("sha256sum --check"));
+        assert!(!workflow.contains("shasum -a 256 -c"));
     }
 
     #[cfg(unix)]
     #[test]
-    fn verifier_rejects_a_manifest_without_a_final_newline_and_retains_digest_evidence() {
+    fn verifier_rejects_a_malformed_manifest_without_reading_its_fixture_paths() {
         use std::os::unix::fs::{PermissionsExt, symlink};
 
         let temporary = tempfile::tempdir().expect("temporary root");
@@ -1936,6 +1941,8 @@ mod tests {
         let verifier = repo.join("tests/qualification/verify-scale-v01.sh");
         let manifest = repo.join("tests/qualification/scale-v01.SHA256SUMS");
         let mara = repo.join("target/release/mara");
+        let verifier_source = include_str!("../../../tests/qualification/verify-scale-v01.sh");
+        assert!(!verifier_source.contains("\"$fixture\"/items-*.mara.md"));
         fs::create_dir(&repo).expect("source repository");
         fs::create_dir_all(verifier.parent().expect("verifier parent")).expect("verifier parent");
         fs::create_dir_all(mara.parent().expect("mara parent")).expect("mara parent");
@@ -1953,11 +1960,7 @@ mod tests {
             include_bytes!("../../../tests/qualification/scale-v01.SHA256SUMS").to_vec();
         assert_eq!(manifest_bytes.pop(), Some(b'\n'));
         fs::write(&manifest, manifest_bytes).expect("manifest without final newline");
-        fs::write(
-            &verifier,
-            include_str!("../../../tests/qualification/verify-scale-v01.sh"),
-        )
-        .expect("verifier");
+        fs::write(&verifier, verifier_source).expect("verifier");
         fs::write(
             &mara,
             "#!/bin/sh\nif [ -n \"${MARA_RAN_MARKER:-}\" ]; then : > \"$MARA_RAN_MARKER\"; fi\ncat <<'JSON'\n{\n  \"format\": \"mara.command\",\n  \"version\": 1,\n  \"command\": \"check\",\n  \"status\": \"ok\",\n  \"project\": {\n    \"name\": \"mara-scale-v01\",\n    \"root\": \".\",\n    \"schema_name\": \"mara-scale-v01\",\n    \"schema_version\": \"0.1.0\",\n    \"schema_path\": \".mara/schema.yaml\"\n  },\n  \"diagnostics\": [],\n  \"data\": {\n    \"summary\": {\n      \"documents\": 10,\n      \"items\": 10000,\n      \"source_nodes\": 0,\n      \"edges\": 100000,\n      \"mentions\": 0,\n      \"external_nodes\": 0,\n      \"errors\": 0,\n      \"warnings\": 0,\n      \"info\": 0\n    }\n  },\n  \"error\": null\n}\nJSON\n",
@@ -1990,12 +1993,11 @@ mod tests {
             fs::read_to_string(qualification_root.join("evidence/manifest-path-check.txt"))
                 .expect("manifest evidence");
         assert!(manifest_evidence.contains("manifest_error=missing_final_lf"));
-        let digest_evidence =
-            fs::read_to_string(qualification_root.join("evidence/fixture-sha256-check.txt"))
-                .expect("digest evidence");
-        assert_eq!(digest_evidence.matches("matched=true").count(), 12);
-        assert!(digest_evidence.contains("expected_sha256="));
-        assert!(digest_evidence.contains("observed_sha256="));
+        assert!(
+            !qualification_root
+                .join("evidence/fixture-sha256-check.txt")
+                .exists()
+        );
         let preflight_evidence =
             fs::read_to_string(qualification_root.join("evidence/preflight-check-exit.txt"))
                 .expect("preflight evidence");
