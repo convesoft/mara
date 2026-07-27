@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 #[cfg(test)]
 use std::collections::BTreeMap;
@@ -110,12 +110,12 @@ struct PreconditionRecord<'a> {
     error: &'a str,
 }
 
-#[derive(Serialize)]
-struct StorageRecord<'a> {
-    source_repo: &'a str,
-    qualification_parent: &'a str,
-    qualification_root: &'a str,
-    filesystem_type: &'a str,
+#[derive(Deserialize, Serialize)]
+struct StorageRecord {
+    source_repo: String,
+    qualification_parent: String,
+    qualification_root: String,
+    filesystem_type: String,
     total_bytes: u64,
     available_bytes: u64,
     minimum_available_bytes: u64,
@@ -257,11 +257,17 @@ fn generate_scale_v01(argument_root: &Path) -> Result<()> {
         ))
     })?;
     ensure_isolated_root(&root, &source_repo, &candidate.parent)?;
-    let created_storage = storage_info(&root)?;
+    let created_storage = match storage_info(&root) {
+        Ok(storage) => storage,
+        Err(error) => {
+            return Err(rollback_created_root(&root, format!("{error}")));
+        }
+    };
     if let Some(error) = storage_precondition_error(&created_storage, false) {
-        return Err(ToolError(format!(
-            "qualification root no longer satisfies storage preconditions: {error}"
-        )));
+        return Err(rollback_created_root(
+            &root,
+            format!("qualification root no longer satisfies storage preconditions: {error}"),
+        ));
     }
 
     let fixture = root.join("fixture");
@@ -272,10 +278,10 @@ fn generate_scale_v01(argument_root: &Path) -> Result<()> {
         .map_err(|error| ToolError(format!("cannot create evidence directory: {error}")))?;
 
     let accepted_storage = StorageRecord {
-        source_repo: &path_text(&source_repo),
-        qualification_parent: &path_text(&candidate.parent),
-        qualification_root: &path_text(&root),
-        filesystem_type: &created_storage.filesystem_type,
+        source_repo: path_text(&source_repo),
+        qualification_parent: path_text(&candidate.parent),
+        qualification_root: path_text(&root),
+        filesystem_type: created_storage.filesystem_type.clone(),
         total_bytes: created_storage.total_bytes,
         available_bytes: created_storage.available_bytes,
         minimum_available_bytes: MINIMUM_AVAILABLE_BYTES,
@@ -288,6 +294,53 @@ fn generate_scale_v01(argument_root: &Path) -> Result<()> {
         &accepted_storage,
     )?;
     write_fixture(&fixture)?;
+    Ok(())
+}
+
+fn rollback_created_root(root: &Path, cause: String) -> ToolError {
+    match fs::remove_dir(root) {
+        Ok(()) => ToolError(cause),
+        Err(error) => ToolError(format!(
+            "{cause}; cannot remove newly created qualification root {}: {error}",
+            root.display()
+        )),
+    }
+}
+
+fn validate_generation_storage_record(
+    evidence: &Path,
+    source_repo: &Path,
+    qualification_parent: &Path,
+    qualification_root: &Path,
+) -> Result<()> {
+    let record_path = evidence.join("storage-before-generation.json");
+    require_regular_file(&record_path, "evidence/storage-before-generation.json")?;
+    let contents = fs::read(&record_path).map_err(|error| {
+        ToolError(format!(
+            "cannot read generation storage record {}: {error}",
+            record_path.display()
+        ))
+    })?;
+    let record = serde_json::from_slice::<StorageRecord>(&contents).map_err(|error| {
+        ToolError(format!(
+            "cannot parse generation storage record {}: {error}",
+            record_path.display()
+        ))
+    })?;
+    if record.source_repo != path_text(source_repo)
+        || record.qualification_parent != path_text(qualification_parent)
+        || record.qualification_root != path_text(qualification_root)
+        || record.filesystem_type.is_empty()
+        || record.minimum_available_bytes != MINIMUM_AVAILABLE_BYTES
+        || record.available_bytes < MINIMUM_AVAILABLE_BYTES
+        || record.on_tmpfs_or_ramfs
+        || record.inside_source_control
+        || !record.passed
+    {
+        return Err(ToolError(
+            "generation storage record does not prove the required preconditions".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -320,6 +373,7 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
     require_real_directory(&fixture, "fixture")?;
     require_real_directory(&evidence, "evidence")?;
     ensure_fixture_has_no_git_context(&fixture)?;
+    validate_generation_storage_record(&evidence, &source_repo, &candidate.parent, &root)?;
 
     let storage = storage_info(&root)?;
     if storage_precondition_error(&storage, false).is_some() {
@@ -328,10 +382,10 @@ fn measure_scale_v01_linux(argument_root: &Path) -> Result<()> {
         ));
     }
     let storage_record = StorageRecord {
-        source_repo: &path_text(&source_repo),
-        qualification_parent: &path_text(&candidate.parent),
-        qualification_root: &path_text(&root),
-        filesystem_type: &storage.filesystem_type,
+        source_repo: path_text(&source_repo),
+        qualification_parent: path_text(&candidate.parent),
+        qualification_root: path_text(&root),
+        filesystem_type: storage.filesystem_type.clone(),
         total_bytes: storage.total_bytes,
         available_bytes: storage.available_bytes,
         minimum_available_bytes: MINIMUM_AVAILABLE_BYTES,
@@ -1024,6 +1078,40 @@ struct ChildOutcome {
 }
 
 #[cfg(target_os = "linux")]
+fn terminate_and_reap_child(
+    pid: libc::pid_t,
+    status: &mut libc::c_int,
+    usage: &mut libc::rusage,
+) -> Result<()> {
+    if unsafe { libc::kill(-pid, libc::SIGKILL) } != 0 {
+        let error = io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(ToolError(format!(
+                "cannot terminate child process group: {error}"
+            )));
+        }
+    }
+    loop {
+        let waited = unsafe { libc::wait4(pid, status, 0, usage) };
+        if waited == pid {
+            return Ok(());
+        }
+        if waited == -1 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            if error.raw_os_error() == Some(libc::ECHILD) {
+                return Ok(());
+            }
+            return Err(ToolError(format!(
+                "cannot reap child process group: {error}"
+            )));
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn run_exact_child(mara: &Path, fixture: &Path) -> Result<ChildOutcome> {
     run_exact_child_with_limit(
         mara,
@@ -1087,29 +1175,17 @@ fn run_exact_child_with_limit(
             if error.raw_os_error() == Some(libc::EINTR) {
                 continue;
             }
-            let _ = unsafe { libc::kill(-pid, libc::SIGKILL) };
+            if let Err(cleanup_error) = terminate_and_reap_child(pid, &mut status, &mut usage) {
+                return Err(ToolError(format!(
+                    "cannot wait for exact child: {error}; {cleanup_error}"
+                )));
+            }
             return Err(ToolError(format!("cannot wait for exact child: {error}")));
         }
         if Instant::now() >= deadline {
             timed_out = true;
-            if unsafe { libc::kill(-pid, libc::SIGKILL) } != 0 {
-                return Err(ToolError(format!(
-                    "cannot kill timed-out child process group: {}",
-                    io::Error::last_os_error()
-                )));
-            }
-            loop {
-                let waited = unsafe { libc::wait4(pid, &mut status, 0, &mut usage) };
-                if waited == pid {
-                    break;
-                }
-                if waited == -1 && io::Error::last_os_error().raw_os_error() != Some(libc::EINTR) {
-                    return Err(ToolError(format!(
-                        "cannot reap timed-out child: {}",
-                        io::Error::last_os_error()
-                    )));
-                }
-            }
+            terminate_and_reap_child(pid, &mut status, &mut usage)
+                .map_err(|error| ToolError(format!("cannot clean up timed-out child: {error}")))?;
             break;
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
@@ -1158,6 +1234,26 @@ fn revalidate_fixture(
             files: fixture_mismatch_snapshot(fixture, pin)?,
             integrity_matches: false,
         });
+    }
+    match fs::symlink_metadata(fixture) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+        Ok(_) => {
+            return Ok(FixtureRevalidation {
+                files: fixture_mismatch_snapshot(fixture, pin)?,
+                integrity_matches: false,
+            });
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(FixtureRevalidation {
+                files: fixture_mismatch_snapshot(fixture, pin)?,
+                integrity_matches: false,
+            });
+        }
+        Err(error) => {
+            return Err(ToolError(format!(
+                "cannot inspect fixture directory: {error}"
+            )));
+        }
     }
     match fs::symlink_metadata(fixture.join(".mara")) {
         Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
@@ -1438,6 +1534,85 @@ mod tests {
     }
 
     #[test]
+    fn measurement_requires_a_valid_generation_storage_record() {
+        let temporary = tempfile::tempdir().expect("temporary root");
+        let source_repo = temporary.path().join("source");
+        let qualification_parent = temporary.path().join("external");
+        let qualification_root = qualification_parent.join("qualification");
+        let evidence = qualification_root.join("evidence");
+        fs::create_dir(&source_repo).expect("source repository");
+        fs::create_dir(&qualification_parent).expect("qualification parent");
+        fs::create_dir(&qualification_root).expect("qualification root");
+        fs::create_dir(&evidence).expect("evidence directory");
+
+        assert!(
+            validate_generation_storage_record(
+                &evidence,
+                &source_repo,
+                &qualification_parent,
+                &qualification_root,
+            )
+            .is_err()
+        );
+
+        let record_path = evidence.join("storage-before-generation.json");
+        let valid = StorageRecord {
+            source_repo: path_text(&source_repo),
+            qualification_parent: path_text(&qualification_parent),
+            qualification_root: path_text(&qualification_root),
+            filesystem_type: "ext4".into(),
+            total_bytes: MINIMUM_AVAILABLE_BYTES,
+            available_bytes: MINIMUM_AVAILABLE_BYTES,
+            minimum_available_bytes: MINIMUM_AVAILABLE_BYTES,
+            on_tmpfs_or_ramfs: false,
+            inside_source_control: false,
+            passed: true,
+        };
+        fs::write(
+            &record_path,
+            serde_json::to_vec(&valid).expect("valid record"),
+        )
+        .expect("storage record");
+        validate_generation_storage_record(
+            &evidence,
+            &source_repo,
+            &qualification_parent,
+            &qualification_root,
+        )
+        .expect("valid generation storage record");
+
+        let invalid = StorageRecord {
+            passed: false,
+            ..valid
+        };
+        fs::write(
+            &record_path,
+            serde_json::to_vec(&invalid).expect("invalid record"),
+        )
+        .expect("invalid storage record");
+        assert!(
+            validate_generation_storage_record(
+                &evidence,
+                &source_repo,
+                &qualification_parent,
+                &qualification_root,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn post_creation_gate_failure_removes_the_empty_qualification_root() {
+        let temporary = tempfile::tempdir().expect("temporary root");
+        let root = temporary.path().join("qualification-root");
+        fs::create_dir(&root).expect("created qualification root");
+        let error = rollback_created_root(&root, "storage gate failed".into());
+        assert_eq!(error.to_string(), "storage gate failed");
+        assert!(!root.exists());
+        fs::create_dir(&root).expect("safe retry can recreate qualification root");
+    }
+
+    #[test]
     fn workspace_isolation_rejects_a_root_beneath_the_source_repository() {
         let source = fs::canonicalize(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .expect("source repository");
@@ -1458,6 +1633,28 @@ mod tests {
         };
         let manifest = temporary.path().join("manifest");
         fs::write(&manifest, "not the pinned manifest\n").expect("manifest");
+        let snapshot = revalidate_fixture(&fixture, &manifest, &pin).expect("revalidation");
+        assert!(!snapshot.integrity_matches);
+        assert!(snapshot.files.iter().all(|entry| entry.matched));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn revalidation_rejects_a_symlinked_fixture_directory() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().expect("temporary root");
+        let real_fixture = temporary.path().join("real-fixture");
+        fs::create_dir(&real_fixture).expect("real fixture directory");
+        write_fixture(&real_fixture).expect("fixture");
+        let fixture = temporary.path().join("fixture");
+        symlink(&real_fixture, &fixture).expect("fixture symlink");
+        let manifest = temporary.path().join("manifest");
+        fs::write(&manifest, "pinned manifest\n").expect("manifest");
+        let pin = ManifestPin {
+            sha256: hash_file(&manifest).expect("manifest hash"),
+            entries: fixture_digests(&real_fixture).into_iter().collect(),
+        };
         let snapshot = revalidate_fixture(&fixture, &manifest, &pin).expect("revalidation");
         assert!(!snapshot.integrity_matches);
         assert!(snapshot.files.iter().all(|entry| entry.matched));
