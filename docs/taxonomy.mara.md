@@ -113,3 +113,42 @@ identity matters independently of its location. Use it for meaningful commands,
 APIs, schemas, services, reports, or standards. Do not create one for every
 source file, document, section, or symbol.
 :::
+
+## Relation vocabulary
+
+These relations form the initial project traceability vocabulary. Use a bare
+`[[ID]]` mention when navigation is useful but no typed meaning applies.
+
+:::mara term TERM-RELATION-DERIVES-FROM
+:title: derives_from
+
+The source originates from or refines the target's intent. Use it for a direct
+semantic basis, not chronology or a general association.
+:::
+
+:::mara term TERM-RELATION-DEPENDS-ON
+:title: depends_on
+
+The source cannot be satisfied, understood, or implemented independently of
+the target. Do not use it merely because items are nearby or discussed together.
+:::
+
+:::mara term TERM-RELATION-SATISFIES
+:title: satisfies
+
+The source design provides a solution contract for the target requirement.
+:::
+
+:::mara term TERM-RELATION-JUSTIFIES
+:title: justifies
+
+The source decision preserves the reasoning for the target requirement or
+design.
+:::
+
+:::mara term TERM-RELATION-SUPERSEDES
+:title: supersedes
+
+The source replaces an older target of the same flavour while preserving the
+target as history. Do not use it for ordinary revisions of one item.
+:::
