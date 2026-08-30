@@ -10,6 +10,30 @@ Repository-wide instructions for humans and software agents.
   it selectively; do not preserve old decisions merely because they already
   exist there.
 
+## Delivery coordination
+
+- Git-tracked Mara documents own durable product meaning. Linear may hold task
+  descriptions, expected outcomes, acceptance notes, priority, sequencing,
+  assignment, blockers, and status, but no product fact or decision may depend
+  on Linear remaining available. Do not add `task` or `release` flavours merely
+  to mirror delivery tracking.
+- GitHub owns pull requests, review discussion, CI, and merge evidence. Treat
+  other operational systems and generated views as replaceable projections.
+- In a multi-repository workspace, every issue must identify its repository and
+  cite relevant Mara IDs when they are known. Given an issue ID, read the issue,
+  this file, and its cited Mara items before acting. If the issue is unavailable,
+  report that instead of inventing its contents.
+- When delivery exposes missing, contradictory, or changed product meaning,
+  resolve it in the canonical Mara documents; a Linear issue or review comment
+  alone cannot establish the decision.
+- Use Triage for unassessed intake, Backlog for accepted but unscheduled work,
+  and a release project for scheduled work. Leave backlog work unassigned unless
+  it is explicitly being started.
+- `backlog this` means create one compact, unassigned, unscheduled Linear Backlog
+  issue for the referenced actionable outcome. Link its source and include
+  evident Mara IDs; do not change code. `triage this` uses Triage instead. If
+  Linear is unavailable, state that no issue was created.
+
 ## Documentation discipline
 
 - Start at [`docs/index.mara.md`](docs/index.mara.md). Follow
@@ -64,14 +88,11 @@ Repository-wide instructions for humans and software agents.
   diagnostics. Record unexpected failures in the backlog with reproduction
   context and logs, then add targeted handling and a regression test. Do not
   build speculative recovery or telemetry infrastructure.
-- Treat review findings as future work by default. Record non-critical findings
-  in the backlog with enough context to revisit them, then return to the current
-  milestone instead of expanding its scope.
-- Fix a review finding immediately only when it is critical: it prevents the
-  primary workflow from working, makes the current release unusable, risks
-  unrecoverable user data, or creates a directly exploitable vulnerability in
-  the intended deployment. Style, theoretical risk, premature optimization,
-  extra defense in depth, and rare non-blocking edge cases are not critical.
+- Treat a defect as critical only when it prevents the primary workflow, makes
+  the current release unusable, risks unrecoverable user data, or creates a
+  directly exploitable vulnerability in the intended deployment. Style,
+  theoretical risk, premature optimization, extra defense in depth, and rare
+  non-blocking edge cases are not critical.
 - Let later versions improve the product using real usage, feedback, and
   measured constraints. Prefer explicit known limitations in an early working
   release over delaying it for undefined completeness.
@@ -94,6 +115,45 @@ Repository-wide instructions for humans and software agents.
   necessary, stop and present the concrete blocker and smallest alternative.
 - Keep changes small and reversible, and preserve a buildable, runnable state
   after each meaningful increment. Avoid broad autonomous rewrites.
+
+## Code review
+
+- Review against the current task, applicable Mara contracts, and the actual
+  end-to-end workflow. Report only actionable, consequential defects with a
+  concrete impact. Leave deterministic style and formatting checks to CI.
+- A finding belongs in the current change only when accepted requirements or
+  acceptance criteria are unmet, or when it is critical under Delivery
+  discipline. Valid non-critical findings go to the backlog without expanding
+  the pull request. Duplicates, resolved findings, speculative hardening,
+  theoretical concerns, and non-actionable preferences are dismissed.
+- Do not accept mocks, placeholders, or isolated tests as evidence that a real
+  primary workflow works. Do not establish new product behavior solely in a
+  review comment; update the canonical Mara documents when meaning changes.
+- Review one bounded batch. Do not enter repeated review-and-fix loops after the
+  current contract passes unless a newly found critical issue requires action.
+
+### Review commands
+
+These phrases apply after `@codex` in a GitHub pull-request comment and as direct
+instructions in a Codex task:
+
+- `classify review`: inspect every unresolved Codex finding for the current pull
+  request revision without changing code or external state. Assign stable IDs
+  (`F1`, `F2`, ...) and classify each as `FIX`, `BACKLOG`, or `DISMISS` using the
+  rules above. State the reason and intended outcome briefly.
+- `process classified review`: recheck the latest classification against the
+  current pull-request head; mark stale or already-resolved findings obsolete.
+  Fix and proportionately verify every `FIX`. Create one Linear Backlog issue per
+  independently actionable `BACKLOG` outcome, grouping duplicates or tightly
+  coupled findings; link the pull request or finding, include evident Mara IDs,
+  and leave it unassigned and unscheduled. Take no action on `DISMISS`.
+- After processing, report a complete ledger mapping every finding ID to its fix
+  and verification, created Linear issue, dismissal, obsolete state, or blocker.
+  If an integration or permission is unavailable, report the incomplete action
+  truthfully rather than claiming it succeeded.
+- `fix this` applies the same fix-and-verify behavior to one referenced finding.
+  `backlog this` applies the Delivery coordination rule to one referenced
+  finding without editing the pull-request branch.
 
 ## Tooling and versioning
 
