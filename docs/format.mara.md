@@ -1,6 +1,6 @@
 # Mara document format
 
-:::mara specification SPEC-DOCUMENT-FORMAT
+:::mara design DES-DOCUMENT-FORMAT
 :title: Mara document format
 
 This contract defines the smallest authoring surface needed to dogfood Mara.
@@ -29,6 +29,7 @@ Failures preserve user data and produce actionable diagnostics.
 - A flavour matches `[a-z][a-z0-9]*(?:_[a-z0-9]+)*`.
 - An ID matches `[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+`, is mandatory and unique in
   the repository, and includes its human-meaningful prefix: `REQ-1`, not `1`.
+- Flavours and ID prefixes follow the project taxonomy.
 - IDs are stable handles. Renaming one requires updating all of its references.
 - An item closes with an exact standalone `:::`. Items cannot nest.
 
@@ -37,6 +38,7 @@ Failures preserve user data and produce actionable diagnostics.
 - Metadata is the contiguous sequence of `:key: value` lines after the opener.
 - Keys use lowercase snake case. Values are single-line scalars whose
   surrounding whitespace is not semantic.
+- Every item has exactly one non-empty `title` entry.
 - Repeated keys are preserved in source order.
 - The first blank line begins the Markdown body. Metadata-shaped lines after
   that boundary remain body content.

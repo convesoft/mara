@@ -12,6 +12,9 @@ Repository-wide instructions for humans and software agents.
 
 ## Documentation discipline
 
+- Start at [`docs/index.mara.md`](docs/index.mara.md). Follow
+  [`docs/format.mara.md`](docs/format.mara.md) for syntax and
+  [`docs/taxonomy.mara.md`](docs/taxonomy.mara.md) for flavour selection.
 - Keep repository-owned documentation, including requirements, definitions,
   architecture, decisions, and specifications, in Git-tracked `*.mara.md`
   files. Tool-required metadata and this instruction file are exceptions, not
@@ -29,6 +32,19 @@ Repository-wide instructions for humans and software agents.
   instead of restating it in multiple documents.
 - When changing documentation, preserve useful content but actively remove
   duplication and text that no longer informs implementation, review, or use.
+- Keep context and explanation as narrative Markdown. Create an item only when
+  durable meaning needs its own identity, relations, independent change, or
+  verification.
+- Keep one independently changeable semantic unit per item. Split content when
+  parts can be accepted, rejected, related, implemented, or verified
+  separately; keep examples, rationale, and supporting explanation with their
+  owning item unless they independently need identity.
+- Use only defined flavours, ID prefixes, and relations. If none fits, expose
+  the vocabulary gap instead of inventing one silently.
+- Add only relations that communicate useful meaning. Never create placeholder
+  items or links merely to complete a traceability chain.
+- Initially require only flavour, human ID, and title. Add lifecycle fields,
+  classifications, or validation constraints only for a demonstrated workflow.
 
 ## Delivery discipline
 
