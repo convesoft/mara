@@ -47,6 +47,10 @@ Repository-wide instructions for humans and software agents.
   invent another branch taxonomy or long-lived development and release branches.
 - Open one pull request per issue against `main`. Use Conventional Commit form
   for its title because GitHub may use the title for the squash commit.
+- Draft every pull request from [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md).
+  Preserve its sections, replace guidance comments with concise task-specific
+  facts, and include only issue references, Mara IDs, and verification evidence
+  that actually exist; use `N/A` where applicable.
 - Squash merge by default. Use rebase merge only when preserving multiple
   independently useful commits that already follow the commit convention.
 
