@@ -83,3 +83,16 @@ The document syntax has no embedded schema or project configuration. Introduce
 validation or new syntax only for a demonstrated workflow. Persisted format
 versions remain independent from the Mara application version.
 :::
+
+:::mara decision ADR-RUSHDOWN-PARSER-ADAPTER
+:title: Use Rushdown behind a Mara-owned Markdown adapter
+:justifies: DES-DOCUMENT-FORMAT
+
+Use Rushdown custom block and inline extensions to recognize Mara structures
+with Markdown-aware code and raw-context handling and exact source spans. A
+private adapter converts the Rushdown result immediately into Mara-owned values,
+containing third-party AST and parser API churn behind that boundary.
+
+This does not add the explicitly deferred complete Markdown AST to the alpha
+contract.
+:::

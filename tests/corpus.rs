@@ -141,13 +141,18 @@ fn parses_the_repository_documents_deterministically() {
 
     assert_eq!(first, second);
     assert_eq!(first.documents().len(), 4);
-    assert_eq!(first.items().count(), 39);
+    assert_eq!(first.items().count(), 40);
     assert!(
         first
             .items()
             .any(|item| item.id() == "REQ-CANONICAL-SOURCE")
     );
     assert!(first.items().any(|item| item.id() == "DES-DOCUMENT-FORMAT"));
+    assert!(
+        first
+            .items()
+            .any(|item| item.id() == "ADR-RUSHDOWN-PARSER-ADAPTER")
+    );
     assert!(!first.items().any(|item| item.id() == "REQ-FAIL-SAFETY"));
 }
 
@@ -275,4 +280,59 @@ fn excludes_mentions_inside_blockquoted_fenced_code() {
     let corpus = load_corpus(&project, &schema).unwrap();
 
     assert!(corpus.items().next().unwrap().mentions().is_empty());
+}
+
+#[test]
+fn recognizes_adjacent_item_delimiters_through_markdown_inline_parsing() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "adjacent.mara.md",
+        ":::mara requirement REQ-FIRST\n:title: First\n\nFirst body.\n:::\n:::mara requirement REQ-SECOND\n:title: Second\n\nSecond body.\n:::\n",
+    );
+
+    let corpus = load_corpus(&project, &schema).unwrap();
+
+    assert_eq!(
+        corpus.items().map(|item| item.id()).collect::<Vec<_>>(),
+        ["REQ-FIRST", "REQ-SECOND"]
+    );
+}
+
+#[test]
+fn ignores_mara_syntax_in_raw_html_blocks() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "raw.mara.md",
+        "<script>\n:::mara requirement REQ-EXAMPLE\n:title: Example\n\n[[REQ-NOT-DATA]]\n:::\n</script>\n\n:::mara requirement REQ-REAL\n:title: Real\n\n<script>\n[[REQ-NOT-DATA]]\n</script>\n\n[[REQ-TARGET]]\n:::\n",
+    );
+
+    let corpus = load_corpus(&project, &schema).unwrap();
+    let item = corpus.items().next().unwrap();
+
+    assert_eq!(corpus.items().count(), 1);
+    assert_eq!(item.id(), "REQ-REAL");
+    assert_eq!(
+        item.mentions()
+            .iter()
+            .map(|mention| mention.target())
+            .collect::<Vec<_>>(),
+        ["REQ-TARGET"]
+    );
+}
+
+#[test]
+fn rejects_nested_items_after_the_body_boundary() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "nested.mara.md",
+        ":::mara requirement REQ-OUTER\n:title: Outer\n\n:::mara requirement REQ-INNER\n:title: Inner\n\nBody.\n:::\n:::\n",
+    );
+
+    let error = load_corpus(&project, &schema).unwrap_err().to_string();
+
+    assert!(error.contains("nested.mara.md:4"), "{error}");
+    assert!(error.contains("items cannot nest"), "{error}");
 }

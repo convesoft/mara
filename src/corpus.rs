@@ -1,14 +1,13 @@
 use std::{
     fs, io,
-    ops::Range,
     path::{Path, PathBuf},
 };
 
+use crate::{Error, PROJECT_FILE, Project, Schema};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
-use pulldown_cmark::{Event, Parser as MarkdownParser, Tag, TagEnd};
 
-use crate::{Error, PROJECT_FILE, Project, Schema, is_item_id, is_snake_name};
+mod markdown;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Corpus {
@@ -277,42 +276,60 @@ fn is_mara_document(path: &Path) -> bool {
 }
 
 fn parse_document(path: PathBuf, source: String, schema: &Schema) -> Result<Document, Error> {
-    let lines = source_lines(&source);
-    let line_starts = lines.iter().map(|line| line.start).collect::<Vec<_>>();
-    let code_spans = markdown_code_spans(&source);
-    let mut items = Vec::new();
-    let mut line_index = 0;
-
-    while line_index < lines.len() {
-        let line = lines[line_index];
-        if within_span(line.start, &code_spans) {
-            line_index += 1;
-            continue;
-        }
-        if let Some((flavour, id)) = opener(line.text) {
-            let (item, next_line) = parse_item(
-                &path,
-                &source,
-                &lines,
-                &line_starts,
-                &code_spans,
-                line_index,
-                flavour,
-                id,
-                schema,
-            )?;
-            items.push(item);
-            line_index = next_line;
-        } else if looks_like_item_opener(line.text) {
-            return Err(invalid(
-                &path,
-                line.number,
-                "item opener must be ':::mara <flavour> <id>' with no other tokens",
-            ));
-        } else {
-            line_index += 1;
-        }
-    }
+    let parsed =
+        markdown::parse(&source).map_err(|error| invalid(&path, error.line, error.message))?;
+    let line_starts = source_lines(&source)
+        .iter()
+        .map(|line| line.start)
+        .collect::<Vec<_>>();
+    let items = parsed
+        .items
+        .into_iter()
+        .map(|parsed| {
+            let metadata = parsed
+                .metadata
+                .into_iter()
+                .map(|entry| MetadataEntry {
+                    key: entry.key,
+                    value: entry.value,
+                    source: location(&path, &line_starts, entry.source.start, entry.source.end),
+                })
+                .collect::<Vec<_>>();
+            let relations = metadata
+                .iter()
+                .filter(|entry| schema.relations().contains_key(&entry.key))
+                .map(|entry| Relation {
+                    name: entry.key.clone(),
+                    target: entry.value.clone(),
+                    source: entry.source.clone(),
+                })
+                .collect();
+            let mentions = parsed
+                .mentions
+                .into_iter()
+                .map(|mention| Mention {
+                    target: mention.target,
+                    source: location(
+                        &path,
+                        &line_starts,
+                        mention.source.start,
+                        mention.source.end,
+                    ),
+                })
+                .collect();
+            Item {
+                flavour: parsed.flavour,
+                id: parsed.id,
+                title: parsed.title,
+                metadata,
+                body: source[parsed.body.clone()].to_owned(),
+                relations,
+                mentions,
+                source: location(&path, &line_starts, parsed.source.start, parsed.source.end),
+                body_source: location(&path, &line_starts, parsed.body.start, parsed.body.end),
+            }
+        })
+        .collect();
 
     Ok(Document {
         path,
@@ -321,252 +338,23 @@ fn parse_document(path: PathBuf, source: String, schema: &Schema) -> Result<Docu
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn parse_item(
-    path: &Path,
-    source: &str,
-    lines: &[SourceLine<'_>],
-    line_starts: &[usize],
-    code_spans: &[Range<usize>],
-    opener_index: usize,
-    flavour: &str,
-    id: &str,
-    schema: &Schema,
-) -> Result<(Item, usize), Error> {
-    if !is_snake_name(flavour) {
-        return Err(invalid(
-            path,
-            lines[opener_index].number,
-            format!("invalid flavour '{flavour}'"),
-        ));
-    }
-    if !is_item_id(id) {
-        return Err(invalid(
-            path,
-            lines[opener_index].number,
-            format!("invalid item ID '{id}'"),
-        ));
-    }
-
-    let mut metadata = Vec::new();
-    let mut line_index = opener_index + 1;
-    while line_index < lines.len() && !lines[line_index].text.trim().is_empty() {
-        let line = lines[line_index];
-        let Some(rest) = line.text.strip_prefix(':') else {
-            return Err(invalid(
-                path,
-                line.number,
-                "expected metadata or a blank line before the item body",
-            ));
-        };
-        let Some((key, value)) = rest.split_once(':') else {
-            return Err(invalid(path, line.number, "invalid metadata entry"));
-        };
-        if !is_snake_name(key) {
-            return Err(invalid(
-                path,
-                line.number,
-                format!("invalid metadata key '{key}'"),
-            ));
-        }
-        metadata.push(MetadataEntry {
-            key: key.to_owned(),
-            value: value.trim().to_owned(),
-            source: location(path, line_starts, line.start, line.end),
-        });
-        line_index += 1;
-    }
-    if line_index == lines.len() {
-        return Err(invalid(
-            path,
-            lines[opener_index].number,
-            "item is missing its body boundary and closing delimiter",
-        ));
-    }
-
-    let title_entries = metadata
-        .iter()
-        .filter(|entry| entry.key == "title")
-        .collect::<Vec<_>>();
-    if title_entries.len() != 1 || title_entries[0].value.is_empty() {
-        return Err(invalid(
-            path,
-            lines[opener_index].number,
-            "item must have exactly one non-empty title entry",
-        ));
-    }
-    let title = title_entries[0].value.clone();
-    let body_start = lines[line_index].full_end;
-    line_index += 1;
-
-    let closing_index = loop {
-        let Some(line) = lines.get(line_index).copied() else {
-            return Err(invalid(
-                path,
-                lines[opener_index].number,
-                "item is missing its closing delimiter",
-            ));
-        };
-        if within_span(line.start, code_spans) {
-            line_index += 1;
-            continue;
-        }
-        if line.text == ":::" {
-            break line_index;
-        }
-        if looks_like_item_opener(line.text) {
-            let message = if opener(line.text).is_some() {
-                "items cannot nest"
-            } else {
-                "invalid nested item opener"
-            };
-            return Err(invalid(path, line.number, message));
-        }
-        line_index += 1;
-    };
-
-    let body_end = lines[closing_index].start;
-    let relations = metadata
-        .iter()
-        .filter(|entry| schema.relations().contains_key(&entry.key))
-        .map(|entry| Relation {
-            name: entry.key.clone(),
-            target: entry.value.clone(),
-            source: entry.source.clone(),
-        })
-        .collect();
-    let mentions = parse_mentions(path, source, line_starts, code_spans, body_start, body_end);
-    let item = Item {
-        flavour: flavour.to_owned(),
-        id: id.to_owned(),
-        title,
-        metadata,
-        body: source[body_start..body_end].to_owned(),
-        relations,
-        mentions,
-        source: location(
-            path,
-            line_starts,
-            lines[opener_index].start,
-            lines[closing_index].full_end,
-        ),
-        body_source: location(path, line_starts, body_start, body_end),
-    };
-    Ok((item, closing_index + 1))
-}
-
-fn parse_mentions(
-    path: &Path,
-    source: &str,
-    line_starts: &[usize],
-    code_spans: &[Range<usize>],
-    start: usize,
-    end: usize,
-) -> Vec<Mention> {
-    let mut mentions = Vec::new();
-    for line in source_lines(&source[start..end]) {
-        let bytes = line.text.as_bytes();
-        let mut index = 0;
-        while index < bytes.len() {
-            if bytes[index..].starts_with(b"[[")
-                && !escaped(bytes, index)
-                && let Some(relative_end) = line.text[index + 2..].find("]]")
-            {
-                let target_end = index + 2 + relative_end;
-                let target = &line.text[index + 2..target_end];
-                let mention_start = start + line.start + index;
-                if is_item_id(target) && !within_span(mention_start, code_spans) {
-                    let mention_end = start + line.start + target_end + 2;
-                    mentions.push(Mention {
-                        target: target.to_owned(),
-                        source: location(path, line_starts, mention_start, mention_end),
-                    });
-                    index = target_end + 2;
-                    continue;
-                }
-            }
-            index += 1;
-        }
-    }
-    mentions
-}
-
-fn markdown_code_spans(source: &str) -> Vec<Range<usize>> {
-    let mut spans = Vec::new();
-    let mut block_start = None;
-    for (event, source_range) in MarkdownParser::new(source).into_offset_iter() {
-        match event {
-            Event::Code(_) => spans.push(source_range),
-            Event::Start(Tag::CodeBlock(_)) => block_start = Some(source_range.start),
-            Event::End(TagEnd::CodeBlock) => {
-                if let Some(start) = block_start.take() {
-                    spans.push(start..source_range.end);
-                }
-            }
-            _ => {}
-        }
-    }
-    spans
-}
-
-fn within_span(byte: usize, spans: &[Range<usize>]) -> bool {
-    spans.iter().any(|span| span.contains(&byte))
-}
-
-fn escaped(bytes: &[u8], index: usize) -> bool {
-    let mut slashes = 0;
-    let mut cursor = index;
-    while cursor > 0 && bytes[cursor - 1] == b'\\' {
-        slashes += 1;
-        cursor -= 1;
-    }
-    slashes % 2 == 1
-}
-
-fn opener(line: &str) -> Option<(&str, &str)> {
-    let declaration = line.strip_prefix(":::mara ")?;
-    let (flavour, id) = declaration.split_once(' ')?;
-    (!flavour.is_empty() && !id.is_empty() && !id.bytes().any(|byte| byte.is_ascii_whitespace()))
-        .then_some((flavour, id))
-}
-
-fn looks_like_item_opener(line: &str) -> bool {
-    line == ":::mara" || line.starts_with(":::mara ")
-}
-
 #[derive(Clone, Copy)]
-struct SourceLine<'a> {
-    text: &'a str,
+struct SourceLine {
     start: usize,
-    end: usize,
-    full_end: usize,
-    number: usize,
 }
 
-fn source_lines(source: &str) -> Vec<SourceLine<'_>> {
+fn source_lines(source: &str) -> Vec<SourceLine> {
     let bytes = source.as_bytes();
     let mut lines = Vec::new();
     let mut start = 0;
-    let mut number = 1;
     while start < bytes.len() {
         let newline = bytes[start..]
             .iter()
             .position(|byte| *byte == b'\n')
             .map(|offset| start + offset);
         let full_end = newline.map_or(bytes.len(), |offset| offset + 1);
-        let mut end = newline.unwrap_or(bytes.len());
-        if end > start && bytes[end - 1] == b'\r' {
-            end -= 1;
-        }
-        lines.push(SourceLine {
-            text: &source[start..end],
-            start,
-            end,
-            full_end,
-            number,
-        });
+        lines.push(SourceLine { start });
         start = full_end;
-        number += 1;
     }
     lines
 }
