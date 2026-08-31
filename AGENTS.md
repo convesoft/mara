@@ -45,8 +45,13 @@ Repository-wide instructions for humans and software agents.
 - Start issue work from current `main` and use the Linear issue's generated
   `gitBranchName`. If it is unavailable, use `<identifier>-<short-title>`; do not
   invent another branch taxonomy or long-lived development and release branches.
-- Open one pull request per issue against `main`. Use Conventional Commit form
-  for its title because GitHub may use the title for the squash commit.
+- Open one pull request per issue against `main`. Its title must follow the
+  active commit form and approved-scope list under Commit messages because
+  GitHub may use the title for the squash commit.
+- Draft every pull request from [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md).
+  Preserve its sections, replace guidance comments with concise task-specific
+  facts, and include only issue references, Mara IDs, and verification evidence
+  that actually exist; use `N/A` where applicable.
 - Squash merge by default. Use rebase merge only when preserving multiple
   independently useful commits that already follow the commit convention.
 
@@ -85,6 +90,34 @@ Repository-wide instructions for humans and software agents.
   items or links merely to complete a traceability chain.
 - Initially require only flavour, human ID, and title. Add lifecycle fields,
   classifications, or validation constraints only for a demonstrated workflow.
+
+## Implementation readiness and knowledge maintenance
+
+- Before changing code, read the task, applicable Mara items, and current
+  implementation. Determine whether the documented contract is sufficient to
+  implement and verify the requested outcome.
+- Continue directly when remaining choices are local and reversible. Stop and
+  ask one concrete question when missing or contradictory knowledge would
+  materially change user-visible behaviour, persisted formats, compatibility,
+  data safety, task scope, or acceptance criteria; do not invent the answer.
+- Update canonical Mara documents in the same change whenever implementation
+  establishes or changes durable product meaning.
+- Add or update a `scenario` or `requirement` when observable expected behaviour
+  is missing or changed. Add an `actor` only when a durable participant
+  distinction affects behaviour or is referenced across multiple items.
+- Add or update a `design` when implementation introduces or changes a durable
+  interface, persisted format, cross-component contract, architectural boundary,
+  or important invariant. Keep routine code organization in code.
+- Record a `decision` only for a consequential choice among meaningful
+  alternatives: reversing it would change user-visible behaviour, persisted
+  formats or compatibility, cross-component architecture, data safety, or
+  require meaningful migration. If unresolved, ask before selecting it; once
+  settled, record the rationale and relate the decision to the affected
+  requirement or design with `justifies`. Do not record routine or easily
+  reversible choices.
+- Stop when the accepted outcome works end to end, its acceptance criteria have
+  evidence, relevant tests pass, and affected durable knowledge is current. Do
+  not extend the task into optional hardening, cleanup, or unrelated documentation.
 
 ## Delivery discipline
 
@@ -193,15 +226,17 @@ instructions in a Codex task:
 
 ## Commit messages
 
-- Use Conventional Commits: `<type>[optional scope][!]: <description>`.
+- Use Conventional Commits. Mara currently has no approved scopes, so use
+  `<type>: <description>` or `<type>!: <description>` for commits and pull
+  request titles.
 - Use `feat` for user-facing capability, `fix` for a defect, `docs` for
   documentation only, `refactor` for behavior-preserving restructuring,
   `perf` for performance, `test` for tests, `build` for build or dependencies,
   `ci` for CI, and `chore` for otherwise-unclassified maintenance.
-- Include a scope only when a clear, stable affected area exists. Reuse names
-  established by the repository's modules and recent history; omit the scope
-  while the project is too small, and never invent one merely to fill the
-  field.
+- Do not infer a scope from a CLI object (`project`, `schema`, `item`, or
+  `relation`), directory name, or existing feature-branch commit. Introduce
+  scopes only by updating this section with an explicit approved list after
+  stable repository boundaries exist.
 - Write a concise imperative description without a trailing period. Use the
   optional body for motivation or important context and git-trailer-style
   footers for references.

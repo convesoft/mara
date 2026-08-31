@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = ["."]
+
+[workspace.package]
+version = "0.1.0-alpha.0"
+edition = "2024"
+
+[package]
+name = "mara"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+toml = "1.1"
+
+[dev-dependencies]
+tempfile = "3"

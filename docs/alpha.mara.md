@@ -62,9 +62,11 @@ Direct reading, editing, and `ripgrep` remain supported workflows.
 :derives_from: SCN-START-STRUCTURED-PROJECT
 
 `mara project init` initializes the current directory. An optional path is
-created when absent or initialized when it is an existing directory. Existing
-content is not overwritten, and an existing Mara project is rejected. The
-default template is `minimal`; `--template empty` creates no project flavours.
+created when absent or initialized when it is an existing directory. Global
+`--project <path>` selects the initialization target when the positional path
+is omitted; supplying both is rejected. Existing content is not
+overwritten, and an existing Mara project is rejected. The default template is
+`minimal`; `--template empty` creates no project flavours.
 :::
 
 :::mara requirement REQ-PROJECT-DISCOVERY
@@ -178,12 +180,46 @@ flavour filters narrow results. Full bodies require explicit `item get` calls.
 :satisfies: REQ-PROJECT-INITIALIZATION
 :satisfies: REQ-PROJECT-DISCOVERY
 
-`.mara/project.toml` is the project-root marker and declares project-format
-version, project name, schema path, and content include patterns. Alpha respects
+`.mara/project.toml` is the project-root marker. Initialization writes draft
+format 1, derives the project name from the root directory, and selects the
+default schema and all Mara documents:
+
+```toml
+format_version = 1
+
+[project]
+name = "example"
+schema = ".mara/schema.yaml"
+
+[content]
+include = ["**/*.mara.md"]
+```
+
+Schema paths and content patterns are project-relative. Alpha respects
 `.gitignore`, skips directory symlinks, and builds query state in memory without
 configurable policies or a persisted index. Project and schema format versions
 start at draft version 1 and change only for incompatible persisted contracts,
 independently from application SemVer.
+:::
+
+:::mara decision ADR-EXPLICIT-INIT-TARGET
+:title: Use the global project option as an initialization target
+:justifies: REQ-PROJECT-INITIALIZATION
+
+Initialization accepts global `--project` as an alternative to its positional
+target so automation can use one explicit-root option across bootstrap and
+project-bound operations. The two forms conflict so target selection never
+depends on precedence.
+:::
+
+:::mara decision ADR-STRICT-PROJECT-CONFIGURATION
+:title: Reject unknown project configuration fields
+:justifies: DES-PROJECT-CONFIGURATION
+
+Project format 1 rejects unknown fields instead of ignoring them. This makes
+misspellings and unsupported settings fail visibly rather than appear accepted,
+and requires compatibility changes to update the documented format and loader
+deliberately.
 :::
 
 :::mara design DES-MINIMAL-SCHEMA
@@ -191,10 +227,11 @@ independently from application SemVer.
 :satisfies: REQ-SCHEMA-DISCOVERY
 :satisfies: REQ-PROJECT-VALIDATION
 
-The default schema provides `scenario`, `requirement`, `design`, and `decision`.
-It declares concise descriptions, ID prefixes, optional or required bodies, and
-flat custom fields of type string, integer, number, boolean, or enum with
-required and repeatable constraints.
+The default `minimal` template writes `.mara/schema.yaml` draft format 1 with
+`scenario`, `requirement`, `design`, and `decision`; `empty` writes empty
+`flavours` and `relations` maps. A flavour declares its description, ID prefix,
+body requirement, and custom fields. Custom fields are flat string, integer,
+number, boolean, or enum values with required and repeatable constraints.
 
 Initial relations are `derives_from`, `depends_on`, `satisfies`, `justifies`,
 and `supersedes`:
