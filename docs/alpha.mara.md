@@ -200,6 +200,16 @@ start at draft version 1 and change only for incompatible persisted contracts,
 independently from application SemVer.
 :::
 
+:::mara decision ADR-STRICT-PROJECT-CONFIGURATION
+:title: Reject unknown project configuration fields
+:justifies: DES-PROJECT-CONFIGURATION
+
+Project format 1 rejects unknown fields instead of ignoring them. This makes
+misspellings and unsupported settings fail visibly rather than appear accepted,
+and requires compatibility changes to update the documented format and loader
+deliberately.
+:::
+
 :::mara design DES-MINIMAL-SCHEMA
 :title: Minimal default schema
 :satisfies: REQ-SCHEMA-DISCOVERY
