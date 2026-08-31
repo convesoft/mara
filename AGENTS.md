@@ -103,8 +103,12 @@ Repository-wide instructions for humans and software agents.
 - Add or update a `design` when implementation introduces or changes a durable
   interface, persisted format, cross-component contract, architectural boundary,
   or important invariant. Keep routine code organization in code.
-- Record a `decision` only when choosing among meaningful alternatives and the
-  rationale should survive implementation. Do not record routine or easily
+- Record a `decision` only for a consequential choice among meaningful
+  alternatives: reversing it would change user-visible behaviour, persisted
+  formats or compatibility, cross-component architecture, data safety, or
+  require meaningful migration. If unresolved, ask before selecting it; once
+  settled, record the rationale and relate the decision to the affected
+  requirement or design with `justifies`. Do not record routine or easily
   reversible choices.
 - Stop when the accepted outcome works end to end, its acceptance criteria have
   evidence, relevant tests pass, and affected durable knowledge is current. Do
