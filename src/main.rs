@@ -1,7 +1,10 @@
 use std::{collections::BTreeMap, env, path::PathBuf, process::ExitCode};
 
 use clap::{Parser, Subcommand, ValueEnum};
-use mara::{Schema, Template, initialize_project, load_schema, resolve_project};
+use mara::{
+    Diagnostic, Schema, Template, initialize_project, load_corpus_for_validation, load_schema,
+    resolve_project, validate_corpus,
+};
 use serde::Serialize;
 
 #[derive(Debug, Parser)]
@@ -29,6 +32,10 @@ enum Command {
         #[command(subcommand)]
         command: SchemaCommand,
     },
+    Item {
+        #[command(subcommand)]
+        command: ItemCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -39,6 +46,12 @@ enum ProjectCommand {
         #[arg(long, value_enum, default_value_t)]
         template: CliTemplate,
     },
+    Validate,
+}
+
+#[derive(Debug, Subcommand)]
+enum ItemCommand {
+    Validate { id: String },
 }
 
 #[derive(Debug, Subcommand)]
@@ -111,6 +124,22 @@ fn run(cli: Cli) -> Result<(), String> {
             println!("created {SCHEMA_FILE}", SCHEMA_FILE = mara::SCHEMA_FILE);
             Ok(())
         }
+        Command::Project {
+            command: ProjectCommand::Validate,
+        } => {
+            let (project, corpus, diagnostics) = load_selected_project(project)?;
+            report_diagnostics(&project, &corpus, diagnostics, None)
+        }
+        Command::Item {
+            command: ItemCommand::Validate { id },
+        } => {
+            let (project, corpus, diagnostics) = load_selected_project(project)?;
+            let matches = corpus.items().filter(|item| item.id() == id).count();
+            if matches == 0 {
+                return Err(format!("item '{id}' was not found"));
+            }
+            report_diagnostics(&project, &corpus, diagnostics, Some(&id))
+        }
         Command::Schema { command } => {
             let current_directory = env::current_dir()
                 .map_err(|error| format!("could not read current directory: {error}"))?;
@@ -120,6 +149,63 @@ fn run(cli: Cli) -> Result<(), String> {
             run_schema_command(command, &project, &schema)
         }
     }
+}
+
+fn load_selected_project(
+    selected: Option<PathBuf>,
+) -> Result<(mara::Project, mara::Corpus, Vec<Diagnostic>), String> {
+    let cwd =
+        env::current_dir().map_err(|error| format!("could not read current directory: {error}"))?;
+    let project = resolve_project(selected.as_deref(), cwd).map_err(|error| error.to_string())?;
+    let schema = load_schema(&project).map_err(|error| error.to_string())?;
+    let (corpus, diagnostics) =
+        load_corpus_for_validation(&project, &schema).map_err(|error| error.to_string())?;
+    Ok((project, corpus, diagnostics))
+}
+
+fn report_diagnostics(
+    project: &mara::Project,
+    corpus: &mara::Corpus,
+    mut diagnostics: Vec<Diagnostic>,
+    selected: Option<&str>,
+) -> Result<(), String> {
+    let schema = load_schema(project).map_err(|error| error.to_string())?;
+    diagnostics.extend(validate_corpus(corpus, &schema));
+    let diagnostics = diagnostics
+        .into_iter()
+        .filter(|diagnostic| {
+            selected.is_none_or(|id| {
+                corpus.items().filter(|item| item.id() == id).any(|item| {
+                    diagnostic.source().span().start_byte() >= item.source().span().start_byte()
+                        && diagnostic.source().span().end_byte() <= item.source().span().end_byte()
+                        && diagnostic.source().path() == item.source().path()
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    if diagnostics.is_empty() {
+        println!(
+            "valid {}",
+            selected.map_or_else(
+                || format!("project at {}", project.root().display()),
+                |id| format!("item '{id}'")
+            )
+        );
+        return Ok(());
+    }
+    for diagnostic in &diagnostics {
+        eprintln!(
+            "{}:{}: error: {}",
+            diagnostic.source().path().display(),
+            diagnostic.source().span().start_line(),
+            diagnostic.message()
+        );
+    }
+    Err(format!(
+        "validation failed with {} diagnostic{}",
+        diagnostics.len(),
+        if diagnostics.len() == 1 { "" } else { "s" }
+    ))
 }
 
 fn run_schema_command(

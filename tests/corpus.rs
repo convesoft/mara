@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use mara::{Template, initialize_project, load_corpus, load_schema};
+use mara::{Template, initialize_project, load_corpus, load_corpus_for_validation, load_schema};
 use tempfile::TempDir;
 
 fn initialized_project() -> (TempDir, mara::Project, mara::Schema) {
@@ -169,6 +169,25 @@ fn reports_malformed_item_openers_instead_of_silently_dropping_data() {
 
     assert!(error.contains("broken.mara.md:1"), "{error}");
     assert!(error.contains("with no other tokens"), "{error}");
+}
+
+#[test]
+fn validation_retains_independent_document_parse_diagnostics() {
+    let (fixture, project, schema) = initialized_project();
+    for name in ["first", "second"] {
+        write(
+            fixture.path(),
+            &format!("{name}.mara.md"),
+            ":::mara requirement REQ-BROKEN trailing\n:title: Broken\n\nBody.\n:::\n",
+        );
+    }
+
+    let (corpus, diagnostics) = load_corpus_for_validation(&project, &schema).unwrap();
+
+    assert!(corpus.documents().is_empty());
+    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(diagnostics[0].source().path(), Path::new("first.mara.md"));
+    assert_eq!(diagnostics[1].source().path(), Path::new("second.mara.md"));
 }
 
 #[test]

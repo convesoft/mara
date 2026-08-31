@@ -1,9 +1,10 @@
 use std::{
+    collections::BTreeMap,
     fs, io,
     path::{Path, PathBuf},
 };
 
-use crate::{Error, PROJECT_FILE, Project, Schema};
+use crate::{BodyRequirement, Error, FieldType, PROJECT_FILE, Project, Schema};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
 
@@ -193,6 +194,287 @@ impl SourceSpan {
 
     pub fn end_line(self) -> usize {
         self.end_line
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Diagnostic {
+    source: SourceLocation,
+    message: String,
+}
+
+impl Diagnostic {
+    pub fn source(&self) -> &SourceLocation {
+        &self.source
+    }
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let mut ids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
+    for item in corpus.items() {
+        ids.entry(item.id()).or_default().push(item);
+    }
+
+    for duplicates in ids.values().filter(|items| items.len() > 1) {
+        for item in duplicates {
+            diagnostic(
+                &mut diagnostics,
+                item.source(),
+                format!("duplicate item ID '{}'", item.id()),
+            );
+        }
+    }
+
+    for item in corpus.items() {
+        let Some(flavour) = schema.flavours.get(item.flavour()) else {
+            diagnostic(
+                &mut diagnostics,
+                item.source(),
+                format!("unknown flavour '{}'", item.flavour()),
+            );
+            for relation in item.relations() {
+                if !ids.contains_key(relation.target()) {
+                    diagnostic(
+                        &mut diagnostics,
+                        relation.source(),
+                        format!(
+                            "relation '{}' references missing item '{}'",
+                            relation.name(),
+                            relation.target()
+                        ),
+                    );
+                }
+            }
+            for mention in item.mentions() {
+                if !ids.contains_key(mention.target()) {
+                    diagnostic(
+                        &mut diagnostics,
+                        mention.source(),
+                        format!("mention references missing item '{}'", mention.target()),
+                    );
+                }
+            }
+            continue;
+        };
+        if !item.id().starts_with(&flavour.id_prefix) {
+            diagnostic(
+                &mut diagnostics,
+                item.source(),
+                format!(
+                    "item ID '{}' must start with '{}' for flavour '{}'",
+                    item.id(),
+                    flavour.id_prefix,
+                    item.flavour()
+                ),
+            );
+        }
+        if flavour.body == BodyRequirement::Required && item.body().trim().is_empty() {
+            diagnostic(
+                &mut diagnostics,
+                item.body_source(),
+                "required body is empty".into(),
+            );
+        }
+
+        let mut fields: BTreeMap<&str, Vec<&MetadataEntry>> = BTreeMap::new();
+        for entry in item
+            .metadata()
+            .iter()
+            .filter(|entry| entry.key() != "title")
+        {
+            if let Some(field) = flavour.fields.get(entry.key()) {
+                fields.entry(entry.key()).or_default().push(entry);
+                if !valid_field_value(field.field_type, field.values.as_deref(), entry.value()) {
+                    diagnostic(
+                        &mut diagnostics,
+                        entry.source(),
+                        format!(
+                            "invalid {} value '{}' for field '{}'",
+                            field_type_name(field.field_type),
+                            entry.value(),
+                            entry.key()
+                        ),
+                    );
+                }
+            } else if let Some(relation) = schema.relations.get(entry.key()) {
+                if !relation
+                    .source
+                    .iter()
+                    .any(|source| source == item.flavour())
+                {
+                    diagnostic(
+                        &mut diagnostics,
+                        entry.source(),
+                        format!(
+                            "relation '{}' does not allow source flavour '{}'",
+                            entry.key(),
+                            item.flavour()
+                        ),
+                    );
+                }
+            } else {
+                diagnostic(
+                    &mut diagnostics,
+                    entry.source(),
+                    format!("unknown metadata field '{}'", entry.key()),
+                );
+            }
+        }
+        for (name, field) in &flavour.fields {
+            let entries = fields
+                .get(name.as_str())
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            if field.required && entries.is_empty() {
+                diagnostic(
+                    &mut diagnostics,
+                    item.source(),
+                    format!("required field '{name}' is missing"),
+                );
+            }
+            if !field.repeatable && entries.len() > 1 {
+                for entry in &entries[1..] {
+                    diagnostic(
+                        &mut diagnostics,
+                        entry.source(),
+                        format!("field '{name}' is not repeatable"),
+                    );
+                }
+            }
+        }
+        for relation in item.relations() {
+            if let Some(definition) = schema.relations.get(relation.name()) {
+                if let Some(targets) = ids.get(relation.target()) {
+                    if targets.len() == 1 {
+                        let target = targets[0];
+                        if !definition
+                            .target
+                            .iter()
+                            .any(|flavour| flavour == target.flavour())
+                        {
+                            diagnostic(
+                                &mut diagnostics,
+                                relation.source(),
+                                format!(
+                                    "relation '{}' does not allow target flavour '{}'",
+                                    relation.name(),
+                                    target.flavour()
+                                ),
+                            );
+                        }
+                        if definition.same_flavour && target.flavour() != item.flavour() {
+                            diagnostic(
+                                &mut diagnostics,
+                                relation.source(),
+                                format!(
+                                    "relation '{}' requires matching source and target flavours",
+                                    relation.name()
+                                ),
+                            );
+                        }
+                    }
+                } else {
+                    diagnostic(
+                        &mut diagnostics,
+                        relation.source(),
+                        format!(
+                            "relation '{}' references missing item '{}'",
+                            relation.name(),
+                            relation.target()
+                        ),
+                    );
+                }
+            }
+        }
+        for mention in item.mentions() {
+            if !ids.contains_key(mention.target()) {
+                diagnostic(
+                    &mut diagnostics,
+                    mention.source(),
+                    format!("mention references missing item '{}'", mention.target()),
+                );
+            }
+        }
+    }
+    diagnostics.sort_by(|a, b| {
+        (a.source.path(), a.source.span().start_line(), &a.message).cmp(&(
+            b.source.path(),
+            b.source.span().start_line(),
+            &b.message,
+        ))
+    });
+    diagnostics
+}
+
+pub fn load_corpus_for_validation(
+    project: &Project,
+    schema: &Schema,
+) -> Result<(Corpus, Vec<Diagnostic>), Error> {
+    let matcher = content_matcher(project)?;
+    let paths = discover(project.root(), &matcher)?;
+    let mut documents = Vec::with_capacity(paths.len());
+    let mut diagnostics = Vec::new();
+    for relative_path in paths {
+        let absolute_path = project.root().join(&relative_path);
+        let source = fs::read_to_string(&absolute_path).map_err(|source| Error::Io {
+            action: "read Mara document",
+            path: absolute_path,
+            source,
+        })?;
+        match parse_document(relative_path, source, schema) {
+            Ok(document) => documents.push(document),
+            Err(Error::InvalidDocument {
+                path,
+                line,
+                message,
+            }) => diagnostics.push(Diagnostic {
+                source: SourceLocation {
+                    path,
+                    span: SourceSpan {
+                        start_byte: 0,
+                        end_byte: 0,
+                        start_line: line,
+                        end_line: line,
+                    },
+                },
+                message,
+            }),
+            Err(error) => return Err(error),
+        }
+    }
+    Ok((Corpus { documents }, diagnostics))
+}
+
+fn diagnostic(diagnostics: &mut Vec<Diagnostic>, source: &SourceLocation, message: String) {
+    diagnostics.push(Diagnostic {
+        source: source.clone(),
+        message,
+    });
+}
+
+fn valid_field_value(kind: FieldType, values: Option<&[String]>, value: &str) -> bool {
+    match kind {
+        FieldType::String => true,
+        FieldType::Integer => value.parse::<i64>().is_ok(),
+        FieldType::Number => value.parse::<f64>().is_ok(),
+        FieldType::Boolean => matches!(value, "true" | "false"),
+        FieldType::Enum => {
+            values.is_some_and(|values| values.iter().any(|candidate| candidate == value))
+        }
+    }
+}
+
+fn field_type_name(kind: FieldType) -> &'static str {
+    match kind {
+        FieldType::String => "string",
+        FieldType::Integer => "integer",
+        FieldType::Number => "number",
+        FieldType::Boolean => "boolean",
+        FieldType::Enum => "enum",
     }
 }
 

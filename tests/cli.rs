@@ -163,15 +163,70 @@ fn rejects_non_project_relative_content_patterns() {
 }
 
 #[test]
-fn defers_project_validate_until_full_corpus_validation_exists() {
+fn project_and_item_validation_run_through_the_real_cli() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
     assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("valid.mara.md"),
+        ":::mara requirement REQ-VALID\n:title: Valid\n\nA complete requirement.\n:::\n",
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+    assert!(stdout(&validate).contains("valid project"));
+
+    let item = mara(fixture.path(), &["item", "validate", "REQ-VALID"]);
+    assert!(item.status.success(), "{}", stderr(&item));
+    assert!(stdout(&item).contains("valid item 'REQ-VALID'"));
+}
+
+#[test]
+fn project_validation_reports_all_independently_available_diagnostics() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        r#":::mara requirement WRONG-ID
+:title: Invalid
+:unknown: value
+:derives_from: MISSING-RELATION
+
+Mentions [[MISSING-MENTION]].
+:::
+
+:::mara mystery MYS-UNKNOWN
+:title: Unknown
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
 
     let validate = mara(fixture.path(), &["project", "validate"]);
 
     assert!(!validate.status.success());
-    assert!(stderr(&validate).contains("unrecognized subcommand 'validate'"));
+    let errors = stderr(&validate);
+    for expected in [
+        "item ID 'WRONG-ID' must start with 'REQ-'",
+        "unknown metadata field 'unknown'",
+        "references missing item 'MISSING-RELATION'",
+        "mention references missing item 'MISSING-MENTION'",
+        "unknown flavour 'mystery'",
+        "validation failed with 5 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+
+    let item = mara(fixture.path(), &["item", "validate", "WRONG-ID"]);
+    assert!(!item.status.success());
+    assert!(stderr(&item).contains("validation failed with 4 diagnostics"));
 }
 
 #[test]

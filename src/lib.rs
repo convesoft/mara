@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 mod corpus;
 
 pub use corpus::{
-    Corpus, Document, Item, Mention, MetadataEntry, Relation, SourceLocation, SourceSpan,
-    load_corpus,
+    Corpus, Diagnostic, Document, Item, Mention, MetadataEntry, Relation, SourceLocation,
+    SourceSpan, load_corpus, load_corpus_for_validation, validate_corpus,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";
