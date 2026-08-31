@@ -1,0 +1,387 @@
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
+
+use crate::{Error, PROJECT_FILE, Project, Schema};
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
+use ignore::WalkBuilder;
+
+mod markdown;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Corpus {
+    documents: Vec<Document>,
+}
+
+impl Corpus {
+    pub fn documents(&self) -> &[Document] {
+        &self.documents
+    }
+
+    pub fn items(&self) -> impl Iterator<Item = &Item> {
+        self.documents.iter().flat_map(|document| document.items())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Document {
+    path: PathBuf,
+    source: String,
+    items: Vec<Item>,
+}
+
+impl Document {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub fn items(&self) -> &[Item] {
+        &self.items
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Item {
+    flavour: String,
+    id: String,
+    title: String,
+    metadata: Vec<MetadataEntry>,
+    body: String,
+    relations: Vec<Relation>,
+    mentions: Vec<Mention>,
+    source: SourceLocation,
+    body_source: SourceLocation,
+}
+
+impl Item {
+    pub fn flavour(&self) -> &str {
+        &self.flavour
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn metadata(&self) -> &[MetadataEntry] {
+        &self.metadata
+    }
+
+    pub fn body(&self) -> &str {
+        &self.body
+    }
+
+    pub fn relations(&self) -> &[Relation] {
+        &self.relations
+    }
+
+    pub fn mentions(&self) -> &[Mention] {
+        &self.mentions
+    }
+
+    pub fn source(&self) -> &SourceLocation {
+        &self.source
+    }
+
+    pub fn body_source(&self) -> &SourceLocation {
+        &self.body_source
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetadataEntry {
+    key: String,
+    value: String,
+    source: SourceLocation,
+}
+
+impl MetadataEntry {
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    pub fn source(&self) -> &SourceLocation {
+        &self.source
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Relation {
+    name: String,
+    target: String,
+    source: SourceLocation,
+}
+
+impl Relation {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn target(&self) -> &str {
+        &self.target
+    }
+
+    pub fn source(&self) -> &SourceLocation {
+        &self.source
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mention {
+    target: String,
+    source: SourceLocation,
+}
+
+impl Mention {
+    pub fn target(&self) -> &str {
+        &self.target
+    }
+
+    pub fn source(&self) -> &SourceLocation {
+        &self.source
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceLocation {
+    path: PathBuf,
+    span: SourceSpan,
+}
+
+impl SourceLocation {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn span(&self) -> SourceSpan {
+        self.span
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SourceSpan {
+    start_byte: usize,
+    end_byte: usize,
+    start_line: usize,
+    end_line: usize,
+}
+
+impl SourceSpan {
+    pub fn start_byte(self) -> usize {
+        self.start_byte
+    }
+
+    pub fn end_byte(self) -> usize {
+        self.end_byte
+    }
+
+    pub fn start_line(self) -> usize {
+        self.start_line
+    }
+
+    pub fn end_line(self) -> usize {
+        self.end_line
+    }
+}
+
+pub fn load_corpus(project: &Project, schema: &Schema) -> Result<Corpus, Error> {
+    let matcher = content_matcher(project)?;
+    let paths = discover(project.root(), &matcher)?;
+
+    let mut documents = Vec::with_capacity(paths.len());
+    for relative_path in paths {
+        let absolute_path = project.root().join(&relative_path);
+        let source = fs::read_to_string(&absolute_path).map_err(|source| Error::Io {
+            action: "read Mara document",
+            path: absolute_path,
+            source,
+        })?;
+        documents.push(parse_document(relative_path, source, schema)?);
+    }
+    Ok(Corpus { documents })
+}
+
+fn content_matcher(project: &Project) -> Result<GlobSet, Error> {
+    let mut builder = GlobSetBuilder::new();
+    for pattern in project.content_patterns() {
+        let glob = GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+            .map_err(|error| Error::InvalidProject {
+                path: project.root().join(PROJECT_FILE),
+                message: format!("invalid content.include pattern '{pattern}': {error}"),
+            })?;
+        builder.add(glob);
+    }
+    builder.build().map_err(|error| Error::InvalidProject {
+        path: project.root().join(PROJECT_FILE),
+        message: format!("could not compile content.include patterns: {error}"),
+    })
+}
+
+fn discover(root: &Path, matcher: &GlobSet) -> Result<Vec<PathBuf>, Error> {
+    let mut builder = WalkBuilder::new(root);
+    builder
+        .hidden(false)
+        .ignore(false)
+        .git_ignore(true)
+        .git_exclude(false)
+        .git_global(false)
+        .parents(true)
+        .require_git(false)
+        .follow_links(false);
+
+    let mut paths = Vec::new();
+    for entry in builder.build() {
+        let entry = entry.map_err(|source| Error::Io {
+            action: "discover Mara documents",
+            path: root.to_path_buf(),
+            source: io::Error::other(source),
+        })?;
+        if !entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_file())
+        {
+            continue;
+        }
+        let relative = entry
+            .path()
+            .strip_prefix(root)
+            .expect("discovered content remains below the project root")
+            .to_path_buf();
+        if is_mara_document(&relative) && matcher.is_match(&relative) {
+            paths.push(relative);
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+fn is_mara_document(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".mara.md"))
+}
+
+fn parse_document(path: PathBuf, source: String, schema: &Schema) -> Result<Document, Error> {
+    let parsed =
+        markdown::parse(&source).map_err(|error| invalid(&path, error.line, error.message))?;
+    let line_starts = source_lines(&source)
+        .iter()
+        .map(|line| line.start)
+        .collect::<Vec<_>>();
+    let items = parsed
+        .items
+        .into_iter()
+        .map(|parsed| {
+            let metadata = parsed
+                .metadata
+                .into_iter()
+                .map(|entry| MetadataEntry {
+                    key: entry.key,
+                    value: entry.value,
+                    source: location(&path, &line_starts, entry.source.start, entry.source.end),
+                })
+                .collect::<Vec<_>>();
+            let relations = metadata
+                .iter()
+                .filter(|entry| schema.relations().contains_key(&entry.key))
+                .map(|entry| Relation {
+                    name: entry.key.clone(),
+                    target: entry.value.clone(),
+                    source: entry.source.clone(),
+                })
+                .collect();
+            let mentions = parsed
+                .mentions
+                .into_iter()
+                .map(|mention| Mention {
+                    target: mention.target,
+                    source: location(
+                        &path,
+                        &line_starts,
+                        mention.source.start,
+                        mention.source.end,
+                    ),
+                })
+                .collect();
+            Item {
+                flavour: parsed.flavour,
+                id: parsed.id,
+                title: parsed.title,
+                metadata,
+                body: source[parsed.body.clone()].to_owned(),
+                relations,
+                mentions,
+                source: location(&path, &line_starts, parsed.source.start, parsed.source.end),
+                body_source: location(&path, &line_starts, parsed.body.start, parsed.body.end),
+            }
+        })
+        .collect();
+
+    Ok(Document {
+        path,
+        source,
+        items,
+    })
+}
+
+#[derive(Clone, Copy)]
+struct SourceLine {
+    start: usize,
+}
+
+fn source_lines(source: &str) -> Vec<SourceLine> {
+    let bytes = source.as_bytes();
+    let mut lines = Vec::new();
+    let mut start = 0;
+    while start < bytes.len() {
+        let newline = bytes[start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|offset| start + offset);
+        let full_end = newline.map_or(bytes.len(), |offset| offset + 1);
+        lines.push(SourceLine { start });
+        start = full_end;
+    }
+    lines
+}
+
+fn location(path: &Path, line_starts: &[usize], start: usize, end: usize) -> SourceLocation {
+    SourceLocation {
+        path: path.to_path_buf(),
+        span: SourceSpan {
+            start_byte: start,
+            end_byte: end,
+            start_line: line_number(line_starts, start),
+            end_line: line_number(line_starts, end.saturating_sub(1).max(start)),
+        },
+    }
+}
+
+fn line_number(line_starts: &[usize], byte: usize) -> usize {
+    if line_starts.is_empty() {
+        return 1;
+    }
+    line_starts.partition_point(|start| *start <= byte).max(1)
+}
+
+fn invalid(path: &Path, line: usize, message: impl Into<String>) -> Error {
+    Error::InvalidDocument {
+        path: path.to_path_buf(),
+        line,
+        message: message.into(),
+    }
+}

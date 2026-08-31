@@ -8,6 +8,13 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+mod corpus;
+
+pub use corpus::{
+    Corpus, Document, Item, Mention, MetadataEntry, Relation, SourceLocation, SourceSpan,
+    load_corpus,
+};
+
 pub const PROJECT_FILE: &str = ".mara/project.toml";
 pub const SCHEMA_FILE: &str = ".mara/schema.yaml";
 
@@ -22,6 +29,7 @@ pub struct Project {
     root: PathBuf,
     name: String,
     schema_path: PathBuf,
+    content_patterns: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -233,6 +241,10 @@ impl Project {
     pub fn schema_path(&self) -> &Path {
         &self.schema_path
     }
+
+    pub fn content_patterns(&self) -> &[String] {
+        &self.content_patterns
+    }
 }
 
 #[derive(Debug)]
@@ -252,6 +264,11 @@ pub enum Error {
     },
     InvalidSchema {
         path: PathBuf,
+        message: String,
+    },
+    InvalidDocument {
+        path: PathBuf,
+        line: usize,
         message: String,
     },
     Io {
@@ -295,6 +312,15 @@ impl fmt::Display for Error {
                     path.display()
                 )
             }
+            Self::InvalidDocument {
+                path,
+                line,
+                message,
+            } => write!(
+                formatter,
+                "invalid Mara document at {}:{line}: {message}",
+                path.display()
+            ),
             Self::Io {
                 action,
                 path,
@@ -535,6 +561,7 @@ fn load_project_root(root: &Path) -> Result<Project, Error> {
         root,
         name: configuration.project.name,
         schema_path,
+        content_patterns: configuration.content.include,
     })
 }
 
@@ -578,6 +605,26 @@ fn is_id_prefix(prefix: &str) -> bool {
         .next()
         .is_some_and(|character| character.is_ascii_uppercase())
         && characters.all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
+        && segments.all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
+        })
+}
+
+fn is_item_id(id: &str) -> bool {
+    let mut segments = id.split('-');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    let mut characters = first.chars();
+    let valid_first = characters
+        .next()
+        .is_some_and(|character| character.is_ascii_uppercase())
+        && characters.all(|character| character.is_ascii_uppercase() || character.is_ascii_digit());
+    valid_first
+        && segments.clone().next().is_some()
         && segments.all(|segment| {
             !segment.is_empty()
                 && segment
