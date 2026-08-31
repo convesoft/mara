@@ -414,6 +414,19 @@ pub fn load_corpus_for_validation(
     project: &Project,
     schema: &Schema,
 ) -> Result<(Corpus, Vec<Diagnostic>), Error> {
+    load_corpus_for_validation_with_schema(project, Some(schema))
+}
+
+pub fn load_corpus_syntax_for_validation(
+    project: &Project,
+) -> Result<(Corpus, Vec<Diagnostic>), Error> {
+    load_corpus_for_validation_with_schema(project, None)
+}
+
+fn load_corpus_for_validation_with_schema(
+    project: &Project,
+    schema: Option<&Schema>,
+) -> Result<(Corpus, Vec<Diagnostic>), Error> {
     let matcher = content_matcher(project)?;
     let paths = discover(project.root(), &matcher)?;
     let mut documents = Vec::with_capacity(paths.len());
@@ -432,8 +445,8 @@ pub fn load_corpus_for_validation(
             source: SourceLocation {
                 path: relative_path.clone(),
                 span: SourceSpan {
-                    start_byte: 0,
-                    end_byte: 0,
+                    start_byte: error.source.start,
+                    end_byte: error.source.end,
                     start_line: error.line,
                     end_line: error.line,
                 },
@@ -558,13 +571,13 @@ fn is_mara_document(path: &Path) -> bool {
 fn parse_document(path: PathBuf, source: String, schema: &Schema) -> Result<Document, Error> {
     let parsed =
         markdown::parse(&source).map_err(|error| invalid(&path, error.line, error.message))?;
-    Ok(project_document(path, source, schema, parsed))
+    Ok(project_document(path, source, Some(schema), parsed))
 }
 
 fn parse_document_for_validation(
     path: PathBuf,
     source: String,
-    schema: &Schema,
+    schema: Option<&Schema>,
 ) -> (Document, Vec<markdown::ParseError>) {
     let (parsed, errors) = markdown::parse_for_validation(&source);
     (project_document(path, source, schema, parsed), errors)
@@ -573,7 +586,7 @@ fn parse_document_for_validation(
 fn project_document(
     path: PathBuf,
     source: String,
-    schema: &Schema,
+    schema: Option<&Schema>,
     parsed: markdown::ParsedDocument,
 ) -> Document {
     let line_starts = source_lines(&source)
@@ -595,7 +608,9 @@ fn project_document(
                 .collect::<Vec<_>>();
             let relations = metadata
                 .iter()
-                .filter(|entry| schema.relations().contains_key(&entry.key))
+                .filter(|entry| {
+                    schema.is_some_and(|schema| schema.relations().contains_key(&entry.key))
+                })
                 .map(|entry| Relation {
                     name: entry.key.clone(),
                     target: entry.value.clone(),

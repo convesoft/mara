@@ -230,6 +230,70 @@ Body.
 }
 
 #[test]
+fn item_validation_retains_recovered_syntax_diagnostics() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("nested.mara.md"),
+        r#":::mara requirement REQ-OUTER
+:title: Outer
+
+:::mara requirement REQ-INNER
+:title: Inner
+
+Inner body.
+:::
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["item", "validate", "REQ-INNER"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert!(
+        errors.contains("nested.mara.md:4: error: items cannot nest"),
+        "{errors}"
+    );
+}
+
+#[test]
+fn project_validation_reports_schema_and_independent_syntax_diagnostics() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace("id_prefix: REQ-", "id_prefix: REQ--"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("broken.mara.md"),
+        ":::mara requirement REQ-BROKEN trailing\n:title: Broken\n\nBody.\n:::\n",
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "flavour 'requirement' has invalid ID prefix 'REQ--'",
+        "item opener must be ':::mara <flavour> <id>' with no other tokens",
+        "validation failed with 2 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
 fn real_cli_discovers_and_inspects_the_effective_minimal_schema() {
     let fixture = TempDir::new().unwrap();
     let project_root = fixture.path().join("project");

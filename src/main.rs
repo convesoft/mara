@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, env, path::PathBuf, process::ExitCode};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mara::{
-    Diagnostic, Schema, Template, initialize_project, load_corpus_for_validation, load_schema,
-    resolve_project, validate_corpus,
+    Diagnostic, Schema, Template, initialize_project, load_corpus_for_validation,
+    load_corpus_syntax_for_validation, load_schema, resolve_project, validate_corpus,
 };
 use serde::Serialize;
 
@@ -83,6 +83,14 @@ enum CliTemplate {
     Empty,
 }
 
+struct ValidationContext {
+    project: mara::Project,
+    corpus: mara::Corpus,
+    schema: Option<Schema>,
+    diagnostics: Vec<Diagnostic>,
+    schema_error: Option<String>,
+}
+
 impl From<CliTemplate> for Template {
     fn from(value: CliTemplate) -> Self {
         match value {
@@ -127,18 +135,22 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Project {
             command: ProjectCommand::Validate,
         } => {
-            let (project, corpus, diagnostics) = load_selected_project(project)?;
-            report_diagnostics(&project, &corpus, diagnostics, None)
+            let context = load_selected_project(project)?;
+            report_diagnostics(context, None)
         }
         Command::Item {
             command: ItemCommand::Validate { id },
         } => {
-            let (project, corpus, diagnostics) = load_selected_project(project)?;
-            let matches = corpus.items().filter(|item| item.id() == id).count();
+            let context = load_selected_project(project)?;
+            let matches = context
+                .corpus
+                .items()
+                .filter(|item| item.id() == id)
+                .count();
             if matches == 0 {
                 return Err(format!("item '{id}' was not found"));
             }
-            report_diagnostics(&project, &corpus, diagnostics, Some(&id))
+            report_diagnostics(context, Some(&id))
         }
         Command::Schema { command } => {
             let current_directory = env::current_dir()
@@ -151,47 +163,72 @@ fn run(cli: Cli) -> Result<(), String> {
     }
 }
 
-fn load_selected_project(
-    selected: Option<PathBuf>,
-) -> Result<(mara::Project, mara::Corpus, Vec<Diagnostic>), String> {
+fn load_selected_project(selected: Option<PathBuf>) -> Result<ValidationContext, String> {
     let cwd =
         env::current_dir().map_err(|error| format!("could not read current directory: {error}"))?;
     let project = resolve_project(selected.as_deref(), cwd).map_err(|error| error.to_string())?;
-    let schema = load_schema(&project).map_err(|error| error.to_string())?;
-    let (corpus, diagnostics) =
-        load_corpus_for_validation(&project, &schema).map_err(|error| error.to_string())?;
-    Ok((project, corpus, diagnostics))
+    let (schema, schema_error, corpus, diagnostics) = match load_schema(&project) {
+        Ok(schema) => {
+            let (corpus, diagnostics) =
+                load_corpus_for_validation(&project, &schema).map_err(|error| error.to_string())?;
+            (Some(schema), None, corpus, diagnostics)
+        }
+        Err(error) => {
+            let schema_error = error.to_string();
+            let (corpus, diagnostics) =
+                load_corpus_syntax_for_validation(&project).map_err(|error| error.to_string())?;
+            (None, Some(schema_error), corpus, diagnostics)
+        }
+    };
+    Ok(ValidationContext {
+        project,
+        corpus,
+        schema,
+        diagnostics,
+        schema_error,
+    })
 }
 
 fn report_diagnostics(
-    project: &mara::Project,
-    corpus: &mara::Corpus,
-    mut diagnostics: Vec<Diagnostic>,
+    mut context: ValidationContext,
     selected: Option<&str>,
 ) -> Result<(), String> {
-    let schema = load_schema(project).map_err(|error| error.to_string())?;
-    diagnostics.extend(validate_corpus(corpus, &schema));
-    let diagnostics = diagnostics
+    if let Some(schema) = &context.schema {
+        context
+            .diagnostics
+            .extend(validate_corpus(&context.corpus, schema));
+    }
+    let diagnostics = context
+        .diagnostics
         .into_iter()
         .filter(|diagnostic| {
             selected.is_none_or(|id| {
-                corpus.items().filter(|item| item.id() == id).any(|item| {
-                    diagnostic.source().span().start_byte() >= item.source().span().start_byte()
-                        && diagnostic.source().span().end_byte() <= item.source().span().end_byte()
-                        && diagnostic.source().path() == item.source().path()
-                })
+                context
+                    .corpus
+                    .items()
+                    .filter(|item| item.id() == id)
+                    .any(|item| {
+                        diagnostic.source().span().start_byte() >= item.source().span().start_byte()
+                            && diagnostic.source().span().end_byte()
+                                <= item.source().span().end_byte()
+                            && diagnostic.source().path() == item.source().path()
+                    })
             })
         })
         .collect::<Vec<_>>();
-    if diagnostics.is_empty() {
+    let diagnostic_count = diagnostics.len() + usize::from(context.schema_error.is_some());
+    if diagnostic_count == 0 {
         println!(
             "valid {}",
             selected.map_or_else(
-                || format!("project at {}", project.root().display()),
+                || format!("project at {}", context.project.root().display()),
                 |id| format!("item '{id}'")
             )
         );
         return Ok(());
+    }
+    if let Some(error) = context.schema_error {
+        eprintln!("error: {error}");
     }
     for diagnostic in &diagnostics {
         eprintln!(
@@ -203,8 +240,8 @@ fn report_diagnostics(
     }
     Err(format!(
         "validation failed with {} diagnostic{}",
-        diagnostics.len(),
-        if diagnostics.len() == 1 { "" } else { "s" }
+        diagnostic_count,
+        if diagnostic_count == 1 { "" } else { "s" }
     ))
 }
 

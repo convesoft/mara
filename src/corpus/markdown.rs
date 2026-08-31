@@ -48,6 +48,7 @@ pub(super) struct ParsedMention {
 #[derive(Debug)]
 pub(super) struct ParseError {
     pub(super) line: usize,
+    pub(super) source: Range<usize>,
     pub(super) message: String,
 }
 
@@ -415,17 +416,20 @@ fn project_item(
     let opener_line = line_at(lines, delimiter.source.start);
     let (flavour, id) = opener(opener_line.text).ok_or_else(|| ParseError {
         line: opener_line.number,
+        source: opener_line.start..opener_line.end,
         message: "item opener must be ':::mara <flavour> <id>' with no other tokens".to_owned(),
     })?;
     if !is_snake_name(flavour) {
         return Err(ParseError {
             line: opener_line.number,
+            source: opener_line.start..opener_line.end,
             message: format!("invalid flavour '{flavour}'"),
         });
     }
     if !is_item_id(id) {
         return Err(ParseError {
             line: opener_line.number,
+            source: opener_line.start..opener_line.end,
             message: format!("invalid item ID '{id}'"),
         });
     }
@@ -438,6 +442,7 @@ fn project_item(
     if title_entries.len() != 1 || title_entries[0].value.is_empty() {
         return Err(ParseError {
             line: opener_line.number,
+            source: opener_line.start..opener_line.end,
             message: "item must have exactly one non-empty title entry".to_owned(),
         });
     }
@@ -448,6 +453,7 @@ fn project_item(
         let Some(next) = delimiters.get(*delimiter_index) else {
             return Err(ParseError {
                 line: opener_line.number,
+                source: opener_line.start..opener_line.end,
                 message: "item is missing its closing delimiter".to_owned(),
             });
         };
@@ -466,6 +472,7 @@ fn project_item(
                 };
                 return Err(ParseError {
                     line: nested.number,
+                    source: nested.start..nested.end,
                     message: message.to_owned(),
                 });
             }
@@ -505,18 +512,21 @@ fn parse_metadata(
         let Some(rest) = line.text.strip_prefix(':') else {
             return Err(ParseError {
                 line: line.number,
+                source: line.start..line.end,
                 message: "expected metadata or a blank line before the item body".to_owned(),
             });
         };
         let Some((key, value)) = rest.split_once(':') else {
             return Err(ParseError {
                 line: line.number,
+                source: line.start..line.end,
                 message: "invalid metadata entry".to_owned(),
             });
         };
         if !is_snake_name(key) {
             return Err(ParseError {
                 line: line.number,
+                source: line.start..line.end,
                 message: format!("invalid metadata key '{key}'"),
             });
         }
@@ -530,6 +540,7 @@ fn parse_metadata(
     if line_index == lines.len() {
         return Err(ParseError {
             line: opener_line.number,
+            source: opener_line.start..opener_line.end,
             message: "item is missing its body boundary and closing delimiter".to_owned(),
         });
     }
