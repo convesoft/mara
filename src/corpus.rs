@@ -1,9 +1,11 @@
 use std::{
     fs, io,
+    ops::Range,
     path::{Path, PathBuf},
 };
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
+use ignore::WalkBuilder;
 
 use crate::{Error, PROJECT_FILE, Project, Schema, is_item_id, is_snake_name};
 
@@ -196,9 +198,7 @@ impl SourceSpan {
 
 pub fn load_corpus(project: &Project, schema: &Schema) -> Result<Corpus, Error> {
     let matcher = content_matcher(project)?;
-    let mut paths = Vec::new();
-    discover(project.root(), project.root(), &matcher, &mut paths)?;
-    paths.sort();
+    let paths = discover(project.root(), &matcher)?;
 
     let mut documents = Vec::with_capacity(paths.len());
     for relative_path in paths {
@@ -231,46 +231,42 @@ fn content_matcher(project: &Project) -> Result<GlobSet, Error> {
     })
 }
 
-fn discover(
-    root: &Path,
-    directory: &Path,
-    matcher: &GlobSet,
-    paths: &mut Vec<PathBuf>,
-) -> Result<(), Error> {
-    let entries = fs::read_dir(directory).map_err(|source| Error::Io {
-        action: "read content directory",
-        path: directory.to_path_buf(),
-        source,
-    })?;
-    let mut entries = entries
-        .collect::<Result<Vec<_>, io::Error>>()
-        .map_err(|source| Error::Io {
-            action: "read content directory entry",
-            path: directory.to_path_buf(),
-            source,
-        })?;
-    entries.sort_by_key(|entry| entry.file_name());
+fn discover(root: &Path, matcher: &GlobSet) -> Result<Vec<PathBuf>, Error> {
+    let mut builder = WalkBuilder::new(root);
+    builder
+        .hidden(false)
+        .ignore(false)
+        .git_ignore(true)
+        .git_exclude(false)
+        .git_global(false)
+        .parents(false)
+        .require_git(false)
+        .follow_links(false);
 
-    for entry in entries {
-        let file_type = entry.file_type().map_err(|source| Error::Io {
-            action: "inspect content path",
-            path: entry.path(),
-            source,
+    let mut paths = Vec::new();
+    for entry in builder.build() {
+        let entry = entry.map_err(|source| Error::Io {
+            action: "discover Mara documents",
+            path: root.to_path_buf(),
+            source: io::Error::other(source),
         })?;
-        if file_type.is_dir() {
-            discover(root, &entry.path(), matcher, paths)?;
-        } else if file_type.is_file() {
-            let relative = entry
-                .path()
-                .strip_prefix(root)
-                .expect("discovered content remains below the project root")
-                .to_path_buf();
-            if is_mara_document(&relative) && matcher.is_match(&relative) {
-                paths.push(relative);
-            }
+        if !entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_file())
+        {
+            continue;
+        }
+        let relative = entry
+            .path()
+            .strip_prefix(root)
+            .expect("discovered content remains below the project root")
+            .to_path_buf();
+        if is_mara_document(&relative) && matcher.is_match(&relative) {
+            paths.push(relative);
         }
     }
-    Ok(())
+    paths.sort();
+    Ok(paths)
 }
 
 fn is_mara_document(path: &Path) -> bool {
@@ -282,13 +278,17 @@ fn is_mara_document(path: &Path) -> bool {
 fn parse_document(path: PathBuf, source: String, schema: &Schema) -> Result<Document, Error> {
     let lines = source_lines(&source);
     let line_starts = lines.iter().map(|line| line.start).collect::<Vec<_>>();
+    let inline_code = inline_code_spans(&lines);
     let mut items = Vec::new();
     let mut line_index = 0;
     let mut fence = None;
 
     while line_index < lines.len() {
         let line = lines[line_index];
-        if update_fence(line.text, &mut fence) || fence.is_some() {
+        if update_fence(line.text, &mut fence)
+            || fence.is_some()
+            || within_span(line.start, &inline_code)
+        {
             line_index += 1;
             continue;
         }
@@ -298,6 +298,7 @@ fn parse_document(path: PathBuf, source: String, schema: &Schema) -> Result<Docu
                 &source,
                 &lines,
                 &line_starts,
+                &inline_code,
                 line_index,
                 flavour,
                 id,
@@ -329,6 +330,7 @@ fn parse_item(
     source: &str,
     lines: &[SourceLine<'_>],
     line_starts: &[usize],
+    inline_code: &[Range<usize>],
     opener_index: usize,
     flavour: &str,
     id: &str,
@@ -351,7 +353,7 @@ fn parse_item(
 
     let mut metadata = Vec::new();
     let mut line_index = opener_index + 1;
-    while line_index < lines.len() && !lines[line_index].text.is_empty() {
+    while line_index < lines.len() && !lines[line_index].text.trim().is_empty() {
         let line = lines[line_index];
         let Some(rest) = line.text.strip_prefix(':') else {
             return Err(invalid(
@@ -409,7 +411,10 @@ fn parse_item(
                 "item is missing its closing delimiter",
             ));
         };
-        if update_fence(line.text, &mut fence) || fence.is_some() {
+        if update_fence(line.text, &mut fence)
+            || fence.is_some()
+            || within_span(line.start, inline_code)
+        {
             line_index += 1;
             continue;
         }
@@ -437,7 +442,7 @@ fn parse_item(
             source: entry.source.clone(),
         })
         .collect();
-    let mentions = parse_mentions(path, source, line_starts, body_start, body_end);
+    let mentions = parse_mentions(path, source, line_starts, inline_code, body_start, body_end);
     let item = Item {
         flavour: flavour.to_owned(),
         id: id.to_owned(),
@@ -461,12 +466,12 @@ fn parse_mentions(
     path: &Path,
     source: &str,
     line_starts: &[usize],
+    inline_code: &[Range<usize>],
     start: usize,
     end: usize,
 ) -> Vec<Mention> {
     let mut mentions = Vec::new();
     let mut fence = None;
-    let mut inline_code = None;
     for line in source_lines(&source[start..end]) {
         if update_fence(line.text, &mut fence) || fence.is_some() {
             continue;
@@ -474,25 +479,14 @@ fn parse_mentions(
         let bytes = line.text.as_bytes();
         let mut index = 0;
         while index < bytes.len() {
-            if bytes[index] == b'`' {
-                let run = byte_run(bytes, index, b'`');
-                match inline_code {
-                    Some(delimiter) if delimiter == run => inline_code = None,
-                    None => inline_code = Some(run),
-                    _ => {}
-                }
-                index += run;
-                continue;
-            }
-            if inline_code.is_none()
-                && bytes[index..].starts_with(b"[[")
+            if bytes[index..].starts_with(b"[[")
                 && !escaped(bytes, index)
                 && let Some(relative_end) = line.text[index + 2..].find("]]")
             {
                 let target_end = index + 2 + relative_end;
                 let target = &line.text[index + 2..target_end];
-                if is_item_id(target) {
-                    let mention_start = start + line.start + index;
+                let mention_start = start + line.start + index;
+                if is_item_id(target) && !within_span(mention_start, inline_code) {
                     let mention_end = start + line.start + target_end + 2;
                     mentions.push(Mention {
                         target: target.to_owned(),
@@ -506,6 +500,47 @@ fn parse_mentions(
         }
     }
     mentions
+}
+
+fn inline_code_spans(lines: &[SourceLine<'_>]) -> Vec<Range<usize>> {
+    let mut runs = Vec::new();
+    let mut fence = None;
+    for line in lines {
+        if update_fence(line.text, &mut fence) || fence.is_some() {
+            continue;
+        }
+        let bytes = line.text.as_bytes();
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] == b'`' && !escaped(bytes, index) {
+                let length = byte_run(bytes, index, b'`');
+                runs.push((line.start + index, line.start + index + length, length));
+                index += length;
+            } else {
+                index += 1;
+            }
+        }
+    }
+
+    let mut spans = Vec::new();
+    let mut opener = 0;
+    while opener < runs.len() {
+        let Some(closer) = runs[opener + 1..]
+            .iter()
+            .position(|run| run.2 == runs[opener].2)
+            .map(|offset| opener + 1 + offset)
+        else {
+            opener += 1;
+            continue;
+        };
+        spans.push(runs[opener].0..runs[closer].1);
+        opener = closer + 1;
+    }
+    spans
+}
+
+fn within_span(byte: usize, spans: &[Range<usize>]) -> bool {
+    spans.iter().any(|span| span.contains(&byte))
 }
 
 fn escaped(bytes: &[u8], index: usize) -> bool {

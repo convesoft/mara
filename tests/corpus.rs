@@ -165,3 +165,89 @@ fn reports_malformed_item_openers_instead_of_silently_dropping_data() {
     assert!(error.contains("broken.mara.md:1"), "{error}");
     assert!(error.contains("with no other tokens"), "{error}");
 }
+
+#[test]
+fn excludes_gitignored_mara_documents() {
+    let (fixture, project, schema) = initialized_project();
+    write(fixture.path(), ".gitignore", "ignored.mara.md\n");
+    write(
+        fixture.path(),
+        "ignored.mara.md",
+        ":::mara requirement REQ-IGNORED\n:title: Ignored\n\nBody.\n:::\n",
+    );
+
+    let corpus = load_corpus(&project, &schema).unwrap();
+
+    assert!(corpus.documents().is_empty());
+}
+
+#[test]
+fn treats_multiline_inline_code_as_example_text_during_item_scans() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "docs/examples.mara.md",
+        r#"`example
+:::mara requirement REQ-EXAMPLE
+:title: Example
+
+Example body.
+:::
+`
+
+:::mara requirement REQ-REAL
+:title: Real
+
+Before.
+`code
+:::
+`
+After with [[REQ-TARGET]].
+:::
+"#,
+    );
+
+    let corpus = load_corpus(&project, &schema).unwrap();
+    let item = corpus.items().next().unwrap();
+
+    assert_eq!(corpus.items().count(), 1);
+    assert_eq!(item.id(), "REQ-REAL");
+    assert!(item.body().contains("After with [[REQ-TARGET]]"));
+    assert_eq!(
+        item.mentions()
+            .iter()
+            .map(|mention| mention.target())
+            .collect::<Vec<_>>(),
+        ["REQ-TARGET"]
+    );
+}
+
+#[test]
+fn accepts_whitespace_only_body_boundaries() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "spaces.mara.md",
+        ":::mara requirement REQ-SPACES\n:title: Spaces\n \t \nBody.\n:::\n",
+    );
+
+    let corpus = load_corpus(&project, &schema).unwrap();
+
+    assert_eq!(corpus.items().next().unwrap().body(), "Body.\n");
+}
+
+#[test]
+fn treats_unmatched_backticks_as_text_when_extracting_mentions() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "mention.mara.md",
+        ":::mara requirement REQ-MENTION\n:title: Mention\n\nAn unmatched ` before [[REQ-TARGET]].\n:::\n",
+    );
+
+    let corpus = load_corpus(&project, &schema).unwrap();
+    let item = corpus.items().next().unwrap();
+
+    assert_eq!(item.mentions()[0].target(), "REQ-TARGET");
+    assert_eq!(item.mentions().len(), 1);
+}
