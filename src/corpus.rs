@@ -6,6 +6,7 @@ use std::{
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
+use pulldown_cmark::{Event, Parser as MarkdownParser, Tag, TagEnd};
 
 use crate::{Error, PROJECT_FILE, Project, Schema, is_item_id, is_snake_name};
 
@@ -278,17 +279,13 @@ fn is_mara_document(path: &Path) -> bool {
 fn parse_document(path: PathBuf, source: String, schema: &Schema) -> Result<Document, Error> {
     let lines = source_lines(&source);
     let line_starts = lines.iter().map(|line| line.start).collect::<Vec<_>>();
-    let inline_code = inline_code_spans(&lines);
+    let code_spans = markdown_code_spans(&source);
     let mut items = Vec::new();
     let mut line_index = 0;
-    let mut fence = None;
 
     while line_index < lines.len() {
         let line = lines[line_index];
-        if update_fence(line.text, &mut fence)
-            || fence.is_some()
-            || within_span(line.start, &inline_code)
-        {
+        if within_span(line.start, &code_spans) {
             line_index += 1;
             continue;
         }
@@ -298,7 +295,7 @@ fn parse_document(path: PathBuf, source: String, schema: &Schema) -> Result<Docu
                 &source,
                 &lines,
                 &line_starts,
-                &inline_code,
+                &code_spans,
                 line_index,
                 flavour,
                 id,
@@ -330,7 +327,7 @@ fn parse_item(
     source: &str,
     lines: &[SourceLine<'_>],
     line_starts: &[usize],
-    inline_code: &[Range<usize>],
+    code_spans: &[Range<usize>],
     opener_index: usize,
     flavour: &str,
     id: &str,
@@ -402,7 +399,6 @@ fn parse_item(
     let body_start = lines[line_index].full_end;
     line_index += 1;
 
-    let mut fence = None;
     let closing_index = loop {
         let Some(line) = lines.get(line_index).copied() else {
             return Err(invalid(
@@ -411,10 +407,7 @@ fn parse_item(
                 "item is missing its closing delimiter",
             ));
         };
-        if update_fence(line.text, &mut fence)
-            || fence.is_some()
-            || within_span(line.start, inline_code)
-        {
+        if within_span(line.start, code_spans) {
             line_index += 1;
             continue;
         }
@@ -442,7 +435,7 @@ fn parse_item(
             source: entry.source.clone(),
         })
         .collect();
-    let mentions = parse_mentions(path, source, line_starts, inline_code, body_start, body_end);
+    let mentions = parse_mentions(path, source, line_starts, code_spans, body_start, body_end);
     let item = Item {
         flavour: flavour.to_owned(),
         id: id.to_owned(),
@@ -466,16 +459,12 @@ fn parse_mentions(
     path: &Path,
     source: &str,
     line_starts: &[usize],
-    inline_code: &[Range<usize>],
+    code_spans: &[Range<usize>],
     start: usize,
     end: usize,
 ) -> Vec<Mention> {
     let mut mentions = Vec::new();
-    let mut fence = None;
     for line in source_lines(&source[start..end]) {
-        if update_fence(line.text, &mut fence) || fence.is_some() {
-            continue;
-        }
         let bytes = line.text.as_bytes();
         let mut index = 0;
         while index < bytes.len() {
@@ -486,7 +475,7 @@ fn parse_mentions(
                 let target_end = index + 2 + relative_end;
                 let target = &line.text[index + 2..target_end];
                 let mention_start = start + line.start + index;
-                if is_item_id(target) && !within_span(mention_start, inline_code) {
+                if is_item_id(target) && !within_span(mention_start, code_spans) {
                     let mention_end = start + line.start + target_end + 2;
                     mentions.push(Mention {
                         target: target.to_owned(),
@@ -502,39 +491,20 @@ fn parse_mentions(
     mentions
 }
 
-fn inline_code_spans(lines: &[SourceLine<'_>]) -> Vec<Range<usize>> {
-    let mut runs = Vec::new();
-    let mut fence = None;
-    for line in lines {
-        if update_fence(line.text, &mut fence) || fence.is_some() {
-            continue;
-        }
-        let bytes = line.text.as_bytes();
-        let mut index = 0;
-        while index < bytes.len() {
-            if bytes[index] == b'`' && !escaped(bytes, index) {
-                let length = byte_run(bytes, index, b'`');
-                runs.push((line.start + index, line.start + index + length, length));
-                index += length;
-            } else {
-                index += 1;
-            }
-        }
-    }
-
+fn markdown_code_spans(source: &str) -> Vec<Range<usize>> {
     let mut spans = Vec::new();
-    let mut opener = 0;
-    while opener < runs.len() {
-        let Some(closer) = runs[opener + 1..]
-            .iter()
-            .position(|run| run.2 == runs[opener].2)
-            .map(|offset| opener + 1 + offset)
-        else {
-            opener += 1;
-            continue;
-        };
-        spans.push(runs[opener].0..runs[closer].1);
-        opener = closer + 1;
+    let mut block_start = None;
+    for (event, source_range) in MarkdownParser::new(source).into_offset_iter() {
+        match event {
+            Event::Code(_) => spans.push(source_range),
+            Event::Start(Tag::CodeBlock(_)) => block_start = Some(source_range.start),
+            Event::End(TagEnd::CodeBlock) => {
+                if let Some(start) = block_start.take() {
+                    spans.push(start..source_range.end);
+                }
+            }
+            _ => {}
+        }
     }
     spans
 }
@@ -599,51 +569,6 @@ fn source_lines(source: &str) -> Vec<SourceLine<'_>> {
         number += 1;
     }
     lines
-}
-
-#[derive(Clone, Copy)]
-struct Fence {
-    marker: u8,
-    length: usize,
-}
-
-fn update_fence(line: &str, fence: &mut Option<Fence>) -> bool {
-    let bytes = line.as_bytes();
-    let indentation = bytes.iter().take_while(|byte| **byte == b' ').count();
-    if indentation > 3 || indentation == bytes.len() {
-        return false;
-    }
-    let marker = bytes[indentation];
-    if marker != b'`' && marker != b'~' {
-        return false;
-    }
-    let length = byte_run(bytes, indentation, marker);
-    if length < 3 {
-        return false;
-    }
-
-    match *fence {
-        Some(open)
-            if open.marker == marker
-                && length >= open.length
-                && line[indentation + length..].trim().is_empty() =>
-        {
-            *fence = None;
-            true
-        }
-        None => {
-            *fence = Some(Fence { marker, length });
-            true
-        }
-        _ => false,
-    }
-}
-
-fn byte_run(bytes: &[u8], start: usize, byte: u8) -> usize {
-    bytes[start..]
-        .iter()
-        .take_while(|candidate| **candidate == byte)
-        .count()
 }
 
 fn location(path: &Path, line_starts: &[usize], start: usize, end: usize) -> SourceLocation {

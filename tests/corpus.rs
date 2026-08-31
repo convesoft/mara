@@ -189,10 +189,6 @@ fn treats_multiline_inline_code_as_example_text_during_item_scans() {
         "docs/examples.mara.md",
         r#"`example
 :::mara requirement REQ-EXAMPLE
-:title: Example
-
-Example body.
-:::
 `
 
 :::mara requirement REQ-REAL
@@ -250,4 +246,33 @@ fn treats_unmatched_backticks_as_text_when_extracting_mentions() {
 
     assert_eq!(item.mentions()[0].target(), "REQ-TARGET");
     assert_eq!(item.mentions().len(), 1);
+}
+
+#[test]
+fn does_not_pair_an_unmatched_backtick_across_markdown_blocks() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "paragraphs.mara.md",
+        "An unmatched ` in ordinary prose.\n\n:::mara requirement REQ-REAL\n:title: Real\n\nBody.\n:::\n\nLater `code`.\n",
+    );
+
+    let corpus = load_corpus(&project, &schema).unwrap();
+
+    assert_eq!(corpus.items().next().unwrap().id(), "REQ-REAL");
+    assert_eq!(corpus.items().count(), 1);
+}
+
+#[test]
+fn excludes_mentions_inside_blockquoted_fenced_code() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "quote.mara.md",
+        ":::mara requirement REQ-REAL\n:title: Real\n\n> ~~~markdown\n> [[REQ-EXAMPLE]]\n> ~~~\n:::\n",
+    );
+
+    let corpus = load_corpus(&project, &schema).unwrap();
+
+    assert!(corpus.items().next().unwrap().mentions().is_empty());
 }
