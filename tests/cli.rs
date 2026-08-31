@@ -411,6 +411,81 @@ fn project_validation_accumulates_independent_schema_diagnostics() {
 }
 
 #[test]
+fn project_validation_runs_schema_independent_checks_after_schema_errors() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace("id_prefix: REQ-", "id_prefix: REQ--"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("first.mara.md"),
+        ":::mara requirement REQ-DUPLICATE\n:title: First\n\nMentions [[MISSING-MENTION]].\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("second.mara.md"),
+        ":::mara requirement REQ-DUPLICATE\n:title: Second\n\nBody.\n:::\n",
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "flavour 'requirement' has invalid ID prefix 'REQ--'",
+        "duplicate item ID 'REQ-DUPLICATE'",
+        "mention references missing item 'MISSING-MENTION'",
+        "validation failed with 4 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
+fn project_validation_accumulates_independent_configuration_errors() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join(".mara/project.toml"),
+        r#"format_version = 1
+
+[project]
+name = ""
+schema = ".mara/schema.yaml"
+
+[content]
+include = ["../**/*.mara.md"]
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "project.name must not be empty",
+        "content.include entries must be project-relative patterns",
+        "validation failed with 2 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
 fn real_cli_discovers_and_inspects_the_effective_minimal_schema() {
     let fixture = TempDir::new().unwrap();
     let project_root = fixture.path().join("project");

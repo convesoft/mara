@@ -217,21 +217,8 @@ impl Diagnostic {
 }
 
 pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-    let mut ids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
-    for item in corpus.items() {
-        ids.entry(item.id()).or_default().push(item);
-    }
-
-    for duplicates in ids.values().filter(|items| items.len() > 1) {
-        for item in duplicates {
-            diagnostic(
-                &mut diagnostics,
-                item.source(),
-                format!("duplicate item ID '{}'", item.id()),
-            );
-        }
-    }
+    let mut diagnostics = validate_corpus_independent(corpus);
+    let ids = item_index(corpus);
 
     for item in corpus.items() {
         let Some(flavour) = schema.flavours.get(item.flavour()) else {
@@ -250,15 +237,6 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             relation.name(),
                             relation.target()
                         ),
-                    );
-                }
-            }
-            for mention in item.mentions() {
-                if !ids.contains_key(mention.target()) {
-                    diagnostic(
-                        &mut diagnostics,
-                        mention.source(),
-                        format!("mention references missing item '{}'", mention.target()),
                     );
                 }
             }
@@ -394,6 +372,26 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 }
             }
         }
+    }
+    sort_diagnostics(&mut diagnostics);
+    diagnostics
+}
+
+pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let ids = item_index(corpus);
+
+    for duplicates in ids.values().filter(|items| items.len() > 1) {
+        for item in duplicates {
+            diagnostic(
+                &mut diagnostics,
+                item.source(),
+                format!("duplicate item ID '{}'", item.id()),
+            );
+        }
+    }
+
+    for item in corpus.items() {
         for mention in item.mentions() {
             if !ids.contains_key(mention.target()) {
                 diagnostic(
@@ -404,6 +402,19 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
             }
         }
     }
+    sort_diagnostics(&mut diagnostics);
+    diagnostics
+}
+
+fn item_index(corpus: &Corpus) -> BTreeMap<&str, Vec<&Item>> {
+    let mut ids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
+    for item in corpus.items() {
+        ids.entry(item.id()).or_default().push(item);
+    }
+    ids
+}
+
+fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
     diagnostics.sort_by(|a, b| {
         (a.source.path(), a.source.span().start_line(), &a.message).cmp(&(
             b.source.path(),
@@ -411,7 +422,6 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
             &b.message,
         ))
     });
-    diagnostics
 }
 
 pub fn load_corpus_for_validation(

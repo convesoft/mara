@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use mara::{
     Diagnostic, Schema, Template, initialize_project, load_corpus_for_validation,
     load_corpus_syntax_for_validation, load_schema, load_schema_for_validation, resolve_project,
-    validate_corpus,
+    resolve_project_for_validation, validate_corpus, validate_corpus_independent,
 };
 use serde::Serialize;
 
@@ -89,6 +89,7 @@ struct ValidationContext {
     corpus: mara::Corpus,
     schema: Option<Schema>,
     diagnostics: Vec<Diagnostic>,
+    project_errors: Vec<String>,
     schema_errors: Vec<String>,
 }
 
@@ -167,39 +168,57 @@ fn run(cli: Cli) -> Result<(), String> {
 fn load_selected_project(selected: Option<PathBuf>) -> Result<ValidationContext, String> {
     let cwd =
         env::current_dir().map_err(|error| format!("could not read current directory: {error}"))?;
-    let project = resolve_project(selected.as_deref(), cwd).map_err(|error| error.to_string())?;
-    let (schema, schema_errors, corpus, diagnostics) = match load_schema_for_validation(&project) {
-        Ok((schema, errors)) if errors.is_empty() => {
-            let (corpus, diagnostics) =
-                load_corpus_for_validation(&project, &schema).map_err(|error| error.to_string())?;
-            (Some(schema), Vec::new(), corpus, diagnostics)
+    let project_validation = resolve_project_for_validation(selected.as_deref(), cwd)
+        .map_err(|error| error.to_string())?;
+    let (project, project_errors, schema_available) = project_validation.into_parts();
+    let project_errors = project_errors
+        .into_iter()
+        .map(|message| {
+            format!(
+                "invalid Mara project at {}: {message}",
+                project.root().join(mara::PROJECT_FILE).display()
+            )
+        })
+        .collect();
+    let (schema, schema_errors, corpus, diagnostics) = if schema_available {
+        match load_schema_for_validation(&project) {
+            Ok((schema, errors)) if errors.is_empty() => {
+                let (corpus, diagnostics) = load_corpus_for_validation(&project, &schema)
+                    .map_err(|error| error.to_string())?;
+                (Some(schema), Vec::new(), corpus, diagnostics)
+            }
+            Ok((_, errors)) => {
+                let schema_errors = errors
+                    .into_iter()
+                    .map(|message| {
+                        format!(
+                            "invalid Mara schema at {}: {message}",
+                            project.schema_path().display()
+                        )
+                    })
+                    .collect();
+                let (corpus, diagnostics) = load_corpus_syntax_for_validation(&project)
+                    .map_err(|error| error.to_string())?;
+                (None, schema_errors, corpus, diagnostics)
+            }
+            Err(error) => {
+                let schema_error = error.to_string();
+                let (corpus, diagnostics) = load_corpus_syntax_for_validation(&project)
+                    .map_err(|error| error.to_string())?;
+                (None, vec![schema_error], corpus, diagnostics)
+            }
         }
-        Ok((_, errors)) => {
-            let schema_errors = errors
-                .into_iter()
-                .map(|message| {
-                    format!(
-                        "invalid Mara schema at {}: {message}",
-                        project.schema_path().display()
-                    )
-                })
-                .collect();
-            let (corpus, diagnostics) =
-                load_corpus_syntax_for_validation(&project).map_err(|error| error.to_string())?;
-            (None, schema_errors, corpus, diagnostics)
-        }
-        Err(error) => {
-            let schema_error = error.to_string();
-            let (corpus, diagnostics) =
-                load_corpus_syntax_for_validation(&project).map_err(|error| error.to_string())?;
-            (None, vec![schema_error], corpus, diagnostics)
-        }
+    } else {
+        let (corpus, diagnostics) =
+            load_corpus_syntax_for_validation(&project).map_err(|error| error.to_string())?;
+        (None, Vec::new(), corpus, diagnostics)
     };
     Ok(ValidationContext {
         project,
         corpus,
         schema,
         diagnostics,
+        project_errors,
         schema_errors,
     })
 }
@@ -208,10 +227,13 @@ fn report_diagnostics(
     mut context: ValidationContext,
     selected: Option<&str>,
 ) -> Result<(), String> {
-    if let Some(schema) = &context.schema {
-        context
+    match &context.schema {
+        Some(schema) => context
             .diagnostics
-            .extend(validate_corpus(&context.corpus, schema));
+            .extend(validate_corpus(&context.corpus, schema)),
+        None => context
+            .diagnostics
+            .extend(validate_corpus_independent(&context.corpus)),
     }
     let diagnostics = context
         .diagnostics
@@ -233,7 +255,8 @@ fn report_diagnostics(
             })
         })
         .collect::<Vec<_>>();
-    let diagnostic_count = diagnostics.len() + context.schema_errors.len();
+    let diagnostic_count =
+        diagnostics.len() + context.project_errors.len() + context.schema_errors.len();
     if diagnostic_count == 0 {
         println!(
             "valid {}",
@@ -243,6 +266,9 @@ fn report_diagnostics(
             )
         );
         return Ok(());
+    }
+    for error in context.project_errors {
+        eprintln!("error: {error}");
     }
     for error in context.schema_errors {
         eprintln!("error: {error}");

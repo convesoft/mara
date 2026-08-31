@@ -6,6 +6,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use globset::GlobBuilder;
 use serde::{Deserialize, Serialize};
 
 mod corpus;
@@ -13,7 +14,7 @@ mod corpus;
 pub use corpus::{
     Corpus, Diagnostic, Document, Item, Mention, MetadataEntry, Relation, SourceLocation,
     SourceSpan, load_corpus, load_corpus_for_validation, load_corpus_syntax_for_validation,
-    validate_corpus,
+    validate_corpus, validate_corpus_independent,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";
@@ -31,6 +32,19 @@ pub struct Project {
     name: String,
     schema_path: PathBuf,
     content_patterns: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct ProjectValidation {
+    project: Project,
+    errors: Vec<String>,
+    schema_available: bool,
+}
+
+impl ProjectValidation {
+    pub fn into_parts(self) -> (Project, Vec<String>, bool) {
+        (self.project, self.errors, self.schema_available)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -451,14 +465,29 @@ pub fn resolve_project(
     explicit_root: Option<&Path>,
     discovery_start: impl AsRef<Path>,
 ) -> Result<Project, Error> {
-    let discovery_start = discovery_start.as_ref();
+    let root = resolve_project_root(explicit_root, discovery_start.as_ref())?;
+    load_project_root(&root)
+}
+
+pub fn resolve_project_for_validation(
+    explicit_root: Option<&Path>,
+    discovery_start: impl AsRef<Path>,
+) -> Result<ProjectValidation, Error> {
+    let root = resolve_project_root(explicit_root, discovery_start.as_ref())?;
+    load_project_root_for_validation(&root)
+}
+
+fn resolve_project_root(
+    explicit_root: Option<&Path>,
+    discovery_start: &Path,
+) -> Result<PathBuf, Error> {
     if let Some(explicit_root) = explicit_root {
         let root = if explicit_root.is_absolute() {
             explicit_root.to_path_buf()
         } else {
             discovery_start.join(explicit_root)
         };
-        return load_project_root(&root);
+        return Ok(root);
     }
 
     let resolved_start = fs::canonicalize(discovery_start).map_err(|source| Error::Io {
@@ -477,7 +506,7 @@ pub fn resolve_project(
 
     loop {
         if path_exists(&candidate.join(PROJECT_FILE))? {
-            return load_project_root(&candidate);
+            return Ok(candidate);
         }
         if !candidate.pop() {
             return Err(Error::ProjectNotFound {
@@ -514,6 +543,18 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
 }
 
 fn load_project_root(root: &Path) -> Result<Project, Error> {
+    let validation = load_project_root_for_validation(root)?;
+    let (project, errors, _) = validation.into_parts();
+    if let Some(message) = errors.into_iter().next() {
+        return Err(Error::InvalidProject {
+            path: project.root().join(PROJECT_FILE),
+            message,
+        });
+    }
+    Ok(project)
+}
+
+fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Error> {
     let root = fs::canonicalize(root).map_err(|source| Error::Io {
         action: "resolve project root",
         path: root.to_path_buf(),
@@ -538,53 +579,68 @@ fn load_project_root(root: &Path) -> Result<Project, Error> {
             message: source.to_string(),
         })?;
 
+    let mut errors = Vec::new();
     if configuration.format_version != 1 {
-        return Err(Error::InvalidProject {
-            path: project_path,
-            message: format!(
-                "unsupported project format version {}",
-                configuration.format_version
-            ),
-        });
+        errors.push(format!(
+            "unsupported project format version {}",
+            configuration.format_version
+        ));
     }
     if configuration.project.name.trim().is_empty() {
-        return Err(Error::InvalidProject {
-            path: project_path,
-            message: "project.name must not be empty".into(),
-        });
+        errors.push("project.name must not be empty".into());
     }
     let configured_schema = Path::new(&configuration.project.schema);
-    if !is_project_relative(configured_schema) {
-        return Err(Error::InvalidProject {
-            path: project_path,
-            message: "project.schema must be a project-relative path".into(),
-        });
+    let schema_is_relative = is_project_relative(configured_schema);
+    if !schema_is_relative {
+        errors.push("project.schema must be a project-relative path".into());
     }
-    if configuration
+    let has_non_relative_content = configuration
         .content
         .include
         .iter()
-        .any(|pattern| !is_project_relative(Path::new(pattern)))
-    {
-        return Err(Error::InvalidProject {
-            path: project_path,
-            message: "content.include entries must be project-relative patterns".into(),
-        });
+        .any(|pattern| !is_project_relative(Path::new(pattern)));
+    if has_non_relative_content {
+        errors.push("content.include entries must be project-relative patterns".into());
     }
 
-    let schema_path = root.join(configured_schema);
-    if !schema_path.is_file() {
-        return Err(Error::InvalidProject {
-            path: project_path,
-            message: format!("schema file does not exist at {}", schema_path.display()),
-        });
+    let mut content_patterns = Vec::new();
+    for pattern in configuration.content.include {
+        let valid_glob = match GlobBuilder::new(&pattern).literal_separator(true).build() {
+            Ok(_) => true,
+            Err(error) => {
+                errors.push(format!(
+                    "invalid content.include pattern '{pattern}': {error}"
+                ));
+                false
+            }
+        };
+        if is_project_relative(Path::new(&pattern)) && valid_glob {
+            content_patterns.push(pattern);
+        }
     }
 
-    Ok(Project {
-        root,
-        name: configuration.project.name,
-        schema_path,
-        content_patterns: configuration.content.include,
+    let schema_path = if schema_is_relative {
+        root.join(configured_schema)
+    } else {
+        root.join(SCHEMA_FILE)
+    };
+    let schema_available = schema_is_relative && schema_path.is_file();
+    if schema_is_relative && !schema_available {
+        errors.push(format!(
+            "schema file does not exist at {}",
+            schema_path.display()
+        ));
+    }
+
+    Ok(ProjectValidation {
+        project: Project {
+            root,
+            name: configuration.project.name,
+            schema_path,
+            content_patterns,
+        },
+        errors,
+        schema_available,
     })
 }
 
