@@ -186,7 +186,7 @@ pub fn initialize_project(target: impl AsRef<Path>, template: Template) -> Resul
         return Err(error);
     }
 
-    match load_project_root(&root) {
+    match resolve_project(None, &root) {
         Ok(project) => Ok(project),
         Err(error) => {
             let _ = fs::remove_file(&project_path);

@@ -1,7 +1,7 @@
-use std::{env, path::PathBuf, process::ExitCode};
+use std::{path::PathBuf, process::ExitCode};
 
 use clap::{Parser, Subcommand, ValueEnum};
-use mara::{Template, initialize_project, resolve_project};
+use mara::{Template, initialize_project};
 
 #[derive(Debug, Parser)]
 #[command(name = "mara", version, about = "Structured project knowledge")]
@@ -35,7 +35,6 @@ enum ProjectCommand {
         #[arg(long, value_enum, default_value_t)]
         template: CliTemplate,
     },
-    Validate,
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -80,16 +79,6 @@ fn run(cli: Cli) -> Result<(), String> {
             println!("initialized Mara project at {}", project.root().display());
             println!("created {PROJECT_FILE}", PROJECT_FILE = mara::PROJECT_FILE);
             println!("created {SCHEMA_FILE}", SCHEMA_FILE = mara::SCHEMA_FILE);
-            Ok(())
-        }
-        Command::Project {
-            command: ProjectCommand::Validate,
-        } => {
-            let current_directory = env::current_dir()
-                .map_err(|error| format!("could not read current directory: {error}"))?;
-            let project = resolve_project(cli.project.as_deref(), current_directory)
-                .map_err(|error| error.to_string())?;
-            println!("valid Mara project at {}", project.root().display());
             Ok(())
         }
     }

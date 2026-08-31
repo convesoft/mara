@@ -1,5 +1,6 @@
 use std::{fs, path::Path, process::Command};
 
+use mara::resolve_project;
 use tempfile::TempDir;
 
 fn mara(current_directory: &Path, arguments: &[&str]) -> std::process::Output {
@@ -8,10 +9,6 @@ fn mara(current_directory: &Path, arguments: &[&str]) -> std::process::Output {
         .args(arguments)
         .output()
         .expect("run Mara CLI")
-}
-
-fn stdout(output: &std::process::Output) -> String {
-    String::from_utf8(output.stdout.clone()).expect("stdout is UTF-8")
 }
 
 fn stderr(output: &std::process::Output) -> String {
@@ -98,7 +95,7 @@ fn empty_template_creates_no_project_flavours() {
 }
 
 #[test]
-fn real_cli_discovers_the_nearest_project_and_honors_an_explicit_root() {
+fn real_cli_initializes_projects_resolved_by_nearest_and_explicit_roots() {
     let fixture = TempDir::new().unwrap();
     let outer = fixture.path().join("outer");
     let nested = outer.join("nested");
@@ -110,13 +107,21 @@ fn real_cli_discovers_the_nearest_project_and_honors_an_explicit_root() {
     let deep = nested.join("a/b");
     fs::create_dir_all(&deep).unwrap();
 
-    let discovered = mara(&deep, &["project", "validate"]);
+    let discovered = resolve_project(None, &deep).unwrap();
+    assert_eq!(discovered.root(), nested.canonicalize().unwrap());
 
-    assert!(discovered.status.success(), "{}", stderr(&discovered));
-    assert!(stdout(&discovered).contains(nested.canonicalize().unwrap().to_str().unwrap()));
+    let explicit = resolve_project(Some(Path::new("../../..")), &deep).unwrap();
+    assert_eq!(explicit.root(), outer.canonicalize().unwrap());
+}
 
-    let explicit = mara(&deep, &["--project", "../../..", "project", "validate"]);
+#[test]
+fn defers_project_validate_until_full_corpus_validation_exists() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
 
-    assert!(explicit.status.success(), "{}", stderr(&explicit));
-    assert!(stdout(&explicit).contains(outer.canonicalize().unwrap().to_str().unwrap()));
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    assert!(stderr(&validate).contains("unrecognized subcommand 'validate'"));
 }
