@@ -54,9 +54,10 @@ impl Schema {
         &self.relations
     }
 
-    fn validate(&self) -> Result<(), String> {
+    fn validation_errors(&self) -> Vec<String> {
+        let mut errors = Vec::new();
         if self.format_version != 1 {
-            return Err(format!(
+            errors.push(format!(
                 "unsupported schema format version {}",
                 self.format_version
             ));
@@ -64,13 +65,13 @@ impl Schema {
 
         for (name, flavour) in &self.flavours {
             if !is_snake_name(name) {
-                return Err(format!("invalid flavour name '{name}'"));
+                errors.push(format!("invalid flavour name '{name}'"));
             }
             if flavour.description.trim().is_empty() {
-                return Err(format!("flavour '{name}' description must not be empty"));
+                errors.push(format!("flavour '{name}' description must not be empty"));
             }
             if !is_id_prefix(&flavour.id_prefix) {
-                return Err(format!(
+                errors.push(format!(
                     "flavour '{name}' has invalid ID prefix '{}'",
                     flavour.id_prefix
                 ));
@@ -78,38 +79,48 @@ impl Schema {
 
             for (field_name, field) in &flavour.fields {
                 if is_structural_item_name(field_name) {
-                    return Err(format!(
+                    errors.push(format!(
                         "flavour '{name}' field '{field_name}' is reserved for item structure"
                     ));
                 }
                 if !is_snake_name(field_name) {
-                    return Err(format!(
+                    errors.push(format!(
                         "flavour '{name}' has invalid field name '{field_name}'"
                     ));
                 }
-                field.validate(name, field_name)?;
+                errors.extend(field.validation_errors(name, field_name));
             }
         }
 
         for (name, relation) in &self.relations {
             if !is_snake_name(name) {
-                return Err(format!("invalid relation name '{name}'"));
+                errors.push(format!("invalid relation name '{name}'"));
             }
             if is_structural_item_name(name) {
-                return Err(format!("relation '{name}' is reserved for item structure"));
+                errors.push(format!("relation '{name}' is reserved for item structure"));
             }
             if relation.description.trim().is_empty() {
-                return Err(format!("relation '{name}' description must not be empty"));
+                errors.push(format!("relation '{name}' description must not be empty"));
             }
-            validate_endpoints(name, "source", &relation.source, &self.flavours)?;
-            validate_endpoints(name, "target", &relation.target, &self.flavours)?;
+            errors.extend(endpoint_errors(
+                name,
+                "source",
+                &relation.source,
+                &self.flavours,
+            ));
+            errors.extend(endpoint_errors(
+                name,
+                "target",
+                &relation.target,
+                &self.flavours,
+            ));
             for source in &relation.source {
-                let flavour = self
+                if self
                     .flavours
                     .get(source)
-                    .expect("relation source was validated");
-                if flavour.fields.contains_key(name) {
-                    return Err(format!(
+                    .is_some_and(|flavour| flavour.fields.contains_key(name))
+                {
+                    errors.push(format!(
                         "relation '{name}' conflicts with field '{name}' on source flavour '{source}'"
                     ));
                 }
@@ -120,13 +131,13 @@ impl Schema {
                     .iter()
                     .any(|source| relation.target.contains(source))
             {
-                return Err(format!(
+                errors.push(format!(
                     "relation '{name}' requires a shared source and target flavour when same_flavour is true"
                 ));
             }
         }
 
-        Ok(())
+        errors
     }
 }
 
@@ -167,40 +178,43 @@ pub struct FieldDefinition {
 }
 
 impl FieldDefinition {
-    fn validate(&self, flavour: &str, field: &str) -> Result<(), String> {
+    fn validation_errors(&self, flavour: &str, field: &str) -> Vec<String> {
+        let mut errors = Vec::new();
         match (self.field_type, &self.values) {
-            (FieldType::Enum, Some(values)) if values.is_empty() => Err(format!(
+            (FieldType::Enum, Some(values)) if values.is_empty() => errors.push(format!(
                 "flavour '{flavour}' enum field '{field}' must declare at least one value"
             )),
             (FieldType::Enum, Some(values)) => {
                 let mut unique = HashSet::new();
+                let mut reported_surrounding_whitespace = false;
                 for value in values {
-                    if value.trim() != value {
-                        return Err(format!(
+                    if value.trim() != value && !reported_surrounding_whitespace {
+                        errors.push(format!(
                             "flavour '{flavour}' enum field '{field}' values must not have surrounding whitespace"
                         ));
+                        reported_surrounding_whitespace = true;
                     }
                     if value.is_empty() {
-                        return Err(format!(
+                        errors.push(format!(
                             "flavour '{flavour}' enum field '{field}' contains an empty value"
                         ));
                     }
                     if !unique.insert(value) {
-                        return Err(format!(
+                        errors.push(format!(
                             "flavour '{flavour}' enum field '{field}' contains duplicate value '{value}'"
                         ));
                     }
                 }
-                Ok(())
             }
-            (FieldType::Enum, None) => Err(format!(
+            (FieldType::Enum, None) => errors.push(format!(
                 "flavour '{flavour}' enum field '{field}' must declare values"
             )),
-            (_, Some(_)) => Err(format!(
+            (_, Some(_)) => errors.push(format!(
                 "flavour '{flavour}' field '{field}' may declare values only when its type is enum"
             )),
-            (_, None) => Ok(()),
+            (_, None) => {}
         }
+        errors
     }
 }
 
@@ -474,6 +488,17 @@ pub fn resolve_project(
 }
 
 pub fn load_schema(project: &Project) -> Result<Schema, Error> {
+    let (schema, errors) = load_schema_for_validation(project)?;
+    if let Some(message) = errors.into_iter().next() {
+        return Err(Error::InvalidSchema {
+            path: project.schema_path().to_path_buf(),
+            message,
+        });
+    }
+    Ok(schema)
+}
+
+pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<String>), Error> {
     let source = fs::read_to_string(project.schema_path()).map_err(|source| Error::Io {
         action: "read project schema",
         path: project.schema_path().to_path_buf(),
@@ -484,11 +509,8 @@ pub fn load_schema(project: &Project) -> Result<Schema, Error> {
             path: project.schema_path().to_path_buf(),
             message: source.to_string(),
         })?;
-    schema.validate().map_err(|message| Error::InvalidSchema {
-        path: project.schema_path().to_path_buf(),
-        message,
-    })?;
-    Ok(schema)
+    let errors = schema.validation_errors();
+    Ok((schema, errors))
 }
 
 fn load_project_root(root: &Path) -> Result<Project, Error> {
@@ -634,31 +656,33 @@ fn is_item_id(id: &str) -> bool {
         })
 }
 
-fn validate_endpoints(
+fn endpoint_errors(
     relation: &str,
     endpoint: &str,
     flavours: &[String],
     declarations: &BTreeMap<String, FlavourDefinition>,
-) -> Result<(), String> {
+) -> Vec<String> {
+    let mut errors = Vec::new();
     if flavours.is_empty() {
-        return Err(format!(
+        errors.push(format!(
             "relation '{relation}' {endpoint} must declare at least one flavour"
         ));
+        return errors;
     }
     let mut unique = HashSet::new();
     for flavour in flavours {
         if !declarations.contains_key(flavour) {
-            return Err(format!(
+            errors.push(format!(
                 "relation '{relation}' {endpoint} references unknown flavour '{flavour}'"
             ));
         }
         if !unique.insert(flavour) {
-            return Err(format!(
+            errors.push(format!(
                 "relation '{relation}' {endpoint} repeats flavour '{flavour}'"
             ));
         }
     }
-    Ok(())
+    errors
 }
 
 fn path_exists(path: &Path) -> Result<bool, Error> {

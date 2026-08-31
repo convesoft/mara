@@ -348,6 +348,69 @@ fn project_validation_continues_after_invalid_utf8() {
 }
 
 #[test]
+fn item_validation_associates_a_missing_close_with_the_outer_item() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("missing-close.mara.md"),
+        r#":::mara requirement REQ-OUTER
+:title: Outer
+
+Outer body.
+
+:::mara requirement REQ-INNER
+:title: Inner
+
+Inner body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["item", "validate", "REQ-OUTER"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert!(errors.contains("items cannot nest"), "{errors}");
+    assert!(
+        !errors.contains("item 'REQ-OUTER' was not found"),
+        "{errors}"
+    );
+}
+
+#[test]
+fn project_validation_accumulates_independent_schema_diagnostics() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema
+            .replace("id_prefix: REQ-", "id_prefix: REQ--")
+            .replace("id_prefix: SCN-", "id_prefix: SCN--"),
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "flavour 'requirement' has invalid ID prefix 'REQ--'",
+        "flavour 'scenario' has invalid ID prefix 'SCN--'",
+        "validation failed with 2 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
 fn real_cli_discovers_and_inspects_the_effective_minimal_schema() {
     let fixture = TempDir::new().unwrap();
     let project_root = fixture.path().join("project");

@@ -49,13 +49,15 @@ pub(super) struct ParsedMention {
 pub(super) struct ParseError {
     pub(super) line: usize,
     pub(super) source: Range<usize>,
-    pub(super) item_id: Option<String>,
+    pub(super) item_ids: Vec<String>,
     pub(super) message: String,
 }
 
 impl ParseError {
     fn with_item_id(mut self, item_id: &str) -> Self {
-        self.item_id = Some(item_id.to_owned());
+        if !self.item_ids.iter().any(|existing| existing == item_id) {
+            self.item_ids.push(item_id.to_owned());
+        }
         self
     }
 }
@@ -425,14 +427,16 @@ fn project_item(
     let (flavour, id) = opener(opener_line.text).ok_or_else(|| ParseError {
         line: opener_line.number,
         source: opener_line.start..opener_line.end,
-        item_id: None,
+        item_ids: Vec::new(),
         message: "item opener must be ':::mara <flavour> <id>' with no other tokens".to_owned(),
     })?;
     if !is_snake_name(flavour) {
         return Err(ParseError {
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
-            item_id: is_item_id(id).then(|| id.to_owned()),
+            item_ids: is_item_id(id)
+                .then(|| vec![id.to_owned()])
+                .unwrap_or_default(),
             message: format!("invalid flavour '{flavour}'"),
         });
     }
@@ -440,7 +444,7 @@ fn project_item(
         return Err(ParseError {
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
-            item_id: None,
+            item_ids: Vec::new(),
             message: format!("invalid item ID '{id}'"),
         });
     }
@@ -455,7 +459,7 @@ fn project_item(
         return Err(ParseError {
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
-            item_id: Some(id.to_owned()),
+            item_ids: vec![id.to_owned()],
             message: "item must have exactly one non-empty title entry".to_owned(),
         });
     }
@@ -467,7 +471,7 @@ fn project_item(
             return Err(ParseError {
                 line: opener_line.number,
                 source: opener_line.start..opener_line.end,
-                item_id: Some(id.to_owned()),
+                item_ids: vec![id.to_owned()],
                 message: "item is missing its closing delimiter".to_owned(),
             });
         };
@@ -485,11 +489,17 @@ fn project_item(
                 } else {
                     "invalid nested item opener"
                 };
+                let mut item_ids = vec![id.to_owned()];
+                if let Some((_, nested_id)) = nested_opener
+                    && is_item_id(nested_id)
+                    && nested_id != id
+                {
+                    item_ids.push(nested_id.to_owned());
+                }
                 return Err(ParseError {
                     line: nested.number,
                     source: nested.start..nested.end,
-                    item_id: nested_opener
-                        .and_then(|(_, id)| is_item_id(id).then(|| id.to_owned())),
+                    item_ids,
                     message: message.to_owned(),
                 });
             }
@@ -530,7 +540,7 @@ fn parse_metadata(
             return Err(ParseError {
                 line: line.number,
                 source: line.start..line.end,
-                item_id: None,
+                item_ids: Vec::new(),
                 message: "expected metadata or a blank line before the item body".to_owned(),
             });
         };
@@ -538,7 +548,7 @@ fn parse_metadata(
             return Err(ParseError {
                 line: line.number,
                 source: line.start..line.end,
-                item_id: None,
+                item_ids: Vec::new(),
                 message: "invalid metadata entry".to_owned(),
             });
         };
@@ -546,7 +556,7 @@ fn parse_metadata(
             return Err(ParseError {
                 line: line.number,
                 source: line.start..line.end,
-                item_id: None,
+                item_ids: Vec::new(),
                 message: format!("invalid metadata key '{key}'"),
             });
         }
@@ -561,7 +571,7 @@ fn parse_metadata(
         return Err(ParseError {
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
-            item_id: None,
+            item_ids: Vec::new(),
             message: "item is missing its body boundary and closing delimiter".to_owned(),
         });
     }

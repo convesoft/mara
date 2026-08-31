@@ -3,7 +3,8 @@ use std::{collections::BTreeMap, env, path::PathBuf, process::ExitCode};
 use clap::{Parser, Subcommand, ValueEnum};
 use mara::{
     Diagnostic, Schema, Template, initialize_project, load_corpus_for_validation,
-    load_corpus_syntax_for_validation, load_schema, resolve_project, validate_corpus,
+    load_corpus_syntax_for_validation, load_schema, load_schema_for_validation, resolve_project,
+    validate_corpus,
 };
 use serde::Serialize;
 
@@ -88,7 +89,7 @@ struct ValidationContext {
     corpus: mara::Corpus,
     schema: Option<Schema>,
     diagnostics: Vec<Diagnostic>,
-    schema_error: Option<String>,
+    schema_errors: Vec<String>,
 }
 
 impl From<CliTemplate> for Template {
@@ -146,7 +147,7 @@ fn run(cli: Cli) -> Result<(), String> {
                 || context
                     .diagnostics
                     .iter()
-                    .any(|diagnostic| diagnostic.item_id() == Some(&id));
+                    .any(|diagnostic| diagnostic.applies_to_item(&id));
             if !item_or_diagnostic_exists {
                 return Err(format!("item '{id}' was not found"));
             }
@@ -167,17 +168,31 @@ fn load_selected_project(selected: Option<PathBuf>) -> Result<ValidationContext,
     let cwd =
         env::current_dir().map_err(|error| format!("could not read current directory: {error}"))?;
     let project = resolve_project(selected.as_deref(), cwd).map_err(|error| error.to_string())?;
-    let (schema, schema_error, corpus, diagnostics) = match load_schema(&project) {
-        Ok(schema) => {
+    let (schema, schema_errors, corpus, diagnostics) = match load_schema_for_validation(&project) {
+        Ok((schema, errors)) if errors.is_empty() => {
             let (corpus, diagnostics) =
                 load_corpus_for_validation(&project, &schema).map_err(|error| error.to_string())?;
-            (Some(schema), None, corpus, diagnostics)
+            (Some(schema), Vec::new(), corpus, diagnostics)
+        }
+        Ok((_, errors)) => {
+            let schema_errors = errors
+                .into_iter()
+                .map(|message| {
+                    format!(
+                        "invalid Mara schema at {}: {message}",
+                        project.schema_path().display()
+                    )
+                })
+                .collect();
+            let (corpus, diagnostics) =
+                load_corpus_syntax_for_validation(&project).map_err(|error| error.to_string())?;
+            (None, schema_errors, corpus, diagnostics)
         }
         Err(error) => {
             let schema_error = error.to_string();
             let (corpus, diagnostics) =
                 load_corpus_syntax_for_validation(&project).map_err(|error| error.to_string())?;
-            (None, Some(schema_error), corpus, diagnostics)
+            (None, vec![schema_error], corpus, diagnostics)
         }
     };
     Ok(ValidationContext {
@@ -185,7 +200,7 @@ fn load_selected_project(selected: Option<PathBuf>) -> Result<ValidationContext,
         corpus,
         schema,
         diagnostics,
-        schema_error,
+        schema_errors,
     })
 }
 
@@ -203,7 +218,7 @@ fn report_diagnostics(
         .into_iter()
         .filter(|diagnostic| {
             selected.is_none_or(|id| {
-                diagnostic.item_id() == Some(id)
+                diagnostic.applies_to_item(id)
                     || context
                         .corpus
                         .items()
@@ -218,7 +233,7 @@ fn report_diagnostics(
             })
         })
         .collect::<Vec<_>>();
-    let diagnostic_count = diagnostics.len() + usize::from(context.schema_error.is_some());
+    let diagnostic_count = diagnostics.len() + context.schema_errors.len();
     if diagnostic_count == 0 {
         println!(
             "valid {}",
@@ -229,7 +244,7 @@ fn report_diagnostics(
         );
         return Ok(());
     }
-    if let Some(error) = context.schema_error {
+    for error in context.schema_errors {
         eprintln!("error: {error}");
     }
     for diagnostic in &diagnostics {
