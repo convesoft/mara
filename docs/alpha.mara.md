@@ -62,9 +62,11 @@ Direct reading, editing, and `ripgrep` remain supported workflows.
 :derives_from: SCN-START-STRUCTURED-PROJECT
 
 `mara project init` initializes the current directory. An optional path is
-created when absent or initialized when it is an existing directory. Existing
-content is not overwritten, and an existing Mara project is rejected. The
-default template is `minimal`; `--template empty` creates no project flavours.
+created when absent or initialized when it is an existing directory. Global
+`--project <path>` selects the initialization target when the positional path
+is omitted; supplying both is rejected. Existing content is not
+overwritten, and an existing Mara project is rejected. The default template is
+`minimal`; `--template empty` creates no project flavours.
 :::
 
 :::mara requirement REQ-PROJECT-DISCOVERY
@@ -198,6 +200,16 @@ Schema paths and content patterns are project-relative. Alpha respects
 configurable policies or a persisted index. Project and schema format versions
 start at draft version 1 and change only for incompatible persisted contracts,
 independently from application SemVer.
+:::
+
+:::mara decision ADR-EXPLICIT-INIT-TARGET
+:title: Use the global project option as an initialization target
+:justifies: REQ-PROJECT-INITIALIZATION
+
+Initialization accepts global `--project` as an alternative to its positional
+target so automation can use one explicit-root option across bootstrap and
+project-bound operations. The two forms conflict so target selection never
+depends on precedence.
 :::
 
 :::mara decision ADR-STRICT-PROJECT-CONFIGURATION
