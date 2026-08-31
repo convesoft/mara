@@ -178,8 +178,22 @@ flavour filters narrow results. Full bodies require explicit `item get` calls.
 :satisfies: REQ-PROJECT-INITIALIZATION
 :satisfies: REQ-PROJECT-DISCOVERY
 
-`.mara/project.toml` is the project-root marker and declares project-format
-version, project name, schema path, and content include patterns. Alpha respects
+`.mara/project.toml` is the project-root marker. Initialization writes draft
+format 1, derives the project name from the root directory, and selects the
+default schema and all Mara documents:
+
+```toml
+format_version = 1
+
+[project]
+name = "example"
+schema = ".mara/schema.yaml"
+
+[content]
+include = ["**/*.mara.md"]
+```
+
+Schema paths and content patterns are project-relative. Alpha respects
 `.gitignore`, skips directory symlinks, and builds query state in memory without
 configurable policies or a persisted index. Project and schema format versions
 start at draft version 1 and change only for incompatible persisted contracts,
@@ -191,10 +205,11 @@ independently from application SemVer.
 :satisfies: REQ-SCHEMA-DISCOVERY
 :satisfies: REQ-PROJECT-VALIDATION
 
-The default schema provides `scenario`, `requirement`, `design`, and `decision`.
-It declares concise descriptions, ID prefixes, optional or required bodies, and
-flat custom fields of type string, integer, number, boolean, or enum with
-required and repeatable constraints.
+The default `minimal` template writes `.mara/schema.yaml` draft format 1 with
+`scenario`, `requirement`, `design`, and `decision`; `empty` writes empty
+`flavours` and `relations` maps. A flavour declares its description, ID prefix,
+body requirement, and custom fields. Custom fields are flat string, integer,
+number, boolean, or enum values with required and repeatable constraints.
 
 Initial relations are `derives_from`, `depends_on`, `satisfies`, `justifies`,
 and `supersedes`:
