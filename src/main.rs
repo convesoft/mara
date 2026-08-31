@@ -142,12 +142,12 @@ fn run(cli: Cli) -> Result<(), String> {
             command: ItemCommand::Validate { id },
         } => {
             let context = load_selected_project(project)?;
-            let matches = context
-                .corpus
-                .items()
-                .filter(|item| item.id() == id)
-                .count();
-            if matches == 0 {
+            let item_or_diagnostic_exists = context.corpus.items().any(|item| item.id() == id)
+                || context
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.item_id() == Some(&id));
+            if !item_or_diagnostic_exists {
                 return Err(format!("item '{id}' was not found"));
             }
             report_diagnostics(context, Some(&id))
@@ -203,16 +203,18 @@ fn report_diagnostics(
         .into_iter()
         .filter(|diagnostic| {
             selected.is_none_or(|id| {
-                context
-                    .corpus
-                    .items()
-                    .filter(|item| item.id() == id)
-                    .any(|item| {
-                        diagnostic.source().span().start_byte() >= item.source().span().start_byte()
-                            && diagnostic.source().span().end_byte()
-                                <= item.source().span().end_byte()
-                            && diagnostic.source().path() == item.source().path()
-                    })
+                diagnostic.item_id() == Some(id)
+                    || context
+                        .corpus
+                        .items()
+                        .filter(|item| item.id() == id)
+                        .any(|item| {
+                            diagnostic.source().span().start_byte()
+                                >= item.source().span().start_byte()
+                                && diagnostic.source().span().end_byte()
+                                    <= item.source().span().end_byte()
+                                && diagnostic.source().path() == item.source().path()
+                        })
             })
         })
         .collect::<Vec<_>>();

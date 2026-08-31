@@ -49,7 +49,15 @@ pub(super) struct ParsedMention {
 pub(super) struct ParseError {
     pub(super) line: usize,
     pub(super) source: Range<usize>,
+    pub(super) item_id: Option<String>,
     pub(super) message: String,
+}
+
+impl ParseError {
+    fn with_item_id(mut self, item_id: &str) -> Self {
+        self.item_id = Some(item_id.to_owned());
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -417,12 +425,14 @@ fn project_item(
     let (flavour, id) = opener(opener_line.text).ok_or_else(|| ParseError {
         line: opener_line.number,
         source: opener_line.start..opener_line.end,
+        item_id: None,
         message: "item opener must be ':::mara <flavour> <id>' with no other tokens".to_owned(),
     })?;
     if !is_snake_name(flavour) {
         return Err(ParseError {
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
+            item_id: is_item_id(id).then(|| id.to_owned()),
             message: format!("invalid flavour '{flavour}'"),
         });
     }
@@ -430,11 +440,13 @@ fn project_item(
         return Err(ParseError {
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
+            item_id: None,
             message: format!("invalid item ID '{id}'"),
         });
     }
 
-    let (metadata, body_start) = parse_metadata(lines, opener_line)?;
+    let (metadata, body_start) =
+        parse_metadata(lines, opener_line).map_err(|error| error.with_item_id(id))?;
     let title_entries = metadata
         .iter()
         .filter(|entry| entry.key == "title")
@@ -443,6 +455,7 @@ fn project_item(
         return Err(ParseError {
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
+            item_id: Some(id.to_owned()),
             message: "item must have exactly one non-empty title entry".to_owned(),
         });
     }
@@ -454,6 +467,7 @@ fn project_item(
             return Err(ParseError {
                 line: opener_line.number,
                 source: opener_line.start..opener_line.end,
+                item_id: Some(id.to_owned()),
                 message: "item is missing its closing delimiter".to_owned(),
             });
         };
@@ -465,7 +479,8 @@ fn project_item(
             DelimiterKind::Closer => break next,
             DelimiterKind::Opener => {
                 let nested = line_at(lines, next.source.start);
-                let message = if opener(nested.text).is_some() {
+                let nested_opener = opener(nested.text);
+                let message = if nested_opener.is_some() {
                     "items cannot nest"
                 } else {
                     "invalid nested item opener"
@@ -473,6 +488,8 @@ fn project_item(
                 return Err(ParseError {
                     line: nested.number,
                     source: nested.start..nested.end,
+                    item_id: nested_opener
+                        .and_then(|(_, id)| is_item_id(id).then(|| id.to_owned())),
                     message: message.to_owned(),
                 });
             }
@@ -513,6 +530,7 @@ fn parse_metadata(
             return Err(ParseError {
                 line: line.number,
                 source: line.start..line.end,
+                item_id: None,
                 message: "expected metadata or a blank line before the item body".to_owned(),
             });
         };
@@ -520,6 +538,7 @@ fn parse_metadata(
             return Err(ParseError {
                 line: line.number,
                 source: line.start..line.end,
+                item_id: None,
                 message: "invalid metadata entry".to_owned(),
             });
         };
@@ -527,6 +546,7 @@ fn parse_metadata(
             return Err(ParseError {
                 line: line.number,
                 source: line.start..line.end,
+                item_id: None,
                 message: format!("invalid metadata key '{key}'"),
             });
         }
@@ -541,6 +561,7 @@ fn parse_metadata(
         return Err(ParseError {
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
+            item_id: None,
             message: "item is missing its body boundary and closing delimiter".to_owned(),
         });
     }

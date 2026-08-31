@@ -200,12 +200,16 @@ impl SourceSpan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     source: SourceLocation,
+    item_id: Option<String>,
     message: String,
 }
 
 impl Diagnostic {
     pub fn source(&self) -> &SourceLocation {
         &self.source
+    }
+    pub fn item_id(&self) -> Option<&str> {
+        self.item_id.as_deref()
     }
     pub fn message(&self) -> &str {
         &self.message
@@ -433,11 +437,25 @@ fn load_corpus_for_validation_with_schema(
     let mut diagnostics = Vec::new();
     for relative_path in paths {
         let absolute_path = project.root().join(&relative_path);
-        let source = fs::read_to_string(&absolute_path).map_err(|source| Error::Io {
-            action: "read Mara document",
-            path: absolute_path,
-            source,
-        })?;
+        let source = match fs::read_to_string(&absolute_path) {
+            Ok(source) => source,
+            Err(error) => {
+                diagnostics.push(Diagnostic {
+                    source: SourceLocation {
+                        path: relative_path,
+                        span: SourceSpan {
+                            start_byte: 0,
+                            end_byte: 0,
+                            start_line: 1,
+                            end_line: 1,
+                        },
+                    },
+                    item_id: None,
+                    message: format!("could not read Mara document: {error}"),
+                });
+                continue;
+            }
+        };
         let (document, errors) =
             parse_document_for_validation(relative_path.clone(), source, schema);
         let retain_document = errors.is_empty() || !document.items.is_empty();
@@ -451,6 +469,7 @@ fn load_corpus_for_validation_with_schema(
                     end_line: error.line,
                 },
             },
+            item_id: error.item_id,
             message: error.message,
         }));
         if retain_document {
@@ -463,6 +482,7 @@ fn load_corpus_for_validation_with_schema(
 fn diagnostic(diagnostics: &mut Vec<Diagnostic>, source: &SourceLocation, message: String) {
     diagnostics.push(Diagnostic {
         source: source.clone(),
+        item_id: None,
         message,
     });
 }

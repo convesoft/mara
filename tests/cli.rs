@@ -294,6 +294,60 @@ fn project_validation_reports_schema_and_independent_syntax_diagnostics() {
 }
 
 #[test]
+fn item_validation_reports_syntax_for_an_identifiable_malformed_item() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("broken.mara.md"),
+        ":::mara requirement REQ-BROKEN\n\nBody without a title.\n:::\n",
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["item", "validate", "REQ-BROKEN"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert!(
+        errors
+            .contains("broken.mara.md:1: error: item must have exactly one non-empty title entry"),
+        "{errors}"
+    );
+    assert!(
+        !errors.contains("item 'REQ-BROKEN' was not found"),
+        "{errors}"
+    );
+}
+
+#[test]
+fn project_validation_continues_after_invalid_utf8() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(fixture.path().join("first.mara.md"), [0xff]).unwrap();
+    fs::write(
+        fixture.path().join("second.mara.md"),
+        ":::mara requirement REQ-BROKEN trailing\n:title: Broken\n\nBody.\n:::\n",
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "first.mara.md:1: error: could not read Mara document",
+        "second.mara.md:1: error: item opener must be",
+        "validation failed with 2 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
 fn real_cli_discovers_and_inspects_the_effective_minimal_schema() {
     let fixture = TempDir::new().unwrap();
     let project_root = fixture.path().join("project");
