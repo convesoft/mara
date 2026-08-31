@@ -322,6 +322,29 @@ fn schema_validation_rejects_unknown_relation_endpoints() {
 }
 
 #[test]
+fn schema_validation_rejects_an_id_prefix_with_an_empty_segment() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace("id_prefix: REQ-", "id_prefix: REQ--"),
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["schema", "validate"]);
+
+    assert!(!validate.status.success());
+    assert!(
+        stderr(&validate).contains("flavour 'requirement' has invalid ID prefix 'REQ--'"),
+        "{}",
+        stderr(&validate)
+    );
+}
+
+#[test]
 fn schema_get_rejects_an_unknown_declaration() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);

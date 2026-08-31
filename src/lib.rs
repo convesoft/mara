@@ -541,12 +541,20 @@ fn is_id_prefix(prefix: &str) -> bool {
     let Some(stem) = prefix.strip_suffix('-') else {
         return false;
     };
-    let mut characters = stem.chars();
+    let mut segments = stem.split('-');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    let mut characters = first.chars();
     characters
         .next()
         .is_some_and(|character| character.is_ascii_uppercase())
-        && characters.all(|character| {
-            character.is_ascii_uppercase() || character.is_ascii_digit() || character == '-'
+        && characters.all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
+        && segments.all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
         })
 }
 
