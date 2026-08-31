@@ -19,6 +19,7 @@ const MARA_INLINE_PRIORITY: u32 = PRIORITY_LINK - 50;
 #[derive(Debug)]
 pub(super) struct ParsedDocument {
     pub(super) items: Vec<ParsedItem>,
+    pub(super) complete: bool,
 }
 
 #[derive(Debug)]
@@ -388,7 +389,10 @@ fn project(
         }
     }
 
-    Ok(ParsedDocument { items })
+    Ok(ParsedDocument {
+        items,
+        complete: true,
+    })
 }
 
 fn project_for_validation(
@@ -400,6 +404,7 @@ fn project_for_validation(
     let mut items = Vec::new();
     let mut errors = Vec::new();
     let mut delimiter_index = 0;
+    let mut complete = true;
 
     while let Some(delimiter) = delimiters.get(delimiter_index) {
         if delimiter.kind == DelimiterKind::Closer {
@@ -414,6 +419,7 @@ fn project_for_validation(
                 errors.extend(projected.errors);
             }
             Err(item_errors) => {
+                complete = false;
                 errors.extend(item_errors);
                 if delimiter_index == opener_index {
                     delimiter_index += 1;
@@ -432,7 +438,7 @@ fn project_for_validation(
         }
     }
 
-    (ParsedDocument { items }, errors)
+    (ParsedDocument { items, complete }, errors)
 }
 
 fn project_item(

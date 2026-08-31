@@ -845,6 +845,41 @@ fn project_validation_retains_schema_after_unknown_root_keys() {
 }
 
 #[test]
+fn project_validation_uses_fields_unaffected_by_configuration_type_errors() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let project_file = fixture.path().join(".mara/project.toml");
+    let project = fs::read_to_string(&project_file).unwrap();
+    let configured_name = fixture.path().file_name().unwrap().to_str().unwrap();
+    fs::write(
+        &project_file,
+        project.replace(&format!("name = \"{configured_name}\""), "name = 42"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        ":::mara requirement REQ-BROKEN trailing\n:title: Broken\n\nBody.\n:::\n",
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "invalid project configuration value 'project.name'",
+        "item opener must be ':::mara <flavour> <id>' with no other tokens",
+        "validation failed with 2 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
 fn project_validation_retains_item_identity_after_metadata_errors() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -880,6 +915,83 @@ Body.
             "missing {expected:?} in {errors}"
         );
     }
+}
+
+#[test]
+fn project_validation_checks_metadata_recovered_before_an_error() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("partial.mara.md"),
+        r#":::mara requirement REQ-PARTIAL
+:title: Partial
+:unknown: value
+:derives_from: REQ-MISSING
+:malformed
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "invalid metadata entry",
+        "unknown metadata field 'unknown'",
+        "relation 'derives_from' references missing item 'REQ-MISSING'",
+        "validation failed with 3 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
+fn project_validation_does_not_infer_missing_targets_after_item_parse_failures() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("source.mara.md"),
+        r#":::mara requirement REQ-SOURCE
+:title: Source
+:derives_from: REQ-TARGET
+
+Mentions [[REQ-TARGET]].
+:::
+
+:::mara requirement REQ-TARGET trailing
+:title: Target
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert!(
+        errors.contains("item opener must be ':::mara <flavour> <id>' with no other tokens"),
+        "{errors}"
+    );
+    assert!(
+        !errors.contains("references missing item 'REQ-TARGET'"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("validation failed with 1 diagnostic"),
+        "{errors}"
+    );
 }
 
 #[cfg(unix)]

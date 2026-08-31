@@ -240,30 +240,28 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                     format!("unknown flavour '{}'", item.flavour()),
                 );
             }
-            if item.metadata_is_valid() {
-                for relation in item.relations() {
-                    if schema.relation_is_valid(relation.name()) {
-                        match ids.get(relation.target()).map(Vec::len) {
-                            None if corpus.is_complete() => diagnostic(
-                                &mut diagnostics,
-                                relation.source(),
-                                format!(
-                                    "relation '{}' references missing item '{}'",
-                                    relation.name(),
-                                    relation.target()
-                                ),
+            for relation in item.relations() {
+                if schema.relation_is_valid(relation.name()) {
+                    match ids.get(relation.target()).map(Vec::len) {
+                        None if corpus.is_complete() => diagnostic(
+                            &mut diagnostics,
+                            relation.source(),
+                            format!(
+                                "relation '{}' references missing item '{}'",
+                                relation.name(),
+                                relation.target()
                             ),
-                            None | Some(1) => {}
-                            Some(_) => diagnostic(
-                                &mut diagnostics,
-                                relation.source(),
-                                format!(
-                                    "relation '{}' references ambiguous item '{}'",
-                                    relation.name(),
-                                    relation.target()
-                                ),
+                        ),
+                        None | Some(1) => {}
+                        Some(_) => diagnostic(
+                            &mut diagnostics,
+                            relation.source(),
+                            format!(
+                                "relation '{}' references ambiguous item '{}'",
+                                relation.name(),
+                                relation.target()
                             ),
-                        }
+                        ),
                     }
                 }
             }
@@ -281,10 +279,10 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 ),
             );
         }
-        if !item.metadata_is_valid() {
-            continue;
-        }
-        if flavour.body == BodyRequirement::Required && item.body().trim().is_empty() {
+        if item.metadata_is_valid()
+            && flavour.body == BodyRequirement::Required
+            && item.body().trim().is_empty()
+        {
             diagnostic(
                 &mut diagnostics,
                 item.body_source(),
@@ -354,7 +352,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 .get(name.as_str())
                 .map(Vec::as_slice)
                 .unwrap_or_default();
-            if field.required && entries.is_empty() {
+            if item.metadata_is_valid() && field.required && entries.is_empty() {
                 diagnostic(
                     &mut diagnostics,
                     item.source(),
@@ -532,8 +530,9 @@ fn load_corpus_for_validation_with_schema(
                 continue;
             }
         };
-        let (document, errors) =
+        let (document, errors, document_complete) =
             parse_document_for_validation(relative_path.clone(), source, schema);
+        complete &= document_complete;
         let retain_document = errors.is_empty() || !document.items.is_empty();
         diagnostics.extend(errors.into_iter().map(|error| Diagnostic {
             source: SourceLocation {
@@ -747,9 +746,14 @@ fn parse_document_for_validation(
     path: PathBuf,
     source: String,
     schema: Option<&Schema>,
-) -> (Document, Vec<markdown::ParseError>) {
+) -> (Document, Vec<markdown::ParseError>, bool) {
     let (parsed, errors) = markdown::parse_for_validation(&source);
-    (project_document(path, source, schema, parsed), errors)
+    let complete = parsed.complete;
+    (
+        project_document(path, source, schema, parsed),
+        errors,
+        complete,
+    )
 }
 
 fn project_document(

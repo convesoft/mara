@@ -515,30 +515,6 @@ struct ContentSection {
     include: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ProjectFileForValidation {
-    format_version: u32,
-    project: ProjectSectionForValidation,
-    content: ContentSectionForValidation,
-    #[serde(flatten)]
-    unknown: BTreeMap<String, toml::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProjectSectionForValidation {
-    name: String,
-    schema: String,
-    #[serde(flatten)]
-    unknown: BTreeMap<String, toml::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ContentSectionForValidation {
-    include: Vec<String>,
-    #[serde(flatten)]
-    unknown: BTreeMap<String, toml::Value>,
-}
-
 pub fn initialize_project(target: impl AsRef<Path>, template: Template) -> Result<Project, Error> {
     let target = target.as_ref();
     fs::create_dir_all(target).map_err(|source| Error::Io {
@@ -772,50 +748,58 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         path: project_path.clone(),
         source,
     })?;
-    let configuration: ProjectFileForValidation =
+    let mut configuration: toml::Table =
         toml::from_str(&source).map_err(|source| Error::InvalidProject {
             path: project_path.clone(),
             message: source.to_string(),
         })?;
 
     let mut errors = Vec::new();
-    errors.extend(
-        configuration
-            .unknown
-            .keys()
-            .map(|key| format!("unknown project configuration key '{key}'")),
+    let format_version: Option<u32> = take_project_value(
+        &mut configuration,
+        "format_version",
+        "format_version",
+        &mut errors,
     );
-    errors.extend(
-        configuration
-            .project
-            .unknown
-            .keys()
-            .map(|key| format!("unknown project configuration key 'project.{key}'")),
-    );
-    errors.extend(
-        configuration
-            .content
-            .unknown
-            .keys()
-            .map(|key| format!("unknown project configuration key 'content.{key}'")),
-    );
-    if configuration.format_version != 1 {
+    let (name, schema): (Option<String>, Option<String>) =
+        match take_project_table(&mut configuration, "project", "project", &mut errors) {
+            Some(mut project) => {
+                let name = take_project_value(&mut project, "name", "project.name", &mut errors);
+                let schema =
+                    take_project_value(&mut project, "schema", "project.schema", &mut errors);
+                unknown_project_keys(&project, "project", &mut errors);
+                (name, schema)
+            }
+            None => (None, None),
+        };
+    let include: Option<Vec<String>> =
+        match take_project_table(&mut configuration, "content", "content", &mut errors) {
+            Some(mut content) => {
+                let include =
+                    take_project_value(&mut content, "include", "content.include", &mut errors);
+                unknown_project_keys(&content, "content", &mut errors);
+                include
+            }
+            None => None,
+        };
+    unknown_project_keys(&configuration, "", &mut errors);
+
+    if format_version.is_some_and(|version| version != 1) {
         errors.push(format!(
             "unsupported project format version {}",
-            configuration.format_version
+            format_version.expect("format version is present")
         ));
     }
-    if configuration.project.name.trim().is_empty() {
+    if name.as_deref().is_some_and(|name| name.trim().is_empty()) {
         errors.push("project.name must not be empty".into());
     }
-    let configured_schema = Path::new(&configuration.project.schema);
-    let schema_is_relative = is_project_relative(configured_schema);
-    if !schema_is_relative {
+    let configured_schema = schema.as_deref().map(Path::new);
+    let schema_is_relative = configured_schema.is_some_and(is_project_relative);
+    if configured_schema.is_some() && !schema_is_relative {
         errors.push("project.schema must be a project-relative path".into());
     }
-    let has_non_relative_content = configuration
-        .content
-        .include
+    let include = include.unwrap_or_default();
+    let has_non_relative_content = include
         .iter()
         .any(|pattern| !is_project_relative(Path::new(pattern)));
     if has_non_relative_content {
@@ -823,7 +807,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
     }
 
     let mut content_patterns = Vec::new();
-    for pattern in configuration.content.include {
+    for pattern in include {
         let pattern_is_relative = is_project_relative(Path::new(&pattern));
         let effective_pattern = if pattern_is_relative {
             normalize_project_relative_pattern(&pattern)
@@ -847,11 +831,12 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         }
     }
 
-    let schema_path = if schema_is_relative {
-        root.join(configured_schema)
-    } else {
-        root.join(SCHEMA_FILE)
-    };
+    let schema_path =
+        if let Some(configured_schema) = configured_schema.filter(|_| schema_is_relative) {
+            root.join(configured_schema)
+        } else {
+            root.join(SCHEMA_FILE)
+        };
     let schema_available = schema_is_relative && schema_path.is_file();
     if schema_is_relative && !schema_available {
         errors.push(format!(
@@ -863,13 +848,72 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
     Ok(ProjectValidation {
         project: Project {
             root,
-            name: configuration.project.name,
+            name: name.unwrap_or_default(),
             schema_path,
             content_patterns,
         },
         errors,
         schema_available,
     })
+}
+
+fn take_project_table(
+    configuration: &mut toml::Table,
+    key: &str,
+    path: &str,
+    errors: &mut Vec<String>,
+) -> Option<toml::Table> {
+    match configuration.remove(key) {
+        Some(toml::Value::Table(table)) => Some(table),
+        Some(value) => {
+            errors.push(format!(
+                "invalid project configuration value '{path}': expected a table, found {}",
+                value.type_str()
+            ));
+            None
+        }
+        None => {
+            errors.push(format!("project configuration key '{path}' is required"));
+            None
+        }
+    }
+}
+
+fn take_project_value<T>(
+    configuration: &mut toml::Table,
+    key: &str,
+    path: &str,
+    errors: &mut Vec<String>,
+) -> Option<T>
+where
+    T: DeserializeOwned,
+{
+    match configuration.remove(key) {
+        Some(value) => match value.try_into() {
+            Ok(value) => Some(value),
+            Err(error) => {
+                errors.push(format!(
+                    "invalid project configuration value '{path}': {error}"
+                ));
+                None
+            }
+        },
+        None => {
+            errors.push(format!("project configuration key '{path}' is required"));
+            None
+        }
+    }
+}
+
+fn unknown_project_keys(configuration: &toml::Table, prefix: &str, errors: &mut Vec<String>) {
+    errors.extend(configuration.keys().map(|key| {
+        let path = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        format!("unknown project configuration key '{path}'")
+    }));
 }
 
 fn normalize_project_relative_pattern(pattern: &str) -> String {
