@@ -228,17 +228,28 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 format!("unknown flavour '{}'", item.flavour()),
             );
             for relation in item.relations() {
-                if schema.relation_is_valid(relation.name()) && !ids.contains_key(relation.target())
-                {
-                    diagnostic(
-                        &mut diagnostics,
-                        relation.source(),
-                        format!(
-                            "relation '{}' references missing item '{}'",
-                            relation.name(),
-                            relation.target()
+                if schema.relation_is_valid(relation.name()) {
+                    match ids.get(relation.target()).map(Vec::len) {
+                        None => diagnostic(
+                            &mut diagnostics,
+                            relation.source(),
+                            format!(
+                                "relation '{}' references missing item '{}'",
+                                relation.name(),
+                                relation.target()
+                            ),
                         ),
-                    );
+                        Some(1) => {}
+                        Some(_) => diagnostic(
+                            &mut diagnostics,
+                            relation.source(),
+                            format!(
+                                "relation '{}' references ambiguous item '{}'",
+                                relation.name(),
+                                relation.target()
+                            ),
+                        ),
+                    }
                 }
             }
             continue;
@@ -347,9 +358,8 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 if !schema.relation_is_valid(relation.name()) {
                     continue;
                 }
-                if let Some(targets) = ids.get(relation.target()) {
-                    if targets.len() == 1 {
-                        let target = targets[0];
+                match ids.get(relation.target()).map(Vec::as_slice) {
+                    Some([target]) => {
                         if schema.relation_target_is_valid(relation.name())
                             && !definition
                                 .target
@@ -380,8 +390,16 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             );
                         }
                     }
-                } else {
-                    diagnostic(
+                    Some(_) => diagnostic(
+                        &mut diagnostics,
+                        relation.source(),
+                        format!(
+                            "relation '{}' references ambiguous item '{}'",
+                            relation.name(),
+                            relation.target()
+                        ),
+                    ),
+                    None => diagnostic(
                         &mut diagnostics,
                         relation.source(),
                         format!(
@@ -389,7 +407,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             relation.name(),
                             relation.target()
                         ),
-                    );
+                    ),
                 }
             }
         }
@@ -414,12 +432,18 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
 
     for item in corpus.items() {
         for mention in item.mentions() {
-            if !ids.contains_key(mention.target()) {
-                diagnostic(
+            match ids.get(mention.target()).map(Vec::len) {
+                None => diagnostic(
                     &mut diagnostics,
                     mention.source(),
                     format!("mention references missing item '{}'", mention.target()),
-                );
+                ),
+                Some(1) => {}
+                Some(_) => diagnostic(
+                    &mut diagnostics,
+                    mention.source(),
+                    format!("mention references ambiguous item '{}'", mention.target()),
+                ),
             }
         }
     }

@@ -39,11 +39,17 @@ pub struct ProjectValidation {
     project: Project,
     errors: Vec<String>,
     schema_available: bool,
+    content_discovery_reliable: bool,
 }
 
 impl ProjectValidation {
-    pub fn into_parts(self) -> (Project, Vec<String>, bool) {
-        (self.project, self.errors, self.schema_available)
+    pub fn into_parts(self) -> (Project, Vec<String>, bool, bool) {
+        (
+            self.project,
+            self.errors,
+            self.schema_available,
+            self.content_discovery_reliable,
+        )
     }
 }
 
@@ -637,7 +643,7 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
 
 fn load_project_root(root: &Path) -> Result<Project, Error> {
     let validation = load_project_root_for_validation(root)?;
-    let (project, errors, _) = validation.into_parts();
+    let (project, errors, _, _) = validation.into_parts();
     if let Some(message) = errors.into_iter().next() {
         return Err(Error::InvalidProject {
             path: project.root().join(PROJECT_FILE),
@@ -697,10 +703,12 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
     }
 
     let mut content_patterns = Vec::new();
+    let mut has_invalid_content_pattern = false;
     for pattern in configuration.content.include {
         let valid_glob = match GlobBuilder::new(&pattern).literal_separator(true).build() {
             Ok(_) => true,
             Err(error) => {
+                has_invalid_content_pattern = true;
                 errors.push(format!(
                     "invalid content.include pattern '{pattern}': {error}"
                 ));
@@ -734,6 +742,9 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         },
         errors,
         schema_available,
+        content_discovery_reliable: configuration.format_version == 1
+            && !has_non_relative_content
+            && !has_invalid_content_pattern,
     })
 }
 

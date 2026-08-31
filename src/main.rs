@@ -91,6 +91,7 @@ struct ValidationContext {
     diagnostics: Vec<Diagnostic>,
     project_errors: Vec<String>,
     schema_errors: Vec<String>,
+    content_discovery_reliable: bool,
 }
 
 impl From<CliTemplate> for Template {
@@ -149,7 +150,7 @@ fn run(cli: Cli) -> Result<(), String> {
                     .diagnostics
                     .iter()
                     .any(|diagnostic| diagnostic.applies_to_item(&id));
-            if !item_or_diagnostic_exists {
+            if !item_or_diagnostic_exists && context.content_discovery_reliable {
                 return Err(format!("item '{id}' was not found"));
             }
             report_diagnostics(context, Some(&id))
@@ -170,7 +171,8 @@ fn load_selected_project(selected: Option<PathBuf>) -> Result<ValidationContext,
         env::current_dir().map_err(|error| format!("could not read current directory: {error}"))?;
     let project_validation = resolve_project_for_validation(selected.as_deref(), cwd)
         .map_err(|error| error.to_string())?;
-    let (project, project_errors, schema_available) = project_validation.into_parts();
+    let (project, project_errors, schema_available, content_discovery_reliable) =
+        project_validation.into_parts();
     let project_errors = project_errors
         .into_iter()
         .map(|message| {
@@ -229,6 +231,7 @@ fn load_selected_project(selected: Option<PathBuf>) -> Result<ValidationContext,
         diagnostics,
         project_errors,
         schema_errors,
+        content_discovery_reliable,
     })
 }
 

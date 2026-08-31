@@ -405,7 +405,7 @@ fn project_for_validation(
                             DelimiterKind::Closer => delimiter_index += 1,
                             DelimiterKind::Opener => {
                                 let outer = line_at(&lines, delimiter.source.start);
-                                let outer_id = opener(outer.text).map(|(_, id)| id);
+                                let outer_id = opener_id(outer.text);
                                 errors.push(nested_item_error(&lines, outer_id, next));
                             }
                         }
@@ -431,16 +431,14 @@ fn project_item(
     let (flavour, id) = opener(opener_line.text).ok_or_else(|| ParseError {
         line: opener_line.number,
         source: opener_line.start..opener_line.end,
-        item_ids: Vec::new(),
+        item_ids: opener_item_ids(opener_line.text),
         message: "item opener must be ':::mara <flavour> <id>' with no other tokens".to_owned(),
     })?;
     if !is_snake_name(flavour) {
         return Err(ParseError {
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
-            item_ids: is_item_id(id)
-                .then(|| vec![id.to_owned()])
-                .unwrap_or_default(),
+            item_ids: opener_item_ids(opener_line.text),
             message: format!("invalid flavour '{flavour}'"),
         });
     }
@@ -522,8 +520,7 @@ fn nested_item_error(
         .filter(|id| is_item_id(id))
         .map(|id| vec![id.to_owned()])
         .unwrap_or_default();
-    if let Some((_, nested_id)) = nested_opener
-        && is_item_id(nested_id)
+    if let Some(nested_id) = opener_id(nested.text)
         && !item_ids.iter().any(|existing| existing == nested_id)
     {
         item_ids.push(nested_id.to_owned());
@@ -627,6 +624,18 @@ fn opener(line: &str) -> Option<(&str, &str)> {
     let (flavour, id) = declaration.split_once(' ')?;
     (!flavour.is_empty() && !id.is_empty() && !id.bytes().any(|byte| byte.is_ascii_whitespace()))
         .then_some((flavour, id))
+}
+
+fn opener_id(line: &str) -> Option<&str> {
+    let mut tokens = line.split_ascii_whitespace();
+    (tokens.next() == Some(":::mara")).then_some(())?;
+    tokens.next()?;
+    let id = tokens.next()?;
+    is_item_id(id).then_some(id)
+}
+
+fn opener_item_ids(line: &str) -> Vec<String> {
+    opener_id(line).map_or_else(Vec::new, |id| vec![id.to_owned()])
 }
 
 fn looks_like_item_opener(line: &str) -> bool {

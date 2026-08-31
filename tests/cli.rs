@@ -230,6 +230,46 @@ Body.
 }
 
 #[test]
+fn item_validation_reports_ambiguous_relation_and_mention_targets() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("source.mara.md"),
+        r#":::mara requirement REQ-SOURCE
+:title: Source
+:derives_from: REQ-TARGET
+
+Mentions [[REQ-TARGET]].
+:::
+"#,
+    )
+    .unwrap();
+    for name in ["first", "second"] {
+        fs::write(
+            fixture.path().join(format!("{name}.mara.md")),
+            format!(":::mara requirement REQ-TARGET\n:title: {name}\n\nTarget body.\n:::\n"),
+        )
+        .unwrap();
+    }
+
+    let validate = mara(fixture.path(), &["item", "validate", "REQ-SOURCE"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "relation 'derives_from' references ambiguous item 'REQ-TARGET'",
+        "mention references ambiguous item 'REQ-TARGET'",
+        "validation failed with 2 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
 fn item_validation_retains_recovered_syntax_diagnostics() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -347,6 +387,28 @@ fn item_validation_reports_syntax_for_an_identifiable_malformed_item() {
             .contains("broken.mara.md:1: error: item must have exactly one non-empty title entry"),
         "{errors}"
     );
+    assert!(
+        !errors.contains("item 'REQ-BROKEN' was not found"),
+        "{errors}"
+    );
+}
+
+#[test]
+fn item_validation_associates_a_malformed_opener_with_its_id() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("broken.mara.md"),
+        ":::mara requirement REQ-BROKEN trailing\n:title: Broken\n\nBody.\n:::\n",
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["item", "validate", "REQ-BROKEN"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert!(errors.contains("item opener must be"), "{errors}");
     assert!(
         !errors.contains("item 'REQ-BROKEN' was not found"),
         "{errors}"
@@ -560,6 +622,33 @@ include = ["../**/*.mara.md"]
             "missing {expected:?} in {errors}"
         );
     }
+}
+
+#[test]
+fn item_validation_reports_configuration_that_prevents_reliable_discovery() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let project_file = fixture.path().join(".mara/project.toml");
+    let project = fs::read_to_string(&project_file).unwrap();
+    fs::write(
+        &project_file,
+        project.replace("**/*.mara.md", "../**/*.mara.md"),
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["item", "validate", "REQ-MISSING"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert!(
+        errors.contains("content.include entries must be project-relative patterns"),
+        "{errors}"
+    );
+    assert!(
+        !errors.contains("item 'REQ-MISSING' was not found"),
+        "{errors}"
+    );
 }
 
 #[test]
