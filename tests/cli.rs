@@ -345,6 +345,38 @@ fn schema_validation_rejects_an_id_prefix_with_an_empty_segment() {
 }
 
 #[test]
+fn schema_validation_rejects_structural_names_as_custom_fields() {
+    for field in ["mid", "flavour", "id", "title", "body"] {
+        let fixture = TempDir::new().unwrap();
+        let init = mara(fixture.path(), &["project", "init"]);
+        assert!(init.status.success(), "{}", stderr(&init));
+        let schema_file = fixture.path().join(".mara/schema.yaml");
+        let schema = fs::read_to_string(&schema_file).unwrap();
+        fs::write(
+            &schema_file,
+            schema.replace(
+                "    id_prefix: REQ-\n    body: required\n    fields: {}",
+                &format!(
+                    "    id_prefix: REQ-\n    body: required\n    fields:\n      {field}:\n        type: string"
+                ),
+            ),
+        )
+        .unwrap();
+
+        let validate = mara(fixture.path(), &["schema", "validate"]);
+
+        assert!(!validate.status.success(), "field '{field}' was accepted");
+        assert!(
+            stderr(&validate).contains(&format!(
+                "flavour 'requirement' field '{field}' is reserved for item structure"
+            )),
+            "{}",
+            stderr(&validate)
+        );
+    }
+}
+
+#[test]
 fn schema_get_rejects_an_unknown_declaration() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);

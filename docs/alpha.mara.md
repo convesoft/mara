@@ -231,7 +231,9 @@ The default `minimal` template writes `.mara/schema.yaml` draft format 1 with
 `scenario`, `requirement`, `design`, and `decision`; `empty` writes empty
 `flavours` and `relations` maps. A flavour declares its description, ID prefix,
 body requirement, and custom fields. Custom fields are flat string, integer,
-number, boolean, or enum values with required and repeatable constraints.
+number, boolean, or enum values with required and repeatable constraints. The
+structural names `mid`, `flavour`, `id`, `title`, and `body` cannot be custom
+fields.
 
 Initial relations are `derives_from`, `depends_on`, `satisfies`, `justifies`,
 and `supersedes`:

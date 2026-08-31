@@ -68,6 +68,14 @@ impl Schema {
             }
 
             for (field_name, field) in &flavour.fields {
+                if matches!(
+                    field_name.as_str(),
+                    "mid" | "flavour" | "id" | "title" | "body"
+                ) {
+                    return Err(format!(
+                        "flavour '{name}' field '{field_name}' is reserved for item structure"
+                    ));
+                }
                 if !is_snake_name(field_name) {
                     return Err(format!(
                         "flavour '{name}' has invalid field name '{field_name}'"
