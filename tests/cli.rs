@@ -15,6 +15,10 @@ fn stderr(output: &std::process::Output) -> String {
     String::from_utf8(output.stderr.clone()).expect("stderr is UTF-8")
 }
 
+fn stdout(output: &std::process::Output) -> String {
+    String::from_utf8(output.stdout.clone()).expect("stdout is UTF-8")
+}
+
 #[test]
 fn initializes_the_current_directory_without_touching_existing_content() {
     let fixture = TempDir::new().unwrap();
@@ -168,4 +172,311 @@ fn defers_project_validate_until_full_corpus_validation_exists() {
 
     assert!(!validate.status.success());
     assert!(stderr(&validate).contains("unrecognized subcommand 'validate'"));
+}
+
+#[test]
+fn real_cli_discovers_and_inspects_the_effective_minimal_schema() {
+    let fixture = TempDir::new().unwrap();
+    let project_root = fixture.path().join("project");
+    let init = mara(
+        fixture.path(),
+        &["project", "init", project_root.to_str().unwrap()],
+    );
+    assert!(init.status.success(), "{}", stderr(&init));
+    let nested = project_root.join("nested/deeper");
+    fs::create_dir_all(&nested).unwrap();
+
+    let complete = mara(&nested, &["schema", "get"]);
+    assert!(complete.status.success(), "{}", stderr(&complete));
+    let complete = stdout(&complete);
+    assert!(complete.contains("format_version: 1"));
+    assert!(complete.contains("requirement:"));
+    assert!(complete.contains("satisfies:"));
+
+    let flavours = mara(&nested, &["schema", "list", "flavour"]);
+    assert!(flavours.status.success(), "{}", stderr(&flavours));
+    let flavours = stdout(&flavours);
+    assert!(flavours.contains("requirement\tAn independently verifiable obligation."));
+    assert!(flavours.contains("design\tA solution or interface contract"));
+
+    let relations = mara(&nested, &["schema", "list", "relation"]);
+    assert!(relations.status.success(), "{}", stderr(&relations));
+    let relations = stdout(&relations);
+    assert!(relations.contains("derives_from\tThe source originates"));
+    assert!(relations.contains("supersedes\tThe source replaces"));
+
+    let relation = mara(&nested, &["schema", "get", "relation", "satisfies"]);
+    assert!(relation.status.success(), "{}", stderr(&relation));
+    let relation = stdout(&relation);
+    assert!(relation.starts_with("satisfies:\n"));
+    assert!(relation.contains("source:\n  - design"));
+    assert!(relation.contains("target:\n  - requirement"));
+
+    let valid = mara(&nested, &["schema", "validate"]);
+    assert!(valid.status.success(), "{}", stderr(&valid));
+    assert!(stdout(&valid).contains("valid schema"));
+}
+
+#[test]
+fn schema_commands_load_the_schema_configured_by_the_selected_project() {
+    let fixture = TempDir::new().unwrap();
+    let selected = fixture.path().join("selected");
+    let init = mara(
+        fixture.path(),
+        &["project", "init", selected.to_str().unwrap()],
+    );
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let project_file = selected.join(".mara/project.toml");
+    let project_source = fs::read_to_string(&project_file).unwrap();
+    fs::write(
+        &project_file,
+        project_source.replace(".mara/schema.yaml", ".mara/custom.yaml"),
+    )
+    .unwrap();
+    fs::write(
+        selected.join(".mara/custom.yaml"),
+        r#"format_version: 1
+flavours:
+  note:
+    description: A concise project note.
+    id_prefix: NOTE-
+    body: optional
+    fields:
+      text:
+        type: string
+      count:
+        type: integer
+      ratio:
+        type: number
+      enabled:
+        type: boolean
+      status:
+        type: enum
+        required: true
+        repeatable: false
+        values: [draft, accepted]
+relations:
+  depends_on:
+    description: The source requires the target.
+    source: [note]
+    target: [note]
+"#,
+    )
+    .unwrap();
+
+    let note = mara(
+        fixture.path(),
+        &[
+            "--project",
+            selected.to_str().unwrap(),
+            "schema",
+            "get",
+            "flavour",
+            "note",
+        ],
+    );
+    assert!(note.status.success(), "{}", stderr(&note));
+    let note = stdout(&note);
+    assert!(note.starts_with("note:\n"));
+    assert!(note.contains("id_prefix: NOTE-"));
+    assert!(note.contains("type: enum"));
+    assert!(note.contains("values:\n      - draft\n      - accepted"));
+    assert!(!note.contains("values: null"));
+
+    let valid = mara(
+        fixture.path(),
+        &[
+            "--project",
+            selected.to_str().unwrap(),
+            "schema",
+            "validate",
+        ],
+    );
+    assert!(valid.status.success(), "{}", stderr(&valid));
+    assert!(stdout(&valid).contains(".mara/custom.yaml"));
+}
+
+#[test]
+fn schema_validation_rejects_unknown_relation_endpoints() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace("target: [scenario, requirement]", "target: [missing]"),
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["schema", "validate"]);
+
+    assert!(!validate.status.success());
+    assert!(
+        stderr(&validate)
+            .contains("relation 'derives_from' target references unknown flavour 'missing'"),
+        "{}",
+        stderr(&validate)
+    );
+}
+
+#[test]
+fn schema_validation_rejects_an_id_prefix_with_an_empty_segment() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace("id_prefix: REQ-", "id_prefix: REQ--"),
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["schema", "validate"]);
+
+    assert!(!validate.status.success());
+    assert!(
+        stderr(&validate).contains("flavour 'requirement' has invalid ID prefix 'REQ--'"),
+        "{}",
+        stderr(&validate)
+    );
+}
+
+#[test]
+fn schema_validation_rejects_structural_names_as_custom_fields() {
+    for field in ["mid", "flavour", "id", "title", "body"] {
+        let fixture = TempDir::new().unwrap();
+        let init = mara(fixture.path(), &["project", "init"]);
+        assert!(init.status.success(), "{}", stderr(&init));
+        let schema_file = fixture.path().join(".mara/schema.yaml");
+        let schema = fs::read_to_string(&schema_file).unwrap();
+        fs::write(
+            &schema_file,
+            schema.replace(
+                "    id_prefix: REQ-\n    body: required\n    fields: {}",
+                &format!(
+                    "    id_prefix: REQ-\n    body: required\n    fields:\n      {field}:\n        type: string"
+                ),
+            ),
+        )
+        .unwrap();
+
+        let validate = mara(fixture.path(), &["schema", "validate"]);
+
+        assert!(!validate.status.success(), "field '{field}' was accepted");
+        assert!(
+            stderr(&validate).contains(&format!(
+                "flavour 'requirement' field '{field}' is reserved for item structure"
+            )),
+            "{}",
+            stderr(&validate)
+        );
+    }
+}
+
+#[test]
+fn schema_validation_rejects_enum_values_with_surrounding_whitespace() {
+    for value in [" draft ", "   "] {
+        let fixture = TempDir::new().unwrap();
+        let init = mara(fixture.path(), &["project", "init"]);
+        assert!(init.status.success(), "{}", stderr(&init));
+        let schema_file = fixture.path().join(".mara/schema.yaml");
+        let schema = fs::read_to_string(&schema_file).unwrap();
+        fs::write(
+            &schema_file,
+            schema.replace(
+                "    id_prefix: REQ-\n    body: required\n    fields: {}",
+                &format!(
+                    "    id_prefix: REQ-\n    body: required\n    fields:\n      status:\n        type: enum\n        values: [\"{value}\"]"
+                ),
+            ),
+        )
+        .unwrap();
+
+        let validate = mara(fixture.path(), &["schema", "validate"]);
+
+        assert!(
+            !validate.status.success(),
+            "enum value '{value}' was accepted"
+        );
+        assert!(
+            stderr(&validate).contains(
+                "flavour 'requirement' enum field 'status' values must not have surrounding whitespace"
+            ),
+            "{}",
+            stderr(&validate)
+        );
+    }
+}
+
+#[test]
+fn schema_validation_rejects_structural_names_as_relations() {
+    for relation in ["mid", "flavour", "id", "title", "body"] {
+        let fixture = TempDir::new().unwrap();
+        let init = mara(fixture.path(), &["project", "init"]);
+        assert!(init.status.success(), "{}", stderr(&init));
+        let schema_file = fixture.path().join(".mara/schema.yaml");
+        let schema = fs::read_to_string(&schema_file).unwrap();
+        fs::write(
+            &schema_file,
+            schema.replace("  derives_from:\n", &format!("  {relation}:\n")),
+        )
+        .unwrap();
+
+        let validate = mara(fixture.path(), &["schema", "validate"]);
+
+        assert!(
+            !validate.status.success(),
+            "relation '{relation}' was accepted"
+        );
+        assert!(
+            stderr(&validate).contains(&format!(
+                "relation '{relation}' is reserved for item structure"
+            )),
+            "{}",
+            stderr(&validate)
+        );
+    }
+}
+
+#[test]
+fn schema_validation_rejects_relation_and_source_field_name_collisions() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace(
+            "    id_prefix: SCN-\n    body: required\n    fields: {}",
+            "    id_prefix: SCN-\n    body: required\n    fields:\n      depends_on:\n        type: string",
+        ),
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["schema", "validate"]);
+
+    assert!(!validate.status.success());
+    assert!(
+        stderr(&validate).contains(
+            "relation 'depends_on' conflicts with field 'depends_on' on source flavour 'scenario'"
+        ),
+        "{}",
+        stderr(&validate)
+    );
+}
+
+#[test]
+fn schema_get_rejects_an_unknown_declaration() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let get = mara(fixture.path(), &["schema", "get", "flavour", "missing"]);
+
+    assert!(!get.status.success());
+    assert!(stderr(&get).contains("unknown flavour 'missing'"));
 }

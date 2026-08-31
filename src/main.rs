@@ -1,7 +1,8 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::{collections::BTreeMap, env, path::PathBuf, process::ExitCode};
 
 use clap::{Parser, Subcommand, ValueEnum};
-use mara::{Template, initialize_project};
+use mara::{Schema, Template, initialize_project, load_schema, resolve_project};
+use serde::Serialize;
 
 #[derive(Debug, Parser)]
 #[command(name = "mara", version, about = "Structured project knowledge")]
@@ -24,6 +25,10 @@ enum Command {
         #[command(subcommand)]
         command: ProjectCommand,
     },
+    Schema {
+        #[command(subcommand)]
+        command: SchemaCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -34,6 +39,28 @@ enum ProjectCommand {
         #[arg(long, value_enum, default_value_t)]
         template: CliTemplate,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum SchemaCommand {
+    Get {
+        #[arg(value_enum, requires = "name")]
+        kind: Option<SchemaKind>,
+
+        #[arg(requires = "kind")]
+        name: Option<String>,
+    },
+    List {
+        #[arg(value_enum)]
+        kind: SchemaKind,
+    },
+    Validate,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SchemaKind {
+    Flavour,
+    Relation,
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -64,11 +91,12 @@ fn main() -> ExitCode {
 }
 
 fn run(cli: Cli) -> Result<(), String> {
-    match cli.command {
+    let Cli { project, command } = cli;
+    match command {
         Command::Project {
             command: ProjectCommand::Init { path, template },
         } => {
-            let target = match (cli.project, path) {
+            let target = match (project, path) {
                 (Some(project), None) => project,
                 (None, Some(path)) => path,
                 (None, None) => PathBuf::from("."),
@@ -83,5 +111,86 @@ fn run(cli: Cli) -> Result<(), String> {
             println!("created {SCHEMA_FILE}", SCHEMA_FILE = mara::SCHEMA_FILE);
             Ok(())
         }
+        Command::Schema { command } => {
+            let current_directory = env::current_dir()
+                .map_err(|error| format!("could not read current directory: {error}"))?;
+            let project = resolve_project(project.as_deref(), current_directory)
+                .map_err(|error| error.to_string())?;
+            let schema = load_schema(&project).map_err(|error| error.to_string())?;
+            run_schema_command(command, &project, &schema)
+        }
     }
+}
+
+fn run_schema_command(
+    command: SchemaCommand,
+    project: &mara::Project,
+    schema: &Schema,
+) -> Result<(), String> {
+    match command {
+        SchemaCommand::Get {
+            kind: None,
+            name: None,
+        } => print_yaml(schema),
+        SchemaCommand::Get {
+            kind: Some(SchemaKind::Flavour),
+            name: Some(name),
+        } => {
+            let definition = schema
+                .flavours()
+                .get(&name)
+                .ok_or_else(|| format!("unknown flavour '{name}'"))?;
+            print_named_yaml(&name, definition)
+        }
+        SchemaCommand::Get {
+            kind: Some(SchemaKind::Relation),
+            name: Some(name),
+        } => {
+            let definition = schema
+                .relations()
+                .get(&name)
+                .ok_or_else(|| format!("unknown relation '{name}'"))?;
+            print_named_yaml(&name, definition)
+        }
+        SchemaCommand::Get { .. } => {
+            Err("schema get requires both KIND and NAME, or neither".into())
+        }
+        SchemaCommand::List {
+            kind: SchemaKind::Flavour,
+        } => {
+            for (name, definition) in schema.flavours() {
+                println!("{name}\t{}", definition.description());
+            }
+            Ok(())
+        }
+        SchemaCommand::List {
+            kind: SchemaKind::Relation,
+        } => {
+            for (name, definition) in schema.relations() {
+                println!("{name}\t{}", definition.description());
+            }
+            Ok(())
+        }
+        SchemaCommand::Validate => {
+            println!(
+                "valid schema at {} ({} flavours, {} relations)",
+                project.schema_path().display(),
+                schema.flavours().len(),
+                schema.relations().len()
+            );
+            Ok(())
+        }
+    }
+}
+
+fn print_named_yaml<T: Serialize>(name: &str, definition: &T) -> Result<(), String> {
+    let declarations = BTreeMap::from([(name, definition)]);
+    print_yaml(&declarations)
+}
+
+fn print_yaml(value: &impl Serialize) -> Result<(), String> {
+    let source = serde_saphyr::to_string(value)
+        .map_err(|error| format!("could not render schema: {error}"))?;
+    print!("{source}");
+    Ok(())
 }
