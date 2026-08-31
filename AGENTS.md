@@ -45,8 +45,9 @@ Repository-wide instructions for humans and software agents.
 - Start issue work from current `main` and use the Linear issue's generated
   `gitBranchName`. If it is unavailable, use `<identifier>-<short-title>`; do not
   invent another branch taxonomy or long-lived development and release branches.
-- Open one pull request per issue against `main`. Use Conventional Commit form
-  for its title because GitHub may use the title for the squash commit.
+- Open one pull request per issue against `main`. Its title must follow the
+  active commit form and approved-scope list under Commit messages because
+  GitHub may use the title for the squash commit.
 - Draft every pull request from [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md).
   Preserve its sections, replace guidance comments with concise task-specific
   facts, and include only issue references, Mara IDs, and verification evidence
@@ -225,15 +226,17 @@ instructions in a Codex task:
 
 ## Commit messages
 
-- Use Conventional Commits: `<type>[optional scope][!]: <description>`.
+- Use Conventional Commits. Mara currently has no approved scopes, so use
+  `<type>: <description>` or `<type>!: <description>` for commits and pull
+  request titles.
 - Use `feat` for user-facing capability, `fix` for a defect, `docs` for
   documentation only, `refactor` for behavior-preserving restructuring,
   `perf` for performance, `test` for tests, `build` for build or dependencies,
   `ci` for CI, and `chore` for otherwise-unclassified maintenance.
-- Include a scope only when a clear, stable affected area exists. Reuse names
-  established by the repository's modules and recent history; omit the scope
-  while the project is too small, and never invent one merely to fill the
-  field.
+- Do not infer a scope from a CLI object (`project`, `schema`, `item`, or
+  `relation`), directory name, or existing feature-branch commit. Introduce
+  scopes only by updating this section with an explicit approved list after
+  stable repository boundaries exist.
 - Write a concise imperative description without a trailing period. Use the
   optional body for motivation or important context and git-trailer-style
   footers for references.
