@@ -86,6 +86,30 @@ Repository-wide instructions for humans and software agents.
 - Initially require only flavour, human ID, and title. Add lifecycle fields,
   classifications, or validation constraints only for a demonstrated workflow.
 
+## Implementation readiness and knowledge maintenance
+
+- Before changing code, read the task, applicable Mara items, and current
+  implementation. Determine whether the documented contract is sufficient to
+  implement and verify the requested outcome.
+- Continue directly when remaining choices are local and reversible. Stop and
+  ask one concrete question when missing or contradictory knowledge would
+  materially change user-visible behaviour, persisted formats, compatibility,
+  data safety, task scope, or acceptance criteria; do not invent the answer.
+- Update canonical Mara documents in the same change whenever implementation
+  establishes or changes durable product meaning.
+- Add or update a `scenario` or `requirement` when observable expected behaviour
+  is missing or changed. Add an `actor` only when a durable participant
+  distinction affects behaviour or is referenced across multiple items.
+- Add or update a `design` when implementation introduces or changes a durable
+  interface, persisted format, cross-component contract, architectural boundary,
+  or important invariant. Keep routine code organization in code.
+- Record a `decision` only when choosing among meaningful alternatives and the
+  rationale should survive implementation. Do not record routine or easily
+  reversible choices.
+- Stop when the accepted outcome works end to end, its acceptance criteria have
+  evidence, relevant tests pass, and affected durable knowledge is current. Do
+  not extend the task into optional hardening, cleanup, or unrelated documentation.
+
 ## Delivery discipline
 
 - Prioritize the shortest path to a working end-to-end product. Until the first
