@@ -53,6 +53,20 @@ pub struct Schema {
     format_version: u32,
     flavours: BTreeMap<String, FlavourDefinition>,
     relations: BTreeMap<String, RelationDefinition>,
+    #[serde(skip)]
+    validation: SchemaValidationState,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct SchemaValidationState {
+    invalid_flavours: HashSet<String>,
+    invalid_id_prefixes: HashSet<String>,
+    invalid_fields: HashSet<(String, String)>,
+    invalid_field_values: HashSet<(String, String)>,
+    invalid_relations: HashSet<String>,
+    invalid_relation_sources: HashSet<String>,
+    invalid_relation_targets: HashSet<String>,
+    invalid_same_flavour: HashSet<String>,
 }
 
 impl Schema {
@@ -68,7 +82,48 @@ impl Schema {
         &self.relations
     }
 
-    fn validation_errors(&self) -> Vec<String> {
+    fn flavour_for_validation(&self, name: &str) -> Option<&FlavourDefinition> {
+        (!self.validation.invalid_flavours.contains(name))
+            .then(|| self.flavours.get(name))
+            .flatten()
+    }
+
+    fn id_prefix_is_valid(&self, flavour: &str) -> bool {
+        !self.validation.invalid_id_prefixes.contains(flavour)
+    }
+
+    fn field_is_valid(&self, flavour: &str, field: &str) -> bool {
+        !self
+            .validation
+            .invalid_fields
+            .contains(&(flavour.to_owned(), field.to_owned()))
+    }
+
+    fn field_values_are_valid(&self, flavour: &str, field: &str) -> bool {
+        !self
+            .validation
+            .invalid_field_values
+            .contains(&(flavour.to_owned(), field.to_owned()))
+    }
+
+    fn relation_is_valid(&self, relation: &str) -> bool {
+        !self.validation.invalid_relations.contains(relation)
+    }
+
+    fn relation_source_is_valid(&self, relation: &str) -> bool {
+        !self.validation.invalid_relation_sources.contains(relation)
+    }
+
+    fn relation_target_is_valid(&self, relation: &str) -> bool {
+        !self.validation.invalid_relation_targets.contains(relation)
+    }
+
+    fn same_flavour_is_valid(&self, relation: &str) -> bool {
+        !self.validation.invalid_same_flavour.contains(relation)
+    }
+
+    fn validation_errors(&mut self) -> Vec<String> {
+        self.validation = SchemaValidationState::default();
         let mut errors = Vec::new();
         if self.format_version != 1 {
             errors.push(format!(
@@ -80,6 +135,7 @@ impl Schema {
         for (name, flavour) in &self.flavours {
             if !is_snake_name(name) {
                 errors.push(format!("invalid flavour name '{name}'"));
+                self.validation.invalid_flavours.insert(name.clone());
             }
             if flavour.description.trim().is_empty() {
                 errors.push(format!("flavour '{name}' description must not be empty"));
@@ -89,29 +145,46 @@ impl Schema {
                     "flavour '{name}' has invalid ID prefix '{}'",
                     flavour.id_prefix
                 ));
+                self.validation.invalid_id_prefixes.insert(name.clone());
             }
 
             for (field_name, field) in &flavour.fields {
+                let mut field_is_valid = true;
                 if is_structural_item_name(field_name) {
                     errors.push(format!(
                         "flavour '{name}' field '{field_name}' is reserved for item structure"
                     ));
+                    field_is_valid = false;
                 }
                 if !is_snake_name(field_name) {
                     errors.push(format!(
                         "flavour '{name}' has invalid field name '{field_name}'"
                     ));
+                    field_is_valid = false;
                 }
-                errors.extend(field.validation_errors(name, field_name));
+                let field_errors = field.validation_errors(name, field_name);
+                if !field_errors.is_empty() {
+                    self.validation
+                        .invalid_field_values
+                        .insert((name.clone(), field_name.clone()));
+                    errors.extend(field_errors);
+                }
+                if !field_is_valid {
+                    self.validation
+                        .invalid_fields
+                        .insert((name.clone(), field_name.clone()));
+                }
             }
         }
 
         for (name, relation) in &self.relations {
             if !is_snake_name(name) {
                 errors.push(format!("invalid relation name '{name}'"));
+                self.validation.invalid_relations.insert(name.clone());
             }
             if is_structural_item_name(name) {
                 errors.push(format!("relation '{name}' is reserved for item structure"));
+                self.validation.invalid_relations.insert(name.clone());
             }
             if relation.description.trim().is_empty() {
                 errors.push(format!("relation '{name}' description must not be empty"));
@@ -122,12 +195,30 @@ impl Schema {
                 &relation.source,
                 &self.flavours,
             ));
+            if !endpoints_are_usable(
+                &relation.source,
+                &self.flavours,
+                &self.validation.invalid_flavours,
+            ) {
+                self.validation
+                    .invalid_relation_sources
+                    .insert(name.clone());
+            }
             errors.extend(endpoint_errors(
                 name,
                 "target",
                 &relation.target,
                 &self.flavours,
             ));
+            if !endpoints_are_usable(
+                &relation.target,
+                &self.flavours,
+                &self.validation.invalid_flavours,
+            ) {
+                self.validation
+                    .invalid_relation_targets
+                    .insert(name.clone());
+            }
             for source in &relation.source {
                 if self
                     .flavours
@@ -137,6 +228,7 @@ impl Schema {
                     errors.push(format!(
                         "relation '{name}' conflicts with field '{name}' on source flavour '{source}'"
                     ));
+                    self.validation.invalid_relations.insert(name.clone());
                 }
             }
             if relation.same_flavour
@@ -148,6 +240,7 @@ impl Schema {
                 errors.push(format!(
                     "relation '{name}' requires a shared source and target flavour when same_flavour is true"
                 ));
+                self.validation.invalid_same_flavour.insert(name.clone());
             }
         }
 
@@ -533,7 +626,7 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
         path: project.schema_path().to_path_buf(),
         source,
     })?;
-    let schema: Schema =
+    let mut schema: Schema =
         serde_saphyr::from_str(&source).map_err(|source| Error::InvalidSchema {
             path: project.schema_path().to_path_buf(),
             message: source.to_string(),
@@ -739,6 +832,17 @@ fn endpoint_errors(
         }
     }
     errors
+}
+
+fn endpoints_are_usable(
+    flavours: &[String],
+    declarations: &BTreeMap<String, FlavourDefinition>,
+    invalid_flavours: &HashSet<String>,
+) -> bool {
+    !flavours.is_empty()
+        && flavours.iter().all(|flavour| {
+            declarations.contains_key(flavour) && !invalid_flavours.contains(flavour)
+        })
 }
 
 fn path_exists(path: &Path) -> Result<bool, Error> {

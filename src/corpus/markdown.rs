@@ -400,11 +400,15 @@ fn project_for_validation(
                 errors.push(error);
                 if delimiter_index == opener_index {
                     delimiter_index += 1;
-                    if delimiters
-                        .get(delimiter_index)
-                        .is_some_and(|delimiter| delimiter.kind == DelimiterKind::Closer)
-                    {
-                        delimiter_index += 1;
+                    if let Some(next) = delimiters.get(delimiter_index) {
+                        match next.kind {
+                            DelimiterKind::Closer => delimiter_index += 1,
+                            DelimiterKind::Opener => {
+                                let outer = line_at(&lines, delimiter.source.start);
+                                let outer_id = opener(outer.text).map(|(_, id)| id);
+                                errors.push(nested_item_error(&lines, outer_id, next));
+                            }
+                        }
                     }
                 }
             }
@@ -481,28 +485,7 @@ fn project_item(
         }
         match next.kind {
             DelimiterKind::Closer => break next,
-            DelimiterKind::Opener => {
-                let nested = line_at(lines, next.source.start);
-                let nested_opener = opener(nested.text);
-                let message = if nested_opener.is_some() {
-                    "items cannot nest"
-                } else {
-                    "invalid nested item opener"
-                };
-                let mut item_ids = vec![id.to_owned()];
-                if let Some((_, nested_id)) = nested_opener
-                    && is_item_id(nested_id)
-                    && nested_id != id
-                {
-                    item_ids.push(nested_id.to_owned());
-                }
-                return Err(ParseError {
-                    line: nested.number,
-                    source: nested.start..nested.end,
-                    item_ids,
-                    message: message.to_owned(),
-                });
-            }
+            DelimiterKind::Opener => return Err(nested_item_error(lines, Some(id), next)),
         }
     };
     let closing_line = line_at(lines, closing.source.start);
@@ -526,6 +509,36 @@ fn project_item(
         mentions: item_mentions,
         source: opener_line.start..closing_line.full_end,
     })
+}
+
+fn nested_item_error(
+    lines: &[SourceLine<'_>],
+    outer_id: Option<&str>,
+    nested_delimiter: &Delimiter,
+) -> ParseError {
+    let nested = line_at(lines, nested_delimiter.source.start);
+    let nested_opener = opener(nested.text);
+    let mut item_ids = outer_id
+        .filter(|id| is_item_id(id))
+        .map(|id| vec![id.to_owned()])
+        .unwrap_or_default();
+    if let Some((_, nested_id)) = nested_opener
+        && is_item_id(nested_id)
+        && !item_ids.iter().any(|existing| existing == nested_id)
+    {
+        item_ids.push(nested_id.to_owned());
+    }
+    ParseError {
+        line: nested.number,
+        source: nested.start..nested.end,
+        item_ids,
+        message: if nested_opener.is_some() {
+            "items cannot nest"
+        } else {
+            "invalid nested item opener"
+        }
+        .to_owned(),
+    }
 }
 
 fn parse_metadata(

@@ -221,14 +221,15 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
     let ids = item_index(corpus);
 
     for item in corpus.items() {
-        let Some(flavour) = schema.flavours.get(item.flavour()) else {
+        let Some(flavour) = schema.flavour_for_validation(item.flavour()) else {
             diagnostic(
                 &mut diagnostics,
                 item.source(),
                 format!("unknown flavour '{}'", item.flavour()),
             );
             for relation in item.relations() {
-                if !ids.contains_key(relation.target()) {
+                if schema.relation_is_valid(relation.name()) && !ids.contains_key(relation.target())
+                {
                     diagnostic(
                         &mut diagnostics,
                         relation.source(),
@@ -242,7 +243,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
             }
             continue;
         };
-        if !item.id().starts_with(&flavour.id_prefix) {
+        if schema.id_prefix_is_valid(item.flavour()) && !item.id().starts_with(&flavour.id_prefix) {
             diagnostic(
                 &mut diagnostics,
                 item.source(),
@@ -269,24 +270,34 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
             .filter(|entry| entry.key() != "title")
         {
             if let Some(field) = flavour.fields.get(entry.key()) {
-                fields.entry(entry.key()).or_default().push(entry);
-                if !valid_field_value(field.field_type, field.values.as_deref(), entry.value()) {
-                    diagnostic(
-                        &mut diagnostics,
-                        entry.source(),
-                        format!(
-                            "invalid {} value '{}' for field '{}'",
-                            field_type_name(field.field_type),
+                if schema.field_is_valid(item.flavour(), entry.key()) {
+                    fields.entry(entry.key()).or_default().push(entry);
+                    if schema.field_values_are_valid(item.flavour(), entry.key())
+                        && !valid_field_value(
+                            field.field_type,
+                            field.values.as_deref(),
                             entry.value(),
-                            entry.key()
-                        ),
-                    );
+                        )
+                    {
+                        diagnostic(
+                            &mut diagnostics,
+                            entry.source(),
+                            format!(
+                                "invalid {} value '{}' for field '{}'",
+                                field_type_name(field.field_type),
+                                entry.value(),
+                                entry.key()
+                            ),
+                        );
+                    }
                 }
             } else if let Some(relation) = schema.relations.get(entry.key()) {
-                if !relation
-                    .source
-                    .iter()
-                    .any(|source| source == item.flavour())
+                if schema.relation_is_valid(entry.key())
+                    && schema.relation_source_is_valid(entry.key())
+                    && !relation
+                        .source
+                        .iter()
+                        .any(|source| source == item.flavour())
                 {
                     diagnostic(
                         &mut diagnostics,
@@ -307,6 +318,9 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
             }
         }
         for (name, field) in &flavour.fields {
+            if !schema.field_is_valid(item.flavour(), name) {
+                continue;
+            }
             let entries = fields
                 .get(name.as_str())
                 .map(Vec::as_slice)
@@ -330,13 +344,17 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
         }
         for relation in item.relations() {
             if let Some(definition) = schema.relations.get(relation.name()) {
+                if !schema.relation_is_valid(relation.name()) {
+                    continue;
+                }
                 if let Some(targets) = ids.get(relation.target()) {
                     if targets.len() == 1 {
                         let target = targets[0];
-                        if !definition
-                            .target
-                            .iter()
-                            .any(|flavour| flavour == target.flavour())
+                        if schema.relation_target_is_valid(relation.name())
+                            && !definition
+                                .target
+                                .iter()
+                                .any(|flavour| flavour == target.flavour())
                         {
                             diagnostic(
                                 &mut diagnostics,
@@ -348,7 +366,10 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                                 ),
                             );
                         }
-                        if definition.same_flavour && target.flavour() != item.flavour() {
+                        if definition.same_flavour
+                            && schema.same_flavour_is_valid(relation.name())
+                            && target.flavour() != item.flavour()
+                        {
                             diagnostic(
                                 &mut diagnostics,
                                 relation.source(),

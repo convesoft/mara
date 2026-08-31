@@ -260,6 +260,40 @@ Inner body.
 }
 
 #[test]
+fn item_validation_rejects_nested_opener_after_an_early_outer_error() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("nested.mara.md"),
+        r#":::mara requirement REQ-OUTER
+
+:::mara requirement REQ-INNER
+:title: Inner
+
+Inner body.
+:::
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["item", "validate", "REQ-INNER"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert!(
+        errors.contains("nested.mara.md:3: error: items cannot nest"),
+        "{errors}"
+    );
+    assert!(
+        !stdout(&validate).contains("valid item"),
+        "{}",
+        stdout(&validate)
+    );
+}
+
+#[test]
 fn project_validation_reports_schema_and_independent_syntax_diagnostics() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -402,6 +436,49 @@ fn project_validation_accumulates_independent_schema_diagnostics() {
         "flavour 'requirement' has invalid ID prefix 'REQ--'",
         "flavour 'scenario' has invalid ID prefix 'SCN--'",
         "validation failed with 2 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
+fn project_validation_uses_unaffected_schema_declarations() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace("id_prefix: SCN-", "id_prefix: SCN--"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        r#":::mara requirement WRONG-ID
+:title: Invalid
+:unknown: value
+:derives_from: MISSING-TARGET
+
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "flavour 'scenario' has invalid ID prefix 'SCN--'",
+        "item ID 'WRONG-ID' must start with 'REQ-'",
+        "required body is empty",
+        "unknown metadata field 'unknown'",
+        "relation 'derives_from' references missing item 'MISSING-TARGET'",
+        "validation failed with 5 diagnostics",
     ] {
         assert!(
             errors.contains(expected),

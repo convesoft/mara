@@ -182,10 +182,19 @@ fn load_selected_project(selected: Option<PathBuf>) -> Result<ValidationContext,
         .collect();
     let (schema, schema_errors, corpus, diagnostics) = if schema_available {
         match load_schema_for_validation(&project) {
-            Ok((schema, errors)) if errors.is_empty() => {
+            Ok((schema, errors)) if schema.format_version() == 1 => {
+                let schema_errors = errors
+                    .into_iter()
+                    .map(|message| {
+                        format!(
+                            "invalid Mara schema at {}: {message}",
+                            project.schema_path().display()
+                        )
+                    })
+                    .collect();
                 let (corpus, diagnostics) = load_corpus_for_validation(&project, &schema)
                     .map_err(|error| error.to_string())?;
-                (Some(schema), Vec::new(), corpus, diagnostics)
+                (Some(schema), schema_errors, corpus, diagnostics)
             }
             Ok((_, errors)) => {
                 let schema_errors = errors
