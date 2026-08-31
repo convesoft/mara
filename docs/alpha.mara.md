@@ -234,6 +234,8 @@ body requirement, and custom fields. Custom fields are flat string, integer,
 number, boolean, or enum values with required and repeatable constraints. The
 structural names `mid`, `flavour`, `id`, `title`, and `body` cannot be custom
 fields. Enum members are non-empty, unique, and have no surrounding whitespace.
+Relation names cannot be structural names or match a custom field declared by
+any allowed source flavour.
 
 Initial relations are `derives_from`, `depends_on`, `satisfies`, `justifies`,
 and `supersedes`:

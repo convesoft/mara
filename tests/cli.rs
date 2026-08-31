@@ -412,6 +412,64 @@ fn schema_validation_rejects_enum_values_with_surrounding_whitespace() {
 }
 
 #[test]
+fn schema_validation_rejects_structural_names_as_relations() {
+    for relation in ["mid", "flavour", "id", "title", "body"] {
+        let fixture = TempDir::new().unwrap();
+        let init = mara(fixture.path(), &["project", "init"]);
+        assert!(init.status.success(), "{}", stderr(&init));
+        let schema_file = fixture.path().join(".mara/schema.yaml");
+        let schema = fs::read_to_string(&schema_file).unwrap();
+        fs::write(
+            &schema_file,
+            schema.replace("  derives_from:\n", &format!("  {relation}:\n")),
+        )
+        .unwrap();
+
+        let validate = mara(fixture.path(), &["schema", "validate"]);
+
+        assert!(
+            !validate.status.success(),
+            "relation '{relation}' was accepted"
+        );
+        assert!(
+            stderr(&validate).contains(&format!(
+                "relation '{relation}' is reserved for item structure"
+            )),
+            "{}",
+            stderr(&validate)
+        );
+    }
+}
+
+#[test]
+fn schema_validation_rejects_relation_and_source_field_name_collisions() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace(
+            "    id_prefix: SCN-\n    body: required\n    fields: {}",
+            "    id_prefix: SCN-\n    body: required\n    fields:\n      depends_on:\n        type: string",
+        ),
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["schema", "validate"]);
+
+    assert!(!validate.status.success());
+    assert!(
+        stderr(&validate).contains(
+            "relation 'depends_on' conflicts with field 'depends_on' on source flavour 'scenario'"
+        ),
+        "{}",
+        stderr(&validate)
+    );
+}
+
+#[test]
 fn schema_get_rejects_an_unknown_declaration() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);

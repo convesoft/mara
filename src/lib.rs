@@ -68,10 +68,7 @@ impl Schema {
             }
 
             for (field_name, field) in &flavour.fields {
-                if matches!(
-                    field_name.as_str(),
-                    "mid" | "flavour" | "id" | "title" | "body"
-                ) {
+                if is_structural_item_name(field_name) {
                     return Err(format!(
                         "flavour '{name}' field '{field_name}' is reserved for item structure"
                     ));
@@ -89,11 +86,25 @@ impl Schema {
             if !is_snake_name(name) {
                 return Err(format!("invalid relation name '{name}'"));
             }
+            if is_structural_item_name(name) {
+                return Err(format!("relation '{name}' is reserved for item structure"));
+            }
             if relation.description.trim().is_empty() {
                 return Err(format!("relation '{name}' description must not be empty"));
             }
             validate_endpoints(name, "source", &relation.source, &self.flavours)?;
             validate_endpoints(name, "target", &relation.target, &self.flavours)?;
+            for source in &relation.source {
+                let flavour = self
+                    .flavours
+                    .get(source)
+                    .expect("relation source was validated");
+                if flavour.fields.contains_key(name) {
+                    return Err(format!(
+                        "relation '{name}' conflicts with field '{name}' on source flavour '{source}'"
+                    ));
+                }
+            }
             if relation.same_flavour
                 && !relation
                     .source
@@ -548,6 +559,10 @@ fn is_lower_alphanumeric_name(part: &str) -> bool {
         .next()
         .is_some_and(|character| character.is_ascii_lowercase())
         && characters.all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+}
+
+fn is_structural_item_name(name: &str) -> bool {
+    matches!(name, "mid" | "flavour" | "id" | "title" | "body")
 }
 
 fn is_id_prefix(prefix: &str) -> bool {
