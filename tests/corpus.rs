@@ -191,6 +191,26 @@ fn validation_retains_independent_document_parse_diagnostics() {
 }
 
 #[test]
+fn validation_retains_valid_items_around_a_malformed_item() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "mixed.mara.md",
+        ":::mara requirement REQ-FIRST\n:title: First\n\nFirst body.\n:::\n\n:::mara requirement REQ-BROKEN trailing\n:title: Broken\n\nBroken body.\n:::\n\n:::mara requirement REQ-LAST\n:title: Last\n\nLast body.\n:::\n",
+    );
+
+    let (corpus, diagnostics) = load_corpus_for_validation(&project, &schema).unwrap();
+    let ids = corpus.items().map(mara::Item::id).collect::<Vec<_>>();
+
+    assert_eq!(corpus.documents().len(), 1);
+    assert_eq!(ids, ["REQ-FIRST", "REQ-LAST"]);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].source().path(), Path::new("mixed.mara.md"));
+    assert_eq!(diagnostics[0].source().span().start_line(), 7);
+    assert!(diagnostics[0].message().contains("with no other tokens"));
+}
+
+#[test]
 fn reports_tab_separated_item_openers_as_malformed() {
     let (fixture, project, schema) = initialized_project();
     write(

@@ -288,6 +288,16 @@ fn mara_extension() -> impl ParserExtension {
 }
 
 pub(super) fn parse(source: &str) -> Result<ParsedDocument, ParseError> {
+    let (delimiters, mentions) = parse_extensions(source);
+    project(source, &delimiters, &mentions)
+}
+
+pub(super) fn parse_for_validation(source: &str) -> (ParsedDocument, Vec<ParseError>) {
+    let (delimiters, mentions) = parse_extensions(source);
+    project_for_validation(source, &delimiters, &mentions)
+}
+
+fn parse_extensions(source: &str) -> (Vec<Delimiter>, Vec<ParsedMention>) {
     let parser = Parser::with_extensions(parser::Options::default(), mara_extension());
     let mut reader = BasicReader::new(source);
     let (arena, document_ref) = parser.parse(&mut reader);
@@ -297,7 +307,7 @@ pub(super) fn parse(source: &str) -> Result<ParsedDocument, ParseError> {
     delimiters.sort_by_key(|delimiter| delimiter.source.start);
     mentions.sort_by_key(|mention| mention.source.start);
 
-    project(source, &delimiters, &mentions)
+    (delimiters, mentions)
 }
 
 fn collect_extensions(
@@ -345,88 +355,143 @@ fn project(
             continue;
         }
 
-        let opener_line = line_at(&lines, delimiter.source.start);
-        let (flavour, id) = opener(opener_line.text).ok_or_else(|| ParseError {
-            line: opener_line.number,
-            message: "item opener must be ':::mara <flavour> <id>' with no other tokens".to_owned(),
-        })?;
-        if !is_snake_name(flavour) {
-            return Err(ParseError {
-                line: opener_line.number,
-                message: format!("invalid flavour '{flavour}'"),
-            });
-        }
-        if !is_item_id(id) {
-            return Err(ParseError {
-                line: opener_line.number,
-                message: format!("invalid item ID '{id}'"),
-            });
-        }
-
-        let (metadata, body_start) = parse_metadata(&lines, opener_line)?;
-        let title_entries = metadata
-            .iter()
-            .filter(|entry| entry.key == "title")
-            .collect::<Vec<_>>();
-        if title_entries.len() != 1 || title_entries[0].value.is_empty() {
-            return Err(ParseError {
-                line: opener_line.number,
-                message: "item must have exactly one non-empty title entry".to_owned(),
-            });
-        }
-        let title = title_entries[0].value.clone();
-
-        delimiter_index += 1;
-        let closing = loop {
-            let Some(next) = delimiters.get(delimiter_index) else {
-                return Err(ParseError {
-                    line: opener_line.number,
-                    message: "item is missing its closing delimiter".to_owned(),
-                });
-            };
-            if next.source.start < body_start {
-                delimiter_index += 1;
-                continue;
-            }
-            match next.kind {
-                DelimiterKind::Closer => break next,
-                DelimiterKind::Opener => {
-                    let nested = line_at(&lines, next.source.start);
-                    let message = if opener(nested.text).is_some() {
-                        "items cannot nest"
-                    } else {
-                        "invalid nested item opener"
-                    };
-                    return Err(ParseError {
-                        line: nested.number,
-                        message: message.to_owned(),
-                    });
-                }
-            }
-        };
-        let closing_line = line_at(&lines, closing.source.start);
-        let body_end = closing_line.start;
-        let item_mentions = mentions
-            .iter()
-            .filter(|mention| mention.source.start >= body_start && mention.source.end <= body_end)
-            .map(|mention| ParsedMention {
-                target: mention.target.clone(),
-                source: mention.source.clone(),
-            })
-            .collect();
-        items.push(ParsedItem {
-            flavour: flavour.to_owned(),
-            id: id.to_owned(),
-            title,
-            metadata,
-            body: body_start..body_end,
-            mentions: item_mentions,
-            source: opener_line.start..closing_line.full_end,
-        });
-        delimiter_index += 1;
+        items.push(project_item(
+            &lines,
+            delimiters,
+            mentions,
+            &mut delimiter_index,
+        )?);
     }
 
     Ok(ParsedDocument { items })
+}
+
+fn project_for_validation(
+    source: &str,
+    delimiters: &[Delimiter],
+    mentions: &[ParsedMention],
+) -> (ParsedDocument, Vec<ParseError>) {
+    let lines = source_lines(source);
+    let mut items = Vec::new();
+    let mut errors = Vec::new();
+    let mut delimiter_index = 0;
+
+    while let Some(delimiter) = delimiters.get(delimiter_index) {
+        if delimiter.kind == DelimiterKind::Closer {
+            delimiter_index += 1;
+            continue;
+        }
+
+        let opener_index = delimiter_index;
+        match project_item(&lines, delimiters, mentions, &mut delimiter_index) {
+            Ok(item) => items.push(item),
+            Err(error) => {
+                errors.push(error);
+                if delimiter_index == opener_index {
+                    delimiter_index += 1;
+                    if delimiters
+                        .get(delimiter_index)
+                        .is_some_and(|delimiter| delimiter.kind == DelimiterKind::Closer)
+                    {
+                        delimiter_index += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    (ParsedDocument { items }, errors)
+}
+
+fn project_item(
+    lines: &[SourceLine<'_>],
+    delimiters: &[Delimiter],
+    mentions: &[ParsedMention],
+    delimiter_index: &mut usize,
+) -> Result<ParsedItem, ParseError> {
+    let delimiter = &delimiters[*delimiter_index];
+    debug_assert_eq!(delimiter.kind, DelimiterKind::Opener);
+
+    let opener_line = line_at(lines, delimiter.source.start);
+    let (flavour, id) = opener(opener_line.text).ok_or_else(|| ParseError {
+        line: opener_line.number,
+        message: "item opener must be ':::mara <flavour> <id>' with no other tokens".to_owned(),
+    })?;
+    if !is_snake_name(flavour) {
+        return Err(ParseError {
+            line: opener_line.number,
+            message: format!("invalid flavour '{flavour}'"),
+        });
+    }
+    if !is_item_id(id) {
+        return Err(ParseError {
+            line: opener_line.number,
+            message: format!("invalid item ID '{id}'"),
+        });
+    }
+
+    let (metadata, body_start) = parse_metadata(lines, opener_line)?;
+    let title_entries = metadata
+        .iter()
+        .filter(|entry| entry.key == "title")
+        .collect::<Vec<_>>();
+    if title_entries.len() != 1 || title_entries[0].value.is_empty() {
+        return Err(ParseError {
+            line: opener_line.number,
+            message: "item must have exactly one non-empty title entry".to_owned(),
+        });
+    }
+    let title = title_entries[0].value.clone();
+
+    *delimiter_index += 1;
+    let closing = loop {
+        let Some(next) = delimiters.get(*delimiter_index) else {
+            return Err(ParseError {
+                line: opener_line.number,
+                message: "item is missing its closing delimiter".to_owned(),
+            });
+        };
+        if next.source.start < body_start {
+            *delimiter_index += 1;
+            continue;
+        }
+        match next.kind {
+            DelimiterKind::Closer => break next,
+            DelimiterKind::Opener => {
+                let nested = line_at(lines, next.source.start);
+                let message = if opener(nested.text).is_some() {
+                    "items cannot nest"
+                } else {
+                    "invalid nested item opener"
+                };
+                return Err(ParseError {
+                    line: nested.number,
+                    message: message.to_owned(),
+                });
+            }
+        }
+    };
+    let closing_line = line_at(lines, closing.source.start);
+    let body_end = closing_line.start;
+    let item_mentions = mentions
+        .iter()
+        .filter(|mention| mention.source.start >= body_start && mention.source.end <= body_end)
+        .map(|mention| ParsedMention {
+            target: mention.target.clone(),
+            source: mention.source.clone(),
+        })
+        .collect();
+    *delimiter_index += 1;
+
+    Ok(ParsedItem {
+        flavour: flavour.to_owned(),
+        id: id.to_owned(),
+        title,
+        metadata,
+        body: body_start..body_end,
+        mentions: item_mentions,
+        source: opener_line.start..closing_line.full_end,
+    })
 }
 
 fn parse_metadata(

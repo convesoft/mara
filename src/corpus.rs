@@ -425,25 +425,23 @@ pub fn load_corpus_for_validation(
             path: absolute_path,
             source,
         })?;
-        match parse_document(relative_path, source, schema) {
-            Ok(document) => documents.push(document),
-            Err(Error::InvalidDocument {
-                path,
-                line,
-                message,
-            }) => diagnostics.push(Diagnostic {
-                source: SourceLocation {
-                    path,
-                    span: SourceSpan {
-                        start_byte: 0,
-                        end_byte: 0,
-                        start_line: line,
-                        end_line: line,
-                    },
+        let (document, errors) =
+            parse_document_for_validation(relative_path.clone(), source, schema);
+        let retain_document = errors.is_empty() || !document.items.is_empty();
+        diagnostics.extend(errors.into_iter().map(|error| Diagnostic {
+            source: SourceLocation {
+                path: relative_path.clone(),
+                span: SourceSpan {
+                    start_byte: 0,
+                    end_byte: 0,
+                    start_line: error.line,
+                    end_line: error.line,
                 },
-                message,
-            }),
-            Err(error) => return Err(error),
+            },
+            message: error.message,
+        }));
+        if retain_document {
+            documents.push(document);
         }
     }
     Ok((Corpus { documents }, diagnostics))
@@ -560,6 +558,24 @@ fn is_mara_document(path: &Path) -> bool {
 fn parse_document(path: PathBuf, source: String, schema: &Schema) -> Result<Document, Error> {
     let parsed =
         markdown::parse(&source).map_err(|error| invalid(&path, error.line, error.message))?;
+    Ok(project_document(path, source, schema, parsed))
+}
+
+fn parse_document_for_validation(
+    path: PathBuf,
+    source: String,
+    schema: &Schema,
+) -> (Document, Vec<markdown::ParseError>) {
+    let (parsed, errors) = markdown::parse_for_validation(&source);
+    (project_document(path, source, schema, parsed), errors)
+}
+
+fn project_document(
+    path: PathBuf,
+    source: String,
+    schema: &Schema,
+    parsed: markdown::ParsedDocument,
+) -> Document {
     let line_starts = source_lines(&source)
         .iter()
         .map(|line| line.start)
@@ -613,11 +629,11 @@ fn parse_document(path: PathBuf, source: String, schema: &Schema) -> Result<Docu
         })
         .collect();
 
-    Ok(Document {
+    Document {
         path,
         source,
         items,
-    })
+    }
 }
 
 #[derive(Clone, Copy)]
