@@ -676,6 +676,135 @@ include = ["../**/*.mara.md"]
 }
 
 #[test]
+fn project_validation_retains_item_context_after_title_errors() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("first.mara.md"),
+        ":::mara requirement REQ-DUPLICATE\n:title: First\n\nBody.\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("second.mara.md"),
+        r#":::mara requirement REQ-DUPLICATE
+:title: Second
+:title: Duplicate title
+:unknown: value
+:derives_from: MISSING-TARGET
+
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "item must have exactly one non-empty title entry",
+        "duplicate item ID 'REQ-DUPLICATE'",
+        "required body is empty",
+        "unknown metadata field 'unknown'",
+        "relation 'derives_from' references missing item 'MISSING-TARGET'",
+        "validation failed with 6 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
+fn project_validation_uses_declarations_unaffected_by_schema_decode_errors() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace(
+            "    body: required\n    fields: {}\n  requirement:",
+            "    body: invalid\n    fields: {}\n  requirement:",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        r#":::mara requirement WRONG-ID
+:title: Invalid
+:unknown: value
+:derives_from: MISSING-TARGET
+
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "flavour 'scenario' is invalid",
+        "item ID 'WRONG-ID' must start with 'REQ-'",
+        "required body is empty",
+        "unknown metadata field 'unknown'",
+        "relation 'derives_from' references missing item 'MISSING-TARGET'",
+        "validation failed with 5 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
+fn project_validation_retains_known_configuration_after_unknown_keys() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let project_file = fixture.path().join(".mara/project.toml");
+    let project = fs::read_to_string(&project_file).unwrap();
+    fs::write(
+        &project_file,
+        project.replace("[project]\n", "[project]\nunexpected = true\n"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        r#":::mara requirement WRONG-ID
+:title: Invalid
+:unknown: value
+
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "unknown project configuration key 'project.unexpected'",
+        "item ID 'WRONG-ID' must start with 'REQ-'",
+        "required body is empty",
+        "unknown metadata field 'unknown'",
+        "validation failed with 4 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
 fn item_validation_reports_configuration_that_prevents_reliable_discovery() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);

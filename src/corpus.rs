@@ -223,11 +223,13 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
 
     for item in corpus.items() {
         let Some(flavour) = schema.flavour_for_validation(item.flavour()) else {
-            diagnostic(
-                &mut diagnostics,
-                item.source(),
-                format!("unknown flavour '{}'", item.flavour()),
-            );
+            if !schema.flavour_is_declared(item.flavour()) {
+                diagnostic(
+                    &mut diagnostics,
+                    item.source(),
+                    format!("unknown flavour '{}'", item.flavour()),
+                );
+            }
             for relation in item.relations() {
                 if schema.relation_is_valid(relation.name()) {
                     match ids.get(relation.target()).map(Vec::len) {
@@ -321,7 +323,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                         ),
                     );
                 }
-            } else {
+            } else if schema.relation_is_valid(entry.key()) {
                 diagnostic(
                     &mut diagnostics,
                     entry.source(),

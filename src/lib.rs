@@ -7,7 +7,7 @@ use std::{
 };
 
 use globset::GlobBuilder;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 mod corpus;
 
@@ -57,6 +57,26 @@ pub struct Schema {
     validation: SchemaValidationState,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum SchemaValue {
+    Boolean(bool),
+    Integer(i64),
+    Number(f64),
+    String(String),
+    Sequence(Vec<SchemaValue>),
+    Mapping(BTreeMap<String, SchemaValue>),
+    Null,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SchemaFileForValidation {
+    format_version: u32,
+    flavours: BTreeMap<String, SchemaValue>,
+    relations: BTreeMap<String, SchemaValue>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct SchemaValidationState {
     invalid_flavours: HashSet<String>,
@@ -86,6 +106,10 @@ impl Schema {
         (!self.validation.invalid_flavours.contains(name))
             .then(|| self.flavours.get(name))
             .flatten()
+    }
+
+    fn flavour_is_declared(&self, name: &str) -> bool {
+        self.flavours.contains_key(name) || self.validation.invalid_flavours.contains(name)
     }
 
     fn id_prefix_is_valid(&self, flavour: &str) -> bool {
@@ -123,7 +147,13 @@ impl Schema {
     }
 
     fn validation_errors(&mut self) -> Vec<String> {
-        self.validation = SchemaValidationState::default();
+        let invalid_flavours = std::mem::take(&mut self.validation.invalid_flavours);
+        let invalid_relations = std::mem::take(&mut self.validation.invalid_relations);
+        self.validation = SchemaValidationState {
+            invalid_flavours,
+            invalid_relations,
+            ..SchemaValidationState::default()
+        };
         let mut errors = Vec::new();
         if self.format_version != 1 {
             errors.push(format!(
@@ -194,6 +224,7 @@ impl Schema {
                 "source",
                 &relation.source,
                 &self.flavours,
+                &self.validation.invalid_flavours,
             ));
             if !endpoints_are_usable(
                 &relation.source,
@@ -209,6 +240,7 @@ impl Schema {
                 "target",
                 &relation.target,
                 &self.flavours,
+                &self.validation.invalid_flavours,
             ));
             if !endpoints_are_usable(
                 &relation.target,
@@ -482,6 +514,30 @@ struct ContentSection {
     include: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ProjectFileForValidation {
+    format_version: u32,
+    project: ProjectSectionForValidation,
+    content: ContentSectionForValidation,
+    #[serde(flatten)]
+    unknown: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProjectSectionForValidation {
+    name: String,
+    schema: String,
+    #[serde(flatten)]
+    unknown: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ContentSectionForValidation {
+    include: Vec<String>,
+    #[serde(flatten)]
+    unknown: BTreeMap<String, toml::Value>,
+}
+
 pub fn initialize_project(target: impl AsRef<Path>, template: Template) -> Result<Project, Error> {
     let target = target.as_ref();
     fs::create_dir_all(target).map_err(|source| Error::Io {
@@ -626,13 +682,58 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
         path: project.schema_path().to_path_buf(),
         source,
     })?;
-    let mut schema: Schema =
+    let configuration: SchemaFileForValidation =
         serde_saphyr::from_str(&source).map_err(|source| Error::InvalidSchema {
             path: project.schema_path().to_path_buf(),
             message: source.to_string(),
         })?;
-    let errors = schema.validation_errors();
+    let mut errors = Vec::new();
+    let mut invalid_flavours = HashSet::new();
+    let mut flavours = BTreeMap::new();
+    for (name, value) in configuration.flavours {
+        match decode_schema_declaration(&value) {
+            Ok(flavour) => {
+                flavours.insert(name, flavour);
+            }
+            Err(message) => {
+                errors.push(format!("flavour '{name}' is invalid: {message}"));
+                invalid_flavours.insert(name);
+            }
+        }
+    }
+    let mut invalid_relations = HashSet::new();
+    let mut relations = BTreeMap::new();
+    for (name, value) in configuration.relations {
+        match decode_schema_declaration(&value) {
+            Ok(relation) => {
+                relations.insert(name, relation);
+            }
+            Err(message) => {
+                errors.push(format!("relation '{name}' is invalid: {message}"));
+                invalid_relations.insert(name);
+            }
+        }
+    }
+    let mut schema = Schema {
+        format_version: configuration.format_version,
+        flavours,
+        relations,
+        validation: SchemaValidationState {
+            invalid_flavours,
+            invalid_relations,
+            ..SchemaValidationState::default()
+        },
+    };
+    errors.extend(schema.validation_errors());
     Ok((schema, errors))
+}
+
+fn decode_schema_declaration<T>(value: &SchemaValue) -> Result<T, String>
+where
+    T: DeserializeOwned,
+{
+    let source = serde_saphyr::to_string(value).map_err(|error| error.to_string())?;
+    serde_saphyr::from_str(&source).map_err(|error| error.to_string())
 }
 
 fn load_project_root(root: &Path) -> Result<Project, Error> {
@@ -666,13 +767,33 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         path: project_path.clone(),
         source,
     })?;
-    let configuration: ProjectFile =
+    let configuration: ProjectFileForValidation =
         toml::from_str(&source).map_err(|source| Error::InvalidProject {
             path: project_path.clone(),
             message: source.to_string(),
         })?;
 
     let mut errors = Vec::new();
+    errors.extend(
+        configuration
+            .unknown
+            .keys()
+            .map(|key| format!("unknown project configuration key '{key}'")),
+    );
+    errors.extend(
+        configuration
+            .project
+            .unknown
+            .keys()
+            .map(|key| format!("unknown project configuration key 'project.{key}'")),
+    );
+    errors.extend(
+        configuration
+            .content
+            .unknown
+            .keys()
+            .map(|key| format!("unknown project configuration key 'content.{key}'")),
+    );
     if configuration.format_version != 1 {
         errors.push(format!(
             "unsupported project format version {}",
@@ -829,6 +950,7 @@ fn endpoint_errors(
     endpoint: &str,
     flavours: &[String],
     declarations: &BTreeMap<String, FlavourDefinition>,
+    invalid_declarations: &HashSet<String>,
 ) -> Vec<String> {
     let mut errors = Vec::new();
     if flavours.is_empty() {
@@ -839,7 +961,7 @@ fn endpoint_errors(
     }
     let mut unique = HashSet::new();
     for flavour in flavours {
-        if !declarations.contains_key(flavour) {
+        if !declarations.contains_key(flavour) && !invalid_declarations.contains(flavour) {
             errors.push(format!(
                 "relation '{relation}' {endpoint} references unknown flavour '{flavour}'"
             ));
