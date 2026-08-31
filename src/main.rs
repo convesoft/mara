@@ -10,7 +10,7 @@ struct Cli {
         long,
         global = true,
         value_name = "PATH",
-        help = "Use this Mara project root instead of upward discovery"
+        help = "Use this Mara project root instead of discovery or an init PATH"
     )]
     project: Option<PathBuf>,
 
@@ -29,8 +29,7 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum ProjectCommand {
     Init {
-        #[arg(default_value = ".")]
-        path: PathBuf,
+        path: Option<PathBuf>,
 
         #[arg(long, value_enum, default_value_t)]
         template: CliTemplate,
@@ -69,13 +68,16 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::Project {
             command: ProjectCommand::Init { path, template },
         } => {
-            if cli.project.is_some() {
-                return Err(
-                    "--project does not apply to project init; pass the target as PATH".into(),
-                );
-            }
+            let target = match (cli.project, path) {
+                (Some(project), None) => project,
+                (None, Some(path)) => path,
+                (None, None) => PathBuf::from("."),
+                (Some(_), Some(_)) => {
+                    return Err("--project and project init PATH cannot be used together".into());
+                }
+            };
             let project =
-                initialize_project(path, template.into()).map_err(|error| error.to_string())?;
+                initialize_project(target, template.into()).map_err(|error| error.to_string())?;
             println!("initialized Mara project at {}", project.root().display());
             println!("created {PROJECT_FILE}", PROJECT_FILE = mara::PROJECT_FILE);
             println!("created {SCHEMA_FILE}", SCHEMA_FILE = mara::SCHEMA_FILE);

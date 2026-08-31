@@ -50,6 +50,29 @@ fn initializes_a_named_missing_or_existing_directory() {
         fs::read_to_string(existing.join("notes.txt")).unwrap(),
         "untouched"
     );
+
+    let explicit = fixture.path().join("explicit");
+    let output = mara(
+        fixture.path(),
+        &["project", "init", "--project", explicit.to_str().unwrap()],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(explicit.join(".mara/project.toml").is_file());
+}
+
+#[test]
+fn rejects_ambiguous_initialization_targets() {
+    let fixture = TempDir::new().unwrap();
+
+    let output = mara(
+        fixture.path(),
+        &["project", "init", "named", "--project", "explicit"],
+    );
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("cannot be used together"));
+    assert!(!fixture.path().join("named").exists());
+    assert!(!fixture.path().join("explicit").exists());
 }
 
 #[test]
@@ -112,6 +135,27 @@ fn real_cli_initializes_projects_resolved_by_nearest_and_explicit_roots() {
 
     let explicit = resolve_project(Some(Path::new("../../..")), &deep).unwrap();
     assert_eq!(explicit.root(), outer.canonicalize().unwrap());
+}
+
+#[test]
+fn rejects_non_project_relative_content_patterns() {
+    for pattern in ["../**/*.mara.md", "/tmp/**/*.mara.md"] {
+        let fixture = TempDir::new().unwrap();
+        let init = mara(fixture.path(), &["project", "init"]);
+        assert!(init.status.success(), "{}", stderr(&init));
+        let project_path = fixture.path().join(".mara/project.toml");
+        let source = fs::read_to_string(&project_path).unwrap();
+        fs::write(&project_path, source.replace("**/*.mara.md", pattern)).unwrap();
+
+        let error = resolve_project(None, fixture.path()).unwrap_err();
+
+        assert!(
+            error
+                .to_string()
+                .contains("content.include entries must be project-relative patterns"),
+            "{error}"
+        );
+    }
 }
 
 #[test]

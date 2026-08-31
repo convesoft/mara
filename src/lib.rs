@@ -278,17 +278,21 @@ fn load_project_root(root: &Path) -> Result<Project, Error> {
         });
     }
     let configured_schema = Path::new(&configuration.project.schema);
-    if configured_schema.is_absolute()
-        || configured_schema.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-    {
+    if !is_project_relative(configured_schema) {
         return Err(Error::InvalidProject {
             path: project_path,
             message: "project.schema must be a project-relative path".into(),
+        });
+    }
+    if configuration
+        .content
+        .include
+        .iter()
+        .any(|pattern| !is_project_relative(Path::new(pattern)))
+    {
+        return Err(Error::InvalidProject {
+            path: project_path,
+            message: "content.include entries must be project-relative patterns".into(),
         });
     }
 
@@ -305,6 +309,16 @@ fn load_project_root(root: &Path) -> Result<Project, Error> {
         name: configuration.project.name,
         schema_path,
     })
+}
+
+fn is_project_relative(path: &Path) -> bool {
+    !path.is_absolute()
+        && !path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
 }
 
 fn path_exists(path: &Path) -> Result<bool, Error> {
