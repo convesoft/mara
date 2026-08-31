@@ -201,6 +201,7 @@ impl SourceSpan {
 pub struct Diagnostic {
     source: SourceLocation,
     item_ids: Vec<String>,
+    applies_to_all_items: bool,
     message: String,
 }
 
@@ -209,7 +210,7 @@ impl Diagnostic {
         &self.source
     }
     pub fn applies_to_item(&self, item_id: &str) -> bool {
-        self.item_ids.iter().any(|existing| existing == item_id)
+        self.applies_to_all_items || self.item_ids.iter().any(|existing| existing == item_id)
     }
     pub fn message(&self) -> &str {
         &self.message
@@ -506,6 +507,7 @@ fn load_corpus_for_validation_with_schema(
                         },
                     },
                     item_ids: Vec::new(),
+                    applies_to_all_items: true,
                     message: format!("could not read Mara document: {error}"),
                 });
                 continue;
@@ -525,6 +527,7 @@ fn load_corpus_for_validation_with_schema(
                 },
             },
             item_ids: error.item_ids,
+            applies_to_all_items: false,
             message: error.message,
         }));
         if retain_document {
@@ -538,6 +541,7 @@ fn diagnostic(diagnostics: &mut Vec<Diagnostic>, source: &SourceLocation, messag
     diagnostics.push(Diagnostic {
         source: source.clone(),
         item_ids: Vec::new(),
+        applies_to_all_items: false,
         message,
     });
 }

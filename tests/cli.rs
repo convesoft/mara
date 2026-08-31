@@ -163,6 +163,30 @@ fn rejects_non_project_relative_content_patterns() {
 }
 
 #[test]
+fn current_directory_content_patterns_discover_project_documents() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let project_file = fixture.path().join(".mara/project.toml");
+    let project = fs::read_to_string(&project_file).unwrap();
+    fs::write(
+        &project_file,
+        project.replace("**/*.mara.md", "./**/*.mara.md"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("included.mara.md"),
+        ":::mara requirement REQ-INCLUDED\n:title: Included\n\nBody.\n:::\n",
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["item", "validate", "REQ-INCLUDED"]);
+
+    assert!(validate.status.success(), "{}", stderr(&validate));
+    assert!(stdout(&validate).contains("valid item 'REQ-INCLUDED'"));
+}
+
+#[test]
 fn project_and_item_validation_run_through_the_real_cli() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -444,6 +468,33 @@ fn project_validation_continues_after_invalid_utf8() {
 }
 
 #[test]
+fn item_validation_fails_when_an_included_document_is_unreadable() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("valid.mara.md"),
+        ":::mara requirement REQ-VALID\n:title: Valid\n\nBody.\n:::\n",
+    )
+    .unwrap();
+    fs::write(fixture.path().join("bad.mara.md"), [0xff]).unwrap();
+
+    let validate = mara(fixture.path(), &["item", "validate", "REQ-VALID"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert!(
+        errors.contains("bad.mara.md:1: error: could not read Mara document"),
+        "{errors}"
+    );
+    assert!(
+        !stdout(&validate).contains("valid item"),
+        "{}",
+        stdout(&validate)
+    );
+}
+
+#[test]
 fn item_validation_associates_a_missing_close_with_the_outer_item() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -645,6 +696,47 @@ fn item_validation_reports_configuration_that_prevents_reliable_discovery() {
         errors.contains("content.include entries must be project-relative patterns"),
         "{errors}"
     );
+    assert!(
+        !errors.contains("item 'REQ-MISSING' was not found"),
+        "{errors}"
+    );
+}
+
+#[test]
+fn item_validation_reports_context_errors_before_a_missing_item() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let project_file = fixture.path().join(".mara/project.toml");
+    let project = fs::read_to_string(&project_file).unwrap();
+    let configured_name = fixture.path().file_name().unwrap().to_str().unwrap();
+    fs::write(
+        &project_file,
+        project.replace(&format!("name = \"{configured_name}\""), "name = \"\""),
+    )
+    .unwrap();
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace("id_prefix: REQ-", "id_prefix: REQ--"),
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["item", "validate", "REQ-MISSING"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "project.name must not be empty",
+        "flavour 'requirement' has invalid ID prefix 'REQ--'",
+        "validation failed with 2 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
     assert!(
         !errors.contains("item 'REQ-MISSING' was not found"),
         "{errors}"
