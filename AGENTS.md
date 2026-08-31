@@ -26,13 +26,19 @@ Repository-wide instructions for humans and software agents.
 - When delivery exposes missing, contradictory, or changed product meaning,
   resolve it in the canonical Mara documents; a Linear issue or review comment
   alone cannot establish the decision.
-- Use Triage for unassessed intake, Backlog for accepted but unscheduled work,
-  and a release project for scheduled work. Leave backlog work unassigned unless
-  it is explicitly being started.
+- Classify findings before creating issues. Put accepted work for the current
+  release in its project as Todo, accepted but unscheduled work in Backlog, and
+  create nothing for duplicate, invalid, or non-actionable findings. Leave
+  backlog work unassigned unless it is explicitly being started.
 - `backlog this` means create one compact, unassigned, unscheduled Linear Backlog
   issue for the referenced actionable outcome. Link its source and include
-  evident Mara IDs; do not change code. `triage this` uses Triage instead. If
-  Linear is unavailable, state that no issue was created.
+  evident Mara IDs; do not change code. If Linear is unavailable, state that no
+  issue was created.
+- The implementer checks a Linear acceptance box only after producing evidence
+  that its criterion passes. Reviewers verify checked criteria and uncheck or
+  request evidence for unsupported claims. Move an issue to Done only after all
+  acceptance criteria pass and its change is merged; add criteria during review
+  only when the canonical Mara contract changes.
 
 ## Documentation discipline
 
