@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, HashSet},
     fmt, fs,
     fs::OpenOptions,
     io::{self, Write},
@@ -21,6 +22,179 @@ pub struct Project {
     root: PathBuf,
     name: String,
     schema_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Schema {
+    format_version: u32,
+    flavours: BTreeMap<String, FlavourDefinition>,
+    relations: BTreeMap<String, RelationDefinition>,
+}
+
+impl Schema {
+    pub fn format_version(&self) -> u32 {
+        self.format_version
+    }
+
+    pub fn flavours(&self) -> &BTreeMap<String, FlavourDefinition> {
+        &self.flavours
+    }
+
+    pub fn relations(&self) -> &BTreeMap<String, RelationDefinition> {
+        &self.relations
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        if self.format_version != 1 {
+            return Err(format!(
+                "unsupported schema format version {}",
+                self.format_version
+            ));
+        }
+
+        for (name, flavour) in &self.flavours {
+            if !is_snake_name(name) {
+                return Err(format!("invalid flavour name '{name}'"));
+            }
+            if flavour.description.trim().is_empty() {
+                return Err(format!("flavour '{name}' description must not be empty"));
+            }
+            if !is_id_prefix(&flavour.id_prefix) {
+                return Err(format!(
+                    "flavour '{name}' has invalid ID prefix '{}'",
+                    flavour.id_prefix
+                ));
+            }
+
+            for (field_name, field) in &flavour.fields {
+                if !is_snake_name(field_name) {
+                    return Err(format!(
+                        "flavour '{name}' has invalid field name '{field_name}'"
+                    ));
+                }
+                field.validate(name, field_name)?;
+            }
+        }
+
+        for (name, relation) in &self.relations {
+            if !is_snake_name(name) {
+                return Err(format!("invalid relation name '{name}'"));
+            }
+            if relation.description.trim().is_empty() {
+                return Err(format!("relation '{name}' description must not be empty"));
+            }
+            validate_endpoints(name, "source", &relation.source, &self.flavours)?;
+            validate_endpoints(name, "target", &relation.target, &self.flavours)?;
+            if relation.same_flavour
+                && !relation
+                    .source
+                    .iter()
+                    .any(|source| relation.target.contains(source))
+            {
+                return Err(format!(
+                    "relation '{name}' requires a shared source and target flavour when same_flavour is true"
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FlavourDefinition {
+    description: String,
+    id_prefix: String,
+    body: BodyRequirement,
+    #[serde(default)]
+    fields: BTreeMap<String, FieldDefinition>,
+}
+
+impl FlavourDefinition {
+    pub fn description(&self) -> &str {
+        &self.description
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BodyRequirement {
+    Optional,
+    Required,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FieldDefinition {
+    #[serde(rename = "type")]
+    field_type: FieldType,
+    #[serde(default)]
+    required: bool,
+    #[serde(default)]
+    repeatable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    values: Option<Vec<String>>,
+}
+
+impl FieldDefinition {
+    fn validate(&self, flavour: &str, field: &str) -> Result<(), String> {
+        match (self.field_type, &self.values) {
+            (FieldType::Enum, Some(values)) if values.is_empty() => Err(format!(
+                "flavour '{flavour}' enum field '{field}' must declare at least one value"
+            )),
+            (FieldType::Enum, Some(values)) => {
+                let mut unique = HashSet::new();
+                for value in values {
+                    if value.is_empty() {
+                        return Err(format!(
+                            "flavour '{flavour}' enum field '{field}' contains an empty value"
+                        ));
+                    }
+                    if !unique.insert(value) {
+                        return Err(format!(
+                            "flavour '{flavour}' enum field '{field}' contains duplicate value '{value}'"
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            (FieldType::Enum, None) => Err(format!(
+                "flavour '{flavour}' enum field '{field}' must declare values"
+            )),
+            (_, Some(_)) => Err(format!(
+                "flavour '{flavour}' field '{field}' may declare values only when its type is enum"
+            )),
+            (_, None) => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FieldType {
+    String,
+    Integer,
+    Number,
+    Boolean,
+    Enum,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelationDefinition {
+    description: String,
+    source: Vec<String>,
+    target: Vec<String>,
+    #[serde(default)]
+    same_flavour: bool,
+}
+
+impl RelationDefinition {
+    pub fn description(&self) -> &str {
+        &self.description
+    }
 }
 
 impl Project {
@@ -49,6 +223,10 @@ pub enum Error {
         start: PathBuf,
     },
     InvalidProject {
+        path: PathBuf,
+        message: String,
+    },
+    InvalidSchema {
         path: PathBuf,
         message: String,
     },
@@ -83,6 +261,13 @@ impl fmt::Display for Error {
                 write!(
                     formatter,
                     "invalid Mara project at {}: {message}",
+                    path.display()
+                )
+            }
+            Self::InvalidSchema { path, message } => {
+                write!(
+                    formatter,
+                    "invalid Mara schema at {}: {message}",
                     path.display()
                 )
             }
@@ -237,6 +422,24 @@ pub fn resolve_project(
     }
 }
 
+pub fn load_schema(project: &Project) -> Result<Schema, Error> {
+    let source = fs::read_to_string(project.schema_path()).map_err(|source| Error::Io {
+        action: "read project schema",
+        path: project.schema_path().to_path_buf(),
+        source,
+    })?;
+    let schema: Schema =
+        serde_saphyr::from_str(&source).map_err(|source| Error::InvalidSchema {
+            path: project.schema_path().to_path_buf(),
+            message: source.to_string(),
+        })?;
+    schema.validate().map_err(|message| Error::InvalidSchema {
+        path: project.schema_path().to_path_buf(),
+        message,
+    })?;
+    Ok(schema)
+}
+
 fn load_project_root(root: &Path) -> Result<Project, Error> {
     let root = fs::canonicalize(root).map_err(|source| Error::Io {
         action: "resolve project root",
@@ -319,6 +522,59 @@ fn is_project_relative(path: &Path) -> bool {
                 Component::ParentDir | Component::RootDir | Component::Prefix(_)
             )
         })
+}
+
+fn is_snake_name(name: &str) -> bool {
+    let mut parts = name.split('_');
+    parts.next().is_some_and(is_lower_alphanumeric_name) && parts.all(is_lower_alphanumeric_name)
+}
+
+fn is_lower_alphanumeric_name(part: &str) -> bool {
+    let mut characters = part.chars();
+    characters
+        .next()
+        .is_some_and(|character| character.is_ascii_lowercase())
+        && characters.all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+}
+
+fn is_id_prefix(prefix: &str) -> bool {
+    let Some(stem) = prefix.strip_suffix('-') else {
+        return false;
+    };
+    let mut characters = stem.chars();
+    characters
+        .next()
+        .is_some_and(|character| character.is_ascii_uppercase())
+        && characters.all(|character| {
+            character.is_ascii_uppercase() || character.is_ascii_digit() || character == '-'
+        })
+}
+
+fn validate_endpoints(
+    relation: &str,
+    endpoint: &str,
+    flavours: &[String],
+    declarations: &BTreeMap<String, FlavourDefinition>,
+) -> Result<(), String> {
+    if flavours.is_empty() {
+        return Err(format!(
+            "relation '{relation}' {endpoint} must declare at least one flavour"
+        ));
+    }
+    let mut unique = HashSet::new();
+    for flavour in flavours {
+        if !declarations.contains_key(flavour) {
+            return Err(format!(
+                "relation '{relation}' {endpoint} references unknown flavour '{flavour}'"
+            ));
+        }
+        if !unique.insert(flavour) {
+            return Err(format!(
+                "relation '{relation}' {endpoint} repeats flavour '{flavour}'"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn path_exists(path: &Path) -> Result<bool, Error> {
