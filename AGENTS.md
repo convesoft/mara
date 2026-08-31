@@ -40,6 +40,16 @@ Repository-wide instructions for humans and software agents.
   acceptance criteria pass and its change is merged; add criteria during review
   only when the canonical Mara contract changes.
 
+## Pull requests
+
+- Start issue work from current `main` and use the Linear issue's generated
+  `gitBranchName`. If it is unavailable, use `<identifier>-<short-title>`; do not
+  invent another branch taxonomy or long-lived development and release branches.
+- Open one pull request per issue against `main`. Use Conventional Commit form
+  for its title because GitHub may use the title for the squash commit.
+- Squash merge by default. Use rebase merge only when preserving multiple
+  independently useful commits that already follow the commit convention.
+
 ## Documentation discipline
 
 - Start at [`docs/index.mara.md`](docs/index.mara.md). Follow

@@ -1,3 +1,5 @@
+<!-- PR title: <type>[optional scope][!]: <description> -->
+
 ## Outcome
 
 <!-- State the observable result. Keep durable product meaning in `*.mara.md`. -->
