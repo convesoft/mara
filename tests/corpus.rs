@@ -172,6 +172,21 @@ fn reports_malformed_item_openers_instead_of_silently_dropping_data() {
 }
 
 #[test]
+fn reports_tab_separated_item_openers_as_malformed() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "tabbed.mara.md",
+        ":::mara\trequirement REQ-BROKEN\n:title: Broken\n\nBody.\n:::\n",
+    );
+
+    let error = load_corpus(&project, &schema).unwrap_err().to_string();
+
+    assert!(error.contains("tabbed.mara.md:1"), "{error}");
+    assert!(error.contains("with no other tokens"), "{error}");
+}
+
+#[test]
 fn excludes_gitignored_mara_documents() {
     let (fixture, project, schema) = initialized_project();
     write(fixture.path(), ".gitignore", "ignored.mara.md\n");
@@ -184,6 +199,23 @@ fn excludes_gitignored_mara_documents() {
     let corpus = load_corpus(&project, &schema).unwrap();
 
     assert!(corpus.documents().is_empty());
+}
+
+#[test]
+fn excludes_documents_ignored_by_the_parent_git_repository() {
+    let fixture = TempDir::new().unwrap();
+    fs::create_dir(fixture.path().join(".git")).unwrap();
+    write(fixture.path(), ".gitignore", "project/generated.mara.md\n");
+    let project_root = fixture.path().join("project");
+    let project = initialize_project(&project_root, Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    write(&project_root, "kept.mara.md", "Kept.\n");
+    write(&project_root, "generated.mara.md", "Generated.\n");
+
+    let corpus = load_corpus(&project, &schema).unwrap();
+
+    assert_eq!(corpus.documents().len(), 1);
+    assert_eq!(corpus.documents()[0].path(), Path::new("kept.mara.md"));
 }
 
 #[test]

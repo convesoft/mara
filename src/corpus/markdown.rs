@@ -510,7 +510,8 @@ fn opener(line: &str) -> Option<(&str, &str)> {
 }
 
 fn looks_like_item_opener(line: &str) -> bool {
-    line == ":::mara" || line.starts_with(":::mara ")
+    line.strip_prefix(":::mara")
+        .is_some_and(|rest| rest.is_empty() || rest.chars().next().is_some_and(char::is_whitespace))
 }
 
 fn escaped_opening(source: &[u8], opening: usize) -> bool {

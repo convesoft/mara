@@ -239,7 +239,7 @@ fn discover(root: &Path, matcher: &GlobSet) -> Result<Vec<PathBuf>, Error> {
         .git_ignore(true)
         .git_exclude(false)
         .git_global(false)
-        .parents(false)
+        .parents(true)
         .require_git(false)
         .follow_links(false);
 
