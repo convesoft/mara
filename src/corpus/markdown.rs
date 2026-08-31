@@ -30,6 +30,7 @@ pub(super) struct ParsedItem {
     pub(super) body: Range<usize>,
     pub(super) mentions: Vec<ParsedMention>,
     pub(super) source: Range<usize>,
+    pub(super) metadata_valid: bool,
 }
 
 #[derive(Debug)]
@@ -57,6 +58,12 @@ pub(super) struct ParseError {
     pub(super) source: Range<usize>,
     pub(super) item_ids: Vec<String>,
     pub(super) message: String,
+}
+
+#[derive(Debug)]
+struct MetadataParseError {
+    metadata: Vec<ParsedMetadataEntry>,
+    error: ParseError,
 }
 
 impl ParseError {
@@ -463,14 +470,21 @@ fn project_item(
         }]);
     }
 
-    let (metadata, body_start) =
-        parse_metadata(lines, opener_line).map_err(|error| vec![error.with_item_id(id)])?;
+    let (metadata, body_start, metadata_valid, mut errors) =
+        match parse_metadata(lines, opener_line) {
+            Ok((metadata, body_start)) => (metadata, body_start, true, Vec::new()),
+            Err(failure) => (
+                failure.metadata,
+                opener_line.full_end,
+                false,
+                vec![failure.error.with_item_id(id)],
+            ),
+        };
     let title_entries = metadata
         .iter()
         .filter(|entry| entry.key == "title")
         .collect::<Vec<_>>();
-    let mut errors = Vec::new();
-    if title_entries.len() != 1 || title_entries[0].value.is_empty() {
+    if metadata_valid && (title_entries.len() != 1 || title_entries[0].value.is_empty()) {
         errors.push(ParseError {
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
@@ -508,14 +522,19 @@ fn project_item(
     };
     let closing_line = line_at(lines, closing.source.start);
     let body_end = closing_line.start;
-    let item_mentions = mentions
-        .iter()
-        .filter(|mention| mention.source.start >= body_start && mention.source.end <= body_end)
-        .map(|mention| ParsedMention {
-            target: mention.target.clone(),
-            source: mention.source.clone(),
-        })
-        .collect();
+    let projected_body_start = if metadata_valid { body_start } else { body_end };
+    let item_mentions = if metadata_valid {
+        mentions
+            .iter()
+            .filter(|mention| mention.source.start >= body_start && mention.source.end <= body_end)
+            .map(|mention| ParsedMention {
+                target: mention.target.clone(),
+                source: mention.source.clone(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     *delimiter_index += 1;
 
     Ok(ProjectedItem {
@@ -524,9 +543,10 @@ fn project_item(
             id: id.to_owned(),
             title,
             metadata,
-            body: body_start..body_end,
+            body: projected_body_start..body_end,
             mentions: item_mentions,
             source: opener_line.start..closing_line.full_end,
+            metadata_valid,
         },
         errors,
     })
@@ -564,33 +584,42 @@ fn nested_item_error(
 fn parse_metadata(
     lines: &[SourceLine<'_>],
     opener_line: SourceLine<'_>,
-) -> Result<(Vec<ParsedMetadataEntry>, usize), ParseError> {
+) -> Result<(Vec<ParsedMetadataEntry>, usize), MetadataParseError> {
     let mut metadata = Vec::new();
     let mut line_index = opener_line.number;
     while line_index < lines.len() && !lines[line_index].text.trim().is_empty() {
         let line = lines[line_index];
         let Some(rest) = line.text.strip_prefix(':') else {
-            return Err(ParseError {
-                line: line.number,
-                source: line.start..line.end,
-                item_ids: Vec::new(),
-                message: "expected metadata or a blank line before the item body".to_owned(),
+            return Err(MetadataParseError {
+                metadata,
+                error: ParseError {
+                    line: line.number,
+                    source: line.start..line.end,
+                    item_ids: Vec::new(),
+                    message: "expected metadata or a blank line before the item body".to_owned(),
+                },
             });
         };
         let Some((key, value)) = rest.split_once(':') else {
-            return Err(ParseError {
-                line: line.number,
-                source: line.start..line.end,
-                item_ids: Vec::new(),
-                message: "invalid metadata entry".to_owned(),
+            return Err(MetadataParseError {
+                metadata,
+                error: ParseError {
+                    line: line.number,
+                    source: line.start..line.end,
+                    item_ids: Vec::new(),
+                    message: "invalid metadata entry".to_owned(),
+                },
             });
         };
         if !is_snake_name(key) {
-            return Err(ParseError {
-                line: line.number,
-                source: line.start..line.end,
-                item_ids: Vec::new(),
-                message: format!("invalid metadata key '{key}'"),
+            return Err(MetadataParseError {
+                metadata,
+                error: ParseError {
+                    line: line.number,
+                    source: line.start..line.end,
+                    item_ids: Vec::new(),
+                    message: format!("invalid metadata key '{key}'"),
+                },
             });
         }
         metadata.push(ParsedMetadataEntry {
@@ -601,11 +630,14 @@ fn parse_metadata(
         line_index += 1;
     }
     if line_index == lines.len() {
-        return Err(ParseError {
-            line: opener_line.number,
-            source: opener_line.start..opener_line.end,
-            item_ids: Vec::new(),
-            message: "item is missing its body boundary and closing delimiter".to_owned(),
+        return Err(MetadataParseError {
+            metadata,
+            error: ParseError {
+                line: opener_line.number,
+                source: opener_line.start..opener_line.end,
+                item_ids: Vec::new(),
+                message: "item is missing its body boundary and closing delimiter".to_owned(),
+            },
         });
     }
 

@@ -1,5 +1,8 @@
 use std::{fs, path::Path, process::Command};
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use mara::resolve_project;
 use tempfile::TempDir;
 
@@ -802,6 +805,122 @@ fn project_validation_retains_known_configuration_after_unknown_keys() {
             "missing {expected:?} in {errors}"
         );
     }
+}
+
+#[test]
+fn project_validation_retains_schema_after_unknown_root_keys() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(&schema_file, format!("unexpected: true\n{schema}")).unwrap();
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        r#":::mara requirement WRONG-ID
+:title: Invalid
+:unknown: value
+
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "unknown schema configuration key 'unexpected'",
+        "item ID 'WRONG-ID' must start with 'REQ-'",
+        "required body is empty",
+        "unknown metadata field 'unknown'",
+        "validation failed with 4 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
+fn project_validation_retains_item_identity_after_metadata_errors() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("first.mara.md"),
+        ":::mara requirement REQ-DUPLICATE\n:title: First\n\nBody.\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("second.mara.md"),
+        r#":::mara requirement REQ-DUPLICATE
+:title: Second
+:malformed
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "invalid metadata entry",
+        "duplicate item ID 'REQ-DUPLICATE'",
+        "validation failed with 3 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn project_validation_continues_after_directory_walk_errors() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        ":::mara requirement REQ-BROKEN trailing\n:title: Broken\n\nBody.\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("valid.mara.md"),
+        ":::mara requirement REQ-VALID\n:title: Valid\n\nMentions [[MISSING-TARGET]].\n:::\n",
+    )
+    .unwrap();
+    let unreadable = fixture.path().join("unreadable");
+    fs::create_dir(&unreadable).unwrap();
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "could not discover Mara documents",
+        "item opener must be ':::mara <flavour> <id>' with no other tokens",
+        "validation failed with 2 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+    assert!(
+        !errors.contains("mention references missing item 'MISSING-TARGET'"),
+        "{errors}"
+    );
 }
 
 #[test]

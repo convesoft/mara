@@ -6,13 +6,14 @@ use std::{
 
 use crate::{BodyRequirement, Error, FieldType, PROJECT_FILE, Project, Schema};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
-use ignore::WalkBuilder;
+use ignore::{DirEntry, Error as WalkError, Walk, WalkBuilder};
 
 mod markdown;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Corpus {
     documents: Vec<Document>,
+    complete: bool,
 }
 
 impl Corpus {
@@ -22,6 +23,10 @@ impl Corpus {
 
     pub fn items(&self) -> impl Iterator<Item = &Item> {
         self.documents.iter().flat_map(|document| document.items())
+    }
+
+    fn is_complete(&self) -> bool {
+        self.complete
     }
 }
 
@@ -57,6 +62,7 @@ pub struct Item {
     mentions: Vec<Mention>,
     source: SourceLocation,
     body_source: SourceLocation,
+    metadata_valid: bool,
 }
 
 impl Item {
@@ -94,6 +100,10 @@ impl Item {
 
     pub fn body_source(&self) -> &SourceLocation {
         &self.body_source
+    }
+
+    fn metadata_is_valid(&self) -> bool {
+        self.metadata_valid
     }
 }
 
@@ -230,28 +240,30 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                     format!("unknown flavour '{}'", item.flavour()),
                 );
             }
-            for relation in item.relations() {
-                if schema.relation_is_valid(relation.name()) {
-                    match ids.get(relation.target()).map(Vec::len) {
-                        None => diagnostic(
-                            &mut diagnostics,
-                            relation.source(),
-                            format!(
-                                "relation '{}' references missing item '{}'",
-                                relation.name(),
-                                relation.target()
+            if item.metadata_is_valid() {
+                for relation in item.relations() {
+                    if schema.relation_is_valid(relation.name()) {
+                        match ids.get(relation.target()).map(Vec::len) {
+                            None if corpus.is_complete() => diagnostic(
+                                &mut diagnostics,
+                                relation.source(),
+                                format!(
+                                    "relation '{}' references missing item '{}'",
+                                    relation.name(),
+                                    relation.target()
+                                ),
                             ),
-                        ),
-                        Some(1) => {}
-                        Some(_) => diagnostic(
-                            &mut diagnostics,
-                            relation.source(),
-                            format!(
-                                "relation '{}' references ambiguous item '{}'",
-                                relation.name(),
-                                relation.target()
+                            None | Some(1) => {}
+                            Some(_) => diagnostic(
+                                &mut diagnostics,
+                                relation.source(),
+                                format!(
+                                    "relation '{}' references ambiguous item '{}'",
+                                    relation.name(),
+                                    relation.target()
+                                ),
                             ),
-                        ),
+                        }
                     }
                 }
             }
@@ -268,6 +280,9 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                     item.flavour()
                 ),
             );
+        }
+        if !item.metadata_is_valid() {
+            continue;
         }
         if flavour.body == BodyRequirement::Required && item.body().trim().is_empty() {
             diagnostic(
@@ -402,7 +417,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             relation.target()
                         ),
                     ),
-                    None => diagnostic(
+                    None if corpus.is_complete() => diagnostic(
                         &mut diagnostics,
                         relation.source(),
                         format!(
@@ -411,6 +426,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             relation.target()
                         ),
                     ),
+                    None => {}
                 }
             }
         }
@@ -436,12 +452,12 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
     for item in corpus.items() {
         for mention in item.mentions() {
             match ids.get(mention.target()).map(Vec::len) {
-                None => diagnostic(
+                None if corpus.is_complete() => diagnostic(
                     &mut diagnostics,
                     mention.source(),
                     format!("mention references missing item '{}'", mention.target()),
                 ),
-                Some(1) => {}
+                None | Some(1) => {}
                 Some(_) => diagnostic(
                     &mut diagnostics,
                     mention.source(),
@@ -490,14 +506,15 @@ fn load_corpus_for_validation_with_schema(
     schema: Option<&Schema>,
 ) -> Result<(Corpus, Vec<Diagnostic>), Error> {
     let matcher = content_matcher(project)?;
-    let paths = discover(project.root(), &matcher)?;
+    let (paths, mut diagnostics) = discover_for_validation(project.root(), &matcher);
+    let mut complete = diagnostics.is_empty();
     let mut documents = Vec::with_capacity(paths.len());
-    let mut diagnostics = Vec::new();
     for relative_path in paths {
         let absolute_path = project.root().join(&relative_path);
         let source = match fs::read_to_string(&absolute_path) {
             Ok(source) => source,
             Err(error) => {
+                complete = false;
                 diagnostics.push(Diagnostic {
                     source: SourceLocation {
                         path: relative_path,
@@ -536,7 +553,13 @@ fn load_corpus_for_validation_with_schema(
             documents.push(document);
         }
     }
-    Ok((Corpus { documents }, diagnostics))
+    Ok((
+        Corpus {
+            documents,
+            complete,
+        },
+        diagnostics,
+    ))
 }
 
 fn diagnostic(diagnostics: &mut Vec<Diagnostic>, source: &SourceLocation, message: String) {
@@ -584,7 +607,10 @@ pub fn load_corpus(project: &Project, schema: &Schema) -> Result<Corpus, Error> 
         })?;
         documents.push(parse_document(relative_path, source, schema)?);
     }
-    Ok(Corpus { documents })
+    Ok(Corpus {
+        documents,
+        complete: true,
+    })
 }
 
 fn content_matcher(project: &Project) -> Result<GlobSet, Error> {
@@ -606,6 +632,52 @@ fn content_matcher(project: &Project) -> Result<GlobSet, Error> {
 }
 
 fn discover(root: &Path, matcher: &GlobSet) -> Result<Vec<PathBuf>, Error> {
+    let mut paths = Vec::new();
+    for entry in walker(root) {
+        let entry = entry.map_err(|source| Error::Io {
+            action: "discover Mara documents",
+            path: root.to_path_buf(),
+            source: io::Error::other(source),
+        })?;
+        if let Some(relative) = discovered_document(root, matcher, &entry) {
+            paths.push(relative);
+        }
+    }
+    paths.sort();
+    Ok(paths)
+}
+
+fn discover_for_validation(root: &Path, matcher: &GlobSet) -> (Vec<PathBuf>, Vec<Diagnostic>) {
+    let mut paths = Vec::new();
+    let mut diagnostics = Vec::new();
+    for result in walker(root) {
+        match result {
+            Ok(entry) => {
+                if let Some(relative) = discovered_document(root, matcher, &entry) {
+                    paths.push(relative);
+                }
+            }
+            Err(error) => diagnostics.push(Diagnostic {
+                source: SourceLocation {
+                    path: walk_error_path(root, &error),
+                    span: SourceSpan {
+                        start_byte: 0,
+                        end_byte: 0,
+                        start_line: 1,
+                        end_line: 1,
+                    },
+                },
+                item_ids: Vec::new(),
+                applies_to_all_items: true,
+                message: format!("could not discover Mara documents: {error}"),
+            }),
+        }
+    }
+    paths.sort();
+    (paths, diagnostics)
+}
+
+fn walker(root: &Path) -> Walk {
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false)
@@ -616,31 +688,47 @@ fn discover(root: &Path, matcher: &GlobSet) -> Result<Vec<PathBuf>, Error> {
         .parents(true)
         .require_git(false)
         .follow_links(false);
+    builder.build()
+}
 
-    let mut paths = Vec::new();
-    for entry in builder.build() {
-        let entry = entry.map_err(|source| Error::Io {
-            action: "discover Mara documents",
-            path: root.to_path_buf(),
-            source: io::Error::other(source),
-        })?;
-        if !entry
-            .file_type()
-            .is_some_and(|file_type| file_type.is_file())
-        {
-            continue;
-        }
-        let relative = entry
-            .path()
-            .strip_prefix(root)
-            .expect("discovered content remains below the project root")
-            .to_path_buf();
-        if is_mara_document(&relative) && matcher.is_match(&relative) {
-            paths.push(relative);
-        }
+fn discovered_document(root: &Path, matcher: &GlobSet, entry: &DirEntry) -> Option<PathBuf> {
+    if !entry
+        .file_type()
+        .is_some_and(|file_type| file_type.is_file())
+    {
+        return None;
     }
-    paths.sort();
-    Ok(paths)
+    let relative = entry
+        .path()
+        .strip_prefix(root)
+        .expect("discovered content remains below the project root")
+        .to_path_buf();
+    (is_mara_document(&relative) && matcher.is_match(&relative)).then_some(relative)
+}
+
+fn walk_error_path(root: &Path, error: &WalkError) -> PathBuf {
+    let path = match error {
+        WalkError::Partial(errors) => errors.iter().find_map(walk_error_source_path),
+        _ => walk_error_source_path(error),
+    };
+    path.map(|path| path.strip_prefix(root).unwrap_or(path).to_path_buf())
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn walk_error_source_path(error: &WalkError) -> Option<&Path> {
+    match error {
+        WalkError::Partial(errors) => errors.iter().find_map(walk_error_source_path),
+        WalkError::WithLineNumber { err, .. } | WalkError::WithDepth { err, .. } => {
+            walk_error_source_path(err)
+        }
+        WalkError::WithPath { path, .. } => Some(path),
+        WalkError::Loop { child, .. } => Some(child),
+        WalkError::Io(_)
+        | WalkError::Glob { .. }
+        | WalkError::UnrecognizedFileType(_)
+        | WalkError::InvalidDefinition => None,
+    }
 }
 
 fn is_mara_document(path: &Path) -> bool {
@@ -721,6 +809,7 @@ fn project_document(
                 mentions,
                 source: location(&path, &line_starts, parsed.source.start, parsed.source.end),
                 body_source: location(&path, &line_starts, parsed.body.start, parsed.body.end),
+                metadata_valid: parsed.metadata_valid,
             }
         })
         .collect();

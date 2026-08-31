@@ -70,11 +70,12 @@ enum SchemaValue {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct SchemaFileForValidation {
     format_version: u32,
     flavours: BTreeMap<String, SchemaValue>,
     relations: BTreeMap<String, SchemaValue>,
+    #[serde(flatten)]
+    unknown: BTreeMap<String, SchemaValue>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -687,7 +688,11 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
             path: project.schema_path().to_path_buf(),
             message: source.to_string(),
         })?;
-    let mut errors = Vec::new();
+    let mut errors = configuration
+        .unknown
+        .keys()
+        .map(|key| format!("unknown schema configuration key '{key}'"))
+        .collect::<Vec<_>>();
     let mut invalid_flavours = HashSet::new();
     let mut flavours = BTreeMap::new();
     for (name, value) in configuration.flavours {
