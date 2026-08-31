@@ -377,6 +377,41 @@ fn schema_validation_rejects_structural_names_as_custom_fields() {
 }
 
 #[test]
+fn schema_validation_rejects_enum_values_with_surrounding_whitespace() {
+    for value in [" draft ", "   "] {
+        let fixture = TempDir::new().unwrap();
+        let init = mara(fixture.path(), &["project", "init"]);
+        assert!(init.status.success(), "{}", stderr(&init));
+        let schema_file = fixture.path().join(".mara/schema.yaml");
+        let schema = fs::read_to_string(&schema_file).unwrap();
+        fs::write(
+            &schema_file,
+            schema.replace(
+                "    id_prefix: REQ-\n    body: required\n    fields: {}",
+                &format!(
+                    "    id_prefix: REQ-\n    body: required\n    fields:\n      status:\n        type: enum\n        values: [\"{value}\"]"
+                ),
+            ),
+        )
+        .unwrap();
+
+        let validate = mara(fixture.path(), &["schema", "validate"]);
+
+        assert!(
+            !validate.status.success(),
+            "enum value '{value}' was accepted"
+        );
+        assert!(
+            stderr(&validate).contains(
+                "flavour 'requirement' enum field 'status' values must not have surrounding whitespace"
+            ),
+            "{}",
+            stderr(&validate)
+        );
+    }
+}
+
+#[test]
 fn schema_get_rejects_an_unknown_declaration() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);

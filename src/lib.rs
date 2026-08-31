@@ -155,6 +155,11 @@ impl FieldDefinition {
             (FieldType::Enum, Some(values)) => {
                 let mut unique = HashSet::new();
                 for value in values {
+                    if value.trim() != value {
+                        return Err(format!(
+                            "flavour '{flavour}' enum field '{field}' values must not have surrounding whitespace"
+                        ));
+                    }
                     if value.is_empty() {
                         return Err(format!(
                             "flavour '{flavour}' enum field '{field}' contains an empty value"

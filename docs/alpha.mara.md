@@ -233,7 +233,7 @@ The default `minimal` template writes `.mara/schema.yaml` draft format 1 with
 body requirement, and custom fields. Custom fields are flat string, integer,
 number, boolean, or enum values with required and repeatable constraints. The
 structural names `mid`, `flavour`, `id`, `title`, and `body` cannot be custom
-fields.
+fields. Enum members are non-empty, unique, and have no surrounding whitespace.
 
 Initial relations are `derives_from`, `depends_on`, `satisfies`, `justifies`,
 and `supersedes`:
