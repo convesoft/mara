@@ -398,12 +398,14 @@ fn declaration_summaries<T: DescribedDeclaration>(
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FieldValue {
     pub key: String,
     pub value: String,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ItemCreateParams {
     pub flavour: String,
     pub id: String,
@@ -427,6 +429,7 @@ pub struct ItemCreationResult {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ItemFilterParams {
     #[serde(default)]
     pub flavours: Vec<String>,
@@ -456,10 +459,34 @@ impl ItemFilterParams {
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ItemSearchParams {
     pub query: String,
-    #[serde(flatten)]
-    pub filters: ItemFilterParams,
+    #[serde(default)]
+    pub flavours: Vec<String>,
+    #[serde(default)]
+    pub fields: Vec<FieldValue>,
+    #[serde(default)]
+    pub relations: Vec<String>,
+    #[serde(default)]
+    pub paths: Vec<PathBuf>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+impl ItemSearchParams {
+    pub fn into_parts(self) -> (String, ItemFilterParams) {
+        (
+            self.query,
+            ItemFilterParams {
+                flavours: self.flavours,
+                fields: self.fields,
+                relations: self.relations,
+                paths: self.paths,
+                limit: self.limit,
+            },
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -468,11 +495,13 @@ pub struct ItemCollectionResult {
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ItemIdParams {
     pub id: String,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ItemRelatedParams {
     pub id: String,
     #[serde(default)]
@@ -489,6 +518,7 @@ pub struct RelatedItemsResult {
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RelationParams {
     pub source: String,
     pub relation: String,

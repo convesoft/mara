@@ -21,6 +21,7 @@ struct MaraMcp {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct SchemaGetParams {
     #[serde(default)]
     kind: Option<SchemaKind>,
@@ -29,9 +30,14 @@ struct SchemaGetParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct SchemaListParams {
     kind: SchemaKind,
 }
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct EmptyParams {}
 
 #[tool_router]
 impl MaraMcp {
@@ -39,7 +45,10 @@ impl MaraMcp {
         name = "project_validate",
         description = "Validate the bound Mara project and return all independently discoverable diagnostics."
     )]
-    fn project_validate(&self) -> Result<Json<ValidationResult>, String> {
+    fn project_validate(
+        &self,
+        Parameters(_): Parameters<EmptyParams>,
+    ) -> Result<Json<ValidationResult>, String> {
         self.operations.project_validate().map(Json)
     }
 
@@ -71,7 +80,10 @@ impl MaraMcp {
         name = "schema_validate",
         description = "Validate the bound project's configured Mara schema."
     )]
-    fn schema_validate(&self) -> Result<Json<SchemaValidationResult>, String> {
+    fn schema_validate(
+        &self,
+        Parameters(_): Parameters<EmptyParams>,
+    ) -> Result<Json<SchemaValidationResult>, String> {
         self.operations.schema_validate().map(Json)
     }
 
@@ -116,9 +128,8 @@ impl MaraMcp {
         &self,
         Parameters(params): Parameters<ItemSearchParams>,
     ) -> Result<Json<ItemCollectionResult>, String> {
-        self.operations
-            .item_search(&params.query, params.filters)
-            .map(Json)
+        let (query, filters) = params.into_parts();
+        self.operations.item_search(&query, filters).map(Json)
     }
 
     #[tool(

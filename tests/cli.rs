@@ -2475,6 +2475,86 @@ fn item_related_returns_filtered_direct_neighbours_with_relation_and_direction()
 }
 
 #[test]
+fn cli_parse_failures_follow_the_selected_output_format() {
+    let fixture = TempDir::new().unwrap();
+
+    for arguments in [
+        &["--format", "json", "item", "get"][..],
+        &["item", "get", "--format=json"][..],
+    ] {
+        let output = mara(fixture.path(), arguments);
+
+        assert_eq!(output.status.code(), Some(2));
+        assert!(stderr(&output).is_empty(), "{}", stderr(&output));
+        let error: Value = serde_json::from_str(&stdout(&output)).unwrap();
+        assert!(
+            error["error"]["message"].as_str().unwrap().contains("<ID>"),
+            "{error:#}"
+        );
+    }
+
+    let human = mara(fixture.path(), &["item", "get"]);
+    assert_eq!(human.status.code(), Some(2));
+    assert!(stdout(&human).is_empty());
+    assert!(stderr(&human).contains("<ID>"), "{}", stderr(&human));
+
+    let help = mara(fixture.path(), &["--format", "json", "--help"]);
+    assert!(help.status.success(), "{}", stderr(&help));
+    assert!(stderr(&help).is_empty(), "{}", stderr(&help));
+    assert!(stdout(&help).contains("Usage: mara"), "{}", stdout(&help));
+}
+
+#[test]
+fn mcp_rejects_undeclared_arguments_without_mutating_the_bound_project() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_request(2, "tools/list", json!({})),
+            mcp_call(
+                3,
+                "item_create",
+                json!({
+                    "flavour": "requirement",
+                    "id": "REQ-UNDECLARED",
+                    "file": "items.mara.md",
+                    "title": "Undeclared project override",
+                    "body": "Must not be written.",
+                    "project": "other"
+                }),
+            ),
+            mcp_call(4, "project_validate", json!({ "project": "other" })),
+        ],
+    );
+
+    for tool in mcp_response(&responses, 2)["result"]["tools"]
+        .as_array()
+        .unwrap()
+    {
+        assert_eq!(
+            tool["inputSchema"]["additionalProperties"], false,
+            "{} accepts undeclared arguments: {tool:#}",
+            tool["name"]
+        );
+    }
+    for id in [3, 4] {
+        let response = mcp_response(&responses, id);
+        let rejected = response.get("error").is_some() || response["result"]["isError"] == true;
+        assert!(rejected, "MCP call {id} was not rejected: {response:#}");
+        assert!(
+            response.to_string().contains("unknown field"),
+            "MCP call {id} did not identify its undeclared argument: {response:#}"
+        );
+    }
+    assert!(!fixture.path().join("items.mara.md").exists());
+}
+
+#[test]
 fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results() {
     let fixture = retrieval_fixture();
     let cli_item = mara(

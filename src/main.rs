@@ -1,11 +1,13 @@
 use std::{
     collections::BTreeMap,
+    env,
+    ffi::OsString,
     io::{self, Read, Write},
     path::PathBuf,
     process::ExitCode,
 };
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
     FieldValue, ItemCollectionResult, ItemCreateParams, ItemFilterParams, ItemRelatedParams,
     ItemSummary, OperationContext, ProjectInitializationResult, RelatedItem, RelationDirection,
@@ -246,7 +248,12 @@ enum OutputFormat {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let arguments = env::args_os().collect::<Vec<_>>();
+    let requested_format = requested_output_format(&arguments);
+    let cli = match Cli::try_parse_from(arguments) {
+        Ok(cli) => cli,
+        Err(error) => return report_parse_error(error, requested_format),
+    };
     let format = cli.format;
     match run(cli) {
         Ok(true) => ExitCode::SUCCESS,
@@ -264,6 +271,51 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+fn requested_output_format(arguments: &[OsString]) -> OutputFormat {
+    let mut format = OutputFormat::Human;
+    let mut arguments = arguments.iter().skip(1);
+
+    while let Some(argument) = arguments.next() {
+        let Some(argument) = argument.to_str() else {
+            continue;
+        };
+        let value = if argument == "--format" {
+            arguments.next().and_then(|argument| argument.to_str())
+        } else {
+            argument.strip_prefix("--format=")
+        };
+
+        match value {
+            Some("json") => format = OutputFormat::Json,
+            Some("human") => format = OutputFormat::Human,
+            _ => {}
+        }
+    }
+
+    format
+}
+
+fn report_parse_error(error: clap::Error, format: OutputFormat) -> ExitCode {
+    let exit_code = ExitCode::from(u8::try_from(error.exit_code()).unwrap_or(1));
+    if matches!(
+        error.kind(),
+        ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+    ) {
+        if let Err(render_error) = error.print() {
+            eprintln!("error: could not render command help: {render_error}");
+        }
+    } else if matches!(format, OutputFormat::Json) {
+        if let Err(render_error) = write_json(&serde_json::json!({
+            "error": { "message": error.to_string() }
+        })) {
+            eprintln!("error: {render_error}");
+        }
+    } else if let Err(render_error) = error.print() {
+        eprintln!("error: could not render command error: {render_error}");
+    }
+    exit_code
 }
 
 fn run(cli: Cli) -> Result<bool, String> {
