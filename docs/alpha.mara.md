@@ -161,9 +161,13 @@ compact summary of the directly related item.
 :title: Search items deterministically with scope filters
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
-`item search <text>` performs deterministic Unicode case-insensitive text matching
-across ID, title, body, and metadata keys and values. Both query commands accept
-repeatable `--flavour <name>`, `--field <key=value>`, `--relation <name>`, and
+`item search <text>` performs deterministic Unicode case-insensitive keyword
+matching across ID, title, body, and metadata keys and values. Every distinct
+query term must occur as a complete term in at least one searchable value;
+terms may occur in different values, in any order, and without adjacency.
+Partial terms, spelling correction, stemming, synonym expansion, and relevance
+ranking are not supported. Both query commands accept repeatable
+`--flavour <name>`, `--field <key=value>`, `--relation <name>`, and
 `--path <project-relative-path>` filters plus `--limit <count>`.
 Path filters normalize `.` components and reject absolute paths or `..`.
 Relation filters match authored relation names. Values within one filter or one
@@ -305,6 +309,26 @@ Item collections use `{ "items": [...] }`. Project and item validation return
 result, with each diagnostic providing `scope`, optional `path` and `line`, and
 `message`. Invocation failures use `{ "error": { "message": ... } }` in CLI
 JSON and a caller-visible MCP tool error.
+:::
+
+:::mara design DES-DETERMINISTIC-KEYWORD-SEARCH
+:title: Replaceable deterministic keyword matching
+:satisfies: REQ-ITEM-SEARCH
+
+Search analyzes query text and each searchable item value with the same pipeline:
+NFC normalization, Unicode full default case folding, NFC normalization, and
+Unicode Standard Annex #29 word segmentation. Each distinct query term is
+matched as a complete term.
+
+An item matches when every query term occurs in at least one of its searchable
+values. Terms may occur in different values, in any order, and without
+adjacency. The matcher does not stem terms, expand synonyms, correct spelling,
+or rank results.
+
+Matching remains an internal projection over the loaded corpus. It writes no
+index or search-specific project data and returns matching items in corpus
+order, so a later search engine can replace it without migrating authored
+project knowledge.
 :::
 
 ## Explicitly deferred
