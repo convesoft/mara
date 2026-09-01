@@ -246,6 +246,7 @@ fn report_diagnostics(
             .diagnostics
             .extend(validate_corpus_independent(&context.corpus)),
     }
+    let selected_item_context_incomplete = selected.is_some() && !context.corpus.is_complete();
     let diagnostics = context
         .diagnostics
         .into_iter()
@@ -266,8 +267,10 @@ fn report_diagnostics(
             })
         })
         .collect::<Vec<_>>();
-    let diagnostic_count =
-        diagnostics.len() + context.project_errors.len() + context.schema_errors.len();
+    let diagnostic_count = diagnostics.len()
+        + context.project_errors.len()
+        + context.schema_errors.len()
+        + usize::from(selected_item_context_incomplete);
     if diagnostic_count == 0 {
         println!(
             "valid {}",
@@ -283,6 +286,12 @@ fn report_diagnostics(
     }
     for error in context.schema_errors {
         eprintln!("error: {error}");
+    }
+    if selected_item_context_incomplete {
+        eprintln!(
+            "error: item '{}' could not be fully validated because the project corpus is incomplete",
+            selected.expect("incomplete selected-item validation has an item ID")
+        );
     }
     for diagnostic in &diagnostics {
         eprintln!(

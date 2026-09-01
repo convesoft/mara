@@ -25,7 +25,7 @@ impl Corpus {
         self.documents.iter().flat_map(|document| document.items())
     }
 
-    fn is_complete(&self) -> bool {
+    pub fn is_complete(&self) -> bool {
         self.complete
     }
 }

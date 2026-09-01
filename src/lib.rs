@@ -71,15 +71,17 @@ enum SchemaValue {
 
 #[derive(Debug, Deserialize)]
 struct SchemaFileForValidation {
-    format_version: u32,
-    flavours: BTreeMap<String, SchemaValue>,
-    relations: BTreeMap<String, SchemaValue>,
+    format_version: Option<SchemaValue>,
+    flavours: Option<SchemaValue>,
+    relations: Option<SchemaValue>,
     #[serde(flatten)]
     unknown: BTreeMap<String, SchemaValue>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct SchemaValidationState {
+    flavours_section_invalid: bool,
+    relations_section_invalid: bool,
     invalid_flavours: HashSet<String>,
     invalid_id_prefixes: HashSet<String>,
     invalid_fields: HashSet<(String, String)>,
@@ -110,7 +112,9 @@ impl Schema {
     }
 
     fn flavour_is_declared(&self, name: &str) -> bool {
-        self.flavours.contains_key(name) || self.validation.invalid_flavours.contains(name)
+        self.validation.flavours_section_invalid
+            || self.flavours.contains_key(name)
+            || self.validation.invalid_flavours.contains(name)
     }
 
     fn id_prefix_is_valid(&self, flavour: &str) -> bool {
@@ -132,7 +136,8 @@ impl Schema {
     }
 
     fn relation_is_valid(&self, relation: &str) -> bool {
-        !self.validation.invalid_relations.contains(relation)
+        !self.validation.relations_section_invalid
+            && !self.validation.invalid_relations.contains(relation)
     }
 
     fn relation_source_is_valid(&self, relation: &str) -> bool {
@@ -148,9 +153,13 @@ impl Schema {
     }
 
     fn validation_errors(&mut self) -> Vec<String> {
+        let flavours_section_invalid = self.validation.flavours_section_invalid;
+        let relations_section_invalid = self.validation.relations_section_invalid;
         let invalid_flavours = std::mem::take(&mut self.validation.invalid_flavours);
         let invalid_relations = std::mem::take(&mut self.validation.invalid_relations);
         self.validation = SchemaValidationState {
+            flavours_section_invalid,
+            relations_section_invalid,
             invalid_flavours,
             invalid_relations,
             ..SchemaValidationState::default()
@@ -220,34 +229,42 @@ impl Schema {
             if relation.description.trim().is_empty() {
                 errors.push(format!("relation '{name}' description must not be empty"));
             }
-            errors.extend(endpoint_errors(
-                name,
-                "source",
-                &relation.source,
-                &self.flavours,
-                &self.validation.invalid_flavours,
-            ));
-            if !endpoints_are_usable(
-                &relation.source,
-                &self.flavours,
-                &self.validation.invalid_flavours,
-            ) {
+            if !self.validation.flavours_section_invalid {
+                errors.extend(endpoint_errors(
+                    name,
+                    "source",
+                    &relation.source,
+                    &self.flavours,
+                    &self.validation.invalid_flavours,
+                ));
+            }
+            if self.validation.flavours_section_invalid
+                || !endpoints_are_usable(
+                    &relation.source,
+                    &self.flavours,
+                    &self.validation.invalid_flavours,
+                )
+            {
                 self.validation
                     .invalid_relation_sources
                     .insert(name.clone());
             }
-            errors.extend(endpoint_errors(
-                name,
-                "target",
-                &relation.target,
-                &self.flavours,
-                &self.validation.invalid_flavours,
-            ));
-            if !endpoints_are_usable(
-                &relation.target,
-                &self.flavours,
-                &self.validation.invalid_flavours,
-            ) {
+            if !self.validation.flavours_section_invalid {
+                errors.extend(endpoint_errors(
+                    name,
+                    "target",
+                    &relation.target,
+                    &self.flavours,
+                    &self.validation.invalid_flavours,
+                ));
+            }
+            if self.validation.flavours_section_invalid
+                || !endpoints_are_usable(
+                    &relation.target,
+                    &self.flavours,
+                    &self.validation.invalid_flavours,
+                )
+            {
                 self.validation
                     .invalid_relation_targets
                     .insert(name.clone());
@@ -664,14 +681,25 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
             path: project.schema_path().to_path_buf(),
             message: source.to_string(),
         })?;
-    let mut errors = configuration
-        .unknown
+    let SchemaFileForValidation {
+        format_version,
+        flavours,
+        relations,
+        unknown,
+    } = configuration;
+    let mut errors = unknown
         .keys()
         .map(|key| format!("unknown schema configuration key '{key}'"))
         .collect::<Vec<_>>();
+    let format_version =
+        decode_schema_configuration_value(format_version, "format_version", &mut errors)
+            .unwrap_or_default();
+    let flavour_values: Option<BTreeMap<String, SchemaValue>> =
+        decode_schema_configuration_value(flavours, "flavours", &mut errors);
+    let flavours_section_invalid = flavour_values.is_none();
     let mut invalid_flavours = HashSet::new();
     let mut flavours = BTreeMap::new();
-    for (name, value) in configuration.flavours {
+    for (name, value) in flavour_values.unwrap_or_default() {
         match decode_schema_declaration(&value) {
             Ok(flavour) => {
                 flavours.insert(name, flavour);
@@ -682,9 +710,12 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
             }
         }
     }
+    let relation_values: Option<BTreeMap<String, SchemaValue>> =
+        decode_schema_configuration_value(relations, "relations", &mut errors);
+    let relations_section_invalid = relation_values.is_none();
     let mut invalid_relations = HashSet::new();
     let mut relations = BTreeMap::new();
-    for (name, value) in configuration.relations {
+    for (name, value) in relation_values.unwrap_or_default() {
         match decode_schema_declaration(&value) {
             Ok(relation) => {
                 relations.insert(name, relation);
@@ -696,10 +727,12 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
         }
     }
     let mut schema = Schema {
-        format_version: configuration.format_version,
+        format_version,
         flavours,
         relations,
         validation: SchemaValidationState {
+            flavours_section_invalid,
+            relations_section_invalid,
             invalid_flavours,
             invalid_relations,
             ..SchemaValidationState::default()
@@ -707,6 +740,31 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
     };
     errors.extend(schema.validation_errors());
     Ok((schema, errors))
+}
+
+fn decode_schema_configuration_value<T>(
+    value: Option<SchemaValue>,
+    path: &str,
+    errors: &mut Vec<String>,
+) -> Option<T>
+where
+    T: DeserializeOwned,
+{
+    match value {
+        Some(value) => match decode_schema_declaration(&value) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                errors.push(format!(
+                    "invalid schema configuration value '{path}': {error}"
+                ));
+                None
+            }
+        },
+        None => {
+            errors.push(format!("schema configuration key '{path}' is required"));
+            None
+        }
+    }
 }
 
 fn decode_schema_declaration<T>(value: &SchemaValue) -> Result<T, String>

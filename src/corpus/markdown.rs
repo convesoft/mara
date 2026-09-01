@@ -490,7 +490,12 @@ fn project_item(
         .iter()
         .filter(|entry| entry.key == "title")
         .collect::<Vec<_>>();
-    if metadata_valid && (title_entries.len() != 1 || title_entries[0].value.is_empty()) {
+    let title_is_invalid = title_entries.len() > 1
+        || title_entries
+            .first()
+            .is_some_and(|entry| entry.value.is_empty())
+        || (metadata_valid && title_entries.is_empty());
+    if title_is_invalid {
         errors.push(ParseError {
             line: opener_line.number,
             source: opener_line.start..opener_line.end,

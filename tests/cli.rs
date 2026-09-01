@@ -767,6 +767,55 @@ fn project_validation_uses_declarations_unaffected_by_schema_decode_errors() {
 }
 
 #[test]
+fn project_validation_uses_flavours_when_the_relations_section_is_malformed() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join(".mara/schema.yaml"),
+        r#"format_version: 1
+flavours:
+  requirement:
+    description: An independently verifiable obligation.
+    id_prefix: REQ-
+    body: required
+    fields:
+      count:
+        type: integer
+relations: invalid
+"#,
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        r#":::mara requirement WRONG-ID
+:title: Invalid
+:count: nope
+
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "invalid schema configuration value 'relations'",
+        "item ID 'WRONG-ID' must start with 'REQ-'",
+        "required body is empty",
+        "invalid integer value 'nope' for field 'count'",
+        "validation failed with 4 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
 fn project_validation_retains_known_configuration_after_unknown_keys() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -954,6 +1003,38 @@ Body.
 }
 
 #[test]
+fn project_validation_checks_title_errors_proven_before_malformed_metadata() {
+    for metadata in [
+        ":title:\n:malformed",
+        ":title: First\n:title: Second\n:malformed",
+    ] {
+        let fixture = TempDir::new().unwrap();
+        let init = mara(fixture.path(), &["project", "init"]);
+        assert!(init.status.success(), "{}", stderr(&init));
+        fs::write(
+            fixture.path().join("partial.mara.md"),
+            format!(":::mara requirement REQ-PARTIAL\n{metadata}\n\nBody.\n:::\n"),
+        )
+        .unwrap();
+
+        let validate = mara(fixture.path(), &["project", "validate"]);
+
+        assert!(!validate.status.success());
+        let errors = stderr(&validate);
+        for expected in [
+            "invalid metadata entry",
+            "item must have exactly one non-empty title entry",
+            "validation failed with 2 diagnostics",
+        ] {
+            assert!(
+                errors.contains(expected),
+                "missing {expected:?} in {errors}"
+            );
+        }
+    }
+}
+
+#[test]
 fn project_validation_does_not_infer_missing_targets_after_item_parse_failures() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -992,6 +1073,46 @@ Body.
         errors.contains("validation failed with 1 diagnostic"),
         "{errors}"
     );
+}
+
+#[test]
+fn item_validation_fails_when_incomplete_corpus_recovery_skips_context_checks() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("source.mara.md"),
+        r#":::mara requirement REQ-SOURCE
+:title: Source
+:derives_from: REQ-TARGET
+
+Mentions [[REQ-TARGET]].
+:::
+
+:::mara requirement REQ-TARGET trailing
+:title: Target
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["item", "validate", "REQ-SOURCE"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert!(
+        errors.contains(
+            "item 'REQ-SOURCE' could not be fully validated because the project corpus is incomplete"
+        ),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("validation failed with 1 diagnostic"),
+        "{errors}"
+    );
+    assert!(!stdout(&validate).contains("valid item"));
 }
 
 #[cfg(unix)]
