@@ -153,17 +153,24 @@ discoverable diagnostic and skips only checks whose prerequisites are invalid.
 
 `item get <id>` returns the item's flavour, ID, metadata, body, source location,
 authored relations, and derived incoming relations. Human and structured output
-represent the same result.
+represent the same result. Relation entries include the relation name and a
+compact summary of the directly related item.
 :::
 
 :::mara requirement REQ-ITEM-SEARCH
 :title: Search items deterministically with scope filters
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
-`item search` performs deterministic case-insensitive text matching across ID,
-title, body, and metadata. Exact flavour, field, relation, and path filters plus
-a result limit narrow the scope. Results are compact summaries rather than full
-item bodies. `item list` returns the same summary shape without a text query.
+`item search <text>` performs deterministic Unicode case-insensitive text matching
+across ID, title, body, and metadata keys and values. Both query commands accept
+repeatable `--flavour <name>`, `--field <key=value>`, `--relation <name>`, and
+`--path <project-relative-path>` filters plus `--limit <count>`.
+Path filters normalize `.` components and reject absolute paths or `..`.
+Relation filters match authored relation names. Values within one filter or one
+field key combine with OR; distinct filter categories and field keys combine
+with AND. The limit applies last. Results follow document-path and source order
+and contain only ID, flavour, title, and source path and start line. `item list`
+returns the same compact summary shape without a text query.
 :::
 
 :::mara requirement REQ-ITEM-RELATED
@@ -172,7 +179,10 @@ item bodies. `item list` returns the same summary shape without a text query.
 
 `item related <id>` returns compact summaries of direct incoming and outgoing
 neighbours and identifies each relation and direction. Direction, relation, and
-flavour filters narrow results. Full bodies require explicit `item get` calls.
+flavour filters narrow results. `--direction` accepts `incoming` or `outgoing`
+and defaults to both; `--relation <name>` and `--flavour <name>` are repeatable.
+Outgoing results precede incoming results, with each group in corpus and
+authored relation order. Full bodies require explicit `item get` calls.
 :::
 
 ## Alpha design

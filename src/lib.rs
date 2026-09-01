@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 mod corpus;
 mod mutation;
+mod query;
 
 pub use corpus::{
     Corpus, Diagnostic, Document, Item, Mention, MetadataEntry, Relation, SourceLocation,
@@ -19,6 +20,11 @@ pub use corpus::{
 };
 pub use mutation::{
     ItemCreation, ItemCreationRequest, RelationMutation, add_relation, create_item, remove_relation,
+};
+pub use query::{
+    FieldFilter, ItemFilters, ItemSource, ItemSummary, MetadataValue, QueryError, RelatedFilters,
+    RelatedItem, RelationDirection, RelationSummary, ResolvedItem, get_item, list_items,
+    related_items, search_items,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";
@@ -364,6 +370,10 @@ pub struct FlavourDefinition {
 impl FlavourDefinition {
     pub fn description(&self) -> &str {
         &self.description
+    }
+
+    pub fn fields(&self) -> &BTreeMap<String, FieldDefinition> {
+        &self.fields
     }
 }
 

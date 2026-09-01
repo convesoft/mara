@@ -6,11 +6,13 @@ use std::{
     process::ExitCode,
 };
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use mara::{
-    Diagnostic, ItemCreationRequest, Schema, Template, add_relation, create_item,
-    initialize_project, load_corpus_for_validation, load_corpus_syntax_for_validation, load_schema,
-    load_schema_for_validation, remove_relation, resolve_project, resolve_project_for_validation,
+    Diagnostic, FieldFilter, ItemCreationRequest, ItemFilters, ItemSummary, RelatedFilters,
+    RelatedItem, RelationDirection, RelationSummary, ResolvedItem, Schema, Template, add_relation,
+    create_item, get_item, initialize_project, list_items, load_corpus, load_corpus_for_validation,
+    load_corpus_syntax_for_validation, load_schema, load_schema_for_validation, related_items,
+    remove_relation, resolve_project, resolve_project_for_validation, search_items,
     validate_corpus, validate_corpus_independent,
 };
 use serde::Serialize;
@@ -80,6 +82,31 @@ enum ItemCommand {
         #[arg(long)]
         line: Option<usize>,
     },
+    Get {
+        id: String,
+    },
+    List {
+        #[command(flatten)]
+        filters: ItemFilterArgs,
+    },
+    Search {
+        query: String,
+
+        #[command(flatten)]
+        filters: ItemFilterArgs,
+    },
+    Related {
+        id: String,
+
+        #[arg(long, value_enum)]
+        direction: Option<CliRelationDirection>,
+
+        #[arg(long)]
+        relation: Vec<String>,
+
+        #[arg(long)]
+        flavour: Vec<String>,
+    },
     Validate {
         id: String,
     },
@@ -103,6 +130,54 @@ enum RelationCommand {
 struct CliField {
     key: String,
     value: String,
+}
+
+#[derive(Debug, Args)]
+struct ItemFilterArgs {
+    #[arg(long)]
+    flavour: Vec<String>,
+
+    #[arg(long = "field", value_parser = parse_field)]
+    fields: Vec<CliField>,
+
+    #[arg(long)]
+    relation: Vec<String>,
+
+    #[arg(long)]
+    path: Vec<PathBuf>,
+
+    #[arg(long)]
+    limit: Option<usize>,
+}
+
+impl ItemFilterArgs {
+    fn into_domain(self) -> ItemFilters {
+        ItemFilters::new(
+            self.flavour,
+            self.fields
+                .into_iter()
+                .map(|field| FieldFilter::new(field.key, field.value))
+                .collect(),
+            self.relation,
+            self.path,
+            self.limit,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliRelationDirection {
+    Incoming,
+    Outgoing,
+}
+
+impl From<CliRelationDirection> for RelationDirection {
+    fn from(value: CliRelationDirection) -> Self {
+        match value {
+            CliRelationDirection::Incoming => Self::Incoming,
+            CliRelationDirection::Outgoing => Self::Outgoing,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -248,6 +323,48 @@ fn run(cli: Cli) -> Result<(), String> {
             let context = load_selected_project(project)?;
             report_diagnostics(context, Some(&id))
         }
+        Command::Item {
+            command: ItemCommand::Get { id },
+        } => {
+            let (corpus, _) = load_query_project(project)?;
+            let item = get_item(&corpus, &id).map_err(|error| error.to_string())?;
+            print_resolved_item(&item);
+            Ok(())
+        }
+        Command::Item {
+            command: ItemCommand::List { filters },
+        } => {
+            let (corpus, schema) = load_query_project(project)?;
+            let items = list_items(&corpus, &schema, &filters.into_domain())
+                .map_err(|error| error.to_string())?;
+            print_item_summaries(&items);
+            Ok(())
+        }
+        Command::Item {
+            command: ItemCommand::Search { query, filters },
+        } => {
+            let (corpus, schema) = load_query_project(project)?;
+            let items = search_items(&corpus, &schema, &query, &filters.into_domain())
+                .map_err(|error| error.to_string())?;
+            print_item_summaries(&items);
+            Ok(())
+        }
+        Command::Item {
+            command:
+                ItemCommand::Related {
+                    id,
+                    direction,
+                    relation,
+                    flavour,
+                },
+        } => {
+            let (corpus, schema) = load_query_project(project)?;
+            let filters = RelatedFilters::new(direction.map(Into::into), relation, flavour);
+            let items = related_items(&corpus, &schema, &id, &filters)
+                .map_err(|error| error.to_string())?;
+            print_related_items(&items);
+            Ok(())
+        }
         Command::Relation {
             command:
                 RelationCommand::Add {
@@ -308,6 +425,12 @@ fn load_mutation_project(selected: Option<PathBuf>) -> Result<(mara::Project, Sc
     Ok((project, schema))
 }
 
+fn load_query_project(selected: Option<PathBuf>) -> Result<(mara::Corpus, Schema), String> {
+    let (project, schema) = load_mutation_project(selected)?;
+    let corpus = load_corpus(&project, &schema).map_err(|error| error.to_string())?;
+    Ok((corpus, schema))
+}
+
 fn parse_field(value: &str) -> Result<CliField, String> {
     let (key, value) = value
         .split_once('=')
@@ -319,6 +442,79 @@ fn parse_field(value: &str) -> Result<CliField, String> {
         key: key.to_owned(),
         value: value.to_owned(),
     })
+}
+
+fn print_resolved_item(item: &ResolvedItem) {
+    print_item_heading(item.summary());
+    let source = item.source();
+    println!(
+        "source\t{}\tstart_byte={}\tend_byte={}\tstart_line={}\tend_line={}",
+        source.path().display(),
+        source.start_byte(),
+        source.end_byte(),
+        source.start_line(),
+        source.end_line()
+    );
+    println!("metadata");
+    for entry in item.metadata() {
+        println!("{}\t{}", entry.key(), entry.value());
+    }
+    println!("body");
+    print!("{}", item.body());
+    if !item.body().ends_with('\n') {
+        println!();
+    }
+    println!("relations");
+    for relation in item.outgoing_relations() {
+        print_relation_summary(RelationDirection::Outgoing, relation);
+    }
+    for relation in item.incoming_relations() {
+        print_relation_summary(RelationDirection::Incoming, relation);
+    }
+}
+
+fn print_item_summaries(items: &[ItemSummary]) {
+    for item in items {
+        print_item_summary(item);
+    }
+}
+
+fn print_item_heading(item: &ItemSummary) {
+    println!("{}\t{}\t{}", item.id(), item.flavour(), item.title());
+}
+
+fn print_item_summary(item: &ItemSummary) {
+    println!(
+        "{}\t{}\t{}\t{}:{}",
+        item.id(),
+        item.flavour(),
+        item.title(),
+        item.path().display(),
+        item.line()
+    );
+}
+
+fn print_relation_summary(direction: RelationDirection, relation: &RelationSummary) {
+    print_related_line(direction, relation.relation(), relation.item());
+}
+
+fn print_related_items(items: &[RelatedItem]) {
+    for item in items {
+        print_related_line(item.direction(), item.relation(), item.item());
+    }
+}
+
+fn print_related_line(direction: RelationDirection, relation: &str, item: &ItemSummary) {
+    println!(
+        "{}\t{}\t{}\t{}\t{}\t{}:{}",
+        direction.as_str(),
+        relation,
+        item.id(),
+        item.flavour(),
+        item.title(),
+        item.path().display(),
+        item.line()
+    );
 }
 
 fn load_selected_project(selected: Option<PathBuf>) -> Result<ValidationContext, String> {
