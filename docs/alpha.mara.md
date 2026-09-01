@@ -294,8 +294,17 @@ for schema-repeatable metadata.
 | `relation` | `add`, `remove` |
 
 `schema get` and `schema list` accept only the declared positional kinds
-`flavour` and `relation`. MCP tools map to the same project-bound operations;
-project initialization remains the CLI bootstrap operation.
+`flavour` and `relation`. Each project-bound operation maps to an MCP tool by
+joining the object and operation with `_`, from `project_validate` through
+`relation_remove`; project initialization remains CLI-only. The server resolves
+and binds one project when `mara mcp` starts, and tools accept no project path.
+
+CLI `--format json` and MCP `structuredContent` serialize the same domain result.
+Item collections use `{ "items": [...] }`. Project and item validation return
+`valid`, `project`, `target`, and `diagnostics`; an invalid target is a completed
+result, with each diagnostic providing `scope`, optional `path` and `line`, and
+`message`. Invocation failures use `{ "error": { "message": ... } }` in CLI
+JSON and a caller-visible MCP tool error.
 :::
 
 ## Explicitly deferred
