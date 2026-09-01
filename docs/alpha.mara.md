@@ -161,10 +161,11 @@ compact summary of the directly related item.
 :title: Search items deterministically with scope filters
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
-`item search <text>` performs deterministic case-insensitive text matching
+`item search <text>` performs deterministic Unicode case-insensitive text matching
 across ID, title, body, and metadata keys and values. Both query commands accept
 repeatable `--flavour <name>`, `--field <key=value>`, `--relation <name>`, and
 `--path <project-relative-path>` filters plus `--limit <count>`.
+Path filters normalize `.` components and reject absolute paths or `..`.
 Relation filters match authored relation names. Values within one filter or one
 field key combine with OR; distinct filter categories and field keys combine
 with AND. The limit applies last. Results follow document-path and source order

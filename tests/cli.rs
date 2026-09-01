@@ -2252,7 +2252,7 @@ fn retrieval_fixture() -> TempDir {
     .unwrap();
     fs::write(
         fixture.path().join("docs/b.mara.md"),
-        ":::mara requirement REQ-BETA\n:title: Beta requirement\n:status: accepted\n:derives_from: SCN-BASE\n\nSecond requirement body.\n:::\n\n:::mara design DES-ALPHA\n:title: Alpha design\n:satisfies: REQ-ALPHA\n\nDesign body.\n:::\n",
+        ":::mara requirement REQ-BETA\n:title: Beta requirement\n:status: accepted\n:derives_from: SCN-BASE\n\nSecond requirement body.\n:::\n\n:::mara design DES-ALPHA\n:title: Alpha design\n:satisfies: REQ-ALPHA\n\nDesign body.\n:::\n\n:::mara scenario SCN-GERMAN\n:title: Straße\n\nGerman title.\n:::\n",
     )
     .unwrap();
     fixture
@@ -2324,6 +2324,36 @@ fn item_list_and_search_return_deterministic_compact_filtered_summaries() {
         "REQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\n"
     );
 
+    let normalized_path = mara(
+        fixture.path(),
+        &["item", "list", "--path", "./docs/a.mara.md"],
+    );
+    assert!(
+        normalized_path.status.success(),
+        "{}",
+        stderr(&normalized_path)
+    );
+    assert_eq!(
+        stdout(&normalized_path),
+        "SCN-BASE\tscenario\tBase scenario\tdocs/a.mara.md:1\nREQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\n"
+    );
+
+    for invalid_path in [
+        fixture.path().join("docs/a.mara.md"),
+        Path::new("../outside.mara.md").to_path_buf(),
+    ] {
+        let rejected = mara(
+            fixture.path(),
+            &["item", "list", "--path", invalid_path.to_str().unwrap()],
+        );
+        assert!(!rejected.status.success());
+        assert!(
+            stderr(&rejected).contains("path filter must be a project-relative path"),
+            "{}",
+            stderr(&rejected)
+        );
+    }
+
     for query in ["zEbRa", "accepted", "DES-ALPHA"] {
         let searched = mara(fixture.path(), &["item", "search", query]);
         assert!(searched.status.success(), "{}", stderr(&searched));
@@ -2334,6 +2364,13 @@ fn item_list_and_search_return_deterministic_compact_filtered_summaries() {
     assert_eq!(
         stdout(&searched),
         "REQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\nDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\n"
+    );
+
+    let case_folded = mara(fixture.path(), &["item", "search", "STRASSE"]);
+    assert!(case_folded.status.success(), "{}", stderr(&case_folded));
+    assert_eq!(
+        stdout(&case_folded),
+        "SCN-GERMAN\tscenario\tStraße\tdocs/b.mara.md:16\n"
     );
 }
 

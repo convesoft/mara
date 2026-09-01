@@ -2,10 +2,11 @@ use std::{
     collections::BTreeMap,
     error::Error,
     fmt,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 use serde::Serialize;
+use unicode_casefold::UnicodeCaseFold;
 
 use crate::{Corpus, Item, Schema, SourceLocation};
 
@@ -299,6 +300,9 @@ pub enum QueryError {
     UnknownRelation {
         name: String,
     },
+    InvalidPath {
+        path: PathBuf,
+    },
 }
 
 impl fmt::Display for QueryError {
@@ -325,6 +329,11 @@ impl fmt::Display for QueryError {
             Self::UnknownFlavour { name } => write!(formatter, "unknown flavour '{name}'"),
             Self::UnknownField { name } => write!(formatter, "unknown field '{name}'"),
             Self::UnknownRelation { name } => write!(formatter, "unknown relation '{name}'"),
+            Self::InvalidPath { path } => write!(
+                formatter,
+                "path filter must be a project-relative path: '{}'",
+                path.display()
+            ),
         }
     }
 }
@@ -453,19 +462,14 @@ fn filtered_items(
     validate_flavours(schema, &filters.flavours)?;
     validate_relations(schema, &filters.relations)?;
     validate_fields(schema, &filters.fields)?;
+    let paths = normalized_paths(&filters.paths)?;
     let fields = grouped_fields(&filters.fields);
-    let query = query.map(str::to_lowercase);
+    let query = query.map(case_fold);
 
     Ok(corpus
         .items()
         .filter(|item| matches_name(&filters.flavours, item.flavour()))
-        .filter(|item| {
-            filters.paths.is_empty()
-                || filters
-                    .paths
-                    .iter()
-                    .any(|path| path == item.source().path())
-        })
+        .filter(|item| paths.is_empty() || paths.iter().any(|path| path == item.source().path()))
         .filter(|item| {
             matches_name_filter(&filters.relations, |name| {
                 item.relations()
@@ -514,6 +518,33 @@ fn validate_fields(schema: &Schema, fields: &[FieldFilter]) -> Result<(), QueryE
     Ok(())
 }
 
+fn normalized_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, QueryError> {
+    paths
+        .iter()
+        .map(|path| {
+            if path.as_os_str().is_empty()
+                || path.is_absolute()
+                || path.components().any(|component| {
+                    matches!(
+                        component,
+                        Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                    )
+                })
+            {
+                return Err(QueryError::InvalidPath { path: path.clone() });
+            }
+            let normalized = path
+                .components()
+                .filter(|component| *component != Component::CurDir)
+                .collect::<PathBuf>();
+            if normalized.as_os_str().is_empty() {
+                return Err(QueryError::InvalidPath { path: path.clone() });
+            }
+            Ok(normalized)
+        })
+        .collect()
+}
+
 fn grouped_fields(fields: &[FieldFilter]) -> BTreeMap<&str, Vec<&str>> {
     let mut grouped = BTreeMap::<&str, Vec<&str>>::new();
     for field in fields {
@@ -533,11 +564,14 @@ fn matches_fields(item: &Item, fields: &BTreeMap<&str, Vec<&str>>) -> bool {
 fn matches_text(item: &Item, query: &str) -> bool {
     [item.id(), item.title(), item.body()]
         .into_iter()
-        .any(|value| value.to_lowercase().contains(query))
+        .any(|value| case_fold(value).contains(query))
         || item.metadata().iter().any(|entry| {
-            entry.key().to_lowercase().contains(query)
-                || entry.value().to_lowercase().contains(query)
+            case_fold(entry.key()).contains(query) || case_fold(entry.value()).contains(query)
         })
+}
+
+fn case_fold(value: &str) -> String {
+    value.case_fold().collect()
 }
 
 fn matches_name(names: &[String], candidate: &str) -> bool {
