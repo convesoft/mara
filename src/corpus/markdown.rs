@@ -32,12 +32,14 @@ pub(super) struct ParsedItem {
     pub(super) mentions: Vec<ParsedMention>,
     pub(super) source: Range<usize>,
     pub(super) metadata_valid: bool,
+    pub(super) body_valid: bool,
 }
 
 #[derive(Debug)]
 struct ProjectedItem {
     item: ParsedItem,
     errors: Vec<ParseError>,
+    complete: bool,
 }
 
 #[derive(Debug)]
@@ -415,6 +417,7 @@ fn project_for_validation(
         let opener_index = delimiter_index;
         match project_item(&lines, delimiters, mentions, &mut delimiter_index) {
             Ok(projected) => {
+                complete &= projected.complete;
                 items.push(projected.item);
                 errors.extend(projected.errors);
             }
@@ -509,7 +512,7 @@ fn project_item(
         .unwrap_or_default();
 
     *delimiter_index += 1;
-    let closing = loop {
+    let (body_end, source_end, structure_complete) = loop {
         let Some(next) = delimiters.get(*delimiter_index) else {
             errors.push(ParseError {
                 line: opener_line.number,
@@ -517,22 +520,28 @@ fn project_item(
                 item_ids: vec![id.to_owned()],
                 message: "item is missing its closing delimiter".to_owned(),
             });
-            return Err(errors);
+            let source_end = lines
+                .last()
+                .map(|line| line.full_end)
+                .unwrap_or(opener_line.full_end);
+            break (source_end, source_end, false);
         };
         if next.source.start < body_start {
             *delimiter_index += 1;
             continue;
         }
         match next.kind {
-            DelimiterKind::Closer => break next,
+            DelimiterKind::Closer => {
+                let closing_line = line_at(lines, next.source.start);
+                *delimiter_index += 1;
+                break (closing_line.start, closing_line.full_end, true);
+            }
             DelimiterKind::Opener => {
                 errors.push(nested_item_error(lines, Some(id), next));
-                return Err(errors);
+                break (next.source.start, next.source.start, false);
             }
         }
     };
-    let closing_line = line_at(lines, closing.source.start);
-    let body_end = closing_line.start;
     let projected_body_start = if metadata_valid { body_start } else { body_end };
     let item_mentions = if metadata_valid {
         mentions
@@ -546,7 +555,6 @@ fn project_item(
     } else {
         Vec::new()
     };
-    *delimiter_index += 1;
 
     Ok(ProjectedItem {
         item: ParsedItem {
@@ -556,10 +564,12 @@ fn project_item(
             metadata,
             body: projected_body_start..body_end,
             mentions: item_mentions,
-            source: opener_line.start..closing_line.full_end,
+            source: opener_line.start..source_end,
             metadata_valid,
+            body_valid: metadata_valid && structure_complete,
         },
         errors,
+        complete: structure_complete,
     })
 }
 

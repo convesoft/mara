@@ -79,12 +79,37 @@ struct SchemaFileForValidation {
     unknown: BTreeMap<String, SchemaValue>,
 }
 
+#[derive(Debug, Deserialize)]
+struct FlavourFileForValidation {
+    description: Option<SchemaValue>,
+    id_prefix: Option<SchemaValue>,
+    body: Option<SchemaValue>,
+    fields: Option<SchemaValue>,
+    #[serde(flatten)]
+    unknown: BTreeMap<String, SchemaValue>,
+}
+
+#[derive(Debug)]
+struct RecoveredFlavour {
+    definition: FlavourDefinition,
+    description_valid: bool,
+    id_prefix_valid: bool,
+    body_valid: bool,
+    fields_valid: bool,
+    invalid_fields: Vec<String>,
+    errors: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct SchemaValidationState {
+    format_version_invalid: bool,
     flavours_section_invalid: bool,
     relations_section_invalid: bool,
     invalid_flavours: HashSet<String>,
+    invalid_flavour_descriptions: HashSet<String>,
     invalid_id_prefixes: HashSet<String>,
+    invalid_bodies: HashSet<String>,
+    invalid_field_sections: HashSet<String>,
     invalid_fields: HashSet<(String, String)>,
     invalid_field_values: HashSet<(String, String)>,
     invalid_relations: HashSet<String>,
@@ -122,6 +147,22 @@ impl Schema {
         !self.validation.invalid_id_prefixes.contains(flavour)
     }
 
+    fn body_is_valid(&self, flavour: &str) -> bool {
+        !self.validation.invalid_bodies.contains(flavour)
+    }
+
+    fn field_is_declared(&self, flavour: &str, field: &str) -> bool {
+        self.validation.invalid_field_sections.contains(flavour)
+            || self
+                .flavours
+                .get(flavour)
+                .is_some_and(|definition| definition.fields.contains_key(field))
+            || self
+                .validation
+                .invalid_fields
+                .contains(&(flavour.to_owned(), field.to_owned()))
+    }
+
     fn field_is_valid(&self, flavour: &str, field: &str) -> bool {
         !self
             .validation
@@ -154,19 +195,22 @@ impl Schema {
     }
 
     fn validation_errors(&mut self) -> Vec<String> {
-        let flavours_section_invalid = self.validation.flavours_section_invalid;
-        let relations_section_invalid = self.validation.relations_section_invalid;
-        let invalid_flavours = std::mem::take(&mut self.validation.invalid_flavours);
-        let invalid_relations = std::mem::take(&mut self.validation.invalid_relations);
+        let recovered = std::mem::take(&mut self.validation);
         self.validation = SchemaValidationState {
-            flavours_section_invalid,
-            relations_section_invalid,
-            invalid_flavours,
-            invalid_relations,
+            format_version_invalid: recovered.format_version_invalid,
+            flavours_section_invalid: recovered.flavours_section_invalid,
+            relations_section_invalid: recovered.relations_section_invalid,
+            invalid_flavours: recovered.invalid_flavours,
+            invalid_flavour_descriptions: recovered.invalid_flavour_descriptions,
+            invalid_id_prefixes: recovered.invalid_id_prefixes,
+            invalid_bodies: recovered.invalid_bodies,
+            invalid_field_sections: recovered.invalid_field_sections,
+            invalid_fields: recovered.invalid_fields,
+            invalid_relations: recovered.invalid_relations,
             ..SchemaValidationState::default()
         };
         let mut errors = Vec::new();
-        if self.format_version != 1 {
+        if !self.validation.format_version_invalid && self.format_version != 1 {
             errors.push(format!(
                 "unsupported schema format version {}",
                 self.format_version
@@ -178,10 +222,14 @@ impl Schema {
                 errors.push(format!("invalid flavour name '{name}'"));
                 self.validation.invalid_flavours.insert(name.clone());
             }
-            if flavour.description.trim().is_empty() {
+            if !self.validation.invalid_flavour_descriptions.contains(name)
+                && flavour.description.trim().is_empty()
+            {
                 errors.push(format!("flavour '{name}' description must not be empty"));
             }
-            if !is_id_prefix(&flavour.id_prefix) {
+            if !self.validation.invalid_id_prefixes.contains(name)
+                && !is_id_prefix(&flavour.id_prefix)
+            {
                 errors.push(format!(
                     "flavour '{name}' has invalid ID prefix '{}'",
                     flavour.id_prefix
@@ -697,28 +745,52 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
         .map(|key| format!("unknown schema configuration key '{key}'"))
         .collect::<Vec<_>>();
     let format_version =
-        decode_schema_configuration_value(format_version, "format_version", &mut errors)
-            .unwrap_or_default();
+        decode_schema_configuration_value(format_version, "format_version", &mut errors);
+    let format_version_invalid = format_version.is_none();
+    let format_version = format_version.unwrap_or_default();
     let flavour_values: Option<BTreeMap<String, SchemaValue>> =
         decode_schema_configuration_value(flavours, "flavours", &mut errors);
     let flavours_section_invalid = flavour_values.is_none();
-    let mut invalid_flavours = HashSet::new();
+    let mut validation = SchemaValidationState {
+        format_version_invalid,
+        flavours_section_invalid,
+        ..SchemaValidationState::default()
+    };
     let mut flavours = BTreeMap::new();
     for (name, value) in flavour_values.unwrap_or_default() {
-        match decode_schema_declaration(&value) {
-            Ok(flavour) => {
-                flavours.insert(name, flavour);
+        match recover_flavour(&name, &value) {
+            Ok(recovered) => {
+                errors.extend(recovered.errors);
+                if !recovered.description_valid {
+                    validation.invalid_flavour_descriptions.insert(name.clone());
+                }
+                if !recovered.id_prefix_valid {
+                    validation.invalid_id_prefixes.insert(name.clone());
+                }
+                if !recovered.body_valid {
+                    validation.invalid_bodies.insert(name.clone());
+                }
+                if !recovered.fields_valid {
+                    validation.invalid_field_sections.insert(name.clone());
+                }
+                validation.invalid_fields.extend(
+                    recovered
+                        .invalid_fields
+                        .into_iter()
+                        .map(|field| (name.clone(), field)),
+                );
+                flavours.insert(name, recovered.definition);
             }
             Err(message) => {
                 errors.push(format!("flavour '{name}' is invalid: {message}"));
-                invalid_flavours.insert(name);
+                validation.invalid_flavours.insert(name);
             }
         }
     }
     let relation_values: Option<BTreeMap<String, SchemaValue>> =
         decode_schema_configuration_value(relations, "relations", &mut errors);
     let relations_section_invalid = relation_values.is_none();
-    let mut invalid_relations = HashSet::new();
+    validation.relations_section_invalid = relations_section_invalid;
     let mut relations = BTreeMap::new();
     for (name, value) in relation_values.unwrap_or_default() {
         match decode_schema_declaration(&value) {
@@ -727,7 +799,7 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
             }
             Err(message) => {
                 errors.push(format!("relation '{name}' is invalid: {message}"));
-                invalid_relations.insert(name);
+                validation.invalid_relations.insert(name);
             }
         }
     }
@@ -735,16 +807,94 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
         format_version,
         flavours,
         relations,
-        validation: SchemaValidationState {
-            flavours_section_invalid,
-            relations_section_invalid,
-            invalid_flavours,
-            invalid_relations,
-            ..SchemaValidationState::default()
-        },
+        validation,
     };
     errors.extend(schema.validation_errors());
     Ok((schema, errors))
+}
+
+fn recover_flavour(name: &str, value: &SchemaValue) -> Result<RecoveredFlavour, String> {
+    let configuration: FlavourFileForValidation = decode_schema_declaration(value)?;
+    let mut errors = configuration
+        .unknown
+        .keys()
+        .map(|key| format!("flavour '{name}' is invalid: unknown configuration key '{key}'"))
+        .collect::<Vec<_>>();
+    let description =
+        decode_flavour_property(name, "description", configuration.description, &mut errors);
+    let id_prefix =
+        decode_flavour_property(name, "id_prefix", configuration.id_prefix, &mut errors);
+    let body = decode_flavour_property(name, "body", configuration.body, &mut errors);
+    let field_values = match configuration.fields {
+        Some(value) => match decode_schema_declaration(&value) {
+            Ok(fields) => Some(fields),
+            Err(error) => {
+                errors.push(format!(
+                    "flavour '{name}' is invalid: property 'fields': {error}"
+                ));
+                None
+            }
+        },
+        None => Some(BTreeMap::new()),
+    };
+    let fields_valid = field_values.is_some();
+    let mut invalid_fields = Vec::new();
+    let mut fields = BTreeMap::new();
+    for (field_name, value) in field_values.unwrap_or_default() {
+        match decode_schema_declaration(&value) {
+            Ok(field) => {
+                fields.insert(field_name, field);
+            }
+            Err(error) => {
+                errors.push(format!(
+                    "flavour '{name}' field '{field_name}' is invalid: {error}"
+                ));
+                invalid_fields.push(field_name);
+            }
+        }
+    }
+    Ok(RecoveredFlavour {
+        definition: FlavourDefinition {
+            description: description.clone().unwrap_or_default(),
+            id_prefix: id_prefix.clone().unwrap_or_default(),
+            body: body.unwrap_or(BodyRequirement::Optional),
+            fields,
+        },
+        description_valid: description.is_some(),
+        id_prefix_valid: id_prefix.is_some(),
+        body_valid: body.is_some(),
+        fields_valid,
+        invalid_fields,
+        errors,
+    })
+}
+
+fn decode_flavour_property<T>(
+    flavour: &str,
+    property: &str,
+    value: Option<SchemaValue>,
+    errors: &mut Vec<String>,
+) -> Option<T>
+where
+    T: DeserializeOwned,
+{
+    match value {
+        Some(value) => match decode_schema_declaration(&value) {
+            Ok(value) => Some(value),
+            Err(error) => {
+                errors.push(format!(
+                    "flavour '{flavour}' is invalid: property '{property}': {error}"
+                ));
+                None
+            }
+        },
+        None => {
+            errors.push(format!(
+                "flavour '{flavour}' is invalid: property '{property}' is required"
+            ));
+            None
+        }
+    }
 }
 
 fn decode_schema_configuration_value<T>(
@@ -835,7 +985,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
             }
             None => (None, None),
         };
-    let include: Option<Vec<String>> =
+    let include_values: Option<Vec<toml::Value>> =
         match take_project_table(&mut configuration, "content", "content", &mut errors) {
             Some(mut content) => {
                 let include =
@@ -861,8 +1011,20 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
     if configured_schema.is_some() && !schema_is_relative {
         errors.push("project.schema must be a project-relative path".into());
     }
-    let mut content_discovery_complete = include.is_some();
-    let include = include.unwrap_or_default();
+    let mut content_discovery_complete = include_values.is_some();
+    let mut include: Vec<String> = Vec::new();
+    for (index, value) in include_values.unwrap_or_default().into_iter().enumerate() {
+        let decoded: Result<String, _> = value.try_into();
+        match decoded {
+            Ok(pattern) => include.push(pattern),
+            Err(error) => {
+                errors.push(format!(
+                    "invalid project configuration value 'content.include[{index}]': {error}"
+                ));
+                content_discovery_complete = false;
+            }
+        }
+    }
     let has_non_relative_content = include
         .iter()
         .any(|pattern| !is_project_relative(Path::new(pattern)));

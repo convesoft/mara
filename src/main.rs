@@ -144,16 +144,6 @@ fn run(cli: Cli) -> Result<(), String> {
             command: ItemCommand::Validate { id },
         } => {
             let context = load_selected_project(project)?;
-            let item_or_diagnostic_exists = context.corpus.items().any(|item| item.id() == id)
-                || context
-                    .diagnostics
-                    .iter()
-                    .any(|diagnostic| diagnostic.applies_to_item(&id));
-            let context_has_errors =
-                !context.project_errors.is_empty() || !context.schema_errors.is_empty();
-            if !item_or_diagnostic_exists && !context_has_errors {
-                return Err(format!("item '{id}' was not found"));
-            }
             report_diagnostics(context, Some(&id))
         }
         Command::Schema { command } => {
@@ -246,6 +236,14 @@ fn report_diagnostics(
             .diagnostics
             .extend(validate_corpus_independent(&context.corpus)),
     }
+    let selected_item_missing = selected.is_some_and(|id| {
+        context.corpus.is_complete()
+            && !context.corpus.items().any(|item| item.id() == id)
+            && !context
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.applies_to_item(id))
+    });
     let selected_item_context_incomplete = selected.is_some() && !context.corpus.is_complete();
     let diagnostics = context
         .diagnostics
@@ -270,6 +268,7 @@ fn report_diagnostics(
     let diagnostic_count = diagnostics.len()
         + context.project_errors.len()
         + context.schema_errors.len()
+        + usize::from(selected_item_missing)
         + usize::from(selected_item_context_incomplete);
     if diagnostic_count == 0 {
         println!(
@@ -291,6 +290,12 @@ fn report_diagnostics(
         eprintln!(
             "error: item '{}' could not be fully validated because the project corpus is incomplete",
             selected.expect("incomplete selected-item validation has an item ID")
+        );
+    }
+    if selected_item_missing {
+        eprintln!(
+            "error: item '{}' was not found",
+            selected.expect("missing selected item has an item ID")
         );
     }
     for diagnostic in &diagnostics {

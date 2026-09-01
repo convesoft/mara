@@ -63,6 +63,7 @@ pub struct Item {
     source: SourceLocation,
     body_source: SourceLocation,
     metadata_valid: bool,
+    body_valid: bool,
 }
 
 impl Item {
@@ -104,6 +105,10 @@ impl Item {
 
     fn metadata_is_valid(&self) -> bool {
         self.metadata_valid
+    }
+
+    fn body_is_valid(&self) -> bool {
+        self.body_valid
     }
 }
 
@@ -279,7 +284,8 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 ),
             );
         }
-        if item.metadata_is_valid()
+        if item.body_is_valid()
+            && schema.body_is_valid(item.flavour())
             && flavour.body == BodyRequirement::Required
             && item.body().trim().is_empty()
         {
@@ -318,6 +324,8 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                         );
                     }
                 }
+            } else if schema.field_is_declared(item.flavour(), entry.key()) {
+                continue;
             } else if let Some(relation) = schema.relations.get(entry.key()) {
                 if schema.relation_is_valid(entry.key())
                     && schema.relation_source_is_valid(entry.key())
@@ -814,6 +822,7 @@ fn project_document(
                 source: location(&path, &line_starts, parsed.source.start, parsed.source.end),
                 body_source: location(&path, &line_starts, parsed.body.start, parsed.body.end),
                 metadata_valid: parsed.metadata_valid,
+                body_valid: parsed.body_valid,
             }
         })
         .collect();

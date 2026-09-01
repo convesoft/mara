@@ -702,6 +702,43 @@ include = ["../**/*.mara.md"]
 }
 
 #[test]
+fn project_validation_retains_valid_include_entries_after_a_type_error() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let project_file = fixture.path().join(".mara/project.toml");
+    let project = fs::read_to_string(&project_file).unwrap();
+    fs::write(
+        &project_file,
+        project.replace(
+            "include = [\"**/*.mara.md\"]",
+            "include = [\"recovered.mara.md\", 42]",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("recovered.mara.md"),
+        ":::mara requirement WRONG-ID\n:title: Recovered\n\nBody.\n:::\n",
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "invalid project configuration value 'content.include[1]'",
+        "item ID 'WRONG-ID' must start with 'REQ-'",
+        "validation failed with 2 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
 fn project_validation_retains_item_context_after_title_errors() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -781,6 +818,55 @@ fn project_validation_uses_declarations_unaffected_by_schema_decode_errors() {
         "unknown metadata field 'unknown'",
         "relation 'derives_from' references missing item 'MISSING-TARGET'",
         "validation failed with 5 diagnostics",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
+fn project_validation_uses_properties_unaffected_by_a_flavour_decode_error() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join(".mara/schema.yaml"),
+        r#"format_version: 1
+flavours:
+  requirement:
+    description: An independently verifiable obligation.
+    id_prefix: REQ-
+    body: invalid
+    fields:
+      count:
+        type: integer
+relations: {}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        r#":::mara requirement WRONG-ID
+:title: Invalid
+:count: nope
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "flavour 'requirement' is invalid",
+        "item ID 'WRONG-ID' must start with 'REQ-'",
+        "invalid integer value 'nope' for field 'count'",
+        "validation failed with 3 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -1099,6 +1185,48 @@ Body.
 }
 
 #[test]
+fn project_validation_retains_opener_semantics_after_a_missing_close() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("complete.mara.md"),
+        ":::mara requirement WRONG-ID\n:title: Complete\n\nBody.\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("partial.mara.md"),
+        ":::mara requirement WRONG-ID\n:title: Partial\n\nBody without a close.\n",
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert!(
+        errors.contains("item is missing its closing delimiter"),
+        "{errors}"
+    );
+    assert_eq!(
+        errors.matches("duplicate item ID 'WRONG-ID'").count(),
+        2,
+        "{errors}"
+    );
+    assert_eq!(
+        errors
+            .matches("item ID 'WRONG-ID' must start with 'REQ-'")
+            .count(),
+        2,
+        "{errors}"
+    );
+    assert!(
+        errors.contains("validation failed with 5 diagnostics"),
+        "{errors}"
+    );
+}
+
+#[test]
 fn project_validation_does_not_infer_missing_targets_after_include_recovery() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -1262,7 +1390,7 @@ fn item_validation_reports_configuration_that_prevents_reliable_discovery() {
 }
 
 #[test]
-fn item_validation_reports_context_errors_before_a_missing_item() {
+fn item_validation_reports_context_errors_and_a_proven_missing_item() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
     assert!(init.status.success(), "{}", stderr(&init));
@@ -1289,15 +1417,39 @@ fn item_validation_reports_context_errors_before_a_missing_item() {
     for expected in [
         "project.name must not be empty",
         "flavour 'requirement' has invalid ID prefix 'REQ--'",
-        "validation failed with 2 diagnostics",
+        "item 'REQ-MISSING' was not found",
+        "validation failed with 3 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
             "missing {expected:?} in {errors}"
         );
     }
+}
+
+#[test]
+fn project_validation_does_not_invent_a_schema_version_after_decode_failure() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(&schema_file, schema.replacen("format_version: 1\n", "", 1)).unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
     assert!(
-        !errors.contains("item 'REQ-MISSING' was not found"),
+        errors.contains("schema configuration key 'format_version' is required"),
+        "{errors}"
+    );
+    assert!(
+        !errors.contains("unsupported schema format version 0"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("validation failed with 1 diagnostic"),
         "{errors}"
     );
 }
