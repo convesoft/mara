@@ -750,6 +750,14 @@ fn parse_document(path: PathBuf, source: String, schema: &Schema) -> Result<Docu
     Ok(project_document(path, source, Some(schema), parsed))
 }
 
+pub(crate) fn parse_document_source(
+    path: &Path,
+    source: &str,
+    schema: &Schema,
+) -> Result<Document, Error> {
+    parse_document(path.to_path_buf(), source.to_owned(), schema)
+}
+
 fn parse_document_for_validation(
     path: PathBuf,
     source: String,

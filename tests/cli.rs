@@ -1,4 +1,9 @@
-use std::{fs, path::Path, process::Command};
+use std::{
+    fs,
+    io::Write,
+    path::Path,
+    process::{Command, Stdio},
+};
 
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -12,6 +17,28 @@ fn mara(current_directory: &Path, arguments: &[&str]) -> std::process::Output {
         .args(arguments)
         .output()
         .expect("run Mara CLI")
+}
+
+fn mara_with_stdin(
+    current_directory: &Path,
+    arguments: &[&str],
+    input: &str,
+) -> std::process::Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mara"))
+        .current_dir(current_directory)
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run Mara CLI");
+    child
+        .stdin
+        .take()
+        .expect("capture Mara stdin")
+        .write_all(input.as_bytes())
+        .expect("write Mara stdin");
+    child.wait_with_output().expect("read Mara CLI output")
 }
 
 fn stderr(output: &std::process::Output) -> String {
@@ -1759,4 +1786,291 @@ fn schema_get_rejects_an_unknown_declaration() {
 
     assert!(!get.status.success());
     assert!(stderr(&get).contains("unknown flavour 'missing'"));
+}
+
+#[test]
+fn item_create_writes_complete_items_and_required_body_scaffolds() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace(
+            "    id_prefix: REQ-\n    body: required\n    fields: {}",
+            "    id_prefix: REQ-\n    body: required\n    fields:\n      status:\n        type: enum\n        required: true\n        values: [draft, accepted]\n      tag:\n        type: string\n        repeatable: true",
+        ),
+    )
+    .unwrap();
+    fs::create_dir(fixture.path().join("docs")).unwrap();
+
+    let missing_field = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-MISSING-FIELD",
+            "docs/missing.mara.md",
+            "--title",
+            "Missing field",
+            "--body",
+            "Body.",
+        ],
+    );
+    assert!(!missing_field.status.success());
+    assert!(stderr(&missing_field).contains("required field 'status' is missing"));
+    assert!(!fixture.path().join("docs/missing.mara.md").exists());
+
+    let complete = mara_with_stdin(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-COMPLETE",
+            "docs/items.mara.md",
+            "--title",
+            "Complete item",
+            "--field",
+            "status=draft",
+            "--field",
+            "tag=alpha",
+            "--field",
+            "tag=primary",
+            "--body",
+            "-",
+        ],
+        "Created from standard input.\n",
+    );
+
+    assert!(complete.status.success(), "{}", stderr(&complete));
+    assert!(stdout(&complete).contains("created item 'REQ-COMPLETE'"));
+    assert!(stdout(&complete).contains("complete: true"));
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("docs/items.mara.md")).unwrap(),
+        ":::mara requirement REQ-COMPLETE\n:title: Complete item\n:status: draft\n:tag: alpha\n:tag: primary\n\nCreated from standard input.\n:::\n"
+    );
+    let valid = mara(fixture.path(), &["item", "validate", "REQ-COMPLETE"]);
+    assert!(valid.status.success(), "{}", stderr(&valid));
+
+    let scaffold = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-SCAFFOLD",
+            "docs/items.mara.md",
+            "--title",
+            "Scaffolded item",
+            "--field",
+            "status=draft",
+        ],
+    );
+
+    assert!(scaffold.status.success(), "{}", stderr(&scaffold));
+    assert!(stdout(&scaffold).contains("complete: false"));
+    assert!(stdout(&scaffold).contains("missing: body"));
+    let source = fs::read_to_string(fixture.path().join("docs/items.mara.md")).unwrap();
+    assert!(source.contains(
+        ":::\n\n:::mara requirement REQ-SCAFFOLD\n:title: Scaffolded item\n:status: draft\n\n:::\n"
+    ));
+    let invalid = mara(fixture.path(), &["item", "validate", "REQ-SCAFFOLD"]);
+    assert!(!invalid.status.success());
+    assert!(stderr(&invalid).contains("required body is empty"));
+}
+
+#[test]
+fn item_create_inserts_at_an_explicit_safe_line_without_corrupting_the_source() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let path = fixture.path().join("notes.mara.md");
+    fs::write(&path, "# Notes\n\nBefore.\n\nAfter.\n").unwrap();
+    #[cfg(unix)]
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+    let missing_parent = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-NO-PARENT",
+            "missing/items.mara.md",
+            "--title",
+            "No parent",
+            "--body",
+            "Body.",
+        ],
+    );
+    assert!(!missing_parent.status.success());
+    assert!(!fixture.path().join("missing").exists());
+
+    let insert = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-INSERTED",
+            "notes.mara.md",
+            "--title",
+            "Inserted item",
+            "--body",
+            "Inserted body.",
+            "--line",
+            "5",
+        ],
+    );
+
+    assert!(insert.status.success(), "{}", stderr(&insert));
+    let source = fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        source,
+        "# Notes\n\nBefore.\n\n:::mara requirement REQ-INSERTED\n:title: Inserted item\n\nInserted body.\n:::\n\nAfter.\n"
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o640
+    );
+    let valid = mara(fixture.path(), &["project", "validate"]);
+    assert!(valid.status.success(), "{}", stderr(&valid));
+
+    let inside_item = source
+        .lines()
+        .position(|line| line == ":title: Inserted item")
+        .unwrap()
+        + 1;
+    let rejected = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-UNSAFE",
+            "notes.mara.md",
+            "--title",
+            "Unsafe item",
+            "--body",
+            "Unsafe body.",
+            "--line",
+            &inside_item.to_string(),
+        ],
+    );
+
+    assert!(!rejected.status.success());
+    assert!(stderr(&rejected).contains("inside item 'REQ-INSERTED'"));
+    assert_eq!(fs::read_to_string(&path).unwrap(), source);
+
+    let structurally_invalid = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-BROKEN",
+            "notes.mara.md",
+            "--title",
+            "Broken item",
+            "--body",
+            ":::mara requirement REQ-NESTED\n:title: Nested item\n\nNested.\n:::",
+        ],
+    );
+    assert!(!structurally_invalid.status.success());
+    assert!(stderr(&structurally_invalid).contains("items cannot nest"));
+    assert_eq!(fs::read_to_string(&path).unwrap(), source);
+}
+
+#[test]
+fn relation_add_and_remove_validate_endpoints_and_update_only_the_source_item() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("items.mara.md"),
+        ":::mara scenario SCN-TARGET\n:title: Target scenario\n\nTarget.\n:::\n\n:::mara design DES-WRONG\n:title: Wrong target\n\nWrong.\n:::\n\n:::mara requirement REQ-SOURCE\n:title: Source requirement\n\nSource.\n:::\n",
+    )
+    .unwrap();
+
+    let add = mara(
+        fixture.path(),
+        &[
+            "relation",
+            "add",
+            "REQ-SOURCE",
+            "derives_from",
+            "SCN-TARGET",
+        ],
+    );
+
+    assert!(add.status.success(), "{}", stderr(&add));
+    assert!(stdout(&add).contains("added relation 'derives_from'"));
+    let authored = fs::read_to_string(fixture.path().join("items.mara.md")).unwrap();
+    assert!(authored.contains(
+        ":::mara requirement REQ-SOURCE\n:title: Source requirement\n:derives_from: SCN-TARGET\n\nSource.\n:::\n"
+    ));
+    assert_eq!(authored.matches(":derives_from: SCN-TARGET").count(), 1);
+    let valid = mara(fixture.path(), &["project", "validate"]);
+    assert!(valid.status.success(), "{}", stderr(&valid));
+
+    for (arguments, expected) in [
+        (
+            [
+                "relation",
+                "add",
+                "REQ-MISSING",
+                "derives_from",
+                "SCN-TARGET",
+            ],
+            "source item 'REQ-MISSING' was not found",
+        ),
+        (
+            [
+                "relation",
+                "add",
+                "REQ-SOURCE",
+                "derives_from",
+                "SCN-MISSING",
+            ],
+            "target item 'SCN-MISSING' was not found",
+        ),
+        (
+            ["relation", "add", "REQ-SOURCE", "derives_from", "DES-WRONG"],
+            "does not allow target flavour 'design'",
+        ),
+    ] {
+        let rejected = mara(fixture.path(), &arguments);
+        assert!(!rejected.status.success());
+        assert!(
+            stderr(&rejected).contains(expected),
+            "{}",
+            stderr(&rejected)
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("items.mara.md")).unwrap(),
+            authored
+        );
+    }
+
+    let remove = mara(
+        fixture.path(),
+        &[
+            "relation",
+            "remove",
+            "REQ-SOURCE",
+            "derives_from",
+            "SCN-TARGET",
+        ],
+    );
+
+    assert!(remove.status.success(), "{}", stderr(&remove));
+    assert!(stdout(&remove).contains("removed relation 'derives_from'"));
+    let removed = fs::read_to_string(fixture.path().join("items.mara.md")).unwrap();
+    assert!(!removed.contains(":derives_from: SCN-TARGET"));
+    let valid = mara(fixture.path(), &["project", "validate"]);
+    assert!(valid.status.success(), "{}", stderr(&valid));
 }

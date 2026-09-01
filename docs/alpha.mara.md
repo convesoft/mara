@@ -269,6 +269,11 @@ CLI commands use `mara <object> <operation>`. The alpha objects are `project`,
 text query, and mutations use explicit verbs such as `create`, `add`, and
 `remove`.
 
+Item creation uses `item create <flavour> <id> <file> --title <title>` with
+repeatable `--field <key=value>`, optional `--body <text|->`, and optional
+`--line <N>`. The destination file is project-relative; repeat `--field` only
+for schema-repeatable metadata.
+
 | Object | Operations |
 |---|---|
 | `project` | `init`, `validate` |

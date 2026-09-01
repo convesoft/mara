@@ -1,10 +1,17 @@
-use std::{collections::BTreeMap, env, path::PathBuf, process::ExitCode};
+use std::{
+    collections::BTreeMap,
+    env,
+    io::{self, Read},
+    path::PathBuf,
+    process::ExitCode,
+};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use mara::{
-    Diagnostic, Schema, Template, initialize_project, load_corpus_for_validation,
-    load_corpus_syntax_for_validation, load_schema, load_schema_for_validation, resolve_project,
-    resolve_project_for_validation, validate_corpus, validate_corpus_independent,
+    Diagnostic, ItemCreationRequest, Schema, Template, add_relation, create_item,
+    initialize_project, load_corpus_for_validation, load_corpus_syntax_for_validation, load_schema,
+    load_schema_for_validation, remove_relation, resolve_project, resolve_project_for_validation,
+    validate_corpus, validate_corpus_independent,
 };
 use serde::Serialize;
 
@@ -37,6 +44,10 @@ enum Command {
         #[command(subcommand)]
         command: ItemCommand,
     },
+    Relation {
+        #[command(subcommand)]
+        command: RelationCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -52,7 +63,46 @@ enum ProjectCommand {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
-    Validate { id: String },
+    Create {
+        flavour: String,
+        id: String,
+        file: PathBuf,
+
+        #[arg(long)]
+        title: String,
+
+        #[arg(long = "field", value_parser = parse_field)]
+        fields: Vec<CliField>,
+
+        #[arg(long)]
+        body: Option<String>,
+
+        #[arg(long)]
+        line: Option<usize>,
+    },
+    Validate {
+        id: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum RelationCommand {
+    Add {
+        source: String,
+        relation: String,
+        target: String,
+    },
+    Remove {
+        source: String,
+        relation: String,
+        target: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct CliField {
+    key: String,
+    value: String,
 }
 
 #[derive(Debug, Subcommand)]
@@ -141,10 +191,102 @@ fn run(cli: Cli) -> Result<(), String> {
             report_diagnostics(context, None)
         }
         Command::Item {
+            command:
+                ItemCommand::Create {
+                    flavour,
+                    id,
+                    file,
+                    title,
+                    fields,
+                    body,
+                    line,
+                },
+        } => {
+            let (project, schema) = load_mutation_project(project)?;
+            let body = match body.as_deref() {
+                Some("-") => {
+                    let mut body = String::new();
+                    io::stdin()
+                        .read_to_string(&mut body)
+                        .map_err(|error| format!("could not read item body from stdin: {error}"))?;
+                    Some(body)
+                }
+                _ => body,
+            };
+            let created = create_item(
+                &project,
+                &schema,
+                ItemCreationRequest {
+                    flavour,
+                    id: id.clone(),
+                    file,
+                    title,
+                    fields: fields
+                        .into_iter()
+                        .map(|field| (field.key, field.value))
+                        .collect(),
+                    body,
+                    line,
+                },
+            )
+            .map_err(|error| error.to_string())?;
+            println!(
+                "created item '{}' at {}:{}",
+                id,
+                created.path().display(),
+                created.line()
+            );
+            println!("complete: {}", created.is_complete());
+            if !created.is_complete() {
+                println!("missing: body");
+            }
+            Ok(())
+        }
+        Command::Item {
             command: ItemCommand::Validate { id },
         } => {
             let context = load_selected_project(project)?;
             report_diagnostics(context, Some(&id))
+        }
+        Command::Relation {
+            command:
+                RelationCommand::Add {
+                    source,
+                    relation,
+                    target,
+                },
+        } => {
+            let (project, schema) = load_mutation_project(project)?;
+            let mutation = add_relation(&project, &schema, &source, &relation, &target)
+                .map_err(|error| error.to_string())?;
+            println!(
+                "added relation '{}' from '{}' to '{}' in {}",
+                mutation.relation(),
+                mutation.source(),
+                mutation.target(),
+                mutation.path().display()
+            );
+            Ok(())
+        }
+        Command::Relation {
+            command:
+                RelationCommand::Remove {
+                    source,
+                    relation,
+                    target,
+                },
+        } => {
+            let (project, schema) = load_mutation_project(project)?;
+            let mutation = remove_relation(&project, &schema, &source, &relation, &target)
+                .map_err(|error| error.to_string())?;
+            println!(
+                "removed relation '{}' from '{}' to '{}' in {}",
+                mutation.relation(),
+                mutation.source(),
+                mutation.target(),
+                mutation.path().display()
+            );
+            Ok(())
         }
         Command::Schema { command } => {
             let current_directory = env::current_dir()
@@ -155,6 +297,28 @@ fn run(cli: Cli) -> Result<(), String> {
             run_schema_command(command, &project, &schema)
         }
     }
+}
+
+fn load_mutation_project(selected: Option<PathBuf>) -> Result<(mara::Project, Schema), String> {
+    let current_directory =
+        env::current_dir().map_err(|error| format!("could not read current directory: {error}"))?;
+    let project = resolve_project(selected.as_deref(), current_directory)
+        .map_err(|error| error.to_string())?;
+    let schema = load_schema(&project).map_err(|error| error.to_string())?;
+    Ok((project, schema))
+}
+
+fn parse_field(value: &str) -> Result<CliField, String> {
+    let (key, value) = value
+        .split_once('=')
+        .ok_or_else(|| "field must use KEY=VALUE".to_owned())?;
+    if key.is_empty() {
+        return Err("field key must not be empty".into());
+    }
+    Ok(CliField {
+        key: key.to_owned(),
+        value: value.to_owned(),
+    })
 }
 
 fn load_selected_project(selected: Option<PathBuf>) -> Result<ValidationContext, String> {
