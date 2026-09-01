@@ -32,6 +32,7 @@ pub struct Project {
     name: String,
     schema_path: PathBuf,
     content_patterns: Vec<String>,
+    content_discovery_complete: bool,
 }
 
 #[derive(Debug)]
@@ -416,6 +417,10 @@ impl Project {
 
     pub fn content_patterns(&self) -> &[String] {
         &self.content_patterns
+    }
+
+    pub(crate) fn content_discovery_is_complete(&self) -> bool {
+        self.content_discovery_complete
     }
 }
 
@@ -856,6 +861,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
     if configured_schema.is_some() && !schema_is_relative {
         errors.push("project.schema must be a project-relative path".into());
     }
+    let mut content_discovery_complete = include.is_some();
     let include = include.unwrap_or_default();
     let has_non_relative_content = include
         .iter()
@@ -886,6 +892,8 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         };
         if pattern_is_relative && valid_glob {
             content_patterns.push(effective_pattern);
+        } else {
+            content_discovery_complete = false;
         }
     }
 
@@ -909,6 +917,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
             name: name.unwrap_or_default(),
             schema_path,
             content_patterns,
+            content_discovery_complete,
         },
         errors,
         schema_available,

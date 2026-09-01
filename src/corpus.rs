@@ -294,7 +294,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
         for entry in item
             .metadata()
             .iter()
-            .filter(|entry| entry.key() != "title")
+            .filter(|entry| !matches!(entry.key(), "mid" | "title"))
         {
             if let Some(field) = flavour.fields.get(entry.key()) {
                 if schema.field_is_valid(item.flavour(), entry.key()) {
@@ -505,7 +505,7 @@ fn load_corpus_for_validation_with_schema(
 ) -> Result<(Corpus, Vec<Diagnostic>), Error> {
     let matcher = content_matcher(project)?;
     let (paths, mut diagnostics) = discover_for_validation(project.root(), &matcher);
-    let mut complete = diagnostics.is_empty();
+    let mut complete = project.content_discovery_is_complete() && diagnostics.is_empty();
     let mut documents = Vec::with_capacity(paths.len());
     for relative_path in paths {
         let absolute_path = project.root().join(&relative_path);

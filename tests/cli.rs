@@ -210,6 +210,29 @@ fn project_and_item_validation_run_through_the_real_cli() {
 }
 
 #[test]
+fn project_validation_treats_mid_as_structural_metadata() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("valid.mara.md"),
+        r#":::mara requirement REQ-VALID
+:mid: 01JQZ4W7G5H8K2M3N6P9R0STVX
+:title: Valid
+
+A complete requirement.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(validate.status.success(), "{}", stderr(&validate));
+    assert!(stdout(&validate).contains("valid project"));
+}
+
+#[test]
 fn project_validation_reports_all_independently_available_diagnostics() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -1063,6 +1086,61 @@ Body.
     let errors = stderr(&validate);
     assert!(
         errors.contains("item opener must be ':::mara <flavour> <id>' with no other tokens"),
+        "{errors}"
+    );
+    assert!(
+        !errors.contains("references missing item 'REQ-TARGET'"),
+        "{errors}"
+    );
+    assert!(
+        errors.contains("validation failed with 1 diagnostic"),
+        "{errors}"
+    );
+}
+
+#[test]
+fn project_validation_does_not_infer_missing_targets_after_include_recovery() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let project_file = fixture.path().join(".mara/project.toml");
+    let project = fs::read_to_string(&project_file).unwrap();
+    fs::write(
+        &project_file,
+        project.replace(
+            "include = [\"**/*.mara.md\"]",
+            "include = [\"source.mara.md\", \"[\"]",
+        ),
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("source.mara.md"),
+        r#":::mara requirement REQ-SOURCE
+:title: Source
+:derives_from: REQ-TARGET
+
+Mentions [[REQ-TARGET]].
+:::
+"#,
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("target.mara.md"),
+        r#":::mara requirement REQ-TARGET
+:title: Target
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert!(
+        errors.contains("invalid content.include pattern '['"),
         "{errors}"
     );
     assert!(
