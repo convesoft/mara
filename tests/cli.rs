@@ -2045,6 +2045,102 @@ fn item_create_rejects_destinations_excluded_from_project_discovery() {
 }
 
 #[test]
+fn item_create_rejects_bodies_that_escape_the_created_item() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    for (id, body) in [
+        ("REQ-TRUNCATED", ":::\nrest"),
+        (
+            "REQ-INJECTOR",
+            "Outer body.\n:::\n\n:::mara requirement REQ-INJECTED\n:title: Injected item\n\nInjected body.",
+        ),
+    ] {
+        let rejected = mara(
+            fixture.path(),
+            &[
+                "item",
+                "create",
+                "requirement",
+                id,
+                "items.mara.md",
+                "--title",
+                "Escaping body",
+                "--body",
+                body,
+            ],
+        );
+
+        assert!(!rejected.status.success());
+        assert!(
+            stderr(&rejected).contains("body must remain inside the created item"),
+            "{}",
+            stderr(&rejected)
+        );
+        assert!(!fixture.path().join("items.mara.md").exists());
+    }
+
+    let fenced = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-FENCED",
+            "items.mara.md",
+            "--title",
+            "Fenced delimiters",
+            "--body",
+            "```markdown\n:::\n\n:::mara requirement REQ-EXAMPLE\n```\n",
+        ],
+    );
+    assert!(fenced.status.success(), "{}", stderr(&fenced));
+    let valid = mara(fixture.path(), &["item", "validate", "REQ-FENCED"]);
+    assert!(valid.status.success(), "{}", stderr(&valid));
+}
+
+#[cfg(unix)]
+#[test]
+fn item_create_rejects_destinations_below_directory_symlinks() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let project_file = fixture.path().join(".mara/project.toml");
+    let project = fs::read_to_string(&project_file).unwrap();
+    fs::write(
+        &project_file,
+        project.replace("**/*.mara.md", "docs/**/*.mara.md"),
+    )
+    .unwrap();
+    fs::create_dir(fixture.path().join("real")).unwrap();
+    std::os::unix::fs::symlink("real", fixture.path().join("docs")).unwrap();
+
+    let rejected = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-SYMLINKED",
+            "docs/item.mara.md",
+            "--title",
+            "Symlinked destination",
+            "--body",
+            "Body.",
+        ],
+    );
+
+    assert!(!rejected.status.success());
+    assert!(
+        stderr(&rejected).contains("is excluded by project content discovery"),
+        "{}",
+        stderr(&rejected)
+    );
+    assert!(!fixture.path().join("real/item.mara.md").exists());
+}
+
+#[test]
 fn relation_add_and_remove_validate_endpoints_and_update_only_the_source_item() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);

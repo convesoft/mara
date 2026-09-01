@@ -124,6 +124,10 @@ pub fn create_item(
         .ok_or_else(|| Error::InvalidMutation {
             message: format!("created item '{}' could not be resolved", request.id),
         })?;
+    let expected_body = render_body(request.body.as_deref(), newline);
+    if projected.items().len() != document.items().len() + 1 || created.body() != expected_body {
+        return invalid("item body must remain inside the created item");
+    }
     let line = created.source().span().start_line();
     let complete = schema
         .flavours
@@ -483,15 +487,21 @@ fn render_item(request: &ItemCreationRequest, newline: &str) -> String {
     }
     source.push_str(newline);
     source.push_str(newline);
-    if let Some(body) = &request.body {
-        source.push_str(body);
-        if !body.ends_with('\n') {
-            source.push_str(newline);
-        }
-    }
+    source.push_str(&render_body(request.body.as_deref(), newline));
     source.push_str(":::");
     source.push_str(newline);
     source
+}
+
+fn render_body(body: Option<&str>, newline: &str) -> String {
+    let Some(body) = body else {
+        return String::new();
+    };
+    let mut rendered = body.to_owned();
+    if !body.ends_with('\n') {
+        rendered.push_str(newline);
+    }
+    rendered
 }
 
 fn insert_block(source: &str, position: usize, block: &str, newline: &str) -> String {

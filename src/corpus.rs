@@ -767,6 +767,18 @@ pub(crate) fn document_is_discoverable(project: &Project, relative: &Path) -> Re
     if !is_mara_document(relative) || !content.is_match(relative) {
         return Ok(false);
     }
+    let mut ancestor = project.root().to_path_buf();
+    for component in relative.parent().into_iter().flat_map(Path::components) {
+        ancestor.push(component.as_os_str());
+        let metadata = fs::symlink_metadata(&ancestor).map_err(|source| Error::Io {
+            action: "inspect document discovery path",
+            path: ancestor.clone(),
+            source,
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Ok(false);
+        }
+    }
     let mut matchers = walker_builder(project.root()).build_matchers();
     let mut ignores = matchers
         .pop()
