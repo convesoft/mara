@@ -5,12 +5,13 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use serde::Serialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use unicode_casefold::UnicodeCaseFold;
 
 use crate::{Corpus, Item, Schema, SourceLocation};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct ItemSource {
     path: PathBuf,
     start_byte: usize,
@@ -54,7 +55,7 @@ impl From<&SourceLocation> for ItemSource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct ItemSummary {
     id: String,
     flavour: String,
@@ -97,7 +98,7 @@ impl From<&Item> for ItemSummary {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct MetadataValue {
     key: String,
     value: String,
@@ -113,7 +114,7 @@ impl MetadataValue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct RelationSummary {
     relation: String,
     item: ItemSummary,
@@ -129,7 +130,7 @@ impl RelationSummary {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct ResolvedItem {
     summary: ItemSummary,
     source: ItemSource,
@@ -215,7 +216,7 @@ impl ItemFilters {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RelationDirection {
     Incoming,
@@ -252,7 +253,7 @@ impl RelatedFilters {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct RelatedItem {
     direction: RelationDirection,
     relation: String,

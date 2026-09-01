@@ -7,10 +7,12 @@ use std::{
 };
 
 use globset::GlobBuilder;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 mod corpus;
 mod mutation;
+mod operations;
 mod query;
 
 pub use corpus::{
@@ -20,6 +22,14 @@ pub use corpus::{
 };
 pub use mutation::{
     ItemCreation, ItemCreationRequest, RelationMutation, add_relation, create_item, remove_relation,
+};
+pub use operations::{
+    DeclarationSummary, FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult,
+    ItemFilterParams, ItemIdParams, ItemRelatedParams, ItemSearchParams, OperationContext,
+    ProjectInitializationResult, ProjectSummary, RelatedItemsResult, RelationAction,
+    RelationMutationResult, RelationParams, SchemaGetResult, SchemaKind, SchemaListResult,
+    SchemaValidationResult, ValidationDiagnostic, ValidationResult, ValidationScope,
+    ValidationTarget, ValidationTargetKind, project_initialize,
 };
 pub use query::{
     FieldFilter, ItemFilters, ItemSource, ItemSummary, MetadataValue, QueryError, RelatedFilters,
@@ -58,13 +68,14 @@ impl ProjectValidation {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Schema {
     format_version: u32,
     flavours: BTreeMap<String, FlavourDefinition>,
     relations: BTreeMap<String, RelationDefinition>,
     #[serde(skip)]
+    #[schemars(skip)]
     validation: SchemaValidationState,
 }
 
@@ -357,7 +368,7 @@ impl Schema {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FlavourDefinition {
     description: String,
@@ -377,14 +388,14 @@ impl FlavourDefinition {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum BodyRequirement {
     Optional,
     Required,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FieldDefinition {
     #[serde(rename = "type")]
@@ -438,7 +449,7 @@ impl FieldDefinition {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FieldType {
     String,
@@ -448,7 +459,7 @@ pub enum FieldType {
     Enum,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RelationDefinition {
     description: String,

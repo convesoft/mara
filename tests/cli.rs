@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     fs,
     io::Write,
     path::Path,
@@ -9,6 +10,7 @@ use std::{
 use std::os::unix::fs::PermissionsExt;
 
 use mara::resolve_project;
+use serde_json::{Value, json};
 use tempfile::TempDir;
 
 fn mara(current_directory: &Path, arguments: &[&str]) -> std::process::Output {
@@ -47,6 +49,57 @@ fn stderr(output: &std::process::Output) -> String {
 
 fn stdout(output: &std::process::Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("stdout is UTF-8")
+}
+
+fn mcp_exchange(current_directory: &Path, requests: &[Value]) -> Vec<Value> {
+    let input = requests
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+    let output = mara_with_stdin(current_directory, &["mcp"], &input);
+    assert!(output.status.success(), "{}", stderr(&output));
+    stdout(&output)
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("MCP response is JSON"))
+        .collect()
+}
+
+fn mcp_request(id: u64, method: &str, params: Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": method,
+        "params": params,
+    })
+}
+
+fn mcp_initialize(id: u64) -> Value {
+    mcp_request(
+        id,
+        "initialize",
+        json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": { "name": "mara-test", "version": "1" },
+        }),
+    )
+}
+
+fn mcp_call(id: u64, name: &str, arguments: Value) -> Value {
+    mcp_request(
+        id,
+        "tools/call",
+        json!({ "name": name, "arguments": arguments }),
+    )
+}
+
+fn mcp_response(responses: &[Value], id: u64) -> &Value {
+    responses
+        .iter()
+        .find(|response| response["id"] == id)
+        .unwrap_or_else(|| panic!("missing MCP response {id}"))
 }
 
 #[test]
@@ -2419,4 +2472,187 @@ fn item_related_returns_filtered_direct_neighbours_with_relation_and_direction()
     );
     assert!(no_match.status.success(), "{}", stderr(&no_match));
     assert!(stdout(&no_match).is_empty());
+}
+
+#[test]
+fn cli_parse_failures_follow_the_selected_output_format() {
+    let fixture = TempDir::new().unwrap();
+
+    for arguments in [
+        &["--format", "json", "item", "get"][..],
+        &["item", "get", "--format=json"][..],
+    ] {
+        let output = mara(fixture.path(), arguments);
+
+        assert_eq!(output.status.code(), Some(2));
+        assert!(stderr(&output).is_empty(), "{}", stderr(&output));
+        let error: Value = serde_json::from_str(&stdout(&output)).unwrap();
+        assert!(
+            error["error"]["message"].as_str().unwrap().contains("<ID>"),
+            "{error:#}"
+        );
+    }
+
+    let human = mara(fixture.path(), &["item", "get"]);
+    assert_eq!(human.status.code(), Some(2));
+    assert!(stdout(&human).is_empty());
+    assert!(stderr(&human).contains("<ID>"), "{}", stderr(&human));
+
+    let help = mara(fixture.path(), &["--format", "json", "--help"]);
+    assert!(help.status.success(), "{}", stderr(&help));
+    assert!(stderr(&help).is_empty(), "{}", stderr(&help));
+    assert!(stdout(&help).contains("Usage: mara"), "{}", stdout(&help));
+}
+
+#[test]
+fn mcp_rejects_undeclared_arguments_without_mutating_the_bound_project() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_request(2, "tools/list", json!({})),
+            mcp_call(
+                3,
+                "item_create",
+                json!({
+                    "flavour": "requirement",
+                    "id": "REQ-UNDECLARED",
+                    "file": "items.mara.md",
+                    "title": "Undeclared project override",
+                    "body": "Must not be written.",
+                    "project": "other"
+                }),
+            ),
+            mcp_call(4, "project_validate", json!({ "project": "other" })),
+        ],
+    );
+
+    for tool in mcp_response(&responses, 2)["result"]["tools"]
+        .as_array()
+        .unwrap()
+    {
+        assert_eq!(
+            tool["inputSchema"]["additionalProperties"], false,
+            "{} accepts undeclared arguments: {tool:#}",
+            tool["name"]
+        );
+    }
+    for id in [3, 4] {
+        let response = mcp_response(&responses, id);
+        let rejected = response.get("error").is_some() || response["result"]["isError"] == true;
+        assert!(rejected, "MCP call {id} was not rejected: {response:#}");
+        assert!(
+            response.to_string().contains("unknown field"),
+            "MCP call {id} did not identify its undeclared argument: {response:#}"
+        );
+    }
+    assert!(!fixture.path().join("items.mara.md").exists());
+}
+
+#[test]
+fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results() {
+    let fixture = retrieval_fixture();
+    let cli_item = mara(
+        fixture.path(),
+        &["--format", "json", "item", "get", "REQ-ALPHA"],
+    );
+    assert!(cli_item.status.success(), "{}", stderr(&cli_item));
+    let cli_item: Value = serde_json::from_str(&stdout(&cli_item)).unwrap();
+    let cli_search = mara(
+        fixture.path(),
+        &["--format", "json", "item", "search", "alpha"],
+    );
+    assert!(cli_search.status.success(), "{}", stderr(&cli_search));
+    let cli_search: Value = serde_json::from_str(&stdout(&cli_search)).unwrap();
+    let cli_schema = mara(
+        fixture.path(),
+        &["--format", "json", "schema", "list", "relation"],
+    );
+    assert!(cli_schema.status.success(), "{}", stderr(&cli_schema));
+    let cli_schema: Value = serde_json::from_str(&stdout(&cli_schema)).unwrap();
+
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_request(2, "tools/list", json!({})),
+            mcp_call(3, "item_get", json!({ "id": "REQ-ALPHA" })),
+            mcp_call(4, "item_search", json!({ "query": "alpha" })),
+            mcp_call(5, "schema_list", json!({ "kind": "relation" })),
+        ],
+    );
+
+    let tool_names = mcp_response(&responses, 2)["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        tool_names,
+        BTreeSet::from([
+            "project_validate",
+            "schema_get",
+            "schema_list",
+            "schema_validate",
+            "item_create",
+            "item_get",
+            "item_list",
+            "item_search",
+            "item_related",
+            "item_validate",
+            "relation_add",
+            "relation_remove",
+        ])
+    );
+    assert!(!tool_names.contains("project_init"));
+    assert_eq!(
+        mcp_response(&responses, 3)["result"]["structuredContent"],
+        cli_item
+    );
+    assert_eq!(
+        mcp_response(&responses, 4)["result"]["structuredContent"],
+        cli_search
+    );
+    assert_eq!(
+        mcp_response(&responses, 5)["result"]["structuredContent"],
+        cli_schema
+    );
+}
+
+#[test]
+fn cli_json_and_mcp_return_the_same_structured_validation_diagnostics() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        ":::mara requirement WRONG-ID\n:title: Invalid\n\n\n:::\n",
+    )
+    .unwrap();
+
+    let cli = mara(fixture.path(), &["--format", "json", "project", "validate"]);
+    assert!(!cli.status.success());
+    assert!(stderr(&cli).is_empty(), "{}", stderr(&cli));
+    let cli_result: Value = serde_json::from_str(&stdout(&cli)).unwrap();
+    assert_eq!(cli_result["valid"], false);
+    assert_eq!(cli_result["diagnostics"].as_array().unwrap().len(), 2);
+
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_call(2, "project_validate", json!({})),
+        ],
+    );
+    let result = &mcp_response(&responses, 2)["result"];
+    assert_eq!(result["isError"], false);
+    assert_eq!(result["structuredContent"], cli_result);
 }

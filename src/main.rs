@@ -1,21 +1,23 @@
 use std::{
     collections::BTreeMap,
     env,
-    io::{self, Read},
+    ffi::OsString,
+    io::{self, Read, Write},
     path::PathBuf,
     process::ExitCode,
 };
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
-    Diagnostic, FieldFilter, ItemCreationRequest, ItemFilters, ItemSummary, RelatedFilters,
-    RelatedItem, RelationDirection, RelationSummary, ResolvedItem, Schema, Template, add_relation,
-    create_item, get_item, initialize_project, list_items, load_corpus, load_corpus_for_validation,
-    load_corpus_syntax_for_validation, load_schema, load_schema_for_validation, related_items,
-    remove_relation, resolve_project, resolve_project_for_validation, search_items,
-    validate_corpus, validate_corpus_independent,
+    FieldValue, ItemCollectionResult, ItemCreateParams, ItemFilterParams, ItemRelatedParams,
+    ItemSummary, OperationContext, ProjectInitializationResult, RelatedItem, RelationDirection,
+    RelationMutationResult, RelationParams, RelationSummary, ResolvedItem, SchemaGetResult,
+    SchemaKind, SchemaListResult, SchemaValidationResult, Template, ValidationResult,
+    ValidationScope, ValidationTargetKind, project_initialize,
 };
 use serde::Serialize;
+
+mod mcp;
 
 #[derive(Debug, Parser)]
 #[command(name = "mara", version, about = "Structured project knowledge")]
@@ -27,6 +29,9 @@ struct Cli {
         help = "Use this Mara project root instead of discovery or an init PATH"
     )]
     project: Option<PathBuf>,
+
+    #[arg(long, global = true, value_enum, default_value_t)]
+    format: OutputFormat,
 
     #[command(subcommand)]
     command: Command,
@@ -50,6 +55,8 @@ enum Command {
         #[command(subcommand)]
         command: RelationCommand,
     },
+    /// Start a stdio MCP server bound to one Mara project.
+    Mcp,
 }
 
 #[derive(Debug, Subcommand)]
@@ -132,6 +139,15 @@ struct CliField {
     value: String,
 }
 
+impl From<CliField> for FieldValue {
+    fn from(value: CliField) -> Self {
+        Self {
+            key: value.key,
+            value: value.value,
+        }
+    }
+}
+
 #[derive(Debug, Args)]
 struct ItemFilterArgs {
     #[arg(long)]
@@ -151,17 +167,14 @@ struct ItemFilterArgs {
 }
 
 impl ItemFilterArgs {
-    fn into_domain(self) -> ItemFilters {
-        ItemFilters::new(
-            self.flavour,
-            self.fields
-                .into_iter()
-                .map(|field| FieldFilter::new(field.key, field.value))
-                .collect(),
-            self.relation,
-            self.path,
-            self.limit,
-        )
+    fn into_params(self) -> ItemFilterParams {
+        ItemFilterParams {
+            flavours: self.flavour,
+            fields: self.fields.into_iter().map(Into::into).collect(),
+            relations: self.relation,
+            paths: self.path,
+            limit: self.limit,
+        }
     }
 }
 
@@ -184,22 +197,31 @@ impl From<CliRelationDirection> for RelationDirection {
 enum SchemaCommand {
     Get {
         #[arg(value_enum, requires = "name")]
-        kind: Option<SchemaKind>,
+        kind: Option<CliSchemaKind>,
 
         #[arg(requires = "kind")]
         name: Option<String>,
     },
     List {
         #[arg(value_enum)]
-        kind: SchemaKind,
+        kind: CliSchemaKind,
     },
     Validate,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
-enum SchemaKind {
+enum CliSchemaKind {
     Flavour,
     Relation,
+}
+
+impl From<CliSchemaKind> for SchemaKind {
+    fn from(value: CliSchemaKind) -> Self {
+        match value {
+            CliSchemaKind::Flavour => Self::Flavour,
+            CliSchemaKind::Relation => Self::Relation,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
@@ -207,15 +229,6 @@ enum CliTemplate {
     #[default]
     Minimal,
     Empty,
-}
-
-struct ValidationContext {
-    project: mara::Project,
-    corpus: mara::Corpus,
-    schema: Option<Schema>,
-    diagnostics: Vec<Diagnostic>,
-    project_errors: Vec<String>,
-    schema_errors: Vec<String>,
 }
 
 impl From<CliTemplate> for Template {
@@ -227,20 +240,95 @@ impl From<CliTemplate> for Template {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum OutputFormat {
+    #[default]
+    Human,
+    Json,
+}
+
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let arguments = env::args_os().collect::<Vec<_>>();
+    let requested_format = requested_output_format(&arguments);
+    let cli = match Cli::try_parse_from(arguments) {
+        Ok(cli) => cli,
+        Err(error) => return report_parse_error(error, requested_format),
+    };
+    let format = cli.format;
     match run(cli) {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(true) => ExitCode::SUCCESS,
+        Ok(false) => ExitCode::FAILURE,
         Err(error) => {
-            eprintln!("error: {error}");
+            if matches!(format, OutputFormat::Json) {
+                if let Err(render_error) = write_json(&serde_json::json!({
+                    "error": { "message": error }
+                })) {
+                    eprintln!("error: {render_error}");
+                }
+            } else {
+                eprintln!("error: {error}");
+            }
             ExitCode::FAILURE
         }
     }
 }
 
-fn run(cli: Cli) -> Result<(), String> {
-    let Cli { project, command } = cli;
+fn requested_output_format(arguments: &[OsString]) -> OutputFormat {
+    let mut format = OutputFormat::Human;
+    let mut arguments = arguments.iter().skip(1);
+
+    while let Some(argument) = arguments.next() {
+        let Some(argument) = argument.to_str() else {
+            continue;
+        };
+        let value = if argument == "--format" {
+            arguments.next().and_then(|argument| argument.to_str())
+        } else {
+            argument.strip_prefix("--format=")
+        };
+
+        match value {
+            Some("json") => format = OutputFormat::Json,
+            Some("human") => format = OutputFormat::Human,
+            _ => {}
+        }
+    }
+
+    format
+}
+
+fn report_parse_error(error: clap::Error, format: OutputFormat) -> ExitCode {
+    let exit_code = ExitCode::from(u8::try_from(error.exit_code()).unwrap_or(1));
+    if matches!(
+        error.kind(),
+        ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+    ) {
+        if let Err(render_error) = error.print() {
+            eprintln!("error: could not render command help: {render_error}");
+        }
+    } else if matches!(format, OutputFormat::Json) {
+        if let Err(render_error) = write_json(&serde_json::json!({
+            "error": { "message": error.to_string() }
+        })) {
+            eprintln!("error: {render_error}");
+        }
+    } else if let Err(render_error) = error.print() {
+        eprintln!("error: could not render command error: {render_error}");
+    }
+    exit_code
+}
+
+fn run(cli: Cli) -> Result<bool, String> {
+    let Cli {
+        project,
+        format,
+        command,
+    } = cli;
     match command {
+        Command::Mcp => {
+            mcp::run(project)?;
+            Ok(true)
+        }
         Command::Project {
             command: ProjectCommand::Init { path, template },
         } => {
@@ -252,18 +340,15 @@ fn run(cli: Cli) -> Result<(), String> {
                     return Err("--project and project init PATH cannot be used together".into());
                 }
             };
-            let project =
-                initialize_project(target, template.into()).map_err(|error| error.to_string())?;
-            println!("initialized Mara project at {}", project.root().display());
-            println!("created {PROJECT_FILE}", PROJECT_FILE = mara::PROJECT_FILE);
-            println!("created {SCHEMA_FILE}", SCHEMA_FILE = mara::SCHEMA_FILE);
-            Ok(())
+            let result = project_initialize(target, template.into())?;
+            emit(format, &result, print_project_initialization)?;
+            Ok(true)
         }
         Command::Project {
             command: ProjectCommand::Validate,
         } => {
-            let context = load_selected_project(project)?;
-            report_diagnostics(context, None)
+            let result = operations(project)?.project_validate()?;
+            emit_validation(format, &result)
         }
         Command::Item {
             command:
@@ -277,7 +362,6 @@ fn run(cli: Cli) -> Result<(), String> {
                     line,
                 },
         } => {
-            let (project, schema) = load_mutation_project(project)?;
             let body = match body.as_deref() {
                 Some("-") => {
                     let mut body = String::new();
@@ -288,66 +372,59 @@ fn run(cli: Cli) -> Result<(), String> {
                 }
                 _ => body,
             };
-            let created = create_item(
-                &project,
-                &schema,
-                ItemCreationRequest {
-                    flavour,
-                    id: id.clone(),
-                    file,
-                    title,
-                    fields: fields
-                        .into_iter()
-                        .map(|field| (field.key, field.value))
-                        .collect(),
-                    body,
-                    line,
-                },
-            )
-            .map_err(|error| error.to_string())?;
-            println!(
-                "created item '{}' at {}:{}",
+            let result = operations(project)?.item_create(ItemCreateParams {
+                flavour,
                 id,
-                created.path().display(),
-                created.line()
-            );
-            println!("complete: {}", created.is_complete());
-            if !created.is_complete() {
-                println!("missing: body");
-            }
-            Ok(())
+                file,
+                title,
+                fields: fields.into_iter().map(Into::into).collect(),
+                body,
+                line,
+            })?;
+            emit(format, &result, |result| {
+                println!(
+                    "created item '{}' at {}:{}",
+                    result.id,
+                    result.path.display(),
+                    result.line
+                );
+                println!("complete: {}", result.complete);
+                for missing in &result.missing {
+                    println!("missing: {missing}");
+                }
+                Ok(())
+            })?;
+            Ok(true)
         }
         Command::Item {
             command: ItemCommand::Validate { id },
         } => {
-            let context = load_selected_project(project)?;
-            report_diagnostics(context, Some(&id))
+            let result = operations(project)?.item_validate(&id)?;
+            emit_validation(format, &result)
         }
         Command::Item {
             command: ItemCommand::Get { id },
         } => {
-            let (corpus, _) = load_query_project(project)?;
-            let item = get_item(&corpus, &id).map_err(|error| error.to_string())?;
-            print_resolved_item(&item);
-            Ok(())
+            let result = operations(project)?.item_get(&id)?;
+            emit(format, &result, |item| {
+                print_resolved_item(item);
+                Ok(())
+            })?;
+            Ok(true)
         }
         Command::Item {
             command: ItemCommand::List { filters },
         } => {
-            let (corpus, schema) = load_query_project(project)?;
-            let items = list_items(&corpus, &schema, &filters.into_domain())
-                .map_err(|error| error.to_string())?;
-            print_item_summaries(&items);
-            Ok(())
+            let result = operations(project)?.item_list(filters.into_params())?;
+            emit(format, &result, print_item_collection)?;
+            Ok(true)
         }
         Command::Item {
             command: ItemCommand::Search { query, filters },
         } => {
-            let (corpus, schema) = load_query_project(project)?;
-            let items = search_items(&corpus, &schema, &query, &filters.into_domain())
-                .map_err(|error| error.to_string())?;
-            print_item_summaries(&items);
-            Ok(())
+            let result = operations(project)?.item_search(&query, filters.into_params())?;
+            emit(format, &result, print_item_collection)?;
+            Ok(true)
         }
         Command::Item {
             command:
@@ -358,12 +435,17 @@ fn run(cli: Cli) -> Result<(), String> {
                     flavour,
                 },
         } => {
-            let (corpus, schema) = load_query_project(project)?;
-            let filters = RelatedFilters::new(direction.map(Into::into), relation, flavour);
-            let items = related_items(&corpus, &schema, &id, &filters)
-                .map_err(|error| error.to_string())?;
-            print_related_items(&items);
-            Ok(())
+            let result = operations(project)?.item_related(ItemRelatedParams {
+                id,
+                direction: direction.map(Into::into),
+                relations: relation,
+                flavours: flavour,
+            })?;
+            emit(format, &result, |result| {
+                print_related_items(&result.items);
+                Ok(())
+            })?;
+            Ok(true)
         }
         Command::Relation {
             command:
@@ -373,17 +455,13 @@ fn run(cli: Cli) -> Result<(), String> {
                     target,
                 },
         } => {
-            let (project, schema) = load_mutation_project(project)?;
-            let mutation = add_relation(&project, &schema, &source, &relation, &target)
-                .map_err(|error| error.to_string())?;
-            println!(
-                "added relation '{}' from '{}' to '{}' in {}",
-                mutation.relation(),
-                mutation.source(),
-                mutation.target(),
-                mutation.path().display()
-            );
-            Ok(())
+            let result = operations(project)?.relation_add(RelationParams {
+                source,
+                relation,
+                target,
+            })?;
+            emit(format, &result, print_relation_mutation)?;
+            Ok(true)
         }
         Command::Relation {
             command:
@@ -393,42 +471,40 @@ fn run(cli: Cli) -> Result<(), String> {
                     target,
                 },
         } => {
-            let (project, schema) = load_mutation_project(project)?;
-            let mutation = remove_relation(&project, &schema, &source, &relation, &target)
-                .map_err(|error| error.to_string())?;
-            println!(
-                "removed relation '{}' from '{}' to '{}' in {}",
-                mutation.relation(),
-                mutation.source(),
-                mutation.target(),
-                mutation.path().display()
-            );
-            Ok(())
+            let result = operations(project)?.relation_remove(RelationParams {
+                source,
+                relation,
+                target,
+            })?;
+            emit(format, &result, print_relation_mutation)?;
+            Ok(true)
         }
-        Command::Schema { command } => {
-            let current_directory = env::current_dir()
-                .map_err(|error| format!("could not read current directory: {error}"))?;
-            let project = resolve_project(project.as_deref(), current_directory)
-                .map_err(|error| error.to_string())?;
-            let schema = load_schema(&project).map_err(|error| error.to_string())?;
-            run_schema_command(command, &project, &schema)
+        Command::Schema {
+            command: SchemaCommand::Get { kind, name },
+        } => {
+            let result = operations(project)?.schema_get(kind.map(Into::into), name)?;
+            emit(format, &result, print_schema_get)?;
+            Ok(true)
+        }
+        Command::Schema {
+            command: SchemaCommand::List { kind },
+        } => {
+            let result = operations(project)?.schema_list(kind.into())?;
+            emit(format, &result, print_schema_list)?;
+            Ok(true)
+        }
+        Command::Schema {
+            command: SchemaCommand::Validate,
+        } => {
+            let result = operations(project)?.schema_validate()?;
+            emit(format, &result, print_schema_validation)?;
+            Ok(true)
         }
     }
 }
 
-fn load_mutation_project(selected: Option<PathBuf>) -> Result<(mara::Project, Schema), String> {
-    let current_directory =
-        env::current_dir().map_err(|error| format!("could not read current directory: {error}"))?;
-    let project = resolve_project(selected.as_deref(), current_directory)
-        .map_err(|error| error.to_string())?;
-    let schema = load_schema(&project).map_err(|error| error.to_string())?;
-    Ok((project, schema))
-}
-
-fn load_query_project(selected: Option<PathBuf>) -> Result<(mara::Corpus, Schema), String> {
-    let (project, schema) = load_mutation_project(selected)?;
-    let corpus = load_corpus(&project, &schema).map_err(|error| error.to_string())?;
-    Ok((corpus, schema))
+fn operations(selected: Option<PathBuf>) -> Result<OperationContext, String> {
+    OperationContext::from_environment(selected)
 }
 
 fn parse_field(value: &str) -> Result<CliField, String> {
@@ -442,6 +518,36 @@ fn parse_field(value: &str) -> Result<CliField, String> {
         key: key.to_owned(),
         value: value.to_owned(),
     })
+}
+
+fn emit<T: Serialize>(
+    format: OutputFormat,
+    value: &T,
+    human: impl FnOnce(&T) -> Result<(), String>,
+) -> Result<(), String> {
+    match format {
+        OutputFormat::Human => human(value),
+        OutputFormat::Json => write_json(value),
+    }
+}
+
+fn write_json(value: &impl Serialize) -> Result<(), String> {
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    serde_json::to_writer(&mut stdout, value)
+        .map_err(|error| format!("could not render JSON output: {error}"))?;
+    writeln!(stdout).map_err(|error| format!("could not write JSON output: {error}"))
+}
+
+fn print_project_initialization(result: &ProjectInitializationResult) -> Result<(), String> {
+    println!(
+        "initialized Mara project at {}",
+        result.project.root.display()
+    );
+    for path in &result.created {
+        println!("created {}", path.display());
+    }
+    Ok(())
 }
 
 fn print_resolved_item(item: &ResolvedItem) {
@@ -471,6 +577,11 @@ fn print_resolved_item(item: &ResolvedItem) {
     for relation in item.incoming_relations() {
         print_relation_summary(RelationDirection::Incoming, relation);
     }
+}
+
+fn print_item_collection(result: &ItemCollectionResult) -> Result<(), String> {
+    print_item_summaries(&result.items);
+    Ok(())
 }
 
 fn print_item_summaries(items: &[ItemSummary]) {
@@ -517,221 +628,106 @@ fn print_related_line(direction: RelationDirection, relation: &str, item: &ItemS
     );
 }
 
-fn load_selected_project(selected: Option<PathBuf>) -> Result<ValidationContext, String> {
-    let cwd =
-        env::current_dir().map_err(|error| format!("could not read current directory: {error}"))?;
-    let project_validation = resolve_project_for_validation(selected.as_deref(), cwd)
-        .map_err(|error| error.to_string())?;
-    let (project, project_errors, schema_available) = project_validation.into_parts();
-    let project_errors = project_errors
-        .into_iter()
-        .map(|message| {
-            format!(
-                "invalid Mara project at {}: {message}",
-                project.root().join(mara::PROJECT_FILE).display()
-            )
-        })
-        .collect();
-    let (schema, schema_errors, corpus, diagnostics) = if schema_available {
-        match load_schema_for_validation(&project) {
-            Ok((schema, errors)) if schema.format_version() == 1 => {
-                let schema_errors = errors
-                    .into_iter()
-                    .map(|message| {
-                        format!(
-                            "invalid Mara schema at {}: {message}",
-                            project.schema_path().display()
-                        )
-                    })
-                    .collect();
-                let (corpus, diagnostics) = load_corpus_for_validation(&project, &schema)
-                    .map_err(|error| error.to_string())?;
-                (Some(schema), schema_errors, corpus, diagnostics)
-            }
-            Ok((_, errors)) => {
-                let schema_errors = errors
-                    .into_iter()
-                    .map(|message| {
-                        format!(
-                            "invalid Mara schema at {}: {message}",
-                            project.schema_path().display()
-                        )
-                    })
-                    .collect();
-                let (corpus, diagnostics) = load_corpus_syntax_for_validation(&project)
-                    .map_err(|error| error.to_string())?;
-                (None, schema_errors, corpus, diagnostics)
-            }
-            Err(error) => {
-                let schema_error = error.to_string();
-                let (corpus, diagnostics) = load_corpus_syntax_for_validation(&project)
-                    .map_err(|error| error.to_string())?;
-                (None, vec![schema_error], corpus, diagnostics)
-            }
-        }
-    } else {
-        let (corpus, diagnostics) =
-            load_corpus_syntax_for_validation(&project).map_err(|error| error.to_string())?;
-        (None, Vec::new(), corpus, diagnostics)
-    };
-    Ok(ValidationContext {
-        project,
-        corpus,
-        schema,
-        diagnostics,
-        project_errors,
-        schema_errors,
-    })
+fn print_relation_mutation(result: &RelationMutationResult) -> Result<(), String> {
+    println!(
+        "{} relation '{}' from '{}' to '{}' in {}",
+        result.action.past_tense(),
+        result.relation,
+        result.source,
+        result.target,
+        result.path.display()
+    );
+    Ok(())
 }
 
-fn report_diagnostics(
-    mut context: ValidationContext,
-    selected: Option<&str>,
-) -> Result<(), String> {
-    match &context.schema {
-        Some(schema) => context
-            .diagnostics
-            .extend(validate_corpus(&context.corpus, schema)),
-        None => context
-            .diagnostics
-            .extend(validate_corpus_independent(&context.corpus)),
-    }
-    let selected_item_missing = selected.is_some_and(|id| {
-        context.corpus.is_complete()
-            && !context.corpus.items().any(|item| item.id() == id)
-            && !context
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.applies_to_item(id))
-    });
-    let selected_item_context_incomplete = selected.is_some() && !context.corpus.is_complete();
-    let diagnostics = context
-        .diagnostics
-        .into_iter()
-        .filter(|diagnostic| {
-            selected.is_none_or(|id| {
-                diagnostic.applies_to_item(id)
-                    || context
-                        .corpus
-                        .items()
-                        .filter(|item| item.id() == id)
-                        .any(|item| {
-                            diagnostic.source().span().start_byte()
-                                >= item.source().span().start_byte()
-                                && diagnostic.source().span().end_byte()
-                                    <= item.source().span().end_byte()
-                                && diagnostic.source().path() == item.source().path()
-                        })
-            })
-        })
-        .collect::<Vec<_>>();
-    let diagnostic_count = diagnostics.len()
-        + context.project_errors.len()
-        + context.schema_errors.len()
-        + usize::from(selected_item_missing)
-        + usize::from(selected_item_context_incomplete);
-    if diagnostic_count == 0 {
-        println!(
-            "valid {}",
-            selected.map_or_else(
-                || format!("project at {}", context.project.root().display()),
-                |id| format!("item '{id}'")
-            )
-        );
+fn emit_validation(format: OutputFormat, result: &ValidationResult) -> Result<bool, String> {
+    emit(format, result, print_validation)?;
+    Ok(result.valid)
+}
+
+fn print_validation(result: &ValidationResult) -> Result<(), String> {
+    if result.valid {
+        match result.target.kind {
+            ValidationTargetKind::Project => {
+                println!("valid project at {}", result.project.display());
+            }
+            ValidationTargetKind::Item => {
+                println!(
+                    "valid item '{}'",
+                    result
+                        .target
+                        .id
+                        .as_deref()
+                        .expect("item validation has an item ID")
+                );
+            }
+        }
         return Ok(());
     }
-    for error in context.project_errors {
-        eprintln!("error: {error}");
+    for diagnostic in &result.diagnostics {
+        match diagnostic.scope {
+            ValidationScope::Project => eprintln!(
+                "error: invalid Mara project at {}: {}",
+                diagnostic
+                    .path
+                    .as_deref()
+                    .expect("project diagnostic has a path")
+                    .display(),
+                diagnostic.message
+            ),
+            ValidationScope::Schema => eprintln!(
+                "error: invalid Mara schema at {}: {}",
+                diagnostic
+                    .path
+                    .as_deref()
+                    .expect("schema diagnostic has a path")
+                    .display(),
+                diagnostic.message
+            ),
+            ValidationScope::Item => eprintln!("error: {}", diagnostic.message),
+            ValidationScope::Document => eprintln!(
+                "{}:{}: error: {}",
+                diagnostic
+                    .path
+                    .as_deref()
+                    .expect("document diagnostic has a path")
+                    .display(),
+                diagnostic.line.expect("document diagnostic has a line"),
+                diagnostic.message
+            ),
+        }
     }
-    for error in context.schema_errors {
-        eprintln!("error: {error}");
-    }
-    if selected_item_context_incomplete {
-        eprintln!(
-            "error: item '{}' could not be fully validated because the project corpus is incomplete",
-            selected.expect("incomplete selected-item validation has an item ID")
-        );
-    }
-    if selected_item_missing {
-        eprintln!(
-            "error: item '{}' was not found",
-            selected.expect("missing selected item has an item ID")
-        );
-    }
-    for diagnostic in &diagnostics {
-        eprintln!(
-            "{}:{}: error: {}",
-            diagnostic.source().path().display(),
-            diagnostic.source().span().start_line(),
-            diagnostic.message()
-        );
-    }
-    Err(format!(
-        "validation failed with {} diagnostic{}",
-        diagnostic_count,
-        if diagnostic_count == 1 { "" } else { "s" }
-    ))
+    let count = result.diagnostics.len();
+    eprintln!(
+        "error: validation failed with {count} diagnostic{}",
+        if count == 1 { "" } else { "s" }
+    );
+    Ok(())
 }
 
-fn run_schema_command(
-    command: SchemaCommand,
-    project: &mara::Project,
-    schema: &Schema,
-) -> Result<(), String> {
-    match command {
-        SchemaCommand::Get {
-            kind: None,
-            name: None,
-        } => print_yaml(schema),
-        SchemaCommand::Get {
-            kind: Some(SchemaKind::Flavour),
-            name: Some(name),
-        } => {
-            let definition = schema
-                .flavours()
-                .get(&name)
-                .ok_or_else(|| format!("unknown flavour '{name}'"))?;
-            print_named_yaml(&name, definition)
-        }
-        SchemaCommand::Get {
-            kind: Some(SchemaKind::Relation),
-            name: Some(name),
-        } => {
-            let definition = schema
-                .relations()
-                .get(&name)
-                .ok_or_else(|| format!("unknown relation '{name}'"))?;
-            print_named_yaml(&name, definition)
-        }
-        SchemaCommand::Get { .. } => {
-            Err("schema get requires both KIND and NAME, or neither".into())
-        }
-        SchemaCommand::List {
-            kind: SchemaKind::Flavour,
-        } => {
-            for (name, definition) in schema.flavours() {
-                println!("{name}\t{}", definition.description());
-            }
-            Ok(())
-        }
-        SchemaCommand::List {
-            kind: SchemaKind::Relation,
-        } => {
-            for (name, definition) in schema.relations() {
-                println!("{name}\t{}", definition.description());
-            }
-            Ok(())
-        }
-        SchemaCommand::Validate => {
-            println!(
-                "valid schema at {} ({} flavours, {} relations)",
-                project.schema_path().display(),
-                schema.flavours().len(),
-                schema.relations().len()
-            );
-            Ok(())
-        }
+fn print_schema_get(result: &SchemaGetResult) -> Result<(), String> {
+    match result {
+        SchemaGetResult::Schema { schema } => print_yaml(schema),
+        SchemaGetResult::Flavour { name, definition } => print_named_yaml(name, definition),
+        SchemaGetResult::Relation { name, definition } => print_named_yaml(name, definition),
     }
+}
+
+fn print_schema_list(result: &SchemaListResult) -> Result<(), String> {
+    for declaration in &result.declarations {
+        println!("{}\t{}", declaration.name, declaration.description);
+    }
+    Ok(())
+}
+
+fn print_schema_validation(result: &SchemaValidationResult) -> Result<(), String> {
+    println!(
+        "valid schema at {} ({} flavours, {} relations)",
+        result.path.display(),
+        result.flavours,
+        result.relations
+    );
+    Ok(())
 }
 
 fn print_named_yaml<T: Serialize>(name: &str, definition: &T) -> Result<(), String> {
