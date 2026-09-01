@@ -18,7 +18,5 @@ ignore = "0.4"
 rushdown = "0.18.0"
 serde = { version = "1", features = ["derive"] }
 serde-saphyr = "1.2"
-toml = "1.1"
-
-[dev-dependencies]
 tempfile = "3"
+toml = "1.1"

@@ -102,9 +102,10 @@ data equivalent to MCP structured results.
 
 `item create` requires flavour, human ID, destination file, title, and all
 schema-required metadata. It creates a missing file only when its parent exists
-and otherwise appends the item. `--line N` inserts immediately before the
-one-based line `N`; `line_count + 1` means end of file. Body input accepts an
-inline value or `-` for standard input.
+and otherwise appends the item. The destination must be selected by the
+project's content include, Git ignore, and directory-symlink discovery rules.
+`--line N` inserts immediately before the one-based line `N`; `line_count + 1`
+means end of file. Body input accepts an inline value or `-` for standard input.
 
 When a required body is omitted, creation succeeds as an incomplete scaffold
 and reports `complete: false` with `body` missing. Validation continues to
@@ -119,8 +120,9 @@ An explicit insertion point must be outside every existing Mara item but may
 split ordinary narrative. Mara ensures at least one blank line around the new
 item when adjacent content exists, avoids accumulating blank lines, validates
 the resulting source structure, and replaces the source atomically only on
-success. An explicitly scaffolded missing body remains a semantic validation
-error without making the insertion structurally unsafe.
+success. Body input that would close the created item or introduce another item
+is rejected. An explicitly scaffolded missing body remains a semantic
+validation error without making the insertion structurally unsafe.
 :::
 
 :::mara requirement REQ-RELATION-MUTATION
@@ -268,6 +270,11 @@ CLI commands use `mara <object> <operation>`. The alpha objects are `project`,
 `get` resolves one object, `list` enumerates with exact filters, `search` adds a
 text query, and mutations use explicit verbs such as `create`, `add`, and
 `remove`.
+
+Item creation uses `item create <flavour> <id> <file> --title <title>` with
+repeatable `--field <key=value>`, optional `--body <text|->`, and optional
+`--line <N>`. The destination file is project-relative; repeat `--field` only
+for schema-repeatable metadata.
 
 | Object | Operations |
 |---|---|

@@ -10,11 +10,15 @@ use globset::GlobBuilder;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 mod corpus;
+mod mutation;
 
 pub use corpus::{
     Corpus, Diagnostic, Document, Item, Mention, MetadataEntry, Relation, SourceLocation,
     SourceSpan, load_corpus, load_corpus_for_validation, load_corpus_syntax_for_validation,
     validate_corpus, validate_corpus_independent,
+};
+pub use mutation::{
+    ItemCreation, ItemCreationRequest, RelationMutation, add_relation, create_item, remove_relation,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";
@@ -496,6 +500,9 @@ pub enum Error {
         line: usize,
         message: String,
     },
+    InvalidMutation {
+        message: String,
+    },
     Io {
         action: &'static str,
         path: PathBuf,
@@ -546,6 +553,7 @@ impl fmt::Display for Error {
                 "invalid Mara document at {}:{line}: {message}",
                 path.display()
             ),
+            Self::InvalidMutation { message } => write!(formatter, "{message}"),
             Self::Io {
                 action,
                 path,
