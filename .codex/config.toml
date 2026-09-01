@@ -1,0 +1,3 @@
+[mcp_servers.mara]
+command = "mara"
+args = ["mcp"]
