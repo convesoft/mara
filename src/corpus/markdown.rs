@@ -19,6 +19,7 @@ const MARA_INLINE_PRIORITY: u32 = PRIORITY_LINK - 50;
 #[derive(Debug)]
 pub(super) struct ParsedDocument {
     pub(super) items: Vec<ParsedItem>,
+    pub(super) complete: bool,
 }
 
 #[derive(Debug)]
@@ -30,6 +31,15 @@ pub(super) struct ParsedItem {
     pub(super) body: Range<usize>,
     pub(super) mentions: Vec<ParsedMention>,
     pub(super) source: Range<usize>,
+    pub(super) metadata_valid: bool,
+    pub(super) body_valid: bool,
+}
+
+#[derive(Debug)]
+struct ProjectedItem {
+    item: ParsedItem,
+    errors: Vec<ParseError>,
+    complete: bool,
 }
 
 #[derive(Debug)]
@@ -48,7 +58,24 @@ pub(super) struct ParsedMention {
 #[derive(Debug)]
 pub(super) struct ParseError {
     pub(super) line: usize,
+    pub(super) source: Range<usize>,
+    pub(super) item_ids: Vec<String>,
     pub(super) message: String,
+}
+
+#[derive(Debug)]
+struct MetadataParseError {
+    metadata: Vec<ParsedMetadataEntry>,
+    error: ParseError,
+}
+
+impl ParseError {
+    fn with_item_id(mut self, item_id: &str) -> Self {
+        if !self.item_ids.iter().any(|existing| existing == item_id) {
+            self.item_ids.push(item_id.to_owned());
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -288,6 +315,16 @@ fn mara_extension() -> impl ParserExtension {
 }
 
 pub(super) fn parse(source: &str) -> Result<ParsedDocument, ParseError> {
+    let (delimiters, mentions) = parse_extensions(source);
+    project(source, &delimiters, &mentions)
+}
+
+pub(super) fn parse_for_validation(source: &str) -> (ParsedDocument, Vec<ParseError>) {
+    let (delimiters, mentions) = parse_extensions(source);
+    project_for_validation(source, &delimiters, &mentions)
+}
+
+fn parse_extensions(source: &str) -> (Vec<Delimiter>, Vec<ParsedMention>) {
     let parser = Parser::with_extensions(parser::Options::default(), mara_extension());
     let mut reader = BasicReader::new(source);
     let (arena, document_ref) = parser.parse(&mut reader);
@@ -297,7 +334,7 @@ pub(super) fn parse(source: &str) -> Result<ParsedDocument, ParseError> {
     delimiters.sort_by_key(|delimiter| delimiter.source.start);
     mentions.sort_by_key(|mention| mention.source.start);
 
-    project(source, &delimiters, &mentions)
+    (delimiters, mentions)
 }
 
 fn collect_extensions(
@@ -345,114 +382,265 @@ fn project(
             continue;
         }
 
-        let opener_line = line_at(&lines, delimiter.source.start);
-        let (flavour, id) = opener(opener_line.text).ok_or_else(|| ParseError {
-            line: opener_line.number,
-            message: "item opener must be ':::mara <flavour> <id>' with no other tokens".to_owned(),
-        })?;
-        if !is_snake_name(flavour) {
-            return Err(ParseError {
-                line: opener_line.number,
-                message: format!("invalid flavour '{flavour}'"),
-            });
-        }
-        if !is_item_id(id) {
-            return Err(ParseError {
-                line: opener_line.number,
-                message: format!("invalid item ID '{id}'"),
-            });
-        }
-
-        let (metadata, body_start) = parse_metadata(&lines, opener_line)?;
-        let title_entries = metadata
-            .iter()
-            .filter(|entry| entry.key == "title")
-            .collect::<Vec<_>>();
-        if title_entries.len() != 1 || title_entries[0].value.is_empty() {
-            return Err(ParseError {
-                line: opener_line.number,
-                message: "item must have exactly one non-empty title entry".to_owned(),
-            });
-        }
-        let title = title_entries[0].value.clone();
-
-        delimiter_index += 1;
-        let closing = loop {
-            let Some(next) = delimiters.get(delimiter_index) else {
-                return Err(ParseError {
-                    line: opener_line.number,
-                    message: "item is missing its closing delimiter".to_owned(),
-                });
-            };
-            if next.source.start < body_start {
-                delimiter_index += 1;
-                continue;
+        match project_item(&lines, delimiters, mentions, &mut delimiter_index) {
+            Ok(mut projected) if !projected.errors.is_empty() => {
+                return Err(projected.errors.remove(0));
             }
-            match next.kind {
-                DelimiterKind::Closer => break next,
-                DelimiterKind::Opener => {
-                    let nested = line_at(&lines, next.source.start);
-                    let message = if opener(nested.text).is_some() {
-                        "items cannot nest"
-                    } else {
-                        "invalid nested item opener"
-                    };
-                    return Err(ParseError {
-                        line: nested.number,
-                        message: message.to_owned(),
-                    });
+            Ok(projected) => items.push(projected.item),
+            Err(mut errors) => return Err(errors.remove(0)),
+        }
+    }
+
+    Ok(ParsedDocument {
+        items,
+        complete: true,
+    })
+}
+
+fn project_for_validation(
+    source: &str,
+    delimiters: &[Delimiter],
+    mentions: &[ParsedMention],
+) -> (ParsedDocument, Vec<ParseError>) {
+    let lines = source_lines(source);
+    let mut items = Vec::new();
+    let mut errors = Vec::new();
+    let mut delimiter_index = 0;
+    let mut complete = true;
+
+    while let Some(delimiter) = delimiters.get(delimiter_index) {
+        if delimiter.kind == DelimiterKind::Closer {
+            delimiter_index += 1;
+            continue;
+        }
+
+        let opener_index = delimiter_index;
+        match project_item(&lines, delimiters, mentions, &mut delimiter_index) {
+            Ok(projected) => {
+                complete &= projected.complete;
+                items.push(projected.item);
+                errors.extend(projected.errors);
+            }
+            Err(item_errors) => {
+                complete = false;
+                errors.extend(item_errors);
+                if delimiter_index == opener_index {
+                    delimiter_index += 1;
+                    if let Some(next) = delimiters.get(delimiter_index) {
+                        match next.kind {
+                            DelimiterKind::Closer => delimiter_index += 1,
+                            DelimiterKind::Opener => {
+                                let outer = line_at(&lines, delimiter.source.start);
+                                let outer_id = opener_id(outer.text);
+                                errors.push(nested_item_error(&lines, outer_id, next));
+                            }
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    (ParsedDocument { items, complete }, errors)
+}
+
+fn project_item(
+    lines: &[SourceLine<'_>],
+    delimiters: &[Delimiter],
+    mentions: &[ParsedMention],
+    delimiter_index: &mut usize,
+) -> Result<ProjectedItem, Vec<ParseError>> {
+    let delimiter = &delimiters[*delimiter_index];
+    debug_assert_eq!(delimiter.kind, DelimiterKind::Opener);
+
+    let opener_line = line_at(lines, delimiter.source.start);
+    let (flavour, id) = opener(opener_line.text).ok_or_else(|| {
+        vec![ParseError {
+            line: opener_line.number,
+            source: opener_line.start..opener_line.end,
+            item_ids: opener_item_ids(opener_line.text),
+            message: "item opener must be ':::mara <flavour> <id>' with no other tokens".to_owned(),
+        }]
+    })?;
+    if !is_snake_name(flavour) {
+        return Err(vec![ParseError {
+            line: opener_line.number,
+            source: opener_line.start..opener_line.end,
+            item_ids: opener_item_ids(opener_line.text),
+            message: format!("invalid flavour '{flavour}'"),
+        }]);
+    }
+    if !is_item_id(id) {
+        return Err(vec![ParseError {
+            line: opener_line.number,
+            source: opener_line.start..opener_line.end,
+            item_ids: Vec::new(),
+            message: format!("invalid item ID '{id}'"),
+        }]);
+    }
+
+    let (metadata, body_start, metadata_valid, mut errors) =
+        match parse_metadata(lines, opener_line) {
+            Ok((metadata, body_start)) => (metadata, body_start, true, Vec::new()),
+            Err(failure) => (
+                failure.metadata,
+                opener_line.full_end,
+                false,
+                vec![failure.error.with_item_id(id)],
+            ),
         };
-        let closing_line = line_at(&lines, closing.source.start);
-        let body_end = closing_line.start;
-        let item_mentions = mentions
+    let title_entries = metadata
+        .iter()
+        .filter(|entry| entry.key == "title")
+        .collect::<Vec<_>>();
+    let title_is_invalid = title_entries.len() > 1
+        || title_entries
+            .first()
+            .is_some_and(|entry| entry.value.is_empty())
+        || (metadata_valid && title_entries.is_empty());
+    if title_is_invalid {
+        errors.push(ParseError {
+            line: opener_line.number,
+            source: opener_line.start..opener_line.end,
+            item_ids: vec![id.to_owned()],
+            message: "item must have exactly one non-empty title entry".to_owned(),
+        });
+    }
+    let title = title_entries
+        .first()
+        .map(|entry| entry.value.clone())
+        .unwrap_or_default();
+
+    *delimiter_index += 1;
+    let (body_end, source_end, structure_complete) = loop {
+        let Some(next) = delimiters.get(*delimiter_index) else {
+            errors.push(ParseError {
+                line: opener_line.number,
+                source: opener_line.start..opener_line.end,
+                item_ids: vec![id.to_owned()],
+                message: "item is missing its closing delimiter".to_owned(),
+            });
+            let source_end = lines
+                .last()
+                .map(|line| line.full_end)
+                .unwrap_or(opener_line.full_end);
+            break (source_end, source_end, false);
+        };
+        if next.source.start < body_start {
+            *delimiter_index += 1;
+            continue;
+        }
+        match next.kind {
+            DelimiterKind::Closer => {
+                let closing_line = line_at(lines, next.source.start);
+                *delimiter_index += 1;
+                break (closing_line.start, closing_line.full_end, true);
+            }
+            DelimiterKind::Opener => {
+                errors.push(nested_item_error(lines, Some(id), next));
+                break (next.source.start, next.source.start, false);
+            }
+        }
+    };
+    let projected_body_start = if metadata_valid { body_start } else { body_end };
+    let item_mentions = if metadata_valid {
+        mentions
             .iter()
             .filter(|mention| mention.source.start >= body_start && mention.source.end <= body_end)
             .map(|mention| ParsedMention {
                 target: mention.target.clone(),
                 source: mention.source.clone(),
             })
-            .collect();
-        items.push(ParsedItem {
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    Ok(ProjectedItem {
+        item: ParsedItem {
             flavour: flavour.to_owned(),
             id: id.to_owned(),
             title,
             metadata,
-            body: body_start..body_end,
+            body: projected_body_start..body_end,
             mentions: item_mentions,
-            source: opener_line.start..closing_line.full_end,
-        });
-        delimiter_index += 1;
-    }
+            source: opener_line.start..source_end,
+            metadata_valid,
+            body_valid: metadata_valid && structure_complete,
+        },
+        errors,
+        complete: structure_complete,
+    })
+}
 
-    Ok(ParsedDocument { items })
+fn nested_item_error(
+    lines: &[SourceLine<'_>],
+    outer_id: Option<&str>,
+    nested_delimiter: &Delimiter,
+) -> ParseError {
+    let nested = line_at(lines, nested_delimiter.source.start);
+    let nested_opener = opener(nested.text);
+    let mut item_ids = outer_id
+        .filter(|id| is_item_id(id))
+        .map(|id| vec![id.to_owned()])
+        .unwrap_or_default();
+    if let Some(nested_id) = opener_id(nested.text)
+        && !item_ids.iter().any(|existing| existing == nested_id)
+    {
+        item_ids.push(nested_id.to_owned());
+    }
+    ParseError {
+        line: nested.number,
+        source: nested.start..nested.end,
+        item_ids,
+        message: if nested_opener.is_some() {
+            "items cannot nest"
+        } else {
+            "invalid nested item opener"
+        }
+        .to_owned(),
+    }
 }
 
 fn parse_metadata(
     lines: &[SourceLine<'_>],
     opener_line: SourceLine<'_>,
-) -> Result<(Vec<ParsedMetadataEntry>, usize), ParseError> {
+) -> Result<(Vec<ParsedMetadataEntry>, usize), MetadataParseError> {
     let mut metadata = Vec::new();
     let mut line_index = opener_line.number;
     while line_index < lines.len() && !lines[line_index].text.trim().is_empty() {
         let line = lines[line_index];
         let Some(rest) = line.text.strip_prefix(':') else {
-            return Err(ParseError {
-                line: line.number,
-                message: "expected metadata or a blank line before the item body".to_owned(),
+            return Err(MetadataParseError {
+                metadata,
+                error: ParseError {
+                    line: line.number,
+                    source: line.start..line.end,
+                    item_ids: Vec::new(),
+                    message: "expected metadata or a blank line before the item body".to_owned(),
+                },
             });
         };
         let Some((key, value)) = rest.split_once(':') else {
-            return Err(ParseError {
-                line: line.number,
-                message: "invalid metadata entry".to_owned(),
+            return Err(MetadataParseError {
+                metadata,
+                error: ParseError {
+                    line: line.number,
+                    source: line.start..line.end,
+                    item_ids: Vec::new(),
+                    message: "invalid metadata entry".to_owned(),
+                },
             });
         };
         if !is_snake_name(key) {
-            return Err(ParseError {
-                line: line.number,
-                message: format!("invalid metadata key '{key}'"),
+            return Err(MetadataParseError {
+                metadata,
+                error: ParseError {
+                    line: line.number,
+                    source: line.start..line.end,
+                    item_ids: Vec::new(),
+                    message: format!("invalid metadata key '{key}'"),
+                },
             });
         }
         metadata.push(ParsedMetadataEntry {
@@ -463,9 +651,14 @@ fn parse_metadata(
         line_index += 1;
     }
     if line_index == lines.len() {
-        return Err(ParseError {
-            line: opener_line.number,
-            message: "item is missing its body boundary and closing delimiter".to_owned(),
+        return Err(MetadataParseError {
+            metadata,
+            error: ParseError {
+                line: opener_line.number,
+                source: opener_line.start..opener_line.end,
+                item_ids: Vec::new(),
+                message: "item is missing its body boundary and closing delimiter".to_owned(),
+            },
         });
     }
 
@@ -507,6 +700,18 @@ fn opener(line: &str) -> Option<(&str, &str)> {
     let (flavour, id) = declaration.split_once(' ')?;
     (!flavour.is_empty() && !id.is_empty() && !id.bytes().any(|byte| byte.is_ascii_whitespace()))
         .then_some((flavour, id))
+}
+
+fn opener_id(line: &str) -> Option<&str> {
+    let mut tokens = line.split_ascii_whitespace();
+    (tokens.next() == Some(":::mara")).then_some(())?;
+    tokens.next()?;
+    let id = tokens.next()?;
+    is_item_id(id).then_some(id)
+}
+
+fn opener_item_ids(line: &str) -> Vec<String> {
+    opener_id(line).map_or_else(Vec::new, |id| vec![id.to_owned()])
 }
 
 fn looks_like_item_opener(line: &str) -> bool {
