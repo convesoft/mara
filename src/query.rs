@@ -1,0 +1,582 @@
+use std::{
+    collections::BTreeMap,
+    error::Error,
+    fmt,
+    path::{Path, PathBuf},
+};
+
+use serde::Serialize;
+
+use crate::{Corpus, Item, Schema, SourceLocation};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ItemSource {
+    path: PathBuf,
+    start_byte: usize,
+    end_byte: usize,
+    start_line: usize,
+    end_line: usize,
+}
+
+impl ItemSource {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub const fn start_byte(&self) -> usize {
+        self.start_byte
+    }
+
+    pub const fn end_byte(&self) -> usize {
+        self.end_byte
+    }
+
+    pub const fn start_line(&self) -> usize {
+        self.start_line
+    }
+
+    pub const fn end_line(&self) -> usize {
+        self.end_line
+    }
+}
+
+impl From<&SourceLocation> for ItemSource {
+    fn from(source: &SourceLocation) -> Self {
+        let span = source.span();
+        Self {
+            path: source.path().to_path_buf(),
+            start_byte: span.start_byte(),
+            end_byte: span.end_byte(),
+            start_line: span.start_line(),
+            end_line: span.end_line(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ItemSummary {
+    id: String,
+    flavour: String,
+    title: String,
+    path: PathBuf,
+    line: usize,
+}
+
+impl ItemSummary {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn flavour(&self) -> &str {
+        &self.flavour
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub const fn line(&self) -> usize {
+        self.line
+    }
+}
+
+impl From<&Item> for ItemSummary {
+    fn from(item: &Item) -> Self {
+        Self {
+            id: item.id().to_owned(),
+            flavour: item.flavour().to_owned(),
+            title: item.title().to_owned(),
+            path: item.source().path().to_path_buf(),
+            line: item.source().span().start_line(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MetadataValue {
+    key: String,
+    value: String,
+}
+
+impl MetadataValue {
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RelationSummary {
+    relation: String,
+    item: ItemSummary,
+}
+
+impl RelationSummary {
+    pub fn relation(&self) -> &str {
+        &self.relation
+    }
+
+    pub const fn item(&self) -> &ItemSummary {
+        &self.item
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ResolvedItem {
+    summary: ItemSummary,
+    source: ItemSource,
+    metadata: Vec<MetadataValue>,
+    body: String,
+    outgoing_relations: Vec<RelationSummary>,
+    incoming_relations: Vec<RelationSummary>,
+}
+
+impl ResolvedItem {
+    pub const fn summary(&self) -> &ItemSummary {
+        &self.summary
+    }
+
+    pub const fn source(&self) -> &ItemSource {
+        &self.source
+    }
+
+    pub fn metadata(&self) -> &[MetadataValue] {
+        &self.metadata
+    }
+
+    pub fn body(&self) -> &str {
+        &self.body
+    }
+
+    pub fn outgoing_relations(&self) -> &[RelationSummary] {
+        &self.outgoing_relations
+    }
+
+    pub fn incoming_relations(&self) -> &[RelationSummary] {
+        &self.incoming_relations
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldFilter {
+    name: String,
+    value: String,
+}
+
+impl FieldFilter {
+    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            value: value.into(),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ItemFilters {
+    flavours: Vec<String>,
+    fields: Vec<FieldFilter>,
+    relations: Vec<String>,
+    paths: Vec<PathBuf>,
+    limit: Option<usize>,
+}
+
+impl ItemFilters {
+    pub fn new(
+        flavours: Vec<String>,
+        fields: Vec<FieldFilter>,
+        relations: Vec<String>,
+        paths: Vec<PathBuf>,
+        limit: Option<usize>,
+    ) -> Self {
+        Self {
+            flavours,
+            fields,
+            relations,
+            paths,
+            limit,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RelationDirection {
+    Incoming,
+    Outgoing,
+}
+
+impl RelationDirection {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Incoming => "incoming",
+            Self::Outgoing => "outgoing",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RelatedFilters {
+    direction: Option<RelationDirection>,
+    relations: Vec<String>,
+    flavours: Vec<String>,
+}
+
+impl RelatedFilters {
+    pub fn new(
+        direction: Option<RelationDirection>,
+        relations: Vec<String>,
+        flavours: Vec<String>,
+    ) -> Self {
+        Self {
+            direction,
+            relations,
+            flavours,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RelatedItem {
+    direction: RelationDirection,
+    relation: String,
+    item: ItemSummary,
+}
+
+impl RelatedItem {
+    pub const fn direction(&self) -> RelationDirection {
+        self.direction
+    }
+
+    pub fn relation(&self) -> &str {
+        &self.relation
+    }
+
+    pub const fn item(&self) -> &ItemSummary {
+        &self.item
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryError {
+    MissingItem {
+        id: String,
+    },
+    AmbiguousItem {
+        id: String,
+    },
+    MissingRelationTarget {
+        source: String,
+        relation: String,
+        target: String,
+    },
+    AmbiguousRelationTarget {
+        source: String,
+        relation: String,
+        target: String,
+    },
+    UnknownFlavour {
+        name: String,
+    },
+    UnknownField {
+        name: String,
+    },
+    UnknownRelation {
+        name: String,
+    },
+}
+
+impl fmt::Display for QueryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingItem { id } => write!(formatter, "item '{id}' was not found"),
+            Self::AmbiguousItem { id } => write!(formatter, "item ID '{id}' is ambiguous"),
+            Self::MissingRelationTarget {
+                source,
+                relation,
+                target,
+            } => write!(
+                formatter,
+                "relation '{relation}' from '{source}' references missing item '{target}'"
+            ),
+            Self::AmbiguousRelationTarget {
+                source,
+                relation,
+                target,
+            } => write!(
+                formatter,
+                "relation '{relation}' from '{source}' references ambiguous item '{target}'"
+            ),
+            Self::UnknownFlavour { name } => write!(formatter, "unknown flavour '{name}'"),
+            Self::UnknownField { name } => write!(formatter, "unknown field '{name}'"),
+            Self::UnknownRelation { name } => write!(formatter, "unknown relation '{name}'"),
+        }
+    }
+}
+
+impl Error for QueryError {}
+
+pub fn get_item(corpus: &Corpus, id: &str) -> Result<ResolvedItem, QueryError> {
+    let item = resolve_item(corpus, id)?;
+    let outgoing_relations = item
+        .relations()
+        .iter()
+        .map(|relation| {
+            Ok(RelationSummary {
+                relation: relation.name().to_owned(),
+                item: resolve_relation_target(corpus, item, relation.name(), relation.target())?
+                    .into(),
+            })
+        })
+        .collect::<Result<_, QueryError>>()?;
+    let incoming_relations = corpus
+        .items()
+        .flat_map(|source| {
+            source
+                .relations()
+                .iter()
+                .filter(move |relation| relation.target() == item.id())
+                .map(move |relation| RelationSummary {
+                    relation: relation.name().to_owned(),
+                    item: source.into(),
+                })
+        })
+        .collect();
+
+    Ok(ResolvedItem {
+        summary: item.into(),
+        source: item.source().into(),
+        metadata: item
+            .metadata()
+            .iter()
+            .map(|entry| MetadataValue {
+                key: entry.key().to_owned(),
+                value: entry.value().to_owned(),
+            })
+            .collect(),
+        body: item.body().to_owned(),
+        outgoing_relations,
+        incoming_relations,
+    })
+}
+
+pub fn list_items(
+    corpus: &Corpus,
+    schema: &Schema,
+    filters: &ItemFilters,
+) -> Result<Vec<ItemSummary>, QueryError> {
+    filtered_items(corpus, schema, filters, None)
+}
+
+pub fn search_items(
+    corpus: &Corpus,
+    schema: &Schema,
+    query: &str,
+    filters: &ItemFilters,
+) -> Result<Vec<ItemSummary>, QueryError> {
+    filtered_items(corpus, schema, filters, Some(query))
+}
+
+pub fn related_items(
+    corpus: &Corpus,
+    schema: &Schema,
+    id: &str,
+    filters: &RelatedFilters,
+) -> Result<Vec<RelatedItem>, QueryError> {
+    validate_flavours(schema, &filters.flavours)?;
+    validate_relations(schema, &filters.relations)?;
+    let item = resolve_item(corpus, id)?;
+    let mut related = Vec::new();
+
+    if filters.direction != Some(RelationDirection::Incoming) {
+        for relation in item.relations() {
+            if !matches_name(&filters.relations, relation.name()) {
+                continue;
+            }
+            let neighbour =
+                resolve_relation_target(corpus, item, relation.name(), relation.target())?;
+            if matches_name(&filters.flavours, neighbour.flavour()) {
+                related.push(RelatedItem {
+                    direction: RelationDirection::Outgoing,
+                    relation: relation.name().to_owned(),
+                    item: neighbour.into(),
+                });
+            }
+        }
+    }
+
+    if filters.direction != Some(RelationDirection::Outgoing) {
+        for source in corpus.items() {
+            if !matches_name(&filters.flavours, source.flavour()) {
+                continue;
+            }
+            for relation in source
+                .relations()
+                .iter()
+                .filter(|relation| relation.target() == item.id())
+            {
+                if matches_name(&filters.relations, relation.name()) {
+                    related.push(RelatedItem {
+                        direction: RelationDirection::Incoming,
+                        relation: relation.name().to_owned(),
+                        item: source.into(),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(related)
+}
+
+fn filtered_items(
+    corpus: &Corpus,
+    schema: &Schema,
+    filters: &ItemFilters,
+    query: Option<&str>,
+) -> Result<Vec<ItemSummary>, QueryError> {
+    validate_flavours(schema, &filters.flavours)?;
+    validate_relations(schema, &filters.relations)?;
+    validate_fields(schema, &filters.fields)?;
+    let fields = grouped_fields(&filters.fields);
+    let query = query.map(str::to_lowercase);
+
+    Ok(corpus
+        .items()
+        .filter(|item| matches_name(&filters.flavours, item.flavour()))
+        .filter(|item| {
+            filters.paths.is_empty()
+                || filters
+                    .paths
+                    .iter()
+                    .any(|path| path == item.source().path())
+        })
+        .filter(|item| {
+            matches_name_filter(&filters.relations, |name| {
+                item.relations()
+                    .iter()
+                    .any(|relation| relation.name() == name)
+            })
+        })
+        .filter(|item| matches_fields(item, &fields))
+        .filter(|item| query.as_ref().is_none_or(|query| matches_text(item, query)))
+        .take(filters.limit.unwrap_or(usize::MAX))
+        .map(ItemSummary::from)
+        .collect())
+}
+
+fn validate_flavours(schema: &Schema, names: &[String]) -> Result<(), QueryError> {
+    if let Some(name) = names
+        .iter()
+        .find(|name| !schema.flavours().contains_key(name.as_str()))
+    {
+        return Err(QueryError::UnknownFlavour { name: name.clone() });
+    }
+    Ok(())
+}
+
+fn validate_relations(schema: &Schema, names: &[String]) -> Result<(), QueryError> {
+    if let Some(name) = names
+        .iter()
+        .find(|name| !schema.relations().contains_key(name.as_str()))
+    {
+        return Err(QueryError::UnknownRelation { name: name.clone() });
+    }
+    Ok(())
+}
+
+fn validate_fields(schema: &Schema, fields: &[FieldFilter]) -> Result<(), QueryError> {
+    if let Some(field) = fields.iter().find(|field| {
+        !schema
+            .flavours()
+            .values()
+            .any(|flavour| flavour.fields().contains_key(field.name()))
+    }) {
+        return Err(QueryError::UnknownField {
+            name: field.name.clone(),
+        });
+    }
+    Ok(())
+}
+
+fn grouped_fields(fields: &[FieldFilter]) -> BTreeMap<&str, Vec<&str>> {
+    let mut grouped = BTreeMap::<&str, Vec<&str>>::new();
+    for field in fields {
+        grouped.entry(field.name()).or_default().push(field.value());
+    }
+    grouped
+}
+
+fn matches_fields(item: &Item, fields: &BTreeMap<&str, Vec<&str>>) -> bool {
+    fields.iter().all(|(name, values)| {
+        item.metadata()
+            .iter()
+            .any(|entry| entry.key() == *name && values.iter().any(|value| entry.value() == *value))
+    })
+}
+
+fn matches_text(item: &Item, query: &str) -> bool {
+    [item.id(), item.title(), item.body()]
+        .into_iter()
+        .any(|value| value.to_lowercase().contains(query))
+        || item.metadata().iter().any(|entry| {
+            entry.key().to_lowercase().contains(query)
+                || entry.value().to_lowercase().contains(query)
+        })
+}
+
+fn matches_name(names: &[String], candidate: &str) -> bool {
+    names.is_empty() || names.iter().any(|name| name == candidate)
+}
+
+fn matches_name_filter(names: &[String], predicate: impl Fn(&str) -> bool) -> bool {
+    names.is_empty() || names.iter().any(|name| predicate(name))
+}
+
+fn resolve_item<'a>(corpus: &'a Corpus, id: &str) -> Result<&'a Item, QueryError> {
+    let mut matches = corpus.items().filter(|item| item.id() == id);
+    let Some(item) = matches.next() else {
+        return Err(QueryError::MissingItem { id: id.to_owned() });
+    };
+    if matches.next().is_some() {
+        return Err(QueryError::AmbiguousItem { id: id.to_owned() });
+    }
+    Ok(item)
+}
+
+fn resolve_relation_target<'a>(
+    corpus: &'a Corpus,
+    source: &Item,
+    relation: &str,
+    target: &str,
+) -> Result<&'a Item, QueryError> {
+    match resolve_item(corpus, target) {
+        Ok(item) => Ok(item),
+        Err(QueryError::MissingItem { .. }) => Err(QueryError::MissingRelationTarget {
+            source: source.id().to_owned(),
+            relation: relation.to_owned(),
+            target: target.to_owned(),
+        }),
+        Err(QueryError::AmbiguousItem { .. }) => Err(QueryError::AmbiguousRelationTarget {
+            source: source.id().to_owned(),
+            relation: relation.to_owned(),
+            target: target.to_owned(),
+        }),
+        Err(error) => Err(error),
+    }
+}

@@ -2229,3 +2229,157 @@ fn relation_add_and_remove_validate_endpoints_and_update_only_the_source_item() 
     let valid = mara(fixture.path(), &["project", "validate"]);
     assert!(valid.status.success(), "{}", stderr(&valid));
 }
+
+fn retrieval_fixture() -> TempDir {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace(
+            "    id_prefix: REQ-\n    body: required\n    fields: {}",
+            "    id_prefix: REQ-\n    body: required\n    fields:\n      status:\n        type: enum\n        values: [draft, accepted]",
+        ),
+    )
+    .unwrap();
+    fs::create_dir(fixture.path().join("docs")).unwrap();
+    fs::write(
+        fixture.path().join("docs/a.mara.md"),
+        ":::mara scenario SCN-BASE\n:title: Base scenario\n\nBase workflow.\n:::\n\n:::mara requirement REQ-ALPHA\n:title: Alpha requirement\n:status: draft\n:derives_from: SCN-BASE\n\nNeed searchable Zebra knowledge.\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("docs/b.mara.md"),
+        ":::mara requirement REQ-BETA\n:title: Beta requirement\n:status: accepted\n:derives_from: SCN-BASE\n\nSecond requirement body.\n:::\n\n:::mara design DES-ALPHA\n:title: Alpha design\n:satisfies: REQ-ALPHA\n\nDesign body.\n:::\n",
+    )
+    .unwrap();
+    fixture
+}
+
+#[test]
+fn item_get_returns_one_complete_item_with_authored_and_incoming_relations() {
+    let fixture = retrieval_fixture();
+
+    let get = mara(fixture.path(), &["item", "get", "REQ-ALPHA"]);
+
+    assert!(get.status.success(), "{}", stderr(&get));
+    assert_eq!(
+        stdout(&get),
+        "REQ-ALPHA\trequirement\tAlpha requirement\nsource\tdocs/a.mara.md\tstart_byte=69\tend_byte=202\tstart_line=7\tend_line=13\nmetadata\ntitle\tAlpha requirement\nstatus\tdraft\nderives_from\tSCN-BASE\nbody\nNeed searchable Zebra knowledge.\nrelations\noutgoing\tderives_from\tSCN-BASE\tscenario\tBase scenario\tdocs/a.mara.md:1\nincoming\tsatisfies\tDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\n"
+    );
+
+    let missing = mara(fixture.path(), &["item", "get", "REQ-MISSING"]);
+    assert!(!missing.status.success());
+    assert!(stderr(&missing).contains("item 'REQ-MISSING' was not found"));
+
+    let duplicate_file = fixture.path().join("docs/b.mara.md");
+    let duplicate_source = fs::read_to_string(&duplicate_file).unwrap();
+    fs::write(
+        duplicate_file,
+        format!(
+            "{duplicate_source}\n:::mara requirement REQ-ALPHA\n:title: Duplicate alpha\n\nDuplicate.\n:::\n"
+        ),
+    )
+    .unwrap();
+    let ambiguous = mara(fixture.path(), &["item", "get", "REQ-ALPHA"]);
+    assert!(!ambiguous.status.success());
+    assert!(stderr(&ambiguous).contains("item ID 'REQ-ALPHA' is ambiguous"));
+}
+
+#[test]
+fn item_list_and_search_return_deterministic_compact_filtered_summaries() {
+    let fixture = retrieval_fixture();
+
+    let listed = mara(
+        fixture.path(),
+        &["item", "list", "--flavour", "requirement"],
+    );
+    assert!(listed.status.success(), "{}", stderr(&listed));
+    assert_eq!(
+        stdout(&listed),
+        "REQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\nREQ-BETA\trequirement\tBeta requirement\tdocs/b.mara.md:1\n"
+    );
+    assert!(!stdout(&listed).contains("requirement body"));
+
+    let filtered = mara(
+        fixture.path(),
+        &[
+            "item",
+            "list",
+            "--field",
+            "status=draft",
+            "--relation",
+            "derives_from",
+            "--path",
+            "docs/a.mara.md",
+            "--limit",
+            "1",
+        ],
+    );
+    assert!(filtered.status.success(), "{}", stderr(&filtered));
+    assert_eq!(
+        stdout(&filtered),
+        "REQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\n"
+    );
+
+    for query in ["zEbRa", "accepted", "DES-ALPHA"] {
+        let searched = mara(fixture.path(), &["item", "search", query]);
+        assert!(searched.status.success(), "{}", stderr(&searched));
+        assert_eq!(stdout(&searched).lines().count(), 1, "query: {query}");
+    }
+    let searched = mara(fixture.path(), &["item", "search", "alpha"]);
+    assert!(searched.status.success(), "{}", stderr(&searched));
+    assert_eq!(
+        stdout(&searched),
+        "REQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\nDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\n"
+    );
+}
+
+#[test]
+fn item_related_returns_filtered_direct_neighbours_with_relation_and_direction() {
+    let fixture = retrieval_fixture();
+
+    let related = mara(fixture.path(), &["item", "related", "REQ-ALPHA"]);
+    assert!(related.status.success(), "{}", stderr(&related));
+    assert_eq!(
+        stdout(&related),
+        "outgoing\tderives_from\tSCN-BASE\tscenario\tBase scenario\tdocs/a.mara.md:1\nincoming\tsatisfies\tDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\n"
+    );
+
+    let incoming = mara(
+        fixture.path(),
+        &[
+            "item",
+            "related",
+            "REQ-ALPHA",
+            "--direction",
+            "incoming",
+            "--relation",
+            "satisfies",
+            "--flavour",
+            "design",
+        ],
+    );
+    assert!(incoming.status.success(), "{}", stderr(&incoming));
+    assert_eq!(
+        stdout(&incoming),
+        "incoming\tsatisfies\tDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\n"
+    );
+
+    let no_match = mara(
+        fixture.path(),
+        &[
+            "item",
+            "related",
+            "REQ-ALPHA",
+            "--direction",
+            "outgoing",
+            "--flavour",
+            "design",
+        ],
+    );
+    assert!(no_match.status.success(), "{}", stderr(&no_match));
+    assert!(stdout(&no_match).is_empty());
+}
