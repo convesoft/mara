@@ -2627,6 +2627,193 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
 }
 
 #[test]
+fn primary_workflows_run_end_to_end_against_real_source_files() {
+    let fixture = TempDir::new().unwrap();
+
+    let initialized = mara(fixture.path(), &["project", "init"]);
+    assert!(initialized.status.success(), "{}", stderr(&initialized));
+    let schema = mara(fixture.path(), &["schema", "get"]);
+    assert!(schema.status.success(), "{}", stderr(&schema));
+    assert!(stdout(&schema).contains("scenario"));
+
+    fs::create_dir(fixture.path().join("docs")).unwrap();
+    let scenario = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "scenario",
+            "SCN-DOGFOOD",
+            "docs/workflow.mara.md",
+            "--title",
+            "Dogfood the alpha workflow",
+            "--body",
+            "A user initializes and authors a real Mara project.",
+        ],
+    );
+    assert!(scenario.status.success(), "{}", stderr(&scenario));
+    let requirement = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-DOGFOOD",
+            "docs/workflow.mara.md",
+            "--title",
+            "Retrieve bounded dogfood knowledge",
+            "--body",
+            "Mara retrieves bounded knowledge from the authored source file.",
+        ],
+    );
+    assert!(requirement.status.success(), "{}", stderr(&requirement));
+    let related = mara(
+        fixture.path(),
+        &[
+            "relation",
+            "add",
+            "REQ-DOGFOOD",
+            "derives_from",
+            "SCN-DOGFOOD",
+        ],
+    );
+    assert!(related.status.success(), "{}", stderr(&related));
+
+    let validated = mara(fixture.path(), &["project", "validate"]);
+    assert!(validated.status.success(), "{}", stderr(&validated));
+
+    let searched = mara(
+        fixture.path(),
+        &[
+            "item",
+            "search",
+            "bounded",
+            "--flavour",
+            "requirement",
+            "--relation",
+            "derives_from",
+            "--path",
+            "docs/workflow.mara.md",
+            "--limit",
+            "1",
+        ],
+    );
+    assert!(searched.status.success(), "{}", stderr(&searched));
+    assert!(stdout(&searched).contains("REQ-DOGFOOD"));
+    let fetched = mara(fixture.path(), &["item", "get", "REQ-DOGFOOD"]);
+    assert!(fetched.status.success(), "{}", stderr(&fetched));
+    assert!(stdout(&fetched).contains("Mara retrieves bounded knowledge"));
+    let neighbours = mara(fixture.path(), &["item", "related", "REQ-DOGFOOD"]);
+    assert!(neighbours.status.success(), "{}", stderr(&neighbours));
+    assert!(stdout(&neighbours).contains("outgoing\tderives_from\tSCN-DOGFOOD"));
+}
+
+#[test]
+fn dogfooded_repository_validates_and_retrieves_equivalently_through_cli_and_mcp() {
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cli_validation = mara(repository, &["--format", "json", "project", "validate"]);
+    assert!(
+        cli_validation.status.success(),
+        "{}",
+        stderr(&cli_validation)
+    );
+    let cli_validation: Value = serde_json::from_str(&stdout(&cli_validation)).unwrap();
+    assert_eq!(cli_validation["valid"], true);
+
+    let cli_search = mara(
+        repository,
+        &[
+            "--format",
+            "json",
+            "item",
+            "search",
+            "Start a project",
+            "--flavour",
+            "scenario",
+            "--path",
+            "docs/alpha.mara.md",
+            "--limit",
+            "1",
+        ],
+    );
+    assert!(cli_search.status.success(), "{}", stderr(&cli_search));
+    let cli_search: Value = serde_json::from_str(&stdout(&cli_search)).unwrap();
+    assert_eq!(cli_search["items"][0]["id"], "SCN-START-STRUCTURED-PROJECT");
+
+    let cli_item = mara(
+        repository,
+        &[
+            "--format",
+            "json",
+            "item",
+            "get",
+            "SCN-START-STRUCTURED-PROJECT",
+        ],
+    );
+    assert!(cli_item.status.success(), "{}", stderr(&cli_item));
+    let cli_item: Value = serde_json::from_str(&stdout(&cli_item)).unwrap();
+    let cli_related = mara(
+        repository,
+        &[
+            "--format",
+            "json",
+            "item",
+            "related",
+            "SCN-START-STRUCTURED-PROJECT",
+        ],
+    );
+    assert!(cli_related.status.success(), "{}", stderr(&cli_related));
+    let cli_related: Value = serde_json::from_str(&stdout(&cli_related)).unwrap();
+    assert!(!cli_related["items"].as_array().unwrap().is_empty());
+
+    let responses = mcp_exchange(
+        repository,
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_call(2, "project_validate", json!({})),
+            mcp_call(
+                3,
+                "item_search",
+                json!({
+                    "query": "Start a project",
+                    "flavours": ["scenario"],
+                    "paths": ["docs/alpha.mara.md"],
+                    "limit": 1
+                }),
+            ),
+            mcp_call(
+                4,
+                "item_get",
+                json!({ "id": "SCN-START-STRUCTURED-PROJECT" }),
+            ),
+            mcp_call(
+                5,
+                "item_related",
+                json!({ "id": "SCN-START-STRUCTURED-PROJECT" }),
+            ),
+        ],
+    );
+
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        cli_validation
+    );
+    assert_eq!(
+        mcp_response(&responses, 3)["result"]["structuredContent"],
+        cli_search
+    );
+    assert_eq!(
+        mcp_response(&responses, 4)["result"]["structuredContent"],
+        cli_item
+    );
+    assert_eq!(
+        mcp_response(&responses, 5)["result"]["structuredContent"],
+        cli_related
+    );
+}
+
+#[test]
 fn cli_json_and_mcp_return_the_same_structured_validation_diagnostics() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);

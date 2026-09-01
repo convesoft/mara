@@ -1,0 +1,79 @@
+format_version: 1
+flavours:
+  term:
+    description: Controlled project vocabulary whose stable meaning prevents ambiguity.
+    id_prefix: TERM-
+    body: required
+    fields: {}
+  actor:
+    description: A durable participant role or external system.
+    id_prefix: ACT-
+    body: required
+    fields: {}
+  goal:
+    description: A durable desired stakeholder or product outcome.
+    id_prefix: GOAL-
+    body: required
+    fields: {}
+  scenario:
+    description: A concrete behavioural flow with an observable outcome.
+    id_prefix: SCN-
+    body: required
+    fields: {}
+  requirement:
+    description: An independently verifiable obligation.
+    id_prefix: REQ-
+    body: required
+    fields: {}
+  design:
+    description: A solution or interface contract that satisfies requirements.
+    id_prefix: DES-
+    body: required
+    fields: {}
+  decision:
+    description: A consequential choice and its durable rationale.
+    id_prefix: ADR-
+    body: required
+    fields: {}
+  risk:
+    description: A material uncertain condition that could cause harm.
+    id_prefix: RISK-
+    body: required
+    fields: {}
+  verification:
+    description: A repeatable verification or validation method.
+    id_prefix: VER-
+    body: required
+    fields: {}
+  evidence:
+    description: One concrete verification or validation result with provenance.
+    id_prefix: EVD-
+    body: required
+    fields: {}
+  artifact:
+    description: A concrete implementation or external output with independent identity.
+    id_prefix: ART-
+    body: required
+    fields: {}
+relations:
+  derives_from:
+    description: The source originates from or refines the target intent.
+    source: [requirement, design]
+    target: [scenario, requirement]
+  depends_on:
+    description: The source cannot be satisfied or understood without the target.
+    source: [term, actor, goal, scenario, requirement, design, decision, risk, verification, evidence, artifact]
+    target: [term, actor, goal, scenario, requirement, design, decision, risk, verification, evidence, artifact]
+  satisfies:
+    description: The source design provides a solution contract for the target requirement.
+    source: [design]
+    target: [requirement]
+  justifies:
+    description: The source decision preserves the reasoning for the target.
+    source: [decision]
+    target: [requirement, design]
+  supersedes:
+    description: The source replaces an older target of the same flavour.
+    source: [term, actor, goal, scenario, requirement, design, decision, risk, verification, evidence, artifact]
+    target: [term, actor, goal, scenario, requirement, design, decision, risk, verification, evidence, artifact]
+    same_flavour: true
