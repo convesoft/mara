@@ -685,6 +685,10 @@ fn discover_for_validation(root: &Path, matcher: &GlobSet) -> (Vec<PathBuf>, Vec
 }
 
 fn walker(root: &Path) -> Walk {
+    walker_builder(root).build()
+}
+
+fn walker_builder(root: &Path) -> WalkBuilder {
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(false)
@@ -695,7 +699,7 @@ fn walker(root: &Path) -> Walk {
         .parents(true)
         .require_git(false)
         .follow_links(false);
-    builder.build()
+    builder
 }
 
 fn discovered_document(root: &Path, matcher: &GlobSet, entry: &DirEntry) -> Option<PathBuf> {
@@ -756,6 +760,26 @@ pub(crate) fn parse_document_source(
     schema: &Schema,
 ) -> Result<Document, Error> {
     parse_document(path.to_path_buf(), source.to_owned(), schema)
+}
+
+pub(crate) fn document_is_discoverable(project: &Project, relative: &Path) -> Result<bool, Error> {
+    let content = content_matcher(project)?;
+    if !is_mara_document(relative) || !content.is_match(relative) {
+        return Ok(false);
+    }
+    let mut matchers = walker_builder(project.root()).build_matchers();
+    let mut ignores = matchers
+        .pop()
+        .expect("a walker builder produces one matcher for its root");
+    let (matched, error) = ignores.matched_with_errors(relative, false);
+    if let Some(source) = error {
+        return Err(Error::Io {
+            action: "evaluate document discovery",
+            path: project.root().join(relative),
+            source: io::Error::other(source),
+        });
+    }
+    Ok(!matched.is_ignore())
 }
 
 fn parse_document_for_validation(

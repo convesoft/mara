@@ -102,9 +102,10 @@ data equivalent to MCP structured results.
 
 `item create` requires flavour, human ID, destination file, title, and all
 schema-required metadata. It creates a missing file only when its parent exists
-and otherwise appends the item. `--line N` inserts immediately before the
-one-based line `N`; `line_count + 1` means end of file. Body input accepts an
-inline value or `-` for standard input.
+and otherwise appends the item. The destination must be selected by the
+project's content include and Git ignore discovery rules. `--line N` inserts
+immediately before the one-based line `N`; `line_count + 1` means end of file.
+Body input accepts an inline value or `-` for standard input.
 
 When a required body is omitted, creation succeeds as an incomplete scaffold
 and reports `complete: false` with `body` missing. Validation continues to

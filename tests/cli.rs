@@ -1986,6 +1986,65 @@ fn item_create_inserts_at_an_explicit_safe_line_without_corrupting_the_source() 
 }
 
 #[test]
+fn item_create_rejects_destinations_excluded_from_project_discovery() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let project_file = fixture.path().join(".mara/project.toml");
+    let project = fs::read_to_string(&project_file).unwrap();
+    fs::write(
+        &project_file,
+        project.replace("**/*.mara.md", "docs/**/*.mara.md"),
+    )
+    .unwrap();
+    fs::create_dir(fixture.path().join("docs")).unwrap();
+    fs::write(fixture.path().join(".gitignore"), "docs/ignored.mara.md\n").unwrap();
+
+    for path in ["outside.mara.md", "docs/ignored.mara.md"] {
+        let rejected = mara(
+            fixture.path(),
+            &[
+                "item",
+                "create",
+                "requirement",
+                "REQ-HIDDEN",
+                path,
+                "--title",
+                "Undiscoverable item",
+                "--body",
+                "Body.",
+            ],
+        );
+
+        assert!(!rejected.status.success());
+        assert!(
+            stderr(&rejected).contains("is excluded by project content discovery"),
+            "{}",
+            stderr(&rejected)
+        );
+        assert!(!fixture.path().join(path).exists());
+    }
+
+    let created = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-VISIBLE",
+            "docs/visible.mara.md",
+            "--title",
+            "Discoverable item",
+            "--body",
+            "Body.",
+        ],
+    );
+    assert!(created.status.success(), "{}", stderr(&created));
+    let valid = mara(fixture.path(), &["item", "validate", "REQ-VISIBLE"]);
+    assert!(valid.status.success(), "{}", stderr(&valid));
+}
+
+#[test]
 fn relation_add_and_remove_validate_endpoints_and_update_only_the_source_item() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);

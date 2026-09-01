@@ -9,7 +9,8 @@ use tempfile::NamedTempFile;
 
 use crate::{
     BodyRequirement, Corpus, Error, FieldDefinition, FieldType, Item, Project, Schema,
-    corpus::parse_document_source, is_item_id, load_corpus,
+    corpus::{document_is_discoverable, parse_document_source},
+    is_item_id, load_corpus,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +79,12 @@ pub fn create_item(
     let corpus = load_corpus(project, schema)?;
     validate_new_item(&corpus, schema, &request)?;
     let (path, absolute, existed) = resolve_document_path(project, &request.file)?;
+    if !document_is_discoverable(project, &path)? {
+        return invalid(format!(
+            "destination file '{}' is excluded by project content discovery",
+            path.display()
+        ));
+    }
     let source = if existed {
         fs::read_to_string(&absolute).map_err(|source| Error::Io {
             action: "read Mara document",
