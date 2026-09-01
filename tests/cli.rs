@@ -2428,6 +2428,47 @@ fn item_list_and_search_return_deterministic_compact_filtered_summaries() {
 }
 
 #[test]
+fn item_search_matches_distinct_complete_unicode_terms_across_values() {
+    let fixture = retrieval_fixture();
+    fs::write(
+        fixture.path().join("docs/search.mara.md"),
+        ":::mara requirement REQ-CROSS-FIELD\n:title: Project knowledge\n\nRetrieve bounded guidance before running validation.\n:::\n\n:::mara scenario SCN-UNICODE\n:title: Café workflow\n\nEquivalent Unicode forms remain searchable.\n:::\n\n:::mara design DES-PROJECTOR\n:title: Projector checks\n\nValidate displays without fuzzy matching.\n:::\n",
+    )
+    .unwrap();
+
+    for query in [
+        "project validation",
+        "validation project",
+        "project project validation",
+    ] {
+        let searched = mara(fixture.path(), &["item", "search", query]);
+        assert!(searched.status.success(), "{}", stderr(&searched));
+        assert_eq!(
+            stdout(&searched),
+            "REQ-CROSS-FIELD\trequirement\tProject knowledge\tdocs/search.mara.md:1\n",
+            "query: {query}"
+        );
+    }
+
+    for query in ["project missing", "projects validation", "project valid"] {
+        let searched = mara(fixture.path(), &["item", "search", query]);
+        assert!(searched.status.success(), "{}", stderr(&searched));
+        assert_eq!(stdout(&searched), "", "query: {query}");
+    }
+
+    let unicode_equivalent = mara(fixture.path(), &["item", "search", "CAFE\u{301} WORKFLOW"]);
+    assert!(
+        unicode_equivalent.status.success(),
+        "{}",
+        stderr(&unicode_equivalent)
+    );
+    assert_eq!(
+        stdout(&unicode_equivalent),
+        "SCN-UNICODE\tscenario\tCafé workflow\tdocs/search.mara.md:7\n"
+    );
+}
+
+#[test]
 fn item_related_returns_filtered_direct_neighbours_with_relation_and_direction() {
     let fixture = retrieval_fixture();
 
@@ -2565,7 +2606,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
     let cli_item: Value = serde_json::from_str(&stdout(&cli_item)).unwrap();
     let cli_search = mara(
         fixture.path(),
-        &["--format", "json", "item", "search", "alpha"],
+        &["--format", "json", "item", "search", "alpha zebra"],
     );
     assert!(cli_search.status.success(), "{}", stderr(&cli_search));
     let cli_search: Value = serde_json::from_str(&stdout(&cli_search)).unwrap();
@@ -2583,7 +2624,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
             json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
             mcp_request(2, "tools/list", json!({})),
             mcp_call(3, "item_get", json!({ "id": "REQ-ALPHA" })),
-            mcp_call(4, "item_search", json!({ "query": "alpha" })),
+            mcp_call(4, "item_search", json!({ "query": "alpha zebra" })),
             mcp_call(5, "schema_list", json!({ "kind": "relation" })),
         ],
     );

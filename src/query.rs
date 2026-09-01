@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt,
     path::{Component, Path, PathBuf},
@@ -8,6 +8,8 @@ use std::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use unicode_casefold::UnicodeCaseFold;
+use unicode_normalization::UnicodeNormalization;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{Corpus, Item, Schema, SourceLocation};
 
@@ -465,7 +467,7 @@ fn filtered_items(
     validate_fields(schema, &filters.fields)?;
     let paths = normalized_paths(&filters.paths)?;
     let fields = grouped_fields(&filters.fields);
-    let query = query.map(case_fold);
+    let query = query.map(keyword_terms);
 
     Ok(corpus
         .items()
@@ -562,17 +564,22 @@ fn matches_fields(item: &Item, fields: &BTreeMap<&str, Vec<&str>>) -> bool {
     })
 }
 
-fn matches_text(item: &Item, query: &str) -> bool {
-    [item.id(), item.title(), item.body()]
-        .into_iter()
-        .any(|value| case_fold(value).contains(query))
-        || item.metadata().iter().any(|entry| {
-            case_fold(entry.key()).contains(query) || case_fold(entry.value()).contains(query)
-        })
+fn matches_text(item: &Item, query: &BTreeSet<String>) -> bool {
+    let mut item_terms = BTreeSet::new();
+    for value in [item.id(), item.title(), item.body()] {
+        item_terms.extend(keyword_terms(value));
+    }
+    for entry in item.metadata() {
+        item_terms.extend(keyword_terms(entry.key()));
+        item_terms.extend(keyword_terms(entry.value()));
+    }
+
+    query.is_subset(&item_terms)
 }
 
-fn case_fold(value: &str) -> String {
-    value.case_fold().collect()
+fn keyword_terms(value: &str) -> BTreeSet<String> {
+    let canonical = value.nfc().case_fold().nfc().collect::<String>();
+    canonical.unicode_words().map(ToOwned::to_owned).collect()
 }
 
 fn matches_name(names: &[String], candidate: &str) -> bool {
