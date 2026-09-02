@@ -1,12 +1,14 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: Exact Cargo version without the leading v
-        required: true
-        type: string
+  pull_request:
+    branches: [main]
+    types: [closed]
+    paths:
+      - CHANGELOG.md
+
+permissions:
+  contents: read
 
 concurrency:
   group: release
@@ -14,9 +16,10 @@ concurrency:
 
 jobs:
   prepare:
+    if: >-
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'release')
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
     outputs:
       sha: ${{ steps.release.outputs.sha }}
       version: ${{ steps.release.outputs.version }}
@@ -26,6 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
@@ -35,26 +39,22 @@ jobs:
       - name: Resolve and validate release identity
         id: release
         env:
-          REQUESTED_VERSION: ${{ inputs.version }}
+          RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
-            echo "releases must be dispatched from main" >&2
+          checked_out_sha=$(git rev-parse HEAD)
+          if [[ "$checked_out_sha" != "$RELEASE_SHA" ]]; then
+            echo "checked out $checked_out_sha instead of release commit $RELEASE_SHA" >&2
             exit 1
           fi
 
           cargo_version=$(cargo metadata --no-deps --format-version 1 \
             | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(JSON.parse(s).packages[0].version))')
-          if [[ "$REQUESTED_VERSION" != "$cargo_version" ]]; then
-            echo "requested version $REQUESTED_VERSION does not match Cargo version $cargo_version" >&2
-            exit 1
-          fi
-
           tag="v$cargo_version"
           if git show-ref --verify --quiet "refs/tags/$tag"; then
             tagged_sha=$(git rev-list -n 1 "$tag")
-            if [[ "$tagged_sha" != "$GITHUB_SHA" ]]; then
-              echo "$tag points to $tagged_sha instead of $GITHUB_SHA" >&2
+            if [[ "$tagged_sha" != "$RELEASE_SHA" ]]; then
+              echo "$tag points to $tagged_sha instead of $RELEASE_SHA" >&2
               exit 1
             fi
           fi
@@ -68,7 +68,7 @@ jobs:
             prerelease=false
           fi
 
-          echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
           echo "version=$cargo_version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "npm-tag=$npm_tag" >> "$GITHUB_OUTPUT"

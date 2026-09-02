@@ -55,9 +55,9 @@ Prereleases use the npm `next` tag; stable releases use `latest`.
 :title: Keep public project and release guidance discoverable
 
 The repository root must provide a concise README, dual-license texts, current
-roadmap through 0.3.0 and Later, security reporting guidance, generated
-changelog, and maintainer release instructions. These conventional files must
-link to canonical Mara contracts instead of duplicating their detailed meaning.
+roadmap through 0.3.0 and Later, security reporting guidance, and generated
+changelog. These conventional files must link to canonical Mara contracts
+instead of duplicating their detailed meaning.
 :::
 
 :::mara design DES-NPM-NATIVE-PACKAGES
@@ -79,11 +79,13 @@ Package manifests are assembled from repository templates and the version in
 :title: Build before approval and publish after approval
 :satisfies: REQ-REPRODUCIBLE-PUBLIC-RELEASE
 
-The manually dispatched `release.yml` workflow accepts an exact version and
-must run from `main`. Unprivileged jobs capture the commit, validate it, build
-and smoke-test all target artifacts, and upload temporary workflow artifacts.
-The only job with `contents: write` and npm OIDC permission depends on those
-jobs and uses the protected `release` environment.
+A pull request becomes a release candidate only when it targets `main`, updates
+the generated `CHANGELOG.md`, carries the `release` label, and is merged. The
+`release.yml` workflow then derives the exact Cargo version from the merge
+commit. Unprivileged jobs validate that commit, build and smoke-test all target
+artifacts, and upload temporary workflow artifacts. The only job with
+`contents: write` and npm OIDC permission depends on those jobs and uses the
+protected `release` environment.
 
 The release job is retryable only for the captured commit and byte-identical npm
 tarballs. It refuses a tag at another commit or an existing package with a
