@@ -69,8 +69,8 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo run -- --format json project validate
 ```
 
-See [`ROADMAP.md`](ROADMAP.md), [`AGENTS.md`](AGENTS.md),
-[`SECURITY.md`](SECURITY.md), and [`RELEASING.md`](RELEASING.md).
+See [`ROADMAP.md`](ROADMAP.md), [`AGENTS.md`](AGENTS.md), and
+[`SECURITY.md`](SECURITY.md).
 
 ## License
 

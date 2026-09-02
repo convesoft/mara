@@ -1,8 +1,7 @@
 # Distribution and release
 
 This document owns the durable distribution and release contract. Public
-installation and maintainer instructions summarize it in `README.md` and
-`RELEASING.md`.
+installation instructions summarize it in `README.md`.
 
 :::mara scenario SCN-INSTALL-DISTRIBUTED-MARA
 :title: Run Mara without a Rust toolchain
