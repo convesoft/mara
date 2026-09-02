@@ -19,7 +19,8 @@ Repository-wide instructions for humans and software agents.
   to mirror delivery tracking.
 - GitHub owns pull requests, review discussion, CI, and merge evidence. Treat
   other operational systems and generated views as replaceable projections.
-- Create a Linear issue before preparing each release.
+- Release preparation must be owned by one Linear issue. Reuse the issue that
+  already owns that release; create one only when none exists.
 - In a multi-repository workspace, every issue must identify its repository and
   cite relevant Mara IDs when they are known. Given an issue ID, read the issue,
   this file, and its cited Mara items before acting. If the issue is unavailable,
