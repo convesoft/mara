@@ -31,7 +31,7 @@ evidence and priorities change; detailed behavior becomes canonical in
 ### 0.1.0-alpha.3 — Enhanced deterministic retrieval
 
 - Improve deterministic CLI and MCP search, retrieval, and relation traversal.
-- Keep results bounded and explicit without adding context profiles.
+- Keep results bounded and explicit.
 
 ### 0.1.0-beta.0
 
@@ -72,8 +72,6 @@ evidence and priorities change; detailed behavior becomes canonical in
 - Define schema evolution and migrations.
 - Add cross-project relations or imports only if 0.2 usage demonstrates the
   need.
-
-Context profiles are not planned through 0.3.0.
 
 ## Later
 

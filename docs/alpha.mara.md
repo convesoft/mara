@@ -335,6 +335,6 @@ project knowledge.
 
 Alpha does not include structured item editing, moving, renaming, or deletion;
 schema mutation commands; MID generation; persisted indexes or graph stores;
-context profiles; fuzzy or semantic search; LSP integration; a complete
-Markdown AST; or a graphical interface. Manual source editing followed by
-validation remains the editing path.
+fuzzy or semantic search; LSP integration; a complete Markdown AST; or a
+graphical interface. Manual source editing followed by validation remains the
+editing path.
