@@ -4,33 +4,6 @@ Mara releases from `main` through `.github/workflows/release.yml`. The workflow
 builds before approval and performs every public mutation only in the protected
 `release` environment. Do not create the tag or publish npm packages manually.
 
-## One-time repository setup
-
-1. Create a GitHub environment named `release` and require the intended
-   maintainer as a reviewer.
-2. Merge `release.yml` to the default branch.
-3. With npm CLI 11.15 or newer and an account that can administer all five
-   packages, configure the same trusted publisher for each package:
-
-```bash
-for package_name in \
-  @convesoft/mara \
-  @convesoft/mara-linux-x64-gnu \
-  @convesoft/mara-linux-arm64-gnu \
-  @convesoft/mara-darwin-x64 \
-  @convesoft/mara-darwin-arm64
-do
-  npm trust github "$package_name" \
-    --file release.yml \
-    --repository convesoft/mara \
-    --environment release \
-    --allow-publish \
-    --yes
-done
-```
-
-The workflow uses npm OIDC trusted publishing and stores no npm write token.
-
 ## Prepare a release
 
 1. Create a release-preparation Linear issue and its short-lived branch from
