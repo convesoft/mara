@@ -6,7 +6,7 @@ All notable changes to Mara are generated from Conventional Commit history.
 """
 body = """
 {% if version %}\
-## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+## [{{ version | trim_start_matches(pat="v") }}]
 {% else %}\
 ## [Unreleased]
 {% endif %}\

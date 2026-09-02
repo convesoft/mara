@@ -1,7 +1,7 @@
 # Changelog
 
 All notable changes to Mara are generated from Conventional Commit history.
-## [0.1.0-alpha.0] - 2026-09-02
+## [0.1.0-alpha.0]
 
 ### Added
 
