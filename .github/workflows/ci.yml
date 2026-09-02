@@ -27,14 +27,16 @@ jobs:
           version=$(cargo metadata --no-deps --format-version 1 \
             | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(JSON.parse(s).packages[0].version))')
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
-      - name: Verify generated changelog
+      - name: Render generated changelog
         uses: orhun/git-cliff-action@v4.8.0
         with:
           config: cliff.toml
           args: --tag ${{ steps.version.outputs.tag }}
         env:
           OUTPUT: generated-CHANGELOG.md
-      - run: diff -u CHANGELOG.md generated-CHANGELOG.md
+      - name: Verify committed changelog after squash merge
+        if: github.event_name == 'push'
+        run: diff -u CHANGELOG.md generated-CHANGELOG.md
 
   npm-smoke:
     name: npm smoke (${{ matrix.target }})
