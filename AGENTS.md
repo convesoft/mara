@@ -64,6 +64,11 @@ Repository-wide instructions for humans and software agents.
   architecture, decisions, and specifications, in Git-tracked `*.mara.md`
   files. Tool-required metadata and this instruction file are exceptions, not
   alternative sources of product truth.
+- Conventional public repository files (`README.md`, `ROADMAP.md`,
+  `SECURITY.md`, `RELEASING.md`, `LICENSE-*`, and generated `CHANGELOG.md`) may
+  remain ordinary Markdown. Keep detailed product and release contracts in
+  `*.mara.md`; public files summarize or link to them instead of becoming a
+  competing source of truth.
 - Optimize documentation for retrieval and action: state concrete facts,
   boundaries, invariants, acceptance criteria, and unresolved questions in the
   shortest form that remains unambiguous.

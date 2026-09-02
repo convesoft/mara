@@ -1,0 +1,134 @@
+# Distribution and release
+
+This document owns the durable distribution and release contract. Public
+installation and maintainer instructions summarize it in `README.md` and
+`RELEASING.md`.
+
+:::mara scenario SCN-INSTALL-DISTRIBUTED-MARA
+:title: Run Mara without a Rust toolchain
+
+On a supported host, a user runs an exact `@convesoft/mara` version through
+`npx`. The package runs the native Mara binary with inherited standard streams,
+so the same command serves the CLI and long-running stdio MCP workflows. This
+advances [[GOAL-UNIFIED-PROJECT-KNOWLEDGE]] and
+[[GOAL-BOUNDED-AGENT-CONTEXT]].
+:::
+
+:::mara requirement REQ-SCRIPT-FREE-NPM-DISTRIBUTION
+:title: Distribute supported native binaries through script-free npm packages
+:derives_from: SCN-INSTALL-DISTRIBUTED-MARA
+
+`@convesoft/mara` must install and launch without npm lifecycle scripts. Every
+release publishes the dispatcher and these native packages at one exact
+application version:
+
+- `@convesoft/mara-linux-x64-gnu`
+- `@convesoft/mara-linux-arm64-gnu`
+- `@convesoft/mara-darwin-x64`
+- `@convesoft/mara-darwin-arm64`
+
+Linux support requires the GNU target and compatibility with the Ubuntu 22.04
+glibc baseline used to build release artifacts. Windows and musl Linux are
+unsupported for the first alpha. An unsupported or missing native package must
+fail with an actionable diagnostic instead of downloading or building code at
+install time.
+:::
+
+:::mara requirement REQ-REPRODUCIBLE-PUBLIC-RELEASE
+:title: Publish one verified release from one approved revision
+:derives_from: SCN-INSTALL-DISTRIBUTED-MARA
+
+A release must build all supported binaries and npm packages from one commit on
+`main`; run formatting, lint, tests, project validation, package inspection, and
+clean-install CLI and MCP smoke tests; and verify that every artifact carries
+the Cargo workspace version. The committed changelog must be generated from
+Conventional Commit history with `git-cliff`.
+
+Publication requires approval through the protected GitHub `release`
+environment. The approved workflow creates an annotated `v<version>` tag at the
+verified commit, creates a draft GitHub release, publishes native npm packages
+before the dispatcher, verifies any already-published version by tarball digest
+on retry, runs a public-registry smoke test, then publishes the GitHub release.
+Prereleases use the npm `next` tag; stable releases use `latest`.
+:::
+
+:::mara requirement REQ-PUBLIC-REPOSITORY-GUIDANCE
+:title: Keep public project and release guidance discoverable
+
+The repository root must provide a concise README, dual-license texts, current
+roadmap through 0.3.0 and Later, security reporting guidance, generated
+changelog, and maintainer release instructions. These conventional files must
+link to canonical Mara contracts instead of duplicating their detailed meaning.
+:::
+
+:::mara design DES-NPM-NATIVE-PACKAGES
+:title: Dispatch to an npm-selected native package
+:satisfies: REQ-SCRIPT-FREE-NPM-DISTRIBUTION
+
+The script-free `@convesoft/mara` package exposes `mara` through a small Node.js
+dispatcher. Its exact-version `optionalDependencies` use npm `os`, `cpu`, and
+`libc` selection to install only the matching native package. Each native
+package contains the compiled Rust executable. The dispatcher selects the
+package from `process.platform` and `process.arch`, resolves its executable,
+forwards arguments and standard streams, and mirrors its exit status or signal.
+
+Package manifests are assembled from repository templates and the version in
+`[workspace.package]`; they do not maintain an independent release version.
+:::
+
+:::mara design DES-PROTECTED-RELEASE-WORKFLOW
+:title: Build before approval and publish after approval
+:satisfies: REQ-REPRODUCIBLE-PUBLIC-RELEASE
+
+The manually dispatched `release.yml` workflow accepts an exact version and
+must run from `main`. Unprivileged jobs capture the commit, validate it, build
+and smoke-test all target artifacts, and upload temporary workflow artifacts.
+The only job with `contents: write` and npm OIDC permission depends on those
+jobs and uses the protected `release` environment.
+
+The release job is retryable only for the captured commit and byte-identical npm
+tarballs. It refuses a tag at another commit or an existing package with a
+different registry tarball digest. Native packages must become visible in the
+public registry before the dispatcher is published, and the dispatcher must
+become visible before the final `npx` smoke test and GitHub release publication.
+:::
+
+:::mara decision ADR-NPM-NATIVE-DISTRIBUTION
+:title: Use npm platform packages instead of an install-time downloader
+:justifies: DES-NPM-NATIVE-PACKAGES
+
+Mara uses a dispatcher plus npm-selected native packages because it provides a
+one-command `npx` path without a Rust toolchain or lifecycle scripts. An
+install-time binary downloader is rejected because blocked or restricted npm
+scripts would make the primary installation path unreliable, especially in
+enterprise environments.
+:::
+
+:::mara decision ADR-FIRST-ALPHA-TARGETS
+:title: Limit the first alpha to glibc Linux and macOS
+:justifies: REQ-SCRIPT-FREE-NPM-DISTRIBUTION
+
+The first alpha supports x64 and arm64 on glibc Linux and macOS. Windows and
+musl Linux remain explicit limitations until real usage justifies their build,
+packaging, and verification cost.
+:::
+
+:::mara decision ADR-DUAL-LICENSE
+:title: License Mara under MIT or Apache-2.0
+:justifies: REQ-PUBLIC-REPOSITORY-GUIDANCE
+
+Recipients may use Mara under either the MIT License or Apache License 2.0.
+This preserves permissive use while providing Apache's explicit patent grant.
+Copyright notices name Aliaksei Raketski.
+:::
+
+:::mara decision ADR-TRUNK-BASED-RELEASES
+:title: Release from main through short-lived issue branches
+:justifies: DES-PROTECTED-RELEASE-WORKFLOW
+
+Mara uses `main` as its only long-lived branch. Work uses short-lived Linear
+issue branches and one squash-merged pull request per issue. Release preparation
+uses the same flow; there are no `develop` or release branches. After the
+release-preparation change is merged, the protected workflow tags the exact
+validated `main` revision only after deployment approval.
+:::
