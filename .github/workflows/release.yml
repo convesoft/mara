@@ -87,7 +87,6 @@ jobs:
       - run: diff -u CHANGELOG.md generated-CHANGELOG.md
 
   build:
-    name: Build and smoke (${{ matrix.target }})
     needs: prepare
     strategy:
       fail-fast: false

@@ -28,6 +28,9 @@ filter_commits = false
 protect_breaking_commits = true
 tag_pattern = "v[0-9].*"
 sort_commits = "oldest"
+commit_preprocessors = [
+  { pattern = '(?m) \(#[0-9]+\)$', replace = "" },
+]
 commit_parsers = [
   { message = "^docs: generate .+ changelog", skip = true },
   { message = "^feat", group = "Added" },
