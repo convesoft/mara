@@ -15,6 +15,10 @@ All notable changes to Mara are generated from Conventional Commit history.
 - Improve deterministic item search
 - Prepare first distributable alpha
 
+### Continuous integration
+
+- Expose npm OIDC exchange diagnostics
+
 ### Documentation
 
 - Establish repository and document format
@@ -32,6 +36,7 @@ All notable changes to Mara are generated from Conventional Commit history.
 - Publish missing npm package versions
 - Publish npm tarballs from local paths
 - Enable npm OIDC authentication
+- Run releases from main push identity
 
 ### Maintenance
 
