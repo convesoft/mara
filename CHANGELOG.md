@@ -30,6 +30,7 @@ All notable changes to Mara are generated from Conventional Commit history.
 - Make release changelog squash-stable
 - Run protected release from main context
 - Publish missing npm package versions
+- Publish npm tarballs from local paths
 
 ### Maintenance
 
