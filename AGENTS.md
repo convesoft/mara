@@ -19,6 +19,8 @@ Repository-wide instructions for humans and software agents.
   to mirror delivery tracking.
 - GitHub owns pull requests, review discussion, CI, and merge evidence. Treat
   other operational systems and generated views as replaceable projections.
+- Release preparation must be owned by one Linear issue. Reuse the issue that
+  already owns that release; create one only when none exists.
 - In a multi-repository workspace, every issue must identify its repository and
   cite relevant Mara IDs when they are known. Given an issue ID, read the issue,
   this file, and its cited Mara items before acting. If the issue is unavailable,
@@ -64,6 +66,11 @@ Repository-wide instructions for humans and software agents.
   architecture, decisions, and specifications, in Git-tracked `*.mara.md`
   files. Tool-required metadata and this instruction file are exceptions, not
   alternative sources of product truth.
+- Conventional public repository files (`README.md`, `ROADMAP.md`,
+  `SECURITY.md`, `LICENSE-*`, and generated `CHANGELOG.md`) may
+  remain ordinary Markdown. Keep detailed product and release contracts in
+  `*.mara.md`; public files summarize or link to them instead of becoming a
+  competing source of truth.
 - Optimize documentation for retrieval and action: state concrete facts,
   boundaries, invariants, acceptance criteria, and unresolved questions in the
   shortest form that remains unambiguous.

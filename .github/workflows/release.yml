@@ -1,0 +1,313 @@
+name: Release
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+    paths:
+      - CHANGELOG.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.release.outputs.sha }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      npm-tag: ${{ steps.release.outputs.npm-tag }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Resolve and validate release identity
+        id: release
+        env:
+          RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          checked_out_sha=$(git rev-parse HEAD)
+          if [[ "$checked_out_sha" != "$RELEASE_SHA" ]]; then
+            echo "checked out $checked_out_sha instead of release commit $RELEASE_SHA" >&2
+            exit 1
+          fi
+
+          cargo_version=$(cargo metadata --no-deps --format-version 1 \
+            | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(JSON.parse(s).packages[0].version))')
+          tag="v$cargo_version"
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            tagged_sha=$(git rev-list -n 1 "$tag")
+            if [[ "$tagged_sha" != "$RELEASE_SHA" ]]; then
+              echo "$tag points to $tagged_sha instead of $RELEASE_SHA" >&2
+              exit 1
+            fi
+          fi
+
+          grep -F "## [$cargo_version]" CHANGELOG.md >/dev/null
+          if [[ "$cargo_version" == *-* ]]; then
+            npm_tag=next
+            prerelease=true
+          else
+            npm_tag=latest
+            prerelease=false
+          fi
+
+          echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "version=$cargo_version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "npm-tag=$npm_tag" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --all-targets
+      - run: cargo run --locked --quiet -- --format json project validate
+      - name: Verify generated changelog
+        uses: orhun/git-cliff-action@v4.8.0
+        with:
+          config: cliff.toml
+          args: --tag ${{ steps.release.outputs.tag }}
+        env:
+          OUTPUT: generated-CHANGELOG.md
+      - run: diff -u CHANGELOG.md generated-CHANGELOG.md
+
+  build:
+    name: Build and smoke (${{ matrix.target }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+          - runner: macos-15
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - run: cargo build --locked --release
+      - run: scripts/smoke-npm.sh target/release/mara
+      - name: Assemble release artifacts
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist dist/native
+          package=$(node scripts/package-npm.mjs platform "$TARGET" target/release/mara dist/stage)
+          npm pack "$package" --pack-destination dist >/dev/null
+
+          archive="mara-$VERSION-$TARGET"
+          mkdir -p "dist/native/$archive"
+          cp target/release/mara "dist/native/$archive/mara"
+          cp README.md LICENSE-MIT LICENSE-APACHE "dist/native/$archive/"
+          tar -C dist/native -czf "dist/$archive.tar.gz" "$archive"
+          rm -rf "dist/native" "dist/stage"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      NPM_TAG: ${{ needs.prepare.outputs.npm-tag }}
+      RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm install --global npm@11.19.1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Assemble dispatcher and checksums
+        run: |
+          set -euo pipefail
+          package=$(node scripts/package-npm.mjs main dist/stage)
+          npm pack "$package" --pack-destination dist >/dev/null
+          rm -rf dist/stage
+          (cd dist && sha256sum *.tar.gz *.tgz > SHA256SUMS)
+      - name: Create or verify annotated tag
+        run: |
+          set -euo pipefail
+          if git show-ref --verify --quiet "refs/tags/$TAG"; then
+            tagged_sha=$(git rev-list -n 1 "$TAG")
+            if [[ "$tagged_sha" != "$RELEASE_SHA" ]]; then
+              echo "$TAG points to $tagged_sha instead of $RELEASE_SHA" >&2
+              exit 1
+            fi
+          else
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git tag --annotate "$TAG" --message "Mara $VERSION" "$RELEASE_SHA"
+            git push origin "refs/tags/$TAG"
+          fi
+      - name: Create or update draft GitHub release
+        env:
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          awk -v heading="## [$VERSION]" '
+            index($0, heading) == 1 { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.tar.gz dist/*.tgz dist/SHA256SUMS --clobber
+          else
+            arguments=(
+              "$TAG"
+              --draft
+              --verify-tag
+              --title "Mara $VERSION"
+              --notes-file release-notes.md
+            )
+            if [[ "$PRERELEASE" == true ]]; then
+              arguments+=(--prerelease)
+            fi
+            gh release create "${arguments[@]}" dist/*.tar.gz dist/*.tgz dist/SHA256SUMS
+          fi
+      - name: Publish native npm packages
+        run: |
+          set -euo pipefail
+
+          publish_or_verify() {
+            local package_name=$1
+            local tarball=$2
+            local expected actual
+            expected=$(sha1sum "$tarball" | cut -d ' ' -f 1)
+            actual=$(npm view "$package_name@$VERSION" dist.shasum --json 2>/dev/null \
+              | tr -d '"[:space:]' || true)
+            if [[ -n "$actual" ]]; then
+              if [[ "$actual" != "$expected" ]]; then
+                echo "$package_name@$VERSION exists with a different tarball digest" >&2
+                exit 1
+              fi
+              echo "$package_name@$VERSION already matches $expected"
+            else
+              npm publish "$tarball" --access public --tag "$NPM_TAG"
+            fi
+          }
+
+          for package_name in \
+            @convesoft/mara-linux-x64-gnu \
+            @convesoft/mara-linux-arm64-gnu \
+            @convesoft/mara-darwin-x64 \
+            @convesoft/mara-darwin-arm64
+          do
+            package_file=${package_name#@convesoft/}
+            package_file=${package_file//\//-}
+            tarball="dist/convesoft-$package_file-$VERSION.tgz"
+            test -f "$tarball"
+            publish_or_verify "$package_name" "$tarball"
+          done
+      - name: Wait for native packages to become installable
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            missing=0
+            for package_name in \
+              @convesoft/mara-linux-x64-gnu \
+              @convesoft/mara-linux-arm64-gnu \
+              @convesoft/mara-darwin-x64 \
+              @convesoft/mara-darwin-arm64
+            do
+              npm view "$package_name@$VERSION" version >/dev/null 2>&1 || missing=1
+            done
+            if [[ "$missing" == 0 ]]; then
+              exit 0
+            fi
+            echo "native packages are still processing (attempt $attempt/60)"
+            sleep 30
+          done
+          echo "native packages did not become visible within 30 minutes" >&2
+          exit 1
+      - name: Publish dispatcher last
+        run: |
+          set -euo pipefail
+          tarball="dist/convesoft-mara-$VERSION.tgz"
+          expected=$(sha1sum "$tarball" | cut -d ' ' -f 1)
+          actual=$(npm view "@convesoft/mara@$VERSION" dist.shasum --json 2>/dev/null \
+            | tr -d '"[:space:]' || true)
+          if [[ -n "$actual" ]]; then
+            if [[ "$actual" != "$expected" ]]; then
+              echo "@convesoft/mara@$VERSION exists with a different tarball digest" >&2
+              exit 1
+            fi
+          else
+            npm publish "$tarball" --access public --tag "$NPM_TAG"
+          fi
+      - name: Public registry smoke test
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if npm view "@convesoft/mara@$VERSION" version >/dev/null 2>&1; then
+              temporary=$(mktemp -d)
+              trap 'rm -rf -- "$temporary"' EXIT
+              cd "$temporary"
+              npx --yes "@convesoft/mara@$VERSION" --version \
+                | grep -F "mara $VERSION"
+              exit 0
+            fi
+            echo "dispatcher is still processing (attempt $attempt/60)"
+            sleep 30
+          done
+          echo "dispatcher did not become visible within 30 minutes" >&2
+          exit 1
+      - name: Publish GitHub release
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.prepare.outputs.prerelease }}" == true ]]; then
+            gh release edit "$TAG" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$TAG" --draft=false --prerelease=false --latest
+          fi
