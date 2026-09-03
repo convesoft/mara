@@ -28,6 +28,7 @@ All notable changes to Mara are generated from Conventional Commit history.
 ### Fixed
 
 - Make release changelog squash-stable
+- Run protected release from main context
 
 ### Maintenance
 
