@@ -31,7 +31,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
@@ -109,7 +109,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.sha }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           package-manager-cache: false
@@ -158,11 +158,24 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
+      - name: Verify trusted-publishing runtime
+        run: |
+          set -euo pipefail
+          if [[ -n "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "NODE_AUTH_TOKEN must be unset so npm uses GitHub OIDC" >&2
+            exit 1
+          fi
+          for variable in ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN; do
+            if [[ -z "${!variable:-}" ]]; then
+              echo "$variable is unavailable; check id-token: write permission" >&2
+              exit 1
+            fi
+          done
       - run: npm install --global npm@11.19.1
       - uses: actions/download-artifact@v4
         with:
