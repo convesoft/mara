@@ -46,6 +46,15 @@ compact related-item summaries before retrieving any additional full bodies.
 This advances [[GOAL-BOUNDED-AGENT-CONTEXT]].
 :::
 
+:::mara scenario SCN-ONBOARD-MARA-AGENT
+:title: Give an agent access to Mara project knowledge
+
+A user installs Mara as an Agent Plugin. The agent initializes an explicit
+project when needed, inspects its schema, and performs bounded operations
+against one selected project through the packaged MCP server. This advances
+[[GOAL-BOUNDED-AGENT-CONTEXT]].
+:::
+
 ## Product contracts
 
 :::mara requirement REQ-CANONICAL-SOURCE
@@ -66,7 +75,9 @@ created when absent or initialized when it is an existing directory. Global
 `--project <path>` selects the initialization target when the positional path
 is omitted; supplying both is rejected. Existing content is not
 overwritten, and an existing Mara project is rejected. The default template is
-`minimal`; `--template empty` creates no project flavours.
+`minimal`; `--template empty` creates no project flavours. MCP `project_init`
+provides the same operation for a required absolute `project` path and optional
+`template`.
 :::
 
 :::mara requirement REQ-PROJECT-DISCOVERY
@@ -74,8 +85,11 @@ overwritten, and an existing Mara project is rejected. The default template is
 :derives_from: SCN-START-STRUCTURED-PROJECT
 
 Commands discover the nearest parent containing `.mara/project.toml`. Global
-`--project <path>` overrides discovery. `mara mcp` uses the same resolution and
-binds the running server to one project.
+`--project <path>` overrides discovery. `mara mcp` starts without resolving a
+project. Each project-bound MCP tool accepts an optional absolute `project`
+path; when absent, it discovers from the server execution directory. Starting
+the server as `mara mcp --project <path>` binds it to that selection, and tools
+must then omit `project`. Each operation resolves exactly one project.
 :::
 
 :::mara requirement REQ-SCHEMA-DISCOVERY
@@ -94,6 +108,18 @@ relation has a concise description suitable for discovery.
 CLI and MCP must share operation semantics and domain results. CLI defaults to
 human-readable output; global `--format json` returns stable agent-oriented
 data equivalent to MCP structured results.
+:::
+
+:::mara requirement REQ-PORTABLE-AGENT-ONBOARDING
+:title: Package Mara for portable agent onboarding
+:derives_from: SCN-ONBOARD-MARA-AGENT
+
+The existing `@convesoft/mara` npm package must contain an Agent Plugins 1.0
+manifest, one Mara skill, and stdio MCP configuration. The skill guides agents
+to select an explicit project and discover its schema before operating. It must
+not create or modify project `AGENTS.md`. Codex is the reference installation
+client; other clients are supported according to their implemented Agent
+Plugins components rather than by a universal compatibility promise.
 :::
 
 :::mara requirement REQ-ITEM-CREATION
@@ -300,8 +326,8 @@ for schema-repeatable metadata.
 `schema get` and `schema list` accept only the declared positional kinds
 `flavour` and `relation`. Each project-bound operation maps to an MCP tool by
 joining the object and operation with `_`, from `project_validate` through
-`relation_remove`; project initialization remains CLI-only. The server resolves
-and binds one project when `mara mcp` starts, and tools accept no project path.
+`relation_remove`; initialization maps to `project_init`. Project-bound MCP
+tools add an optional absolute `project` path to the shared operation input.
 
 CLI `--format json` and MCP `structuredContent` serialize the same domain result.
 Item collections use `{ "items": [...] }`. Project and item validation return
@@ -309,6 +335,33 @@ Item collections use `{ "items": [...] }`. Project and item validation return
 result, with each diagnostic providing `scope`, optional `path` and `line`, and
 `message`. Invocation failures use `{ "error": { "message": ... } }` in CLI
 JSON and a caller-visible MCP tool error.
+:::
+
+:::mara design DES-OPERATION-PROJECT-CONTEXT
+:title: Resolve project context at the operation boundary
+:satisfies: REQ-PROJECT-DISCOVERY
+:satisfies: REQ-SURFACE-PARITY
+
+Public operation wrappers select a project from an explicit path or the
+execution directory, resolve its current project context, and then invoke the
+operation against that resolved context. MCP request selection is absolute and
+takes effect only when the server was not started with `--project`; a bound
+server rejects request-level selection. Resolution occurs for each call, so
+source and schema changes remain visible without server-side project caches.
+
+This boundary remains one project per operation. It does not define nested
+project precedence, workspace aggregation, or cross-project operations.
+:::
+
+:::mara design DES-PORTABLE-AGENT-PLUGIN
+:title: Portable Agent Plugin package
+:satisfies: REQ-PORTABLE-AGENT-ONBOARDING
+
+The main npm package is the Agent Plugin root. It contains the Agent Plugins
+1.0 `plugin.json`, discovers `skills/mara/SKILL.md`, and declares the packaged
+Mara launcher as a stdio server in `mcp.json`. The MCP process starts in the
+plugin root and relies on request-level absolute project selection instead of
+assuming that the plugin installation directory is a Mara project.
 :::
 
 :::mara design DES-DETERMINISTIC-KEYWORD-SEARCH

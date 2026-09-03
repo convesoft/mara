@@ -1,0 +1,13 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "mara",
+  "description": "Discover, author, relate, and validate structured project knowledge.",
+  "author": {
+    "name": "Convesoft",
+    "url": "https://github.com/convesoft"
+  },
+  "homepage": "https://github.com/convesoft/mara",
+  "repository": "https://github.com/convesoft/mara",
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["project-knowledge", "requirements", "mcp", "agent-skill"]
+}

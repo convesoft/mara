@@ -30,6 +30,11 @@ mkdir -p "$packages" "$tarballs" "$install" "$project"
 
 platform_package=$(node scripts/package-npm.mjs platform "$target" "$binary" "$packages")
 main_package=$(node scripts/package-npm.mjs main "$packages")
+for file in plugin.json mcp.json skills/mara/SKILL.md; do
+  test -f "$main_package/$file"
+done
+test "$(node -p 'require(process.argv[1]).version' "$main_package/plugin.json")" = \
+  "$(node -p 'require(process.argv[1]).version' "$main_package/package.json")"
 npm pack "$platform_package" --pack-destination "$tarballs" >/dev/null
 npm pack "$main_package" --pack-destination "$tarballs" >/dev/null
 
@@ -65,5 +70,12 @@ mara="$install/node_modules/.bin/mara"
 
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mara-npm-smoke","version":"1"}}}' \
-  | "$mara" --project "$project" mcp \
+  | "$mara" mcp --project "$project" \
   | grep -F '"protocolVersion":"2025-06-18"'
+
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mara-npm-smoke","version":"1"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"project_validate\",\"arguments\":{\"project\":\"$project\"}}}" \
+  | (cd "$install" && "$mara" mcp) \
+  | grep -F '"valid":true'

@@ -63,6 +63,7 @@ instead of duplicating their detailed meaning.
 :::mara design DES-NPM-NATIVE-PACKAGES
 :title: Dispatch to an npm-selected native package
 :satisfies: REQ-SCRIPT-FREE-NPM-DISTRIBUTION
+:satisfies: REQ-PORTABLE-AGENT-ONBOARDING
 
 The script-free `@convesoft/mara` package exposes `mara` through a small Node.js
 dispatcher. Its exact-version `optionalDependencies` use npm `os`, `cpu`, and
@@ -71,8 +72,9 @@ package contains the compiled Rust executable. The dispatcher selects the
 package from `process.platform` and `process.arch`, resolves its executable,
 forwards arguments and standard streams, and mirrors its exit status or signal.
 
-Package manifests are assembled from repository templates and the version in
-`[workspace.package]`; they do not maintain an independent release version.
+Package manifests and the packaged Agent Plugin version are assembled from
+repository templates and the version in `[workspace.package]`; they do not
+maintain an independent release version.
 :::
 
 :::mara design DES-PROTECTED-RELEASE-WORKFLOW

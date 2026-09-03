@@ -40,8 +40,10 @@ pub use query::{
 pub const PROJECT_FILE: &str = ".mara/project.toml";
 pub const SCHEMA_FILE: &str = ".mara/schema.yaml";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
 pub enum Template {
+    #[default]
     Minimal,
     Empty,
 }

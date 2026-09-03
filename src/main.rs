@@ -55,7 +55,7 @@ enum Command {
         #[command(subcommand)]
         command: RelationCommand,
     },
-    /// Start a stdio MCP server bound to one Mara project.
+    /// Start a stdio MCP server, optionally bound with --project.
     Mcp,
 }
 

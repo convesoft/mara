@@ -32,14 +32,31 @@ command = "npx"
 args = ["-y", "@convesoft/mara@0.1.0-alpha.0", "mcp"]
 ```
 
-If the client starts elsewhere, add an explicit project root before `mcp`:
+To bind the server to one project regardless of its execution directory, place
+`--project` after `mcp`:
 
-```text
---project /absolute/path/to/project
+```toml
+[mcp_servers.mara]
+command = "npx"
+args = [
+  "-y",
+  "@convesoft/mara@0.1.0-alpha.0",
+  "mcp",
+  "--project",
+  "/absolute/path/to/project",
+]
 ```
 
-Mara discovers the nearest parent containing `.mara/project.toml` and binds one
-project when the MCP server starts.
+Without `--project`, the server can start anywhere. Project-bound tools accept
+an absolute `project` path or discover the nearest parent containing
+`.mara/project.toml` from the server's execution directory.
+
+## Agent Plugin package
+
+The main npm package also contains a portable Agent Plugins 1.0 manifest, a
+Mara skill, and stdio MCP configuration. Compatible clients can install that
+package through their supported plugin distribution flow. Codex is the
+reference client; the portable package does not modify project `AGENTS.md`.
 
 ## Core workflow
 

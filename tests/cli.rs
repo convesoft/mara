@@ -52,13 +52,21 @@ fn stdout(output: &std::process::Output) -> String {
 }
 
 fn mcp_exchange(current_directory: &Path, requests: &[Value]) -> Vec<Value> {
+    mcp_exchange_with_arguments(current_directory, &["mcp"], requests)
+}
+
+fn mcp_exchange_with_arguments(
+    current_directory: &Path,
+    arguments: &[&str],
+    requests: &[Value],
+) -> Vec<Value> {
     let input = requests
         .iter()
         .map(Value::to_string)
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    let output = mara_with_stdin(current_directory, &["mcp"], &input);
+    let output = mara_with_stdin(current_directory, arguments, &input);
     assert!(output.status.success(), "{}", stderr(&output));
     stdout(&output)
         .lines()
@@ -2546,7 +2554,7 @@ fn cli_parse_failures_follow_the_selected_output_format() {
 }
 
 #[test]
-fn mcp_rejects_undeclared_arguments_without_mutating_the_bound_project() {
+fn mcp_rejects_undeclared_arguments_without_mutating_the_selected_project() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
     assert!(init.status.success(), "{}", stderr(&init));
@@ -2566,10 +2574,10 @@ fn mcp_rejects_undeclared_arguments_without_mutating_the_bound_project() {
                     "file": "items.mara.md",
                     "title": "Undeclared project override",
                     "body": "Must not be written.",
-                    "project": "other"
+                    "workspace": "other"
                 }),
             ),
-            mcp_call(4, "project_validate", json!({ "project": "other" })),
+            mcp_call(4, "project_validate", json!({ "workspace": "other" })),
         ],
     );
 
@@ -2593,6 +2601,83 @@ fn mcp_rejects_undeclared_arguments_without_mutating_the_bound_project() {
         );
     }
     assert!(!fixture.path().join("items.mara.md").exists());
+}
+
+#[test]
+fn mcp_starts_outside_a_project_and_initializes_an_absolute_target() {
+    let fixture = TempDir::new().unwrap();
+    let project = fixture.path().join("new-project");
+
+    let initialized = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_call(
+                2,
+                "project_init",
+                json!({ "project": project, "template": "minimal" }),
+            ),
+        ],
+    );
+    let result = &mcp_response(&initialized, 2)["result"];
+    assert_eq!(result["isError"], false);
+    assert_eq!(
+        result["structuredContent"]["project"]["root"],
+        project.to_string_lossy().as_ref()
+    );
+    assert!(project.join(".mara/project.toml").is_file());
+    assert!(project.join(".mara/schema.yaml").is_file());
+
+    let validated = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_call(2, "project_validate", json!({ "project": project })),
+            mcp_call(3, "project_validate", json!({ "project": "new-project" })),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&validated, 2)["result"]["structuredContent"]["valid"],
+        true
+    );
+    assert_eq!(mcp_response(&validated, 3)["result"]["isError"], true);
+    assert!(
+        mcp_response(&validated, 3)
+            .to_string()
+            .contains("must be absolute")
+    );
+}
+
+#[test]
+fn mcp_project_option_after_the_command_binds_the_server() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let project = fixture.path().to_str().unwrap();
+
+    let responses = mcp_exchange_with_arguments(
+        fixture.path(),
+        &["mcp", "--project", project],
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_call(2, "project_validate", json!({})),
+            mcp_call(3, "project_validate", json!({ "project": project })),
+        ],
+    );
+
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"]["valid"],
+        true
+    );
+    assert_eq!(mcp_response(&responses, 3)["result"]["isError"], true);
+    assert!(
+        mcp_response(&responses, 3)
+            .to_string()
+            .contains("started with --project")
+    );
 }
 
 #[test]
@@ -2629,15 +2714,17 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
         ],
     );
 
-    let tool_names = mcp_response(&responses, 2)["result"]["tools"]
+    let tools = mcp_response(&responses, 2)["result"]["tools"]
         .as_array()
-        .unwrap()
+        .unwrap();
+    let tool_names = tools
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect::<BTreeSet<_>>();
     assert_eq!(
         tool_names,
         BTreeSet::from([
+            "project_init",
             "project_validate",
             "schema_get",
             "schema_list",
@@ -2652,7 +2739,22 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
             "relation_remove",
         ])
     );
-    assert!(!tool_names.contains("project_init"));
+    for tool in tools {
+        assert!(
+            tool["inputSchema"]["properties"].get("project").is_some(),
+            "{} does not declare project selection: {tool:#}",
+            tool["name"]
+        );
+        let project_is_required = tool["inputSchema"]["required"]
+            .as_array()
+            .is_some_and(|required| required.iter().any(|field| field == "project"));
+        assert_eq!(
+            project_is_required,
+            tool["name"] == "project_init",
+            "{} has the wrong project requirement: {tool:#}",
+            tool["name"]
+        );
+    }
     assert_eq!(
         mcp_response(&responses, 3)["result"]["structuredContent"],
         cli_item
