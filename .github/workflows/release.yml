@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   pull_request_target:
     branches: [main]
     types: [closed]
@@ -15,6 +16,62 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  diagnose-oidc:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm install --global npm@11.19.1
+      - name: Report OIDC identity
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
+          url.searchParams.set("audience", "npm:registry.npmjs.org");
+          const response = await fetch(url, {
+            headers: {
+              Authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}`,
+            },
+          });
+          if (!response.ok) {
+            throw new Error(`GitHub OIDC request failed with HTTP ${response.status}`);
+          }
+          const { value } = await response.json();
+          const payload = value?.split(".")[1];
+          if (!payload) {
+            throw new Error("GitHub OIDC response did not contain a JWT");
+          }
+          const claims = JSON.parse(Buffer.from(payload, "base64url"));
+          const keys = [
+            "aud",
+            "sub",
+            "repository",
+            "workflow_ref",
+            "job_workflow_ref",
+            "environment",
+            "event_name",
+            "ref",
+          ];
+          console.log(Object.fromEntries(keys.map((key) => [key, claims[key] ?? null])));
+          NODE
+      - name: Verify npm OIDC exchange
+        run: |
+          set -euo pipefail
+          package=$(node scripts/package-npm.mjs main dist/oidc-check)
+          npm publish "$package" \
+            --dry-run \
+            --access public \
+            --tag next \
+            --loglevel verbose
+
   prepare:
     if: >-
       github.event.pull_request.merged == true &&
