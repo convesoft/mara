@@ -31,6 +31,7 @@ All notable changes to Mara are generated from Conventional Commit history.
 - Run protected release from main context
 - Publish missing npm package versions
 - Publish npm tarballs from local paths
+- Enable npm OIDC authentication
 
 ### Maintenance
 
