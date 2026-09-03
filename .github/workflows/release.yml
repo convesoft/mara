@@ -224,9 +224,8 @@ jobs:
             local tarball=$2
             local expected actual
             expected=$(sha1sum "$tarball" | cut -d ' ' -f 1)
-            actual=$(npm view "$package_name@$VERSION" dist.shasum --json 2>/dev/null \
-              | tr -d '"[:space:]' || true)
-            if [[ -n "$actual" ]]; then
+            if actual=$(npm view "$package_name@$VERSION" dist.shasum --json 2>/dev/null \
+              | tr -d '"[:space:]'); then
               if [[ "$actual" != "$expected" ]]; then
                 echo "$package_name@$VERSION exists with a different tarball digest" >&2
                 exit 1
@@ -275,9 +274,8 @@ jobs:
           set -euo pipefail
           tarball="dist/convesoft-mara-$VERSION.tgz"
           expected=$(sha1sum "$tarball" | cut -d ' ' -f 1)
-          actual=$(npm view "@convesoft/mara@$VERSION" dist.shasum --json 2>/dev/null \
-            | tr -d '"[:space:]' || true)
-          if [[ -n "$actual" ]]; then
+          if actual=$(npm view "@convesoft/mara@$VERSION" dist.shasum --json 2>/dev/null \
+            | tr -d '"[:space:]'); then
             if [[ "$actual" != "$expected" ]]; then
               echo "@convesoft/mara@$VERSION exists with a different tarball digest" >&2
               exit 1
