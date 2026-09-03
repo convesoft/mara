@@ -4,7 +4,7 @@
     "mara": {
       "type": "stdio",
       "command": "node",
-      "args": ["${PLUGIN_ROOT}/bin/mara.cjs", "mcp"]
+      "args": ["${PLUGIN_ROOT}/bin/mara-plugin.cjs", "mcp"]
     }
   }
 }

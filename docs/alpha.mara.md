@@ -360,9 +360,13 @@ project precedence, workspace aggregation, or cross-project operations.
 
 The main npm package is the Agent Plugin root. It contains the Agent Plugins
 1.0 `plugin.json`, discovers `skills/mara/SKILL.md`, and declares the packaged
-Mara launcher as a stdio server in `mcp.json`. The MCP process starts in the
-plugin root and relies on request-level absolute project selection instead of
-assuming that the plugin installation directory is a Mara project.
+plugin launcher as a stdio server in `mcp.json`. The launcher uses an installed
+matching native package when available. When a client such as Codex extracts
+the plugin without installing npm dependencies, it runs the package's exact
+version through `npx`, which installs the selected native package in npm's
+managed cache. The MCP process starts in the plugin root and relies on
+request-level absolute project selection instead of assuming that the plugin
+installation directory is a Mara project.
 :::
 
 :::mara design DES-DETERMINISTIC-KEYWORD-SEARCH

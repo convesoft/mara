@@ -95,10 +95,13 @@ maintain an independent release version.
 The repository's Codex marketplace is named `convesoft` and exposes plugin
 `mara` from the release channel used for `@convesoft/mara`: `next` during
 prereleases and `latest` after the stable release. Codex resolves that channel
-to a versioned installed snapshot. The existing-installation route instead
-registers the installed executable through Codex MCP configuration and installs
-the same skill independently; it does not create or link a Codex plugin-cache
-entry.
+to a versioned installed snapshot. Because Codex extracts npm plugin sources
+without installing their dependencies, the snapshot's MCP launcher runs the
+same exact `@convesoft/mara` version through `npx`; npm then installs the
+matching native package in its managed cache. The existing-installation route
+instead registers the installed executable through Codex MCP configuration and
+installs the same skill independently; it does not create or link a Codex
+plugin-cache entry.
 :::
 
 :::mara design DES-PROTECTED-RELEASE-WORKFLOW
@@ -137,11 +140,12 @@ enterprise environments.
 :justifies: DES-CODEX-AGENT-DISTRIBUTION
 
 Do not edit or symlink Codex plugin-cache entries to reuse another Mara package
-installation. Codex deliberately installs a versioned snapshot and owns its
-validation, enablement, update, and removal. Users who want self-contained
-onboarding accept that managed copy; users who already installed Mara reuse it
-through MCP configuration and install only the small skill. This avoids a
-second executable without depending on Codex's internal cache layout.
+installation. Codex owns the plugin snapshot's validation, enablement, update,
+and removal, while npm owns the exact-version native runtime selected by its
+launcher. Users who want complete onboarding accept those managed artifacts;
+users who already installed Mara reuse it through MCP configuration and install
+only the small skill. This avoids a second native executable without depending
+on Codex's internal cache layout.
 :::
 
 :::mara decision ADR-FIRST-ALPHA-TARGETS

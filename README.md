@@ -67,7 +67,9 @@ codex plugin add mara@convesoft
 ```
 
 Start a new Codex session after installation. Codex keeps an installed plugin
-in its managed cache, including the packaged Mara executable.
+snapshot in its managed cache. On first MCP start, its launcher uses `npx` to
+install and run that snapshot's exact Mara version with the matching native
+package in npm's cache.
 
 If Mara and its MCP server are already configured, install only the skill and
 keep using that existing executable:
