@@ -8,6 +8,12 @@ if [[ $# -ne 1 ]]; then
 fi
 
 binary=$(realpath "$1")
+marketplace=.agents/plugins/marketplace.json
+test "$(node -p 'require("./" + process.argv[1]).name' "$marketplace")" = convesoft
+test "$(node -p 'require("./" + process.argv[1]).plugins[0].name' "$marketplace")" = mara
+test "$(node -p 'require("./" + process.argv[1]).plugins[0].source.package' "$marketplace")" = \
+  @convesoft/mara
+test "$(node -p 'require("./" + process.argv[1]).plugins[0].source.version' "$marketplace")" = next
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64) target=x86_64-unknown-linux-gnu ;;
   Linux:aarch64) target=aarch64-unknown-linux-gnu ;;

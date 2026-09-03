@@ -49,9 +49,10 @@ This advances [[GOAL-BOUNDED-AGENT-CONTEXT]].
 :::mara scenario SCN-ONBOARD-MARA-AGENT
 :title: Give an agent access to Mara project knowledge
 
-A user installs Mara as an Agent Plugin. The agent initializes an explicit
-project when needed, inspects its schema, and performs bounded operations
-against one selected project through the packaged MCP server. This advances
+A user installs Mara as an Agent Plugin or connects an existing Mara
+installation and installs its skill separately. The agent initializes an
+explicit project when needed, inspects its schema, and performs bounded
+operations against one selected project through MCP. This advances
 [[GOAL-BOUNDED-AGENT-CONTEXT]].
 :::
 

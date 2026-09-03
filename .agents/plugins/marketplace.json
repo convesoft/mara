@@ -1,0 +1,22 @@
+{
+  "name": "convesoft",
+  "interface": {
+    "displayName": "Convesoft"
+  },
+  "plugins": [
+    {
+      "name": "mara",
+      "source": {
+        "source": "npm",
+        "package": "@convesoft/mara",
+        "version": "next",
+        "registry": "https://registry.npmjs.org"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

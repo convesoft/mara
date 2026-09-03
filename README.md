@@ -58,6 +58,35 @@ Mara skill, and stdio MCP configuration. Compatible clients can install that
 package through their supported plugin distribution flow. Codex is the
 reference client; the portable package does not modify project `AGENTS.md`.
 
+Starting with `0.1.0-alpha.1`, a user without an existing Mara installation can
+install the complete package from the Convesoft Codex marketplace:
+
+```bash
+codex plugin marketplace add convesoft/mara
+codex plugin add mara@convesoft
+```
+
+Start a new Codex session after installation. Codex keeps an installed plugin
+in its managed cache, including the packaged Mara executable.
+
+If Mara and its MCP server are already configured, install only the skill and
+keep using that existing executable:
+
+```bash
+npx skills add convesoft/mara --skill mara -g -a codex
+```
+
+For a new MCP registration backed by an existing installation, use the
+executable's absolute path:
+
+```bash
+codex mcp add mara -- /absolute/path/to/mara mcp
+```
+
+Use either the complete plugin or the existing-installation route. Do not add
+the complete plugin alongside an equivalent manually configured Mara MCP
+server.
+
 ## Core workflow
 
 ```bash
