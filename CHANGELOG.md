@@ -5,14 +5,14 @@ All notable changes to Mara are generated from Conventional Commit history.
 
 ### Added
 
-- Initialize and discover Mara projects (#1)
-- Load and inspect project schemas (#2)
-- Parse Mara documents into memory (#3)
-- Validate Mara projects and items (#4)
-- Create items and mutate relations (#5)
-- Query project knowledge (#6)
-- Expose alpha operations through MCP (#7)
-- Improve deterministic item search (#9)
+- Initialize and discover Mara projects
+- Load and inspect project schemas
+- Parse Mara documents into memory
+- Validate Mara projects and items
+- Create items and mutate relations
+- Query project knowledge
+- Expose alpha operations through MCP
+- Improve deterministic item search
 - Prepare first distributable alpha
 
 ### Documentation
@@ -25,6 +25,10 @@ All notable changes to Mara are generated from Conventional Commit history.
 - Add pull request template
 - Document pull request workflow
 
+### Fixed
+
+- Make release changelog squash-stable
+
 ### Maintenance
 
-- Dogfood Mara repository (#8)
+- Dogfood Mara repository
