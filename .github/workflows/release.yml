@@ -68,11 +68,13 @@ jobs:
             prerelease=false
           fi
 
-          echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
-          echo "version=$cargo_version" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "npm-tag=$npm_tag" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          {
+            echo "sha=$RELEASE_SHA"
+            echo "version=$cargo_version"
+            echo "tag=$tag"
+            echo "npm-tag=$npm_tag"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
       - run: cargo fmt --all -- --check
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - run: cargo test --locked --all-targets
@@ -173,7 +175,7 @@ jobs:
           package=$(node scripts/package-npm.mjs main dist/stage)
           npm pack "$package" --pack-destination dist >/dev/null
           rm -rf dist/stage
-          (cd dist && sha256sum *.tar.gz *.tgz > SHA256SUMS)
+          (cd dist && sha256sum -- *.tar.gz *.tgz > SHA256SUMS)
       - name: Create or verify annotated tag
         run: |
           set -euo pipefail
@@ -244,7 +246,7 @@ jobs:
           do
             package_file=${package_name#@convesoft/}
             package_file=${package_file//\//-}
-            tarball="dist/convesoft-$package_file-$VERSION.tgz"
+            tarball="$PWD/dist/convesoft-$package_file-$VERSION.tgz"
             test -f "$tarball"
             publish_or_verify "$package_name" "$tarball"
           done
@@ -272,7 +274,7 @@ jobs:
       - name: Publish dispatcher last
         run: |
           set -euo pipefail
-          tarball="dist/convesoft-mara-$VERSION.tgz"
+          tarball="$PWD/dist/convesoft-mara-$VERSION.tgz"
           expected=$(sha1sum "$tarball" | cut -d ' ' -f 1)
           if actual=$(npm view "@convesoft/mara@$VERSION" dist.shasum --json 2>/dev/null \
             | tr -d '"[:space:]'); then
