@@ -28,16 +28,37 @@ impl OperationContext {
         })
     }
 
-    pub fn bound(selected: Option<PathBuf>) -> Result<Self, String> {
-        let context = Self::from_environment(selected)?;
-        let validation =
-            resolve_project_for_validation(context.selected.as_deref(), &context.current_directory)
-                .map_err(|error| error.to_string())?;
-        let (project, _, _) = validation.into_parts();
+    pub fn for_project(&self, requested: Option<PathBuf>) -> Result<Self, String> {
+        if requested.as_ref().is_some_and(|path| !path.is_absolute()) {
+            return Err("request project path must be absolute".into());
+        }
+        if self.selected.is_some() && requested.is_some() {
+            return Err(
+                "project cannot be selected per operation because the server started with --project"
+                    .into(),
+            );
+        }
         Ok(Self {
-            selected: Some(project.root().to_path_buf()),
-            current_directory: project.root().to_path_buf(),
+            selected: requested.or_else(|| self.selected.clone()),
+            current_directory: self.current_directory.clone(),
         })
+    }
+
+    pub fn project_initialize(
+        &self,
+        target: Option<PathBuf>,
+        template: Template,
+    ) -> Result<ProjectInitializationResult, String> {
+        let operation = self.for_project(target)?;
+        project_initialize(
+            operation
+                .selected
+                .ok_or_else(|| {
+                    "project init requires an absolute project path when the server is not bound with --project"
+                        .to_string()
+                })?,
+            template,
+        )
     }
 
     pub fn project_validate(&self) -> Result<ValidationResult, String> {

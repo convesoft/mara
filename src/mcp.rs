@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
 use mara::{
-    ItemCollectionResult, ItemCreateParams, ItemCreationResult, ItemFilterParams, ItemIdParams,
-    ItemRelatedParams, ItemSearchParams, OperationContext, RelatedItemsResult,
-    RelationMutationResult, RelationParams, ResolvedItem, SchemaGetResult, SchemaKind,
-    SchemaListResult, SchemaValidationResult, ValidationResult,
+    FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult, ItemFilterParams,
+    ItemRelatedParams, OperationContext, ProjectInitializationResult, RelatedItemsResult,
+    RelationDirection, RelationMutationResult, RelationParams, ResolvedItem, SchemaGetResult,
+    SchemaKind, SchemaListResult, SchemaValidationResult, Template, ValidationResult,
 };
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -22,7 +22,25 @@ struct MaraMcp {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct ProjectParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ProjectInitParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    #[serde(default)]
+    template: Template,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct SchemaGetParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
     #[serde(default)]
     kind: Option<SchemaKind>,
     #[serde(default)]
@@ -32,24 +50,200 @@ struct SchemaGetParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SchemaListParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
     kind: SchemaKind,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct EmptyParams {}
+struct ItemCreateToolParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    flavour: String,
+    id: String,
+    file: PathBuf,
+    title: String,
+    #[serde(default)]
+    fields: Vec<FieldValue>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    line: Option<usize>,
+}
+
+impl ItemCreateToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, ItemCreateParams) {
+        (
+            self.project,
+            ItemCreateParams {
+                flavour: self.flavour,
+                id: self.id,
+                file: self.file,
+                title: self.title,
+                fields: self.fields,
+                body: self.body,
+                line: self.line,
+            },
+        )
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemIdToolParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemFilterToolParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    #[serde(default)]
+    flavours: Vec<String>,
+    #[serde(default)]
+    fields: Vec<FieldValue>,
+    #[serde(default)]
+    relations: Vec<String>,
+    #[serde(default)]
+    paths: Vec<PathBuf>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+impl ItemFilterToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, ItemFilterParams) {
+        (
+            self.project,
+            ItemFilterParams {
+                flavours: self.flavours,
+                fields: self.fields,
+                relations: self.relations,
+                paths: self.paths,
+                limit: self.limit,
+            },
+        )
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemSearchToolParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    query: String,
+    #[serde(default)]
+    flavours: Vec<String>,
+    #[serde(default)]
+    fields: Vec<FieldValue>,
+    #[serde(default)]
+    relations: Vec<String>,
+    #[serde(default)]
+    paths: Vec<PathBuf>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+impl ItemSearchToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, String, ItemFilterParams) {
+        (
+            self.project,
+            self.query,
+            ItemFilterParams {
+                flavours: self.flavours,
+                fields: self.fields,
+                relations: self.relations,
+                paths: self.paths,
+                limit: self.limit,
+            },
+        )
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemRelatedToolParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    id: String,
+    #[serde(default)]
+    direction: Option<RelationDirection>,
+    #[serde(default)]
+    relations: Vec<String>,
+    #[serde(default)]
+    flavours: Vec<String>,
+}
+
+impl ItemRelatedToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, ItemRelatedParams) {
+        (
+            self.project,
+            ItemRelatedParams {
+                id: self.id,
+                direction: self.direction,
+                relations: self.relations,
+                flavours: self.flavours,
+            },
+        )
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RelationToolParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    source: String,
+    relation: String,
+    target: String,
+}
+
+impl RelationToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, RelationParams) {
+        (
+            self.project,
+            RelationParams {
+                source: self.source,
+                relation: self.relation,
+                target: self.target,
+            },
+        )
+    }
+}
 
 #[tool_router]
 impl MaraMcp {
+    fn for_project(&self, project: Option<PathBuf>) -> Result<OperationContext, String> {
+        self.operations.for_project(project)
+    }
+
+    #[tool(
+        name = "project_init",
+        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project."
+    )]
+    fn project_init(
+        &self,
+        Parameters(params): Parameters<ProjectInitParams>,
+    ) -> Result<Json<ProjectInitializationResult>, String> {
+        self.operations
+            .project_initialize(params.project, params.template)
+            .map(Json)
+    }
+
     #[tool(
         name = "project_validate",
-        description = "Validate the bound Mara project and return all independently discoverable diagnostics."
+        description = "Validate the selected Mara project and return all independently discoverable diagnostics."
     )]
     fn project_validate(
         &self,
-        Parameters(_): Parameters<EmptyParams>,
+        Parameters(params): Parameters<ProjectParams>,
     ) -> Result<Json<ValidationResult>, String> {
-        self.operations.project_validate().map(Json)
+        self.for_project(params.project)?
+            .project_validate()
+            .map(Json)
     }
 
     #[tool(
@@ -60,7 +254,7 @@ impl MaraMcp {
         &self,
         Parameters(params): Parameters<SchemaGetParams>,
     ) -> Result<Json<SchemaGetResult>, String> {
-        self.operations
+        self.for_project(params.project)?
             .schema_get(params.kind, params.name)
             .map(Json)
     }
@@ -73,18 +267,22 @@ impl MaraMcp {
         &self,
         Parameters(params): Parameters<SchemaListParams>,
     ) -> Result<Json<SchemaListResult>, String> {
-        self.operations.schema_list(params.kind).map(Json)
+        self.for_project(params.project)?
+            .schema_list(params.kind)
+            .map(Json)
     }
 
     #[tool(
         name = "schema_validate",
-        description = "Validate the bound project's configured Mara schema."
+        description = "Validate the selected project's configured Mara schema."
     )]
     fn schema_validate(
         &self,
-        Parameters(_): Parameters<EmptyParams>,
+        Parameters(params): Parameters<ProjectParams>,
     ) -> Result<Json<SchemaValidationResult>, String> {
-        self.operations.schema_validate().map(Json)
+        self.for_project(params.project)?
+            .schema_validate()
+            .map(Json)
     }
 
     #[tool(
@@ -93,9 +291,10 @@ impl MaraMcp {
     )]
     fn item_create(
         &self,
-        Parameters(params): Parameters<ItemCreateParams>,
+        Parameters(params): Parameters<ItemCreateToolParams>,
     ) -> Result<Json<ItemCreationResult>, String> {
-        self.operations.item_create(params).map(Json)
+        let (project, params) = params.into_parts();
+        self.for_project(project)?.item_create(params).map(Json)
     }
 
     #[tool(
@@ -104,9 +303,11 @@ impl MaraMcp {
     )]
     fn item_get(
         &self,
-        Parameters(params): Parameters<ItemIdParams>,
+        Parameters(params): Parameters<ItemIdToolParams>,
     ) -> Result<Json<ResolvedItem>, String> {
-        self.operations.item_get(&params.id).map(Json)
+        self.for_project(params.project)?
+            .item_get(&params.id)
+            .map(Json)
     }
 
     #[tool(
@@ -115,9 +316,10 @@ impl MaraMcp {
     )]
     fn item_list(
         &self,
-        Parameters(params): Parameters<ItemFilterParams>,
+        Parameters(params): Parameters<ItemFilterToolParams>,
     ) -> Result<Json<ItemCollectionResult>, String> {
-        self.operations.item_list(params).map(Json)
+        let (project, params) = params.into_parts();
+        self.for_project(project)?.item_list(params).map(Json)
     }
 
     #[tool(
@@ -126,10 +328,12 @@ impl MaraMcp {
     )]
     fn item_search(
         &self,
-        Parameters(params): Parameters<ItemSearchParams>,
+        Parameters(params): Parameters<ItemSearchToolParams>,
     ) -> Result<Json<ItemCollectionResult>, String> {
-        let (query, filters) = params.into_parts();
-        self.operations.item_search(&query, filters).map(Json)
+        let (project, query, filters) = params.into_parts();
+        self.for_project(project)?
+            .item_search(&query, filters)
+            .map(Json)
     }
 
     #[tool(
@@ -138,9 +342,10 @@ impl MaraMcp {
     )]
     fn item_related(
         &self,
-        Parameters(params): Parameters<ItemRelatedParams>,
+        Parameters(params): Parameters<ItemRelatedToolParams>,
     ) -> Result<Json<RelatedItemsResult>, String> {
-        self.operations.item_related(params).map(Json)
+        let (project, params) = params.into_parts();
+        self.for_project(project)?.item_related(params).map(Json)
     }
 
     #[tool(
@@ -149,9 +354,11 @@ impl MaraMcp {
     )]
     fn item_validate(
         &self,
-        Parameters(params): Parameters<ItemIdParams>,
+        Parameters(params): Parameters<ItemIdToolParams>,
     ) -> Result<Json<ValidationResult>, String> {
-        self.operations.item_validate(&params.id).map(Json)
+        self.for_project(params.project)?
+            .item_validate(&params.id)
+            .map(Json)
     }
 
     #[tool(
@@ -160,9 +367,10 @@ impl MaraMcp {
     )]
     fn relation_add(
         &self,
-        Parameters(params): Parameters<RelationParams>,
+        Parameters(params): Parameters<RelationToolParams>,
     ) -> Result<Json<RelationMutationResult>, String> {
-        self.operations.relation_add(params).map(Json)
+        let (project, params) = params.into_parts();
+        self.for_project(project)?.relation_add(params).map(Json)
     }
 
     #[tool(
@@ -171,20 +379,21 @@ impl MaraMcp {
     )]
     fn relation_remove(
         &self,
-        Parameters(params): Parameters<RelationParams>,
+        Parameters(params): Parameters<RelationToolParams>,
     ) -> Result<Json<RelationMutationResult>, String> {
-        self.operations.relation_remove(params).map(Json)
+        let (project, params) = params.into_parts();
+        self.for_project(project)?.relation_remove(params).map(Json)
     }
 }
 
 #[tool_handler(
     name = "mara",
-    instructions = "Structured operations for the Mara project bound when this server started."
+    instructions = "Structured Mara operations. Pass an absolute project path to each project-bound tool, omit it for execution-directory discovery, or start the server with --project to bind all calls."
 )]
 impl ServerHandler for MaraMcp {}
 
 pub fn run(selected: Option<PathBuf>) -> Result<(), String> {
-    let operations = OperationContext::bound(selected)?;
+    let operations = OperationContext::from_environment(selected)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

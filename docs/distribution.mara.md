@@ -33,6 +33,16 @@ fail with an actionable diagnostic instead of downloading or building code at
 install time.
 :::
 
+:::mara requirement REQ-AGENT-INSTALLATION-MODES
+:title: Support complete and existing-installation agent onboarding
+:derives_from: SCN-ONBOARD-MARA-AGENT
+
+Codex users without Mara can install the complete package from the Convesoft
+marketplace. Users who already have Mara and an MCP registration can install
+only the Mara skill without installing another executable package. The two
+routes expose the same skill and MCP operations.
+:::
+
 :::mara requirement REQ-REPRODUCIBLE-PUBLIC-RELEASE
 :title: Publish one verified release from one approved revision
 :derives_from: SCN-INSTALL-DISTRIBUTED-MARA
@@ -47,8 +57,9 @@ Publication requires approval through the protected GitHub `release`
 environment. The approved workflow creates an annotated `v<version>` tag at the
 verified commit, creates a draft GitHub release, publishes native npm packages
 before the dispatcher, verifies any already-published version by tarball digest
-on retry, runs a public-registry smoke test, then publishes the GitHub release.
-Prereleases use the npm `next` tag; stable releases use `latest`.
+on retry, runs public-registry and Codex marketplace smoke tests, then publishes
+the GitHub release. Prereleases use the npm `next` tag; stable releases use
+`latest`.
 :::
 
 :::mara requirement REQ-PUBLIC-REPOSITORY-GUIDANCE
@@ -63,6 +74,7 @@ instead of duplicating their detailed meaning.
 :::mara design DES-NPM-NATIVE-PACKAGES
 :title: Dispatch to an npm-selected native package
 :satisfies: REQ-SCRIPT-FREE-NPM-DISTRIBUTION
+:satisfies: REQ-PORTABLE-AGENT-ONBOARDING
 
 The script-free `@convesoft/mara` package exposes `mara` through a small Node.js
 dispatcher. Its exact-version `optionalDependencies` use npm `os`, `cpu`, and
@@ -71,8 +83,25 @@ package contains the compiled Rust executable. The dispatcher selects the
 package from `process.platform` and `process.arch`, resolves its executable,
 forwards arguments and standard streams, and mirrors its exit status or signal.
 
-Package manifests are assembled from repository templates and the version in
-`[workspace.package]`; they do not maintain an independent release version.
+Package manifests and the packaged Agent Plugin version are assembled from
+repository templates and the version in `[workspace.package]`; they do not
+maintain an independent release version.
+:::
+
+:::mara design DES-CODEX-AGENT-DISTRIBUTION
+:title: Distribute complete and existing-installation Codex onboarding
+:satisfies: REQ-AGENT-INSTALLATION-MODES
+
+The repository's Codex marketplace is named `convesoft` and exposes plugin
+`mara` from the release channel used for `@convesoft/mara`: `next` during
+prereleases and `latest` after the stable release. Codex resolves that channel
+to a versioned installed snapshot. Because Codex extracts npm plugin sources
+without installing their dependencies, the snapshot's MCP launcher runs the
+same exact `@convesoft/mara` version through `npx`; npm then installs the
+matching native package in its managed cache. The existing-installation route
+instead registers the installed executable through Codex MCP configuration and
+installs the same skill independently; it does not create or link a Codex
+plugin-cache entry.
 :::
 
 :::mara design DES-PROTECTED-RELEASE-WORKFLOW
@@ -91,7 +120,8 @@ The release job is retryable only for the captured commit and byte-identical npm
 tarballs. It refuses a tag at another commit or an existing package with a
 different registry tarball digest. Native packages must become visible in the
 public registry before the dispatcher is published, and the dispatcher must
-become visible before the final `npx` smoke test and GitHub release publication.
+become visible before the final `npx` and Codex marketplace smoke tests and
+GitHub release publication.
 :::
 
 :::mara decision ADR-NPM-NATIVE-DISTRIBUTION
@@ -103,6 +133,19 @@ one-command `npx` path without a Rust toolchain or lifecycle scripts. An
 install-time binary downloader is rejected because blocked or restricted npm
 scripts would make the primary installation path unreliable, especially in
 enterprise environments.
+:::
+
+:::mara decision ADR-CLIENT-MANAGED-PLUGIN-INSTALLATION
+:title: Keep installed plugin state client-managed
+:justifies: DES-CODEX-AGENT-DISTRIBUTION
+
+Do not edit or symlink Codex plugin-cache entries to reuse another Mara package
+installation. Codex owns the plugin snapshot's validation, enablement, update,
+and removal, while npm owns the exact-version native runtime selected by its
+launcher. Users who want complete onboarding accept those managed artifacts;
+users who already installed Mara reuse it through MCP configuration and install
+only the small skill. This avoids a second native executable without depending
+on Codex's internal cache layout.
 :::
 
 :::mara decision ADR-FIRST-ALPHA-TARGETS

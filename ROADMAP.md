@@ -16,11 +16,12 @@ evidence and priorities change; detailed behavior becomes canonical in
 
 ### 0.1.0-alpha.1 — Agent-ready onboarding
 
-- Add an Agent Plugin manifest, Mara skill, and MCP configuration.
-- Manage project `AGENTS.md` guidance and reusable project templates.
-- Add project-level configuration needed by the onboarding workflow.
-- Leave client-wide discovery unspecified until observed client behavior gives
-  it a reliable contract.
+- Ship the existing npm package as a portable Agent Plugin with a Mara skill
+  and MCP configuration.
+- Let one MCP connection initialize or select one project per operation while
+  retaining execution-directory discovery.
+- Verify installation and the primary workflow in Codex as the reference
+  client without making client-wide compatibility promises.
 
 ### 0.1.0-alpha.2 — Durable identity and editing
 

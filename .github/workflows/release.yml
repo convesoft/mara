@@ -311,6 +311,32 @@ jobs:
           done
           echo "dispatcher did not become visible within 30 minutes" >&2
           exit 1
+      - name: Codex marketplace smoke test
+        env:
+          MARA_CODEX_HOME: ${{ runner.temp }}/mara-codex-smoke
+          MARA_PROJECT: ${{ runner.temp }}/mara-codex-project
+        run: |
+          set -euo pipefail
+          mkdir -p "$MARA_CODEX_HOME"
+          export CODEX_HOME="$MARA_CODEX_HOME"
+          codex=(npx --yes @openai/codex@0.152.0)
+          "${codex[@]}" plugin marketplace add convesoft/mara --ref "$TAG" --json
+          install_json=$("${codex[@]}" plugin add mara@convesoft --json)
+          installed_version=$(node -e \
+            'process.stdout.write(JSON.parse(process.argv[1]).version)' \
+            "$install_json")
+          plugin_root=$(node -e \
+            'process.stdout.write(JSON.parse(process.argv[1]).installedPath)' \
+            "$install_json")
+          test "$installed_version" = "$VERSION"
+          test -f "$plugin_root/mcp.json"
+          test -f "$plugin_root/skills/mara/SKILL.md"
+          test -x "$plugin_root/bin/mara-plugin.cjs"
+
+          node scripts/smoke-codex-plugin.mjs \
+            "$MARA_PROJECT" "${codex[@]}"
+          test -f "$MARA_PROJECT/.mara/project.toml"
+          test -f "$MARA_PROJECT/.mara/schema.yaml"
       - name: Publish GitHub release
         run: |
           set -euo pipefail

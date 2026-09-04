@@ -32,14 +32,62 @@ command = "npx"
 args = ["-y", "@convesoft/mara@0.1.0-alpha.0", "mcp"]
 ```
 
-If the client starts elsewhere, add an explicit project root before `mcp`:
+To bind the server to one project regardless of its execution directory, place
+`--project` after `mcp`:
 
-```text
---project /absolute/path/to/project
+```toml
+[mcp_servers.mara]
+command = "npx"
+args = [
+  "-y",
+  "@convesoft/mara@0.1.0-alpha.0",
+  "mcp",
+  "--project",
+  "/absolute/path/to/project",
+]
 ```
 
-Mara discovers the nearest parent containing `.mara/project.toml` and binds one
-project when the MCP server starts.
+Without `--project`, the server can start anywhere. Project-bound tools accept
+an absolute `project` path or discover the nearest parent containing
+`.mara/project.toml` from the server's execution directory.
+
+## Agent Plugin package
+
+The main npm package also contains a portable Agent Plugins 1.0 manifest, a
+Mara skill, and stdio MCP configuration. Compatible clients can install that
+package through their supported plugin distribution flow. Codex is the
+reference client; the portable package does not modify project `AGENTS.md`.
+
+Starting with `0.1.0-alpha.1`, a user without an existing Mara installation can
+install the complete package from the Convesoft Codex marketplace:
+
+```bash
+codex plugin marketplace add convesoft/mara
+codex plugin add mara@convesoft
+```
+
+Start a new Codex session after installation. Codex keeps an installed plugin
+snapshot in its managed cache. On first MCP start, its launcher uses `npx` to
+install and run that snapshot's exact Mara version with the matching native
+package in npm's cache.
+
+If Mara and its MCP server are already configured, install only the skill and
+keep using that existing executable:
+
+```bash
+npx skills add convesoft/mara --skill mara -g -a codex
+```
+
+For a new MCP registration backed by an existing installation, use the
+executable's absolute path:
+
+```bash
+codex mcp add mara -- /absolute/path/to/mara mcp
+```
+
+Use either the complete plugin or the existing-installation route. Do not add
+the complete plugin alongside an equivalent manually configured Mara MCP
+server.
 
 ## Core workflow
 

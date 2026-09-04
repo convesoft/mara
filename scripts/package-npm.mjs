@@ -115,11 +115,39 @@ async function packageMain(outputRoot, version) {
     bin: { mara: "bin/mara.cjs" },
     engines: { node: ">=18" },
     optionalDependencies,
-    files: ["bin/mara.cjs", "README.md", "LICENSE-MIT", "LICENSE-APACHE"],
+    files: [
+      "bin/mara.cjs",
+      "bin/mara-plugin.cjs",
+      "plugin.json",
+      "mcp.json",
+      "skills/mara/SKILL.md",
+      "README.md",
+      "LICENSE-MIT",
+      "LICENSE-APACHE",
+    ],
   };
 
   await copyFile(path.join(repositoryRoot, "npm/mara.cjs"), path.join(destination, "bin/mara.cjs"));
   await chmod(path.join(destination, "bin/mara.cjs"), 0o755);
+  await copyFile(
+    path.join(repositoryRoot, "npm/mara-plugin.cjs"),
+    path.join(destination, "bin/mara-plugin.cjs"),
+  );
+  await chmod(path.join(destination, "bin/mara-plugin.cjs"), 0o755);
+  await mkdir(path.join(destination, "skills/mara"), { recursive: true });
+  const plugin = JSON.parse(await readFile(path.join(repositoryRoot, "plugin.json"), "utf8"));
+  await writeFile(
+    path.join(destination, "plugin.json"),
+    `${JSON.stringify({ ...plugin, version }, null, 2)}\n`,
+  );
+  await Promise.all(
+    [
+      ["mcp.json", "mcp.json"],
+      ["skills/mara/SKILL.md", "skills/mara/SKILL.md"],
+    ].map(([source, target]) =>
+      copyFile(path.join(repositoryRoot, source), path.join(destination, target)),
+    ),
+  );
   await copyCommonFiles(destination);
   await writeManifest(destination, manifest);
   process.stdout.write(`${destination}\n`);
