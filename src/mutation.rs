@@ -534,9 +534,25 @@ fn ensure_unambiguous_item_identities(corpus: &Corpus) -> Result<(), Error> {
 
     for item in corpus.items() {
         ids.entry(item.id()).or_default().push(item);
-        if let Some(mid) = item.mid() {
-            mids.entry(mid).or_default().push(item);
+        let mid_entries = item
+            .metadata()
+            .iter()
+            .filter(|entry| entry.key() == "mid")
+            .collect::<Vec<_>>();
+        let [mid_entry] = mid_entries.as_slice() else {
+            return invalid(format!(
+                "cannot mutate relations while item '{}' does not have exactly one MID; run project validate",
+                item.id()
+            ));
+        };
+        if !crate::is_mid(mid_entry.value()) {
+            return invalid(format!(
+                "cannot mutate relations while item '{}' has invalid MID '{}'; run project validate",
+                item.id(),
+                mid_entry.value()
+            ));
         }
+        mids.entry(mid_entry.value()).or_default().push(item);
     }
 
     if let Some((id, _)) = ids.iter().find(|(_, items)| items.len() > 1) {

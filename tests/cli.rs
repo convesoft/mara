@@ -2802,6 +2802,63 @@ Second.
     }
 }
 
+#[test]
+fn relation_mutation_rejects_secondary_authored_mids_before_writing() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let path = fixture.path().join("items.mara.md");
+    fs::write(
+        &path,
+        r#":::mara requirement REQ-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: Source
+:depends_on: 01ARZ3NDEKTSV4RRFFQ69G5F02
+
+Source.
+:::
+
+:::mara requirement REQ-FIRST
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02
+:title: First
+
+First.
+:::
+
+:::mara requirement REQ-SECOND
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02
+:title: Second
+
+Second.
+:::
+"#,
+    )
+    .unwrap();
+    let original = fs::read_to_string(&path).unwrap();
+
+    let rejected = mara(
+        fixture.path(),
+        &[
+            "relation",
+            "remove",
+            "REQ-SOURCE",
+            "depends_on",
+            "REQ-FIRST",
+        ],
+    );
+
+    assert!(!rejected.status.success());
+    assert!(
+        stderr(&rejected).contains(
+            "cannot mutate relations while item 'REQ-FIRST' does not have exactly one MID"
+        ),
+        "{}",
+        stderr(&rejected)
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+}
+
 fn retrieval_fixture() -> TempDir {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
