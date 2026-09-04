@@ -605,6 +605,21 @@ Source.
     assert_eq!(item["summary"]["id"], "REQ-SOURCE");
     assert_eq!(item["summary"]["mid"], "01ARZ3NDEKTSV4RRFFQ69G5F01");
 
+    let list = mara(fixture.path(), &["--format", "json", "item", "list"]);
+    assert!(list.status.success(), "{}", stderr(&list));
+    let list: Value = serde_json::from_str(&stdout(&list)).unwrap();
+    assert_eq!(list["items"][0]["id"], "SCN-TARGET");
+    assert_eq!(list["items"][0]["mid"], "01ARZ3NDEKTSV4RRFFQ69G5F00");
+
+    let search = mara(
+        fixture.path(),
+        &["--format", "json", "item", "search", "source"],
+    );
+    assert!(search.status.success(), "{}", stderr(&search));
+    let search: Value = serde_json::from_str(&stdout(&search)).unwrap();
+    assert_eq!(search["items"][0]["id"], "REQ-SOURCE");
+    assert_eq!(search["items"][0]["mid"], "01ARZ3NDEKTSV4RRFFQ69G5F01");
+
     let add = mara(
         fixture.path(),
         &[
@@ -2733,6 +2748,58 @@ fn relation_add_and_remove_validate_endpoints_and_update_only_the_source_item() 
     assert!(!removed.contains(":derives_from: SCN-TARGET"));
     let valid = mara(fixture.path(), &["project", "validate"]);
     assert!(valid.status.success(), "{}", stderr(&valid));
+}
+
+#[test]
+fn relation_mutation_rejects_ambiguous_item_identities_before_writing() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let path = fixture.path().join("items.mara.md");
+    fs::write(
+        &path,
+        r#":::mara requirement REQ-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: Source
+:depends_on: REQ-SECOND
+
+Source.
+:::
+
+:::mara requirement REQ-FIRST
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: First
+
+First.
+:::
+
+:::mara requirement REQ-SECOND
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: Second
+
+Second.
+:::
+"#,
+    )
+    .unwrap();
+    let original = fs::read_to_string(&path).unwrap();
+
+    for action in ["add", "remove"] {
+        let rejected = mara(
+            fixture.path(),
+            &["relation", action, "REQ-SOURCE", "depends_on", "REQ-FIRST"],
+        );
+
+        assert!(!rejected.status.success(), "{action}");
+        assert!(
+            stderr(&rejected).contains(
+                "cannot mutate relations while item MID '01ARZ3NDEKTSV4RRFFQ69G5F01' is ambiguous"
+            ),
+            "{}",
+            stderr(&rejected)
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    }
 }
 
 fn retrieval_fixture() -> TempDir {

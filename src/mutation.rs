@@ -311,6 +311,7 @@ fn mutate_relation(
     kind: MutationKind,
 ) -> Result<RelationMutation, Error> {
     let corpus = load_corpus(project, schema)?;
+    ensure_unambiguous_item_identities(&corpus)?;
     let source_item = resolve_item(&corpus, source_id, "source")?;
     let target_item = resolve_item(&corpus, target_id, "target")?;
     let definition = schema
@@ -525,6 +526,31 @@ fn same_item_identity(left: &Item, right: &Item) -> bool {
         (Some(left_mid), Some(right_mid)) => left_mid == right_mid,
         _ => left.id() == right.id(),
     }
+}
+
+fn ensure_unambiguous_item_identities(corpus: &Corpus) -> Result<(), Error> {
+    let mut ids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
+    let mut mids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
+
+    for item in corpus.items() {
+        ids.entry(item.id()).or_default().push(item);
+        if let Some(mid) = item.mid() {
+            mids.entry(mid).or_default().push(item);
+        }
+    }
+
+    if let Some((id, _)) = ids.iter().find(|(_, items)| items.len() > 1) {
+        return invalid(format!(
+            "cannot mutate relations while item ID '{id}' is ambiguous; run project validate"
+        ));
+    }
+    if let Some((mid, _)) = mids.iter().find(|(_, items)| items.len() > 1) {
+        return invalid(format!(
+            "cannot mutate relations while item MID '{mid}' is ambiguous; run project validate"
+        ));
+    }
+
+    Ok(())
 }
 
 fn resolve_document_path(

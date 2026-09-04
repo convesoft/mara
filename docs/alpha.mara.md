@@ -252,8 +252,8 @@ Path filters normalize `.` components and reject absolute paths or `..`.
 Relation filters match authored relation names. Values within one filter or one
 field key combine with OR; distinct filter categories and field keys combine
 with AND. The limit applies last. Results follow document-path and source order
-and contain only ID, flavour, title, and source path and start line. `item list`
-returns the same compact summary shape without a text query.
+and contain only ID, MID when present, flavour, title, source path, and start
+line. `item list` returns the same compact summary shape without a text query.
 :::
 
 :::mara requirement REQ-ITEM-RELATED
