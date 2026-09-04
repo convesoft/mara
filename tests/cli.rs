@@ -594,6 +594,46 @@ Body.
 }
 
 #[test]
+fn project_mid_backfill_preflight_does_not_match_user_text_as_missing_mid() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace(
+            "    id_prefix: REQ-\n    body: required\n    fields: {}",
+            "    id_prefix: REQ-\n    body: required\n    fields:\n      blocked:\n        type: boolean",
+        ),
+    )
+    .unwrap();
+    let path = fixture.path().join("legacy.mara.md");
+    fs::write(
+        &path,
+        r#":::mara requirement REQ-LEGACY
+:title: Legacy requirement
+:blocked: bad is missing its MID
+
+Legacy body.
+:::
+"#,
+    )
+    .unwrap();
+    let original = fs::read_to_string(&path).unwrap();
+
+    let rejected = mara(fixture.path(), &["project", "mid", "backfill"]);
+
+    assert!(!rejected.status.success());
+    assert!(
+        stderr(&rejected).contains("invalid boolean value 'bad is missing its MID'"),
+        "{}",
+        stderr(&rejected)
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+}
+
+#[test]
 fn mcp_project_mid_backfill_backfills_a_selected_project() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);

@@ -207,7 +207,7 @@ pub fn backfill_mids(project: &Project, schema: &Schema) -> Result<BackfilledMid
     diagnostics.extend(validate_corpus(&corpus, schema));
     let blocking = diagnostics
         .into_iter()
-        .filter(|diagnostic| !diagnostic.message().contains(" is missing its MID"))
+        .filter(|diagnostic| !diagnostic.is_missing_mid())
         .collect::<Vec<_>>();
     if let Some(diagnostic) = blocking.first() {
         return invalid(format!(

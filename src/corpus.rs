@@ -222,7 +222,14 @@ pub struct Diagnostic {
     source: SourceLocation,
     item_ids: Vec<String>,
     applies_to_all_items: bool,
+    kind: DiagnosticKind,
     message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiagnosticKind {
+    Other,
+    MissingMid,
 }
 
 impl Diagnostic {
@@ -234,6 +241,9 @@ impl Diagnostic {
     }
     pub fn message(&self) -> &str {
         &self.message
+    }
+    pub(crate) fn is_missing_mid(&self) -> bool {
+        self.kind == DiagnosticKind::MissingMid
     }
 }
 
@@ -480,9 +490,10 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
     for item in corpus.items() {
         let mids = mid_entries(item);
         match mids.as_slice() {
-            [] => diagnostic(
+            [] => diagnostic_with_kind(
                 &mut diagnostics,
                 item.source(),
+                DiagnosticKind::MissingMid,
                 format!("item '{}' is missing its MID", item.id()),
             ),
             [entry] => {
@@ -661,6 +672,7 @@ fn load_corpus_for_validation_with_schema(
                     },
                     item_ids: Vec::new(),
                     applies_to_all_items: true,
+                    kind: DiagnosticKind::Other,
                     message: format!("could not read Mara document: {error}"),
                 });
                 continue;
@@ -682,6 +694,7 @@ fn load_corpus_for_validation_with_schema(
             },
             item_ids: error.item_ids,
             applies_to_all_items: false,
+            kind: DiagnosticKind::Other,
             message: error.message,
         }));
         if retain_document {
@@ -698,10 +711,20 @@ fn load_corpus_for_validation_with_schema(
 }
 
 fn diagnostic(diagnostics: &mut Vec<Diagnostic>, source: &SourceLocation, message: String) {
+    diagnostic_with_kind(diagnostics, source, DiagnosticKind::Other, message);
+}
+
+fn diagnostic_with_kind(
+    diagnostics: &mut Vec<Diagnostic>,
+    source: &SourceLocation,
+    kind: DiagnosticKind,
+    message: String,
+) {
     diagnostics.push(Diagnostic {
         source: source.clone(),
         item_ids: Vec::new(),
         applies_to_all_items: false,
+        kind,
         message,
     });
 }
@@ -804,6 +827,7 @@ fn discover_for_validation(root: &Path, matcher: &GlobSet) -> (Vec<PathBuf>, Vec
                 },
                 item_ids: Vec::new(),
                 applies_to_all_items: true,
+                kind: DiagnosticKind::Other,
                 message: format!("could not discover Mara documents: {error}"),
             }),
         }
