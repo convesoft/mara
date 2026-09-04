@@ -57,9 +57,9 @@ Publication requires approval through the protected GitHub `release`
 environment. The approved workflow creates an annotated `v<version>` tag at the
 verified commit, creates a draft GitHub release, publishes native npm packages
 before the dispatcher, verifies any already-published version by tarball digest
-on retry, runs public-registry and Codex marketplace smoke tests, then publishes
-the GitHub release. Prereleases use the npm `next` tag; stable releases use
-`latest`.
+on retry, then extracts the public dispatcher and exercises the exact stdio MCP
+command declared by its plugin metadata before publishing the GitHub release.
+Prereleases use the npm `next` tag; stable releases use `latest`.
 :::
 
 :::mara requirement REQ-PUBLIC-REPOSITORY-GUIDANCE
@@ -97,11 +97,16 @@ The repository's Codex marketplace is named `convesoft` and exposes plugin
 prereleases and `latest` after the stable release. Codex resolves that channel
 to a versioned installed snapshot. Because Codex extracts npm plugin sources
 without installing their dependencies, the snapshot's MCP launcher runs the
-same exact `@convesoft/mara` version through `npx`; npm then installs the
-matching native package in its managed cache. The existing-installation route
-instead registers the installed executable through Codex MCP configuration and
-installs the same skill independently; it does not create or link a Codex
-plugin-cache entry.
+same exact `@convesoft/mara` version through `npx` from a neutral directory;
+npm then installs the matching native package in its managed cache. The
+existing-installation route instead registers the installed executable through
+Codex MCP configuration and installs the same skill independently; it does not
+create or link a Codex plugin-cache entry.
+
+A separate compatibility workflow installs each published release through a
+pinned Codex version and exercises its installed MCP integration without a
+model call. It also supports manual reruns. This reference-client check reports
+compatibility but does not gate or retry immutable release publication.
 :::
 
 :::mara design DES-PROTECTED-RELEASE-WORKFLOW
@@ -120,8 +125,10 @@ The release job is retryable only for the captured commit and byte-identical npm
 tarballs. It refuses a tag at another commit or an existing package with a
 different registry tarball digest. Native packages must become visible in the
 public registry before the dispatcher is published, and the dispatcher must
-become visible before the final `npx` and Codex marketplace smoke tests and
-GitHub release publication.
+become visible before the final clean `npx`, packaged-plugin MCP, and GitHub
+release publication checks. Codex marketplace compatibility runs separately
+after publication and on manual request so external client behavior cannot make
+an otherwise verified release transaction partially fail.
 :::
 
 :::mara decision ADR-NPM-NATIVE-DISTRIBUTION

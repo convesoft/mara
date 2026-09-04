@@ -102,6 +102,7 @@ test "$(node -p 'require(process.argv[1]).mcpServers.mara.args[0]' "$plugin/mcp.
 printf '%s\n' \
   '#!/usr/bin/env bash' \
   'set -euo pipefail' \
+  'test "$PWD" = "${MARA_SMOKE_EXPECTED_CWD:?}"' \
   'test "$1" = --yes' \
   'shift' \
   'test "$1" = "${MARA_SMOKE_PACKAGE_SPEC:?}"' \
@@ -118,6 +119,8 @@ printf '%s\n' \
       cd "$plugin"
       PATH="$shim:$PATH" \
         MARA_SMOKE_EXECUTABLE="$mara" \
+        MARA_SMOKE_EXPECTED_CWD="$(node -p \
+          'require("node:path").parse(process.argv[1]).root' "$plugin")" \
         MARA_SMOKE_PACKAGE_SPEC="@convesoft/mara@$version" \
         node bin/mara-plugin.cjs mcp
     ) \

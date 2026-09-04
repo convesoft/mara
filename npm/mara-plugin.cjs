@@ -29,7 +29,10 @@ const command = hasLocalRuntime ? process.execPath : "npx";
 const args = hasLocalRuntime
   ? [path.join(__dirname, "mara.cjs"), ...process.argv.slice(2)]
   : ["--yes", `${manifest.name}@${manifest.version}`, ...process.argv.slice(2)];
-const child = spawn(command, args, { stdio: "inherit" });
+const child = spawn(command, args, {
+  cwd: hasLocalRuntime ? undefined : path.parse(__dirname).root,
+  stdio: "inherit",
+});
 const signals = ["SIGINT", "SIGTERM", "SIGHUP"];
 const forward = new Map();
 

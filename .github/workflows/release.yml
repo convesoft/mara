@@ -294,7 +294,7 @@ jobs:
           else
             npm publish "$tarball" --access public --tag "$NPM_TAG"
           fi
-      - name: Public registry smoke test
+      - name: Public package and plugin smoke test
         run: |
           set -euo pipefail
           for attempt in $(seq 1 60); do
@@ -304,6 +304,22 @@ jobs:
               cd "$temporary"
               npx --yes "@convesoft/mara@$VERSION" --version \
                 | grep -F "mara $VERSION"
+
+              tarball=$(npm pack "@convesoft/mara@$VERSION" \
+                --pack-destination "$temporary" --json \
+                | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(JSON.parse(s)[0].filename))')
+              mkdir -p plugin project
+              tar -xzf "$tarball" -C plugin
+              plugin_root="$temporary/plugin/package"
+              test "$(node -p 'require(process.argv[1]).version' "$plugin_root/package.json")" = \
+                "$VERSION"
+              test "$(node -p 'require(process.argv[1]).version' "$plugin_root/plugin.json")" = \
+                "$VERSION"
+              test -f "$plugin_root/mcp.json"
+              test -f "$plugin_root/skills/mara/SKILL.md"
+              test -x "$plugin_root/bin/mara-plugin.cjs"
+              node "$GITHUB_WORKSPACE/scripts/smoke-plugin-mcp.mjs" \
+                "$plugin_root" "$temporary/project"
               exit 0
             fi
             echo "dispatcher is still processing (attempt $attempt/60)"
@@ -311,32 +327,6 @@ jobs:
           done
           echo "dispatcher did not become visible within 30 minutes" >&2
           exit 1
-      - name: Codex marketplace smoke test
-        env:
-          MARA_CODEX_HOME: ${{ runner.temp }}/mara-codex-smoke
-          MARA_PROJECT: ${{ runner.temp }}/mara-codex-project
-        run: |
-          set -euo pipefail
-          mkdir -p "$MARA_CODEX_HOME"
-          export CODEX_HOME="$MARA_CODEX_HOME"
-          codex=(npx --yes @openai/codex@0.152.0)
-          "${codex[@]}" plugin marketplace add convesoft/mara --ref "$TAG" --json
-          install_json=$("${codex[@]}" plugin add mara@convesoft --json)
-          installed_version=$(node -e \
-            'process.stdout.write(JSON.parse(process.argv[1]).version)' \
-            "$install_json")
-          plugin_root=$(node -e \
-            'process.stdout.write(JSON.parse(process.argv[1]).installedPath)' \
-            "$install_json")
-          test "$installed_version" = "$VERSION"
-          test -f "$plugin_root/mcp.json"
-          test -f "$plugin_root/skills/mara/SKILL.md"
-          test -x "$plugin_root/bin/mara-plugin.cjs"
-
-          node scripts/smoke-codex-plugin.mjs \
-            "$MARA_PROJECT" "${codex[@]}"
-          test -f "$MARA_PROJECT/.mara/project.toml"
-          test -f "$MARA_PROJECT/.mara/schema.yaml"
       - name: Publish GitHub release
         run: |
           set -euo pipefail
