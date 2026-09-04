@@ -253,6 +253,9 @@ pub fn backfill_mids(project: &Project, schema: &Schema) -> Result<BackfilledMid
             .expect("backfill target belongs to the loaded corpus");
         let newline = newline_style(document.source());
         insertions.sort_by_key(|(position, _)| *position);
+        for (offset, (_, entry)) in insertions.iter_mut().enumerate() {
+            entry.line += offset;
+        }
         let mut candidate = document.source().to_owned();
         for (position, entry) in insertions.iter().rev() {
             candidate.insert_str(*position, &format!(":mid: {}{newline}", entry.mid()));

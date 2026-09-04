@@ -549,6 +549,10 @@ Legacy body.
     let backfill: Value = serde_json::from_str(&stdout(&backfill)).unwrap();
     let changed = backfill["changed"].as_array().unwrap();
     assert_eq!(changed.len(), 2);
+    assert_eq!(changed[0]["id"], "SCN-LEGACY");
+    assert_eq!(changed[0]["line"], 2);
+    assert_eq!(changed[1]["id"], "REQ-LEGACY");
+    assert_eq!(changed[1]["line"], 9);
     assert!(
         changed
             .iter()
