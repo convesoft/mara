@@ -1,6 +1,11 @@
 # Changelog
 
 All notable changes to Mara are generated from Conventional Commit history.
+## [0.1.0-alpha.1]
+
+### Added
+
+- Add portable agent onboarding
 ## [0.1.0-alpha.0]
 
 ### Added
