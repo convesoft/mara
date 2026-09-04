@@ -20,9 +20,6 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
-    env:
-      MARA_CODEX_HOME: ${{ runner.temp }}/mara-codex-smoke
-      MARA_PROJECT: ${{ runner.temp }}/mara-codex-project
     steps:
       - uses: actions/checkout@v6
         with:
@@ -52,6 +49,9 @@ jobs:
             echo "VERSION=$VERSION"
           } >> "$GITHUB_ENV"
       - name: Install through the Codex marketplace and exercise MCP
+        env:
+          MARA_CODEX_HOME: ${{ runner.temp }}/mara-codex-smoke
+          MARA_PROJECT: ${{ runner.temp }}/mara-codex-project
         run: |
           set -euo pipefail
           mkdir -p "$MARA_CODEX_HOME"
