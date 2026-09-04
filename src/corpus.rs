@@ -462,13 +462,16 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
         }
     }
 
-    for duplicates in mids.values().filter(|items| items.len() > 1) {
+    for (mid, duplicates) in mids.iter().filter(|(_, items)| items.len() > 1) {
         for item in duplicates {
-            if let Some(entry) = mid_entries(item).first() {
+            if let Some(entry) = mid_entries(item)
+                .into_iter()
+                .find(|entry| entry.value() == *mid)
+            {
                 diagnostic(
                     &mut diagnostics,
                     entry.source(),
-                    format!("duplicate item MID '{}'", entry.value()),
+                    format!("duplicate item MID '{mid}'"),
                 );
             }
         }

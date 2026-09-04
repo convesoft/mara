@@ -461,6 +461,59 @@ Body.
 }
 
 #[test]
+fn project_validation_reports_the_duplicated_secondary_mid_entry() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        r#":::mara requirement REQ-FIRST
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: First
+
+Body.
+:::
+
+:::mara requirement REQ-SECOND
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: Second
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["--format", "json", "project", "validate"]);
+
+    assert!(!validate.status.success());
+    assert!(stderr(&validate).is_empty(), "{}", stderr(&validate));
+    let validate: Value = serde_json::from_str(&stdout(&validate)).unwrap();
+    let duplicate_mids = validate["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic["message"] == "duplicate item MID '01ARZ3NDEKTSV4RRFFQ69G5F01'"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(duplicate_mids.len(), 2, "{validate:#}");
+    assert!(
+        duplicate_mids
+            .iter()
+            .any(|diagnostic| diagnostic["line"] == 3),
+        "{validate:#}"
+    );
+    assert!(
+        duplicate_mids
+            .iter()
+            .any(|diagnostic| diagnostic["line"] == 10),
+        "{validate:#}"
+    );
+}
+
+#[test]
 fn project_mid_backfill_is_deliberate_preflighted_and_idempotent() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
