@@ -6,7 +6,7 @@ evidence and priorities change; detailed behavior becomes canonical in
 
 ## Toward 0.1.0
 
-### 0.1.0-alpha.0 — Distributable core (current)
+### 0.1.0-alpha.0 — Distributable core
 
 - Publish the existing single-project CLI and MCP workflow.
 - Add essential public documentation, licensing, and the roadmap.
@@ -14,14 +14,14 @@ evidence and priorities change; detailed behavior becomes canonical in
 - Generate the changelog and automate CI, packaging, and protected releases.
 - Verify clean CLI and stdio MCP use without a local Rust installation.
 
-### 0.1.0-alpha.1 — Agent-ready onboarding
+### 0.1.0-alpha.1 — Agent-ready onboarding (current)
 
-- Ship the existing npm package as a portable Agent Plugin with a Mara skill
-  and MCP configuration.
+- Ship a Mara skill and clear MCP onboarding guidance with the existing npm
+  package.
 - Let one MCP connection initialize or select one project per operation while
   retaining execution-directory discovery.
-- Verify installation and the primary workflow in Codex as the reference
-  client without making client-wide compatibility promises.
+- Verify the primary Codex workflow through manual MCP registration and
+  separate skill installation. Keep complete-plugin installation optional.
 
 ### 0.1.0-alpha.2 — Durable identity and editing
 

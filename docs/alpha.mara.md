@@ -49,11 +49,11 @@ This advances [[GOAL-BOUNDED-AGENT-CONTEXT]].
 :::mara scenario SCN-ONBOARD-MARA-AGENT
 :title: Give an agent access to Mara project knowledge
 
-A user installs Mara as an Agent Plugin or connects an existing Mara
-installation and installs its skill separately. The agent initializes an
-explicit project when needed, inspects its schema, and performs bounded
-operations against one selected project through MCP. This advances
-[[GOAL-BOUNDED-AGENT-CONTEXT]].
+A user connects an installed Mara executable to the agent as an MCP server and
+installs its skill separately. A compatible client may instead install the
+optional complete Agent Plugin. The agent initializes an explicit project when
+needed, inspects its schema, and performs bounded operations against one
+selected project through MCP. This advances [[GOAL-BOUNDED-AGENT-CONTEXT]].
 :::
 
 ## Product contracts
@@ -116,12 +116,13 @@ data equivalent to MCP structured results.
 :title: Package Mara for portable agent onboarding
 :derives_from: SCN-ONBOARD-MARA-AGENT
 
-The existing `@convesoft/mara` npm package must contain an Agent Plugins 1.0
-manifest, one Mara skill, and stdio MCP configuration. The skill guides agents
-to select an explicit project and discover its schema before operating. It must
-not create or modify project `AGENTS.md`. Codex is the reference installation
-client; other clients are supported according to their implemented Agent
-Plugins components rather than by a universal compatibility promise.
+The supported agent onboarding path registers an installed Mara executable as
+an MCP server and installs the Mara skill separately. The existing
+`@convesoft/mara` package also contains an Agent Plugins 1.0 manifest, the same
+skill, and stdio MCP configuration as an optional complete-plugin convenience.
+The skill guides agents to select an explicit project and discover its schema
+before operating. Neither route creates or modifies project `AGENTS.md`.
+Complete-plugin compatibility is client-managed and is not a release gate.
 :::
 
 :::mara requirement REQ-ITEM-CREATION
@@ -359,15 +360,14 @@ project precedence, workspace aggregation, or cross-project operations.
 :title: Portable Agent Plugin package
 :satisfies: REQ-PORTABLE-AGENT-ONBOARDING
 
-The main npm package is the Agent Plugin root. It contains the Agent Plugins
-1.0 `plugin.json`, discovers `skills/mara/SKILL.md`, and declares the packaged
-plugin launcher as a stdio server in `mcp.json`. The launcher uses an installed
-matching native package when available. When a client such as Codex extracts
-the plugin without installing npm dependencies, it runs the package's exact
-version through `npx`, which installs the selected native package in npm's
-managed cache. The MCP process starts in the plugin root and relies on
-request-level absolute project selection instead of assuming that the plugin
-installation directory is a Mara project.
+The main npm package is also an optional Agent Plugin root. It contains the
+Agent Plugins 1.0 `plugin.json`, discovers `skills/mara/SKILL.md`, and declares
+the packaged plugin launcher as a stdio server in `mcp.json`. The launcher uses
+an installed matching native package when available or runs the package's exact
+version through `npx`. Its MCP process relies on request-level absolute project
+selection instead of assuming that the plugin installation directory is a Mara
+project. Client-specific complete-plugin installation behavior is outside the
+supported manual MCP-plus-skill contract.
 :::
 
 :::mara design DES-DETERMINISTIC-KEYWORD-SEARCH

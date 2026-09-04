@@ -294,7 +294,7 @@ jobs:
           else
             npm publish "$tarball" --access public --tag "$NPM_TAG"
           fi
-      - name: Public package and plugin smoke test
+      - name: Public registry smoke test
         run: |
           set -euo pipefail
           for attempt in $(seq 1 60); do
@@ -304,22 +304,6 @@ jobs:
               cd "$temporary"
               npx --yes "@convesoft/mara@$VERSION" --version \
                 | grep -F "mara $VERSION"
-
-              tarball=$(npm pack "@convesoft/mara@$VERSION" \
-                --pack-destination "$temporary" --json \
-                | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(JSON.parse(s)[0].filename))')
-              mkdir -p plugin project
-              tar -xzf "$tarball" -C plugin
-              plugin_root="$temporary/plugin/package"
-              test "$(node -p 'require(process.argv[1]).version' "$plugin_root/package.json")" = \
-                "$VERSION"
-              test "$(node -p 'require(process.argv[1]).version' "$plugin_root/plugin.json")" = \
-                "$VERSION"
-              test -f "$plugin_root/mcp.json"
-              test -f "$plugin_root/skills/mara/SKILL.md"
-              test -x "$plugin_root/bin/mara-plugin.cjs"
-              node "$GITHUB_WORKSPACE/scripts/smoke-plugin-mcp.mjs" \
-                "$plugin_root" "$temporary/project"
               exit 0
             fi
             echo "dispatcher is still processing (attempt $attempt/60)"
