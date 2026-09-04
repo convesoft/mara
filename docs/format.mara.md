@@ -18,6 +18,7 @@ An item has an explicit namespace, flavour, and complete human-readable ID:
 
 ```markdown
 :::mara requirement REQ-FAIL-SAFETY
+:mid: 01M1PXP2KGVW5ZF2JGP9K4XE9B
 :title: Fail safely and observably
 :depends_on: REQ-ACTIONABLE-DIAGNOSTICS
 
