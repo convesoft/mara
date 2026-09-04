@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use mara::{
     FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult, ItemFilterParams,
-    ItemRelatedParams, OperationContext, ProjectBackfillMidsResult, ProjectInitializationResult,
+    ItemRelatedParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
     RelatedItemsResult, RelationDirection, RelationMutationResult, RelationParams, ResolvedItem,
     SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult, Template,
     ValidationResult,
@@ -248,15 +248,15 @@ impl MaraMcp {
     }
 
     #[tool(
-        name = "project_backfill_mids",
+        name = "project_mid_backfill",
         description = "Deliberately add generated MIDs to every legacy item that lacks one after a validation preflight."
     )]
-    fn project_backfill_mids(
+    fn project_mid_backfill(
         &self,
         Parameters(params): Parameters<ProjectParams>,
-    ) -> Result<Json<ProjectBackfillMidsResult>, String> {
+    ) -> Result<Json<ProjectMidBackfillResult>, String> {
         self.for_project(params.project)?
-            .project_backfill_mids()
+            .project_mid_backfill()
             .map(Json)
     }
 

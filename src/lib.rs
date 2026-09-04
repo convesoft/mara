@@ -27,7 +27,7 @@ pub use mutation::{
 pub use operations::{
     DeclarationSummary, FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult,
     ItemFilterParams, ItemIdParams, ItemRelatedParams, ItemSearchParams, OperationContext,
-    ProjectBackfillMidsResult, ProjectInitializationResult, ProjectSummary, RelatedItemsResult,
+    ProjectInitializationResult, ProjectMidBackfillResult, ProjectSummary, RelatedItemsResult,
     RelationAction, RelationMutationResult, RelationParams, SchemaGetResult, SchemaKind,
     SchemaListResult, SchemaValidationResult, ValidationDiagnostic, ValidationResult,
     ValidationScope, ValidationTarget, ValidationTargetKind, project_initialize,
@@ -1256,18 +1256,9 @@ pub(crate) fn is_item_id(id: &str) -> bool {
 }
 
 pub(crate) fn is_mid(value: &str) -> bool {
-    value.len() == 26
-        && value.chars().all(|character| {
-            matches!(
-                character,
-                '0'..='9'
-                    | 'A'..='H'
-                    | 'J'..='K'
-                    | 'M'..='N'
-                    | 'P'..='T'
-                    | 'V'..='Z'
-            )
-        })
+    value
+        .parse::<ulid::Ulid>()
+        .is_ok_and(|mid| mid.to_string() == value)
 }
 
 fn endpoint_errors(

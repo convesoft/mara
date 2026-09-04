@@ -355,6 +355,13 @@ Body.
 Body.
 :::
 
+:::mara requirement REQ-OVERFLOW
+:mid: ZZZZZZZZZZZZZZZZZZZZZZZZZZ
+:title: Overflow MID
+
+Body.
+:::
+
 :::mara requirement REQ-DUPLICATE-ONE
 :mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
 :title: Duplicate one
@@ -386,6 +393,7 @@ Body.
     for expected in [
         "item 'REQ-MISSING' is missing its MID",
         "invalid item MID 'not-a-mid'",
+        "invalid item MID 'ZZZZZZZZZZZZZZZZZZZZZZZZZZ'",
         "duplicate item MID '01ARZ3NDEKTSV4RRFFQ69G5F00'",
         "item 'REQ-MISPLACED' MID must immediately follow its opener",
     ] {
@@ -397,7 +405,7 @@ Body.
 }
 
 #[test]
-fn project_backfill_mids_is_deliberate_preflighted_and_idempotent() {
+fn project_mid_backfill_is_deliberate_preflighted_and_idempotent() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
     assert!(init.status.success(), "{}", stderr(&init));
@@ -426,7 +434,7 @@ Legacy body.
 
     let backfill = mara(
         fixture.path(),
-        &["--format", "json", "project", "backfill-mids"],
+        &["--format", "json", "project", "mid", "backfill"],
     );
     assert!(backfill.status.success(), "{}", stderr(&backfill));
     let backfill: Value = serde_json::from_str(&stdout(&backfill)).unwrap();
@@ -447,7 +455,7 @@ Legacy body.
 
     let again = mara(
         fixture.path(),
-        &["--format", "json", "project", "backfill-mids"],
+        &["--format", "json", "project", "mid", "backfill"],
     );
     assert!(again.status.success(), "{}", stderr(&again));
     let again: Value = serde_json::from_str(&stdout(&again)).unwrap();
@@ -466,14 +474,14 @@ Body.
     )
     .unwrap();
     let original = fs::read_to_string(&path).unwrap();
-    let rejected = mara(fixture.path(), &["project", "backfill-mids"]);
+    let rejected = mara(fixture.path(), &["project", "mid", "backfill"]);
     assert!(!rejected.status.success());
     assert!(stderr(&rejected).contains("cannot backfill MIDs while validation fails"));
     assert_eq!(fs::read_to_string(&path).unwrap(), original);
 }
 
 #[test]
-fn mcp_project_backfill_mids_backfills_a_selected_project() {
+fn mcp_project_mid_backfill_backfills_a_selected_project() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
     assert!(init.status.success(), "{}", stderr(&init));
@@ -488,7 +496,7 @@ fn mcp_project_backfill_mids_backfills_a_selected_project() {
         &[
             mcp_initialize(1),
             json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
-            mcp_call(2, "project_backfill_mids", json!({})),
+            mcp_call(2, "project_mid_backfill", json!({})),
             mcp_call(3, "project_validate", json!({})),
         ],
     );
@@ -3051,7 +3059,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
         BTreeSet::from([
             "project_init",
             "project_validate",
-            "project_backfill_mids",
+            "project_mid_backfill",
             "schema_get",
             "schema_list",
             "schema_validate",

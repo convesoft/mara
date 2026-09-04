@@ -10,7 +10,7 @@ use std::{
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
     FieldValue, ItemCollectionResult, ItemCreateParams, ItemFilterParams, ItemRelatedParams,
-    ItemSummary, OperationContext, ProjectBackfillMidsResult, ProjectInitializationResult,
+    ItemSummary, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
     RelatedItem, RelationDirection, RelationMutationResult, RelationParams, RelationSummary,
     ResolvedItem, SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult, Template,
     ValidationResult, ValidationScope, ValidationTargetKind, project_initialize,
@@ -68,7 +68,15 @@ enum ProjectCommand {
         template: CliTemplate,
     },
     Validate,
-    BackfillMids,
+    Mid {
+        #[command(subcommand)]
+        command: ProjectMidCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectMidCommand {
+    Backfill,
 }
 
 #[derive(Debug, Subcommand)]
@@ -352,10 +360,13 @@ fn run(cli: Cli) -> Result<bool, String> {
             emit_validation(format, &result)
         }
         Command::Project {
-            command: ProjectCommand::BackfillMids,
+            command:
+                ProjectCommand::Mid {
+                    command: ProjectMidCommand::Backfill,
+                },
         } => {
-            let result = operations(project)?.project_backfill_mids()?;
-            emit(format, &result, print_project_backfill_mids)?;
+            let result = operations(project)?.project_mid_backfill()?;
+            emit(format, &result, print_project_mid_backfill)?;
             Ok(true)
         }
         Command::Item {
@@ -559,7 +570,7 @@ fn print_project_initialization(result: &ProjectInitializationResult) -> Result<
     Ok(())
 }
 
-fn print_project_backfill_mids(result: &ProjectBackfillMidsResult) -> Result<(), String> {
+fn print_project_mid_backfill(result: &ProjectMidBackfillResult) -> Result<(), String> {
     if result.changed.is_empty() {
         println!("no missing MIDs in project at {}", result.project.display());
         return Ok(());

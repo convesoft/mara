@@ -66,10 +66,10 @@ impl OperationContext {
         self.validate(None)
     }
 
-    pub fn project_backfill_mids(&self) -> Result<ProjectBackfillMidsResult, String> {
+    pub fn project_mid_backfill(&self) -> Result<ProjectMidBackfillResult, String> {
         let (project, schema) = self.load_project()?;
         let result = backfill_mids(&project, &schema).map_err(|error| error.to_string())?;
-        Ok(ProjectBackfillMidsResult {
+        Ok(ProjectMidBackfillResult {
             project: project.root().to_path_buf(),
             changed: result
                 .entries()
@@ -354,7 +354,7 @@ pub struct ProjectSummary {
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ProjectBackfillMidsResult {
+pub struct ProjectMidBackfillResult {
     pub project: PathBuf,
     pub changed: Vec<BackfilledMidResult>,
 }

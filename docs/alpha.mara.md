@@ -175,7 +175,7 @@ deterministically.
 :title: Backfill missing item identities deliberately
 :derives_from: SCN-AUTHOR-ITEM-FLEXIBLY
 
-`project backfill-mids` and MCP `project_backfill_mids` add generated MIDs to
+`project mid backfill` and MCP `project_mid_backfill` add generated MIDs to
 every legacy item that lacks one. Backfill preserves existing source content and
 existing MIDs, writes each new `:mid:` immediately after its item opener, and
 makes no source changes when its validation preflight fails. Normal reads never
@@ -378,7 +378,7 @@ for schema-repeatable metadata.
 
 | Object | Operations |
 |---|---|
-| `project` | `init`, `validate`, `backfill-mids` |
+| `project` | `init`, `validate`, `mid backfill` |
 | `schema` | `get`, `list`, `validate` |
 | `item` | `create`, `get`, `list`, `search`, `related`, `validate` |
 | `relation` | `add`, `remove` |
