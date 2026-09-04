@@ -167,7 +167,8 @@ Every item has one repository-wide immutable MID in addition to its
 human-readable ID. A MID is a raw canonical uppercase 26-character ULID with no
 prefix. Human IDs remain readable handles and authored relation targets, while
 identity-dependent resolution can use either an exact MID or an exact human ID
-deterministically.
+deterministically. Duplicate MIDs and duplicate human IDs are invalid even when
+the other identity differs.
 :::
 
 :::mara requirement REQ-MID-BACKFILL
@@ -409,9 +410,10 @@ generated MID. Query and mutation operations resolve item handles by exact MID
 when the handle is a canonical MID, otherwise by exact human ID. Compact and
 resolved item structures include both identities when a MID is present.
 
-Resolved relation traversal uses resolved item identities internally. Relation
-metadata remains authored as human-readable IDs, and relation mutation writes
-the target item's human ID even when the caller supplied its MID.
+Resolved relation traversal resolves target handles to item identities
+internally. Relation metadata remains authored as human-readable IDs by
+operation output, and relation mutation writes the target item's human ID even
+when the caller supplied its MID.
 :::
 
 :::mara design DES-OPERATION-PROJECT-CONTEXT

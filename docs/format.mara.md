@@ -61,10 +61,10 @@ Failures preserve user data and produce actionable diagnostics.
 
 - `[[REQ-FAIL-SAFETY]]` is a readable internal mention resolved by exact ID.
 - Typed relations are metadata entries whose key names the relation and whose
-  value is one target ID. Repeat the key for multiple targets.
+  value is one target handle. Repeat the key for multiple targets.
 - Use only relation names whose meaning is defined by the project corpus.
-- Relations resolve to MIDs internally once machine identity exists. Inverses
-  and backlinks are derived and are not authored a second time.
+- Relations resolve target handles to MIDs internally once machine identity
+  exists. Inverses and backlinks are derived and are not authored a second time.
 - Inline references are mentions; typed relations are authored in metadata.
 
 ## In-memory projection

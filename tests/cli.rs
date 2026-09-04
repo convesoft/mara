@@ -405,6 +405,62 @@ Body.
 }
 
 #[test]
+fn project_validation_rejects_non_bijective_item_identities() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        r#":::mara requirement REQ-SHARED-ID
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: Shared ID one
+
+Body.
+:::
+
+:::mara requirement REQ-SHARED-ID
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: Shared ID two
+
+Body.
+:::
+
+:::mara requirement REQ-SHARED-MID-ONE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02
+:title: Shared MID one
+
+Body.
+:::
+
+:::mara requirement REQ-SHARED-MID-TWO
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02
+:title: Shared MID two
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert_eq!(
+        errors.matches("duplicate item ID 'REQ-SHARED-ID'").count(),
+        2,
+        "{errors}"
+    );
+    assert_eq!(
+        errors
+            .matches("duplicate item MID '01ARZ3NDEKTSV4RRFFQ69G5F02'")
+            .count(),
+        2,
+        "{errors}"
+    );
+}
+
+#[test]
 fn project_mid_backfill_is_deliberate_preflighted_and_idempotent() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -563,6 +619,115 @@ Source.
     let source = fs::read_to_string(fixture.path().join("items.mara.md")).unwrap();
     assert!(source.contains(":derives_from: SCN-TARGET"));
     assert!(!source.contains(":derives_from: 01ARZ3NDEKTSV4RRFFQ69G5F00"));
+}
+
+#[test]
+fn relation_traversal_resolves_authored_mids_as_item_identity() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("items.mara.md"),
+        r#":::mara scenario SCN-TARGET
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: Target
+
+Target.
+:::
+
+:::mara requirement REQ-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: Source
+:derives_from: 01ARZ3NDEKTSV4RRFFQ69G5F00
+
+Source.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+
+    let get = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "get",
+            "01ARZ3NDEKTSV4RRFFQ69G5F00",
+        ],
+    );
+    assert!(get.status.success(), "{}", stderr(&get));
+    let item: Value = serde_json::from_str(&stdout(&get)).unwrap();
+    assert_eq!(item["incoming_relations"][0]["item"]["id"], "REQ-SOURCE");
+
+    let related = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "related",
+            "01ARZ3NDEKTSV4RRFFQ69G5F00",
+        ],
+    );
+    assert!(related.status.success(), "{}", stderr(&related));
+    let related: Value = serde_json::from_str(&stdout(&related)).unwrap();
+    assert_eq!(related["items"][0]["item"]["id"], "REQ-SOURCE");
+    assert_eq!(related["items"][0]["direction"], "incoming");
+}
+
+#[test]
+fn incoming_relation_traversal_rejects_ambiguous_human_id_targets() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("items.mara.md"),
+        r#":::mara requirement REQ-DUP
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: First
+
+First.
+:::
+
+:::mara requirement REQ-DUP
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: Second
+
+Second.
+:::
+
+:::mara design DES-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02
+:title: Source
+:satisfies: REQ-DUP
+
+Source.
+:::
+"#,
+    )
+    .unwrap();
+
+    let get = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "get",
+            "01ARZ3NDEKTSV4RRFFQ69G5F00",
+        ],
+    );
+
+    assert!(!get.status.success());
+    let error: Value = serde_json::from_str(&stdout(&get)).unwrap();
+    assert_eq!(
+        error["error"]["message"],
+        "relation 'satisfies' from 'DES-SOURCE' references ambiguous item 'REQ-DUP'"
+    );
 }
 
 #[test]

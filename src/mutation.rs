@@ -357,7 +357,7 @@ fn mutate_relation(
         .filter(|existing| {
             existing.name() == relation_name
                 && resolve_item(&corpus, existing.target(), "target")
-                    .is_ok_and(|item| item.id() == target_item.id())
+                    .is_ok_and(|item| same_item_identity(item, target_item))
         })
         .collect::<Vec<_>>();
     let candidate = match kind {
@@ -517,6 +517,13 @@ fn resolve_item<'a>(corpus: &'a Corpus, id: &str, endpoint: &str) -> Result<&'a 
         [] => invalid(format!("relation {endpoint} item '{id}' was not found")),
         _ if by_mid => invalid(format!("relation {endpoint} item MID '{id}' is ambiguous")),
         _ => invalid(format!("relation {endpoint} item '{id}' is ambiguous")),
+    }
+}
+
+fn same_item_identity(left: &Item, right: &Item) -> bool {
+    match (left.mid(), right.mid()) {
+        (Some(left_mid), Some(right_mid)) => left_mid == right_mid,
+        _ => left.id() == right.id(),
     }
 }
 

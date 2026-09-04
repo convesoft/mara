@@ -240,6 +240,7 @@ impl Diagnostic {
 pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
     let mut diagnostics = validate_corpus_independent(corpus);
     let ids = item_index(corpus);
+    let mids = mid_index(corpus);
 
     for item in corpus.items() {
         let Some(flavour) = schema.flavour_for_validation(item.flavour()) else {
@@ -252,8 +253,8 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
             }
             for relation in item.relations() {
                 if schema.relation_is_valid(relation.name()) {
-                    match ids.get(relation.target()).map(Vec::len) {
-                        None if corpus.is_complete() => diagnostic(
+                    match resolve_indexed_item(&ids, &mids, relation.target()) {
+                        IndexedItem::Missing if corpus.is_complete() => diagnostic(
                             &mut diagnostics,
                             relation.source(),
                             format!(
@@ -262,8 +263,8 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                                 relation.target()
                             ),
                         ),
-                        None | Some(1) => {}
-                        Some(_) => diagnostic(
+                        IndexedItem::Missing | IndexedItem::One(_) => {}
+                        IndexedItem::Ambiguous => diagnostic(
                             &mut diagnostics,
                             relation.source(),
                             format!(
@@ -387,8 +388,8 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 if !schema.relation_is_valid(relation.name()) {
                     continue;
                 }
-                match ids.get(relation.target()).map(Vec::as_slice) {
-                    Some([target]) => {
+                match resolve_indexed_item(&ids, &mids, relation.target()) {
+                    IndexedItem::One(target) => {
                         if schema.relation_target_is_valid(relation.name())
                             && !definition
                                 .target
@@ -419,7 +420,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             );
                         }
                     }
-                    Some(_) => diagnostic(
+                    IndexedItem::Ambiguous => diagnostic(
                         &mut diagnostics,
                         relation.source(),
                         format!(
@@ -428,7 +429,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             relation.target()
                         ),
                     ),
-                    None if corpus.is_complete() => diagnostic(
+                    IndexedItem::Missing if corpus.is_complete() => diagnostic(
                         &mut diagnostics,
                         relation.source(),
                         format!(
@@ -437,7 +438,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             relation.target()
                         ),
                     ),
-                    None => {}
+                    IndexedItem::Missing => {}
                 }
             }
         }
@@ -576,6 +577,29 @@ fn mid_index(corpus: &Corpus) -> BTreeMap<&str, Vec<&Item>> {
         }
     }
     mids
+}
+
+enum IndexedItem<'a> {
+    Missing,
+    One(&'a Item),
+    Ambiguous,
+}
+
+fn resolve_indexed_item<'a>(
+    ids: &BTreeMap<&str, Vec<&'a Item>>,
+    mids: &BTreeMap<&str, Vec<&'a Item>>,
+    handle: &str,
+) -> IndexedItem<'a> {
+    let matches = if crate::is_mid(handle) {
+        mids.get(handle)
+    } else {
+        ids.get(handle)
+    };
+    match matches.map(Vec::as_slice) {
+        Some([item]) => IndexedItem::One(item),
+        Some(_) => IndexedItem::Ambiguous,
+        None => IndexedItem::Missing,
+    }
 }
 
 fn mid_entries(item: &Item) -> Vec<&MetadataEntry> {
