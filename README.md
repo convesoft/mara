@@ -14,9 +14,9 @@ baseline.
 Pin the exact version so an MCP restart cannot silently change behavior:
 
 ```bash
-npx -y @convesoft/mara@0.1.0-alpha.0 --version
-npx -y @convesoft/mara@0.1.0-alpha.0 project init ./example
-npx -y @convesoft/mara@0.1.0-alpha.0 --project ./example project validate
+npx -y @convesoft/mara@0.1.0-alpha.1 --version
+npx -y @convesoft/mara@0.1.0-alpha.1 project init ./example
+npx -y @convesoft/mara@0.1.0-alpha.1 --project ./example project validate
 ```
 
 The npm packages contain prebuilt native binaries and use no install scripts.
@@ -29,7 +29,7 @@ For a client that starts stdio servers in the project directory:
 ```toml
 [mcp_servers.mara]
 command = "npx"
-args = ["-y", "@convesoft/mara@0.1.0-alpha.0", "mcp"]
+args = ["-y", "@convesoft/mara@0.1.0-alpha.1", "mcp"]
 ```
 
 To bind the server to one project regardless of its execution directory, place
@@ -40,7 +40,7 @@ To bind the server to one project regardless of its execution directory, place
 command = "npx"
 args = [
   "-y",
-  "@convesoft/mara@0.1.0-alpha.0",
+  "@convesoft/mara@0.1.0-alpha.1",
   "mcp",
   "--project",
   "/absolute/path/to/project",
@@ -51,43 +51,37 @@ Without `--project`, the server can start anywhere. Project-bound tools accept
 an absolute `project` path or discover the nearest parent containing
 `.mara/project.toml` from the server's execution directory.
 
-## Agent Plugin package
+## Configure Codex
 
-The main npm package also contains a portable Agent Plugins 1.0 manifest, a
-Mara skill, and stdio MCP configuration. Compatible clients can install that
-package through their supported plugin distribution flow. Codex is the
-reference client; the portable package does not modify project `AGENTS.md`.
+Register the installed Mara executable as an MCP server and install the Mara
+skill separately:
 
-Starting with `0.1.0-alpha.1`, a user without an existing Mara installation can
-install the complete package from the Convesoft Codex marketplace:
+```bash
+codex mcp add mara -- npx -y @convesoft/mara@0.1.0-alpha.1 mcp
+npx skills add convesoft/mara --skill mara -g -a codex
+```
+
+If Mara is already installed, register its absolute executable path instead:
+
+```bash
+codex mcp add mara -- /absolute/path/to/mara mcp
+```
+
+The skill and MCP server expose the same Mara operations without installing a
+second executable or depending on a client's plugin-cache layout.
+
+The npm package also contains an optional portable Agent Plugins 1.0 manifest,
+skill, and MCP configuration. Compatible clients may install the complete
+package through the Convesoft marketplace as a convenience:
 
 ```bash
 codex plugin marketplace add convesoft/mara
 codex plugin add mara@convesoft
 ```
 
-Start a new Codex session after installation. Codex keeps an installed plugin
-snapshot in its managed cache. On first MCP start, its launcher uses `npx` to
-install and run that snapshot's exact Mara version with the matching native
-package in npm's cache.
-
-If Mara and its MCP server are already configured, install only the skill and
-keep using that existing executable:
-
-```bash
-npx skills add convesoft/mara --skill mara -g -a codex
-```
-
-For a new MCP registration backed by an existing installation, use the
-executable's absolute path:
-
-```bash
-codex mcp add mara -- /absolute/path/to/mara mcp
-```
-
-Use either the complete plugin or the existing-installation route. Do not add
-the complete plugin alongside an equivalent manually configured Mara MCP
-server.
+The complete plugin is not a release compatibility target. Do not install it
+alongside an equivalent manually configured Mara MCP server. Neither onboarding
+route modifies project `AGENTS.md`.
 
 ## Core workflow
 
