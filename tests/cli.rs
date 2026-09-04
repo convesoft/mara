@@ -2651,6 +2651,60 @@ fn mcp_starts_outside_a_project_and_initializes_an_absolute_target() {
 }
 
 #[test]
+fn mcp_bound_server_initializes_its_selected_target_without_an_override() {
+    let fixture = TempDir::new().unwrap();
+    let project = fixture.path().join("new-project");
+    let project_path = project.to_str().unwrap();
+
+    let responses = mcp_exchange_with_arguments(
+        fixture.path(),
+        &["mcp", "--project", project_path],
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_call(2, "project_init", json!({ "template": "minimal" })),
+            mcp_call(3, "project_init", json!({ "project": project_path })),
+        ],
+    );
+
+    assert_eq!(mcp_response(&responses, 2)["result"]["isError"], false);
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"]["project"]["root"],
+        project_path
+    );
+    assert!(project.join(".mara/project.toml").is_file());
+    assert!(project.join(".mara/schema.yaml").is_file());
+    assert_eq!(mcp_response(&responses, 3)["result"]["isError"], true);
+    assert!(
+        mcp_response(&responses, 3)
+            .to_string()
+            .contains("started with --project")
+    );
+}
+
+#[test]
+fn mcp_unbound_project_init_requires_an_absolute_target() {
+    let fixture = TempDir::new().unwrap();
+
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_call(2, "project_init", json!({})),
+        ],
+    );
+
+    assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
+    assert!(
+        mcp_response(&responses, 2)
+            .to_string()
+            .contains("requires an absolute project path")
+    );
+    assert!(!fixture.path().join(".mara/project.toml").exists());
+}
+
+#[test]
 fn mcp_project_option_after_the_command_binds_the_server() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -2748,11 +2802,10 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
         let project_is_required = tool["inputSchema"]["required"]
             .as_array()
             .is_some_and(|required| required.iter().any(|field| field == "project"));
-        assert_eq!(
-            project_is_required,
-            tool["name"] == "project_init",
-            "{} has the wrong project requirement: {tool:#}",
-            tool["name"]
+        assert!(
+            !project_is_required,
+            "{} unexpectedly requires project selection: {tool:#}",
+            tool["name"],
         );
     }
     assert_eq!(

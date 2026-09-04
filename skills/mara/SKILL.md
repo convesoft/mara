@@ -19,7 +19,8 @@ Use the Mara MCP tools as the structured interface to a project's canonical
   cross-project behavior.
 
 If the intended root has no `.mara/project.toml` and the user wants to start a
-Mara project, call `project_init` with the absolute root. Use the default
+Mara project, call `project_init` with the absolute root, or omit `project` when
+the MCP server was started with that root bound by `--project`. Use the default
 `minimal` template unless the user explicitly requests `empty`. Do not create
 or modify `AGENTS.md` as part of Mara onboarding.
 

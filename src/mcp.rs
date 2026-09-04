@@ -30,7 +30,8 @@ struct ProjectParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProjectInitParams {
-    project: PathBuf,
+    #[serde(default)]
+    project: Option<PathBuf>,
     #[serde(default)]
     template: Template,
 }
@@ -221,7 +222,7 @@ impl MaraMcp {
 
     #[tool(
         name = "project_init",
-        description = "Initialize a Mara project at a required absolute path without overwriting existing content."
+        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project."
     )]
     fn project_init(
         &self,

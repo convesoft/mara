@@ -46,14 +46,17 @@ impl OperationContext {
 
     pub fn project_initialize(
         &self,
-        target: PathBuf,
+        target: Option<PathBuf>,
         template: Template,
     ) -> Result<ProjectInitializationResult, String> {
-        let operation = self.for_project(Some(target))?;
+        let operation = self.for_project(target)?;
         project_initialize(
             operation
                 .selected
-                .expect("project initialization selects an explicit target"),
+                .ok_or_else(|| {
+                    "project init requires an absolute project path when the server is not bound with --project"
+                        .to_string()
+                })?,
             template,
         )
     }

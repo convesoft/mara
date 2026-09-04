@@ -77,8 +77,9 @@ created when absent or initialized when it is an existing directory. Global
 is omitted; supplying both is rejected. Existing content is not
 overwritten, and an existing Mara project is rejected. The default template is
 `minimal`; `--template empty` creates no project flavours. MCP `project_init`
-provides the same operation for a required absolute `project` path and optional
-`template`.
+provides the same operation with an optional `template`. An unbound server call
+requires an absolute `project` path; a server started with `--project` uses its
+bound target and rejects a request-level `project` override.
 :::
 
 :::mara requirement REQ-PROJECT-DISCOVERY

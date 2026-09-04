@@ -333,37 +333,8 @@ jobs:
           test -f "$plugin_root/skills/mara/SKILL.md"
           test -x "$plugin_root/bin/mara-plugin.cjs"
 
-          responses=$(node -e '
-            const project = process.env.MARA_PROJECT;
-            const messages = [
-              {
-                jsonrpc: "2.0",
-                id: 1,
-                method: "initialize",
-                params: {
-                  protocolVersion: "2025-06-18",
-                  capabilities: {},
-                  clientInfo: { name: "mara-codex-marketplace-smoke", version: "1" },
-                },
-              },
-              { jsonrpc: "2.0", method: "notifications/initialized" },
-              {
-                jsonrpc: "2.0",
-                id: 2,
-                method: "tools/call",
-                params: { name: "project_init", arguments: { project } },
-              },
-              {
-                jsonrpc: "2.0",
-                id: 3,
-                method: "tools/call",
-                params: { name: "project_validate", arguments: { project } },
-              },
-            ];
-            for (const message of messages) console.log(JSON.stringify(message));
-          ' | (cd "$plugin_root" && node bin/mara-plugin.cjs mcp))
-          printf '%s\n' "$responses" | grep -F "\"root\":\"$MARA_PROJECT\""
-          printf '%s\n' "$responses" | grep -F '"valid":true'
+          node scripts/smoke-codex-plugin.mjs \
+            "$MARA_PROJECT" "${codex[@]}"
           test -f "$MARA_PROJECT/.mara/project.toml"
           test -f "$MARA_PROJECT/.mara/schema.yaml"
       - name: Publish GitHub release
