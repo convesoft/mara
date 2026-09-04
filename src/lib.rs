@@ -21,15 +21,16 @@ pub use corpus::{
     validate_corpus, validate_corpus_independent,
 };
 pub use mutation::{
-    ItemCreation, ItemCreationRequest, RelationMutation, add_relation, create_item, remove_relation,
+    BackfilledMid, BackfilledMids, ItemCreation, ItemCreationRequest, RelationMutation,
+    add_relation, backfill_mids, create_item, remove_relation,
 };
 pub use operations::{
     DeclarationSummary, FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult,
     ItemFilterParams, ItemIdParams, ItemRelatedParams, ItemSearchParams, OperationContext,
-    ProjectInitializationResult, ProjectSummary, RelatedItemsResult, RelationAction,
-    RelationMutationResult, RelationParams, SchemaGetResult, SchemaKind, SchemaListResult,
-    SchemaValidationResult, ValidationDiagnostic, ValidationResult, ValidationScope,
-    ValidationTarget, ValidationTargetKind, project_initialize,
+    ProjectBackfillMidsResult, ProjectInitializationResult, ProjectSummary, RelatedItemsResult,
+    RelationAction, RelationMutationResult, RelationParams, SchemaGetResult, SchemaKind,
+    SchemaListResult, SchemaValidationResult, ValidationDiagnostic, ValidationResult,
+    ValidationScope, ValidationTarget, ValidationTargetKind, project_initialize,
 };
 pub use query::{
     FieldFilter, ItemFilters, ItemSource, ItemSummary, MetadataValue, QueryError, RelatedFilters,
@@ -1234,7 +1235,7 @@ fn is_id_prefix(prefix: &str) -> bool {
         })
 }
 
-fn is_item_id(id: &str) -> bool {
+pub(crate) fn is_item_id(id: &str) -> bool {
     let mut segments = id.split('-');
     let Some(first) = segments.next() else {
         return false;
@@ -1251,6 +1252,21 @@ fn is_item_id(id: &str) -> bool {
                 && segment
                     .chars()
                     .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
+        })
+}
+
+pub(crate) fn is_mid(value: &str) -> bool {
+    value.len() == 26
+        && value.chars().all(|character| {
+            matches!(
+                character,
+                '0'..='9'
+                    | 'A'..='H'
+                    | 'J'..='K'
+                    | 'M'..='N'
+                    | 'P'..='T'
+                    | 'V'..='Z'
+            )
         })
 }
 

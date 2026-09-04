@@ -1,6 +1,7 @@
 # Mara document format
 
 :::mara design DES-DOCUMENT-FORMAT
+:mid: 01M1PXP2KG381MM1VNN6XC7S4M
 :title: Mara document format
 
 This contract defines the smallest authoring surface needed to dogfood Mara.
@@ -47,12 +48,14 @@ Failures preserve user data and produce actionable diagnostics.
 ## Machine identity
 
 - `mid` is reserved structural metadata, not a configurable field.
-- During pre-alpha, `:mid:` may be absent because Mara cannot generate it yet.
-- Once identity generation exists, every item has exactly one Mara-generated
-  MID on the line immediately after its opener. It is repository-wide unique
-  and immutable for the item's lifetime.
-- Do not create or copy placeholder MIDs. Existing pre-alpha items receive MIDs
-  through one deliberate backfill before identity-dependent features ship.
+- Every item has exactly one Mara-generated MID on the line immediately after
+  its opener.
+- A MID is a raw canonical uppercase 26-character ULID with no prefix.
+- The MID is repository-wide unique and immutable for the item's lifetime.
+- Callers never provide, copy, edit, or update MIDs through item operations.
+- Do not create or copy placeholder MIDs by hand. Existing pre-alpha items
+  receive MIDs through one deliberate backfill before identity-dependent
+  editing is used.
 
 ## References and relations
 
@@ -85,6 +88,7 @@ versions remain independent from the Mara application version.
 :::
 
 :::mara decision ADR-RUSHDOWN-PARSER-ADAPTER
+:mid: 01M1PXP2KGG86FFPSNS8QWEXRZ
 :title: Use Rushdown behind a Mara-owned Markdown adapter
 :justifies: DES-DOCUMENT-FORMAT
 

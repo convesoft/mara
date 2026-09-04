@@ -4,6 +4,7 @@ This document owns the durable distribution and release contract. Public
 installation instructions summarize it in `README.md`.
 
 :::mara scenario SCN-INSTALL-DISTRIBUTED-MARA
+:mid: 01M1PXP2KG35JD2VV6SBSXPDQW
 :title: Run Mara without a Rust toolchain
 
 On a supported host, a user runs an exact `@convesoft/mara` version through
@@ -14,6 +15,7 @@ advances [[GOAL-UNIFIED-PROJECT-KNOWLEDGE]] and
 :::
 
 :::mara requirement REQ-SCRIPT-FREE-NPM-DISTRIBUTION
+:mid: 01M1PXP2KGSGNZEYN88YWF7S2Y
 :title: Distribute supported native binaries through script-free npm packages
 :derives_from: SCN-INSTALL-DISTRIBUTED-MARA
 
@@ -34,6 +36,7 @@ install time.
 :::
 
 :::mara requirement REQ-AGENT-INSTALLATION-MODES
+:mid: 01M1PXP2KGPHVWQQ8BGR9KDF12
 :title: Support manual and optional complete-plugin agent onboarding
 :derives_from: SCN-ONBOARD-MARA-AGENT
 
@@ -45,6 +48,7 @@ release gate.
 :::
 
 :::mara requirement REQ-REPRODUCIBLE-PUBLIC-RELEASE
+:mid: 01M1PXP2KGMG4DYF9JAN85XXMH
 :title: Publish one verified release from one approved revision
 :derives_from: SCN-INSTALL-DISTRIBUTED-MARA
 
@@ -63,6 +67,7 @@ release. Prereleases use the npm `next` tag; stable releases use `latest`.
 :::
 
 :::mara requirement REQ-PUBLIC-REPOSITORY-GUIDANCE
+:mid: 01M1PXP2KG4VCF5PT6TTZ6QJ9W
 :title: Keep public project and release guidance discoverable
 
 The repository root must provide a concise README, dual-license texts, current
@@ -72,6 +77,7 @@ instead of duplicating their detailed meaning.
 :::
 
 :::mara design DES-NPM-NATIVE-PACKAGES
+:mid: 01M1PXP2KG1AN1F4WE281BQ028
 :title: Dispatch to an npm-selected native package
 :satisfies: REQ-SCRIPT-FREE-NPM-DISTRIBUTION
 :satisfies: REQ-PORTABLE-AGENT-ONBOARDING
@@ -89,6 +95,7 @@ maintain an independent release version.
 :::
 
 :::mara design DES-CODEX-AGENT-DISTRIBUTION
+:mid: 01M1PXP2KGCASKQ0HAVTQMK4R4
 :title: Distribute manual and optional complete-plugin Codex onboarding
 :satisfies: REQ-AGENT-INSTALLATION-MODES
 
@@ -102,6 +109,7 @@ behavior outside automated release verification.
 :::
 
 :::mara design DES-PROTECTED-RELEASE-WORKFLOW
+:mid: 01M1PXP2KGJBRNZHGGGJJ1GVA4
 :title: Build before approval and publish after approval
 :satisfies: REQ-REPRODUCIBLE-PUBLIC-RELEASE
 
@@ -123,6 +131,7 @@ transaction.
 :::
 
 :::mara decision ADR-NPM-NATIVE-DISTRIBUTION
+:mid: 01M1PXP2KGX9Z4Q22NMPF1BQBW
 :title: Use npm platform packages instead of an install-time downloader
 :justifies: DES-NPM-NATIVE-PACKAGES
 
@@ -134,6 +143,7 @@ enterprise environments.
 :::
 
 :::mara decision ADR-CLIENT-MANAGED-PLUGIN-INSTALLATION
+:mid: 01M1PXP2KGC95GEMT8MR00DWEN
 :title: Keep installed plugin state client-managed
 :justifies: DES-CODEX-AGENT-DISTRIBUTION
 
@@ -147,6 +157,7 @@ on Codex's internal cache layout.
 :::
 
 :::mara decision ADR-FIRST-ALPHA-TARGETS
+:mid: 01M1PXP2KGV6WJSBS36FTBXXPM
 :title: Limit the first alpha to glibc Linux and macOS
 :justifies: REQ-SCRIPT-FREE-NPM-DISTRIBUTION
 
@@ -156,6 +167,7 @@ packaging, and verification cost.
 :::
 
 :::mara decision ADR-DUAL-LICENSE
+:mid: 01M1PXP2KGM980VC45RM6VSEVB
 :title: License Mara under MIT or Apache-2.0
 :justifies: REQ-PUBLIC-REPOSITORY-GUIDANCE
 
@@ -165,6 +177,7 @@ Copyright notices name Aliaksei Raketski.
 :::
 
 :::mara decision ADR-TRUNK-BASED-RELEASES
+:mid: 01M1PXP2KG4AF9B3AB69M3HSZ7
 :title: Release from main through short-lived issue branches
 :justifies: DES-PROTECTED-RELEASE-WORKFLOW
 

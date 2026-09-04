@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs, io,
     path::{Path, PathBuf},
 };
@@ -55,6 +55,7 @@ impl Document {
 pub struct Item {
     flavour: String,
     id: String,
+    mid: Option<String>,
     title: String,
     metadata: Vec<MetadataEntry>,
     body: String,
@@ -73,6 +74,10 @@ impl Item {
 
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    pub fn mid(&self) -> Option<&str> {
+        self.mid.as_deref()
     }
 
     pub fn title(&self) -> &str {
@@ -444,6 +449,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
 pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let ids = item_index(corpus);
+    let mids = mid_index(corpus);
 
     for duplicates in ids.values().filter(|items| items.len() > 1) {
         for item in duplicates {
@@ -455,7 +461,79 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
         }
     }
 
+    for duplicates in mids.values().filter(|items| items.len() > 1) {
+        for item in duplicates {
+            if let Some(entry) = mid_entries(item).first() {
+                diagnostic(
+                    &mut diagnostics,
+                    entry.source(),
+                    format!("duplicate item MID '{}'", entry.value()),
+                );
+            }
+        }
+    }
+
     for item in corpus.items() {
+        let mids = mid_entries(item);
+        match mids.as_slice() {
+            [] => diagnostic(
+                &mut diagnostics,
+                item.source(),
+                format!("item '{}' is missing its MID", item.id()),
+            ),
+            [entry] => {
+                if !crate::is_mid(entry.value()) {
+                    diagnostic(
+                        &mut diagnostics,
+                        entry.source(),
+                        format!("invalid item MID '{}'", entry.value()),
+                    );
+                }
+                if entry.source().span().start_line() != item.source().span().start_line() + 1 {
+                    diagnostic(
+                        &mut diagnostics,
+                        entry.source(),
+                        format!(
+                            "item '{}' MID must immediately follow its opener",
+                            item.id()
+                        ),
+                    );
+                }
+            }
+            [first, rest @ ..] => {
+                if !crate::is_mid(first.value()) {
+                    diagnostic(
+                        &mut diagnostics,
+                        first.source(),
+                        format!("invalid item MID '{}'", first.value()),
+                    );
+                }
+                if first.source().span().start_line() != item.source().span().start_line() + 1 {
+                    diagnostic(
+                        &mut diagnostics,
+                        first.source(),
+                        format!(
+                            "item '{}' MID must immediately follow its opener",
+                            item.id()
+                        ),
+                    );
+                }
+                for entry in rest {
+                    diagnostic(
+                        &mut diagnostics,
+                        entry.source(),
+                        format!("item '{}' has more than one MID entry", item.id()),
+                    );
+                    if !crate::is_mid(entry.value()) {
+                        diagnostic(
+                            &mut diagnostics,
+                            entry.source(),
+                            format!("invalid item MID '{}'", entry.value()),
+                        );
+                    }
+                }
+            }
+        }
         for mention in item.mentions() {
             match ids.get(mention.target()).map(Vec::len) {
                 None if corpus.is_complete() => diagnostic(
@@ -482,6 +560,29 @@ fn item_index(corpus: &Corpus) -> BTreeMap<&str, Vec<&Item>> {
         ids.entry(item.id()).or_default().push(item);
     }
     ids
+}
+
+fn mid_index(corpus: &Corpus) -> BTreeMap<&str, Vec<&Item>> {
+    let mut mids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
+    for item in corpus.items() {
+        let mut seen = BTreeSet::new();
+        for entry in mid_entries(item)
+            .into_iter()
+            .filter(|entry| crate::is_mid(entry.value()))
+        {
+            if seen.insert(entry.value()) {
+                mids.entry(entry.value()).or_default().push(item);
+            }
+        }
+    }
+    mids
+}
+
+fn mid_entries(item: &Item) -> Vec<&MetadataEntry> {
+    item.metadata()
+        .iter()
+        .filter(|entry| entry.key() == "mid")
+        .collect()
 }
 
 fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
@@ -858,6 +959,10 @@ fn project_document(
             Item {
                 flavour: parsed.flavour,
                 id: parsed.id,
+                mid: metadata
+                    .iter()
+                    .find(|entry| entry.key == "mid" && crate::is_mid(&entry.value))
+                    .map(|entry| entry.value.clone()),
                 title: parsed.title,
                 metadata,
                 body: source[parsed.body.clone()].to_owned(),

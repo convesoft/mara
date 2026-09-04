@@ -5,6 +5,7 @@ requirements management, and project knowledge without imposing a generated
 specification workflow.
 
 :::mara goal GOAL-UNIFIED-PROJECT-KNOWLEDGE
+:mid: 01M1PXP2KGBN9S4G5PC0SAE5P6
 :title: Keep project knowledge in one structured source of truth
 
 Mara combines ordinary Markdown narrative with identifiable, typed, related,
@@ -13,6 +14,7 @@ remain readable files rather than parallel documentation systems.
 :::
 
 :::mara goal GOAL-BOUNDED-AGENT-CONTEXT
+:mid: 01M1PXP2KGMDJHQGF2MCTP7TED
 :title: Let agents retrieve relevant knowledge without loading the full corpus
 
 Agents discover, search, inspect, and traverse project knowledge incrementally.
@@ -22,6 +24,7 @@ Derived query results never become a second authoring authority.
 ## Primary workflows
 
 :::mara scenario SCN-START-STRUCTURED-PROJECT
+:mid: 01M1PXP2KGMG0M2HVW68FS0EJW
 :title: Start a project with structured documentation
 
 The user initializes Mara in a new project, inspects its effective schema,
@@ -31,6 +34,7 @@ knowledge while implementing the project. This advances
 :::
 
 :::mara scenario SCN-AUTHOR-ITEM-FLEXIBLY
+:mid: 01M1PXP2KGMN7M1S7ND2AGM8ZK
 :title: Author an item through the most convenient path
 
 An author creates a complete item through Mara, creates a scaffold and fills its
@@ -39,6 +43,7 @@ manually authored items follow the same schema and source format.
 :::
 
 :::mara scenario SCN-RETRIEVE-BOUNDED-KNOWLEDGE
+:mid: 01M1PXP2KGTZWMSGFSKY6CCKW4
 :title: Retrieve bounded project knowledge
 
 An author or agent searches with filters, fetches a selected item, and inspects
@@ -47,6 +52,7 @@ This advances [[GOAL-BOUNDED-AGENT-CONTEXT]].
 :::
 
 :::mara scenario SCN-ONBOARD-MARA-AGENT
+:mid: 01M1PXP2KGEBFRGNFRZ89V2JMS
 :title: Give an agent access to Mara project knowledge
 
 A user connects an installed Mara executable to the agent as an MCP server and
@@ -59,6 +65,7 @@ selected project through MCP. This advances [[GOAL-BOUNDED-AGENT-CONTEXT]].
 ## Product contracts
 
 :::mara requirement REQ-CANONICAL-SOURCE
+:mid: 01M1PXP2KGFTACAY742WPSWRK7
 :title: Git-tracked Mara documents remain canonical
 :derives_from: SCN-START-STRUCTURED-PROJECT
 
@@ -68,6 +75,7 @@ Direct reading, editing, and `ripgrep` remain supported workflows.
 :::
 
 :::mara requirement REQ-PROJECT-INITIALIZATION
+:mid: 01M1PXP2KG7SDH3FRPXK9EN06C
 :title: Initialize Mara in a current or named directory
 :derives_from: SCN-START-STRUCTURED-PROJECT
 
@@ -83,6 +91,7 @@ bound target and rejects a request-level `project` override.
 :::
 
 :::mara requirement REQ-PROJECT-DISCOVERY
+:mid: 01M1PXP2KG99P47TB3HH0A9635
 :title: Resolve one explicit project for each operation
 :derives_from: SCN-START-STRUCTURED-PROJECT
 
@@ -95,6 +104,7 @@ must then omit `project`. Each operation resolves exactly one project.
 :::
 
 :::mara requirement REQ-SCHEMA-DISCOVERY
+:mid: 01M1PXP2KGPMYWSV20VA6TP3R6
 :title: Make the effective project schema discoverable
 :derives_from: SCN-START-STRUCTURED-PROJECT
 
@@ -104,6 +114,7 @@ relation has a concise description suitable for discovery.
 :::
 
 :::mara requirement REQ-SURFACE-PARITY
+:mid: 01M1PXP2KGA6GZQB9MCYMYVNJA
 :title: Expose the same operations through CLI and MCP
 :derives_from: SCN-START-STRUCTURED-PROJECT
 
@@ -113,6 +124,7 @@ data equivalent to MCP structured results.
 :::
 
 :::mara requirement REQ-PORTABLE-AGENT-ONBOARDING
+:mid: 01M1PXP2KG77N00V05NSNKTRN0
 :title: Package Mara for portable agent onboarding
 :derives_from: SCN-ONBOARD-MARA-AGENT
 
@@ -126,6 +138,7 @@ Complete-plugin compatibility is client-managed and is not a release gate.
 :::
 
 :::mara requirement REQ-ITEM-CREATION
+:mid: 01M1PXP2KGSJHD00W32AGQ3YVT
 :title: Create a complete item or scaffold in an explicit document
 :derives_from: SCN-AUTHOR-ITEM-FLEXIBLY
 
@@ -139,9 +152,38 @@ means end of file. Body input accepts an inline value or `-` for standard input.
 When a required body is omitted, creation succeeds as an incomplete scaffold
 and reports `complete: false` with `body` missing. Validation continues to
 reject the item until its body is filled. An optional body may remain empty.
+
+Mara generates the item's MID, writes it as exactly one `:mid:` entry
+immediately after the item opener, and returns it with the creation result.
+Callers cannot provide, copy, or update a MID through item creation.
+:::
+
+:::mara requirement REQ-DURABLE-ITEM-IDENTITY
+:mid: 01M1PXP2KG5R46BBV7ZGQE6XGB
+:title: Give every item a durable machine identity
+:derives_from: SCN-AUTHOR-ITEM-FLEXIBLY
+
+Every item has one repository-wide immutable MID in addition to its
+human-readable ID. A MID is a raw canonical uppercase 26-character ULID with no
+prefix. Human IDs remain readable handles and authored relation targets, while
+identity-dependent resolution can use either an exact MID or an exact human ID
+deterministically.
+:::
+
+:::mara requirement REQ-MID-BACKFILL
+:mid: 01M1PXP2KG07XC4AX4G6X7BSNC
+:title: Backfill missing item identities deliberately
+:derives_from: SCN-AUTHOR-ITEM-FLEXIBLY
+
+`project backfill-mids` and MCP `project_backfill_mids` add generated MIDs to
+every legacy item that lacks one. Backfill preserves existing source content and
+existing MIDs, writes each new `:mid:` immediately after its item opener, and
+makes no source changes when its validation preflight fails. Normal reads never
+backfill automatically.
 :::
 
 :::mara requirement REQ-ITEM-INSERTION-SAFETY
+:mid: 01M1PXP2KGKT8ET242DR0YHV9S
 :title: Insert items without corrupting document structure
 :derives_from: SCN-AUTHOR-ITEM-FLEXIBLY
 
@@ -155,6 +197,7 @@ validation error without making the insertion structurally unsafe.
 :::
 
 :::mara requirement REQ-RELATION-MUTATION
+:mid: 01M1PXP2KGENM6H6CP04STA54Q
 :title: Add and remove typed relations explicitly
 :derives_from: SCN-AUTHOR-ITEM-FLEXIBLY
 
@@ -165,28 +208,34 @@ derived.
 :::
 
 :::mara requirement REQ-PROJECT-VALIDATION
+:mid: 01M1PXP2KGWKQRXBB29DX5D7G1
 :title: Validate a selected item or the full project
 :derives_from: SCN-START-STRUCTURED-PROJECT
 
 `item validate <id>` checks one item in project context; `project validate`
 checks the complete corpus. Validation covers project and schema configuration,
-item syntax, known flavours, ID prefixes and uniqueness, required fields and
-bodies, metadata, relation declarations and targets, and `[[ID]]` mentions.
-Broken relations and mentions are errors. Mara reports every independently
-discoverable diagnostic and skips only checks whose prerequisites are invalid.
+item syntax, known flavours, ID prefixes and uniqueness, MID presence, MID
+format, MID uniqueness, required fields and bodies, metadata, relation
+declarations and targets, and `[[ID]]` mentions. Broken relations and mentions
+are errors. Mara reports every independently discoverable diagnostic with an
+actionable source location and skips only checks whose prerequisites are
+invalid.
 :::
 
 :::mara requirement REQ-ITEM-GET
+:mid: 01M1PXP2KGGWT0WRKDJXC5NS4G
 :title: Retrieve one complete resolved item
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
-`item get <id>` returns the item's flavour, ID, metadata, body, source location,
-authored relations, and derived incoming relations. Human and structured output
-represent the same result. Relation entries include the relation name and a
-compact summary of the directly related item.
+`item get <id-or-mid>` returns the item's flavour, human ID, MID, metadata,
+body, source location, authored relations, and derived incoming relations. Human
+and structured output represent the same result. Relation entries include the
+relation name and a compact summary containing both identities for the directly
+related item.
 :::
 
 :::mara requirement REQ-ITEM-SEARCH
+:mid: 01M1PXP2KGKART3Y9XWADR46F5
 :title: Search items deterministically with scope filters
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
@@ -207,20 +256,23 @@ returns the same compact summary shape without a text query.
 :::
 
 :::mara requirement REQ-ITEM-RELATED
+:mid: 01M1PXP2KG97XHSEEB4KCZVTAP
 :title: Retrieve compact directly related items
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
-`item related <id>` returns compact summaries of direct incoming and outgoing
-neighbours and identifies each relation and direction. Direction, relation, and
-flavour filters narrow results. `--direction` accepts `incoming` or `outgoing`
-and defaults to both; `--relation <name>` and `--flavour <name>` are repeatable.
-Outgoing results precede incoming results, with each group in corpus and
-authored relation order. Full bodies require explicit `item get` calls.
+`item related <id-or-mid>` returns compact summaries of direct incoming and
+outgoing neighbours and identifies each relation and direction. Direction,
+relation, and flavour filters narrow results. `--direction` accepts `incoming`
+or `outgoing` and defaults to both; `--relation <name>` and `--flavour <name>`
+are repeatable. Outgoing results precede incoming results, with each group in
+corpus and authored relation order. Full bodies require explicit `item get`
+calls.
 :::
 
 ## Alpha design
 
 :::mara design DES-PROJECT-CONFIGURATION
+:mid: 01M1PXP2KGYT8EAYRHXYSMZY0V
 :title: Minimal project configuration
 :satisfies: REQ-PROJECT-INITIALIZATION
 :satisfies: REQ-PROJECT-DISCOVERY
@@ -248,6 +300,7 @@ independently from application SemVer.
 :::
 
 :::mara decision ADR-EXPLICIT-INIT-TARGET
+:mid: 01M1PXP2KGRT31XDJG6KEJZEDB
 :title: Use the global project option as an initialization target
 :justifies: REQ-PROJECT-INITIALIZATION
 
@@ -258,6 +311,7 @@ depends on precedence.
 :::
 
 :::mara decision ADR-STRICT-PROJECT-CONFIGURATION
+:mid: 01M1PXP2KG1Z4GCKD2545KN1BJ
 :title: Reject unknown project configuration fields
 :justifies: DES-PROJECT-CONFIGURATION
 
@@ -268,6 +322,7 @@ deliberately.
 :::
 
 :::mara design DES-MINIMAL-SCHEMA
+:mid: 01M1PXP2KGT0F06H7DCBNXPRNH
 :title: Minimal default schema
 :satisfies: REQ-SCHEMA-DISCOVERY
 :satisfies: REQ-PROJECT-VALIDATION
@@ -299,10 +354,12 @@ computed fields, or custom rules.
 :::
 
 :::mara design DES-COMMAND-SURFACE
+:mid: 01M1PXP2KG6N0GDT9FW7231DB4
 :title: Object-operation command surface
 :satisfies: REQ-SCHEMA-DISCOVERY
 :satisfies: REQ-SURFACE-PARITY
 :satisfies: REQ-ITEM-CREATION
+:satisfies: REQ-MID-BACKFILL
 :satisfies: REQ-RELATION-MUTATION
 :satisfies: REQ-ITEM-GET
 :satisfies: REQ-ITEM-SEARCH
@@ -321,7 +378,7 @@ for schema-repeatable metadata.
 
 | Object | Operations |
 |---|---|
-| `project` | `init`, `validate` |
+| `project` | `init`, `validate`, `backfill-mids` |
 | `schema` | `get`, `list`, `validate` |
 | `item` | `create`, `get`, `list`, `search`, `related`, `validate` |
 | `relation` | `add`, `remove` |
@@ -340,7 +397,25 @@ result, with each diagnostic providing `scope`, optional `path` and `line`, and
 JSON and a caller-visible MCP tool error.
 :::
 
+:::mara design DES-DURABLE-ITEM-IDENTITIES
+:mid: 01M1PXP2KGC400ND3WXDFZJE88
+:title: Store machine identities as structural metadata
+:satisfies: REQ-DURABLE-ITEM-IDENTITY
+:satisfies: REQ-MID-BACKFILL
+:satisfies: REQ-SURFACE-PARITY
+
+The in-memory item projection retains both the authored human ID and the
+generated MID. Query and mutation operations resolve item handles by exact MID
+when the handle is a canonical MID, otherwise by exact human ID. Compact and
+resolved item structures include both identities when a MID is present.
+
+Resolved relation traversal uses resolved item identities internally. Relation
+metadata remains authored as human-readable IDs, and relation mutation writes
+the target item's human ID even when the caller supplied its MID.
+:::
+
 :::mara design DES-OPERATION-PROJECT-CONTEXT
+:mid: 01M1PXP2KG1T44F3T2E5YR4YX2
 :title: Resolve project context at the operation boundary
 :satisfies: REQ-PROJECT-DISCOVERY
 :satisfies: REQ-SURFACE-PARITY
@@ -357,6 +432,7 @@ project precedence, workspace aggregation, or cross-project operations.
 :::
 
 :::mara design DES-PORTABLE-AGENT-PLUGIN
+:mid: 01M1PXP2KGAC399SK9RG2SX763
 :title: Portable Agent Plugin package
 :satisfies: REQ-PORTABLE-AGENT-ONBOARDING
 
@@ -371,6 +447,7 @@ supported manual MCP-plus-skill contract.
 :::
 
 :::mara design DES-DETERMINISTIC-KEYWORD-SEARCH
+:mid: 01M1PXP2KGHS11B9YGCD35EP8S
 :title: Replaceable deterministic keyword matching
 :satisfies: REQ-ITEM-SEARCH
 
@@ -393,7 +470,6 @@ project knowledge.
 ## Explicitly deferred
 
 Alpha does not include structured item editing, moving, renaming, or deletion;
-schema mutation commands; MID generation; persisted indexes or graph stores;
-fuzzy or semantic search; LSP integration; a complete Markdown AST; or a
-graphical interface. Manual source editing followed by validation remains the
-editing path.
+schema mutation commands; persisted indexes or graph stores; fuzzy or semantic
+search; LSP integration; a complete Markdown AST; or a graphical interface.
+Manual source editing followed by validation remains the editing path.

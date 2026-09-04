@@ -60,6 +60,7 @@ impl From<&SourceLocation> for ItemSource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct ItemSummary {
     id: String,
+    mid: Option<String>,
     flavour: String,
     title: String,
     path: PathBuf,
@@ -69,6 +70,10 @@ pub struct ItemSummary {
 impl ItemSummary {
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    pub fn mid(&self) -> Option<&str> {
+        self.mid.as_deref()
     }
 
     pub fn flavour(&self) -> &str {
@@ -92,6 +97,7 @@ impl From<&Item> for ItemSummary {
     fn from(item: &Item) -> Self {
         Self {
             id: item.id().to_owned(),
+            mid: item.mid().map(ToOwned::to_owned),
             flavour: item.flavour().to_owned(),
             title: item.title().to_owned(),
             path: item.source().path().to_path_buf(),
@@ -284,6 +290,9 @@ pub enum QueryError {
     AmbiguousItem {
         id: String,
     },
+    AmbiguousMid {
+        mid: String,
+    },
     MissingRelationTarget {
         source: String,
         relation: String,
@@ -313,6 +322,7 @@ impl fmt::Display for QueryError {
         match self {
             Self::MissingItem { id } => write!(formatter, "item '{id}' was not found"),
             Self::AmbiguousItem { id } => write!(formatter, "item ID '{id}' is ambiguous"),
+            Self::AmbiguousMid { mid } => write!(formatter, "item MID '{mid}' is ambiguous"),
             Self::MissingRelationTarget {
                 source,
                 relation,
@@ -591,11 +601,21 @@ fn matches_name_filter(names: &[String], predicate: impl Fn(&str) -> bool) -> bo
 }
 
 fn resolve_item<'a>(corpus: &'a Corpus, id: &str) -> Result<&'a Item, QueryError> {
-    let mut matches = corpus.items().filter(|item| item.id() == id);
+    let by_mid = crate::is_mid(id);
+    let mut matches = corpus.items().filter(|item| {
+        if by_mid {
+            item.mid() == Some(id)
+        } else {
+            item.id() == id
+        }
+    });
     let Some(item) = matches.next() else {
         return Err(QueryError::MissingItem { id: id.to_owned() });
     };
     if matches.next().is_some() {
+        if by_mid {
+            return Err(QueryError::AmbiguousMid { mid: id.to_owned() });
+        }
         return Err(QueryError::AmbiguousItem { id: id.to_owned() });
     }
     Ok(item)
