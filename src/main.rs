@@ -9,11 +9,12 @@ use std::{
 
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
-    FieldValue, ItemCollectionResult, ItemCreateParams, ItemFilterParams, ItemRelatedParams,
-    ItemSummary, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
-    RelatedItem, RelationDirection, RelationMutationResult, RelationParams, RelationSummary,
-    ResolvedItem, SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult, Template,
-    ValidationResult, ValidationScope, ValidationTargetKind, project_initialize,
+    FieldValue, ItemCollectionResult, ItemCreateParams, ItemFilterParams, ItemMoveParams,
+    ItemRelatedParams, ItemSummary, OperationContext, ProjectInitializationResult,
+    ProjectMidBackfillResult, RelatedItem, RelationDirection, RelationMutationResult,
+    RelationParams, RelationSummary, ResolvedItem, SchemaGetResult, SchemaKind, SchemaListResult,
+    SchemaValidationResult, Template, ValidationResult, ValidationScope, ValidationTargetKind,
+    project_initialize,
 };
 use serde::Serialize;
 
@@ -68,10 +69,20 @@ enum ProjectCommand {
         template: CliTemplate,
     },
     Validate,
+    Transaction {
+        #[command(subcommand)]
+        command: ProjectTransactionCommand,
+    },
     Mid {
         #[command(subcommand)]
         command: ProjectMidCommand,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectTransactionCommand {
+    /// Restore original files from a pending move journal.
+    Rollback,
 }
 
 #[derive(Debug, Subcommand)]
@@ -81,6 +92,12 @@ enum ProjectMidCommand {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
+    Move {
+        reference: String,
+        file: PathBuf,
+        #[arg(long)]
+        line: Option<usize>,
+    },
     Create {
         flavour: String,
         id: String,
@@ -367,6 +384,51 @@ fn run(cli: Cli) -> Result<bool, String> {
         } => {
             let result = operations(project)?.project_mid_backfill()?;
             emit(format, &result, print_project_mid_backfill)?;
+            Ok(true)
+        }
+        Command::Project {
+            command:
+                ProjectCommand::Transaction {
+                    command: ProjectTransactionCommand::Rollback,
+                },
+        } => {
+            let result = operations(project)?.project_transaction_rollback()?;
+            emit(format, &result, |result| {
+                if result.restored.is_empty() {
+                    println!("no pending transaction");
+                }
+                for path in &result.restored {
+                    println!("rolled back {}", path.display());
+                }
+                Ok(())
+            })?;
+            Ok(true)
+        }
+        Command::Item {
+            command:
+                ItemCommand::Move {
+                    reference,
+                    file,
+                    line,
+                },
+        } => {
+            let result = operations(project)?.item_move(ItemMoveParams {
+                reference,
+                file,
+                line,
+            })?;
+            emit(format, &result, |result| {
+                println!(
+                    "moved item '{}' with MID {} from {}:{} to {}:{}",
+                    result.id,
+                    result.mid,
+                    result.old_location.path.display(),
+                    result.old_location.line,
+                    result.new_location.path.display(),
+                    result.new_location.line
+                );
+                Ok(())
+            })?;
             Ok(true)
         }
         Command::Item {

@@ -173,6 +173,29 @@ impl OperationContext {
         })
     }
 
+    pub fn item_move(&self, params: ItemMoveParams) -> Result<crate::ItemMove, String> {
+        let (project, schema) = self.load_project()?;
+        crate::move_item(
+            &project,
+            &schema,
+            &params.reference,
+            &params.file,
+            params.line,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    pub fn project_transaction_rollback(&self) -> Result<TransactionRollbackResult, String> {
+        // Recovery must work even when interrupted writes made the corpus invalid.
+        let project = resolve_project(self.selected.as_deref(), &self.current_directory)
+            .map_err(|error| error.to_string())?;
+        let result = crate::rollback_transaction(&project).map_err(|error| error.to_string())?;
+        Ok(TransactionRollbackResult {
+            project: project.root().to_path_buf(),
+            restored: result.restored,
+        })
+    }
+
     pub fn item_get(&self, id: &str) -> Result<ResolvedItem, String> {
         let (corpus, _) = self.load_query_project()?;
         get_item(&corpus, id).map_err(|error| error.to_string())
@@ -474,6 +497,21 @@ pub struct ItemCreateParams {
     pub body: Option<String>,
     #[serde(default)]
     pub line: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ItemMoveParams {
+    pub reference: String,
+    pub file: PathBuf,
+    #[serde(default)]
+    pub line: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct TransactionRollbackResult {
+    pub project: PathBuf,
+    pub restored: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]

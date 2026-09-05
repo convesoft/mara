@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use mara::{
     FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult, ItemFilterParams,
-    ItemRelatedParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
-    RelatedItemsResult, RelationDirection, RelationMutationResult, RelationParams, ResolvedItem,
-    SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult, Template,
-    ValidationResult,
+    ItemMove, ItemMoveParams, ItemRelatedParams, OperationContext, ProjectInitializationResult,
+    ProjectMidBackfillResult, RelatedItemsResult, RelationDirection, RelationMutationResult,
+    RelationParams, ResolvedItem, SchemaGetResult, SchemaKind, SchemaListResult,
+    SchemaValidationResult, Template, TransactionRollbackResult, ValidationResult,
 };
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -88,6 +88,17 @@ impl ItemCreateToolParams {
             },
         )
     }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemMoveToolParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    reference: String,
+    file: PathBuf,
+    #[serde(default)]
+    line: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -309,6 +320,36 @@ impl MaraMcp {
     ) -> Result<Json<ItemCreationResult>, String> {
         let (project, params) = params.into_parts();
         self.for_project(project)?.item_create(params).map(Json)
+    }
+
+    #[tool(
+        name = "item_move",
+        description = "Move one item by exact MID or human ID to a project-relative document; optional line is one-based in the original destination."
+    )]
+    fn item_move(
+        &self,
+        Parameters(params): Parameters<ItemMoveToolParams>,
+    ) -> Result<Json<ItemMove>, String> {
+        self.for_project(params.project)?
+            .item_move(ItemMoveParams {
+                reference: params.reference,
+                file: params.file,
+                line: params.line,
+            })
+            .map(Json)
+    }
+
+    #[tool(
+        name = "project_transaction_rollback",
+        description = "Explicitly roll back a pending move journal to its original files. Stop other Mara writers first; later manual edits are never overwritten."
+    )]
+    fn project_transaction_rollback(
+        &self,
+        Parameters(params): Parameters<ProjectParams>,
+    ) -> Result<Json<TransactionRollbackResult>, String> {
+        self.for_project(params.project)?
+            .project_transaction_rollback()
+            .map(Json)
     }
 
     #[tool(

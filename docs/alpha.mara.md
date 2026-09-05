@@ -379,9 +379,9 @@ for schema-repeatable metadata.
 
 | Object | Operations |
 |---|---|
-| `project` | `init`, `validate`, `mid backfill` |
+| `project` | `init`, `validate`, `mid backfill`, `transaction rollback` |
 | `schema` | `get`, `list`, `validate` |
-| `item` | `create`, `get`, `list`, `search`, `related`, `validate` |
+| `item` | `create`, `move`, `get`, `list`, `search`, `related`, `validate` |
 | `relation` | `add`, `remove` |
 
 `schema get` and `schema list` accept only the declared positional kinds
@@ -389,6 +389,9 @@ for schema-repeatable metadata.
 joining the object and operation with `_`, from `project_validate` through
 `relation_remove`; initialization maps to `project_init`. Project-bound MCP
 tools add an optional absolute `project` path to the shared operation input.
+
+Item movement and explicit transaction rollback follow [[DES-ITEM-MOVEMENT]].
+MCP `item_move` accepts `reference`, `file`, and optional `line`.
 
 CLI `--format json` and MCP `structuredContent` serialize the same domain result.
 Item collections use `{ "items": [...] }`. Project and item validation return
