@@ -281,7 +281,7 @@ are repeatable. Outgoing results precede incoming results, with each group in
 corpus and authored relation order. Full bodies require explicit `item get`
 calls.
 
-Planned alpha.3 continuation follows [[REQ-RELATED-PAGINATION]]. Each call
+Bounded pagination follows [[REQ-RELATED-PAGINATION]]. Each call
 remains direct-neighbour retrieval; the caller selects further items to read.
 :::
 

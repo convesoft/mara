@@ -166,6 +166,12 @@ enum ItemCommand {
 
         #[arg(long)]
         flavour: Vec<String>,
+
+        #[arg(long, help = "Page size: 1 through 100 (default 20)")]
+        limit: Option<usize>,
+
+        #[arg(long, help = "Continue with next_cursor and the same item/options")]
+        cursor: Option<String>,
     },
     Validate {
         id: String,
@@ -623,6 +629,8 @@ fn run(cli: Cli) -> Result<bool, String> {
                     direction,
                     relation,
                     flavour,
+                    limit,
+                    cursor,
                 },
         } => {
             let result = operations(project)?.item_related(ItemRelatedParams {
@@ -630,9 +638,12 @@ fn run(cli: Cli) -> Result<bool, String> {
                 direction: direction.map(Into::into),
                 relations: relation,
                 flavours: flavour,
+                limit,
+                cursor,
             })?;
             emit(format, &result, |result| {
                 print_related_items(&result.items);
+                print_page_continuation(result.has_more, result.next_cursor.as_deref());
                 Ok(())
             })?;
             Ok(true)
@@ -809,12 +820,16 @@ fn print_item_collection(result: &ItemCollectionResult) -> Result<(), String> {
             }
         }
     }
-    print!("page\thas_more={}", result.has_more);
-    if let Some(cursor) = &result.next_cursor {
+    print_page_continuation(result.has_more, result.next_cursor.as_deref());
+    Ok(())
+}
+
+fn print_page_continuation(has_more: bool, next_cursor: Option<&str>) {
+    print!("page\thas_more={has_more}");
+    if let Some(cursor) = next_cursor {
         print!("\tnext_cursor={cursor}");
     }
     println!();
-    Ok(())
 }
 
 fn print_item_heading(item: &ItemSummary) {
@@ -870,6 +885,11 @@ fn print_related_items(items: &[RelatedItem]) {
 }
 
 fn print_related_line(direction: RelationDirection, relation: &str, item: &ItemSummary) {
+    let title = if item.title_truncated() {
+        format!("{} [title truncated]", item.title())
+    } else {
+        item.title().to_owned()
+    };
     if let Some(mid) = item.mid() {
         println!(
             "{}\t{}\t{}\t{}\t{}\t{}\t{}:{}",
@@ -878,7 +898,7 @@ fn print_related_line(direction: RelationDirection, relation: &str, item: &ItemS
             item.id(),
             mid,
             item.flavour(),
-            item.title(),
+            title,
             item.path().display(),
             item.line()
         );
@@ -889,7 +909,7 @@ fn print_related_line(direction: RelationDirection, relation: &str, item: &ItemS
             relation,
             item.id(),
             item.flavour(),
-            item.title(),
+            title,
             item.path().display(),
             item.line()
         );

@@ -14,7 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::{Corpus, Item, Schema, SourceLocation};
 
 mod page;
-pub use page::{ItemCollectionResult, SearchExcerpt};
+pub use page::{ItemCollectionResult, RelatedItemsResult, SearchExcerpt};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct ItemSource {
@@ -277,6 +277,8 @@ pub struct RelatedFilters {
     direction: Option<RelationDirection>,
     relations: Vec<String>,
     flavours: Vec<String>,
+    limit: Option<usize>,
+    cursor: Option<String>,
 }
 
 impl RelatedFilters {
@@ -289,7 +291,14 @@ impl RelatedFilters {
             direction,
             relations,
             flavours,
+            ..Self::default()
         }
+    }
+
+    pub fn with_page(mut self, limit: Option<usize>, cursor: Option<String>) -> Self {
+        self.limit = limit;
+        self.cursor = cursor;
+        self
     }
 }
 
@@ -455,6 +464,15 @@ pub fn search_items(
 }
 
 pub fn related_items(
+    corpus: &Corpus,
+    schema: &Schema,
+    id: &str,
+    filters: &RelatedFilters,
+) -> Result<RelatedItemsResult, QueryError> {
+    page::related_page(corpus, schema, id, filters)
+}
+
+fn related_matches(
     corpus: &Corpus,
     schema: &Schema,
     id: &str,
