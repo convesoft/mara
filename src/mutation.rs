@@ -8,8 +8,10 @@ use std::{
 use tempfile::NamedTempFile;
 
 mod transaction;
+mod update;
 use transaction::MutationLock;
 pub use transaction::{TransactionRollback, rollback_transaction};
+pub use update::{ItemUpdate, update_item};
 
 use crate::{
     BodyRequirement, Corpus, Error, FieldDefinition, FieldType, Item, Project, Schema,
@@ -525,7 +527,7 @@ fn mutate_relation(
 ) -> Result<RelationMutation, Error> {
     let _lock = MutationLock::acquire(project)?;
     let corpus = load_corpus(project, schema)?;
-    ensure_unambiguous_item_identities(&corpus)?;
+    ensure_unambiguous_item_identities(&corpus, "mutate relations")?;
     let source_item = resolve_item(&corpus, source_id, "source")?;
     let target_item = resolve_item(&corpus, target_id, "target")?;
     let definition = schema
@@ -742,7 +744,7 @@ fn same_item_identity(left: &Item, right: &Item) -> bool {
     }
 }
 
-fn ensure_unambiguous_item_identities(corpus: &Corpus) -> Result<(), Error> {
+fn ensure_unambiguous_item_identities(corpus: &Corpus, operation: &str) -> Result<(), Error> {
     let mut ids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
     let mut mids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
 
@@ -755,13 +757,13 @@ fn ensure_unambiguous_item_identities(corpus: &Corpus) -> Result<(), Error> {
             .collect::<Vec<_>>();
         let [mid_entry] = mid_entries.as_slice() else {
             return invalid(format!(
-                "cannot mutate relations while item '{}' does not have exactly one MID; run project validate",
+                "cannot {operation} while item '{}' does not have exactly one MID; run project validate",
                 item.id()
             ));
         };
         if !crate::is_mid(mid_entry.value()) {
             return invalid(format!(
-                "cannot mutate relations while item '{}' has invalid MID '{}'; run project validate",
+                "cannot {operation} while item '{}' has invalid MID '{}'; run project validate",
                 item.id(),
                 mid_entry.value()
             ));
@@ -771,12 +773,12 @@ fn ensure_unambiguous_item_identities(corpus: &Corpus) -> Result<(), Error> {
 
     if let Some((id, _)) = ids.iter().find(|(_, items)| items.len() > 1) {
         return invalid(format!(
-            "cannot mutate relations while item ID '{id}' is ambiguous; run project validate"
+            "cannot {operation} while item ID '{id}' is ambiguous; run project validate"
         ));
     }
     if let Some((mid, _)) = mids.iter().find(|(_, items)| items.len() > 1) {
         return invalid(format!(
-            "cannot mutate relations while item MID '{mid}' is ambiguous; run project validate"
+            "cannot {operation} while item MID '{mid}' is ambiguous; run project validate"
         ));
     }
 

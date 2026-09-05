@@ -3452,6 +3452,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
             "schema_validate",
             "item_create",
             "item_move",
+            "item_update",
             "item_get",
             "item_list",
             "item_search",
@@ -4181,4 +4182,522 @@ fn item_move_rejects_symlink_destinations_without_touching_sources() {
         destination
     );
     assert!(!external.path().join("new.mara.md").exists());
+}
+
+fn update_fixture() -> (TempDir, String, String) {
+    let fixture = TempDir::new().unwrap();
+    assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    let schema_path = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_path).unwrap().replace(
+        "    id_prefix: REQ-\n    body: required\n    fields: {}",
+        "    id_prefix: REQ-\n    body: required\n    fields:\n      status:\n        type: enum\n        required: true\n        values: [draft, accepted]\n      tag:\n        type: string\n        repeatable: true\n      count:\n        type: integer\n      enabled:\n        type: boolean\n      weight:\n        type: number",
+    );
+    fs::write(schema_path, schema).unwrap();
+    let created = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "create",
+            "requirement",
+            "REQ-EDIT",
+            "edit.mara.md",
+            "--title",
+            "Original",
+            "--field",
+            "status=draft",
+            "--body",
+            "Original body.",
+        ],
+    );
+    assert!(created.status.success(), "{}", stderr(&created));
+    let result: Value = serde_json::from_slice(&created.stdout).unwrap();
+    let mid = result["mid"].as_str().unwrap().to_owned();
+    let neighbor = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-KEEP",
+            "other.mara.md",
+            "--title",
+            "Keep",
+            "--field",
+            "status=draft",
+            "--body",
+            "Keep [[REQ-EDIT]].",
+        ],
+    );
+    assert!(neighbor.status.success(), "{}", stderr(&neighbor));
+    let source = format!(
+        "# Before  \r\n\r\n:::mara requirement REQ-EDIT\r\n:mid: {mid}\r\n:title:  Original \t\r\n:tag:\told-one  \r\n:depends_on: REQ-KEEP\r\n:status: draft\t\r\n:tag: old-two\r\n \t\r\nOriginal **body**.\r\n\r\n:::\r\n\r\nAfter without newline"
+    );
+    fs::write(fixture.path().join("edit.mara.md"), &source).unwrap();
+    assert!(
+        mara(fixture.path(), &["project", "validate"])
+            .status
+            .success()
+    );
+    (fixture, source, mid)
+}
+
+#[test]
+fn item_update_preserves_source_and_permissions_while_replacing_repeated_fields() {
+    let (fixture, source, mid) = update_fixture();
+    let path = fixture.path().join("edit.mara.md");
+    let other = fs::read(fixture.path().join("other.mara.md")).unwrap();
+    #[cfg(unix)]
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+    let result = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "update",
+            &mid,
+            "--title",
+            " New title ",
+            "--field",
+            "tag=first",
+            "--field",
+            "status=accepted",
+            "--field",
+            "tag=second",
+            "--field",
+            "tag=third",
+            "--field",
+            "count=42",
+            "--field",
+            "enabled=true",
+            "--field",
+            "weight=2.5",
+        ],
+    );
+    assert!(result.status.success(), "{}", stderr(&result));
+    let result: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(
+        result,
+        json!({"id":"REQ-EDIT", "mid":mid, "path":"edit.mara.md",
+        "changed_fields":["count","enabled","status","tag","title","weight"], "warnings":[]})
+    );
+    let expected = source
+        .replace(":title:  Original \t", ":title:  New title \t")
+        .replace(":tag:\told-one  ", ":tag:\tfirst  ")
+        .replace(":status: draft\t", ":status: accepted\t")
+        .replace(
+            ":tag: old-two\r\n",
+            ":tag: second\r\n:tag: third\r\n:count: 42\r\n:enabled: true\r\n:weight: 2.5\r\n",
+        );
+    assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+    assert_eq!(
+        fs::read(fixture.path().join("other.mara.md")).unwrap(),
+        other
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o640
+    );
+    let reduced = mara(
+        fixture.path(),
+        &["item", "update", "REQ-EDIT", "--field", "tag=only"],
+    );
+    assert!(reduced.status.success(), "{}", stderr(&reduced));
+    assert!(stdout(&reduced).contains(&mid));
+    assert!(stdout(&reduced).contains("changed fields: tag"));
+    assert!(stdout(&reduced).contains("edit.mara.md"));
+    let expected = expected
+        .replace(":tag:\tfirst  ", ":tag:\tonly  ")
+        .replace(":tag: second\r\n", "")
+        .replace(":tag: third\r\n", "");
+    assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+    let cleared = mara(
+        fixture.path(),
+        &["item", "update", "REQ-EDIT", "--clear-field", "tag"],
+    );
+    assert!(cleared.status.success(), "{}", stderr(&cleared));
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        expected.replace(":tag:\tonly  \r\n", "")
+    );
+    assert!(
+        mara(fixture.path(), &["project", "validate"])
+            .status
+            .success()
+    );
+    assert!(!fixture.path().join(".mara/transaction.json").exists());
+}
+
+#[test]
+fn item_update_reads_body_from_stdin_and_handles_optional_empty_body_and_noops() {
+    let (fixture, source, _) = update_fixture();
+    let body = "New paragraph.\n\n```markdown\n:::mara is an example\n:::\n```\n[[REQ-KEEP]]";
+    let result = mara_with_stdin(
+        fixture.path(),
+        &["item", "update", "REQ-EDIT", "--body", "-"],
+        body,
+    );
+    assert!(result.status.success(), "{}", stderr(&result));
+    let expected = source.replace(
+        "Original **body**.\r\n\r\n",
+        &(body.replace('\n', "\r\n") + "\r\n"),
+    );
+    let path = fixture.path().join("edit.mara.md");
+    assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+    let noop = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "update",
+            "REQ-EDIT",
+            "--title",
+            "Original",
+            "--clear-field",
+            "count",
+        ],
+    );
+    assert!(noop.status.success(), "{}", stderr(&noop));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&noop.stdout).unwrap()["changed_fields"],
+        json!([])
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+    let schema_path = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_path)
+        .unwrap()
+        .replace("body: required", "body: optional");
+    fs::write(schema_path, schema).unwrap();
+    let empty = mara(
+        fixture.path(),
+        &["item", "update", "REQ-EDIT", "--body", ""],
+    );
+    assert!(empty.status.success(), "{}", stderr(&empty));
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        source.replace("Original **body**.\r\n\r\n", "")
+    );
+}
+
+#[test]
+fn item_update_allows_continued_drafting_and_completes_scaffolds() {
+    let (fixture, source, _) = update_fixture();
+    let created = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-DRAFT",
+            "draft.mara.md",
+            "--title",
+            "Draft",
+            "--field",
+            "status=draft",
+        ],
+    );
+    assert!(created.status.success(), "{}", stderr(&created));
+    assert!(stdout(&created).contains("complete: false"));
+    // Other existing scaffolds also remain available during incremental drafting.
+    let result = mara(
+        fixture.path(),
+        &["item", "update", "REQ-EDIT", "--title", "Changed"],
+    );
+    assert!(result.status.success(), "{}", stderr(&result));
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("edit.mara.md")).unwrap(),
+        source.replace("Original \t", "Changed \t")
+    );
+    let result = mara(
+        fixture.path(),
+        &[
+            "item",
+            "update",
+            "REQ-DRAFT",
+            "--title",
+            "Working draft",
+            "--field",
+            "tag=planning",
+        ],
+    );
+    assert!(result.status.success(), "{}", stderr(&result));
+    assert!(stderr(&result).contains("warning: draft.mara.md:"));
+    assert!(stderr(&result).contains("required body is empty"));
+    let cli = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "update",
+            "REQ-DRAFT",
+            "--title",
+            "Working draft",
+        ],
+    );
+    assert!(cli.status.success(), "{}", stderr(&cli));
+    let cli: Value = serde_json::from_slice(&cli.stdout).unwrap();
+    assert_eq!(cli["warnings"].as_array().unwrap().len(), 1);
+    assert_eq!(cli["warnings"][0]["path"], "draft.mara.md");
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "item_update",
+                json!({"reference":"REQ-DRAFT", "title":"Working draft"}),
+            ),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        cli
+    );
+    for command in [
+        vec!["project", "validate"],
+        vec!["item", "validate", "REQ-DRAFT"],
+    ] {
+        let validation = mara(fixture.path(), &command);
+        assert!(!validation.status.success());
+        assert!(stderr(&validation).contains("required body is empty"));
+    }
+    let draft = fs::read(fixture.path().join("draft.mara.md")).unwrap();
+    let empty = mara(
+        fixture.path(),
+        &["item", "update", "REQ-DRAFT", "--body", ""],
+    );
+    assert!(!empty.status.success());
+    assert_eq!(
+        fs::read(fixture.path().join("draft.mara.md")).unwrap(),
+        draft
+    );
+    let result = mara_with_stdin(
+        fixture.path(),
+        &["item", "update", "REQ-DRAFT", "--body", "-"],
+        "Completed draft.\n",
+    );
+    assert!(result.status.success(), "{}", stderr(&result));
+    assert!(
+        mara(fixture.path(), &["project", "validate"])
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn item_update_invalid_requests_preserve_all_files() {
+    let (fixture, source, _) = update_fixture();
+    let other = fs::read(fixture.path().join("other.mara.md")).unwrap();
+    for args in [
+        vec![],
+        vec!["--title", " \t"],
+        vec!["--title", "bad\nvalue"],
+        vec!["--field", "status=unknown"],
+        vec!["--field", "status=draft", "--field", "status=accepted"],
+        vec!["--field", "count=no"],
+        vec!["--field", "enabled=yes"],
+        vec!["--field", "weight=no"],
+        vec!["--field", "tag=bad\nvalue"],
+        vec!["--field", "unknown=value"],
+        vec!["--clear-field", "unknown"],
+        vec!["--clear-field", "status"],
+        vec!["--clear-field", "tag", "--field", "tag=value"],
+        vec!["--field", "mid=01M1PXP2KG381MM1VNN6XC7S4M"],
+        vec!["--clear-field", "mid"],
+        vec!["--field", "id=REQ-RENAMED"],
+        vec!["--field", "flavour=design"],
+        vec!["--field", "title=Changed"],
+        vec!["--field", "body=Changed"],
+        vec!["--field", "depends_on=REQ-KEEP"],
+        vec!["--clear-field", "depends_on"],
+        vec!["--body", ""],
+        vec!["--body", " \n"],
+        vec!["--body", "[[REQ-MISSING]]"],
+        vec!["--body", ":::\nEscaped"],
+        vec!["--body", "```\nUnclosed fence"],
+        vec![
+            "--body",
+            ":::mara requirement REQ-NESTED\n:title: Nested\n\nBody\n:::",
+        ],
+    ] {
+        let mut command = vec!["--format", "json", "item", "update", "REQ-EDIT"];
+        command.extend(args);
+        let result = mara(fixture.path(), &command);
+        assert!(!result.status.success(), "unexpected success: {command:?}");
+        assert!(
+            serde_json::from_slice::<Value>(&result.stdout).unwrap()["error"]["message"]
+                .is_string()
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("edit.mara.md")).unwrap(),
+            source,
+            "{command:?}"
+        );
+        assert_eq!(
+            fs::read(fixture.path().join("other.mara.md")).unwrap(),
+            other
+        );
+    }
+    for reference in ["REQ-MISSING", "req-edit", "01M1PXP2KG381MM1VNN6XC7S4M"] {
+        assert!(
+            !mara(
+                fixture.path(),
+                &["item", "update", reference, "--title", "Changed"]
+            )
+            .status
+            .success()
+        );
+    }
+    // A diagnostic containing scaffold-like text is not a missing-body exception.
+    fs::write(
+        fixture.path().join("other.mara.md"),
+        String::from_utf8(other.clone())
+            .unwrap()
+            .replace(":status: draft", ":status: required body is empty"),
+    )
+    .unwrap();
+    assert!(
+        !mara(
+            fixture.path(),
+            &["item", "update", "REQ-EDIT", "--title", "Changed"]
+        )
+        .status
+        .success()
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("edit.mara.md")).unwrap(),
+        source
+    );
+    fs::write(fixture.path().join("other.mara.md"), other).unwrap();
+    fs::write(fixture.path().join(".mara/transaction.json"), "pending").unwrap();
+    let result = mara(
+        fixture.path(),
+        &["item", "update", "REQ-EDIT", "--title", "Changed"],
+    );
+    assert!(!result.status.success());
+    assert!(stderr(&result).contains("pending transaction"));
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("edit.mara.md")).unwrap(),
+        source
+    );
+}
+
+#[test]
+fn item_update_mcp_matches_cli_against_real_files() {
+    let (fixture, source, mid) = update_fixture();
+    let cli = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "update",
+            "REQ-EDIT",
+            "--title",
+            "New",
+            "--field",
+            "tag=one",
+            "--field",
+            "tag=two",
+            "--clear-field",
+            "count",
+            "--body",
+            "Updated [[REQ-KEEP]].",
+        ],
+    );
+    assert!(cli.status.success(), "{}", stderr(&cli));
+    let expected = fs::read(fixture.path().join("edit.mara.md")).unwrap();
+    fs::write(fixture.path().join("edit.mara.md"), &source).unwrap();
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "item_update",
+                json!({"project":fixture.path(), "reference":mid, "title":"New", "fields":[{"key":"tag","value":"one"},{"key":"tag","value":"two"}], "clear_fields":["count"], "body":"Updated [[REQ-KEEP]]."}),
+            ),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        serde_json::from_slice::<Value>(&cli.stdout).unwrap()
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("edit.mara.md")).unwrap(),
+        expected
+    );
+    for arguments in [
+        json!({"reference":"REQ-EDIT"}),
+        json!({"reference":"REQ-EDIT", "mid":mid, "title":"Rejected"}),
+        json!({"reference":"REQ-EDIT", "fields":[{"key":"depends_on","value":"REQ-KEEP"}]}),
+        json!({"reference":"REQ-EDIT", "body":"[[REQ-MISSING]]"}),
+        json!({"reference":"REQ-EDIT", "project":fixture.path(), "title":"Rejected"}),
+    ] {
+        let responses = mcp_exchange_with_arguments(
+            fixture.path(),
+            &["mcp", "--project", fixture.path().to_str().unwrap()],
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, "item_update", arguments),
+            ],
+        );
+        let response = mcp_response(&responses, 2);
+        assert!(
+            response.get("error").is_some() || response["result"]["isError"] == true,
+            "{response}"
+        );
+        assert_eq!(
+            fs::read(fixture.path().join("edit.mara.md")).unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn item_update_rejects_missing_or_ambiguous_identity_and_preserves_adjacent_items() {
+    let (fixture, source, mid) = update_fixture();
+    let path = fixture.path().join("edit.mara.md");
+    let other = fs::read_to_string(fixture.path().join("other.mara.md")).unwrap();
+    // A same-document neighbor and a closing delimiter without a final newline.
+    let adjacent = format!(
+        "{other}\n{}",
+        source.trim_end_matches("\r\n\r\nAfter without newline")
+    );
+    fs::remove_file(fixture.path().join("other.mara.md")).unwrap();
+    fs::write(&path, &adjacent).unwrap();
+    let result = mara(
+        fixture.path(),
+        &["item", "update", &mid, "--title", "Changed"],
+    );
+    assert!(result.status.success(), "{}", stderr(&result));
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        adjacent.replace(":title:  Original", ":title:  Changed")
+    );
+    for invalid_source in [
+        source.replace(&format!(":mid: {mid}\r\n"), ""),
+        source.replace(&format!(":mid: {mid}"), ":mid: invalid"),
+        format!(
+            "{source}\n\n{}",
+            source.replace("REQ-EDIT", "REQ-DUPLICATE")
+        ),
+        format!("{source}\n\n{}", other.replace("REQ-KEEP", "REQ-EDIT")),
+    ] {
+        fs::write(&path, &invalid_source).unwrap();
+        let result = mara(
+            fixture.path(),
+            &["item", "update", "REQ-EDIT", "--title", "Changed"],
+        );
+        assert!(!result.status.success());
+        assert_eq!(fs::read_to_string(&path).unwrap(), invalid_source);
+    }
 }

@@ -10,11 +10,11 @@ use std::{
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
     FieldValue, ItemCollectionResult, ItemCreateParams, ItemFilterParams, ItemMoveParams,
-    ItemRelatedParams, ItemSummary, OperationContext, ProjectInitializationResult,
-    ProjectMidBackfillResult, RelatedItem, RelationDirection, RelationMutationResult,
-    RelationParams, RelationSummary, ResolvedItem, SchemaGetResult, SchemaKind, SchemaListResult,
-    SchemaValidationResult, Template, ValidationResult, ValidationScope, ValidationTargetKind,
-    project_initialize,
+    ItemRelatedParams, ItemSummary, ItemUpdateParams, OperationContext,
+    ProjectInitializationResult, ProjectMidBackfillResult, RelatedItem, RelationDirection,
+    RelationMutationResult, RelationParams, RelationSummary, ResolvedItem, SchemaGetResult,
+    SchemaKind, SchemaListResult, SchemaValidationResult, Template, ValidationResult,
+    ValidationScope, ValidationTargetKind, project_initialize,
 };
 use serde::Serialize;
 
@@ -92,6 +92,18 @@ enum ProjectMidCommand {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
+    /// Partially update an item's title, custom fields, or body.
+    Update {
+        reference: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long = "field", value_parser = parse_field)]
+        fields: Vec<CliField>,
+        #[arg(long = "clear-field")]
+        clear_fields: Vec<String>,
+        #[arg(long, help = "Replace the body; use - to read standard input")]
+        body: Option<String>,
+    },
     Move {
         reference: String,
         file: PathBuf,
@@ -406,6 +418,44 @@ fn run(cli: Cli) -> Result<bool, String> {
         }
         Command::Item {
             command:
+                ItemCommand::Update {
+                    reference,
+                    title,
+                    fields,
+                    clear_fields,
+                    body,
+                },
+        } => {
+            let body = read_body(body)?;
+            let result = operations(project)?.item_update(ItemUpdateParams {
+                reference,
+                title,
+                fields: fields.into_iter().map(Into::into).collect(),
+                clear_fields,
+                body,
+            })?;
+            emit(format, &result, |result| {
+                println!(
+                    "updated item '{}' with MID {} at {}",
+                    result.id,
+                    result.mid,
+                    result.path.display()
+                );
+                println!("changed fields: {}", result.changed_fields.join(", "));
+                for warning in &result.warnings {
+                    eprintln!(
+                        "warning: {}:{}: {}",
+                        warning.path.as_ref().expect("item warning path").display(),
+                        warning.line.expect("item warning line"),
+                        warning.message
+                    );
+                }
+                Ok(())
+            })?;
+            Ok(true)
+        }
+        Command::Item {
+            command:
                 ItemCommand::Move {
                     reference,
                     file,
@@ -443,16 +493,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                     line,
                 },
         } => {
-            let body = match body.as_deref() {
-                Some("-") => {
-                    let mut body = String::new();
-                    io::stdin()
-                        .read_to_string(&mut body)
-                        .map_err(|error| format!("could not read item body from stdin: {error}"))?;
-                    Some(body)
-                }
-                _ => body,
-            };
+            let body = read_body(body)?;
             let result = operations(project)?.item_create(ItemCreateParams {
                 flavour,
                 id,
@@ -881,4 +922,17 @@ fn print_yaml(value: &impl Serialize) -> Result<(), String> {
         .map_err(|error| format!("could not render schema: {error}"))?;
     print!("{source}");
     Ok(())
+}
+
+fn read_body(body: Option<String>) -> Result<Option<String>, String> {
+    match body.as_deref() {
+        Some("-") => {
+            let mut body = String::new();
+            io::stdin()
+                .read_to_string(&mut body)
+                .map_err(|error| format!("could not read item body from stdin: {error}"))?;
+            Ok(Some(body))
+        }
+        _ => Ok(body),
+    }
 }

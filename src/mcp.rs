@@ -2,10 +2,11 @@ use std::path::PathBuf;
 
 use mara::{
     FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult, ItemFilterParams,
-    ItemMove, ItemMoveParams, ItemRelatedParams, OperationContext, ProjectInitializationResult,
-    ProjectMidBackfillResult, RelatedItemsResult, RelationDirection, RelationMutationResult,
-    RelationParams, ResolvedItem, SchemaGetResult, SchemaKind, SchemaListResult,
-    SchemaValidationResult, Template, TransactionRollbackResult, ValidationResult,
+    ItemMove, ItemMoveParams, ItemRelatedParams, ItemUpdate, ItemUpdateParams, OperationContext,
+    ProjectInitializationResult, ProjectMidBackfillResult, RelatedItemsResult, RelationDirection,
+    RelationMutationResult, RelationParams, ResolvedItem, SchemaGetResult, SchemaKind,
+    SchemaListResult, SchemaValidationResult, Template, TransactionRollbackResult,
+    ValidationResult,
 };
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -88,6 +89,25 @@ impl ItemCreateToolParams {
             },
         )
     }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemUpdateToolParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    reference: String,
+    #[serde(default)]
+    title: Option<String>,
+    /// Replace all values of each named custom field, repeating keys as needed.
+    #[serde(default)]
+    fields: Vec<FieldValue>,
+    /// Clear optional custom fields; cannot also appear in fields.
+    #[serde(default)]
+    clear_fields: Vec<String>,
+    /// Replacement body text; an empty string clears an optional body.
+    #[serde(default)]
+    body: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -320,6 +340,25 @@ impl MaraMcp {
     ) -> Result<Json<ItemCreationResult>, String> {
         let (project, params) = params.into_parts();
         self.for_project(project)?.item_create(params).map(Json)
+    }
+
+    #[tool(
+        name = "item_update",
+        description = "Partially update one item by exact MID or human ID. Requires a title, custom field replacement or clear, or body. Preserves identity, relations, and untouched source."
+    )]
+    fn item_update(
+        &self,
+        Parameters(params): Parameters<ItemUpdateToolParams>,
+    ) -> Result<Json<ItemUpdate>, String> {
+        self.for_project(params.project)?
+            .item_update(ItemUpdateParams {
+                reference: params.reference,
+                title: params.title,
+                fields: params.fields,
+                clear_fields: params.clear_fields,
+                body: params.body,
+            })
+            .map(Json)
     }
 
     #[tool(

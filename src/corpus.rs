@@ -251,6 +251,7 @@ pub struct Diagnostic {
 enum DiagnosticKind {
     Other,
     MissingMid,
+    MissingBody,
 }
 
 impl Diagnostic {
@@ -263,6 +264,10 @@ impl Diagnostic {
     pub fn message(&self) -> &str {
         &self.message
     }
+    pub(crate) fn is_missing_body(&self) -> bool {
+        self.kind == DiagnosticKind::MissingBody
+    }
+
     pub(crate) fn is_missing_mid(&self) -> bool {
         self.kind == DiagnosticKind::MissingMid
     }
@@ -326,9 +331,10 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
             && flavour.body == BodyRequirement::Required
             && item.body().trim().is_empty()
         {
-            diagnostic(
+            diagnostic_with_kind(
                 &mut diagnostics,
                 item.body_source(),
+                DiagnosticKind::MissingBody,
                 "required body is empty".into(),
             );
         }
