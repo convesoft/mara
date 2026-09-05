@@ -366,6 +366,7 @@ computed fields, or custom rules.
 :satisfies: REQ-ITEM-SEARCH
 :satisfies: REQ-ITEM-RELATED
 :satisfies: REQ-ITEM-UPDATE
+:satisfies: REQ-ITEM-RENAME
 
 CLI commands use `mara <object> <operation>`. The alpha objects are `project`,
 `schema`, `item`, and `relation`; `mara mcp` starts the stdio MCP surface.
@@ -382,7 +383,7 @@ for schema-repeatable metadata.
 |---|---|
 | `project` | `init`, `validate`, `mid backfill`, `transaction rollback` |
 | `schema` | `get`, `list`, `validate` |
-| `item` | `create`, `update`, `move`, `delete`, `get`, `list`, `search`, `related`, `validate` |
+| `item` | `create`, `update`, `move`, `rename`, `delete`, `get`, `list`, `search`, `related`, `validate` |
 | `relation` | `add`, `remove` |
 
 `schema get` and `schema list` accept only the declared positional kinds
@@ -394,6 +395,8 @@ tools add an optional absolute `project` path to the shared operation input.
 Structured updates follow [[DES-ITEM-UPDATE]].
 
 Safe deletion follows [[DES-ITEM-DELETION]].
+
+Human-ID renaming follows [[DES-ITEM-RENAME]].
 
 Item movement and explicit transaction rollback follow [[DES-ITEM-MOVEMENT]].
 MCP `item_move` accepts `reference`, `file`, and optional `line`.
@@ -479,7 +482,7 @@ project knowledge.
 
 ## Explicitly deferred
 
-Renaming, schema mutation commands, persisted indexes or graph stores,
+Schema mutation commands, persisted indexes or graph stores,
 fuzzy or semantic search, LSP integration, a complete Markdown AST, and a
 graphical interface remain deferred. Manual source editing followed by validation
-remains supported alongside structured updates and movement.
+remains supported alongside structured updates, movement, renaming, and deletion.

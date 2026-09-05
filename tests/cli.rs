@@ -3452,6 +3452,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
             "schema_validate",
             "item_create",
             "item_delete",
+            "item_rename",
             "item_move",
             "item_update",
             "item_get",
@@ -3985,6 +3986,7 @@ fn pending_transaction_blocks_cli_and_mcp_mutations_and_exposes_recovery_errors(
     for args in [
         vec!["item", "move", "REQ-MOVE", "destination.mara.md"],
         vec!["item", "delete", "REQ-MOVE"],
+        vec!["item", "rename", "REQ-MOVE", "REQ-NEW"],
         vec![
             "item",
             "create",
@@ -4012,6 +4014,11 @@ fn pending_transaction_blocks_cli_and_mcp_mutations_and_exposes_recovery_errors(
                 json!({"reference": "REQ-MOVE", "file": "destination.mara.md"}),
             ),
             mcp_call(3, "project_transaction_rollback", json!({})),
+            mcp_call(
+                4,
+                "item_rename",
+                json!({"reference":"REQ-MOVE","new_id":"REQ-NEW"}),
+            ),
         ],
     );
     assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
@@ -4019,6 +4026,12 @@ fn pending_transaction_blocks_cli_and_mcp_mutations_and_exposes_recovery_errors(
         mcp_response(&responses, 3)
             .to_string()
             .contains("unrecoverable transaction")
+    );
+    assert_eq!(mcp_response(&responses, 4)["result"]["isError"], true);
+    assert!(
+        mcp_response(&responses, 4)
+            .to_string()
+            .contains("pending transaction")
     );
     let output = mara(fixture.path(), &["project", "transaction", "rollback"]);
     assert!(!output.status.success());
@@ -5026,4 +5039,318 @@ fn item_delete_refuses_invalid_projects_and_invalid_requests_without_source_chan
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
         fs::write(config_path, config).unwrap();
     }
+}
+
+fn rename_fixture() -> (TempDir, String, String, String) {
+    let (fixture, source, _) = move_fixture();
+    let original: Value = serde_json::from_slice(
+        &mara(
+            fixture.path(),
+            &["--format", "json", "item", "get", "REQ-MOVE"],
+        )
+        .stdout,
+    )
+    .unwrap();
+    let mid = original["summary"]["mid"].as_str().unwrap().to_owned();
+    let source = source
+        .replace(
+            ":title: REQ-MOVE\r\n",
+            ":title: REQ-MOVE\r\n:depends_on: REQ-MOVE\r\n",
+        )
+        .replace(
+            "Exact Unicode body:",
+            "Self [[REQ-MOVE]]. Exact Unicode body:",
+        );
+    let destination = fs::read_to_string(fixture.path().join("destination.mara.md"))
+        .unwrap()
+        .replace(
+            ":depends_on: REQ-MOVE",
+            &format!(":depends_on:\tREQ-MOVE  \n:depends_on: {mid}"),
+        )
+        .replace(
+            "Reference [[REQ-MOVE]].",
+            &format!(
+                r#"Reference [[REQ-MOVE]], [[REQ-MOVE]] and [[{mid}]].
+Unicode żółć REQ-MOVE prose; [REQ-MOVE](https://example.com/REQ-MOVE).
+Literal `[[REQ-MOVE]]` and escaped \[[REQ-MOVE]].
+Unsupported labelled syntax [[REQ-MOVE|REQ-MOVE]].
+
+```markdown
+[[REQ-MOVE]]
+```
+
+<!-- [[REQ-MOVE]] -->
+
+<div>
+[[REQ-MOVE]]
+</div>
+"#
+            ),
+        );
+    let destination = format!("Narrative [[REQ-MOVE]].\n\n{destination}\nTail REQ-MOVE");
+    fs::write(fixture.path().join("source.mara.md"), &source).unwrap();
+    fs::write(fixture.path().join("destination.mara.md"), &destination).unwrap();
+    fs::write(
+        fixture.path().join("untouched.mara.md"),
+        "REQ-MOVE [[REQ-MOVE]]\r\n",
+    )
+    .unwrap();
+    assert!(
+        mara(fixture.path(), &["project", "validate"])
+            .status
+            .success()
+    );
+    (fixture, source, destination, mid)
+}
+
+#[test]
+fn item_rename_preserves_bytes_and_mid_graph_across_documents() {
+    let (fixture, source, destination, mid) = rename_fixture();
+    #[cfg(unix)]
+    for (path, mode) in [("source.mara.md", 0o640), ("destination.mara.md", 0o604)] {
+        fs::set_permissions(fixture.path().join(path), fs::Permissions::from_mode(mode)).unwrap();
+    }
+    let before: Value = serde_json::from_slice(
+        &mara(fixture.path(), &["--format", "json", "item", "get", &mid]).stdout,
+    )
+    .unwrap();
+    let git = Command::new("git")
+        .arg("init")
+        .arg(fixture.path())
+        .output()
+        .unwrap();
+    assert!(git.status.success());
+    let output = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "rename",
+            &mid,
+            "REQ-RENAMED-LONGER",
+        ],
+    );
+    assert!(output.status.success(), "{}", stdout(&output));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        result,
+        json!({"mid":mid, "old_id":"REQ-MOVE", "new_id":"REQ-RENAMED-LONGER", "paths":["destination.mara.md","source.mara.md"]})
+    );
+    let expected_source = source
+        .replace("requirement REQ-MOVE", "requirement REQ-RENAMED-LONGER")
+        .replace(":depends_on: REQ-MOVE", ":depends_on: REQ-RENAMED-LONGER")
+        .replace("Self [[REQ-MOVE]]", "Self [[REQ-RENAMED-LONGER]]");
+    let expected_destination = destination
+        .replace(":depends_on:\tREQ-MOVE", ":depends_on:\tREQ-RENAMED-LONGER")
+        .replace(
+            "Reference [[REQ-MOVE]], [[REQ-MOVE]]",
+            "Reference [[REQ-RENAMED-LONGER]], [[REQ-RENAMED-LONGER]]",
+        );
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("source.mara.md")).unwrap(),
+        expected_source
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("destination.mara.md")).unwrap(),
+        expected_destination
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("untouched.mara.md")).unwrap(),
+        b"REQ-MOVE [[REQ-MOVE]]\r\n"
+    );
+    #[cfg(unix)]
+    for (path, mode) in [("source.mara.md", 0o640), ("destination.mara.md", 0o604)] {
+        assert_eq!(
+            fs::metadata(fixture.path().join(path))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            mode
+        );
+    }
+    let after: Value = serde_json::from_slice(
+        &mara(
+            fixture.path(),
+            &["--format", "json", "item", "get", "REQ-RENAMED-LONGER"],
+        )
+        .stdout,
+    )
+    .unwrap();
+    assert_eq!(after["summary"]["mid"], before["summary"]["mid"]);
+    for direction in ["incoming_relations", "outgoing_relations"] {
+        let endpoints = |value: &Value| {
+            value[direction]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|entry| (entry["relation"].clone(), entry["item"]["mid"].clone()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(endpoints(&after), endpoints(&before));
+    }
+    assert!(
+        !mara(fixture.path(), &["item", "get", "REQ-MOVE"])
+            .status
+            .success()
+    );
+    assert!(
+        mara(fixture.path(), &["item", "get", &mid])
+            .status
+            .success()
+    );
+    assert!(
+        mara(fixture.path(), &["project", "validate"])
+            .status
+            .success()
+    );
+    assert!(!fixture.path().join(".mara/transaction.json").exists());
+    assert!(
+        !Command::new("git")
+            .current_dir(fixture.path())
+            .args(["rev-parse", "--verify", "HEAD"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn item_rename_cli_mcp_and_human_results_agree() {
+    let (fixture, source, destination, mid) = rename_fixture();
+    let output = mara(
+        fixture.path(),
+        &["--format", "json", "item", "rename", "REQ-MOVE", "REQ-X"],
+    );
+    assert!(output.status.success(), "{}", stdout(&output));
+    let expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let expected_source = fs::read(fixture.path().join("source.mara.md")).unwrap();
+    let expected_destination = fs::read(fixture.path().join("destination.mara.md")).unwrap();
+    fs::write(fixture.path().join("source.mara.md"), &source).unwrap();
+    fs::write(fixture.path().join("destination.mara.md"), &destination).unwrap();
+    let responses = mcp_exchange_with_arguments(
+        fixture.path(),
+        &["mcp", "--project", fixture.path().to_str().unwrap()],
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0", "method":"notifications/initialized"}),
+            mcp_call(2, "item_rename", json!({"reference":mid,"new_id":"REQ-X"})),
+            mcp_call(
+                3,
+                "item_rename",
+                json!({"reference":mid,"new_id":"REQ-X","project":fixture.path()}),
+            ),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        expected
+    );
+    assert_eq!(mcp_response(&responses, 3)["result"]["isError"], true);
+    assert_eq!(
+        fs::read(fixture.path().join("source.mara.md")).unwrap(),
+        expected_source
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("destination.mara.md")).unwrap(),
+        expected_destination
+    );
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0", "method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "item_rename",
+                json!({"project":fixture.path(),"reference":"REQ-X","new_id":"REQ-X"}),
+            ),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        json!({"mid":mid,"old_id":"REQ-X","new_id":"REQ-X","paths":[]})
+    );
+    let output = mara(fixture.path(), &["item", "rename", "REQ-X", "REQ-MOVE"]);
+    assert!(output.status.success());
+    for value in [
+        &mid,
+        "REQ-X",
+        "REQ-MOVE",
+        "source.mara.md",
+        "destination.mara.md",
+    ] {
+        assert!(stdout(&output).contains(value));
+    }
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("source.mara.md")).unwrap(),
+        source
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("destination.mara.md")).unwrap(),
+        destination
+    );
+}
+
+#[test]
+fn item_rename_rejections_leave_source_unchanged_with_cli_mcp_parity() {
+    let (fixture, source, destination, mid) = rename_fixture();
+    for (reference, new_id) in [
+        ("REQ-MOVE", "bad"),
+        ("REQ-MOVE", "DES-WRONG"),
+        ("REQ-MOVE", "REQ-STAY"),
+        ("REQ-MOVE", &mid),
+        ("REQ-MOVE", "REQ-A\nREQ-B"),
+        ("REQ-UNKNOWN", "REQ-X"),
+    ] {
+        let output = mara(
+            fixture.path(),
+            &["--format", "json", "item", "rename", reference, new_id],
+        );
+        assert!(!output.status.success());
+        let error: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0", "method":"notifications/initialized"}),
+                mcp_call(
+                    2,
+                    "item_rename",
+                    json!({"reference":reference,"new_id":new_id}),
+                ),
+            ],
+        );
+        let result = &mcp_response(&responses, 2)["result"];
+        assert_eq!(result["isError"], true);
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains(error["error"]["message"].as_str().unwrap())
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("source.mara.md")).unwrap(),
+            source
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("destination.mara.md")).unwrap(),
+            destination
+        );
+        assert!(!fixture.path().join(".mara/transaction.json").exists());
+    }
+    fs::write(
+        fixture.path().join("destination.mara.md"),
+        destination.replace("[[REQ-MOVE]]", "[[REQ-MISSING]]"),
+    )
+    .unwrap();
+    let output = mara(fixture.path(), &["item", "rename", "REQ-MOVE", "REQ-X"]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("validation fails"));
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("source.mara.md")).unwrap(),
+        source
+    );
 }

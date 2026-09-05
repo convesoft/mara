@@ -81,7 +81,7 @@ enum ProjectCommand {
 
 #[derive(Debug, Subcommand)]
 enum ProjectTransactionCommand {
-    /// Restore original files from a pending move journal.
+    /// Restore original files from a pending mutation journal.
     Rollback,
 }
 
@@ -92,6 +92,11 @@ enum ProjectMidCommand {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
+    /// Rename a human ID and its internal references, preserving the MID.
+    Rename {
+        reference: String,
+        new_id: String,
+    },
     /// Delete one item only when no surviving relations or mentions refer to it.
     Delete {
         reference: String,
@@ -415,6 +420,22 @@ fn run(cli: Cli) -> Result<bool, String> {
                 }
                 for path in &result.restored {
                     println!("rolled back {}", path.display());
+                }
+                Ok(())
+            })?;
+            Ok(true)
+        }
+        Command::Item {
+            command: ItemCommand::Rename { reference, new_id },
+        } => {
+            let result = operations(project)?.item_rename(&reference, &new_id)?;
+            emit(format, &result, |result| {
+                println!(
+                    "renamed item '{}' to '{}' with MID {}",
+                    result.old_id, result.new_id, result.mid
+                );
+                for path in &result.paths {
+                    println!("updated {}", path.display());
                 }
                 Ok(())
             })?;

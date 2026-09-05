@@ -22,8 +22,9 @@ pub use corpus::{
 };
 pub use mutation::{
     BackfilledMid, BackfilledMids, ItemCreation, ItemCreationRequest, ItemDeletion, ItemLocation,
-    ItemMove, ItemUpdate, RelationMutation, TransactionRollback, add_relation, backfill_mids,
-    create_item, delete_item, move_item, remove_relation, rollback_transaction, update_item,
+    ItemMove, ItemRename, ItemUpdate, RelationMutation, TransactionRollback, add_relation,
+    backfill_mids, create_item, delete_item, move_item, remove_relation, rename_item,
+    rollback_transaction, update_item,
 };
 pub use operations::{
     DeclarationSummary, FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult,

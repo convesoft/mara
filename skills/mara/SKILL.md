@@ -29,8 +29,9 @@ or modify `AGENTS.md` as part of Mara onboarding.
 1. Call `schema_get` before authoring unfamiliar flavours, fields, or relations.
 2. Use `item_search`, `item_list`, and `item_related` for bounded discovery;
    call `item_get` only for selected full items.
-3. Use `item_create`, `item_update`, `item_move`, `item_delete`, `relation_add`, and
-   `relation_remove` only when the user has asked to change project knowledge.
+3. Use `item_create`, `item_update`, `item_move`, `item_rename`, `item_delete`,
+   `relation_add`, and `relation_remove` only when the user has asked to change
+   project knowledge.
 4. Run the narrowest relevant validation after a mutation and use
    `project_validate` when the requested work affects corpus-wide integrity.
 
@@ -40,4 +41,6 @@ use `item_move` to relocate an item while preserving identity. Update warnings
 about existing scaffold bodies still count as errors in explicit validation.
 Use `item_delete` to remove an item only when no surviving typed relations or
 supported wiki mentions refer to it; resolve reported blockers explicitly.
-Rename is not available yet; edit the source directly and validate when needed.
+Use `item_rename` to change a human ID and supported internal references while
+preserving the MID. Pending transactions block mutations; use
+`project_transaction_rollback` for explicit recovery after stopping other writers.
