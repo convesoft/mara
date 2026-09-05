@@ -15,6 +15,10 @@ All notable changes to Mara are generated from Conventional Commit history.
 
 - Remove optional plugin release automation
 
+### Documentation
+
+- Clarify alpha 3 retrieval scope
+
 ### Fixed
 
 - Make plugin release validation deterministic
