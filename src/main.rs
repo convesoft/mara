@@ -92,6 +92,10 @@ enum ProjectMidCommand {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
+    /// Delete one item only when no surviving relations or mentions refer to it.
+    Delete {
+        reference: String,
+    },
     /// Partially update an item's title, custom fields, or body.
     Update {
         reference: String,
@@ -412,6 +416,21 @@ fn run(cli: Cli) -> Result<bool, String> {
                 for path in &result.restored {
                     println!("rolled back {}", path.display());
                 }
+                Ok(())
+            })?;
+            Ok(true)
+        }
+        Command::Item {
+            command: ItemCommand::Delete { reference },
+        } => {
+            let result = operations(project)?.item_delete(&reference)?;
+            emit(format, &result, |result| {
+                println!(
+                    "deleted item '{}' with MID {} from {}",
+                    result.id,
+                    result.mid,
+                    result.path.display()
+                );
                 Ok(())
             })?;
             Ok(true)

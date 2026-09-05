@@ -173,6 +173,11 @@ impl OperationContext {
         })
     }
 
+    pub fn item_delete(&self, reference: &str) -> Result<crate::ItemDeletion, String> {
+        let (project, schema) = self.load_project()?;
+        crate::delete_item(&project, &schema, reference).map_err(|error| error.to_string())
+    }
+
     pub fn item_update(&self, params: ItemUpdateParams) -> Result<crate::ItemUpdate, String> {
         let (project, schema) = self.load_project()?;
         crate::update_item(&project, &schema, params).map_err(|error| error.to_string())

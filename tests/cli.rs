@@ -3451,6 +3451,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
             "schema_list",
             "schema_validate",
             "item_create",
+            "item_delete",
             "item_move",
             "item_update",
             "item_get",
@@ -3983,6 +3984,7 @@ fn pending_transaction_blocks_cli_and_mcp_mutations_and_exposes_recovery_errors(
     .unwrap();
     for args in [
         vec!["item", "move", "REQ-MOVE", "destination.mara.md"],
+        vec!["item", "delete", "REQ-MOVE"],
         vec![
             "item",
             "create",
@@ -4699,5 +4701,329 @@ fn item_update_rejects_missing_or_ambiguous_identity_and_preserves_adjacent_item
         );
         assert!(!result.status.success());
         assert_eq!(fs::read_to_string(&path).unwrap(), invalid_source);
+    }
+}
+
+fn delete_fixture() -> (TempDir, String, String, String) {
+    let fixture = TempDir::new().unwrap();
+    assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    let mut mid = String::new();
+    for (id, file) in [
+        ("REQ-DELETE", "delete.mara.md"),
+        ("REQ-KEEP", "keep.mara.md"),
+    ] {
+        let output = mara(
+            fixture.path(),
+            &[
+                "--format",
+                "json",
+                "item",
+                "create",
+                "requirement",
+                id,
+                file,
+                "--title",
+                id,
+                "--body",
+                "Exact Unicode body: żółć.",
+            ],
+        );
+        assert!(output.status.success(), "{}", stdout(&output));
+        if id == "REQ-DELETE" {
+            mid = serde_json::from_slice::<Value>(&output.stdout).unwrap()["mid"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+        }
+    }
+    let source = fs::read_to_string(fixture.path().join("delete.mara.md")).unwrap();
+    let other = fs::read_to_string(fixture.path().join("keep.mara.md")).unwrap();
+    (fixture, source, other, mid)
+}
+
+#[test]
+fn item_delete_preserves_source_permissions_and_empty_documents() {
+    let (fixture, block, other, mid) = delete_fixture();
+    let path = fixture.path().join("delete.mara.md");
+    // Same-document survivor, CRLF, narrative, and no final newline.
+    let source =
+        format!("Before żółć.\n\n{block}\n{other}\nAfter without newline").replace('\n', "\r\n");
+    fs::remove_file(fixture.path().join("keep.mara.md")).unwrap();
+    fs::write(&path, &source).unwrap();
+    #[cfg(unix)]
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+    let output = mara(
+        fixture.path(),
+        &["--format", "json", "item", "delete", &mid],
+    );
+    assert!(output.status.success(), "{}", stdout(&output));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        json!({"id":"REQ-DELETE", "mid":mid, "path":"delete.mara.md"})
+    );
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        format!("Before żółć.\n\n{other}\nAfter without newline").replace('\n', "\r\n")
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o640
+    );
+    assert!(
+        mara(fixture.path(), &["project", "validate"])
+            .status
+            .success()
+    );
+    assert!(
+        !mara(fixture.path(), &["item", "get", &mid])
+            .status
+            .success()
+    );
+    // End/start boundaries and a closing delimiter without a final newline.
+    for (source, expected) in [
+        (block.clone(), String::new()),
+        (block.trim_end_matches('\n').to_owned(), String::new()),
+        (format!("{block}\nTail"), "\nTail".into()),
+        (format!("\n{block}\nTail"), "\nTail".into()),
+        (
+            format!("Head\n\r\n{block}\r\nTail"),
+            "Head\n\r\nTail".into(),
+        ),
+        (format!("Head\n\n{block}"), "Head\n\n".into()),
+        (
+            format!("Head\n\n\n{block}\n\nTail"),
+            "Head\n\n\n\nTail".into(),
+        ),
+    ] {
+        fs::write(&path, source).unwrap();
+        let output = mara(fixture.path(), &["item", "delete", "REQ-DELETE"]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert!(stdout(&output).contains(&format!(
+            "deleted item 'REQ-DELETE' with MID {mid} from delete.mara.md"
+        )));
+        assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+        assert!(path.is_file());
+    }
+}
+
+#[test]
+fn item_delete_reports_every_incoming_occurrence_with_cli_mcp_parity() {
+    let (fixture, source, other, mid) = delete_fixture();
+    let other = other
+        .replace(
+            ":title: REQ-KEEP",
+            &format!(":title: REQ-KEEP\n:depends_on: REQ-DELETE\n:depends_on: {mid}"),
+        )
+        .replace(
+            "Exact Unicode body: żółć.",
+            &format!("[[REQ-DELETE]] [[{mid}]] [[REQ-DELETE]]"),
+        );
+    fs::write(fixture.path().join("keep.mara.md"), &other).unwrap();
+    let third = other.replace("REQ-KEEP", "REQ-THIRD");
+    // Use a generated identity for the second surviving document.
+    let created = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "create",
+            "requirement",
+            "REQ-THIRD",
+            "third.mara.md",
+            "--title",
+            "Third",
+            "--body",
+            "Third.",
+        ],
+    );
+    assert!(created.status.success(), "{}", stdout(&created));
+    let third_mid = serde_json::from_slice::<Value>(&created.stdout).unwrap()["mid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let keep_mid = other
+        .lines()
+        .find_map(|line| line.strip_prefix(":mid: "))
+        .unwrap();
+    let third = third.replace(keep_mid, &third_mid);
+    fs::write(fixture.path().join("third.mara.md"), &third).unwrap();
+    assert!(
+        mara(fixture.path(), &["project", "validate"])
+            .status
+            .success()
+    );
+    let cli = mara(
+        fixture.path(),
+        &["--format", "json", "item", "delete", &mid],
+    );
+    assert!(!cli.status.success());
+    let result: Value = serde_json::from_slice(&cli.stdout).unwrap();
+    let error = result["error"]["message"].as_str().unwrap();
+    assert_eq!(error.matches("(bytes ").count(), 10, "{error}");
+    for (file, body) in [("keep.mara.md", &other), ("third.mara.md", &third)] {
+        for (offset, _) in body
+            .match_indices(":depends_on:")
+            .chain(body.match_indices("[["))
+        {
+            let line = body[..offset].bytes().filter(|byte| *byte == b'\n').count() + 1;
+            assert!(
+                error.contains(&format!("{file}:{line} (bytes {offset}..")),
+                "{error}"
+            );
+        }
+    }
+    let human = mara(fixture.path(), &["item", "delete", "REQ-DELETE"]);
+    assert!(!human.status.success());
+    assert!(stderr(&human).contains(error));
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "item_delete", json!({"reference":"REQ-DELETE"})),
+        ],
+    );
+    let result = &mcp_response(&responses, 2)["result"];
+    assert_eq!(result["isError"], true);
+    assert!(
+        result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains(error)
+    );
+    for (file, expected) in [
+        ("delete.mara.md", source),
+        ("keep.mara.md", other),
+        ("third.mara.md", third),
+    ] {
+        assert_eq!(
+            fs::read_to_string(fixture.path().join(file)).unwrap(),
+            expected
+        );
+    }
+}
+
+#[test]
+fn item_delete_ignores_outgoing_self_references_and_code_examples() {
+    let (fixture, source, other, mid) = delete_fixture();
+    let source = source.replace(":title: REQ-DELETE", &format!(":title: REQ-DELETE\n:depends_on: REQ-KEEP\n:depends_on: REQ-DELETE\n:depends_on: {mid}"))
+        .replace("Exact Unicode body: żółć.", &format!("[[REQ-KEEP]] [[REQ-DELETE]] [[{mid}]]"));
+    let other = other.replace("Exact Unicode body: żółć.", &format!("`[[REQ-DELETE]] [[{mid}]]`\n\n```text\n[[REQ-DELETE]] [[{mid}]]\n```\n\n\\[[REQ-DELETE]] \\[[{mid}]]"));
+    let other = format!("Narrative [[REQ-DELETE]] [[{mid}]].\n\n{other}");
+    fs::write(fixture.path().join("delete.mara.md"), &source).unwrap();
+    fs::write(fixture.path().join("keep.mara.md"), &other).unwrap();
+    assert!(
+        mara(fixture.path(), &["project", "validate"])
+            .status
+            .success()
+    );
+    let cli = mara(
+        fixture.path(),
+        &["--format", "json", "item", "delete", "REQ-DELETE"],
+    );
+    assert!(cli.status.success(), "{}", stdout(&cli));
+    fs::write(fixture.path().join("delete.mara.md"), &source).unwrap();
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "item_delete",
+                json!({"project":fixture.path(), "reference":mid}),
+            ),
+            mcp_call(3, "project_validate", json!({})),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        serde_json::from_slice::<Value>(&cli.stdout).unwrap()
+    );
+    assert_eq!(
+        mcp_response(&responses, 3)["result"]["structuredContent"]["valid"],
+        true
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("delete.mara.md")).unwrap(),
+        ""
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("keep.mara.md")).unwrap(),
+        other
+    );
+}
+
+#[test]
+fn item_delete_refuses_invalid_projects_and_invalid_requests_without_source_changes() {
+    let (fixture, source, other, mid) = delete_fixture();
+    let path = fixture.path().join("delete.mara.md");
+    let other_path = fixture.path().join("keep.mara.md");
+    for invalid_other in [
+        other.replace("Exact Unicode body: żółć.", "[[REQ-MISSING]]"),
+        other.replace(
+            "Exact Unicode body: żółć.",
+            "[[00000000000000000000000000]]",
+        ),
+        other.replace("Exact Unicode body: żółć.", ""),
+        other
+            .lines()
+            .filter(|line| !line.starts_with(":mid:"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        format!("{other}\n{}", source.replace("REQ-DELETE", "REQ-DUPLICATE")),
+        other.replace("REQ-KEEP", "REQ-DELETE"),
+        other.replace(":::mara requirement", ":::mara unknown"),
+        other.trim_end_matches(":::\n").to_owned(),
+    ] {
+        fs::write(&other_path, &invalid_other).unwrap();
+        let result = mara(fixture.path(), &["item", "delete", &mid]);
+        assert!(!result.status.success(), "{invalid_other}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        assert_eq!(fs::read_to_string(&other_path).unwrap(), invalid_other);
+    }
+    fs::write(&other_path, &other).unwrap();
+    for reference in ["REQ-MISSING", "req-delete", "00000000000000000000000000"] {
+        assert!(
+            !mara(fixture.path(), &["item", "delete", reference])
+                .status
+                .success()
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+    }
+    for arguments in [
+        json!({"reference":"REQ-DELETE", "force":true}),
+        json!({"reference":mid, "project":fixture.path()}),
+        json!({"id":"REQ-DELETE"}),
+    ] {
+        let responses = mcp_exchange_with_arguments(
+            fixture.path(),
+            &["mcp", "--project", fixture.path().to_str().unwrap()],
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, "item_delete", arguments),
+            ],
+        );
+        let response = mcp_response(&responses, 2);
+        assert!(
+            response.get("error").is_some() || response["result"]["isError"] == true,
+            "{response}"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+    }
+    for file in [".mara/project.toml", ".mara/schema.yaml"] {
+        let config_path = fixture.path().join(file);
+        let config = fs::read(&config_path).unwrap();
+        fs::write(&config_path, "invalid: [").unwrap();
+        assert!(
+            !mara(fixture.path(), &["item", "delete", &mid])
+                .status
+                .success()
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        fs::write(config_path, config).unwrap();
     }
 }

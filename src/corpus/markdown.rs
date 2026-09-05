@@ -261,7 +261,7 @@ impl MaraInlineParser {
         }
         let closing = line[2..].windows(2).position(|pair| pair == b"]]")? + 2;
         let target = std::str::from_utf8(&line[2..closing]).ok()?;
-        if !is_item_id(target) {
+        if !is_item_id(target) && !crate::is_mid(target) {
             return None;
         }
         let length = closing + 2;

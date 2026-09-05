@@ -222,3 +222,64 @@ missing-body diagnostics as warnings during update, while explicit validation
 continues to fail until the bodies are supplied. This exception does not allow
 new missing required bodies or other invalid state.
 :::
+
+:::mara requirement REQ-ITEM-DELETION
+:mid: 01M1RTTGFNW3Y7K8CQW16FJKYV
+:title: Delete an item only when surviving references remain valid
+
+`item delete <reference>` and MCP `item_delete` remove exactly one item
+resolved by exact MID or human ID. Require a valid complete project before
+editing and a valid complete surviving corpus before publication.
+
+Refuse deletion when any surviving item's typed relation or supported wiki
+mention resolves to the selected MID or human ID. Report every blocking
+occurrence with its source path, one-based line, and byte span. References
+inside the selected item, including self-references, disappear with it and do
+not block deletion. Supported mentions follow [[DES-DOCUMENT-FORMAT]].
+
+Remove only the selected block and minimally normalize adjacent empty lines.
+Preserve unrelated source bytes, surviving items and references, line-ending
+style, and file permissions. Keep the containing document even when empty.
+Validate before one atomic replacement under the existing mutation lock;
+pending recovery state blocks deletion under [[REQ-RECOVERABLE-MUTATION]].
+
+Human output, CLI JSON, and MCP identify the deleted MID, human ID, and source
+path. There is no cascade, force option, tombstone, alias, history record,
+document deletion, bulk operation, or Git operation.
+:::
+
+:::mara design DES-ITEM-DELETION
+:mid: 01M1RTTGG2S7CSTJTG2ES0K9RM
+:title: Preflight references before removing an item source span
+:satisfies: REQ-ITEM-DELETION
+:satisfies: REQ-SURFACE-PARITY
+
+CLI accepts `item delete <reference>`. MCP accepts `reference` and the usual
+optional project selection. Both use one shared operation and return
+`{id, mid, path}`, with the original project-relative document path.
+
+Load and validate the full corpus under the project mutation lock, then resolve
+one exact identity. Scan every surviving item's schema-defined typed relations
+and parser-recognized body mentions, resolving both human IDs and MIDs. Retain
+every blocking occurrence, ordered by document path and source byte offset.
+Invocation errors follow [[DES-COMMAND-SURFACE]]; a blocked deletion names the
+selected identities and lists each source item, relation name or mention,
+path, one-based line, and end-exclusive UTF-8 byte span. Authors must remove or
+redirect those references explicitly before retrying.
+
+Remove the parser's complete item span, including the closing line terminator
+when present. If removal joins an empty line before the block with an empty
+line after it, remove exactly the first following empty line. An empty line
+here contains only LF or CRLF. Preserve every other byte, including existing
+leading/trailing blank lines, whitespace-only lines, and the final-newline
+state of surviving content. Do not insert separators or delete the document.
+
+Reparse the candidate, validate the complete surviving corpus, and verify that
+exactly the selected item disappeared while every surviving block and its
+recognized mentions remain unchanged. Stage the candidate in the source parent
+with original permissions. Use the existing single-file transaction path to
+recheck source bytes, permissions, project configuration, schema, discovery,
+and the full corpus before atomic replacement, without a multi-file journal.
+Concurrent manual filesystem edits during publication remain outside the
+advisory lock, as described in [[DES-ITEM-MOVEMENT]].
+:::

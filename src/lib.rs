@@ -21,9 +21,9 @@ pub use corpus::{
     validate_corpus, validate_corpus_independent,
 };
 pub use mutation::{
-    BackfilledMid, BackfilledMids, ItemCreation, ItemCreationRequest, ItemLocation, ItemMove,
-    ItemUpdate, RelationMutation, TransactionRollback, add_relation, backfill_mids, create_item,
-    move_item, remove_relation, rollback_transaction, update_item,
+    BackfilledMid, BackfilledMids, ItemCreation, ItemCreationRequest, ItemDeletion, ItemLocation,
+    ItemMove, ItemUpdate, RelationMutation, TransactionRollback, add_relation, backfill_mids,
+    create_item, delete_item, move_item, remove_relation, rollback_transaction, update_item,
 };
 pub use operations::{
     DeclarationSummary, FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult,
