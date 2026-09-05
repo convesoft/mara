@@ -6,11 +6,11 @@
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
 This is the accepted scope for 0.1.0-alpha.3. Search/list pagination, search
-excerpts, direct-neighbour pagination, and consecutive partial item reads are
-implemented; fuzzy matching and relevance ranking remain planned.
+excerpts, direct-neighbour pagination, consecutive partial item reads, and
+typo-tolerant matching are implemented; relevance ranking remains planned.
 Current retrieval contracts are [[REQ-ITEM-SEARCH]], [[REQ-ITEM-GET]], and
 [[REQ-ITEM-RELATED]]. Open choices in the planned contracts must be settled
-before implementation; no search library is selected here.
+before implementation.
 
 | Capability | Contract |
 |---|---|
@@ -29,9 +29,10 @@ Traversal remains caller-controlled: inspect one item and its direct relations,
 select relevant neighbours, and retrieve them as often as needed. No automatic
 multi-hop expansion is added.
 
-Semantic/hybrid search, embeddings or model execution, synonym dictionaries,
-stemming, substring/prefix modes, a query language, persisted indexes or graph
-stores, and context profiles remain outside the implementation scope.
+Semantic search (including lexical/semantic hybrids), embeddings or model
+execution, synonym dictionaries, stemming, substring/prefix modes, a query
+language, persisted indexes or graph stores, and context profiles remain
+outside the implementation scope.
 
 Narrative outside item blocks is canonical document content under
 [[DES-DOCUMENT-FORMAT]], but current item search does not retrieve it. Whether
@@ -126,16 +127,25 @@ The continuation interface follows [[DES-RETRIEVAL-CONTINUATION]].
 :title: Recover word matches containing small spelling errors
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
-Item search must support typo-tolerant word matching while retaining existing
-scope filters and requiring every distinct query term to match. Use
-conservative matching for short terms. Item-handle lookup and filter values
-remain exact. This is word-level spelling tolerance, not file-picker-style
-subsequence matching. Matching may incidentally cover a word-form variation;
-it does not promise morphological or substring matching.
+CLI `item search` and MCP `item_search` always combine exact and typo-tolerant
+word matches, without a mode flag or an exact-only fallback stage. Every
+distinct query term must match at least one complete word in the existing
+searchable values. Preserve all exact matches in the result set, including
+when approximate matches exist; result sets may expand relative to exact-only
+search. Empty-term queries retain their existing match-all behavior.
 
-Open before implementation: whether fuzzy matching is the default or explicitly
-selected, compatibility with current exact matching, and edit thresholds by
-term length.
+After the shared normalization in [[DES-DETERMINISTIC-KEYWORD-SEARCH]], allow
+zero edits for query terms of 1-3 Unicode scalar values, one for 4-7, and two
+for 8 or more. Use the query term's length, not byte length or the candidate's
+length. Edits are insertions, deletions, substitutions, and adjacent letter
+swaps. Apply the same matcher to excerpt occurrences.
+
+Retain existing scope filters; item-handle lookup and every filter value remain
+exact. This is word-level spelling tolerance, not file-picker-style subsequence
+matching. Matching may incidentally cover a word-form variation or a nearby
+word prefix; it does not promise morphological or substring matching.
+Results retain corpus order until [[REQ-SEARCH-RELEVANCE]] is implemented;
+that contract owns exact-before-approximate ranking before pagination.
 :::
 
 :::mara requirement REQ-SEARCH-RELEVANCE
@@ -143,9 +153,10 @@ term length.
 :title: Rank search results reproducibly by relevance
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
-Item search must support relevance ordering that favours exact over approximate
-matches and accounts for matches in IDs and titles. Define scoring and field
-weights before implementation. For unchanged input and options, ordering must
+Item search must support relevance ordering that puts items matching every
+query term exactly before any item requiring an approximate match. ID/title
+weighting must preserve this precedence. Define scoring and field weights
+before implementation. For unchanged input and options, ordering must
 be reproducible with stable tie-breaking. Rank before limiting or paginating;
 item list remains in corpus order. Whether relevance ordering is the search
 default remains open, as does compatibility with current corpus ordering.
@@ -186,15 +197,14 @@ path. Byte positions are document-relative, end-exclusive UTF-8 offsets;
 lines are one-based and inclusive. Text is an exact source slice of at most
 240 Unicode scalar values, including for oversized single lines.
 
-Select occurrences using the same normalized whole-word matcher over ID,
-metadata keys/values (including title), and body. Take up to 60 scalar values
+Select occurrences using the same normalized exact/typo-tolerant word matcher
+over ID, metadata keys/values (including title), and body. Take up to 60 scalar values
 of preceding context within that searchable value, then up to 240 total;
 skip occurrences already covered by a selected fragment. A match longer than
 the fragment cap is itself clipped. Fragments may cross body lines, but never
 searchable-value boundaries. Empty-term queries return an empty excerpt array.
 Excerpts need not cover every query term or occurrence; `partial` always marks
-them as an incomplete view. Future fuzzy matching must reuse its matching
-semantics for excerpt selection.
+them as an incomplete view.
 
 The same query and matching rules apply with or without excerpts. A caller may
 search the corpus for compact summaries, repeat the query restricted to a
@@ -354,4 +364,18 @@ values retrievable within the response budget. A shared cursor gives callers
 one completion condition and avoids coordinating independent section reads.
 Fixed identity/location fields, metadata keys, and relation names remain intact;
 report an actionable size error when they prevent progress.
+:::
+
+:::mara decision ADR-AUTOMATIC-TYPO-TOLERANCE
+:mid: 01M1S7ES0HDMSMX4TWEMW9MM8Z
+:title: Combine exact and typo-tolerant search automatically
+:justifies: REQ-FUZZY-ITEM-SEARCH
+
+Use one search operation that always combines exact and conservative approximate
+word matches. Users and agents should recover spelling errors without detecting
+a failed search and retrying in another mode. Preserve every exact match while
+allowing additional candidates; requiring every query term and restricting edits
+for short terms limits unwanted matches. Relevance ordering owns
+exact-before-approximate precedence under [[REQ-SEARCH-RELEVANCE]]; this matching
+change retains corpus order until ranking is implemented.
 :::

@@ -655,7 +655,26 @@ fn matches_text(item: &Item, query: &BTreeSet<String>) -> bool {
         item_terms.extend(keyword_terms(entry.value()));
     }
 
-    query.is_subset(&item_terms)
+    query.iter().all(|term| {
+        item_terms.contains(term) || item_terms.iter().any(|word| word_matches(term, word))
+    })
+}
+
+// Both item selection and source excerpts compare complete normalized words.
+fn word_matches(query: &str, word: &str) -> bool {
+    if query == word {
+        return true;
+    }
+    let query_length = query.chars().count();
+    let max_edits = match query_length {
+        0..=3 => return false,
+        4..=7 => 1,
+        _ => 2,
+    };
+    if query_length.abs_diff(word.chars().count()) > max_edits {
+        return false;
+    }
+    strsim::damerau_levenshtein(query, word) <= max_edits
 }
 
 fn keyword_terms(value: &str) -> BTreeSet<String> {

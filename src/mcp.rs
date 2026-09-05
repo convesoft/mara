@@ -505,7 +505,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_search",
-        description = "Search whole words in corpus order with exact filters and bounded pages. Optional ids select items; excerpts include partial source passages. Continue with next_cursor and unchanged options; restart after source changes."
+        description = "Search every distinct query word with automatic typo tolerance in corpus order. Normalized query words allow 0 edits at 1-3 characters, 1 at 4-7, and 2 at 8+; adjacent swaps count as one edit. Filters and selected ids stay exact. Optional excerpts include partial matching source passages. Continue bounded pages with next_cursor and unchanged options; restart after source changes."
     )]
     fn item_search(
         &self,

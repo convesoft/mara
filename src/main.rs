@@ -153,6 +153,7 @@ enum ItemCommand {
         #[command(flatten)]
         filters: ItemFilterArgs,
     },
+    /// Match every query word with automatic typo tolerance; filters stay exact.
     Search {
         query: String,
 

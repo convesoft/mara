@@ -105,7 +105,9 @@ command with `--cursor <next_cursor>` to continue. Get returns consecutive body
 and metadata fragments, then direct relations; follow continuation to retrieve
 the complete item. Inspect selected search passages with
 `mara item search "primary workflow" --id REQ-EXAMPLE --excerpts`.
-Bounds, continuation, and excerpt options follow
+Search automatically combines exact word matches with small spelling corrections;
+item lookup and filters remain exact. Matching, bounds, continuation, and
+excerpts follow
 [`docs/retrieval.mara.md`](docs/retrieval.mara.md).
 For existing projects whose items lack machine identities, run
 `mara project mid backfill`, then `mara project validate` before editing.

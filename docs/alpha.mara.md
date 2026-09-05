@@ -245,10 +245,11 @@ Bounds and consecutive continuation are specified by
 
 `item search <text>` performs deterministic Unicode case-insensitive keyword
 matching across ID, title, body, and metadata keys and values. Every distinct
-query term must occur as a complete term in at least one searchable value;
+query term must match a complete term in at least one searchable value;
 terms may occur in different values, in any order, and without adjacency.
-Partial terms, spelling correction, stemming, synonym expansion, and relevance
-ranking are not supported. Both query commands accept repeatable
+Exact and typo-tolerant matches are combined automatically under
+[[REQ-FUZZY-ITEM-SEARCH]]. Substring modes, stemming, synonym expansion, and
+relevance ranking are not supported. Both query commands accept repeatable
 `--flavour <name>`, `--field <key=value>`, `--relation <name>`, and
 `--path <project-relative-path>` filters plus `--limit <count>`.
 Path filters normalize `.` components and reject absolute paths or `..`.
@@ -263,9 +264,7 @@ limits and truncation markers follow [[REQ-RETRIEVAL-BOUNDS]]. Optional search
 excerpts and exact item selection follow [[DES-SEARCH-EXCERPT-OPTIONS]];
 summaries contain no body text unless excerpts are requested.
 
-This is the current matching/output baseline. Fuzzy matching and relevance
-ordering remain planned in [[REQ-FUZZY-ITEM-SEARCH]] and
-[[REQ-SEARCH-RELEVANCE]].
+Relevance ordering remains planned in [[REQ-SEARCH-RELEVANCE]].
 :::
 
 :::mara requirement REQ-ITEM-RELATED
@@ -485,22 +484,24 @@ supported manual MCP-plus-skill contract.
 
 Search analyzes query text and each searchable item value with the same pipeline:
 NFC normalization, Unicode full default case folding, NFC normalization, and
-Unicode Standard Annex #29 word segmentation. Each distinct query term is
-matched as a complete term.
+Unicode Standard Annex #29 word segmentation. Compare complete terms using
+exact equality or Damerau-Levenshtein distance over Unicode scalar values,
+with the query-length thresholds in [[REQ-FUZZY-ITEM-SEARCH]]. An insertion,
+deletion, substitution, or adjacent transposition costs one edit.
 
-An item matches when every query term occurs in at least one of its searchable
+An item matches when every query term matches at least one of its searchable
 values. Terms may occur in different values, in any order, and without
-adjacency. The matcher does not stem terms, expand synonyms, correct spelling,
-or rank results.
+adjacency. Use `strsim`'s Unicode-aware `damerau_levenshtein` for spelling distance;
+it supports adjacent swaps without introducing an index or a search engine.
+The matcher does not stem terms, expand synonyms, or rank results.
 
 Matching remains an internal projection over the loaded corpus. It writes no
 index or search-specific project data and returns matching items in corpus
 order, so a later search engine can replace it without migrating authored
 project knowledge.
 
-This is the current matcher. [[REQ-FUZZY-ITEM-SEARCH]] and
-[[REQ-SEARCH-RELEVANCE]] define planned alpha.3 extensions; activation defaults,
-scoring, and library selection are not established by this baseline design.
+[[REQ-SEARCH-RELEVANCE]] defines the planned relevance ordering; scoring and
+field weights remain open there.
 :::
 
 ## Explicitly deferred
@@ -509,5 +510,5 @@ Schema mutation commands, persisted indexes or graph stores,
 semantic search, LSP integration, a complete Markdown AST, and a
 graphical interface remain deferred. Manual source editing followed by validation
 remains supported alongside structured updates, movement, renaming, and deletion.
-Fuzzy search and the other alpha.3 retrieval changes are planned in
+Current and planned alpha.3 retrieval behavior is defined in
 [Enhanced deterministic retrieval](retrieval.mara.md).

@@ -3944,6 +3944,7 @@ fn item_search_matches_distinct_complete_unicode_terms_across_values() {
         "project validation",
         "validation project",
         "project project validation",
+        "projects validation", // A word-form variation within the edit budget.
     ] {
         let searched = mara(fixture.path(), &["item", "search", query]);
         assert!(searched.status.success(), "{}", stderr(&searched));
@@ -3954,7 +3955,7 @@ fn item_search_matches_distinct_complete_unicode_terms_across_values() {
         );
     }
 
-    for query in ["project missing", "projects validation", "project valid"] {
+    for query in ["project missing", "prj validation", "project valid"] {
         let searched = mara(fixture.path(), &["item", "search", query]);
         assert!(searched.status.success(), "{}", stderr(&searched));
         assert_eq!(
@@ -3974,6 +3975,258 @@ fn item_search_matches_distinct_complete_unicode_terms_across_values() {
         stdout(&unicode_equivalent),
         "SCN-UNICODE\tscenario\tCafé workflow\tdocs/search.mara.md:7\npage\thas_more=false\n"
     );
+}
+
+#[test]
+fn typo_tolerant_search_uses_normalized_word_lengths_and_bounded_edits() {
+    let fixture = retrieval_fixture();
+    let path = fixture.path().join("docs/word.mara.md");
+    for (query, word, expected) in [
+        ("cat", "cat", true),
+        ("cat", "cut", false),
+        ("cát", "cåt", false), // Three scalars, despite the UTF-8 byte count.
+        ("cats", "cat", true),
+        ("cafe", "cafes", true),
+        ("cafe", "case", true),
+        ("cafe", "caef", true), // An adjacent swap is one edit.
+        ("cafe", "cxfx", false),
+        ("project", "projecx", true),
+        ("project", "projexx", false),
+        ("projects", "projexxs", true),
+        ("projects", "projxxxs", false),
+        ("STRASSE", "Straße", true),
+        ("STRASXE", "Straße", true),
+        ("ßabcdef", "ssabcdxx", true), // Case folding expands to eight scalars.
+        ("CAFÈ", "cafe\u{301}", true),
+        ("ПРОЕКТ", "проетк", true),
+        ("prj", "project", false), // No subsequence or substring mode.
+        ("validate", "validation", false), // No stemming.
+        ("project missing", "project", false),
+    ] {
+        let source =
+            format!(":::mara requirement REQ-WORD\n:title: Catalog entry\n\n{word}\n:::\n");
+        fs::write(&path, &source).unwrap();
+        let output = mara(
+            fixture.path(),
+            &[
+                "--format",
+                "json",
+                "item",
+                "search",
+                query,
+                "--path",
+                "docs/word.mara.md",
+                "--excerpts",
+            ],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            page["items"].as_array().unwrap().len(),
+            usize::from(expected),
+            "{query} -> {word}"
+        );
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(
+                    2,
+                    "item_search",
+                    json!({"query":query, "paths":["docs/word.mara.md"], "excerpts":true}),
+                ),
+            ],
+        );
+        assert_eq!(
+            mcp_response(&responses, 2)["result"]["structuredContent"],
+            page
+        );
+        if expected {
+            let excerpts = page["items"][0]["excerpts"].as_array().unwrap();
+            assert!(
+                excerpts
+                    .iter()
+                    .any(|e| e["text"].as_str().unwrap().contains(word)),
+                "{query} -> {word}"
+            );
+            for excerpt in excerpts {
+                let start = excerpt["start_byte"].as_u64().unwrap() as usize;
+                let end = excerpt["end_byte"].as_u64().unwrap() as usize;
+                assert_eq!(excerpt["text"], source[start..end]);
+            }
+        }
+    }
+}
+
+#[test]
+fn typo_tolerant_search_preserves_exact_matches_filters_excerpts_and_pages() {
+    let fixture = retrieval_fixture();
+    let path = fixture.path().join("docs/typos.mara.md");
+    fs::write(
+        &path,
+        ":::mara requirement REQ-APPROXIMATE\n:title: Project knowledge\n:status: accepted\n:derives_from: SCN-BASE\n\nValidaton Straße cafe\u{301}.\n:::\n\n:::mara requirement REQ-EXACT\n:title: Project knowledge\n:status: draft\n:derives_from: SCN-BASE\n\nValidation Straße cafe\u{301}.\n:::\n",
+    )
+    .unwrap();
+    let backfill = mara(fixture.path(), &["project", "mid", "backfill"]);
+    assert!(backfill.status.success(), "{}", stderr(&backfill));
+    let source = fs::read_to_string(&path).unwrap();
+
+    // Exact results must remain present even when approximate matches exist.
+    // Ranking is separate; this change preserves corpus order across pages.
+    for query in ["project validation", "projcet validation projcet"] {
+        let mut cursor: Option<String> = None;
+        let mut ids = Vec::new();
+        loop {
+            let mut args = vec![
+                "--format",
+                "json",
+                "item",
+                "search",
+                query,
+                "--path",
+                "docs/typos.mara.md",
+                "--flavour",
+                "requirement",
+                "--relation",
+                "derives_from",
+                "--limit",
+                "1",
+                "--excerpts",
+            ];
+            let mut params = json!({
+                "query": query, "paths": ["docs/typos.mara.md"],
+                "flavours": ["requirement"], "relations": ["derives_from"],
+                "limit": 1, "excerpts": true,
+            });
+            if let Some(cursor) = &cursor {
+                args.extend(["--cursor", cursor]);
+                params["cursor"] = json!(cursor);
+            }
+            let output = mara(fixture.path(), &args);
+            assert!(output.status.success(), "{}", stderr(&output));
+            let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(2, "item_search", params),
+                ],
+            );
+            assert_eq!(
+                mcp_response(&responses, 2)["result"]["structuredContent"],
+                page
+            );
+            let items = page["items"].as_array().unwrap();
+            assert_eq!(items.len(), 1, "query: {query}");
+            ids.push(items[0]["id"].as_str().unwrap().to_owned());
+            let excerpts = items[0]["excerpts"].as_array().unwrap();
+            assert!(
+                excerpts
+                    .iter()
+                    .any(|e| e["text"].as_str().unwrap().contains("Validat"))
+            );
+            for excerpt in excerpts {
+                let start = excerpt["start_byte"].as_u64().unwrap() as usize;
+                let end = excerpt["end_byte"].as_u64().unwrap() as usize;
+                assert_eq!(excerpt["text"], source[start..end]);
+                assert_eq!(excerpt["partial"], true);
+            }
+            cursor = page["next_cursor"].as_str().map(ToOwned::to_owned);
+            assert_eq!(page["has_more"], cursor.is_some());
+            if cursor.is_none() {
+                break;
+            }
+            assert!(ids.len() < 2, "continuation must finish");
+        }
+        assert_eq!(ids, ["REQ-APPROXIMATE", "REQ-EXACT"]);
+    }
+
+    // Filter values and selected handles must never use typo tolerance.
+    for (option, value, params, expected) in [
+        (
+            "--field",
+            "status=draft",
+            json!({"fields":[{"key":"status","value":"draft"}]}),
+            Some(1),
+        ),
+        (
+            "--field",
+            "status=drafx",
+            json!({"fields":[{"key":"status","value":"drafx"}]}),
+            Some(0),
+        ),
+        (
+            "--path",
+            "docs/typoz.mara.md",
+            json!({"paths":["docs/typoz.mara.md"]}),
+            Some(0),
+        ),
+        (
+            "--flavour",
+            "requiremenx",
+            json!({"flavours":["requiremenx"]}),
+            None,
+        ),
+        (
+            "--relation",
+            "derives_fron",
+            json!({"relations":["derives_fron"]}),
+            None,
+        ),
+        ("--id", "REQ-EXACT", json!({"ids":["REQ-EXACT"]}), Some(1)),
+        ("--id", "REQ-EXACX", json!({"ids":["REQ-EXACX"]}), None),
+    ] {
+        let mut params = params;
+        params["query"] = json!("projcet validation");
+        let output = mara(
+            fixture.path(),
+            &[
+                "--format",
+                "json",
+                "item",
+                "search",
+                "projcet validation",
+                option,
+                value,
+            ],
+        );
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, "item_search", params),
+            ],
+        );
+        let result = &mcp_response(&responses, 2)["result"];
+        if let Some(count) = expected {
+            assert!(output.status.success(), "{}", stderr(&output));
+            let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(
+                page["items"].as_array().unwrap().len(),
+                count,
+                "{option} {value}"
+            );
+            assert_eq!(result["structuredContent"], page);
+        } else {
+            assert!(!output.status.success(), "{option} {value}");
+            assert_eq!(result["isError"], true);
+        }
+    }
+    let get = mara(fixture.path(), &["item", "get", "REQ-EXACX"]);
+    assert!(!get.status.success());
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "item_get", json!({"id":"REQ-EXACX"})),
+        ],
+    );
+    assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
+    assert_eq!(fs::read_to_string(&path).unwrap(), source);
 }
 
 #[test]
