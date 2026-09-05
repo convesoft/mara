@@ -126,6 +126,429 @@ fn mcp_response(responses: &[Value], id: u64) -> &Value {
 }
 
 #[test]
+fn bounded_search_and_list_continue_completely_with_cli_mcp_parity() {
+    let fixture = retrieval_fixture();
+    let source = (0..45)
+        .map(|index| format!(":::mara requirement REQ-PAGE-{index}\n:title: Page {index}\n\nNeed bounded knowledge.\n:::\n\n"))
+        .collect::<String>();
+    fs::write(fixture.path().join("docs/pages.mara.md"), source).unwrap();
+    for operation in ["search", "list"] {
+        let mut cursor: Option<String> = None;
+        let mut ids = Vec::new();
+        loop {
+            let mut args = vec!["--format", "json", "item", operation];
+            if operation == "search" {
+                args.push("bounded knowledge");
+            }
+            args.extend(["--path", "docs/pages.mara.md", "--limit", "7"]);
+            if let Some(cursor) = &cursor {
+                args.extend(["--cursor", cursor]);
+            }
+            let output = mara(fixture.path(), &args);
+            assert!(output.status.success(), "{}", stderr(&output));
+            let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let mut params = json!({"paths": ["docs/pages.mara.md"], "limit": 7});
+            if operation == "search" {
+                params["query"] = json!("bounded knowledge");
+            }
+            if let Some(cursor) = &cursor {
+                params["cursor"] = json!(cursor);
+            }
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(2, &format!("item_{operation}"), params),
+                ],
+            );
+            assert_eq!(
+                mcp_response(&responses, 2)["result"]["structuredContent"],
+                page
+            );
+            let items = page["items"].as_array().unwrap();
+            assert!(!items.is_empty() && items.len() <= 7);
+            for item in items {
+                assert!(item.get("body").is_none());
+                assert!(item.get("excerpts").is_none());
+                ids.push(item["id"].as_str().unwrap().to_owned());
+            }
+            assert_eq!(page["has_more"], !page["next_cursor"].is_null());
+            cursor = page["next_cursor"].as_str().map(ToOwned::to_owned);
+            if cursor.is_none() {
+                break;
+            }
+        }
+        assert_eq!(
+            ids,
+            (0..45).map(|i| format!("REQ-PAGE-{i}")).collect::<Vec<_>>()
+        );
+    }
+    let default = mara(fixture.path(), &["--format", "json", "item", "list"]);
+    let page: Value = serde_json::from_slice(&default.stdout).unwrap();
+    assert_eq!(page["items"].as_array().unwrap().len(), 20);
+    assert_eq!(page["has_more"], true);
+}
+
+#[test]
+fn search_excerpts_preserve_unicode_source_positions_and_exact_selection() {
+    let fixture = retrieval_fixture();
+    let title = "界".repeat(300);
+    let source = format!(
+        ":::mara requirement REQ-PASSAGE\n:title: {title}\n:status: draft\n\n{} Straße cafe\u{301} {}\n:::\n",
+        "界 ".repeat(2000),
+        "tail ".repeat(2000)
+    );
+    fs::write(fixture.path().join("docs/passage.mara.md"), &source).unwrap();
+    let backfill = mara(fixture.path(), &["project", "mid", "backfill"]);
+    assert!(backfill.status.success(), "{}", stderr(&backfill));
+    let source = fs::read_to_string(fixture.path().join("docs/passage.mara.md")).unwrap();
+    let got = mara(
+        fixture.path(),
+        &["--format", "json", "item", "get", "REQ-PASSAGE"],
+    );
+    let got: Value = serde_json::from_slice(&got.stdout).unwrap();
+    let mid = got["summary"]["mid"].as_str().unwrap();
+    let output = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "search",
+            "draft STRASSE CAFÉ",
+            "--id",
+            mid,
+            "--id",
+            "REQ-PASSAGE",
+            "--excerpts",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let items = page["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["title_truncated"], true);
+    assert_eq!(items[0]["title"].as_str().unwrap().chars().count(), 256);
+    assert_eq!(got["summary"]["title"], title);
+    let excerpts = items[0]["excerpts"].as_array().unwrap();
+    assert!(!excerpts.is_empty() && excerpts.len() <= 3);
+    let mut previous_end = 0;
+    for excerpt in excerpts {
+        let start = excerpt["start_byte"].as_u64().unwrap() as usize;
+        let end = excerpt["end_byte"].as_u64().unwrap() as usize;
+        let text = excerpt["text"].as_str().unwrap();
+        assert_eq!(&source[start..end], text);
+        assert!(start >= previous_end);
+        previous_end = end;
+        assert!(text.chars().count() <= 240);
+        assert_eq!(excerpt["partial"], true);
+        assert_eq!(
+            excerpt["start_line"],
+            source[..start].bytes().filter(|b| *b == b'\n').count() + 1
+        );
+        assert_eq!(
+            excerpt["end_line"],
+            source.as_bytes()[..end - 1]
+                .iter()
+                .copied()
+                .filter(|b| *b == b'\n')
+                .count()
+                + 1
+        );
+    }
+    assert!(
+        excerpts
+            .iter()
+            .any(|e| e["text"].as_str().unwrap().contains("Straße cafe\u{301}"))
+    );
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "item_search",
+                json!({"query":"draft STRASSE CAFÉ", "ids":[mid,"REQ-PASSAGE"], "excerpts":true}),
+            ),
+            mcp_call(
+                3,
+                "item_search",
+                json!({"query":"draft", "ids":["REQ-MISSING"]}),
+            ),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        page
+    );
+    assert_eq!(mcp_response(&responses, 3)["result"]["isError"], true);
+    let excluded = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "search",
+            "draft",
+            "--id",
+            mid,
+            "--flavour",
+            "scenario",
+        ],
+    );
+    let excluded: Value = serde_json::from_slice(&excluded.stdout).unwrap();
+    assert_eq!(excluded["items"], json!([]));
+    let human = mara(
+        fixture.path(),
+        &[
+            "item",
+            "search",
+            "draft STRASSE CAFÉ",
+            "--id",
+            mid,
+            "--excerpts",
+        ],
+    );
+    assert!(human.status.success(), "{}", stderr(&human));
+    assert!(stdout(&human).contains("[title truncated]"));
+    assert!(stdout(&human).contains("excerpt\tpartial=true\tdocs/passage.mara.md:"));
+    assert!(stdout(&human).ends_with("page\thas_more=false\n"));
+    let empty = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "search",
+            "",
+            "--id",
+            mid,
+            "--excerpts",
+        ],
+    );
+    let empty: Value = serde_json::from_slice(&empty.stdout).unwrap();
+    assert_eq!(empty["items"][0]["excerpts"], json!([]));
+    // Duplicate source IDs make exact selection ambiguous, even with a filter
+    // that would otherwise remove every candidate.
+    fs::write(fixture.path().join("docs/duplicate.mara.md"), &source).unwrap();
+    let ambiguous = mara(
+        fixture.path(),
+        &[
+            "item",
+            "search",
+            "draft",
+            "--id",
+            "REQ-PASSAGE",
+            "--flavour",
+            "scenario",
+        ],
+    );
+    assert!(!ambiguous.status.success());
+    assert!(
+        stderr(&ambiguous).contains("ambiguous"),
+        "{}",
+        stderr(&ambiguous)
+    );
+}
+
+#[test]
+fn pagination_rejects_changed_inputs_and_invalid_limits() {
+    let fixture = retrieval_fixture();
+    let first = mara(
+        fixture.path(),
+        &[
+            "--format", "json", "item", "search", "alpha", "--limit", "1",
+        ],
+    );
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+    for (query, limit) in [("alpha", "2"), ("beta", "1")] {
+        let changed = mara(
+            fixture.path(),
+            &[
+                "item", "search", query, "--limit", limit, "--cursor", cursor,
+            ],
+        );
+        assert!(!changed.status.success());
+        assert!(stderr(&changed).contains("restart"), "{}", stderr(&changed));
+    }
+    let path = fixture.path().join("docs/a.mara.md");
+    let original = fs::read_to_string(&path).unwrap();
+    fs::write(&path, format!("Narrative edit.\n{original}")).unwrap();
+    let changed = mara(
+        fixture.path(),
+        &[
+            "item", "search", "alpha", "--limit", "1", "--cursor", cursor,
+        ],
+    );
+    assert!(!changed.status.success());
+    assert!(stderr(&changed).contains("restart"), "{}", stderr(&changed));
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "item_search",
+                json!({"query":"alpha","limit":1,"cursor":cursor}),
+            ),
+            mcp_call(3, "item_list", json!({"cursor":"malformed"})),
+            mcp_call(4, "item_list", json!({"limit":101})),
+        ],
+    );
+    for id in [2, 3, 4] {
+        assert_eq!(mcp_response(&responses, id)["result"]["isError"], true);
+    }
+    fs::write(&path, original).unwrap();
+    let restored = mara(
+        fixture.path(),
+        &[
+            "item", "search", "alpha", "--limit", "1", "--cursor", cursor,
+        ],
+    );
+    assert!(restored.status.success(), "{}", stderr(&restored));
+    let schema_path = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_path).unwrap();
+    fs::write(
+        &schema_path,
+        schema.replace("[draft, accepted]", "[draft, accepted, reviewed]"),
+    )
+    .unwrap();
+    let changed = mara(
+        fixture.path(),
+        &[
+            "item", "search", "alpha", "--limit", "1", "--cursor", cursor,
+        ],
+    );
+    assert!(!changed.status.success());
+    assert!(stderr(&changed).contains("restart"), "{}", stderr(&changed));
+    fs::write(schema_path, schema).unwrap();
+    for limit in ["0", "101"] {
+        let invalid = mara(fixture.path(), &["item", "list", "--limit", limit]);
+        assert!(!invalid.status.success());
+        assert!(
+            stderr(&invalid).contains("1 through 100"),
+            "{}",
+            stderr(&invalid)
+        );
+    }
+}
+
+#[test]
+fn search_pages_obey_serialized_byte_budget_without_losing_large_results() {
+    let fixture = retrieval_fixture();
+    let title = "界\"\\".repeat(200);
+    let passage = format!("needle {} ", "界\"\\ ".repeat(400));
+    let source = (0..100)
+        .map(|i| {
+            format!(
+                ":::mara requirement REQ-BUDGET-{i}\n:title: {title}\n\n{}\n:::\n\n",
+                passage.repeat(3)
+            )
+        })
+        .collect::<String>();
+    fs::write(fixture.path().join("docs/budget.mara.md"), source).unwrap();
+    let mut cursor: Option<String> = None;
+    let mut ids = Vec::new();
+    let mut pages = 0;
+    loop {
+        let mut args = vec![
+            "--format",
+            "json",
+            "item",
+            "search",
+            "needle",
+            "--excerpts",
+            "--limit",
+            "100",
+        ];
+        if let Some(cursor) = &cursor {
+            args.extend(["--cursor", cursor]);
+        }
+        let output = mara(fixture.path(), &args);
+        assert!(output.status.success(), "{}", stderr(&output));
+        // Exclude the CLI's framing newline, which is not domain JSON.
+        assert!(output.stdout.len() - 1 <= 65_536);
+        let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+        if pages == 0 {
+            assert_eq!(page["has_more"], true);
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(
+                        2,
+                        "item_search",
+                        json!({"query":"needle","excerpts":true,"limit":100}),
+                    ),
+                ],
+            );
+            assert_eq!(
+                mcp_response(&responses, 2)["result"]["structuredContent"],
+                page
+            );
+        }
+        for item in page["items"].as_array().unwrap() {
+            assert_eq!(item["title_truncated"], true);
+            assert_eq!(item["excerpts"].as_array().unwrap().len(), 3);
+            ids.push(item["id"].as_str().unwrap().to_owned());
+        }
+        pages += 1;
+        cursor = page["next_cursor"].as_str().map(ToOwned::to_owned);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert!(pages > 1);
+    assert_eq!(
+        ids,
+        (0..100)
+            .map(|i| format!("REQ-BUDGET-{i}"))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn oversized_item_handles_fail_without_silent_omission_or_unbounded_diagnostics() {
+    let fixture = retrieval_fixture();
+    let long_id = format!("REQ-{}", "A".repeat(66_000));
+    fs::write(
+        fixture.path().join("docs/oversized.mara.md"),
+        format!(
+            ":::mara requirement {long_id}\n:title: Oversized identity\n\nNeed knowledge.\n:::\n"
+        ),
+    )
+    .unwrap();
+    let output = mara(
+        fixture.path(),
+        &["item", "list", "--path", "docs/oversized.mara.md"],
+    );
+    assert!(!output.status.success());
+    assert!(stdout(&output).is_empty());
+    assert!(
+        stderr(&output).contains("shorten oversized identity/location fields"),
+        "{}",
+        stderr(&output)
+    );
+    assert!(output.stderr.len() < 1024);
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "item_list", json!({"paths":["docs/oversized.mara.md"]})),
+        ],
+    );
+    let result = &mcp_response(&responses, 2)["result"];
+    assert_eq!(result["isError"], true);
+    assert!(serde_json::to_vec(result).unwrap().len() < 1024);
+}
+
+#[test]
 fn initializes_the_current_directory_without_touching_existing_content() {
     let fixture = TempDir::new().unwrap();
     let existing = fixture.path().join("README.md");
@@ -3025,7 +3448,7 @@ fn item_list_and_search_return_deterministic_compact_filtered_summaries() {
     assert!(listed.status.success(), "{}", stderr(&listed));
     assert_eq!(
         stdout(&listed),
-        "REQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\nREQ-BETA\trequirement\tBeta requirement\tdocs/b.mara.md:1\n"
+        "REQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\nREQ-BETA\trequirement\tBeta requirement\tdocs/b.mara.md:1\npage\thas_more=false\n"
     );
     assert!(!stdout(&listed).contains("requirement body"));
 
@@ -3047,7 +3470,7 @@ fn item_list_and_search_return_deterministic_compact_filtered_summaries() {
     assert!(filtered.status.success(), "{}", stderr(&filtered));
     assert_eq!(
         stdout(&filtered),
-        "REQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\n"
+        "REQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\npage\thas_more=false\n"
     );
 
     let normalized_path = mara(
@@ -3061,7 +3484,7 @@ fn item_list_and_search_return_deterministic_compact_filtered_summaries() {
     );
     assert_eq!(
         stdout(&normalized_path),
-        "SCN-BASE\tscenario\tBase scenario\tdocs/a.mara.md:1\nREQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\n"
+        "SCN-BASE\tscenario\tBase scenario\tdocs/a.mara.md:1\nREQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\npage\thas_more=false\n"
     );
 
     for invalid_path in [
@@ -3083,20 +3506,20 @@ fn item_list_and_search_return_deterministic_compact_filtered_summaries() {
     for query in ["zEbRa", "accepted", "DES-ALPHA"] {
         let searched = mara(fixture.path(), &["item", "search", query]);
         assert!(searched.status.success(), "{}", stderr(&searched));
-        assert_eq!(stdout(&searched).lines().count(), 1, "query: {query}");
+        assert_eq!(stdout(&searched).lines().count(), 2, "query: {query}");
     }
     let searched = mara(fixture.path(), &["item", "search", "alpha"]);
     assert!(searched.status.success(), "{}", stderr(&searched));
     assert_eq!(
         stdout(&searched),
-        "REQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\nDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\n"
+        "REQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\nDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\npage\thas_more=false\n"
     );
 
     let case_folded = mara(fixture.path(), &["item", "search", "STRASSE"]);
     assert!(case_folded.status.success(), "{}", stderr(&case_folded));
     assert_eq!(
         stdout(&case_folded),
-        "SCN-GERMAN\tscenario\tStraße\tdocs/b.mara.md:16\n"
+        "SCN-GERMAN\tscenario\tStraße\tdocs/b.mara.md:16\npage\thas_more=false\n"
     );
 }
 
@@ -3118,7 +3541,7 @@ fn item_search_matches_distinct_complete_unicode_terms_across_values() {
         assert!(searched.status.success(), "{}", stderr(&searched));
         assert_eq!(
             stdout(&searched),
-            "REQ-CROSS-FIELD\trequirement\tProject knowledge\tdocs/search.mara.md:1\n",
+            "REQ-CROSS-FIELD\trequirement\tProject knowledge\tdocs/search.mara.md:1\npage\thas_more=false\n",
             "query: {query}"
         );
     }
@@ -3126,7 +3549,11 @@ fn item_search_matches_distinct_complete_unicode_terms_across_values() {
     for query in ["project missing", "projects validation", "project valid"] {
         let searched = mara(fixture.path(), &["item", "search", query]);
         assert!(searched.status.success(), "{}", stderr(&searched));
-        assert_eq!(stdout(&searched), "", "query: {query}");
+        assert_eq!(
+            stdout(&searched),
+            "page\thas_more=false\n",
+            "query: {query}"
+        );
     }
 
     let unicode_equivalent = mara(fixture.path(), &["item", "search", "CAFE\u{301} WORKFLOW"]);
@@ -3137,7 +3564,7 @@ fn item_search_matches_distinct_complete_unicode_terms_across_values() {
     );
     assert_eq!(
         stdout(&unicode_equivalent),
-        "SCN-UNICODE\tscenario\tCafé workflow\tdocs/search.mara.md:7\n"
+        "SCN-UNICODE\tscenario\tCafé workflow\tdocs/search.mara.md:7\npage\thas_more=false\n"
     );
 }
 

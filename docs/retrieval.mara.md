@@ -5,12 +5,13 @@
 :title: Define the alpha 3 retrieval boundary
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
-This is the accepted scope for 0.1.0-alpha.3, not implemented behaviour.
+This is the accepted scope for 0.1.0-alpha.3. Search/list pagination and search
+excerpts are implemented; the other capabilities below remain planned.
 Current retrieval contracts are [[REQ-ITEM-SEARCH]], [[REQ-ITEM-GET]], and
 [[REQ-ITEM-RELATED]]. Open choices in the planned contracts must be settled
 before implementation; no search library is selected here.
 
-| Capability | Planned contract |
+| Capability | Contract |
 |---|---|
 | Bounded search/list and opt-in excerpts | [[REQ-SEARCH-PAGINATION]], [[REQ-SEARCH-EXCERPTS]] |
 | Bounded direct neighbours | [[REQ-RELATED-PAGINATION]] |
@@ -50,10 +51,18 @@ preserve complete item handles for subsequent retrieval. Full titles remain
 retrievable through item get. Bounds must handle Unicode and oversized single
 lines without presenting omitted content as complete.
 
-Open before implementation: default and maximum counts and text sizes, size
-units, oversized metadata/path/other-field handling, and human/JSON/MCP
-truncation markers. A result-count limit alone cannot bound a response; line
-limits alone cannot bound a one-line body.
+Search/list pages default to 20 items and accept `limit` from 1 through 100.
+Each serialized JSON domain result is at most 65,536 UTF-8 bytes, including
+JSON escaping and pagination metadata; CLI framing and MCP transport wrappers
+are outside that budget. The byte budget may shorten a page before its count
+limit. Summary titles retain at most 256 Unicode scalar values and carry
+`title_truncated: true` when shortened; human output appends `[title truncated]`.
+Complete IDs, MIDs, flavours, and paths are preserved. If one entry cannot fit
+an otherwise empty page, fail with a bounded diagnostic directing the caller
+to shorten oversized identity/location fields. Never skip that entry silently.
+
+Excerpt limits are defined in [[DES-SEARCH-EXCERPT-OPTIONS]]. Bounds for related
+and get responses remain open for their owning capabilities.
 :::
 
 :::mara requirement REQ-SEARCH-PAGINATION
@@ -66,8 +75,7 @@ whether more results are available. Callers can retrieve subsequent pages.
 Apply filters and the selected ordering before pagination. For unchanged input,
 following continuation retrieves the complete result set without omissions or
 duplicates. Default results remain compact item summaries without body text.
-Continuation interface and source-change choices are open in
-[[DES-RETRIEVAL-CONTINUATION]].
+Continuation follows [[DES-RETRIEVAL-CONTINUATION]].
 :::
 
 :::mara requirement REQ-RELATED-PAGINATION
@@ -140,8 +148,8 @@ Callers can restrict search to selected item handles to inspect their matches,
 or request excerpts during the initial corpus search. Return source passages
 and positions, not generated summaries. Mark excerpts as incomplete views;
 they may skip intervening content and do not replace a complete item read.
-Without the excerpt option, return the existing compact summary shape, subject
-to the planned bounds and pagination metadata.
+Without the excerpt option, return the compact summary shape, subject to
+[[REQ-RETRIEVAL-BOUNDS]] and pagination metadata.
 :::
 
 :::mara design DES-SEARCH-EXCERPT-OPTIONS
@@ -151,11 +159,29 @@ to the planned bounds and pagination metadata.
 
 Extend `item search` and MCP `item_search` with equivalent options for excerpts
 and exact selected-item filtering; do not add a separate preview operation.
-The planned CLI spelling is `--excerpts` and `--id <id-or-mid>`. MCP field names,
-selected-item multiplicity, invalid-handle behaviour, and detailed result
-schemas remain to be specified. Also settle fragment selection/count and
-source-position format, including queries whose terms match different fields
-or passages. Excerpts reuse fuzzy matching semantics when fuzzy search is used.
+CLI options are `--excerpts` and repeatable `--id <id-or-mid>`; MCP uses
+`excerpts` (default false) and `ids` (default empty). Resolve every selected
+handle exactly, rejecting missing or ambiguous handles even if other filters
+would exclude them. Selections combine with OR, intersect the other filters,
+and deduplicate ID/MID aliases before pagination. Selection order does not
+change corpus order.
+
+Only requested summaries include `excerpts`, an array of at most three
+fragments in source order. Each fragment has `text`, `start_byte`, `end_byte`,
+`start_line`, `end_line`, and `partial: true`; its summary supplies the file
+path. Byte positions are document-relative, end-exclusive UTF-8 offsets;
+lines are one-based and inclusive. Text is an exact source slice of at most
+240 Unicode scalar values, including for oversized single lines.
+
+Select occurrences using the same normalized whole-word matcher over ID,
+metadata keys/values (including title), and body. Take up to 60 scalar values
+of preceding context within that searchable value, then up to 240 total;
+skip occurrences already covered by a selected fragment. A match longer than
+the fragment cap is itself clipped. Fragments may cross body lines, but never
+searchable-value boundaries. Empty-term queries return an empty excerpt array.
+Excerpts need not cover every query term or occurrence; `partial` always marks
+them as an incomplete view. Future fuzzy matching must reuse its matching
+semantics for excerpt selection.
 
 The same query and matching rules apply with or without excerpts. A caller may
 search the corpus for compact summaries, repeat the query restricted to a
@@ -195,10 +221,22 @@ input, continuation must cover the requested content without omissions or
 duplication. Rank search results before pagination; body reads remain
 consecutive rather than selecting query matches.
 
-Open before implementation: request/result shapes, position representation,
-independent resumption of body and relation portions, and behaviour when source
-content or ranked results change between calls. These choices must preserve
-the caller's ability to distinguish complete from partial results.
+Search/list accept CLI `--cursor` and MCP `cursor`. Their result is
+`{items, has_more, next_cursor}`; `next_cursor` is null exactly when no results
+remain. Human output ends with a page line containing `has_more` and, when
+present, `next_cursor`. Repeat the same operation, query, filters, limit, and
+excerpt options with the returned opaque cursor. Cursors are versioned,
+stateless continuation markers, not persisted indexes or snapshot storage.
+
+Reject malformed cursors and cursors whose source/schema or request fingerprint
+has changed, with an instruction to restart from the first page. Any discovered
+document change, including narrative edits, invalidates continuation. Reverting
+to identical input restores validity; no historical snapshot is retained.
+Cursor compatibility across application upgrades is not promised. Matching and
+ordering finish before the count and serialized-byte budgets are applied.
+
+Related/get request shapes, body/relation positions, independent resumption,
+and source-change handling remain open for their owning capabilities.
 :::
 
 :::mara verification VER-BOUNDED-RETRIEVAL
@@ -222,4 +260,16 @@ coverage. Apply the agreed source-change continuation policy once specified.
 
 Release preparation follows evidence that this workflow passes; these are
 planned checks, not evidence that alpha.3 functionality already exists.
+:::
+
+:::mara decision ADR-SEARCH-CONTINUATION
+:mid: 01M1S1WPMD2PNHTZ4643CCB1CN
+:title: Restart search pagination after source changes
+:justifies: DES-RETRIEVAL-CONTINUATION
+
+Use stateless, versioned search/list cursors that bind a result position to the
+source and request fingerprint. Reject changed inputs rather than silently
+continuing an offset into a different result set. This preserves complete page
+coverage for unchanged input without storing snapshots or an index; callers
+restart discovery after edits.
 :::

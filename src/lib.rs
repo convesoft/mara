@@ -27,18 +27,18 @@ pub use mutation::{
     rollback_transaction, update_item,
 };
 pub use operations::{
-    DeclarationSummary, FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult,
-    ItemFilterParams, ItemIdParams, ItemMoveParams, ItemRelatedParams, ItemSearchParams,
-    ItemUpdateParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
-    ProjectSummary, RelatedItemsResult, RelationAction, RelationMutationResult, RelationParams,
-    SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult,
-    TransactionRollbackResult, ValidationDiagnostic, ValidationResult, ValidationScope,
-    ValidationTarget, ValidationTargetKind, project_initialize,
+    DeclarationSummary, FieldValue, ItemCreateParams, ItemCreationResult, ItemFilterParams,
+    ItemIdParams, ItemMoveParams, ItemRelatedParams, ItemSearchParams, ItemUpdateParams,
+    OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, ProjectSummary,
+    RelatedItemsResult, RelationAction, RelationMutationResult, RelationParams, SchemaGetResult,
+    SchemaKind, SchemaListResult, SchemaValidationResult, TransactionRollbackResult,
+    ValidationDiagnostic, ValidationResult, ValidationScope, ValidationTarget,
+    ValidationTargetKind, project_initialize,
 };
 pub use query::{
-    FieldFilter, ItemFilters, ItemSource, ItemSummary, MetadataValue, QueryError, RelatedFilters,
-    RelatedItem, RelationDirection, RelationSummary, ResolvedItem, get_item, list_items,
-    related_items, search_items,
+    FieldFilter, ItemCollectionResult, ItemFilters, ItemSource, ItemSummary, MetadataValue,
+    QueryError, RelatedFilters, RelatedItem, RelationDirection, RelationSummary, ResolvedItem,
+    SearchExcerpt, get_item, list_items, related_items, search_items,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";

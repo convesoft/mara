@@ -10,7 +10,7 @@ use std::{
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
     FieldValue, ItemCollectionResult, ItemCreateParams, ItemFilterParams, ItemMoveParams,
-    ItemRelatedParams, ItemSummary, ItemUpdateParams, OperationContext,
+    ItemRelatedParams, ItemSearchParams, ItemSummary, ItemUpdateParams, OperationContext,
     ProjectInitializationResult, ProjectMidBackfillResult, RelatedItem, RelationDirection,
     RelationMutationResult, RelationParams, RelationSummary, ResolvedItem, SchemaGetResult,
     SchemaKind, SchemaListResult, SchemaValidationResult, Template, ValidationResult,
@@ -148,6 +148,12 @@ enum ItemCommand {
 
         #[command(flatten)]
         filters: ItemFilterArgs,
+
+        #[arg(long = "id", help = "Select exact item IDs or MIDs (repeatable)")]
+        ids: Vec<String>,
+
+        #[arg(long, help = "Include up to three bounded source excerpts per match")]
+        excerpts: bool,
     },
     Related {
         id: String,
@@ -209,8 +215,11 @@ struct ItemFilterArgs {
     #[arg(long)]
     path: Vec<PathBuf>,
 
-    #[arg(long)]
+    #[arg(long, help = "Page size: 1 through 100 (default 20)")]
     limit: Option<usize>,
+
+    #[arg(long, help = "Continue with next_cursor and the same query/options")]
+    cursor: Option<String>,
 }
 
 impl ItemFilterArgs {
@@ -221,6 +230,7 @@ impl ItemFilterArgs {
             relations: self.relation,
             paths: self.path,
             limit: self.limit,
+            cursor: self.cursor,
         }
     }
 }
@@ -583,9 +593,26 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(true)
         }
         Command::Item {
-            command: ItemCommand::Search { query, filters },
+            command:
+                ItemCommand::Search {
+                    query,
+                    filters,
+                    ids,
+                    excerpts,
+                },
         } => {
-            let result = operations(project)?.item_search(&query, filters.into_params())?;
+            let filters = filters.into_params();
+            let result = operations(project)?.item_search(ItemSearchParams {
+                query,
+                flavours: filters.flavours,
+                fields: filters.fields,
+                relations: filters.relations,
+                paths: filters.paths,
+                limit: filters.limit,
+                cursor: filters.cursor,
+                ids,
+                excerpts,
+            })?;
             emit(format, &result, print_item_collection)?;
             Ok(true)
         }
@@ -766,14 +793,28 @@ fn print_resolved_item(item: &ResolvedItem) {
 }
 
 fn print_item_collection(result: &ItemCollectionResult) -> Result<(), String> {
-    print_item_summaries(&result.items);
-    Ok(())
-}
-
-fn print_item_summaries(items: &[ItemSummary]) {
-    for item in items {
+    for item in &result.items {
         print_item_summary(item);
+        if let Some(excerpts) = item.excerpts() {
+            for excerpt in excerpts {
+                println!(
+                    "excerpt\tpartial=true\t{}:{}-{}\tbytes={}-{}\t{}",
+                    item.path().display(),
+                    excerpt.start_line,
+                    excerpt.end_line,
+                    excerpt.start_byte,
+                    excerpt.end_byte,
+                    serde_json::to_string(&excerpt.text).map_err(|error| error.to_string())?
+                );
+            }
+        }
     }
+    print!("page\thas_more={}", result.has_more);
+    if let Some(cursor) = &result.next_cursor {
+        print!("\tnext_cursor={cursor}");
+    }
+    println!();
+    Ok(())
 }
 
 fn print_item_heading(item: &ItemSummary) {
@@ -791,13 +832,18 @@ fn print_item_heading(item: &ItemSummary) {
 }
 
 fn print_item_summary(item: &ItemSummary) {
+    let title = if item.title_truncated() {
+        format!("{} [title truncated]", item.title())
+    } else {
+        item.title().to_owned()
+    };
     if let Some(mid) = item.mid() {
         println!(
             "{}\t{}\t{}\t{}\t{}:{}",
             item.id(),
             mid,
             item.flavour(),
-            item.title(),
+            title,
             item.path().display(),
             item.line()
         );
@@ -806,7 +852,7 @@ fn print_item_summary(item: &ItemSummary) {
             "{}\t{}\t{}\t{}:{}",
             item.id(),
             item.flavour(),
-            item.title(),
+            title,
             item.path().display(),
             item.line()
         );
