@@ -44,12 +44,11 @@ evidence and priorities change; detailed behavior becomes canonical in
 - Add typo-tolerant word matching and deterministic relevance ranking.
 - Create one item with its initial outgoing relations atomically through CLI/MCP;
   see [item creation](docs/alpha.mara.md).
-- Investigate whether and how narrative outside items should be searchable;
-  implementation scope remains undecided.
+- Review the [narrative retrieval findings](docs/retrieval.mara.md#narrative-retrieval-investigation)
+  and settle the boundary; no narrative-search implementation is accepted yet.
 
-See [retrieval scope and open contracts](docs/retrieval.mara.md) for the five
-implementation work areas, narrative-search investigation, verification
-expectations, and unresolved defaults.
+See [retrieval scope and contracts](docs/retrieval.mara.md) for implementation
+boundaries, verification expectations, and the recommendation awaiting review.
 
 ### 0.1.0-beta.0
 
