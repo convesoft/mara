@@ -555,7 +555,12 @@ fn filtered_items<'a>(
                     .any(|selected| std::ptr::eq(*selected, *item))
         })
         .filter(|item| matches_name(&filters.flavours, item.flavour()))
-        .filter(|item| paths.is_empty() || paths.iter().any(|path| path == item.source().path()))
+        .filter(|item| {
+            paths.is_empty()
+                || paths
+                    .iter()
+                    .any(|path| item.source().path().starts_with(path))
+        })
         .filter(|item| {
             matches_name_filter(&filters.relations, |name| {
                 item.relations()

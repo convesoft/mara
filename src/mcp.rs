@@ -176,6 +176,7 @@ struct ItemFilterToolParams {
     fields: Vec<FieldValue>,
     #[serde(default)]
     relations: Vec<String>,
+    /// Exact documents or directory subtrees, relative to the project root; OR across paths. Example: ["packages/query/docs/"].
     #[serde(default)]
     paths: Vec<PathBuf>,
     #[serde(default)]
@@ -214,6 +215,7 @@ struct ItemSearchToolParams {
     fields: Vec<FieldValue>,
     #[serde(default)]
     relations: Vec<String>,
+    /// Exact documents or directory subtrees, relative to the project root; OR across paths. Example: ["packages/query/docs/"].
     #[serde(default)]
     paths: Vec<PathBuf>,
     #[serde(default)]

@@ -39,11 +39,11 @@ pub(super) fn filtered_page(
 ) -> Result<ItemCollectionResult, QueryError> {
     let limit = page_limit(filters.limit)?;
     let request = (
-        // Invalidate pre-ranking search cursors even before the release version changes.
+        // Reject cursors created before path filters included directory subtrees.
         if query.is_some() {
-            "search-ranked-v1"
+            "search-ranked-subtrees-v1"
         } else {
-            "items"
+            "items-subtrees-v1"
         },
         &filters.flavours,
         &filters.fields,

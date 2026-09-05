@@ -267,7 +267,9 @@ Substring modes, stemming, and synonym expansion are not supported.
 Both query commands accept repeatable
 `--flavour <name>`, `--field <key=value>`, `--relation <name>`, and
 `--path <project-relative-path>` filters plus `--limit <count>`.
-Path filters normalize `.` components and reject absolute paths or `..`.
+Path filters select exact documents or directory subtrees, including nested
+documents and excluding similarly prefixed sibling names. Path selection and
+normalization follow [[DES-ITEM-PATH-SELECTION]].
 Relation filters match authored relation names. Values within one filter or one
 field key combine with OR; distinct filter categories and field keys combine
 with AND. The limit applies last. Search results follow [[REQ-SEARCH-RELEVANCE]];

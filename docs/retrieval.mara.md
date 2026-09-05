@@ -18,6 +18,7 @@ Current retrieval contracts are [[REQ-ITEM-SEARCH]], [[REQ-ITEM-GET]], and
 | Consecutive partial item reads | [[REQ-PARTIAL-ITEM-READ]] |
 | Typo-tolerant word matching | [[REQ-FUZZY-ITEM-SEARCH]] |
 | Deterministic relevance ranking | [[REQ-SEARCH-RELEVANCE]] |
+| Exact-document and directory-subtree filters | [[REQ-ITEM-SEARCH]], [[DES-ITEM-PATH-SELECTION]] |
 
 Shared response bounds follow [[REQ-RETRIEVAL-BOUNDS]], and continuation follows
 [[DES-RETRIEVAL-CONTINUATION]]. Each capability includes CLI/MCP parity and
@@ -335,6 +336,12 @@ continue results, optionally request excerpts for selected items, read an item
 and its remaining portions, inspect direct relations, and fetch caller-selected
 neighbours. Equivalent inputs must yield the same domain results.
 
+Exercise search/list path selection with one root configuration, two package
+directories, a nested document, and a similarly prefixed sibling directory.
+Verify exact-file compatibility, directory boundaries, normalization, overlapping
+selections, composed filters, ranking, and complete CLI/stdio MCP pagination
+under [[DES-ITEM-PATH-SELECTION]].
+
 Use large titles, large relation sets, Unicode text, and an enormous single-line
 body to verify explicit bounds and complete continuation. Verify that excerpts
 appear only when requested and identify matching source passages; consecutive
@@ -418,4 +425,36 @@ MIDs have no meaningful relevance, and titles provide typo recovery for
 descriptive human IDs. Keep typo tolerance in the remaining searchable text;
 this is a field boundary, not a parser for handle-shaped words. Apply the same
 boundary to source excerpts so reported matches agree with item selection.
+:::
+
+:::mara design DES-ITEM-PATH-SELECTION
+:mid: 01M1SB055Q4A7P94KZZDYVJ5A7
+:title: Select documents and directory subtrees through path filters
+:satisfies: REQ-ITEM-SEARCH
+
+CLI `item search` and `item list` use repeatable `--path`; MCP `item_search`
+and `item_list` use `paths`. Each value selects an exact document path or all
+discovered documents beneath that directory, comparing complete path components.
+For example, `packages/query` includes `packages/query/docs/nested/api.mara.md`
+but excludes `packages/query-extra`. No extension-based inference, glob matching,
+or filesystem existence check is needed: match equality or a component prefix.
+A nonexistent selection returns no items. Selection only narrows the corpus
+already discovered under [[DES-PROJECT-CONFIGURATION]]; it does not load another
+configuration or bypass content patterns, ignore rules, or symlink handling.
+
+Paths are relative to the project root, including when invoked from a package
+subdirectory. Normalize `.` components, repeated separators, and trailing
+separators using host path semantics. Reject empty paths, absolute paths, any
+`..` component, and paths that normalize to empty (including `.`); omit the
+filter to select the whole project. Case and component spelling remain exact.
+
+Repeated or overlapping paths combine with OR without duplicating items. Path
+selection intersects all other filter categories before ranking, excerpts, and
+count/byte pagination. Exact-file and unfiltered behavior remain available.
+Continuation follows [[DES-RETRIEVAL-CONTINUATION]]; repeat the same request
+options, including path values, with its cursor.
+
+From the project root, `mara item search "cache" --path packages/query/docs/`
+selects package-local documentation. The equivalent MCP call is `item_search`
+with `{"query":"cache","paths":["packages/query/docs/"]}` and the same project.
 :::
