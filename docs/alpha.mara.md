@@ -233,6 +233,9 @@ body, source location, authored relations, and derived incoming relations. Human
 and structured output represent the same result. Relation entries include the
 relation name and a compact summary containing both identities for the directly
 related item.
+
+Planned alpha.3 bounds and continuation are specified by
+[[REQ-RETRIEVAL-BOUNDS]] and [[REQ-PARTIAL-ITEM-READ]].
 :::
 
 :::mara requirement REQ-ITEM-SEARCH
@@ -254,6 +257,11 @@ field key combine with OR; distinct filter categories and field keys combine
 with AND. The limit applies last. Results follow document-path and source order
 and contain only ID, MID when present, flavour, title, source path, and start
 line. `item list` returns the same compact summary shape without a text query.
+
+This is the current matching/output baseline. Planned alpha.3 extensions are
+[[REQ-SEARCH-PAGINATION]], [[REQ-FUZZY-ITEM-SEARCH]],
+[[REQ-SEARCH-RELEVANCE]], and [[REQ-SEARCH-EXCERPTS]], with shared response
+bounds in [[REQ-RETRIEVAL-BOUNDS]].
 :::
 
 :::mara requirement REQ-ITEM-RELATED
@@ -268,6 +276,9 @@ or `outgoing` and defaults to both; `--relation <name>` and `--flavour <name>`
 are repeatable. Outgoing results precede incoming results, with each group in
 corpus and authored relation order. Full bodies require explicit `item get`
 calls.
+
+Planned alpha.3 continuation follows [[REQ-RELATED-PAGINATION]]. Each call
+remains direct-neighbour retrieval; the caller selects further items to read.
 :::
 
 ## Alpha design
@@ -407,6 +418,10 @@ Item collections use `{ "items": [...] }`. Project and item validation return
 result, with each diagnostic providing `scope`, optional `path` and `line`, and
 `message`. Invocation failures use `{ "error": { "message": ... } }` in CLI
 JSON and a caller-visible MCP tool error.
+
+Planned excerpt options follow [[DES-SEARCH-EXCERPT-OPTIONS]]. Alpha.3
+pagination and partial-read request/result schemas remain open in
+[retrieval scope](retrieval.mara.md); the collection shape above is current.
 :::
 
 :::mara design DES-DURABLE-ITEM-IDENTITIES
@@ -478,11 +493,17 @@ Matching remains an internal projection over the loaded corpus. It writes no
 index or search-specific project data and returns matching items in corpus
 order, so a later search engine can replace it without migrating authored
 project knowledge.
+
+This is the current matcher. [[REQ-FUZZY-ITEM-SEARCH]] and
+[[REQ-SEARCH-RELEVANCE]] define planned alpha.3 extensions; activation defaults,
+scoring, and library selection are not established by this baseline design.
 :::
 
 ## Explicitly deferred
 
 Schema mutation commands, persisted indexes or graph stores,
-fuzzy or semantic search, LSP integration, a complete Markdown AST, and a
+semantic search, LSP integration, a complete Markdown AST, and a
 graphical interface remain deferred. Manual source editing followed by validation
 remains supported alongside structured updates, movement, renaming, and deletion.
+Fuzzy search and the other alpha.3 retrieval changes are planned in
+[Enhanced deterministic retrieval](retrieval.mara.md).

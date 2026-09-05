@@ -14,7 +14,7 @@ evidence and priorities change; detailed behavior becomes canonical in
 - Generate the changelog and automate CI, packaging, and protected releases.
 - Verify clean CLI and stdio MCP use without a local Rust installation.
 
-### 0.1.0-alpha.1 — Agent-ready onboarding (current)
+### 0.1.0-alpha.1 — Agent-ready onboarding
 
 - Ship a Mara skill and clear MCP onboarding guidance with the existing npm
   package.
@@ -23,16 +23,25 @@ evidence and priorities change; detailed behavior becomes canonical in
 - Verify the primary Codex workflow through manual MCP registration and
   separate skill installation. Keep complete-plugin installation optional.
 
-### 0.1.0-alpha.2 — Durable identity and editing
+### 0.1.0-alpha.2 — Durable identity and editing (current)
 
 - Introduce immutable machine identities with deliberate backfill.
 - Add safe structured update, move, rename, and delete operations.
 - Preserve relation and validation integrity throughout lifecycle changes.
+- Clarify the alpha.3 retrieval scope in canonical documents before release.
 
 ### 0.1.0-alpha.3 — Enhanced deterministic retrieval
 
-- Improve deterministic CLI and MCP search, retrieval, and relation traversal.
-- Keep results bounded and explicit.
+- Paginate search/list results and bound summaries; offer opt-in search excerpts
+  and selected-item filtering.
+- Bound direct-neighbour results with continuation; keep traversal
+  caller-controlled.
+- Read large item bodies in bounded consecutive portions and continue relation
+  lists without silently omitting content.
+- Add typo-tolerant word matching and deterministic relevance ranking.
+
+See [retrieval scope and open contracts](docs/retrieval.mara.md) for the five
+implementation work areas, verification expectations, and unresolved defaults.
 
 ### 0.1.0-beta.0
 
