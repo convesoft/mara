@@ -5631,6 +5631,19 @@ fn every_command_help_describes_commands_arguments_and_options() {
             for convention in ["KEY=", "empty value", "--clear-field", "remove"] {
                 assert!(field_help.contains(convention), "{field_help}");
             }
+            let body_help = help.lines().find(|line| line.contains("--body")).unwrap();
+            for convention in ["empty", "whitespace-only", "required", "rejected"] {
+                assert!(body_help.contains(convention), "{body_help}");
+            }
+        }
+        if command == ["item", "list"]
+            || command == ["item", "search"]
+            || command == ["project", "validate"]
+        {
+            let path_help = help.lines().find(|line| line.contains("--path")).unwrap();
+            for convention in ["empty paths", ". or ./", "omit --path", "whole project"] {
+                assert!(path_help.contains(convention), "{command:?}: {path_help}");
+            }
         }
         if command == ["item", "create"] {
             let body_help = help.lines().find(|line| line.contains("--body")).unwrap();
@@ -5740,6 +5753,20 @@ fn mcp_tools_list_exposes_parameter_guidance() {
             for convention in ["custom", "title/MID", "typed relations"] {
                 assert!(description.contains(convention), "{name}: {description}");
             }
+        }
+    }
+    for name in ["item_list", "item_search", "project_validate"] {
+        let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
+        let paths = tool["inputSchema"]["properties"]["paths"]["description"]
+            .as_str()
+            .unwrap();
+        for convention in [
+            "empty path elements",
+            ". or ./",
+            "omit paths or use []",
+            "whole project",
+        ] {
+            assert!(paths.contains(convention), "{name}: {paths}");
         }
     }
     let create = tools

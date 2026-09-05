@@ -36,7 +36,7 @@ struct ProjectValidateParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, or ..; omitted or empty selects the whole project. Example: ["packages/query/docs/"]. Selects reported diagnostics only; validity still covers the whole project.
+    /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, .., empty path elements, . or ./; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"]. Selects reported diagnostics only; validity still covers the whole project.
     #[serde(default)]
     paths: Vec<PathBuf>,
 }
@@ -222,7 +222,7 @@ struct ItemFilterToolParams {
     /// Exact authored outgoing relation names, combined with OR and intersected with other filters. Omitted or empty adds no restriction.
     #[serde(default)]
     relations: Vec<String>,
-    /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, or ..; omitted or empty selects the whole project. Example: ["packages/query/docs/"].
+    /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, .., empty path elements, . or ./; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
     #[serde(default)]
     paths: Vec<PathBuf>,
     /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer.
@@ -266,7 +266,7 @@ struct ItemSearchToolParams {
     /// Exact authored outgoing relation names, combined with OR and intersected with other filters. Omitted or empty adds no restriction.
     #[serde(default)]
     relations: Vec<String>,
-    /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, or ..; omitted or empty selects the whole project. Example: ["packages/query/docs/"].
+    /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, .., empty path elements, . or ./; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
     #[serde(default)]
     paths: Vec<PathBuf>,
     /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer.

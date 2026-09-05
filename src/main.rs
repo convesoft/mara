@@ -82,7 +82,7 @@ enum ProjectCommand {
         #[arg(
             long = "path",
             value_name = "PATH",
-            help = "Show diagnostics for an exact document or directory subtree (project-relative, repeatable); project/schema errors always appear; validity and exit status still cover the whole project"
+            help = "Show diagnostics for an exact document or directory subtree (project-relative, repeatable OR); no globs, absolute paths, .., empty paths, . or ./; omit --path for the whole project. Project/schema errors always appear; validity and exit status still cover the whole project"
         )]
         paths: Vec<PathBuf>,
     },
@@ -143,7 +143,7 @@ enum ItemCommand {
         clear_fields: Vec<String>,
         #[arg(
             long,
-            help = "Replace body text; - reads stdin, an empty string clears an optional body, omission leaves it unchanged"
+            help = "Replace body text; - reads stdin, an empty string clears an optional body, omission leaves it unchanged. Empty or whitespace-only replacements of required bodies are rejected"
         )]
         body: Option<String>,
     },
@@ -311,7 +311,7 @@ struct ItemFilterArgs {
 
     #[arg(
         long,
-        help = "Select an exact document or directory subtree (project-relative, repeatable OR), e.g. packages/query/docs/; no globs, absolute paths, or ..; omit for the whole project"
+        help = "Select an exact document or directory subtree (project-relative, repeatable OR), e.g. packages/query/docs/; no globs, absolute paths, .., empty paths, . or ./; omit --path for the whole project"
     )]
     path: Vec<PathBuf>,
 
