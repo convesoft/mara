@@ -5571,6 +5571,137 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
 }
 
 #[test]
+fn every_command_help_describes_commands_arguments_and_options() {
+    let fixture = TempDir::new().unwrap();
+    let mut pending = vec![Vec::<String>::new()];
+    let mut visited = BTreeSet::new();
+    while let Some(command) = pending.pop() {
+        assert!(visited.insert(command.clone()));
+        let mut arguments = command.iter().map(String::as_str).collect::<Vec<_>>();
+        arguments.push("--help");
+        let output = mara(fixture.path(), &arguments);
+        assert!(output.status.success(), "{command:?}: {}", stderr(&output));
+        assert!(stderr(&output).is_empty(), "{}", stderr(&output));
+        let help = stdout(&output);
+        let (purpose, _) = help.split_once("Usage:").expect("help has usage");
+        assert!(!purpose.trim().is_empty(), "{command:?}: {help}");
+
+        let mut section = "";
+        let mut lines = help.lines().peekable();
+        while let Some(line) = lines.next() {
+            if matches!(line, "Commands:" | "Arguments:" | "Options:") {
+                section = line;
+            } else if line.starts_with("  ")
+                && !line.starts_with("          ")
+                && !section.is_empty()
+            {
+                let (name, description) = line
+                    .trim()
+                    .split_once("  ")
+                    .or_else(|| {
+                        lines
+                            .peek()
+                            .filter(|next| next.starts_with("          "))
+                            .map(|next| (line.trim(), next.trim()))
+                    })
+                    .unwrap_or_else(|| panic!("{command:?} has undocumented entry: {line}"));
+                assert!(!description.trim().is_empty(), "{command:?}: {line}");
+                if section == "Commands:" && name != "help" {
+                    let mut child = command.clone();
+                    child.push(name.to_owned());
+                    pending.push(child);
+                }
+            }
+        }
+    }
+    // Root, six command groups, nineteen project operations, and the MCP server.
+    assert_eq!(visited.len(), 27);
+}
+
+#[test]
+fn mcp_tools_list_exposes_parameter_guidance() {
+    fn check_properties(schema: &Value) {
+        if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+            for (name, property) in properties {
+                assert!(
+                    property["description"]
+                        .as_str()
+                        .is_some_and(|text| !text.trim().is_empty()),
+                    "missing input guidance for {name}: {property:#}"
+                );
+            }
+        }
+        match schema {
+            Value::Object(object) => object.values().for_each(check_properties),
+            Value::Array(array) => array.iter().for_each(check_properties),
+            _ => {}
+        }
+    }
+
+    let fixture = TempDir::new().unwrap();
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_request(2, "tools/list", json!({})),
+        ],
+    );
+    let tools = mcp_response(&responses, 2)["result"]["tools"]
+        .as_array()
+        .unwrap();
+    assert_eq!(tools.len(), 19);
+    for tool in tools {
+        assert!(
+            tool["description"]
+                .as_str()
+                .is_some_and(|text| !text.trim().is_empty()),
+            "missing tool description: {tool:#}"
+        );
+        check_properties(&tool["inputSchema"]);
+    }
+    for name in ["item_create", "item_update"] {
+        let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
+        let fields = tool["inputSchema"]["properties"]["fields"]["description"]
+            .as_str()
+            .unwrap();
+        for convention in ["custom", "title/MID", "typed relations", "relation_add"] {
+            assert!(fields.contains(convention), "{name}: {fields}");
+        }
+    }
+    let create = tools
+        .iter()
+        .find(|tool| tool["name"] == "item_create")
+        .unwrap();
+    let relations = &create["inputSchema"]["properties"]["relations"];
+    assert_eq!(relations["type"], "array");
+    assert!(
+        !create["inputSchema"]["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("relations"))
+    );
+    assert!(
+        relations["description"]
+            .as_str()
+            .unwrap()
+            .contains("atomically")
+    );
+    let search = tools
+        .iter()
+        .find(|tool| tool["name"] == "item_search")
+        .unwrap();
+    assert_eq!(
+        search["inputSchema"]["properties"]["excerpts"]["default"],
+        false
+    );
+    assert_eq!(
+        search["inputSchema"]["properties"]["ids"]["default"],
+        json!([])
+    );
+}
+
+#[test]
 fn primary_workflows_run_end_to_end_against_real_source_files() {
     let fixture = TempDir::new().unwrap();
 

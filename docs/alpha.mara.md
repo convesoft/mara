@@ -121,6 +121,12 @@ relation has a concise description suitable for discovery.
 CLI and MCP must share operation semantics and domain results. CLI defaults to
 human-readable output; global `--format json` returns stable agent-oriented
 data equivalent to MCP structured results.
+
+CLI help must describe every public command and its arguments/options. MCP
+tool descriptions and input schemas must expose equivalent invocation guidance,
+including identity and path conventions, omission/empty-value semantics, and
+applicable defaults. Verify the rendered help and the server's `tools/list`
+response; guidance must preserve the operation contracts below.
 :::
 
 :::mara requirement REQ-PORTABLE-AGENT-ONBOARDING

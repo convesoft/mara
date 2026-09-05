@@ -28,10 +28,11 @@ struct Cli {
         long,
         global = true,
         value_name = "PATH",
-        help = "Use this Mara project root instead of discovery or an init PATH"
+        help = "Use this project root (absolute or relative to the working directory) instead of ancestor discovery; selects the init target or binds mcp"
     )]
     project: Option<PathBuf>,
 
+    /// Select operation output as human-readable text or JSON (does not affect MCP).
     #[arg(long, global = true, value_enum, default_value_t)]
     format: OutputFormat,
 
@@ -41,18 +42,22 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Initialize, validate, or recover a Mara project.
     Project {
         #[command(subcommand)]
         command: ProjectCommand,
     },
+    /// Inspect and validate the effective project schema.
     Schema {
         #[command(subcommand)]
         command: SchemaCommand,
     },
+    /// Author, retrieve, and validate project knowledge items.
     Item {
         #[command(subcommand)]
         command: ItemCommand,
     },
+    /// Add or remove authored typed relations between items.
     Relation {
         #[command(subcommand)]
         command: RelationCommand,
@@ -63,9 +68,12 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum ProjectCommand {
+    /// Initialize a Mara project without overwriting existing content.
     Init {
+        /// Destination directory; defaults to the working directory. Cannot combine with --project.
         path: Option<PathBuf>,
 
+        /// Initial schema: minimal includes common flavours and relations; empty declares none.
         #[arg(long, value_enum, default_value_t)]
         template: CliTemplate,
     },
@@ -78,10 +86,12 @@ enum ProjectCommand {
         )]
         paths: Vec<PathBuf>,
     },
+    /// Recover a pending multi-file mutation.
     Transaction {
         #[command(subcommand)]
         command: ProjectTransactionCommand,
     },
+    /// Manage durable machine identities (MIDs).
     Mid {
         #[command(subcommand)]
         command: ProjectMidCommand,
@@ -90,12 +100,15 @@ enum ProjectCommand {
 
 #[derive(Debug, Subcommand)]
 enum ProjectTransactionCommand {
-    /// Restore original files from a pending mutation journal.
+    /// Restore original files from a pending mutation journal; stop other writers first.
+    ///
+    /// Preserves later manual edits by refusing conflicting files. No journal is a no-op.
     Rollback,
 }
 
 #[derive(Debug, Subcommand)]
 enum ProjectMidCommand {
+    /// Generate missing MIDs on legacy items after validation; preserve existing MIDs.
     Backfill,
 }
 
@@ -103,53 +116,77 @@ enum ProjectMidCommand {
 enum ItemCommand {
     /// Rename a human ID and its internal references, preserving the MID.
     Rename {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         reference: String,
+        /// New unique human ID with the flavour's prefix; the old ID is not kept as an alias.
         new_id: String,
     },
     /// Delete one item only when no surviving relations or mentions refer to it.
     Delete {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         reference: String,
     },
-    /// Partially update an item's title, custom fields, or body.
+    /// Partially update an item's title, custom fields, or body; supply at least one change.
     Update {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         reference: String,
+        /// Replace the nonempty title; omission leaves it unchanged.
         #[arg(long)]
         title: Option<String>,
+        /// Replace all values of a custom KEY=VALUE field; repeat for schema-repeatable keys.
+        /// Excludes title, MID, and typed relations; use relation add/remove for edges.
         #[arg(long = "field", value_parser = parse_field)]
         fields: Vec<CliField>,
+        /// Remove all values of an optional custom field (repeatable); cannot also set that key.
         #[arg(long = "clear-field")]
         clear_fields: Vec<String>,
-        #[arg(long, help = "Replace the body; use - to read standard input")]
+        #[arg(
+            long,
+            help = "Replace body text; - reads stdin, an empty string clears an optional body, omission leaves it unchanged"
+        )]
         body: Option<String>,
     },
+    /// Move an item without changing its identity, content, or relations.
     Move {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         reference: String,
+        /// Destination project-relative *.mara.md file; parent must exist and discovery must include it.
         file: PathBuf,
+        /// Insert before this one-based line in the original destination; omission appends.
         #[arg(long)]
         line: Option<usize>,
     },
+    /// Create an item with a generated MID and optional initial relations, or a body scaffold.
     Create {
+        /// Schema-declared flavour; inspect with schema list flavour.
         flavour: String,
+        /// New unique human ID with the flavour's prefix (for example REQ-EXAMPLE); not a MID.
         id: String,
+        /// Destination project-relative *.mara.md file; parent must exist and discovery must include it.
         file: PathBuf,
 
+        /// Nonempty single-line item title.
         #[arg(long)]
         title: String,
 
-        #[arg(long = "field", value_parser = parse_field, help = "Custom KEY=VALUE field; excludes title, MID, and typed relations")]
+        #[arg(long = "field", value_parser = parse_field, help = "Schema-declared custom KEY=VALUE field; repeat only for repeatable keys. Excludes title, MID, and typed relations; use --relation or relation add for edges")]
         fields: Vec<CliField>,
 
         #[arg(long = "relation", value_name = "NAME=TARGET", value_parser = parse_initial_relation,
-            help = "Initial outgoing relation; repeat for multiple edges. TARGET is an exact human ID or MID")]
+            help = "Initial outgoing relation, created atomically with the item (repeatable). TARGET is an exact human ID or canonical MID (uppercase 26-character ULID)")]
         relations: Vec<InitialRelation>,
 
+        /// Body text, or - to read stdin; omission creates a scaffold when a body is required.
         #[arg(long)]
         body: Option<String>,
 
+        /// Insert before this one-based line; omission appends, line_count + 1 means end of file.
         #[arg(long)]
         line: Option<usize>,
     },
+    /// Read bounded consecutive portions of an item's body, metadata, and direct relations.
     Get {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         id: String,
         #[arg(
             long,
@@ -158,60 +195,86 @@ enum ItemCommand {
         limit: Option<usize>,
         #[arg(
             long,
-            help = "Continue body, metadata, and relations using next_cursor with unchanged options"
+            help = "Opaque next_cursor from the previous page; keep id/limit unchanged until has_more is false; omit to start or restart after source/schema changes"
         )]
         cursor: Option<String>,
     },
+    /// List compact item summaries in document-path and source order, with exact filters.
     List {
         #[command(flatten)]
         filters: ItemFilterArgs,
     },
-    /// Rank matches by relevance with typo tolerance; ID/MID values and filters stay exact.
+    /// Rank word matches by relevance with typo tolerance; ID/MID words and filters stay exact.
     Search {
+        /// Words to match across ID, title, body, and metadata; all words must match. Use "" for all items.
         query: String,
 
         #[command(flatten)]
         filters: ItemFilterArgs,
 
-        #[arg(long = "id", help = "Select exact item IDs or MIDs (repeatable)")]
+        #[arg(
+            long = "id",
+            help = "Select exact human IDs or canonical MIDs (uppercase 26-character ULIDs); repeat for OR, intersected with other filters"
+        )]
         ids: Vec<String>,
 
-        #[arg(long, help = "Include up to three bounded source excerpts per match")]
+        #[arg(
+            long,
+            help = "Include up to three bounded, partial source excerpts per match; use item get for complete content"
+        )]
         excerpts: bool,
     },
+    /// List direct incoming and outgoing relation entries; retrieve neighbour bodies with item get.
     Related {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         id: String,
 
+        /// Select edge direction relative to this item; omission includes both.
         #[arg(long, value_enum)]
         direction: Option<CliRelationDirection>,
 
+        /// Select exact relation names (repeatable, OR); intersects the neighbour flavour filter.
         #[arg(long)]
         relation: Vec<String>,
 
+        /// Select exact neighbour flavours (repeatable, OR); omission includes all.
         #[arg(long)]
         flavour: Vec<String>,
 
         #[arg(long, help = "Page size: 1 through 100 (default 20)")]
         limit: Option<usize>,
 
-        #[arg(long, help = "Continue with next_cursor and the same item/options")]
+        #[arg(
+            long,
+            help = "Opaque next_cursor from the previous page; keep item/options unchanged; omit to start or restart after source/schema changes"
+        )]
         cursor: Option<String>,
     },
+    /// Report all discoverable validation diagnostics applicable to one item.
     Validate {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         id: String,
     },
 }
 
 #[derive(Debug, Subcommand)]
 enum RelationCommand {
+    /// Add a schema-valid outgoing relation; rejects an existing edge.
     Add {
+        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID).
         source: String,
+        /// Schema-declared relation name; inspect with schema list relation.
         relation: String,
+        /// Target item's exact human ID or canonical MID (uppercase 26-character ULID).
         target: String,
     },
+    /// Remove an authored outgoing relation; rejects a missing edge.
     Remove {
+        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID).
         source: String,
+        /// Schema-declared relation name; inspect with schema list relation.
         relation: String,
+        /// Target item's exact human ID or canonical MID (uppercase 26-character ULID).
         target: String,
     },
 }
@@ -233,25 +296,31 @@ impl From<CliField> for FieldValue {
 
 #[derive(Debug, Args)]
 struct ItemFilterArgs {
+    /// Select exact flavours (repeatable, OR); distinct filter categories combine with AND.
     #[arg(long)]
     flavour: Vec<String>,
 
+    /// Exact metadata KEY=VALUE filter; OR within one key, AND across different keys (repeatable).
     #[arg(long = "field", value_parser = parse_field)]
     fields: Vec<CliField>,
 
+    /// Select items with these authored outgoing relation names (repeatable, OR).
     #[arg(long)]
     relation: Vec<String>,
 
     #[arg(
         long,
-        help = "Select an exact document or directory subtree (project-relative, repeatable), e.g. packages/query/docs/"
+        help = "Select an exact document or directory subtree (project-relative, repeatable OR), e.g. packages/query/docs/; no globs, absolute paths, or ..; omit for the whole project"
     )]
     path: Vec<PathBuf>,
 
     #[arg(long, help = "Page size: 1 through 100 (default 20)")]
     limit: Option<usize>,
 
-    #[arg(long, help = "Continue with next_cursor and the same query/options")]
+    #[arg(
+        long,
+        help = "Opaque next_cursor from the previous page; keep query/options unchanged; omit to start or restart after source/schema changes"
+    )]
     cursor: Option<String>,
 }
 
@@ -285,17 +354,23 @@ impl From<CliRelationDirection> for RelationDirection {
 
 #[derive(Debug, Subcommand)]
 enum SchemaCommand {
+    /// Get the complete effective schema, or one declaration by kind and name.
     Get {
+        /// Declaration kind; supply with NAME, or omit both for the complete schema.
         #[arg(value_enum, requires = "name")]
         kind: Option<CliSchemaKind>,
 
+        /// Exact declaration name; requires KIND.
         #[arg(requires = "kind")]
         name: Option<String>,
     },
+    /// List declaration names and descriptions for one schema kind.
     List {
+        /// Kind of schema declarations to list.
         #[arg(value_enum)]
         kind: CliSchemaKind,
     },
+    /// Validate the project's configured schema without validating item content.
     Validate,
 }
 

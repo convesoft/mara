@@ -518,7 +518,9 @@ fn declaration_summaries<T: DescribedDeclaration>(
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FieldValue {
+    /// Metadata key; authoring accepts only schema-declared custom fields, while retrieval filters match metadata keys exactly.
     pub key: String,
+    /// Scalar text, including numbers and booleans as strings. Authoring trims surrounding whitespace and rejects line breaks; retrieval filters match exactly.
     pub value: String,
 }
 
