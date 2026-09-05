@@ -327,7 +327,7 @@ struct ItemFilterArgs {
 
     #[arg(
         long,
-        help = "Opaque next_cursor from the previous page; keep query/options unchanged until has_more is false; omit to start or restart after source/schema changes. Empty strings are invalid"
+        help = "Opaque next_cursor from the previous page; keep all other inputs unchanged until has_more is false; omit to start or restart after source/schema changes. Empty strings are invalid"
     )]
     cursor: Option<String>,
 }

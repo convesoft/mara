@@ -5946,6 +5946,14 @@ fn mcp_tools_list_exposes_parameter_guidance() {
                 .find(|line| line.trim_start().starts_with(cli_input))
                 .unwrap_or_else(|| panic!("{name} is missing {cli_input}: {help}"));
             let mcp_help = schema["description"].as_str().unwrap();
+            if property == "cursor" && matches!(name, "item_list" | "item_search") {
+                for (surface, text) in [("CLI", cli_help), ("MCP", mcp_help)] {
+                    assert!(
+                        text.contains("all other inputs unchanged"),
+                        "{name}.{property} {surface} needs operation-neutral continuation guidance: {text}"
+                    );
+                }
+            }
             for convention in conventions {
                 for (surface, text) in [("CLI", cli_help), ("MCP", mcp_help)] {
                     assert!(
