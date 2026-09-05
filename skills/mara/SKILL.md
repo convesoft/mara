@@ -6,9 +6,24 @@ description: Use Mara to initialize, discover, author, relate, retrieve, search,
 # Mara project knowledge
 
 Prefer the Mara MCP tools for a project's canonical `*.mara.md` knowledge.
-When MCP is unavailable, use the installed Mara CLI with `--format json` for
-structured results. The same operation selection, authoring, continuation, and
-validation rules apply to both surfaces.
+When MCP is unavailable, use an available Mara CLI invocation with `--format json`
+for structured results. The same operation selection, authoring, continuation,
+and validation rules apply to both surfaces.
+
+## Resolve the CLI fallback
+
+Installing the skill does not install `mara` on PATH. Reuse the configured MCP
+launcher: keep its executable, runner arguments, exact package version, and
+environment; replace the `mcp` operation with the required CLI operation. Carry
+any bound project into the CLI's `--project` option.
+
+For the Bash examples below, put that launcher in an argument array `mara_cli`:
+`mara_cli=(npx -y '@convesoft/mara@<configured-version>')` (replace the placeholder
+with the existing exact pin), or `mara_cli=('/absolute/path/to/mara')` for a direct
+executable. Use `mara_cli=(mara)` only when `command -v mara` resolves it.
+Check `"${mara_cli[@]}" --version` and the operation's `--help`; preserve the pin
+and use only supported options. If no launcher is available, report the missing
+executable or runner rather than assuming a PATH installation or changing versions.
 
 ## Select the project
 
@@ -17,7 +32,7 @@ validation rules apply to both surfaces.
   server was explicitly started with `mara mcp --project PATH`.
 - If `project` is omitted, Mara discovers the nearest project from the MCP
   server's execution directory.
-- For CLI calls, use `mara --project /absolute/project --format json ...`.
+- For CLI calls, use `"${mara_cli[@]}" --project /absolute/project --format json ...`.
   Without `--project`, the CLI discovers from its working directory.
 - Treat each operation as scoped to one project. Do not infer workspace or
   cross-project behavior.
@@ -26,12 +41,12 @@ If the intended root has no `.mara/project.toml` and the user wants to start a
 Mara project, call `project_init` with the absolute root, or omit `project` when
 the MCP server was started with that root bound by `--project`. Use the default
 `minimal` template unless the user explicitly requests `empty`. The CLI equivalent
-is `mara --project /absolute/project --format json project init`. Do not create
-or modify `AGENTS.md` as part of Mara onboarding.
+is `"${mara_cli[@]}" --project /absolute/project --format json project init`.
+Do not create or modify `AGENTS.md` as part of Mara onboarding.
 
 ## Choose the operation
 
-CLI entries below follow `mara --project /absolute/project --format json`;
+CLI entries below follow `"${mara_cli[@]}" --project /absolute/project --format json`;
 inspect `<object> <operation> --help` for positional arguments and options.
 
 | Intent | MCP operation | CLI command |
@@ -71,7 +86,7 @@ Restart without a cursor after source/schema changes. Related follows only direc
 edges; choose further neighbours explicitly.
 
 CLI retrieval uses the same JSON result fields: for example,
-`mara --project /absolute/project --format json item search recovery --limit 5`.
+`"${mara_cli[@]}" --project /absolute/project --format json item search recovery --limit 5`.
 Use `--cursor '<next_cursor>'` for continuation and `--excerpts` for passages.
 
 ## Keep metadata inputs distinct
@@ -147,24 +162,25 @@ validation. Pending transactions block mutations; use `project_transaction_rollb
 (`project transaction rollback` in CLI) for explicit recovery after stopping
 other writers.
 
-For the same authoring workflow through CLI, after resolving `REQ-EXAMPLE`,
-use initial relations atomically and inspect both directions:
+For the same authoring workflow through CLI, after resolving `mara_cli` and
+`REQ-EXAMPLE`, use initial relations atomically when the selected version supports
+`--relation`, and inspect both directions:
 
-```sh
+```bash
 mara_project=/absolute/project
-mara --project "$mara_project" --format json schema get
-mara --project "$mara_project" --format json item get REQ-EXAMPLE
-mara --project "$mara_project" --format json item create decision ADR-EXAMPLE decisions.mara.md \
+"${mara_cli[@]}" --project "$mara_project" --format json schema get
+"${mara_cli[@]}" --project "$mara_project" --format json item get REQ-EXAMPLE
+"${mara_cli[@]}" --project "$mara_project" --format json item create decision ADR-EXAMPLE decisions.mara.md \
   --title 'Keep edits recoverable' \
   --body 'Preserve the previous content until validation succeeds so rejected edits can be retried.' \
   --relation justifies=REQ-EXAMPLE
-mara --project "$mara_project" --format json item get ADR-EXAMPLE
-mara --project "$mara_project" --format json item related ADR-EXAMPLE --direction outgoing
-mara --project "$mara_project" --format json item related REQ-EXAMPLE --direction incoming
-mara --project "$mara_project" --format json project validate
+"${mara_cli[@]}" --project "$mara_project" --format json item get ADR-EXAMPLE
+"${mara_cli[@]}" --project "$mara_project" --format json item related ADR-EXAMPLE --direction outgoing
+"${mara_cli[@]}" --project "$mara_project" --format json item related REQ-EXAMPLE --direction incoming
+"${mara_cli[@]}" --project "$mara_project" --format json project validate
 ```
 
-To follow the separate create/add sequence instead, omit `--relation` during
-creation and then run `relation add ADR-EXAMPLE justifies REQ-EXAMPLE` with the
-same global project/JSON options. Check creation completeness and validation
-results as above.
+If the selected version lacks initial relations, or to use separate create/add,
+omit `--relation` during creation and then run
+`relation add ADR-EXAMPLE justifies REQ-EXAMPLE` with the same launcher and global
+project/JSON options. Check creation completeness and validation results as above.
