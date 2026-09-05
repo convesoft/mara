@@ -28,6 +28,27 @@ impl Corpus {
     pub fn is_complete(&self) -> bool {
         self.complete
     }
+
+    pub(crate) fn with_replacements(
+        &self,
+        replacements: &BTreeMap<PathBuf, String>,
+        schema: &Schema,
+    ) -> Result<Self, Error> {
+        let mut documents = self.documents.clone();
+        for (path, source) in replacements {
+            let document = parse_document_source(path, source, schema)?;
+            if let Some(existing) = documents.iter_mut().find(|entry| entry.path() == path) {
+                *existing = document;
+            } else {
+                documents.push(document);
+            }
+        }
+        documents.sort_by(|left, right| left.path().cmp(right.path()));
+        Ok(Self {
+            documents,
+            complete: self.complete,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
