@@ -207,7 +207,7 @@ enum ItemCommand {
     },
     /// Rank word matches by relevance with typo tolerance; ID/MID words and filters stay exact.
     Search {
-        /// Words to match across ID, title, body, and metadata; all words must match. Use "" for all items.
+        /// Words to match across ID, title, body, and metadata; all words must match. An empty string or punctuation-only text matches all items within the filters.
         query: String,
 
         #[command(flatten)]

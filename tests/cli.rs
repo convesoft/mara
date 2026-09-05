@@ -4884,7 +4884,7 @@ fn search_relevance_ranks_before_pagination_with_cli_mcp_parity() {
         }
         assert_eq!(ids, expected);
     }
-    // Empty queries and item list retain source order, including the filtered-out item.
+    // Zero-term queries and item list retain source order, including the filtered-out item.
     for operation in ["list", "search"] {
         let mut args = vec!["--format", "json", "item", operation];
         if operation == "search" {
@@ -5626,6 +5626,15 @@ fn every_command_help_describes_commands_arguments_and_options() {
         assert!(output.status.success(), "{command:?}: {}", stderr(&output));
         assert!(stderr(&output).is_empty(), "{}", stderr(&output));
         let help = stdout(&output);
+        if command == ["item", "search"] {
+            let query_help = help
+                .lines()
+                .find(|line| line.trim_start().starts_with("<QUERY>"))
+                .unwrap();
+            for convention in ["empty", "punctuation-only", "all items within the filters"] {
+                assert!(query_help.contains(convention), "{query_help}");
+            }
+        }
         if command == ["item", "update"] {
             let field_help = help.lines().find(|line| line.contains("--field")).unwrap();
             for convention in ["KEY=", "empty value", "--clear-field", "remove"] {
