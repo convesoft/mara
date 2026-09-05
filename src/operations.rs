@@ -4,13 +4,13 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Corpus, Diagnostic, FieldFilter, FlavourDefinition, ItemCollectionResult, ItemCreationRequest,
-    ItemFilters, ItemGetResult, Project, RelatedFilters, RelatedItemsResult, RelationDefinition,
-    RelationDirection, Schema, Template, add_relation, backfill_mids, create_item, get_item_page,
-    initialize_project, list_items, load_corpus, load_corpus_for_validation,
-    load_corpus_syntax_for_validation, load_schema, load_schema_for_validation, related_items,
-    remove_relation, resolve_project, resolve_project_for_validation, search_items,
-    validate_corpus, validate_corpus_independent,
+    Corpus, Diagnostic, FieldFilter, FlavourDefinition, InitialRelation, ItemCollectionResult,
+    ItemCreationRequest, ItemFilters, ItemGetResult, Project, RelatedFilters, RelatedItemsResult,
+    RelationDefinition, RelationDirection, Schema, Template, add_relation, backfill_mids,
+    create_item, get_item_page, initialize_project, list_items, load_corpus,
+    load_corpus_for_validation, load_corpus_syntax_for_validation, load_schema,
+    load_schema_for_validation, related_items, remove_relation, resolve_project,
+    resolve_project_for_validation, search_items, validate_corpus, validate_corpus_independent,
 };
 
 #[derive(Debug, Clone)]
@@ -153,6 +153,7 @@ impl OperationContext {
                     .into_iter()
                     .map(|field| (field.key, field.value))
                     .collect(),
+                relations: request.relations,
                 body: request.body,
                 line: request.line,
             },
@@ -511,8 +512,12 @@ pub struct ItemCreateParams {
     pub id: String,
     pub file: PathBuf,
     pub title: String,
+    /// Schema-declared custom fields only; excludes title, MID, and typed relations.
     #[serde(default)]
     pub fields: Vec<FieldValue>,
+    /// Initial outgoing edges, validated and created atomically. Omitted or empty adds none.
+    #[serde(default)]
+    pub relations: Vec<InitialRelation>,
     #[serde(default)]
     pub body: Option<String>,
     #[serde(default)]

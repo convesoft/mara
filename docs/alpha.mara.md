@@ -156,6 +156,14 @@ reject the item until its body is filled. An optional body may remain empty.
 Mara generates the item's MID, writes it as exactly one `:mid:` entry
 immediately after the item opener, and returns it with the creation result.
 Callers cannot provide, copy, or update a MID through item creation.
+
+Creation optionally accepts initial outgoing typed relations separately from
+custom fields. Validate the complete candidate item and all requested edges
+before publishing the item, generated MID, and relations in one atomic source
+update. A rejected request preserves an existing destination byte-for-byte and
+leaves no new destination file or item. Required-body scaffolds remain allowed.
+Omitting relations or providing an empty list preserves existing creation
+behavior. Later edge edits use [[REQ-RELATION-MUTATION]].
 :::
 
 :::mara requirement REQ-DURABLE-ITEM-IDENTITY
@@ -206,6 +214,12 @@ validation error without making the insertion structurally unsafe.
 resolve both items and validate the relation against schema source and target
 flavours. Relations are authored once on the source; incoming backlinks are
 derived.
+
+Adding an existing edge is an error, including when different handles resolve
+to the same target identity. Self-relations are allowed when the schema permits
+the endpoint flavours. Initial relations during creation follow these rules;
+the new item's own human ID may select itself. Other targets must already
+exist, and identity validation follows the same rules as `relation add`.
 :::
 
 :::mara requirement REQ-PROJECT-VALIDATION
@@ -389,9 +403,19 @@ text query, and mutations use explicit verbs such as `create`, `add`, and
 `remove`.
 
 Item creation uses `item create <flavour> <id> <file> --title <title>` with
-repeatable `--field <key=value>`, optional `--body <text|->`, and optional
-`--line <N>`. The destination file is project-relative; repeat `--field` only
-for schema-repeatable metadata.
+repeatable `--field <key=value>` and `--relation <name=target>`, optional
+`--body <text|->`, and optional `--line <N>`. The destination file is
+project-relative; repeat `--field` only for schema-repeatable custom metadata.
+Fields exclude structural title/MID metadata and typed relations.
+
+MCP `item_create` accepts optional `relations`, an array of
+`{"relation":"justifies","target":"REQ-EXAMPLE"}` objects, defaulting to `[]`.
+CLI and MCP resolve targets exactly by human ID or canonical MID, write their
+human IDs as relation metadata after custom fields in request order, and reject
+duplicate edges by resolved identity. Creation returns the existing
+`id`, `mid`, `path`, `line`, `complete`, and `missing` result; use get/related to
+inspect edges and derived backlinks. Atomic validation and compatibility follow
+[[REQ-ITEM-CREATION]] and [[REQ-RELATION-MUTATION]].
 
 | Object | Operations |
 |---|---|
@@ -501,6 +525,18 @@ Matching remains an internal projection over the loaded corpus. It writes no
 index or search-specific project data. Rank matching items under
 [[REQ-SEARCH-RELEVANCE]] before pagination, so a later search engine can replace
 the in-memory projection without migrating authored project knowledge.
+:::
+
+:::mara decision ADR-ATOMIC-ITEM-CREATION
+:mid: 01M1S9YE52K3V1ZRMR93FB5C1K
+:title: Publish an item and its initial relations together
+:justifies: REQ-ITEM-CREATION
+
+Create one item and its initial outgoing relations in one validated atomic source
+update. Separate creation and relation mutations can leave an incomplete graph
+when a later relation fails. A dedicated relations input keeps typed edges
+distinct from custom fields; relation add/remove remain available for later edits.
+This does not introduce multi-item batches or unresolved forward references.
 :::
 
 ## Explicitly deferred
