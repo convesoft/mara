@@ -35,14 +35,13 @@ execution, synonym dictionaries, stemming, substring/prefix modes, a query
 language, persisted indexes or graph stores, and context profiles remain
 outside the implementation scope.
 
-Narrative outside item blocks is canonical document content under
-[[DES-DOCUMENT-FORMAT]], but current item search does not retrieve it. Whether
-and how narrative should be searchable is an open alpha.3 investigation, not
-an accepted implementation requirement. Evaluate its fit with Mara's purpose,
-item identity, source locations, and bounded retrieval without assuming that
-all useful narrative must become an item.
-Findings and the recommendation awaiting review are recorded in
-[Narrative retrieval investigation](#narrative-retrieval-investigation).
+Narrative outside item blocks remains canonical document content under
+[[DES-DOCUMENT-FORMAT]]. For alpha.3, access it through file reads and file search;
+Mara search remains item-only. Clients with only Mara MCP cannot discover or read
+all canonical narrative. No narrative-retrieval implementation is accepted.
+[[ADR-ALPHA-NARRATIVE-FILE-ACCESS]] records the reviewed boundary and rationale;
+[Narrative retrieval investigation](#narrative-retrieval-investigation) preserves
+the evidence and future interface questions.
 :::
 
 :::mara requirement REQ-RETRIEVAL-BOUNDS
@@ -464,8 +463,9 @@ with `{"query":"cache","paths":["packages/query/docs/"]}` and the same project.
 
 ## Narrative retrieval investigation
 
-Recommendation awaiting review; this section does not accept a new retrieval
-surface or change the alpha.3 implementation scope in `DES-RETRIEVAL-SCOPE`.
+The reviewed alpha.3 boundary is recorded in `DES-RETRIEVAL-SCOPE` and
+`ADR-ALPHA-NARRATIVE-FILE-ACCESS`. This investigation accepts no new retrieval
+surface.
 
 ### Corpus evidence
 
@@ -520,7 +520,7 @@ can detach headings, lists, or explanations from their context. Paragraph
 splitting alone does not solve Markdown tables, code examples, or long sections.
 These are result-unit and reading-contract choices, not only matcher changes.
 
-### Recommended boundary and remaining decisions
+### Reviewed boundary and future decisions
 
 Retain file-based narrative access for alpha.3 and preserve item-only search,
 filters, identities, and relations. This serves the demonstrated local authoring
@@ -532,10 +532,10 @@ that alpha.3 needs a new public retrieval surface to complete its primary flow.
 If a workflow without filesystem access is accepted, prefer a separate
 document/passage surface over extending `item search`. It would expose source
 content without claiming that every passage is a typed, durable knowledge unit.
-This is a direction for review, not an accepted implementation task.
+This remains a possible future direction, not an accepted implementation task.
 
-Review must settle whether file access is sufficient for alpha.3. Any separately
-accepted implementation needs a concrete scenario and contracts deciding:
+File access is accepted as sufficient for alpha.3. Any separately accepted
+implementation needs a concrete scenario and contracts deciding:
 
 - Whole-document versus narrative-only discovery, passage boundaries, and how
   to retain surrounding context without duplicating item results.
@@ -544,7 +544,18 @@ accepted implementation needs a concrete scenario and contracts deciding:
 - Consecutive read and continuation bounds, source-change rejection, and CLI/MCP
   parity, including a narrative-only document and oversized Markdown content.
 
-No narrative-retrieval implementation is accepted by this investigation. After
-review, record the settled boundary in `DES-RETRIEVAL-SCOPE`, add a decision item
-for its rationale, and reconcile the roadmap. Keep any accepted implementation
-separate from this documentation task.
+No narrative-retrieval implementation is accepted by this investigation.
+
+:::mara decision ADR-ALPHA-NARRATIVE-FILE-ACCESS
+:mid: 01M1ST2P149A5YS3BKY599HG2K
+:title: Retain file-based narrative access for alpha 3
+:justifies: DES-RETRIEVAL-SCOPE
+
+Alpha.3 retains file reads and file search for narrative outside item blocks.
+The demonstrated local authoring workflow can access that context without
+changing item identity, filters, relations, or bounded retrieval. Useful context
+does not need artificial item identity merely to become searchable. Accept the
+limitation that clients with only Mara MCP cannot retrieve all canonical
+narrative. A future document/passage surface requires a separately accepted
+scenario and contracts; the investigation does not commit to that implementation.
+:::
