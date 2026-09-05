@@ -634,7 +634,7 @@ impl MaraMcp {
 
 #[tool_handler(
     name = "mara",
-    instructions = "Structured Mara operations. Pass an absolute project path, or omit it for execution-directory discovery (project_init requires an explicit destination). When the server starts with --project, omit request-level project selection; overrides are rejected."
+    instructions = "Structured Mara operations. Pass an absolute project path, or omit it for execution-directory discovery (project_init requires an explicit destination only when the server is unbound). When the server starts with --project, omit request-level project selection, including for project_init; overrides are rejected."
 )]
 impl ServerHandler for MaraMcp {}
 

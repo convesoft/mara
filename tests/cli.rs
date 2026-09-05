@@ -5441,6 +5441,13 @@ fn mcp_bound_server_initializes_its_selected_target_without_an_override() {
         ],
     );
 
+    let instructions = mcp_response(&responses, 1)["result"]["instructions"]
+        .as_str()
+        .unwrap();
+    assert!(instructions.contains("explicit destination only when the server is unbound"));
+    assert!(
+        instructions.contains("omit request-level project selection, including for project_init")
+    );
     assert_eq!(mcp_response(&responses, 2)["result"]["isError"], false);
     assert_eq!(
         mcp_response(&responses, 2)["result"]["structuredContent"]["project"]["root"],
@@ -5469,6 +5476,10 @@ fn mcp_unbound_project_init_requires_an_absolute_target() {
         ],
     );
 
+    let instructions = mcp_response(&responses, 1)["result"]["instructions"]
+        .as_str()
+        .unwrap();
+    assert!(instructions.contains("explicit destination only when the server is unbound"));
     assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
     assert!(
         mcp_response(&responses, 2)
