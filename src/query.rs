@@ -546,7 +546,7 @@ fn filtered_items<'a>(
         .map(|id| resolve_item(corpus, id))
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(corpus
+    let items = corpus
         .items()
         .filter(|item| {
             selected.is_empty()
@@ -563,9 +563,16 @@ fn filtered_items<'a>(
                     .any(|relation| relation.name() == name)
             })
         })
-        .filter(|item| matches_fields(item, &fields))
-        .filter(|item| query.as_ref().is_none_or(|query| matches_text(item, query)))
-        .collect())
+        .filter(|item| matches_fields(item, &fields));
+    let Some(query) = query else {
+        return Ok(items.collect());
+    };
+    let mut ranked = items
+        .filter_map(|item| search_rank(item, &query).map(|rank| (rank, item)))
+        .collect::<Vec<_>>();
+    // Stable sorting retains document-path/source order for equal ranks.
+    ranked.sort_by_key(|(rank, _)| std::cmp::Reverse(*rank));
+    Ok(ranked.into_iter().map(|(_, item)| item).collect())
 }
 
 fn validate_flavours(schema: &Schema, names: &[String]) -> Result<(), QueryError> {
@@ -645,19 +652,55 @@ fn matches_fields(item: &Item, fields: &BTreeMap<&str, Vec<&str>>) -> bool {
     })
 }
 
-fn matches_text(item: &Item, query: &BTreeSet<String>) -> bool {
-    let mut item_terms = BTreeSet::new();
-    for value in [item.id(), item.title(), item.body()] {
-        item_terms.extend(keyword_terms(value));
+// The exact-match group dominates field weights, regardless of occurrences.
+fn search_rank(item: &Item, query: &BTreeSet<String>) -> Option<(bool, usize)> {
+    if query.is_empty() {
+        return Some((true, 0));
     }
+    let mut exact_words = BTreeMap::<String, usize>::new();
+    let mut fuzzy_words = BTreeMap::<String, usize>::new();
+    let mut include = |value: &str, weight: usize, fuzzy: bool| {
+        for word in keyword_terms(value) {
+            if fuzzy {
+                fuzzy_words
+                    .entry(word.clone())
+                    .and_modify(|current| *current = (*current).max(weight))
+                    .or_insert(weight);
+            }
+            exact_words
+                .entry(word)
+                .and_modify(|current| *current = (*current).max(weight))
+                .or_insert(weight);
+        }
+    };
+    include(item.id(), 3, false);
+    include(item.body(), 1, true);
     for entry in item.metadata() {
-        item_terms.extend(keyword_terms(entry.key()));
-        item_terms.extend(keyword_terms(entry.value()));
+        include(entry.key(), 1, true);
+        include(
+            entry.value(),
+            if entry.key() == "title" { 3 } else { 1 },
+            entry.key() != "mid",
+        );
     }
 
-    query.iter().all(|term| {
-        item_terms.contains(term) || item_terms.iter().any(|word| word_matches(term, word))
-    })
+    let mut all_exact = true;
+    let mut score = 0;
+    for term in query {
+        let exact_weight = exact_words.get(term).copied().unwrap_or(0);
+        all_exact &= exact_weight > 0;
+        let mut weight = exact_weight;
+        for (word, candidate_weight) in &fuzzy_words {
+            if *candidate_weight > weight && word_matches(term, word) {
+                weight = *candidate_weight;
+            }
+        }
+        if weight == 0 {
+            return None;
+        }
+        score += weight;
+    }
+    Some((all_exact, score))
 }
 
 // Both item selection and source excerpts compare complete normalized words.

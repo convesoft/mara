@@ -6,11 +6,10 @@
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
 This is the accepted scope for 0.1.0-alpha.3. Search/list pagination, search
-excerpts, direct-neighbour pagination, consecutive partial item reads, and
-typo-tolerant matching are implemented; relevance ranking remains planned.
+excerpts, direct-neighbour pagination, consecutive partial item reads,
+typo-tolerant matching, and relevance ranking are implemented.
 Current retrieval contracts are [[REQ-ITEM-SEARCH]], [[REQ-ITEM-GET]], and
-[[REQ-ITEM-RELATED]]. Open choices in the planned contracts must be settled
-before implementation.
+[[REQ-ITEM-RELATED]].
 
 | Capability | Contract |
 |---|---|
@@ -130,9 +129,13 @@ The continuation interface follows [[DES-RETRIEVAL-CONTINUATION]].
 CLI `item search` and MCP `item_search` always combine exact and typo-tolerant
 word matches, without a mode flag or an exact-only fallback stage. Every
 distinct query term must match at least one complete word in the existing
-searchable values. Preserve all exact matches in the result set, including
-when approximate matches exist; result sets may expand relative to exact-only
-search. Empty-term queries retain their existing match-all behavior.
+searchable values. ID and MID field values allow only exact normalized word
+matches; titles, body text, metadata keys, and other metadata values also allow
+typo-tolerant matches. This restriction applies to the fields, not to text that
+resembles a handle in body or other metadata. Preserve all exact matches in the
+result set, including when approximate matches exist; result sets may expand
+relative to exact-only search. Empty-term queries retain their existing
+match-all behavior.
 
 After the shared normalization in [[DES-DETERMINISTIC-KEYWORD-SEARCH]], allow
 zero edits for query terms of 1-3 Unicode scalar values, one for 4-7, and two
@@ -144,8 +147,7 @@ Retain existing scope filters; item-handle lookup and every filter value remain
 exact. This is word-level spelling tolerance, not file-picker-style subsequence
 matching. Matching may incidentally cover a word-form variation or a nearby
 word prefix; it does not promise morphological or substring matching.
-Results retain corpus order until [[REQ-SEARCH-RELEVANCE]] is implemented;
-that contract owns exact-before-approximate ranking before pagination.
+[[REQ-SEARCH-RELEVANCE]] owns exact-before-approximate ranking before pagination.
 :::
 
 :::mara requirement REQ-SEARCH-RELEVANCE
@@ -153,13 +155,23 @@ that contract owns exact-before-approximate ranking before pagination.
 :title: Rank search results reproducibly by relevance
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
-Item search must support relevance ordering that puts items matching every
-query term exactly before any item requiring an approximate match. ID/title
-weighting must preserve this precedence. Define scoring and field weights
-before implementation. For unchanged input and options, ordering must
-be reproducible with stable tie-breaking. Rank before limiting or paginating;
-item list remains in corpus order. Whether relevance ordering is the search
-default remains open, as does compatibility with current corpus ordering.
+CLI `item search` and MCP `item_search` always order results by relevance, with
+no sort option. Items matching every distinct normalized query term exactly
+precede any item requiring an approximate match, regardless of field weights.
+
+Within each group, sum each distinct query term's highest matching field weight:
+ID or title = 3; body, metadata keys, and other metadata values (including MID)
+= 1. A title metadata value is a title match. Use the best allowed exact or
+approximate occurrence for that weight, even when a term also matches exactly
+in a lower-weight field. Repeated terms, occurrences, and metadata entries add
+no weight. Do not score edit distance or term frequency.
+
+Sort by descending score within each group; ties retain document-path and
+source order. Empty-term queries give every item score zero and retain corpus
+order. Apply filters and ranking before count/byte limits and pagination;
+continuation covers every match without omissions or duplicates for unchanged
+input. This replaces the previous corpus ordering of search; item list remains
+in corpus order. Result summaries do not expose scores.
 :::
 
 :::mara requirement REQ-SEARCH-EXCERPTS
@@ -188,7 +200,7 @@ CLI options are `--excerpts` and repeatable `--id <id-or-mid>`; MCP uses
 handle exactly, rejecting missing or ambiguous handles even if other filters
 would exclude them. Selections combine with OR, intersect the other filters,
 and deduplicate ID/MID aliases before pagination. Selection order does not
-change corpus order.
+change relevance order.
 
 Only requested summaries include `excerpts`, an array of at most three
 fragments in source order. Each fragment has `text`, `start_byte`, `end_byte`,
@@ -210,7 +222,8 @@ The same query and matching rules apply with or without excerpts. A caller may
 search the corpus for compact summaries, repeat the query restricted to a
 selected item with excerpts, then use `item get` for a complete or consecutive
 partial read. Initial searches may request excerpts directly to avoid an extra
-call. Excerpt positions identify where to inspect the source; they are not a
+call. ID and MID values use exact-only matching as in [[REQ-FUZZY-ITEM-SEARCH]].
+Excerpt positions identify where to inspect the source; they are not a
 promise that the excerpt contains the item's complete meaning.
 
 Search still accepts plain query text. These options do not introduce Boolean,
@@ -328,7 +341,10 @@ appear only when requested and identify matching source passages; consecutive
 reads must retain text between those passages. Use real queries with expected
 items to demonstrate typo recovery, useful relevance ordering, and preservation
 of exact matches. Repeat unchanged queries to verify stable ordering and page
-coverage. For related pages, verify both directions across page boundaries,
+coverage. Put approximate title matches before exact body matches in source
+order and verify exact results lead the first page. Verify ID/title weighting,
+corpus-order ties, exact-only ID/MID fields, and unchanged item-list ordering.
+For related pages, verify both directions across page boundaries,
 filtered continuation, title truncation, the serialized byte budget, and
 rejection after source, schema, or request changes. For get, reconstruct the
 body and all metadata values by their ranges, including enormous titles,
@@ -376,6 +392,30 @@ word matches. Users and agents should recover spelling errors without detecting
 a failed search and retrying in another mode. Preserve every exact match while
 allowing additional candidates; requiring every query term and restricting edits
 for short terms limits unwanted matches. Relevance ordering owns
-exact-before-approximate precedence under [[REQ-SEARCH-RELEVANCE]]; this matching
-change retains corpus order until ranking is implemented.
+exact-before-approximate precedence under [[REQ-SEARCH-RELEVANCE]].
+:::
+
+:::mara decision ADR-RELEVANCE-ONLY-SEARCH
+:mid: 01M1S8TVA98VWAGW6YTJZKHK1C
+:title: Make relevance the only search ordering
+:justifies: REQ-SEARCH-RELEVANCE
+
+Use relevance ordering for every search instead of offering a corpus-order
+mode. Search should put useful candidates first; item list retains source
+browsing order, and no current search workflow requires an ordering switch.
+Exact-before-approximate groups prevent field weights from burying exact
+results. Fixed per-term field weights and corpus-order ties provide reproducible
+ranking without a new dependency or persisted index.
+:::
+
+:::mara decision ADR-EXACT-SEARCH-IDENTITIES
+:mid: 01M1S8TVAH70R9VFCDME08ZZ2H
+:title: Exclude identity fields from typo tolerance
+:justifies: REQ-FUZZY-ITEM-SEARCH
+
+Match ID and MID field values only by exact normalized words. Nearby opaque
+MIDs have no meaningful relevance, and titles provide typo recovery for
+descriptive human IDs. Keep typo tolerance in the remaining searchable text;
+this is a field boundary, not a parser for handle-shaped words. Apply the same
+boundary to source excerpts so reported matches agree with item selection.
 :::

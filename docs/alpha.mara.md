@@ -248,23 +248,23 @@ matching across ID, title, body, and metadata keys and values. Every distinct
 query term must match a complete term in at least one searchable value;
 terms may occur in different values, in any order, and without adjacency.
 Exact and typo-tolerant matches are combined automatically under
-[[REQ-FUZZY-ITEM-SEARCH]]. Substring modes, stemming, synonym expansion, and
-relevance ranking are not supported. Both query commands accept repeatable
+[[REQ-FUZZY-ITEM-SEARCH]], which excludes ID/MID values from typo tolerance.
+Substring modes, stemming, and synonym expansion are not supported.
+Both query commands accept repeatable
 `--flavour <name>`, `--field <key=value>`, `--relation <name>`, and
 `--path <project-relative-path>` filters plus `--limit <count>`.
 Path filters normalize `.` components and reject absolute paths or `..`.
 Relation filters match authored relation names. Values within one filter or one
 field key combine with OR; distinct filter categories and field keys combine
-with AND. The limit applies last. Results follow document-path and source order
-and contain ID, MID when present, flavour, title, source path, and start line.
+with AND. The limit applies last. Search results follow [[REQ-SEARCH-RELEVANCE]];
+list results follow document-path and source order. Results contain ID, MID when
+present, flavour, title, source path, and start line.
 `item list` returns the same compact summary shape without a text query.
 Search/list return bounded pages with continuation metadata under
 [[REQ-SEARCH-PAGINATION]] and [[DES-RETRIEVAL-CONTINUATION]]. Summary title
 limits and truncation markers follow [[REQ-RETRIEVAL-BOUNDS]]. Optional search
 excerpts and exact item selection follow [[DES-SEARCH-EXCERPT-OPTIONS]];
 summaries contain no body text unless excerpts are requested.
-
-Relevance ordering remains planned in [[REQ-SEARCH-RELEVANCE]].
 :::
 
 :::mara requirement REQ-ITEM-RELATED
@@ -493,15 +493,14 @@ An item matches when every query term matches at least one of its searchable
 values. Terms may occur in different values, in any order, and without
 adjacency. Use `strsim`'s Unicode-aware `damerau_levenshtein` for spelling distance;
 it supports adjacent swaps without introducing an index or a search engine.
-The matcher does not stem terms, expand synonyms, or rank results.
+The matcher does not stem terms or expand synonyms. Keep the originating field
+when collecting words: ID/MID values are exact-only, and ranking uses the field
+weights in [[REQ-SEARCH-RELEVANCE]].
 
 Matching remains an internal projection over the loaded corpus. It writes no
-index or search-specific project data and returns matching items in corpus
-order, so a later search engine can replace it without migrating authored
-project knowledge.
-
-[[REQ-SEARCH-RELEVANCE]] defines the planned relevance ordering; scoring and
-field weights remain open there.
+index or search-specific project data. Rank matching items under
+[[REQ-SEARCH-RELEVANCE]] before pagination, so a later search engine can replace
+the in-memory projection without migrating authored project knowledge.
 :::
 
 ## Explicitly deferred

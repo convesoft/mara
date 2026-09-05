@@ -3978,6 +3978,234 @@ fn item_search_matches_distinct_complete_unicode_terms_across_values() {
 }
 
 #[test]
+fn search_relevance_ranks_before_pagination_with_cli_mcp_parity() {
+    let fixture = retrieval_fixture();
+    let entries = [
+        ("REQ-APPROX-BODY", "Catalog", "Project validaton."),
+        ("REQ-PROJCET-VALIDATON", "Projcet validaton", "Details."),
+        (
+            "REQ-BODY",
+            "Catalog",
+            "Project validation. Project validation.",
+        ),
+        ("REQ-MIXED", "Project", "Validation."),
+        ("REQ-PROJECT-VALIDATION", "Catalog", "Details."),
+        ("REQ-TITLE", "Project validation", "Details."),
+        (
+            "REQ-REPEATED",
+            "Project project project",
+            "Validation validation.",
+        ),
+        ("REQ-BOTH", "Projcet validaton", "Project validation."),
+    ];
+    let mut source = entries.iter().map(|(id, title, body)| {
+        format!(":::mara requirement {id}\n:title: {title}\n:status: draft\n:derives_from: SCN-BASE\n\n{body}\n:::\n\n")
+    }).collect::<String>();
+    source.push_str(":::mara requirement REQ-EXCLUDED\n:title: Project validation\n:status: accepted\n:derives_from: SCN-BASE\n\nDetails.\n:::\n");
+    fs::write(fixture.path().join("docs/ranking.mara.md"), source).unwrap();
+    let backfill = mara(fixture.path(), &["project", "mid", "backfill"]);
+    assert!(backfill.status.success(), "{}", stderr(&backfill));
+    let expected = [
+        "REQ-PROJECT-VALIDATION",
+        "REQ-TITLE",
+        "REQ-BOTH", // Exact group, weight 6.
+        "REQ-MIXED",
+        "REQ-REPEATED", // Exact group, weight 4; repetition adds nothing.
+        "REQ-BODY",     // Exact body beats even approximate ID/title words.
+        "REQ-PROJCET-VALIDATON",
+        "REQ-APPROX-BODY", // Approximate group, weights 6 and 2.
+    ];
+    for (query, excerpts) in [
+        ("project validation", false),
+        ("VALIDATION project project", true),
+    ] {
+        let mut cursor: Option<String> = None;
+        let mut ids = Vec::new();
+        loop {
+            let mut args = vec![
+                "--format",
+                "json",
+                "item",
+                "search",
+                query,
+                "--path",
+                "docs/ranking.mara.md",
+                "--flavour",
+                "requirement",
+                "--field",
+                "status=draft",
+                "--relation",
+                "derives_from",
+                "--limit",
+                "2",
+            ];
+            let mut params = json!({"query":query, "paths":["docs/ranking.mara.md"],
+                "flavours":["requirement"], "fields":[{"key":"status","value":"draft"}],
+                "relations":["derives_from"], "limit":2, "excerpts":excerpts});
+            if excerpts {
+                args.push("--excerpts");
+                // Reversed selected handles must not control ranking.
+                for (id, _, _) in entries.iter().rev() {
+                    args.extend(["--id", id]);
+                }
+                params["ids"] = json!(
+                    entries
+                        .iter()
+                        .rev()
+                        .map(|entry| entry.0)
+                        .collect::<Vec<_>>()
+                );
+            }
+            if let Some(cursor) = &cursor {
+                args.extend(["--cursor", cursor]);
+                params["cursor"] = json!(cursor);
+            }
+            let output = mara(fixture.path(), &args);
+            assert!(output.status.success(), "{}", stderr(&output));
+            let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let repeated = mara(fixture.path(), &args);
+            assert!(repeated.status.success(), "{}", stderr(&repeated));
+            assert_eq!(output.stdout, repeated.stdout);
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(2, "item_search", params),
+                ],
+            );
+            assert_eq!(
+                mcp_response(&responses, 2)["result"]["structuredContent"],
+                page
+            );
+            let items = page["items"].as_array().unwrap();
+            assert_eq!(items.len(), 2);
+            for item in items {
+                assert!(item.get("score").is_none());
+                ids.push(item["id"].as_str().unwrap().to_owned());
+            }
+            assert_eq!(ids, expected[..ids.len()]);
+            cursor = page["next_cursor"].as_str().map(ToOwned::to_owned);
+            assert_eq!(page["has_more"], cursor.is_some());
+            if cursor.is_none() {
+                break;
+            }
+            assert!(ids.len() < expected.len(), "continuation must finish");
+        }
+        assert_eq!(ids, expected);
+    }
+    // Empty queries and item list retain source order, including the filtered-out item.
+    for operation in ["list", "search"] {
+        let mut args = vec!["--format", "json", "item", operation];
+        if operation == "search" {
+            args.push("...");
+        }
+        args.extend(["--path", "docs/ranking.mara.md"]);
+        let output = mara(fixture.path(), &args);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let actual = page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        let mut corpus_order = entries.iter().map(|entry| entry.0).collect::<Vec<_>>();
+        corpus_order.push("REQ-EXCLUDED");
+        assert_eq!(actual, corpus_order);
+    }
+}
+
+#[test]
+fn search_identity_fields_and_their_excerpts_match_exactly() {
+    let fixture = retrieval_fixture();
+    let path = fixture.path().join("docs/identity.mara.md");
+    fs::write(
+        &path,
+        ":::mara requirement REQ-IDENTITY\n:title: Catalog\n\nDetails.\n:::\n",
+    )
+    .unwrap();
+    let backfill = mara(fixture.path(), &["project", "mid", "backfill"]);
+    assert!(backfill.status.success(), "{}", stderr(&backfill));
+    let original = fs::read_to_string(&path).unwrap();
+    let mid = original
+        .lines()
+        .find_map(|line| line.strip_prefix(":mid: "))
+        .unwrap();
+    let lower_mid = mid.to_lowercase();
+    let mut mistyped_mid = mid.to_owned();
+    mistyped_mid.replace_range(25.., if mid.ends_with('0') { "1" } else { "0" });
+
+    for with_title_match in [false, true] {
+        let source = if with_title_match {
+            original.replace(
+                ":title: Catalog",
+                &format!(":title: Identity {mistyped_mid}"),
+            )
+        } else {
+            original.clone()
+        };
+        fs::write(&path, &source).unwrap();
+        for (query, exact) in [
+            ("identity", true),
+            ("identtiy", false),
+            (lower_mid.as_str(), true),
+            (mistyped_mid.as_str(), false),
+        ] {
+            let output = mara(
+                fixture.path(),
+                &[
+                    "--format",
+                    "json",
+                    "item",
+                    "search",
+                    query,
+                    "--path",
+                    "docs/identity.mara.md",
+                    "--excerpts",
+                ],
+            );
+            assert!(output.status.success(), "{}", stderr(&output));
+            let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(
+                page["items"].as_array().unwrap().len(),
+                usize::from(exact || with_title_match),
+                "{query}, title={with_title_match}"
+            );
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(
+                        2,
+                        "item_search",
+                        json!({"query":query, "paths":["docs/identity.mara.md"], "excerpts":true}),
+                    ),
+                ],
+            );
+            assert_eq!(
+                mcp_response(&responses, 2)["result"]["structuredContent"],
+                page
+            );
+            if with_title_match && !exact {
+                let excerpts = page["items"][0]["excerpts"].as_array().unwrap();
+                assert!(!excerpts.is_empty());
+                for excerpt in excerpts {
+                    let start = excerpt["start_byte"].as_u64().unwrap() as usize;
+                    let end = excerpt["end_byte"].as_u64().unwrap() as usize;
+                    assert_eq!(excerpt["text"], source[start..end]);
+                    assert!(
+                        start >= source.find(":title:").unwrap(),
+                        "identity fields must not produce approximate excerpts"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn typo_tolerant_search_uses_normalized_word_lengths_and_bounded_edits() {
     let fixture = retrieval_fixture();
     let path = fixture.path().join("docs/word.mara.md");
@@ -4072,8 +4300,7 @@ fn typo_tolerant_search_preserves_exact_matches_filters_excerpts_and_pages() {
     assert!(backfill.status.success(), "{}", stderr(&backfill));
     let source = fs::read_to_string(&path).unwrap();
 
-    // Exact results must remain present even when approximate matches exist.
-    // Ranking is separate; this change preserves corpus order across pages.
+    // Exact results lead when present; otherwise equal field weights retain corpus order.
     for query in ["project validation", "projcet validation projcet"] {
         let mut cursor: Option<String> = None;
         let mut ids = Vec::new();
@@ -4140,7 +4367,11 @@ fn typo_tolerant_search_preserves_exact_matches_filters_excerpts_and_pages() {
             }
             assert!(ids.len() < 2, "continuation must finish");
         }
-        assert_eq!(ids, ["REQ-APPROXIMATE", "REQ-EXACT"]);
+        if query == "project validation" {
+            assert_eq!(ids, ["REQ-EXACT", "REQ-APPROXIMATE"]);
+        } else {
+            assert_eq!(ids, ["REQ-APPROXIMATE", "REQ-EXACT"]);
+        }
     }
 
     // Filter values and selected handles must never use typo tolerance.

@@ -39,7 +39,12 @@ pub(super) fn filtered_page(
 ) -> Result<ItemCollectionResult, QueryError> {
     let limit = page_limit(filters.limit)?;
     let request = (
-        "items",
+        // Invalidate pre-ranking search cursors even before the release version changes.
+        if query.is_some() {
+            "search-ranked-v1"
+        } else {
+            "items"
+        },
         &filters.flavours,
         &filters.fields,
         &filters.relations,
@@ -251,21 +256,25 @@ fn excerpts(source: &str, item: &Item, terms: &BTreeSet<String>) -> Vec<SearchEx
         .expect("item opener")
         .rfind(item.id())
         .expect("item ID in opener");
-    values.push((opener_start + id_offset, item.id()));
+    values.push((opener_start + id_offset, item.id(), false));
     for entry in item.metadata() {
         let start = entry.source().span().start_byte();
         let line = &source[start..entry.source().span().end_byte()];
-        values.push((start + 1, entry.key()));
+        values.push((start + 1, entry.key(), true));
         let prefix = entry.key().len() + 2;
         let after_key = &line[prefix..];
         let whitespace = after_key.len() - after_key.trim_start().len();
-        values.push((start + prefix + whitespace, entry.value()));
+        values.push((
+            start + prefix + whitespace,
+            entry.value(),
+            entry.key() != "mid",
+        ));
     }
-    values.push((item.body_source().span().start_byte(), item.body()));
+    values.push((item.body_source().span().start_byte(), item.body(), true));
     let mut fragments = Vec::new();
-    for (base, value) in values {
+    for (base, value, fuzzy) in values {
         let mut covered_until = 0;
-        for (start, _) in matching_spans(value, terms) {
+        for (start, _) in matching_spans(value, terms, fuzzy) {
             if start < covered_until {
                 continue;
             }
@@ -306,7 +315,7 @@ fn line_at(source: &str, byte: usize) -> usize {
         + 1
 }
 
-fn matching_spans(value: &str, terms: &BTreeSet<String>) -> Vec<(usize, usize)> {
+fn matching_spans(value: &str, terms: &BTreeSet<String>, fuzzy: bool) -> Vec<(usize, usize)> {
     // Normalize whole grapheme clusters so composition and case-fold expansion
     // retain a mapping to their original source bytes (e.g. cafe + accent, ß).
     let mut canonical = String::new();
@@ -323,7 +332,9 @@ fn matching_spans(value: &str, terms: &BTreeSet<String>) -> Vec<(usize, usize)> 
     }
     canonical
         .unicode_word_indices()
-        .filter(|(_, word)| terms.iter().any(|term| word_matches(term, word)))
+        .filter(|(_, word)| {
+            terms.contains(*word) || (fuzzy && terms.iter().any(|term| word_matches(term, word)))
+        })
         .map(|(start, word)| {
             let first = mapping.partition_point(|entry| entry.1 <= start);
             let last = mapping.partition_point(|entry| entry.0 < start + word.len()) - 1;
