@@ -1,6 +1,24 @@
 # Changelog
 
 All notable changes to Mara are generated from Conventional Commit history.
+## [0.1.0-alpha.2]
+
+### Added
+
+- Add durable item identities
+- Move items between documents
+- Update items structurally
+- Delete unreferenced items safely
+- Rename item IDs across the corpus
+
+### Continuous integration
+
+- Remove optional plugin release automation
+
+### Fixed
+
+- Make plugin release validation deterministic
+- Make Codex compatibility dispatchable
 ## [0.1.0-alpha.1]
 
 ### Added
