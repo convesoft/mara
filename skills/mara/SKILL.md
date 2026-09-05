@@ -24,20 +24,67 @@ the MCP server was started with that root bound by `--project`. Use the default
 `minimal` template unless the user explicitly requests `empty`. Do not create
 or modify `AGENTS.md` as part of Mara onboarding.
 
-## Work with the corpus
+## Choose the operation
 
-1. Call `schema_get` before authoring unfamiliar flavours, fields, or relations.
-2. Use `item_search`, `item_list`, and `item_related` for bounded discovery;
-   call `item_get` only for selected full items.
-3. Use `item_create`, `item_update`, `item_move`, `item_rename`, `item_delete`,
-   `relation_add`, and `relation_remove` only when the user has asked to change
-   project knowledge.
-4. Run the narrowest relevant validation after a mutation and use
-   `project_validate` when the requested work affects corpus-wide integrity.
+| Intent | MCP operation |
+|---|---|
+| Discover vocabulary and field/edge constraints | `schema_list`, then `schema_get` for selected declarations; omit kind/name to get the full schema |
+| Find items by text or enumerate exact filters | `item_search` or `item_list` |
+| Read selected items, metadata, and direct relations | `item_get` |
+| Inspect direct neighbours, optionally by direction/relation | `item_related`, then `item_get` for selected neighbour bodies |
+| Create an item, optionally with initial edges | `item_create` |
+| Change title, custom fields, or body | `item_update` |
+| Relocate an item to a file/line | `item_move`; preserves ID and MID |
+| Change a human ID and supported internal references | `item_rename`; preserves MID |
+| Add or remove an existing item's typed edge | `relation_add` or `relation_remove` |
+| Delete an unreferenced item | `item_delete`; resolve reported relation/mention blockers explicitly |
+| Check an item or whole-project integrity | `item_validate` or `project_validate` |
 
-To create an item with initial outgoing relations, inspect the schema and target
-items, then pass `relations` separately from custom `fields` in one `item_create`
-call. For example, after resolving `REQ-EXAMPLE` in `/absolute/project`:
+Use mutations only when the user has asked to change project knowledge. Choose
+the structured mutation for the semantic change. An invalid-argument error calls
+for correcting the input or selecting the right operation; it is not a reason
+to bypass validation by editing source lines. Mara source files remain canonical;
+MCP results are not a separate authoring store.
+
+## Retrieve enough context
+
+For example, search with `{"query":"recovery","limit":5}`, select an ID from
+the results, and pass it to `item_get` and `item_related` as `id`. Use the project
+context selected above. Use `excerpts:true` on search when matching passages
+help selection; excerpts may skip content and do not replace an item read.
+
+Search, list, related, and get return `has_more` and `next_cursor`. When requested
+content is incomplete, repeat the same operation with that opaque `cursor`,
+keeping project, handle/query, filters, limit, and excerpt options unchanged.
+Continue until the needed content is retrieved; full enumeration/read requires
+`has_more:false`. Get can split body, metadata values, and relations across pages:
+use their byte/index ranges to reconstruct content, including complete titles.
+Restart without a cursor after source/schema changes. Related follows only direct
+edges; choose further neighbours explicitly.
+
+## Keep metadata inputs distinct
+
+Call `schema_get` before authoring unfamiliar flavours, fields, or relations.
+The shared `:key: value` source syntax does not make these interchangeable:
+
+- **Structural metadata:** pass title through `title`. Mara generates the
+  immutable MID; never supply, copy, or edit it. Creation `id` is a new human ID.
+- **Custom fields:** use `fields:[{"key":"...","value":"..."}]` only for
+  fields declared on that flavour. Supply required fields; repeat keys only
+  when allowed. Update replaces all values of each supplied key; use
+  `clear_fields` to remove optional keys. Omitted update values stay unchanged.
+- **Typed relations:** `justifies` and `satisfies` are relations, not custom
+  fields. `fields:[{"key":"justifies","value":"REQ-EXAMPLE"}]` is invalid.
+  Use creation `relations` or explicit relation operations; inspect allowed
+  source/target flavours first. Incoming backlinks are derived, never authored.
+
+## Author and verify
+
+1. Inspect the schema and resolve existing targets with `item_get`. In this
+   example, the schema permits `decision` → `justifies` → `requirement`, and
+   `REQ-EXAMPLE` already exists. Replace `/absolute/project` with the selected root,
+   or omit `project` when the server is bound to it.
+2. Call `item_create` with a meaningful body and any required custom fields:
 
 ```json
 {
@@ -45,24 +92,40 @@ call. For example, after resolving `REQ-EXAMPLE` in `/absolute/project`:
   "flavour": "decision",
   "id": "ADR-EXAMPLE",
   "file": "decisions.mara.md",
-  "title": "Keep initial authoring atomic",
-  "body": "Publish the item and its edges together so a failed edge leaves no partial item.",
-  "relations": [{"relation": "justifies", "target": "REQ-EXAMPLE"}]
+  "title": "Keep edits recoverable",
+  "body": "Preserve the previous content until validation succeeds so rejected edits can be retried."
 }
 ```
 
-Creation accepts exact human-ID or MID targets and rejects the whole request if
-an edge is invalid. `justifies` is a typed relation, not a custom field;
-title and MID are structural metadata. Inspect the result with `item_get` and
-`item_related`, then validate. Use `relation_add` and `relation_remove` for
-subsequent edge changes.
+3. Check `complete` and `missing`; a blank required body creates an incomplete
+   scaffold. Fill it with `item_update` before claiming completion.
+4. Call `relation_add` to add the edge:
 
-Mara source files remain canonical. Do not treat MCP results as a separate
-authoring store. Use `item_update` for partial title, custom-field, or body edits;
-use `item_move` to relocate an item while preserving identity. Update warnings
-about existing scaffold bodies still count as errors in explicit validation.
-Use `item_delete` to remove an item only when no surviving typed relations or
-supported wiki mentions refer to it; resolve reported blockers explicitly.
-Use `item_rename` to change a human ID and supported internal references while
-preserving the MID. Pending transactions block mutations; use
-`project_transaction_rollback` for explicit recovery after stopping other writers.
+```json
+{
+  "project": "/absolute/project",
+  "source": "ADR-EXAMPLE",
+  "relation": "justifies",
+  "target": "REQ-EXAMPLE"
+}
+```
+
+When initial edges are already known, prefer adding
+`"relations":[{"relation":"justifies","target":"REQ-EXAMPLE"}]` to step 2
+instead of step 4. Creation validates and publishes the item and initial edges
+atomically, rejecting the whole request if an edge is invalid. Targets accept
+exact human IDs or MIDs. Do not add the same edge again; use `relation_add` and
+`relation_remove` for later changes (both take `source`, `relation`, `target`).
+
+5. Call `item_get` with `id:"ADR-EXAMPLE"`; inspect generated MID, title, body,
+   custom metadata, and outgoing relations. Call `item_related` with
+   `id:"ADR-EXAMPLE",direction:"outgoing"`, then with
+   `id:"REQ-EXAMPLE",direction:"incoming"` to verify both views of the edge.
+6. Call `item_validate` with `id:"ADR-EXAMPLE"`; use `project_validate` for
+   corpus-wide integrity after relation or reference changes. Use the same project
+   context. Require `valid:true`, not just successful transport. Project
+   validation `paths` filters reported diagnostics, not whole-project validity.
+
+Update warnings about existing scaffold bodies still count as errors in explicit
+validation. Pending transactions block mutations; use `project_transaction_rollback`
+for explicit recovery after stopping other writers.
