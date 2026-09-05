@@ -41,6 +41,8 @@ and how narrative should be searchable is an open alpha.3 investigation, not
 an accepted implementation requirement. Evaluate its fit with Mara's purpose,
 item identity, source locations, and bounded retrieval without assuming that
 all useful narrative must become an item.
+Findings and the recommendation awaiting review are recorded in
+[Narrative retrieval investigation](#narrative-retrieval-investigation).
 :::
 
 :::mara requirement REQ-RETRIEVAL-BOUNDS
@@ -459,3 +461,90 @@ From the project root, `mara item search "cache" --path packages/query/docs/`
 selects package-local documentation. The equivalent MCP call is `item_search`
 with `{"query":"cache","paths":["packages/query/docs/"]}` and the same project.
 :::
+
+## Narrative retrieval investigation
+
+Recommendation awaiting review; this section does not accept a new retrieval
+surface or change the alpha.3 implementation scope in `DES-RETRIEVAL-SCOPE`.
+
+### Corpus evidence
+
+The repository at `af0ef79` contains useful context outside items:
+
+| Source | Knowledge and appropriate boundary |
+|---|---|
+| [Documentation index](index.mara.md) | Reading order and document links; the entire file is narrative. Navigation needs a source location, not an item identity for every link. |
+| [Taxonomy introduction and table](taxonomy.mara.md) | Explains the project profile and provides a compact vocabulary overview. Keep the overview as narrative; the existing `TERM-FLAVOUR-*` items own independently referable flavour definitions. |
+| [First-alpha introduction](alpha.mara.md) | Frames the milestone. `GOAL-UNIFIED-PROJECT-KNOWLEDGE` owns the durable product outcome; repeating that goal as another item would add no independent meaning. |
+| [Distribution introduction](distribution.mara.md) | Locates the contract and its public summary. Keep this navigation with the document; verifiable distribution obligations already have their own items. |
+
+Concrete contrast, using the CLI built from that revision against this corpus:
+
+```sh
+rg -n -F 'canonical project documentation' docs/index.mara.md
+cargo run --locked --quiet -- --format json item search 'canonical project documentation'
+cargo run --locked --quiet -- --format json item list --path docs/index.mara.md
+```
+
+The file search finds line 3; both item operations return an empty `items` array
+with `has_more: false`. Searching `canonical source` instead returns
+`REQ-CANONICAL-SOURCE`, `DES-DOCUMENT-FORMAT`, and `DES-RETRIEVAL-SCOPE`.
+Item search therefore cannot establish that a concept is absent from canonical
+documents. A path filter narrows items; it does not make narrative searchable.
+
+The implementation retains complete document source in `Document` but projects
+search candidates and excerpts from items (`src/corpus.rs`, `src/query.rs`, and
+`src/query/page.rs`). Narrative is retained, not lost during loading. The format
+also excludes narrative from supported item mentions and typed relations.
+
+An independently accepted obligation, definition, or consequential decision
+deserves an item when it needs its own identity, relation, change, or
+verification. Context, reading order, and supporting explanation can remain
+narrative. Keep rationale and examples with an owning item when they explain
+that item's meaning; do not promote paragraphs merely to make search find them.
+
+### Retrieval alternatives
+
+| Concern | Retain file access | Search narrative alongside items | Separate document/passage surface |
+|---|---|---|---|
+| Discovery | File search and document links find narrative, including documents with no items; requires filesystem access. | One discovery call could find both kinds, but changes the item-search result contract or requires a new mixed operation. | Explicit discovery can find narrative-only documents without changing item search; callers must choose another surface. |
+| Result identity | Path and location identify current source, not a durable entity. | Results need an explicit item/passage distinction. Assigning synthetic item IDs or MIDs would misrepresent narrative. | Paths and source ranges can locate passages without granting item identity; moves and edits invalidate those locations. |
+| Source locations | Tools supply paths and lines; callers inspect the file. | Preserve item locations and add exact passage spans; a neighbouring item cannot stand in for the passage. | Return project-relative paths, UTF-8 byte spans, and line ranges; headings may aid navigation but are not unique identities. |
+| Filters | File paths narrow reads; item flavour, field, and relation filters do not apply to narrative. | Must decide whether item filters exclude passages or are rejected; silently inheriting a nearby item's metadata is misleading. | Project/document path selection fits; item filters have no meaning for untyped passages. |
+| Relations | Existing item graph remains unchanged. | Narrative cannot inherit relations from its document or adjacent items. | Passages remain outside the item graph unless a separate relation contract is accepted. |
+| Bounded reads | Callers bound file search/read output; Mara provides no narrative continuation or completeness guarantee. | Shared pages need bounds and ranking across result kinds plus a way to read beyond excerpts. | Needs bounded discovery and consecutive source reads, explicit completeness, and restart after source changes. |
+
+Searching an entire document as one candidate can join unrelated terms across
+sections. Searching only the gaps between items avoids duplicate item hits but
+can detach headings, lists, or explanations from their context. Paragraph
+splitting alone does not solve Markdown tables, code examples, or long sections.
+These are result-unit and reading-contract choices, not only matcher changes.
+
+### Recommended boundary and remaining decisions
+
+Retain file-based narrative access for alpha.3 and preserve item-only search,
+filters, identities, and relations. This serves the demonstrated local authoring
+workflow without requiring additional itemization. The limitation is explicit:
+a client with only Mara MCP cannot discover or read all canonical narrative.
+The current corpus demonstrates useful missing context, but does not establish
+that alpha.3 needs a new public retrieval surface to complete its primary flow.
+
+If a workflow without filesystem access is accepted, prefer a separate
+document/passage surface over extending `item search`. It would expose source
+content without claiming that every passage is a typed, durable knowledge unit.
+This is a direction for review, not an accepted implementation task.
+
+Review must settle whether file access is sufficient for alpha.3. Any separately
+accepted implementation needs a concrete scenario and contracts deciding:
+
+- Whole-document versus narrative-only discovery, passage boundaries, and how
+  to retain surrounding context without duplicating item results.
+- Matching/ranking, path scope, exact source locations, and location validity
+  after edits or moves, without assigning synthetic item identity.
+- Consecutive read and continuation bounds, source-change rejection, and CLI/MCP
+  parity, including a narrative-only document and oversized Markdown content.
+
+No narrative-retrieval implementation is accepted by this investigation. After
+review, record the settled boundary in `DES-RETRIEVAL-SCOPE`, add a decision item
+for its rationale, and reconcile the roadmap. Keep any accepted implementation
+separate from this documentation task.
