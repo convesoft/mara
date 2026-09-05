@@ -7,8 +7,10 @@ use std::{
 
 use tempfile::NamedTempFile;
 
+mod delete;
 mod transaction;
 mod update;
+pub use delete::{ItemDeletion, delete_item};
 use transaction::MutationLock;
 pub use transaction::{TransactionRollback, rollback_transaction};
 pub use update::{ItemUpdate, update_item};

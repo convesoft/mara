@@ -60,7 +60,10 @@ Failures preserve user data and produce actionable diagnostics.
 
 ## References and relations
 
-- `[[REQ-FAIL-SAFETY]]` is a readable internal mention resolved by exact ID.
+- `[[REQ-FAIL-SAFETY]]` and `[[<MID>]]` are internal mentions resolved by
+  exact human ID or canonical MID. Supported mentions occur in item bodies,
+  outside Markdown code and raw contexts; escaped openings are literal text.
+  Narrative outside items and metadata scalar values are not mention sources.
 - Typed relations are metadata entries whose key names the relation and whose
   value is one target handle. Repeat the key for multiple targets.
 - Use only relation names whose meaning is defined by the project corpus.

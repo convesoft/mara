@@ -487,7 +487,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
 pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let ids = item_index(corpus);
-    let mids = mid_index(corpus);
+    let mid_targets = mid_index(corpus);
 
     for duplicates in ids.values().filter(|items| items.len() > 1) {
         for item in duplicates {
@@ -499,7 +499,7 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
         }
     }
 
-    for (mid, duplicates) in mids.iter().filter(|(_, items)| items.len() > 1) {
+    for (mid, duplicates) in mid_targets.iter().filter(|(_, items)| items.len() > 1) {
         for item in duplicates {
             if let Some(entry) = mid_entries(item)
                 .into_iter()
@@ -577,14 +577,14 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
             }
         }
         for mention in item.mentions() {
-            match ids.get(mention.target()).map(Vec::len) {
-                None if corpus.is_complete() => diagnostic(
+            match resolve_indexed_item(&ids, &mid_targets, mention.target()) {
+                IndexedItem::Missing if corpus.is_complete() => diagnostic(
                     &mut diagnostics,
                     mention.source(),
                     format!("mention references missing item '{}'", mention.target()),
                 ),
-                None | Some(1) => {}
-                Some(_) => diagnostic(
+                IndexedItem::Missing | IndexedItem::One(_) => {}
+                IndexedItem::Ambiguous => diagnostic(
                     &mut diagnostics,
                     mention.source(),
                     format!("mention references ambiguous item '{}'", mention.target()),

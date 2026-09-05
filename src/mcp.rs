@@ -112,6 +112,14 @@ struct ItemUpdateToolParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct ItemDeleteToolParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    reference: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct ItemMoveToolParams {
     #[serde(default)]
     project: Option<PathBuf>,
@@ -358,6 +366,19 @@ impl MaraMcp {
                 clear_fields: params.clear_fields,
                 body: params.body,
             })
+            .map(Json)
+    }
+
+    #[tool(
+        name = "item_delete",
+        description = "Delete one item by exact MID or human ID after validating the project. Refuses surviving incoming relations or supported wiki mentions and reports every blocking source location. Keeps the containing document."
+    )]
+    fn item_delete(
+        &self,
+        Parameters(params): Parameters<ItemDeleteToolParams>,
+    ) -> Result<Json<mara::ItemDeletion>, String> {
+        self.for_project(params.project)?
+            .item_delete(&params.reference)
             .map(Json)
     }
 

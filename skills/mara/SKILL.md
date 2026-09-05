@@ -29,7 +29,7 @@ or modify `AGENTS.md` as part of Mara onboarding.
 1. Call `schema_get` before authoring unfamiliar flavours, fields, or relations.
 2. Use `item_search`, `item_list`, and `item_related` for bounded discovery;
    call `item_get` only for selected full items.
-3. Use `item_create`, `item_update`, `item_move`, `relation_add`, and
+3. Use `item_create`, `item_update`, `item_move`, `item_delete`, `relation_add`, and
    `relation_remove` only when the user has asked to change project knowledge.
 4. Run the narrowest relevant validation after a mutation and use
    `project_validate` when the requested work affects corpus-wide integrity.
@@ -38,5 +38,6 @@ Mara source files remain canonical. Do not treat MCP results as a separate
 authoring store. Use `item_update` for partial title, custom-field, or body edits;
 use `item_move` to relocate an item while preserving identity. Update warnings
 about existing scaffold bodies still count as errors in explicit validation.
-Rename and delete operations are not available yet; edit the source directly
-and validate when those operations are needed.
+Use `item_delete` to remove an item only when no surviving typed relations or
+supported wiki mentions refer to it; resolve reported blockers explicitly.
+Rename is not available yet; edit the source directly and validate when needed.

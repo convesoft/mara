@@ -217,10 +217,10 @@ derived.
 checks the complete corpus. Validation covers project and schema configuration,
 item syntax, known flavours, ID prefixes and uniqueness, MID presence, MID
 format, MID uniqueness, required fields and bodies, metadata, relation
-declarations and targets, and `[[ID]]` mentions. Broken relations and mentions
-are errors. Mara reports every independently discoverable diagnostic with an
-actionable source location and skips only checks whose prerequisites are
-invalid.
+declarations and targets, and supported wiki mentions by human ID or MID.
+Broken relations and mentions are errors. Mara reports every independently
+discoverable diagnostic with an actionable source location and skips only checks
+whose prerequisites are invalid.
 :::
 
 :::mara requirement REQ-ITEM-GET
@@ -382,7 +382,7 @@ for schema-repeatable metadata.
 |---|---|
 | `project` | `init`, `validate`, `mid backfill`, `transaction rollback` |
 | `schema` | `get`, `list`, `validate` |
-| `item` | `create`, `update`, `move`, `get`, `list`, `search`, `related`, `validate` |
+| `item` | `create`, `update`, `move`, `delete`, `get`, `list`, `search`, `related`, `validate` |
 | `relation` | `add`, `remove` |
 
 `schema get` and `schema list` accept only the declared positional kinds
@@ -392,6 +392,8 @@ joining the object and operation with `_`, from `project_validate` through
 tools add an optional absolute `project` path to the shared operation input.
 
 Structured updates follow [[DES-ITEM-UPDATE]].
+
+Safe deletion follows [[DES-ITEM-DELETION]].
 
 Item movement and explicit transaction rollback follow [[DES-ITEM-MOVEMENT]].
 MCP `item_move` accepts `reference`, `file`, and optional `line`.
@@ -477,7 +479,7 @@ project knowledge.
 
 ## Explicitly deferred
 
-Renaming, deletion, schema mutation commands, persisted indexes or graph stores,
+Renaming, schema mutation commands, persisted indexes or graph stores,
 fuzzy or semantic search, LSP integration, a complete Markdown AST, and a
 graphical interface remain deferred. Manual source editing followed by validation
 remains supported alongside structured updates and movement.
