@@ -234,7 +234,10 @@ struct ItemFilterArgs {
     #[arg(long)]
     relation: Vec<String>,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "Select an exact document or directory subtree (project-relative, repeatable), e.g. packages/query/docs/"
+    )]
     path: Vec<PathBuf>,
 
     #[arg(long, help = "Page size: 1 through 100 (default 20)")]

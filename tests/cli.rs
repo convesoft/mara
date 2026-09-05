@@ -534,6 +534,238 @@ fn related_pages_fail_on_an_oversized_entry_without_skipping_it() {
 }
 
 #[test]
+fn directory_path_filters_preserve_boundaries_and_exact_files() {
+    let fixture = directory_retrieval_fixture();
+    let selected = ["REQ-PACK-A", "REQ-PACK-E", "REQ-PACK-B", "REQ-PACK-C"];
+    for (paths, expected) in [
+        (vec!["packages/query/docs"], selected.to_vec()),
+        (vec!["./packages//query/./docs/"], selected.to_vec()),
+        (
+            vec!["packages/query/docs", "packages/query/docs/nested/"],
+            selected.to_vec(),
+        ),
+        (
+            vec!["packages/query/docs/a.mara.md"],
+            vec!["REQ-PACK-A", "REQ-PACK-E"],
+        ),
+        (vec!["packages/query/docs/a.mara"], vec![]),
+        (vec!["packages/missing"], vec![]),
+        (
+            vec!["packages/dicom-viewer", "packages/query/docs/nested"],
+            vec!["REQ-VIEWER", "REQ-PACK-B", "REQ-PACK-C"],
+        ),
+    ] {
+        for operation in ["list", "search"] {
+            let mut args = vec!["--format", "json", "item", operation];
+            let mut params = json!({"paths": paths});
+            if operation == "search" {
+                args.push("");
+                params["query"] = json!("");
+            }
+            for path in &paths {
+                args.extend(["--path", path]);
+            }
+            // Resolve the one root configuration even when invoked inside a package.
+            let package = fixture.path().join("packages/query");
+            let output = mara(&package, &args);
+            assert!(output.status.success(), "{}", stderr(&output));
+            let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let ids: Vec<_> = page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["id"].as_str().unwrap())
+                .collect();
+            assert_eq!(ids, expected, "{operation} {paths:?}");
+            assert_eq!(page["has_more"], false);
+            let responses = mcp_exchange(
+                &package,
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(2, &format!("item_{operation}"), params),
+                ],
+            );
+            assert_eq!(
+                mcp_response(&responses, 2)["result"]["structuredContent"],
+                page
+            );
+        }
+    }
+
+    for path in [
+        "",
+        ".",
+        "./",
+        "packages/query/../dicom-viewer",
+        "/packages/query",
+    ] {
+        for operation in ["list", "search"] {
+            let mut args = vec!["item", operation];
+            let mut params = json!({"paths":[path]});
+            if operation == "search" {
+                args.push("cache");
+                params["query"] = json!("cache");
+            }
+            args.extend(["--path", path]);
+            let output = mara(fixture.path(), &args);
+            assert!(!output.status.success(), "{path}");
+            let expected_error = if path.is_empty() {
+                "a value is required for '--path <PATH>'"
+            } else {
+                "path filter must be a project-relative path"
+            };
+            assert!(
+                stderr(&output).contains(expected_error),
+                "{}",
+                stderr(&output)
+            );
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(2, &format!("item_{operation}"), params),
+                ],
+            );
+            assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
+        }
+    }
+}
+
+#[test]
+fn directory_path_filters_compose_with_ranking_and_cli_mcp_pagination() {
+    let fixture = directory_retrieval_fixture();
+    for operation in ["list", "search"] {
+        let mut cursor: Option<String> = None;
+        let mut ids = Vec::new();
+        loop {
+            assert!(ids.len() < 4, "continuation must make progress");
+            let mut args = vec!["--format", "json", "item", operation];
+            let mut params = json!({
+                "paths":["packages/query/docs/", "packages/query/docs/nested"],
+                "flavours":["requirement"], "fields":[{"key":"status", "value":"draft"}],
+                "relations":["derives_from"], "limit":1,
+            });
+            if operation == "search" {
+                args.extend([
+                    "cache",
+                    "--excerpts",
+                    "--id",
+                    "REQ-PACK-A",
+                    "--id",
+                    "REQ-PACK-B",
+                    "--id",
+                    "REQ-PACK-C",
+                    "--id",
+                    "REQ-VIEWER",
+                ]);
+                params["query"] = json!("cache");
+                params["excerpts"] = json!(true);
+                params["ids"] = json!(["REQ-PACK-A", "REQ-PACK-B", "REQ-PACK-C", "REQ-VIEWER"]);
+            }
+            args.extend([
+                "--path",
+                "packages/query/docs/",
+                "--path",
+                "packages/query/docs/nested",
+                "--flavour",
+                "requirement",
+                "--field",
+                "status=draft",
+                "--relation",
+                "derives_from",
+                "--limit",
+                "1",
+            ]);
+            if let Some(cursor) = &cursor {
+                args.extend(["--cursor", cursor]);
+                params["cursor"] = json!(cursor);
+            }
+            let output = mara(fixture.path(), &args);
+            assert!(output.status.success(), "{}", stderr(&output));
+            let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(2, &format!("item_{operation}"), params.clone()),
+                ],
+            );
+            assert_eq!(
+                mcp_response(&responses, 2)["result"]["structuredContent"],
+                page
+            );
+            assert!(serde_json::to_vec(&page).unwrap().len() <= 65_536);
+            let items = page["items"].as_array().unwrap();
+            assert_eq!(items.len(), 1);
+            ids.push(items[0]["id"].as_str().unwrap().to_owned());
+            if operation == "search" {
+                assert!(!items[0]["excerpts"].as_array().unwrap().is_empty());
+            }
+            assert_eq!(page["has_more"], !page["next_cursor"].is_null());
+            cursor = page["next_cursor"].as_str().map(ToOwned::to_owned);
+            if let Some(cursor) = &cursor {
+                // A different directory must not reuse this request's continuation.
+                params["paths"] = json!(["packages/dicom-viewer"]);
+                params["cursor"] = json!(cursor);
+                let responses = mcp_exchange(
+                    fixture.path(),
+                    &[
+                        mcp_initialize(1),
+                        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                        mcp_call(2, &format!("item_{operation}"), params),
+                    ],
+                );
+                assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
+            } else {
+                break;
+            }
+        }
+        let expected = if operation == "search" {
+            ["REQ-PACK-B", "REQ-PACK-A", "REQ-PACK-C"]
+        } else {
+            ["REQ-PACK-A", "REQ-PACK-B", "REQ-PACK-C"]
+        };
+        assert_eq!(ids, expected);
+    }
+}
+
+fn directory_retrieval_fixture() -> TempDir {
+    let fixture = retrieval_fixture();
+    for (path, source) in [
+        (
+            "packages/query/docs/a.mara.md",
+            ":::mara requirement REQ-PACK-A\n:title: Storage\n:status: draft\n:derives_from: SCN-BASE\n\nCache entries.\n:::\n\n:::mara requirement REQ-PACK-E\n:title: Cache\n:status: accepted\n:derives_from: SCN-BASE\n\nCache accepted.\n:::\n",
+        ),
+        (
+            "packages/query/docs/nested/b.mara.md",
+            ":::mara requirement REQ-PACK-B\n:title: Cache\n:status: draft\n:derives_from: SCN-BASE\n\nNested entry.\n:::\n\n:::mara requirement REQ-PACK-C\n:title: Cahce\n:status: draft\n:derives_from: SCN-BASE\n\nTypo entry.\n:::\n",
+        ),
+        (
+            "packages/query/docs-extra/a.mara.md",
+            ":::mara requirement REQ-DOCS-SIBLING\n:title: Cache\n\nSibling directory.\n:::\n",
+        ),
+        (
+            "packages/query-extra/docs/a.mara.md",
+            ":::mara requirement REQ-PACK-SIBLING\n:title: Cache\n\nSibling package.\n:::\n",
+        ),
+        (
+            "packages/dicom-viewer/docs/a.mara.md",
+            ":::mara requirement REQ-VIEWER\n:title: Cache\n:status: draft\n:derives_from: SCN-BASE\n\nOther package.\n:::\n",
+        ),
+    ] {
+        let path = fixture.path().join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, source).unwrap();
+    }
+    let backfill = mara(fixture.path(), &["project", "mid", "backfill"]);
+    assert!(backfill.status.success(), "{}", stderr(&backfill));
+    fixture
+}
+
+#[test]
 fn bounded_search_and_list_continue_completely_with_cli_mcp_parity() {
     let fixture = retrieval_fixture();
     let source = (0..45)
