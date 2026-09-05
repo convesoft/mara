@@ -421,7 +421,7 @@ JSON and a caller-visible MCP tool error.
 
 Planned excerpt options follow [[DES-SEARCH-EXCERPT-OPTIONS]]. Alpha.3
 pagination and partial-read request/result schemas remain open in
-[retrieval scope](retrieval.mara.md); the collection shape above is current.
+[[DES-RETRIEVAL-CONTINUATION]]; the collection shape above is current.
 :::
 
 :::mara design DES-DURABLE-ITEM-IDENTITIES

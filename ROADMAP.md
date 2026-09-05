@@ -39,9 +39,12 @@ evidence and priorities change; detailed behavior becomes canonical in
 - Read large item bodies in bounded consecutive portions and continue relation
   lists without silently omitting content.
 - Add typo-tolerant word matching and deterministic relevance ranking.
+- Investigate whether and how narrative outside items should be searchable;
+  implementation scope remains undecided.
 
 See [retrieval scope and open contracts](docs/retrieval.mara.md) for the five
-implementation work areas, verification expectations, and unresolved defaults.
+implementation work areas, narrative-search investigation, verification
+expectations, and unresolved defaults.
 
 ### 0.1.0-beta.0
 

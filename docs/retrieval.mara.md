@@ -1,28 +1,27 @@
 # Enhanced deterministic retrieval
 
-This document records the accepted scope for `0.1.0-alpha.3`, not implemented
-behaviour. The retrieval contracts in [First alpha](alpha.mara.md) describe the
-current baseline. The open choices below must be settled in the affected
-contracts before implementation; this scope does not select a search library.
+:::mara design DES-RETRIEVAL-SCOPE
+:mid: 01M1RYWDZXR3BVWW2V756KCPHK
+:title: Define the alpha 3 retrieval boundary
+:derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
-## Scope
+This is the accepted scope for 0.1.0-alpha.3, not implemented behaviour.
+Current retrieval contracts are [[REQ-ITEM-SEARCH]], [[REQ-ITEM-GET]], and
+[[REQ-ITEM-RELATED]]. Open choices in the planned contracts must be settled
+before implementation; no search library is selected here.
 
-Five implementation work areas, each including its contract updates, CLI/MCP
-parity, and focused verification:
-
-| Work area | Outcome |
+| Capability | Planned contract |
 |---|---|
-| Search/list | Bounded summaries and pagination; optional search excerpts and selected-item filtering |
-| Related items | Bounded direct-neighbour results with continuation |
-| Item retrieval | Bounded consecutive body portions and relation lists with continuation |
-| Fuzzy search | Typo-tolerant word matching |
-| Relevance ranking | Stronger matches first with deterministic ordering |
+| Bounded search/list and opt-in excerpts | [[REQ-SEARCH-PAGINATION]], [[REQ-SEARCH-EXCERPTS]] |
+| Bounded direct neighbours | [[REQ-RELATED-PAGINATION]] |
+| Consecutive partial item reads | [[REQ-PARTIAL-ITEM-READ]] |
+| Typo-tolerant word matching | [[REQ-FUZZY-ITEM-SEARCH]] |
+| Deterministic relevance ranking | [[REQ-SEARCH-RELEVANCE]] |
 
-Release preparation follows end-to-end verification of search, optional excerpt
-inspection, item reading, and caller-selected relation traversal. Large titles,
-large relation sets, Unicode text, and a body consisting of one enormous line
-must exercise the response bounds. Real retrieval examples must demonstrate
-typo recovery and useful ranking, including preservation of exact matches.
+Shared response bounds follow [[REQ-RETRIEVAL-BOUNDS]], and continuation follows
+[[DES-RETRIEVAL-CONTINUATION]]. Each capability includes CLI/MCP parity and
+focused verification through [[VER-BOUNDED-RETRIEVAL]]. Retrieval continues to serve
+[[GOAL-BOUNDED-AGENT-CONTEXT]] while preserving [[REQ-CANONICAL-SOURCE]].
 
 Traversal remains caller-controlled: inspect one item and its direct relations,
 select relevant neighbours, and retrieve them as often as needed. No automatic
@@ -30,30 +29,15 @@ multi-hop expansion is added.
 
 Semantic/hybrid search, embeddings or model execution, synonym dictionaries,
 stemming, substring/prefix modes, a query language, persisted indexes or graph
-stores, and context profiles are outside this milestone. A fuzzy match may
-incidentally cover a word-form variation; it does not promise morphological or
-substring matching. Existing project, schema, and authored document formats
-remain the source of truth.
+stores, and context profiles remain outside the implementation scope.
 
-## Open implementation contracts
-
-- **Bounds:** default and maximum counts and text sizes; size units; handling of
-  oversized metadata, paths, and other fields; human/JSON/MCP truncation markers.
-  A result-count limit alone cannot bound a response, and line limits alone
-  cannot bound a one-line body.
-- **Continuation:** request/result shapes and position representation; resuming
-  body and relation portions independently; behaviour when source content or
-  ranked results change between calls. Unchanged input must be retrievable
-  without omissions or duplicate portions.
-- **Search policy:** whether fuzzy matching and relevance ordering are defaults
-  or explicitly selected; compatibility with current exact matching and corpus
-  ordering; typo thresholds by term length; scoring and field weights.
-- **Excerpts:** fragment selection and count, source-position format, behaviour
-  when terms match different fields or passages, and selected-ID filter
-  cardinality and invalid-handle behaviour. Reuse search matching semantics;
-  do not introduce a separate interpretation of fuzzy matches for previews.
-
-## Planned requirements
+Narrative outside item blocks is canonical document content under
+[[DES-DOCUMENT-FORMAT]], but current item search does not retrieve it. Whether
+and how narrative should be searchable is an open alpha.3 investigation, not
+an accepted implementation requirement. Evaluate its fit with Mara's purpose,
+item identity, source locations, and bounded retrieval without assuming that
+all useful narrative must become an item.
+:::
 
 :::mara requirement REQ-RETRIEVAL-BOUNDS
 :mid: 01M1RY3MB07B3QJM0603QHMHBM
@@ -64,8 +48,12 @@ Search/list summaries, related-item summaries, and item retrieval must have
 finite response bounds. Cap displayed summary titles and indicate truncation;
 preserve complete item handles for subsequent retrieval. Full titles remain
 retrievable through item get. Bounds must handle Unicode and oversized single
-lines without presenting omitted content as complete. The bound values and
-oversized-field policy remain open above.
+lines without presenting omitted content as complete.
+
+Open before implementation: default and maximum counts and text sizes, size
+units, oversized metadata/path/other-field handling, and human/JSON/MCP
+truncation markers. A result-count limit alone cannot bound a response; line
+limits alone cannot bound a one-line body.
 :::
 
 :::mara requirement REQ-SEARCH-PAGINATION
@@ -78,6 +66,8 @@ whether more results are available. Callers can retrieve subsequent pages.
 Apply filters and the selected ordering before pagination. For unchanged input,
 following continuation retrieves the complete result set without omissions or
 duplicates. Default results remain compact item summaries without body text.
+Continuation interface and source-change choices are open in
+[[DES-RETRIEVAL-CONTINUATION]].
 :::
 
 :::mara requirement REQ-RELATED-PAGINATION
@@ -90,6 +80,8 @@ neighbours, retaining relation names, directions, and existing filters. Make
 remaining results explicit and retrievable through continuation. Preserve
 outgoing-before-incoming and corpus/authored relation ordering. Neighbour
 bodies require explicit retrieval by the caller.
+Continuation interface and source-change choices are open in
+[[DES-RETRIEVAL-CONTINUATION]].
 :::
 
 :::mara requirement REQ-PARTIAL-ITEM-READ
@@ -104,6 +96,8 @@ entire body without gaps or duplication, including a body with no line breaks.
 Bound the incoming and outgoing relation lists returned by get as well and
 make omitted entries retrievable. A partial read must not silently jump to
 query matches or discard intervening text.
+Continuation interface and source-change choices are open in
+[[DES-RETRIEVAL-CONTINUATION]].
 :::
 
 :::mara requirement REQ-FUZZY-ITEM-SEARCH
@@ -115,7 +109,12 @@ Item search must support typo-tolerant word matching while retaining existing
 scope filters and requiring every distinct query term to match. Use
 conservative matching for short terms. Item-handle lookup and filter values
 remain exact. This is word-level spelling tolerance, not file-picker-style
-subsequence matching. Activation defaults and edit thresholds remain open.
+subsequence matching. Matching may incidentally cover a word-form variation;
+it does not promise morphological or substring matching.
+
+Open before implementation: whether fuzzy matching is the default or explicitly
+selected, compatibility with current exact matching, and edit thresholds by
+term length.
 :::
 
 :::mara requirement REQ-SEARCH-RELEVANCE
@@ -128,7 +127,7 @@ matches and accounts for matches in IDs and titles. Define scoring and field
 weights before implementation. For unchanged input and options, ordering must
 be reproducible with stable tie-breaking. Rank before limiting or paginating;
 item list remains in corpus order. Whether relevance ordering is the search
-default remains open.
+default remains open, as does compatibility with current corpus ordering.
 :::
 
 :::mara requirement REQ-SEARCH-EXCERPTS
@@ -153,7 +152,10 @@ to the planned bounds and pagination metadata.
 Extend `item search` and MCP `item_search` with equivalent options for excerpts
 and exact selected-item filtering; do not add a separate preview operation.
 The planned CLI spelling is `--excerpts` and `--id <id-or-mid>`. MCP field names,
-selected-item multiplicity, and detailed result schemas remain to be specified.
+selected-item multiplicity, invalid-handle behaviour, and detailed result
+schemas remain to be specified. Also settle fragment selection/count and
+source-position format, including queries whose terms match different fields
+or passages. Excerpts reuse fuzzy matching semantics when fuzzy search is used.
 
 The same query and matching rules apply with or without excerpts. A caller may
 search the corpus for compact summaries, repeat the query restricted to a
@@ -178,4 +180,46 @@ discovery or after selection. Sharing search semantics avoids a second matcher
 and preserves the caller's choice between an extra inspection call and a
 larger initial response. Consecutive item reading remains the role of item get;
 query-focused excerpts may omit intervening content.
+:::
+
+:::mara design DES-RETRIEVAL-CONTINUATION
+:mid: 01M1RYWE0PX1TCWXTTCYM35C7S
+:title: Define continuation across bounded retrieval
+:satisfies: REQ-SEARCH-PAGINATION
+:satisfies: REQ-RELATED-PAGINATION
+:satisfies: REQ-PARTIAL-ITEM-READ
+
+Planned alpha.3 continuation must let callers retrieve omitted search results,
+direct neighbours, body portions, and item relation entries. For unchanged
+input, continuation must cover the requested content without omissions or
+duplication. Rank search results before pagination; body reads remain
+consecutive rather than selecting query matches.
+
+Open before implementation: request/result shapes, position representation,
+independent resumption of body and relation portions, and behaviour when source
+content or ranked results change between calls. These choices must preserve
+the caller's ability to distinguish complete from partial results.
+:::
+
+:::mara verification VER-BOUNDED-RETRIEVAL
+:mid: 01M1RYWE2BFJ41BZ9R4A3N5RNF
+:title: Verify the complete bounded retrieval workflow
+:depends_on: DES-RETRIEVAL-SCOPE
+:depends_on: DES-RETRIEVAL-CONTINUATION
+
+For alpha.3, exercise the real CLI and MCP against the same corpus: search,
+continue results, optionally request excerpts for selected items, read an item
+and its remaining portions, inspect direct relations, and fetch caller-selected
+neighbours. Equivalent inputs must yield the same domain results.
+
+Use large titles, large relation sets, Unicode text, and an enormous single-line
+body to verify explicit bounds and complete continuation. Verify that excerpts
+appear only when requested and identify matching source passages; consecutive
+reads must retain text between those passages. Use real queries with expected
+items to demonstrate typo recovery, useful relevance ordering, and preservation
+of exact matches. Repeat unchanged queries to verify stable ordering and page
+coverage. Apply the agreed source-change continuation policy once specified.
+
+Release preparation follows evidence that this workflow passes; these are
+planned checks, not evidence that alpha.3 functionality already exists.
 :::
