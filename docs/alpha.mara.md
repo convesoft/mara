@@ -121,6 +121,12 @@ relation has a concise description suitable for discovery.
 CLI and MCP must share operation semantics and domain results. CLI defaults to
 human-readable output; global `--format json` returns stable agent-oriented
 data equivalent to MCP structured results.
+
+CLI help must describe every public command and its arguments/options. MCP
+tool descriptions and input schemas must expose equivalent invocation guidance,
+including identity and path conventions, omission/empty-value semantics, and
+applicable defaults. Verify the rendered help and the server's `tools/list`
+response; guidance must preserve the operation contracts below.
 :::
 
 :::mara requirement REQ-PORTABLE-AGENT-ONBOARDING
@@ -149,8 +155,8 @@ project's content include, Git ignore, and directory-symlink discovery rules.
 `--line N` inserts immediately before the one-based line `N`; `line_count + 1`
 means end of file. Body input accepts an inline value or `-` for standard input.
 
-When a required body is omitted, creation succeeds as an incomplete scaffold
-and reports `complete: false` with `body` missing. Validation continues to
+When a required body is omitted, empty, or whitespace-only, creation succeeds
+as an incomplete scaffold and reports `complete: false` with `body` missing. Validation continues to
 reject the item until its body is filled. An optional body may remain empty.
 
 Mara generates the item's MID, writes it as exactly one `:mid:` entry
@@ -273,6 +279,8 @@ Substring modes, stemming, and synonym expansion are not supported.
 Both query commands accept repeatable
 `--flavour <name>`, `--field <key=value>`, `--relation <name>`, and
 `--path <project-relative-path>` filters plus `--limit <count>`.
+Field filters accept only schema-declared custom-field keys, excluding
+structural title/MID metadata and typed relations; key and value matching is exact.
 Path filters select exact documents or directory subtrees, including nested
 documents and excluding similarly prefixed sibling names. Path selection and
 normalization follow [[DES-ITEM-PATH-SELECTION]].

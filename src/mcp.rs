@@ -25,6 +25,7 @@ struct MaraMcp {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProjectParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
 }
@@ -32,9 +33,10 @@ struct ProjectParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProjectValidateParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Exact documents or directory subtrees, relative to the project root; OR across paths. Selects diagnostics only, never validation context. Example: ["packages/dicom-viewer/"].
+    /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, .., empty path elements, . or ./; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"]. Selects reported diagnostics only; validity still covers the whole project.
     #[serde(default)]
     paths: Vec<PathBuf>,
 }
@@ -42,8 +44,10 @@ struct ProjectValidateParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProjectInitParams {
+    /// Absolute destination directory; required unless the server was started with --project, in which case omit it. Creates a missing directory; rejects an existing Mara project.
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Initial schema: minimal (default) includes common flavours and relations; empty declares none.
     #[serde(default)]
     template: Template,
 }
@@ -51,10 +55,13 @@ struct ProjectInitParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SchemaGetParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Declaration kind: flavour or relation. Supply together with name, or omit/null both for the complete effective schema.
     #[serde(default)]
     kind: Option<SchemaKind>,
+    /// Exact schema declaration name; requires kind. Omit both name and kind (or set both to null) for the complete schema.
     #[serde(default)]
     name: Option<String>,
 }
@@ -62,28 +69,37 @@ struct SchemaGetParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SchemaListParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Kind of declarations to list: flavour or relation.
     kind: SchemaKind,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ItemCreateToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Schema-declared flavour; discover names with schema_list(kind="flavour").
     flavour: String,
+    /// New unique human ID with the flavour's prefix (for example REQ-EXAMPLE), not a MID. Mara generates the MID.
     id: String,
+    /// Destination project-relative *.mara.md path selected by project discovery; parent directory must exist. Creates the file if absent.
     file: PathBuf,
+    /// Nonempty single-line title; surrounding whitespace is trimmed.
     title: String,
-    /// Custom fields only; excludes title, MID, and typed relations. Use relations for initial edges.
+    /// Schema-declared custom fields only; excludes structural title/MID metadata and typed relations. Repeat keys only when schema-repeatable. Omitted or empty supplies none; required fields must be supplied. Use relations for initial edges or relation_add for later edits.
     #[serde(default)]
     fields: Vec<FieldValue>,
-    /// Initial outgoing edges, created atomically. Omitted or empty adds none; use relation_add/remove for later edits.
+    /// Initial outgoing typed relations, created atomically with the item. Omitted or empty adds none; use relation_add/relation_remove for later edits.
     #[serde(default)]
     relations: Vec<InitialRelation>,
+    /// Literal Markdown body (- is literal; no stdin). Omitted or null supplies no body; a missing or blank required body creates a scaffold.
     #[serde(default)]
     body: Option<String>,
+    /// Insert before this one-based destination line; line_count + 1 means end of file. Omitted or null appends. Insertion inside another item is rejected.
     #[serde(default)]
     line: Option<usize>,
 }
@@ -109,18 +125,21 @@ impl ItemCreateToolParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ItemUpdateToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     reference: String,
+    /// Replacement nonempty single-line title, trimmed; omitted or null leaves it unchanged.
     #[serde(default)]
     title: Option<String>,
-    /// Replace all values of each named custom field, repeating keys as needed.
+    /// Replace all values of each named schema-declared custom field; repeat keys only when schema-repeatable. Excludes structural title/MID metadata and typed relations; use relation_add/relation_remove for edges. Omitted or empty leaves fields unchanged; an empty value is not a clear.
     #[serde(default)]
     fields: Vec<FieldValue>,
-    /// Clear optional custom fields; cannot also appear in fields.
+    /// Remove all values of named optional custom fields; cannot also set those keys in fields. Excludes title, MID, and typed relations. Omitted or empty clears nothing.
     #[serde(default)]
     clear_fields: Vec<String>,
-    /// Replacement body text; an empty string clears an optional body.
+    /// Replacement literal Markdown body (- is literal). Omitted or null leaves it unchanged; an empty string clears an optional body. Empty or whitespace-only replacement of a required body is rejected.
     #[serde(default)]
     body: Option<String>,
 }
@@ -128,27 +147,36 @@ struct ItemUpdateToolParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ItemRenameToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     reference: String,
+    /// New unique human ID with the item's flavour prefix. Preserves the MID; the old human ID is not kept as an alias.
     new_id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ItemDeleteToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     reference: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ItemMoveToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     reference: String,
+    /// Destination project-relative *.mara.md path selected by project discovery; parent directory must exist. Creates the file if absent.
     file: PathBuf,
+    /// Insert before this one-based line in the original destination, including same-file moves. Omitted or null appends; line_count + 1 means end of file. Insertion inside an item is rejected.
     #[serde(default)]
     line: Option<usize>,
 }
@@ -156,21 +184,25 @@ struct ItemMoveToolParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ItemIdToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ItemGetToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     id: String,
-    /// Maximum combined relation entries per page, 1 through 100; defaults to 20.
+    /// Maximum combined direct relation entries per page, 1 through 100; omitted or null defaults to 20. Body and metadata portions are byte-bounded independently of this count.
     #[serde(default)]
     limit: Option<usize>,
-    /// Continue consecutive body, metadata, and relation portions with unchanged options.
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged. Omit or null for the first page; restart after source/schema changes. Follow body, metadata, then relations until has_more is false.
     #[serde(default)]
     cursor: Option<String>,
 }
@@ -178,22 +210,26 @@ struct ItemGetToolParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ItemFilterToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Exact flavour names, combined with OR and intersected with other filter categories. Omitted or empty selects all flavours.
     #[serde(default)]
     flavours: Vec<String>,
+    /// Exact schema-declared custom-field key/value filters; excludes title/MID and typed relations. OR within one key, AND across keys and other filter categories. Omitted or empty adds no restriction.
     #[serde(default)]
     fields: Vec<FieldValue>,
+    /// Exact authored outgoing relation names, combined with OR and intersected with other filters. Omitted or empty adds no restriction.
     #[serde(default)]
     relations: Vec<String>,
-    /// Exact documents or directory subtrees, relative to the project root; OR across paths. Example: ["packages/query/docs/"].
+    /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, .., empty path elements, . or ./; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
     #[serde(default)]
     paths: Vec<PathBuf>,
+    /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer.
     #[serde(default)]
-    /// Page size from 1 through 100; defaults to 20.
     limit: Option<usize>,
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged. Omit or null for the first page; restart after source/schema changes.
     #[serde(default)]
-    /// Continue using next_cursor with the same query and options.
     cursor: Option<String>,
 }
 
@@ -216,29 +252,34 @@ impl ItemFilterToolParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ItemSearchToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Unicode case-insensitive words matched across ID, title, body, and metadata. Every distinct word must match; empty or punctuation-only text matches all items within the filters.
     query: String,
+    /// Exact flavour names, combined with OR and intersected with other filter categories. Omitted or empty selects all flavours.
     #[serde(default)]
     flavours: Vec<String>,
+    /// Exact schema-declared custom-field key/value filters; excludes title/MID and typed relations. OR within one key, AND across keys and other filter categories. Omitted or empty adds no restriction.
     #[serde(default)]
     fields: Vec<FieldValue>,
+    /// Exact authored outgoing relation names, combined with OR and intersected with other filters. Omitted or empty adds no restriction.
     #[serde(default)]
     relations: Vec<String>,
-    /// Exact documents or directory subtrees, relative to the project root; OR across paths. Example: ["packages/query/docs/"].
+    /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, .., empty path elements, . or ./; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
     #[serde(default)]
     paths: Vec<PathBuf>,
+    /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer.
     #[serde(default)]
-    /// Page size from 1 through 100; defaults to 20.
     limit: Option<usize>,
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged. Omit or null for the first page; restart after source/schema changes.
     #[serde(default)]
-    /// Continue using next_cursor with the same query and options.
     cursor: Option<String>,
+    /// Exact human IDs or canonical MIDs (uppercase 26-character ULIDs), combined with OR and intersected with other filters. Omitted or empty adds no restriction.
     #[serde(default)]
-    /// Exact IDs or MIDs to select, intersected with other filters.
     ids: Vec<String>,
+    /// Include up to three bounded, partial source excerpts per match. Defaults to false; excerpts may skip content and do not replace item_get.
     #[serde(default)]
-    /// Include up to three bounded, partial source excerpts per match.
     excerpts: bool,
 }
 
@@ -264,19 +305,24 @@ impl ItemSearchToolParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ItemRelatedToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     id: String,
+    /// Edge direction relative to the selected item: incoming or outgoing. Omitted or null includes both, outgoing first.
     #[serde(default)]
     direction: Option<RelationDirection>,
+    /// Exact relation names, combined with OR and intersected with the neighbour flavour filter. Omitted or empty includes all.
     #[serde(default)]
     relations: Vec<String>,
+    /// Exact neighbour flavour names, combined with OR. Omitted or empty includes all.
     #[serde(default)]
     flavours: Vec<String>,
-    /// Page size from 1 through 100; defaults to 20.
+    /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer. Counts relation entries, not unique neighbours.
     #[serde(default)]
     limit: Option<usize>,
-    /// Continue using next_cursor with the same item and options.
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged. Omit or null for the first page; restart after source/schema changes.
     #[serde(default)]
     cursor: Option<String>,
 }
@@ -300,10 +346,14 @@ impl ItemRelatedToolParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RelationToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
+    /// Source item's exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     source: String,
+    /// Schema-declared outgoing relation name; discover names with schema_list(kind="relation").
     relation: String,
+    /// Target item's exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     target: String,
 }
 
@@ -522,7 +572,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_search",
-        description = "Search every distinct query word, ranked by relevance before pagination. Items matching every word exactly precede any requiring typo tolerance; within each group each word's best ID/title match weighs 3, other fields 1, with corpus-order ties. ID/MID field values match only exact normalized words. Other text allows 0 edits at 1-3 characters, 1 at 4-7, and 2 at 8+; adjacent swaps count as one edit. Filters and selected ids stay exact. Optional excerpts include partial matching source passages. Continue bounded pages with next_cursor and unchanged options; restart after source changes."
+        description = "Search every distinct query word with typo tolerance, ranked by relevance before pagination. Exact matches rank first; ID/title matches carry more weight. ID/MID field words and all filters stay exact. Optional excerpts are partial source passages. Follow next_cursor with unchanged inputs; restart after source/schema changes."
     )]
     fn item_search(
         &self,
@@ -559,7 +609,7 @@ impl MaraMcp {
 
     #[tool(
         name = "relation_add",
-        description = "Add one schema-valid authored relation to its source item."
+        description = "Add one schema-valid authored outgoing relation to its source item; rejects an existing edge."
     )]
     fn relation_add(
         &self,
@@ -571,7 +621,7 @@ impl MaraMcp {
 
     #[tool(
         name = "relation_remove",
-        description = "Remove one existing authored relation from its source item."
+        description = "Remove one existing authored outgoing relation from its source item; rejects a missing edge."
     )]
     fn relation_remove(
         &self,
@@ -584,7 +634,7 @@ impl MaraMcp {
 
 #[tool_handler(
     name = "mara",
-    instructions = "Structured Mara operations. Pass an absolute project path to each project-bound tool, omit it for execution-directory discovery, or start the server with --project to bind all calls."
+    instructions = "Structured Mara operations. Pass an absolute project path, or omit it for execution-directory discovery (project_init requires an explicit destination only when the server is unbound). When the server starts with --project, omit request-level project selection, including for project_init; overrides are rejected."
 )]
 impl ServerHandler for MaraMcp {}
 

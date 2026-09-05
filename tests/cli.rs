@@ -4067,6 +4067,38 @@ fn item_create_writes_complete_items_and_required_body_scaffolds() {
     let invalid = mara(fixture.path(), &["item", "validate", "REQ-SCAFFOLD"]);
     assert!(!invalid.status.success());
     assert!(stderr(&invalid).contains("required body is empty"));
+
+    for (id, body, stdin) in [
+        ("REQ-EMPTY-BODY", "", ""),
+        ("REQ-BLANK-STDIN", "-", " \t\n"),
+    ] {
+        let created = mara_with_stdin(
+            fixture.path(),
+            &[
+                "--format",
+                "json",
+                "item",
+                "create",
+                "requirement",
+                id,
+                "docs/items.mara.md",
+                "--title",
+                "Blank body",
+                "--field",
+                "status=draft",
+                "--body",
+                body,
+            ],
+            stdin,
+        );
+        assert!(created.status.success(), "{}", stderr(&created));
+        let result: Value = serde_json::from_slice(&created.stdout).unwrap();
+        assert_eq!(result["complete"], false);
+        assert_eq!(result["missing"], json!(["body"]));
+        let invalid = mara(fixture.path(), &["item", "validate", id]);
+        assert!(!invalid.status.success());
+        assert!(stderr(&invalid).contains("required body is empty"));
+    }
 }
 
 #[test]
@@ -4852,7 +4884,7 @@ fn search_relevance_ranks_before_pagination_with_cli_mcp_parity() {
         }
         assert_eq!(ids, expected);
     }
-    // Empty queries and item list retain source order, including the filtered-out item.
+    // Zero-term queries and item list retain source order, including the filtered-out item.
     for operation in ["list", "search"] {
         let mut args = vec!["--format", "json", "item", operation];
         if operation == "search" {
@@ -5409,6 +5441,13 @@ fn mcp_bound_server_initializes_its_selected_target_without_an_override() {
         ],
     );
 
+    let instructions = mcp_response(&responses, 1)["result"]["instructions"]
+        .as_str()
+        .unwrap();
+    assert!(instructions.contains("explicit destination only when the server is unbound"));
+    assert!(
+        instructions.contains("omit request-level project selection, including for project_init")
+    );
     assert_eq!(mcp_response(&responses, 2)["result"]["isError"], false);
     assert_eq!(
         mcp_response(&responses, 2)["result"]["structuredContent"]["project"]["root"],
@@ -5437,6 +5476,10 @@ fn mcp_unbound_project_init_requires_an_absolute_target() {
         ],
     );
 
+    let instructions = mcp_response(&responses, 1)["result"]["instructions"]
+        .as_str()
+        .unwrap();
+    assert!(instructions.contains("explicit destination only when the server is unbound"));
     assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
     assert!(
         mcp_response(&responses, 2)
@@ -5567,6 +5610,203 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
     assert_eq!(
         mcp_response(&responses, 5)["result"]["structuredContent"],
         cli_schema
+    );
+}
+
+#[test]
+fn every_command_help_describes_commands_arguments_and_options() {
+    let fixture = TempDir::new().unwrap();
+    let mut pending = vec![Vec::<String>::new()];
+    let mut visited = BTreeSet::new();
+    while let Some(command) = pending.pop() {
+        assert!(visited.insert(command.clone()));
+        let mut arguments = command.iter().map(String::as_str).collect::<Vec<_>>();
+        arguments.push("--help");
+        let output = mara(fixture.path(), &arguments);
+        assert!(output.status.success(), "{command:?}: {}", stderr(&output));
+        assert!(stderr(&output).is_empty(), "{}", stderr(&output));
+        let help = stdout(&output);
+        if command == ["item", "search"] {
+            let query_help = help
+                .lines()
+                .find(|line| line.trim_start().starts_with("<QUERY>"))
+                .unwrap();
+            for convention in ["empty", "punctuation-only", "all items within the filters"] {
+                assert!(query_help.contains(convention), "{query_help}");
+            }
+        }
+        if command == ["item", "update"] {
+            let field_help = help.lines().find(|line| line.contains("--field")).unwrap();
+            for convention in ["KEY=", "empty value", "--clear-field", "remove"] {
+                assert!(field_help.contains(convention), "{field_help}");
+            }
+            let body_help = help.lines().find(|line| line.contains("--body")).unwrap();
+            for convention in ["empty", "whitespace-only", "required", "rejected"] {
+                assert!(body_help.contains(convention), "{body_help}");
+            }
+        }
+        if command == ["item", "list"]
+            || command == ["item", "search"]
+            || command == ["project", "validate"]
+        {
+            let path_help = help.lines().find(|line| line.contains("--path")).unwrap();
+            for convention in ["empty paths", ". or ./", "omit --path", "whole project"] {
+                assert!(path_help.contains(convention), "{command:?}: {path_help}");
+            }
+        }
+        if command == ["item", "create"] {
+            let body_help = help.lines().find(|line| line.contains("--body")).unwrap();
+            for convention in ["omitted", "empty", "whitespace-only", "scaffold"] {
+                assert!(body_help.contains(convention), "{body_help}");
+            }
+        }
+        if command == ["item", "list"] || command == ["item", "search"] {
+            let field_help = help.lines().find(|line| line.contains("--field")).unwrap();
+            for convention in ["custom", "title/MID", "typed relations"] {
+                assert!(field_help.contains(convention), "{command:?}: {field_help}");
+            }
+        }
+        let (purpose, _) = help.split_once("Usage:").expect("help has usage");
+        assert!(!purpose.trim().is_empty(), "{command:?}: {help}");
+
+        let mut section = "";
+        let mut lines = help.lines().peekable();
+        while let Some(line) = lines.next() {
+            if matches!(line, "Commands:" | "Arguments:" | "Options:") {
+                section = line;
+            } else if line.starts_with("  ")
+                && !line.starts_with("          ")
+                && !section.is_empty()
+            {
+                let (name, description) = line
+                    .trim()
+                    .split_once("  ")
+                    .or_else(|| {
+                        lines
+                            .peek()
+                            .filter(|next| next.starts_with("          "))
+                            .map(|next| (line.trim(), next.trim()))
+                    })
+                    .unwrap_or_else(|| panic!("{command:?} has undocumented entry: {line}"));
+                assert!(!description.trim().is_empty(), "{command:?}: {line}");
+                if section == "Commands:" && name != "help" {
+                    let mut child = command.clone();
+                    child.push(name.to_owned());
+                    pending.push(child);
+                }
+            }
+        }
+    }
+    // Root, six command groups, nineteen project operations, and the MCP server.
+    assert_eq!(visited.len(), 27);
+}
+
+#[test]
+fn mcp_tools_list_exposes_parameter_guidance() {
+    fn check_properties(schema: &Value) {
+        if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+            for (name, property) in properties {
+                assert!(
+                    property["description"]
+                        .as_str()
+                        .is_some_and(|text| !text.trim().is_empty()),
+                    "missing input guidance for {name}: {property:#}"
+                );
+            }
+        }
+        match schema {
+            Value::Object(object) => object.values().for_each(check_properties),
+            Value::Array(array) => array.iter().for_each(check_properties),
+            _ => {}
+        }
+    }
+
+    let fixture = TempDir::new().unwrap();
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_request(2, "tools/list", json!({})),
+        ],
+    );
+    let tools = mcp_response(&responses, 2)["result"]["tools"]
+        .as_array()
+        .unwrap();
+    assert_eq!(tools.len(), 19);
+    for tool in tools {
+        assert!(
+            tool["description"]
+                .as_str()
+                .is_some_and(|text| !text.trim().is_empty()),
+            "missing tool description: {tool:#}"
+        );
+        check_properties(&tool["inputSchema"]);
+    }
+    for name in ["item_create", "item_update"] {
+        let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
+        let fields = tool["inputSchema"]["properties"]["fields"]["description"]
+            .as_str()
+            .unwrap();
+        for convention in ["custom", "title/MID", "typed relations", "relation_add"] {
+            assert!(fields.contains(convention), "{name}: {fields}");
+        }
+    }
+    for name in ["item_list", "item_search"] {
+        let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
+        for description in [
+            &tool["inputSchema"]["properties"]["fields"]["description"],
+            &tool["inputSchema"]["$defs"]["FieldValue"]["properties"]["key"]["description"],
+        ] {
+            let description = description.as_str().unwrap();
+            for convention in ["custom", "title/MID", "typed relations"] {
+                assert!(description.contains(convention), "{name}: {description}");
+            }
+        }
+    }
+    for name in ["item_list", "item_search", "project_validate"] {
+        let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
+        let paths = tool["inputSchema"]["properties"]["paths"]["description"]
+            .as_str()
+            .unwrap();
+        for convention in [
+            "empty path elements",
+            ". or ./",
+            "omit paths or use []",
+            "whole project",
+        ] {
+            assert!(paths.contains(convention), "{name}: {paths}");
+        }
+    }
+    let create = tools
+        .iter()
+        .find(|tool| tool["name"] == "item_create")
+        .unwrap();
+    let relations = &create["inputSchema"]["properties"]["relations"];
+    assert_eq!(relations["type"], "array");
+    assert!(
+        !create["inputSchema"]["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("relations"))
+    );
+    assert!(
+        relations["description"]
+            .as_str()
+            .unwrap()
+            .contains("atomically")
+    );
+    let search = tools
+        .iter()
+        .find(|tool| tool["name"] == "item_search")
+        .unwrap();
+    assert_eq!(
+        search["inputSchema"]["properties"]["excerpts"]["default"],
+        false
+    );
+    assert_eq!(
+        search["inputSchema"]["properties"]["ids"]["default"],
+        json!([])
     );
 }
 
@@ -6406,6 +6646,13 @@ fn item_update_preserves_source_and_permissions_while_replacing_repeated_fields(
         .replace(":tag: second\r\n", "")
         .replace(":tag: third\r\n", "");
     assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+    let emptied = mara(
+        fixture.path(),
+        &["item", "update", "REQ-EDIT", "--field", "tag="],
+    );
+    assert!(emptied.status.success(), "{}", stderr(&emptied));
+    let expected = expected.replace(":tag:\tonly  ", ":tag:\t  ");
+    assert_eq!(fs::read_to_string(&path).unwrap(), expected);
     let cleared = mara(
         fixture.path(),
         &["item", "update", "REQ-EDIT", "--clear-field", "tag"],
@@ -6413,7 +6660,7 @@ fn item_update_preserves_source_and_permissions_while_replacing_repeated_fields(
     assert!(cleared.status.success(), "{}", stderr(&cleared));
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
-        expected.replace(":tag:\tonly  \r\n", "")
+        expected.replace(":tag:\t  \r\n", "")
     );
     assert!(
         mara(fixture.path(), &["project", "validate"])
