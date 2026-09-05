@@ -2,7 +2,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use super::*;
 
-const PAGE_BYTES: usize = 65_536;
+pub(super) const PAGE_BYTES: usize = 65_536;
 const TITLE_CHARS: usize = 256;
 const EXCERPT_CHARS: usize = 240;
 const EXCERPT_COUNT: usize = 3;
@@ -147,7 +147,7 @@ pub(super) fn related_page(
     Ok(page)
 }
 
-fn page_limit(limit: Option<usize>) -> Result<usize, QueryError> {
+pub(super) fn page_limit(limit: Option<usize>) -> Result<usize, QueryError> {
     let limit = limit.unwrap_or(20);
     if !(1..=100).contains(&limit) {
         return Err(page_error("page limit must be 1 through 100"));
@@ -155,14 +155,14 @@ fn page_limit(limit: Option<usize>) -> Result<usize, QueryError> {
     Ok(limit)
 }
 
-fn truncate_title(summary: &mut ItemSummary) {
+pub(super) fn truncate_title(summary: &mut ItemSummary) {
     if let Some((end, _)) = summary.title.char_indices().nth(TITLE_CHARS) {
         summary.title.truncate(end);
         summary.title_truncated = true;
     }
 }
 
-fn page_error(message: &str) -> QueryError {
+pub(super) fn page_error(message: &str) -> QueryError {
     QueryError::InvalidPage {
         message: message.to_owned(),
     }
@@ -191,7 +191,7 @@ fn continuation(
     )
 }
 
-fn fingerprint(
+pub(super) fn fingerprint(
     corpus: &Corpus,
     schema: &Schema,
     request: &impl Serialize,

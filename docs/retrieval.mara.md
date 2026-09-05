@@ -6,8 +6,8 @@
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
 This is the accepted scope for 0.1.0-alpha.3. Search/list pagination, search
-excerpts, and direct-neighbour pagination are implemented; the other
-capabilities below remain planned.
+excerpts, direct-neighbour pagination, and consecutive partial item reads are
+implemented; fuzzy matching and relevance ranking remain planned.
 Current retrieval contracts are [[REQ-ITEM-SEARCH]], [[REQ-ITEM-GET]], and
 [[REQ-ITEM-RELATED]]. Open choices in the planned contracts must be settled
 before implementation; no search library is selected here.
@@ -64,8 +64,14 @@ directing the caller to shorten oversized identity/location fields or relation
 names as applicable.
 Never skip that entry silently.
 
-Excerpt limits are defined in [[DES-SEARCH-EXCERPT-OPTIONS]]. Bounds for get
-responses remain open for its owning capability.
+Excerpt limits are defined in [[DES-SEARCH-EXCERPT-OPTIONS]]. Get uses the same
+65,536-byte serialized JSON budget, including all fragments, ranges, and cursor
+metadata. Its summary and neighbour titles use the same 256-scalar cap; retrieve
+complete titles through the owning item's title metadata fragments. Identity,
+location, metadata keys, and relation names remain complete; if a fixed header
+or the next fragment/relation cannot fit an otherwise empty page, fail with a
+bounded diagnostic directing the caller to shorten the oversized fields.
+Body and metadata value fragmentation follow [[DES-RETRIEVAL-CONTINUATION]].
 :::
 
 :::mara requirement REQ-SEARCH-PAGINATION
@@ -110,8 +116,9 @@ entire body without gaps or duplication, including a body with no line breaks.
 Bound the incoming and outgoing relation lists returned by get as well and
 make omitted entries retrievable. A partial read must not silently jump to
 query matches or discard intervening text.
-Continuation interface and source-change choices are open in
-[[DES-RETRIEVAL-CONTINUATION]].
+Oversized titles and other metadata values must also be retrievable in
+consecutive fragments. Preserve authored metadata order and repeated keys.
+The continuation interface follows [[DES-RETRIEVAL-CONTINUATION]].
 :::
 
 :::mara requirement REQ-FUZZY-ITEM-SEARCH
@@ -221,7 +228,7 @@ query-focused excerpts may omit intervening content.
 :satisfies: REQ-RELATED-PAGINATION
 :satisfies: REQ-PARTIAL-ITEM-READ
 
-Planned alpha.3 continuation must let callers retrieve omitted search results,
+Alpha.3 continuation lets callers retrieve omitted search results,
 direct neighbours, body portions, and item relation entries. For unchanged
 input, continuation must cover the requested content without omissions or
 duplication. Rank search results before pagination; body reads remain
@@ -244,8 +251,54 @@ to identical input restores validity; no historical snapshot is retained.
 Cursor compatibility across application upgrades is not promised. Matching and
 ordering finish before the count and serialized-byte budgets are applied.
 
-Get request shapes, body/relation positions, independent resumption, and
-source-change handling remain open for its owning capability.
+## Item get
+
+CLI `item get <id-or-mid>` accepts `--cursor` and `--limit`; MCP `item_get`
+accepts `id`, `cursor`, and `limit`. Limit caps combined outgoing/incoming
+relation occurrences per response: default 20, range 1 through 100. It does not
+limit body bytes or metadata entries. The shared serialized-byte budget may
+shorten any portion further.
+
+One opaque cursor advances a single sequence: consecutive body bytes, ordered
+metadata values, then outgoing and incoming relation occurrences in their
+existing order. Fill the available byte budget in this order; return the whole
+body on the first page when it fits alongside the fixed header and progress
+metadata. There are no independent section cursors. Completed sections return
+empty portions on later pages; repeat the same handle and limit until
+`has_more` is false. Get uses the same source/schema/request change rejection
+as other retrieval operations, including edits outside the selected item.
+
+The JSON result retains `summary`, `source`, `body`, `metadata`,
+`outgoing_relations`, and `incoming_relations`, and adds `body_range`,
+`metadata_range`, `outgoing_relations_range`, `incoming_relations_range`,
+`has_more`, and `next_cursor`. `summary` is bounded; `source` continues to locate
+the complete item in its document. `next_cursor` is null exactly when no
+content remains. Relation entries retain `{relation, item}` summaries.
+
+- `body` is an exact consecutive slice of the parsed body. `body_range` is
+  `{start_byte, end_byte, total_bytes, partial}` with end-exclusive UTF-8 byte
+  offsets relative to the body. Split only at Unicode scalar boundaries.
+- Each metadata fragment is `{index, key, value, range}`. `index` is the
+  zero-based authored metadata occurrence, including structural metadata.
+  `value` is a consecutive slice of that parsed scalar; `range` has the same
+  shape as `body_range`, with offsets relative to that metadata value. Preserve
+  complete keys and distinguish repeated keys by index. A title is retrieved
+  completely by concatenating its metadata value fragments.
+- Each collection range is `{start_index, end_index, total, partial}` with
+  zero-based, end-exclusive indices. Metadata ranges cover touched entries;
+  consecutive pages can touch the same index when its value is fragmented.
+  Relation ranges index their respective direction independently. Empty portions
+  report equal start/end positions, and total always describes the full section.
+- `partial` is false only when that portion represents the entire value or
+  collection. A metadata collection is partial if any value is fragmented.
+  Empty completed sections of a nonempty value/collection remain partial;
+  `has_more` describes continuation of the whole item, not completeness of each
+  section shown on this page.
+
+Human output labels every fragment's index/byte range and each section's
+range, totals, and partial state, then ends with the same page continuation
+line as other retrieval operations. Display separators are not body/value
+content; reconstruct exact text from JSON strings and their offsets.
 :::
 
 :::mara verification VER-BOUNDED-RETRIEVAL
@@ -267,7 +320,11 @@ items to demonstrate typo recovery, useful relevance ordering, and preservation
 of exact matches. Repeat unchanged queries to verify stable ordering and page
 coverage. For related pages, verify both directions across page boundaries,
 filtered continuation, title truncation, the serialized byte budget, and
-rejection after source, schema, or request changes.
+rejection after source, schema, or request changes. For get, reconstruct the
+body and all metadata values by their ranges, including enormous titles,
+repeated keys, empty values, and JSON-escaped Unicode. Verify get's combined
+relation limit and direction order, byte-budget continuation, cursor rejection,
+and CLI/MCP domain-result parity through the final page.
 
 Release preparation follows evidence that this workflow passes; these are
 planned checks, not evidence that alpha.3 functionality already exists.
@@ -275,12 +332,26 @@ planned checks, not evidence that alpha.3 functionality already exists.
 
 :::mara decision ADR-SEARCH-CONTINUATION
 :mid: 01M1S1WPMD2PNHTZ4643CCB1CN
-:title: Restart search and relation pagination after source changes
+:title: Restart retrieval continuation after source changes
 :justifies: DES-RETRIEVAL-CONTINUATION
 
-Use stateless, versioned search/list and related cursors that bind a result
-position to the source and request fingerprint. Reject changed inputs rather
+Use stateless, versioned search/list, related, and get cursors that bind result
+positions to the source and request fingerprint. Reject changed inputs rather
 than silently continuing an offset into a different result set. This preserves complete page
 coverage for unchanged input without storing snapshots or an index; callers
 restart discovery after edits.
+:::
+
+:::mara decision ADR-FRAGMENT-ITEM-READS
+:mid: 01M1S5WD583NZJP58HSRZNFNMB
+:title: Continue body and metadata fragments through one item cursor
+:justifies: DES-RETRIEVAL-CONTINUATION
+
+Use one continuation sequence for body text, metadata values, and direct
+relations, with the body first. Fragment oversized title and metadata values
+instead of rejecting otherwise readable items; this keeps complete authored
+values retrievable within the response budget. A shared cursor gives callers
+one completion condition and avoids coordinating independent section reads.
+Fixed identity/location fields, metadata keys, and relation names remain intact;
+report an actionable size error when they prevent progress.
 :::

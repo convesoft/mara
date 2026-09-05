@@ -13,7 +13,9 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{Corpus, Item, Schema, SourceLocation};
 
+mod get;
 mod page;
+pub use get::{EntryRange, ItemGetResult, MetadataFragment, TextRange, get_item_page};
 pub use page::{ItemCollectionResult, RelatedItemsResult, SearchExcerpt};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]

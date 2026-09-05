@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Corpus, Diagnostic, FieldFilter, FlavourDefinition, ItemCollectionResult, ItemCreationRequest,
-    ItemFilters, Project, RelatedFilters, RelatedItemsResult, RelationDefinition,
-    RelationDirection, ResolvedItem, Schema, Template, add_relation, backfill_mids, create_item,
-    get_item, initialize_project, list_items, load_corpus, load_corpus_for_validation,
+    ItemFilters, ItemGetResult, Project, RelatedFilters, RelatedItemsResult, RelationDefinition,
+    RelationDirection, Schema, Template, add_relation, backfill_mids, create_item, get_item_page,
+    initialize_project, list_items, load_corpus, load_corpus_for_validation,
     load_corpus_syntax_for_validation, load_schema, load_schema_for_validation, related_items,
     remove_relation, resolve_project, resolve_project_for_validation, search_items,
     validate_corpus, validate_corpus_independent,
@@ -211,9 +211,16 @@ impl OperationContext {
         })
     }
 
-    pub fn item_get(&self, id: &str) -> Result<ResolvedItem, String> {
-        let (corpus, _) = self.load_query_project()?;
-        get_item(&corpus, id).map_err(|error| error.to_string())
+    pub fn item_get(&self, params: ItemGetParams) -> Result<ItemGetResult, String> {
+        let (corpus, schema) = self.load_query_project()?;
+        get_item_page(
+            &corpus,
+            &schema,
+            &params.id,
+            params.limit,
+            params.cursor.as_deref(),
+        )
+        .map_err(|error| error.to_string())
     }
 
     pub fn item_list(&self, filters: ItemFilterParams) -> Result<ItemCollectionResult, String> {
@@ -630,6 +637,16 @@ impl ItemSearchParams {
 #[serde(deny_unknown_fields)]
 pub struct ItemIdParams {
     pub id: String,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ItemGetParams {
+    pub id: String,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

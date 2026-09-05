@@ -28,17 +28,18 @@ pub use mutation::{
 };
 pub use operations::{
     DeclarationSummary, FieldValue, ItemCreateParams, ItemCreationResult, ItemFilterParams,
-    ItemIdParams, ItemMoveParams, ItemRelatedParams, ItemSearchParams, ItemUpdateParams,
-    OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, ProjectSummary,
-    RelationAction, RelationMutationResult, RelationParams, SchemaGetResult, SchemaKind,
-    SchemaListResult, SchemaValidationResult, TransactionRollbackResult, ValidationDiagnostic,
-    ValidationResult, ValidationScope, ValidationTarget, ValidationTargetKind, project_initialize,
+    ItemGetParams, ItemIdParams, ItemMoveParams, ItemRelatedParams, ItemSearchParams,
+    ItemUpdateParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
+    ProjectSummary, RelationAction, RelationMutationResult, RelationParams, SchemaGetResult,
+    SchemaKind, SchemaListResult, SchemaValidationResult, TransactionRollbackResult,
+    ValidationDiagnostic, ValidationResult, ValidationScope, ValidationTarget,
+    ValidationTargetKind, project_initialize,
 };
 pub use query::{
-    FieldFilter, ItemCollectionResult, ItemFilters, ItemSource, ItemSummary, MetadataValue,
-    QueryError, RelatedFilters, RelatedItem, RelatedItemsResult, RelationDirection,
-    RelationSummary, ResolvedItem, SearchExcerpt, get_item, list_items, related_items,
-    search_items,
+    EntryRange, FieldFilter, ItemCollectionResult, ItemFilters, ItemGetResult, ItemSource,
+    ItemSummary, MetadataFragment, MetadataValue, QueryError, RelatedFilters, RelatedItem,
+    RelatedItemsResult, RelationDirection, RelationSummary, ResolvedItem, SearchExcerpt, TextRange,
+    get_item, get_item_page, list_items, related_items, search_items,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";
