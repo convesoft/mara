@@ -633,6 +633,213 @@ fn directory_path_filters_preserve_boundaries_and_exact_files() {
     }
 }
 
+fn directory_validation_fixture() -> TempDir {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    for (path, content) in [
+        (
+            "packages/dicom-viewer/docs/viewer.mara.md",
+            ":::mara requirement REQ-VIEWER\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: Viewer\n:derives_from: REQ-CORE\n\nUses [[REQ-CORE]].\n:::\n",
+        ),
+        (
+            "packages/core/core.mara.md",
+            ":::mara requirement REQ-CORE\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02\n:title: Core\n\nCore behavior.\n:::\n",
+        ),
+        (
+            "packages/dicom-viewer-extra/extra.mara.md",
+            ":::mara requirement REQ-EXTRA\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F03\n:title: Extra\n\nExtra behavior.\n:::\n",
+        ),
+    ] {
+        let file = fixture.path().join(path);
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, content).unwrap();
+    }
+    fixture
+}
+
+fn validation_with_parity(current_directory: &Path, paths: &[&str]) -> Value {
+    let mut args = vec!["--format", "json", "project", "validate"];
+    for path in paths {
+        args.extend(["--path", path]);
+    }
+    let output = mara(current_directory, &args);
+    let result: Value = serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|error| panic!("{error}: {}", stderr(&output)));
+    assert_eq!(output.status.success(), result["valid"].as_bool().unwrap());
+    let responses = mcp_exchange(
+        current_directory,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "project_validate", json!({"paths":paths})),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        result
+    );
+    result
+}
+
+#[test]
+fn directory_validation_filters_reporting_with_full_project_status_and_context() {
+    let fixture = directory_validation_fixture();
+    let package = fixture.path().join("packages/dicom-viewer");
+    let path = "packages/dicom-viewer/docs/viewer.mara.md";
+    let valid = validation_with_parity(&package, &["packages/dicom-viewer/"]);
+    assert_eq!(valid["valid"], true);
+    assert_eq!(valid["diagnostics"], json!([]));
+    assert_eq!(valid["selection"]["omitted_diagnostics"], 0);
+    assert_eq!(valid["project"], json!(fixture.path()));
+
+    // Keep the external target valid while breaking a local relation and mention.
+    let viewer = fixture.path().join(path);
+    let original = fs::read_to_string(&viewer).unwrap();
+    fs::write(
+        &viewer,
+        original
+            .replace(":derives_from: REQ-CORE", ":derives_from: REQ-MISSING")
+            .replace(
+                "Uses [[REQ-CORE]].",
+                "Uses [[REQ-CORE]] and [[REQ-MISSING]].",
+            ),
+    )
+    .unwrap();
+    for path in [
+        "packages/core/core.mara.md",
+        "packages/dicom-viewer-extra/extra.mara.md",
+    ] {
+        let file = fixture.path().join(path);
+        let content = fs::read_to_string(&file).unwrap();
+        fs::write(
+            file,
+            content.replace("behavior.", "behavior with [[REQ-ABSENT]]."),
+        )
+        .unwrap();
+    }
+    let full = validation_with_parity(&package, &[]);
+    assert!(full.get("selection").is_none());
+    assert_eq!(full["diagnostics"].as_array().unwrap().len(), 4);
+    let expected: Vec<_> = full["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|diagnostic| diagnostic["path"] == path)
+        .cloned()
+        .collect();
+    assert_eq!(expected.len(), 2);
+    assert_eq!(expected[0]["line"], 4);
+    assert_eq!(expected[1]["line"], 6);
+    for paths in [
+        vec!["packages/dicom-viewer"],
+        vec!["./packages//dicom-viewer/./"],
+        vec!["packages/dicom-viewer", "packages/dicom-viewer/docs"],
+        vec![path],
+    ] {
+        let result = validation_with_parity(&package, &paths);
+        assert_eq!(result["valid"], false);
+        assert_eq!(result["diagnostics"], json!(expected));
+        assert_eq!(result["selection"]["omitted_diagnostics"], 2);
+        if paths.len() == 1 && paths[0] != path {
+            assert_eq!(
+                result["selection"]["paths"],
+                json!(["packages/dicom-viewer"])
+            );
+        }
+    }
+    let combined = validation_with_parity(&package, &["packages/dicom-viewer", "packages/core"]);
+    assert_eq!(combined["diagnostics"].as_array().unwrap().len(), 3);
+    assert_eq!(combined["selection"]["omitted_diagnostics"], 1);
+
+    // An empty displayed list cannot turn an invalid project into a valid one.
+    fs::write(viewer, original).unwrap();
+    for path in ["packages/dicom-viewer", "packages/absent"] {
+        let result = validation_with_parity(&package, &[path]);
+        assert_eq!(result["valid"], false);
+        assert_eq!(result["diagnostics"], json!([]));
+        assert_eq!(result["selection"]["omitted_diagnostics"], 2);
+        let human = mara(&package, &["project", "validate", "--path", path]);
+        assert!(!human.status.success());
+        assert!(
+            stderr(&human).contains("2 diagnostics outside the selection omitted"),
+            "{}",
+            stderr(&human)
+        );
+        assert!(stderr(&human).contains("validation failed with 2 diagnostics"));
+    }
+
+    // Identity uniqueness also needs documents outside the selected package.
+    let core = fixture.path().join("packages/core/core.mara.md");
+    let content = fs::read_to_string(&core).unwrap();
+    fs::write(core, format!("{content}\n:::mara requirement REQ-VIEWER\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F04\n:title: Duplicate\n\nBody.\n:::\n")).unwrap();
+    let result = validation_with_parity(&package, &["packages/dicom-viewer"]);
+    assert_eq!(result["valid"], false);
+    let diagnostics = result["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics.len(), 1);
+    assert!(
+        diagnostics[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("duplicate item ID 'REQ-VIEWER'")
+    );
+    assert_eq!(diagnostics[0]["path"], path);
+    assert_eq!(diagnostics[0]["line"], 1);
+}
+
+#[test]
+fn directory_validation_preserves_configuration_and_incomplete_context_failures() {
+    let fixture = directory_validation_fixture();
+    let config = fixture.path().join(".mara/project.toml");
+    let original_config = fs::read_to_string(&config).unwrap();
+    fs::write(&config, format!("unexpected = true\n{original_config}")).unwrap();
+    let schema = fixture.path().join(".mara/schema.yaml");
+    let original_schema = fs::read_to_string(&schema).unwrap();
+    fs::write(&schema, format!("unexpected: true\n{original_schema}")).unwrap();
+    let result = validation_with_parity(fixture.path(), &["packages/absent"]);
+    assert_eq!(result["valid"], false);
+    assert_eq!(result["selection"]["omitted_diagnostics"], 0);
+    let diagnostics = result["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(diagnostics[0]["scope"], "project");
+    assert_eq!(diagnostics[1]["scope"], "schema");
+    assert_eq!(diagnostics[0]["path"], json!(config));
+    assert_eq!(diagnostics[1]["path"], json!(schema));
+
+    fs::write(config, original_config).unwrap();
+    fs::write(schema, original_schema).unwrap();
+    fs::write(fixture.path().join("packages/core/core.mara.md"), [0xff]).unwrap();
+    let result = validation_with_parity(fixture.path(), &["packages/dicom-viewer"]);
+    assert_eq!(result["valid"], false);
+    assert_eq!(result["diagnostics"], json!([]));
+    assert_eq!(result["selection"]["omitted_diagnostics"], 1);
+}
+
+#[test]
+fn directory_validation_rejects_invalid_paths_on_both_surfaces() {
+    let fixture = directory_validation_fixture();
+    for path in ["", ".", "./", "packages/../core", "/packages/core"] {
+        let output = mara(fixture.path(), &["project", "validate", "--path", path]);
+        assert!(!output.status.success(), "{path}");
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, "project_validate", json!({"paths":[path]})),
+            ],
+        );
+        let response = &mcp_response(&responses, 2)["result"];
+        assert_eq!(response["isError"], true, "{path}");
+        assert!(
+            response["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("path filter must be a project-relative path")
+        );
+    }
+}
+
 #[test]
 fn directory_path_filters_compose_with_ranking_and_cli_mcp_pagination() {
     let fixture = directory_retrieval_fixture();

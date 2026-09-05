@@ -69,7 +69,15 @@ enum ProjectCommand {
         #[arg(long, value_enum, default_value_t)]
         template: CliTemplate,
     },
-    Validate,
+    /// Validate the whole project, optionally selecting which diagnostics are shown.
+    Validate {
+        #[arg(
+            long = "path",
+            value_name = "PATH",
+            help = "Show diagnostics for an exact document or directory subtree (project-relative, repeatable); project/schema errors always appear; validity and exit status still cover the whole project"
+        )]
+        paths: Vec<PathBuf>,
+    },
     Transaction {
         #[command(subcommand)]
         command: ProjectTransactionCommand,
@@ -427,9 +435,9 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(true)
         }
         Command::Project {
-            command: ProjectCommand::Validate,
+            command: ProjectCommand::Validate { paths },
         } => {
-            let result = operations(project)?.project_validate()?;
+            let result = operations(project)?.project_validate(&paths)?;
             emit_validation(format, &result)
         }
         Command::Project {
@@ -1044,7 +1052,17 @@ fn print_validation(result: &ValidationResult) -> Result<(), String> {
             ),
         }
     }
-    let count = result.diagnostics.len();
+    let omitted = result
+        .selection
+        .as_ref()
+        .map_or(0, |selection| selection.omitted_diagnostics);
+    if omitted > 0 {
+        eprintln!(
+            "error: {omitted} diagnostic{} outside the selection omitted",
+            if omitted == 1 { "" } else { "s" }
+        );
+    }
+    let count = result.diagnostics.len() + omitted;
     eprintln!(
         "error: validation failed with {count} diagnostic{}",
         if count == 1 { "" } else { "s" }

@@ -31,6 +31,16 @@ struct ProjectParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct ProjectValidateParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Exact documents or directory subtrees, relative to the project root; OR across paths. Selects diagnostics only, never validation context. Example: ["packages/dicom-viewer/"].
+    #[serde(default)]
+    paths: Vec<PathBuf>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct ProjectInitParams {
     #[serde(default)]
     project: Option<PathBuf>,
@@ -331,14 +341,14 @@ impl MaraMcp {
 
     #[tool(
         name = "project_validate",
-        description = "Validate the selected Mara project and return all independently discoverable diagnostics."
+        description = "Validate the complete configured Mara project. Optional paths select reported diagnostics only; project/schema diagnostics always appear. Validity still covers the whole project, including omitted diagnostics counted in selection.omitted_diagnostics."
     )]
     fn project_validate(
         &self,
-        Parameters(params): Parameters<ProjectParams>,
+        Parameters(params): Parameters<ProjectValidateParams>,
     ) -> Result<Json<ValidationResult>, String> {
         self.for_project(params.project)?
-            .project_validate()
+            .project_validate(&params.paths)
             .map(Json)
     }
 

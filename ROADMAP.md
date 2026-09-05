@@ -35,6 +35,8 @@ evidence and priorities change; detailed behavior becomes canonical in
 - Paginate search/list results and bound summaries; offer opt-in search excerpts
   and selected-item filtering.
 - Filter search/list to exact documents or package directory subtrees.
+- Filter validation diagnostics by directory while retaining whole-project
+  context and status; see [validation reporting](docs/alpha.mara.md).
 - Bound direct-neighbour results with continuation; keep traversal
   caller-controlled.
 - Read large item bodies in bounded consecutive portions and continue relation

@@ -19,9 +19,10 @@ Current retrieval contracts are [[REQ-ITEM-SEARCH]], [[REQ-ITEM-GET]], and
 | Typo-tolerant word matching | [[REQ-FUZZY-ITEM-SEARCH]] |
 | Deterministic relevance ranking | [[REQ-SEARCH-RELEVANCE]] |
 | Exact-document and directory-subtree filters | [[REQ-ITEM-SEARCH]], [[DES-ITEM-PATH-SELECTION]] |
+| Directory-filtered validation diagnostics with whole-project status | [[REQ-PROJECT-VALIDATION]], [[DES-VALIDATION-PATH-SELECTION]] |
 
-Shared response bounds follow [[REQ-RETRIEVAL-BOUNDS]], and continuation follows
-[[DES-RETRIEVAL-CONTINUATION]]. Each capability includes CLI/MCP parity and
+Retrieval response bounds follow [[REQ-RETRIEVAL-BOUNDS]], and continuation follows
+[[DES-RETRIEVAL-CONTINUATION]]. Each retrieval capability includes CLI/MCP parity and
 focused verification through [[VER-BOUNDED-RETRIEVAL]]. Retrieval continues to serve
 [[GOAL-BOUNDED-AGENT-CONTEXT]] while preserving [[REQ-CANONICAL-SOURCE]].
 
