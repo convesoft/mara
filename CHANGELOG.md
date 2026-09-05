@@ -1,6 +1,27 @@
 # Changelog
 
 All notable changes to Mara are generated from Conventional Commit history.
+## [0.1.0-alpha.3]
+
+### Added
+
+- Paginate search results and add optional excerpts
+- Paginate direct relation results
+- Paginate item reads with consecutive fragments
+- Combine exact and typo-tolerant item search
+- Rank search results by relevance
+- Create items with initial relations atomically
+- Filter item search and list by directory
+- Filter project validation diagnostics by path
+
+### Documentation
+
+- Clarify Mara skill workflows and JSON CLI fallback
+- Investigate narrative retrieval boundaries
+
+### Fixed
+
+- Clarify CLI help and MCP input guidance
 ## [0.1.0-alpha.2]
 
 ### Added

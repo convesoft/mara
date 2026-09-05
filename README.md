@@ -14,9 +14,9 @@ baseline.
 Pin the exact version so an MCP restart cannot silently change behavior:
 
 ```bash
-npx -y @convesoft/mara@0.1.0-alpha.2 --version
-npx -y @convesoft/mara@0.1.0-alpha.2 project init ./example
-npx -y @convesoft/mara@0.1.0-alpha.2 --project ./example project validate
+npx -y @convesoft/mara@0.1.0-alpha.3 --version
+npx -y @convesoft/mara@0.1.0-alpha.3 project init ./example
+npx -y @convesoft/mara@0.1.0-alpha.3 --project ./example project validate
 ```
 
 The npm packages contain prebuilt native binaries and use no install scripts.
@@ -29,7 +29,7 @@ For a client that starts stdio servers in the project directory:
 ```toml
 [mcp_servers.mara]
 command = "npx"
-args = ["-y", "@convesoft/mara@0.1.0-alpha.2", "mcp"]
+args = ["-y", "@convesoft/mara@0.1.0-alpha.3", "mcp"]
 ```
 
 To bind the server to one project regardless of its execution directory, place
@@ -40,7 +40,7 @@ To bind the server to one project regardless of its execution directory, place
 command = "npx"
 args = [
   "-y",
-  "@convesoft/mara@0.1.0-alpha.2",
+  "@convesoft/mara@0.1.0-alpha.3",
   "mcp",
   "--project",
   "/absolute/path/to/project",
@@ -57,7 +57,7 @@ Register the installed Mara executable as an MCP server and install the Mara
 skill separately:
 
 ```bash
-codex mcp add mara -- npx -y @convesoft/mara@0.1.0-alpha.2 mcp
+codex mcp add mara -- npx -y @convesoft/mara@0.1.0-alpha.3 mcp
 npx skills add convesoft/mara --skill mara -g -a codex
 ```
 
@@ -110,6 +110,8 @@ matches. ID/MID field values use exact normalized words; item lookup and filters
 remain exact. Matching, bounds, continuation, and
 excerpts follow
 [`docs/retrieval.mara.md`](docs/retrieval.mara.md).
+Narrative outside item blocks remains accessible through file reads and file
+search; Mara MCP alone does not retrieve it.
 For existing projects whose items lack machine identities, run
 `mara project mid backfill`, then `mara project validate` before editing.
 Distribution and release guarantees are in
