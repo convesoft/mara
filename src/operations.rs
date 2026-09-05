@@ -4,8 +4,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Corpus, Diagnostic, FieldFilter, FlavourDefinition, ItemCreationRequest, ItemFilters,
-    ItemSummary, Project, RelatedFilters, RelatedItem, RelationDefinition, RelationDirection,
+    Corpus, Diagnostic, FieldFilter, FlavourDefinition, ItemCollectionResult, ItemCreationRequest,
+    ItemFilters, Project, RelatedFilters, RelatedItem, RelationDefinition, RelationDirection,
     ResolvedItem, Schema, Template, add_relation, backfill_mids, create_item, get_item,
     initialize_project, list_items, load_corpus, load_corpus_for_validation,
     load_corpus_syntax_for_validation, load_schema, load_schema_for_validation, related_items,
@@ -218,20 +218,19 @@ impl OperationContext {
 
     pub fn item_list(&self, filters: ItemFilterParams) -> Result<ItemCollectionResult, String> {
         let (corpus, schema) = self.load_query_project()?;
-        let items = list_items(&corpus, &schema, &filters.into_domain())
-            .map_err(|error| error.to_string())?;
-        Ok(ItemCollectionResult { items })
+        list_items(&corpus, &schema, &filters.into_domain()).map_err(|error| error.to_string())
     }
 
-    pub fn item_search(
-        &self,
-        query: &str,
-        filters: ItemFilterParams,
-    ) -> Result<ItemCollectionResult, String> {
+    pub fn item_search(&self, params: ItemSearchParams) -> Result<ItemCollectionResult, String> {
         let (corpus, schema) = self.load_query_project()?;
-        let items = search_items(&corpus, &schema, query, &filters.into_domain())
-            .map_err(|error| error.to_string())?;
-        Ok(ItemCollectionResult { items })
+        let (query, filters, ids, excerpts) = params.into_parts();
+        search_items(
+            &corpus,
+            &schema,
+            &query,
+            &filters.into_domain().with_search_options(ids, excerpts),
+        )
+        .map_err(|error| error.to_string())
     }
 
     pub fn item_related(&self, params: ItemRelatedParams) -> Result<RelatedItemsResult, String> {
@@ -568,6 +567,8 @@ pub struct ItemFilterParams {
     pub paths: Vec<PathBuf>,
     #[serde(default)]
     pub limit: Option<usize>,
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 impl ItemFilterParams {
@@ -582,6 +583,7 @@ impl ItemFilterParams {
             self.paths,
             self.limit,
         )
+        .with_cursor(self.cursor)
     }
 }
 
@@ -599,10 +601,16 @@ pub struct ItemSearchParams {
     pub paths: Vec<PathBuf>,
     #[serde(default)]
     pub limit: Option<usize>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub ids: Vec<String>,
+    #[serde(default)]
+    pub excerpts: bool,
 }
 
 impl ItemSearchParams {
-    pub fn into_parts(self) -> (String, ItemFilterParams) {
+    pub fn into_parts(self) -> (String, ItemFilterParams, Vec<String>, bool) {
         (
             self.query,
             ItemFilterParams {
@@ -611,14 +619,12 @@ impl ItemSearchParams {
                 relations: self.relations,
                 paths: self.paths,
                 limit: self.limit,
+                cursor: self.cursor,
             },
+            self.ids,
+            self.excerpts,
         )
     }
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ItemCollectionResult {
-    pub items: Vec<ItemSummary>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

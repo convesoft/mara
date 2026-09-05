@@ -13,6 +13,9 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{Corpus, Item, Schema, SourceLocation};
 
+mod page;
+pub use page::{ItemCollectionResult, SearchExcerpt};
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct ItemSource {
     path: PathBuf,
@@ -65,6 +68,10 @@ pub struct ItemSummary {
     title: String,
     path: PathBuf,
     line: usize,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    title_truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    excerpts: Option<Vec<SearchExcerpt>>,
 }
 
 impl ItemSummary {
@@ -91,6 +98,14 @@ impl ItemSummary {
     pub const fn line(&self) -> usize {
         self.line
     }
+
+    pub const fn title_truncated(&self) -> bool {
+        self.title_truncated
+    }
+
+    pub fn excerpts(&self) -> Option<&[SearchExcerpt]> {
+        self.excerpts.as_deref()
+    }
 }
 
 impl From<&Item> for ItemSummary {
@@ -102,6 +117,8 @@ impl From<&Item> for ItemSummary {
             title: item.title().to_owned(),
             path: item.source().path().to_path_buf(),
             line: item.source().span().start_line(),
+            title_truncated: false,
+            excerpts: None,
         }
     }
 }
@@ -174,7 +191,7 @@ impl ResolvedItem {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FieldFilter {
     name: String,
     value: String,
@@ -204,6 +221,9 @@ pub struct ItemFilters {
     relations: Vec<String>,
     paths: Vec<PathBuf>,
     limit: Option<usize>,
+    cursor: Option<String>,
+    ids: Vec<String>,
+    excerpts: bool,
 }
 
 impl ItemFilters {
@@ -220,7 +240,19 @@ impl ItemFilters {
             relations,
             paths,
             limit,
+            ..Self::default()
         }
+    }
+
+    pub fn with_cursor(mut self, cursor: Option<String>) -> Self {
+        self.cursor = cursor;
+        self
+    }
+
+    pub fn with_search_options(mut self, ids: Vec<String>, excerpts: bool) -> Self {
+        self.ids = ids;
+        self.excerpts = excerpts;
+        self
     }
 }
 
@@ -284,6 +316,9 @@ impl RelatedItem {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryError {
+    InvalidPage {
+        message: String,
+    },
     MissingItem {
         id: String,
     },
@@ -320,6 +355,7 @@ pub enum QueryError {
 impl fmt::Display for QueryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidPage { message } => formatter.write_str(message),
             Self::MissingItem { id } => write!(formatter, "item '{id}' was not found"),
             Self::AmbiguousItem { id } => write!(formatter, "item ID '{id}' is ambiguous"),
             Self::AmbiguousMid { mid } => write!(formatter, "item MID '{mid}' is ambiguous"),
@@ -405,8 +441,8 @@ pub fn list_items(
     corpus: &Corpus,
     schema: &Schema,
     filters: &ItemFilters,
-) -> Result<Vec<ItemSummary>, QueryError> {
-    filtered_items(corpus, schema, filters, None)
+) -> Result<ItemCollectionResult, QueryError> {
+    page::filtered_page(corpus, schema, filters, None)
 }
 
 pub fn search_items(
@@ -414,8 +450,8 @@ pub fn search_items(
     schema: &Schema,
     query: &str,
     filters: &ItemFilters,
-) -> Result<Vec<ItemSummary>, QueryError> {
-    filtered_items(corpus, schema, filters, Some(query))
+) -> Result<ItemCollectionResult, QueryError> {
+    page::filtered_page(corpus, schema, filters, Some(query))
 }
 
 pub fn related_items(
@@ -472,21 +508,32 @@ pub fn related_items(
     Ok(related)
 }
 
-fn filtered_items(
-    corpus: &Corpus,
+fn filtered_items<'a>(
+    corpus: &'a Corpus,
     schema: &Schema,
     filters: &ItemFilters,
     query: Option<&str>,
-) -> Result<Vec<ItemSummary>, QueryError> {
+) -> Result<Vec<&'a Item>, QueryError> {
     validate_flavours(schema, &filters.flavours)?;
     validate_relations(schema, &filters.relations)?;
     validate_fields(schema, &filters.fields)?;
     let paths = normalized_paths(&filters.paths)?;
     let fields = grouped_fields(&filters.fields);
     let query = query.map(keyword_terms);
+    let selected = filters
+        .ids
+        .iter()
+        .map(|id| resolve_item(corpus, id))
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(corpus
         .items()
+        .filter(|item| {
+            selected.is_empty()
+                || selected
+                    .iter()
+                    .any(|selected| std::ptr::eq(*selected, *item))
+        })
         .filter(|item| matches_name(&filters.flavours, item.flavour()))
         .filter(|item| paths.is_empty() || paths.iter().any(|path| path == item.source().path()))
         .filter(|item| {
@@ -498,8 +545,6 @@ fn filtered_items(
         })
         .filter(|item| matches_fields(item, &fields))
         .filter(|item| query.as_ref().is_none_or(|query| matches_text(item, query)))
-        .take(filters.limit.unwrap_or(usize::MAX))
-        .map(ItemSummary::from)
         .collect())
 }
 
@@ -594,8 +639,12 @@ fn matches_text(item: &Item, query: &BTreeSet<String>) -> bool {
 }
 
 fn keyword_terms(value: &str) -> BTreeSet<String> {
-    let canonical = value.nfc().case_fold().nfc().collect::<String>();
+    let canonical = canonical_text(value);
     canonical.unicode_words().map(ToOwned::to_owned).collect()
+}
+
+fn canonical_text(value: &str) -> String {
+    value.nfc().case_fold().nfc().collect()
 }
 
 fn matches_name(names: &[String], candidate: &str) -> bool {

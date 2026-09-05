@@ -255,13 +255,17 @@ Path filters normalize `.` components and reject absolute paths or `..`.
 Relation filters match authored relation names. Values within one filter or one
 field key combine with OR; distinct filter categories and field keys combine
 with AND. The limit applies last. Results follow document-path and source order
-and contain only ID, MID when present, flavour, title, source path, and start
-line. `item list` returns the same compact summary shape without a text query.
+and contain ID, MID when present, flavour, title, source path, and start line.
+`item list` returns the same compact summary shape without a text query.
+Search/list return bounded pages with continuation metadata under
+[[REQ-SEARCH-PAGINATION]] and [[DES-RETRIEVAL-CONTINUATION]]. Summary title
+limits and truncation markers follow [[REQ-RETRIEVAL-BOUNDS]]. Optional search
+excerpts and exact item selection follow [[DES-SEARCH-EXCERPT-OPTIONS]];
+summaries contain no body text unless excerpts are requested.
 
-This is the current matching/output baseline. Planned alpha.3 extensions are
-[[REQ-SEARCH-PAGINATION]], [[REQ-FUZZY-ITEM-SEARCH]],
-[[REQ-SEARCH-RELEVANCE]], and [[REQ-SEARCH-EXCERPTS]], with shared response
-bounds in [[REQ-RETRIEVAL-BOUNDS]].
+This is the current matching/output baseline. Fuzzy matching and relevance
+ordering remain planned in [[REQ-FUZZY-ITEM-SEARCH]] and
+[[REQ-SEARCH-RELEVANCE]].
 :::
 
 :::mara requirement REQ-ITEM-RELATED
@@ -413,15 +417,16 @@ Item movement and explicit transaction rollback follow [[DES-ITEM-MOVEMENT]].
 MCP `item_move` accepts `reference`, `file`, and optional `line`.
 
 CLI `--format json` and MCP `structuredContent` serialize the same domain result.
-Item collections use `{ "items": [...] }`. Project and item validation return
+Related-item collections use `{ "items": [...] }`; search/list collections
+follow [[DES-RETRIEVAL-CONTINUATION]]. Project and item validation return
 `valid`, `project`, `target`, and `diagnostics`; an invalid target is a completed
 result, with each diagnostic providing `scope`, optional `path` and `line`, and
 `message`. Invocation failures use `{ "error": { "message": ... } }` in CLI
 JSON and a caller-visible MCP tool error.
 
-Planned excerpt options follow [[DES-SEARCH-EXCERPT-OPTIONS]]. Alpha.3
-pagination and partial-read request/result schemas remain open in
-[[DES-RETRIEVAL-CONTINUATION]]; the collection shape above is current.
+Search excerpt options follow [[DES-SEARCH-EXCERPT-OPTIONS]]. Related-item
+pagination and partial-read schemas remain open in
+[[DES-RETRIEVAL-CONTINUATION]].
 :::
 
 :::mara design DES-DURABLE-ITEM-IDENTITIES

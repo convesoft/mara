@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use mara::{
     FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult, ItemFilterParams,
-    ItemMove, ItemMoveParams, ItemRelatedParams, ItemUpdate, ItemUpdateParams, OperationContext,
-    ProjectInitializationResult, ProjectMidBackfillResult, RelatedItemsResult, RelationDirection,
-    RelationMutationResult, RelationParams, ResolvedItem, SchemaGetResult, SchemaKind,
-    SchemaListResult, SchemaValidationResult, Template, TransactionRollbackResult,
+    ItemMove, ItemMoveParams, ItemRelatedParams, ItemSearchParams, ItemUpdate, ItemUpdateParams,
+    OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, RelatedItemsResult,
+    RelationDirection, RelationMutationResult, RelationParams, ResolvedItem, SchemaGetResult,
+    SchemaKind, SchemaListResult, SchemaValidationResult, Template, TransactionRollbackResult,
     ValidationResult,
 };
 use rmcp::{
@@ -160,7 +160,11 @@ struct ItemFilterToolParams {
     #[serde(default)]
     paths: Vec<PathBuf>,
     #[serde(default)]
+    /// Page size from 1 through 100; defaults to 20.
     limit: Option<usize>,
+    #[serde(default)]
+    /// Continue using next_cursor with the same query and options.
+    cursor: Option<String>,
 }
 
 impl ItemFilterToolParams {
@@ -173,6 +177,7 @@ impl ItemFilterToolParams {
                 relations: self.relations,
                 paths: self.paths,
                 limit: self.limit,
+                cursor: self.cursor,
             },
         )
     }
@@ -193,20 +198,33 @@ struct ItemSearchToolParams {
     #[serde(default)]
     paths: Vec<PathBuf>,
     #[serde(default)]
+    /// Page size from 1 through 100; defaults to 20.
     limit: Option<usize>,
+    #[serde(default)]
+    /// Continue using next_cursor with the same query and options.
+    cursor: Option<String>,
+    #[serde(default)]
+    /// Exact IDs or MIDs to select, intersected with other filters.
+    ids: Vec<String>,
+    #[serde(default)]
+    /// Include up to three bounded, partial source excerpts per match.
+    excerpts: bool,
 }
 
 impl ItemSearchToolParams {
-    fn into_parts(self) -> (Option<PathBuf>, String, ItemFilterParams) {
+    fn into_parts(self) -> (Option<PathBuf>, ItemSearchParams) {
         (
             self.project,
-            self.query,
-            ItemFilterParams {
+            ItemSearchParams {
+                query: self.query,
+                ids: self.ids,
+                excerpts: self.excerpts,
                 flavours: self.flavours,
                 fields: self.fields,
                 relations: self.relations,
                 paths: self.paths,
                 limit: self.limit,
+                cursor: self.cursor,
             },
         )
     }
@@ -449,7 +467,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_list",
-        description = "List deterministic compact item summaries using exact filters."
+        description = "List bounded item-summary pages in corpus order. Continue with next_cursor and unchanged options; restart after source changes."
     )]
     fn item_list(
         &self,
@@ -461,16 +479,14 @@ impl MaraMcp {
 
     #[tool(
         name = "item_search",
-        description = "Search item text and return deterministic compact summaries with optional exact filters."
+        description = "Search whole words in corpus order with exact filters and bounded pages. Optional ids select items; excerpts include partial source passages. Continue with next_cursor and unchanged options; restart after source changes."
     )]
     fn item_search(
         &self,
         Parameters(params): Parameters<ItemSearchToolParams>,
     ) -> Result<Json<ItemCollectionResult>, String> {
-        let (project, query, filters) = params.into_parts();
-        self.for_project(project)?
-            .item_search(&query, filters)
-            .map(Json)
+        let (project, params) = params.into_parts();
+        self.for_project(project)?.item_search(params).map(Json)
     }
 
     #[tool(
