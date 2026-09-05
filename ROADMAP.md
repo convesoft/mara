@@ -23,14 +23,14 @@ evidence and priorities change; detailed behavior becomes canonical in
 - Verify the primary Codex workflow through manual MCP registration and
   separate skill installation. Keep complete-plugin installation optional.
 
-### 0.1.0-alpha.2 — Durable identity and editing (current)
+### 0.1.0-alpha.2 — Durable identity and editing
 
 - Introduce immutable machine identities with deliberate backfill.
 - Add safe structured update, move, rename, and delete operations.
 - Preserve relation and validation integrity throughout lifecycle changes.
 - Clarify the alpha.3 retrieval scope in canonical documents before release.
 
-### 0.1.0-alpha.3 — Enhanced deterministic retrieval
+### 0.1.0-alpha.3 — Enhanced deterministic retrieval (current)
 
 - Paginate search/list results and bound summaries; offer opt-in search excerpts
   and selected-item filtering.
