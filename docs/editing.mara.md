@@ -96,10 +96,11 @@ Stop other Mara writers, then run `mara project transaction rollback` (with
 `--project` when needed), or MCP `project_transaction_rollback`. Recovery takes
 the same exclusive lock and does not require a valid corpus or schema. It
 checks every current target against its recorded preimage or candidate and
-checks recorded permissions before restoring any file. Stage all originals,
-restore existing files, remove destinations whose `before` was null, then
-remove the journal. Recovery can be retried after interruption; no journal is
-a successful no-op.
+checks recorded permissions before restoring any file: compare `readonly` on
+all platforms, and compare `unix_mode` only on Unix when the journal supplies
+it. Stage all originals, restore existing files, remove destinations whose
+`before` was null, then remove the journal. Recovery can be retried after
+interruption; no journal is a successful no-op.
 
 If a target differs from both recorded versions, preserve the manual edits and
 journal, reconcile the file to its recorded preimage or candidate (including

@@ -85,6 +85,18 @@ impl FileMode {
         }
     }
 
+    fn matches(&self, permissions: Permissions) -> bool {
+        if self.readonly != permissions.readonly() {
+            return false;
+        }
+        #[cfg(unix)]
+        if let Some(mode) = self.unix_mode {
+            use std::os::unix::fs::PermissionsExt;
+            return mode == permissions.mode();
+        }
+        true
+    }
+
     fn apply(&self, file: &File) -> io::Result<()> {
         let mut permissions = file.metadata()?.permissions();
         #[cfg(unix)]
@@ -141,10 +153,8 @@ impl Change {
         let current = read_optional(&absolute)?;
         if current == self.before || (allow_after && current.as_deref() == Some(&self.after)) {
             if let Some(mode) = &self.mode {
-                let actual = FileMode::from_permissions(
-                    io_at(&absolute, fs::metadata(&absolute))?.permissions(),
-                );
-                if actual != *mode {
+                let permissions = io_at(&absolute, fs::metadata(&absolute))?.permissions();
+                if !mode.matches(permissions) {
                     return invalid(format!(
                         "permissions of '{}' changed since preflight; restore recorded permissions before retrying rollback",
                         self.path.display()
@@ -556,17 +566,61 @@ mod tests {
             let mut damaged = value.clone();
             damaged["changes"][0].as_object_mut().unwrap().remove(field);
             fs::write(project.root().join(JOURNAL), damaged.to_string()).unwrap();
-            assert!(
-                rollback_transaction(&project)
-                    .unwrap_err()
-                    .to_string()
-                    .contains("missing field")
-            );
+            let error = rollback_transaction(&project).unwrap_err().to_string();
+            assert!(error.contains("missing field"), "{error}");
             assert_eq!(
                 fs::read_to_string(project.root().join("a.mara.md")).unwrap(),
                 "original a\r\n"
             );
             assert!(project.root().join(JOURNAL).exists());
+        }
+    }
+
+    #[test]
+    fn rollback_still_rejects_mismatched_recorded_permissions() {
+        let (_directory, project) = fixture();
+        let journal = Journal {
+            format_version: 1,
+            changes: changes(&project, false),
+        };
+        let original = serde_json::to_value(&journal).unwrap();
+        let mut readonly_mismatch = original.clone();
+        let mode = readonly_mismatch["changes"][0]["mode"]
+            .as_object_mut()
+            .unwrap();
+        let readonly = mode["readonly"].as_bool().unwrap();
+        mode.insert("readonly".into(), serde_json::json!(!readonly));
+        mode.remove("unix_mode");
+        let mismatches = vec![readonly_mismatch];
+        #[cfg(unix)]
+        let mismatches = {
+            let mut mismatches = mismatches;
+            let mut mode_mismatch = original;
+            let mode = mode_mismatch["changes"][0]["mode"]["unix_mode"]
+                .as_u64()
+                .unwrap();
+            // Change an execute bit without changing the portable readonly value.
+            mode_mismatch["changes"][0]["mode"]["unix_mode"] = serde_json::json!(mode ^ 0o100);
+            mismatches.push(mode_mismatch);
+            mismatches
+        };
+        for mismatch in mismatches {
+            fs::write(project.root().join(JOURNAL), mismatch.to_string()).unwrap();
+            let error = rollback_transaction(&project).unwrap_err().to_string();
+            assert!(error.contains("permissions"), "{error}");
+            assert!(MutationLock::acquire(&project).is_err());
+            assert_eq!(
+                fs::read_to_string(project.root().join("a.mara.md")).unwrap(),
+                "original a\r\n"
+            );
+            assert_eq!(
+                fs::read_to_string(project.root().join("b.mara.md")).unwrap(),
+                "original b\n"
+            );
+            assert_eq!(
+                fs::read_to_string(project.root().join(JOURNAL)).unwrap(),
+                mismatch.to_string()
+            );
         }
     }
 

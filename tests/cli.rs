@@ -4032,12 +4032,25 @@ fn pending_transaction_blocks_cli_and_mcp_mutations_and_exposes_recovery_errors(
 
 #[test]
 fn transaction_rollback_cli_and_mcp_restore_real_files_and_are_idempotent() {
+    assert_transaction_rollback_cli_and_mcp(true);
+}
+
+#[test]
+fn transaction_rollback_cli_and_mcp_accept_permissions_without_unix_mode() {
+    assert_transaction_rollback_cli_and_mcp(false);
+}
+
+fn assert_transaction_rollback_cli_and_mcp(include_unix_mode: bool) {
     let (fixture, source, _) = move_fixture();
     let metadata = fs::metadata(fixture.path().join("source.mara.md")).unwrap();
     let mut mode = json!({"readonly": metadata.permissions().readonly()});
-    #[cfg(unix)]
-    {
-        mode["unix_mode"] = json!(metadata.permissions().mode());
+    if include_unix_mode {
+        #[cfg(unix)]
+        let unix_mode = metadata.permissions().mode();
+        // A Unix journal must also recover on platforms without Unix permissions.
+        #[cfg(not(unix))]
+        let unix_mode = 0o100600;
+        mode["unix_mode"] = json!(unix_mode);
     }
     let journal = json!({"format_version": 1, "changes": [
         {"path": "source.mara.md", "before": source, "after": "", "mode": mode},
