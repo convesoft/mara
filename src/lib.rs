@@ -22,17 +22,17 @@ pub use corpus::{
 };
 pub use mutation::{
     BackfilledMid, BackfilledMids, ItemCreation, ItemCreationRequest, ItemLocation, ItemMove,
-    RelationMutation, TransactionRollback, add_relation, backfill_mids, create_item, move_item,
-    remove_relation, rollback_transaction,
+    ItemUpdate, RelationMutation, TransactionRollback, add_relation, backfill_mids, create_item,
+    move_item, remove_relation, rollback_transaction, update_item,
 };
 pub use operations::{
     DeclarationSummary, FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult,
     ItemFilterParams, ItemIdParams, ItemMoveParams, ItemRelatedParams, ItemSearchParams,
-    OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, ProjectSummary,
-    RelatedItemsResult, RelationAction, RelationMutationResult, RelationParams, SchemaGetResult,
-    SchemaKind, SchemaListResult, SchemaValidationResult, TransactionRollbackResult,
-    ValidationDiagnostic, ValidationResult, ValidationScope, ValidationTarget,
-    ValidationTargetKind, project_initialize,
+    ItemUpdateParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
+    ProjectSummary, RelatedItemsResult, RelationAction, RelationMutationResult, RelationParams,
+    SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult,
+    TransactionRollbackResult, ValidationDiagnostic, ValidationResult, ValidationScope,
+    ValidationTarget, ValidationTargetKind, project_initialize,
 };
 pub use query::{
     FieldFilter, ItemFilters, ItemSource, ItemSummary, MetadataValue, QueryError, RelatedFilters,
