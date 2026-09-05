@@ -7,4 +7,5 @@ documents only when a current user workflow requires them.
 
 - [First alpha](alpha.mara.md)
 - [Item editing and recovery](editing.mara.md)
+- [Enhanced deterministic retrieval (planned alpha.3)](retrieval.mara.md)
 - [Distribution and release](distribution.mara.md)
