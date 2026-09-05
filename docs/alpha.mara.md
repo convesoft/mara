@@ -235,6 +235,12 @@ declarations and targets, and supported wiki mentions by human ID or MID.
 Broken relations and mentions are errors. Mara reports every independently
 discoverable diagnostic with an actionable source location and skips only checks
 whose prerequisites are invalid.
+
+Callers may select document diagnostics by project-relative paths while all
+validation checks retain the complete configured project context. Whole-project
+validity and CLI exit status include diagnostics omitted by selection; project
+and schema diagnostics remain visible. Reporting follows
+[[DES-VALIDATION-PATH-SELECTION]].
 :::
 
 :::mara requirement REQ-ITEM-GET
@@ -549,3 +555,53 @@ graphical interface remain deferred. Manual source editing followed by validatio
 remains supported alongside structured updates, movement, renaming, and deletion.
 Current and planned alpha.3 retrieval behavior is defined in
 [Enhanced deterministic retrieval](retrieval.mara.md).
+
+:::mara design DES-VALIDATION-PATH-SELECTION
+:mid: 01M1SBWDCNK751E3KE1PY3FS61
+:title: Select validation diagnostics without narrowing project context
+:satisfies: REQ-PROJECT-VALIDATION
+:satisfies: REQ-SURFACE-PARITY
+
+CLI `project validate` accepts repeatable `--path`; MCP `project_validate`
+accepts `paths`. Selection follows the matching, normalization, rejection, and
+OR rules of [[DES-ITEM-PATH-SELECTION]], including exact-document selection.
+Paths are project-relative even when discovery starts inside a package.
+
+Validate the complete configured corpus under [[DES-PROJECT-CONFIGURATION]]
+before selecting diagnostics. Cross-package references and project-wide identity
+checks retain their full context. Keep diagnostics whose source path matches a
+selection, preserving original paths, lines, and order. Always keep project and
+schema diagnostics and diagnostics without a source path. Other diagnostics,
+including discovery or read failures outside the selection, are omitted from
+the displayed list but still affect whole-project validity.
+
+For filtered calls, JSON and MCP add `selection` with normalized `paths` and
+`omitted_diagnostics`, the number of diagnostics removed from the full result.
+`valid` always describes the whole project; CLI exits successfully only when
+that full result is valid. Human output reports the omitted count when nonzero,
+including when the displayed list is empty. Omitting paths or passing an empty
+MCP array preserves the existing unfiltered result shape and behavior. A path
+matching no documents produces no matching document diagnostics, not an error
+or proof that the project is valid. Item validation is unchanged.
+
+For a monorepo with one root configuration, run
+`mara project validate --path packages/dicom-viewer/`; the equivalent MCP call
+is `project_validate` with `{"paths":["packages/dicom-viewer/"]}` and the same
+project. A valid target in `packages/core/` still resolves. A broken reference
+originating in the viewer appears with its source location. An unrelated error
+in core is counted as omitted and still makes `valid` false and CLI exit fail.
+:::
+
+:::mara decision ADR-FILTERED-VALIDATION-STATUS
+:mid: 01M1SBWDCY5CVG6DHZ87XE9HAK
+:title: Keep filtered validation status tied to the whole project
+:justifies: DES-VALIDATION-PATH-SELECTION
+
+Use whole-project validity and CLI exit status for filtered project validation,
+as defined in [[DES-VALIDATION-PATH-SELECTION]]. A directory filter selects
+reported diagnostics; it does not establish a separate package validation
+boundary. Retaining the existing meaning of `valid` prevents an empty selection
+from reporting success while errors elsewhere invalidate the project. Report
+the omitted count so failure remains understandable without displaying those
+diagnostics. Separate package and project validity results are not introduced.
+:::

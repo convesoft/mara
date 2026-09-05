@@ -614,7 +614,7 @@ fn validate_fields(schema: &Schema, fields: &[FieldFilter]) -> Result<(), QueryE
     Ok(())
 }
 
-fn normalized_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, QueryError> {
+pub(crate) fn normalized_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, QueryError> {
     paths
         .iter()
         .map(|path| {

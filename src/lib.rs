@@ -32,7 +32,7 @@ pub use operations::{
     ItemUpdateParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
     ProjectSummary, RelationAction, RelationMutationResult, RelationParams, SchemaGetResult,
     SchemaKind, SchemaListResult, SchemaValidationResult, TransactionRollbackResult,
-    ValidationDiagnostic, ValidationResult, ValidationScope, ValidationTarget,
+    ValidationDiagnostic, ValidationResult, ValidationScope, ValidationSelection, ValidationTarget,
     ValidationTargetKind, project_initialize,
 };
 pub use query::{

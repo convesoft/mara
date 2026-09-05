@@ -62,8 +62,25 @@ impl OperationContext {
         )
     }
 
-    pub fn project_validate(&self) -> Result<ValidationResult, String> {
-        self.validate(None)
+    pub fn project_validate(&self, paths: &[PathBuf]) -> Result<ValidationResult, String> {
+        let paths = crate::query::normalized_paths(paths).map_err(|error| error.to_string())?;
+        let mut result = self.validate(None)?;
+        if !paths.is_empty() {
+            let total = result.diagnostics.len();
+            // Selection changes reporting only; validity was computed over the full corpus.
+            result.diagnostics.retain(|diagnostic| {
+                !matches!(diagnostic.scope, ValidationScope::Document)
+                    || diagnostic
+                        .path
+                        .as_ref()
+                        .is_none_or(|source| paths.iter().any(|path| source.starts_with(path)))
+            });
+            result.selection = Some(ValidationSelection {
+                paths,
+                omitted_diagnostics: total - result.diagnostics.len(),
+            });
+        }
+        Ok(result)
     }
 
     pub fn project_mid_backfill(&self) -> Result<ProjectMidBackfillResult, String> {
@@ -742,10 +759,21 @@ pub struct ValidationDiagnostic {
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ValidationResult {
+    /// Validity of the target; project validity includes diagnostics omitted by path selection.
     pub valid: bool,
     pub project: PathBuf,
     pub target: ValidationTarget,
     pub diagnostics: Vec<ValidationDiagnostic>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection: Option<ValidationSelection>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ValidationSelection {
+    /// Normalized project-relative paths selecting diagnostics, not validation context.
+    pub paths: Vec<PathBuf>,
+    /// Diagnostics outside the selection, still included in whole-project validity.
+    pub omitted_diagnostics: usize,
 }
 
 struct ValidationContext {
@@ -843,6 +871,7 @@ fn collect_validation_result(
             id: selected.map(str::to_owned),
         },
         diagnostics,
+        selection: None,
     }
 }
 
