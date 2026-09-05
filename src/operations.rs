@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Corpus, Diagnostic, FieldFilter, FlavourDefinition, ItemCollectionResult, ItemCreationRequest,
-    ItemFilters, Project, RelatedFilters, RelatedItem, RelationDefinition, RelationDirection,
-    ResolvedItem, Schema, Template, add_relation, backfill_mids, create_item, get_item,
-    initialize_project, list_items, load_corpus, load_corpus_for_validation,
+    ItemFilters, Project, RelatedFilters, RelatedItemsResult, RelationDefinition,
+    RelationDirection, ResolvedItem, Schema, Template, add_relation, backfill_mids, create_item,
+    get_item, initialize_project, list_items, load_corpus, load_corpus_for_validation,
     load_corpus_syntax_for_validation, load_schema, load_schema_for_validation, related_items,
     remove_relation, resolve_project, resolve_project_for_validation, search_items,
     validate_corpus, validate_corpus_independent,
@@ -235,10 +235,9 @@ impl OperationContext {
 
     pub fn item_related(&self, params: ItemRelatedParams) -> Result<RelatedItemsResult, String> {
         let (corpus, schema) = self.load_query_project()?;
-        let filters = RelatedFilters::new(params.direction, params.relations, params.flavours);
-        let items = related_items(&corpus, &schema, &params.id, &filters)
-            .map_err(|error| error.to_string())?;
-        Ok(RelatedItemsResult { items })
+        let filters = RelatedFilters::new(params.direction, params.relations, params.flavours)
+            .with_page(params.limit, params.cursor);
+        related_items(&corpus, &schema, &params.id, &filters).map_err(|error| error.to_string())
     }
 
     pub fn relation_add(&self, params: RelationParams) -> Result<RelationMutationResult, String> {
@@ -643,11 +642,10 @@ pub struct ItemRelatedParams {
     pub relations: Vec<String>,
     #[serde(default)]
     pub flavours: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct RelatedItemsResult {
-    pub items: Vec<RelatedItem>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]

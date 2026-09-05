@@ -126,6 +126,414 @@ fn mcp_response(responses: &[Value], id: u64) -> &Value {
 }
 
 #[test]
+fn related_pages_continue_in_order_with_filters_and_cli_mcp_parity() {
+    let fixture = retrieval_fixture();
+    let mut source = String::from(":::mara requirement REQ-HUB\n:title: Hub\n");
+    // Deliberately reverse outgoing order; each neighbour also links back twice.
+    for i in (0..43).rev() {
+        source.push_str(&format!(":depends_on: REQ-NEIGHBOUR-{i}\n"));
+    }
+    source.push_str("\nHub body.\n:::\n\n");
+    for i in 0..43 {
+        source.push_str(&format!(":::mara requirement REQ-NEIGHBOUR-{i}\n:title: Neighbour {i}\n:depends_on: REQ-HUB\n:supersedes: REQ-HUB\n\nNeighbour body.\n:::\n\n"));
+    }
+    fs::write(fixture.path().join("docs/neighbours.mara.md"), source).unwrap();
+    let backfill = mara(fixture.path(), &["project", "mid", "backfill"]);
+    assert!(backfill.status.success(), "{}", stderr(&backfill));
+    for filtered in [false, true] {
+        let mut cursor: Option<String> = None;
+        let mut actual = Vec::new();
+        let mut requests = vec![
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+        ];
+        let mut pages = Vec::new();
+        loop {
+            assert!(pages.len() < 30, "continuation must make progress");
+            let mut args = vec![
+                "--format", "json", "item", "related", "REQ-HUB", "--limit", "7",
+            ];
+            let mut params = json!({"id":"REQ-HUB", "limit":7});
+            if filtered {
+                args.extend([
+                    "--direction",
+                    "incoming",
+                    "--relation",
+                    "supersedes",
+                    "--flavour",
+                    "requirement",
+                ]);
+                params["direction"] = json!("incoming");
+                params["relations"] = json!(["supersedes"]);
+                params["flavours"] = json!(["requirement"]);
+            }
+            if let Some(cursor) = &cursor {
+                args.extend(["--cursor", cursor]);
+                params["cursor"] = json!(cursor);
+            }
+            let output = mara(fixture.path(), &args);
+            assert!(output.status.success(), "{}", stdout(&output));
+            let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let items = page["items"].as_array().unwrap();
+            assert!(!items.is_empty() && items.len() <= 7);
+            for entry in items {
+                assert!(is_mid(entry["item"]["mid"].as_str().unwrap()));
+                assert!(entry["item"].get("body").is_none());
+                assert!(entry["item"].get("excerpts").is_none());
+                actual.push((
+                    entry["direction"].as_str().unwrap().to_owned(),
+                    entry["relation"].as_str().unwrap().to_owned(),
+                    entry["item"]["id"].as_str().unwrap().to_owned(),
+                ));
+            }
+            requests.push(mcp_call(pages.len() as u64 + 2, "item_related", params));
+            assert_eq!(page["has_more"], !page["next_cursor"].is_null());
+            cursor = page["next_cursor"].as_str().map(ToOwned::to_owned);
+            pages.push(page);
+            if cursor.is_none() {
+                break;
+            }
+        }
+        let responses = mcp_exchange(fixture.path(), &requests);
+        for (i, page) in pages.iter().enumerate() {
+            assert_eq!(
+                &mcp_response(&responses, i as u64 + 2)["result"]["structuredContent"],
+                page
+            );
+        }
+        let mut expected = Vec::new();
+        if !filtered {
+            for i in (0..43).rev() {
+                expected.push((
+                    "outgoing".to_owned(),
+                    "depends_on".to_owned(),
+                    format!("REQ-NEIGHBOUR-{i}"),
+                ));
+            }
+        }
+        for i in 0..43 {
+            for relation in if filtered {
+                vec!["supersedes"]
+            } else {
+                vec!["depends_on", "supersedes"]
+            } {
+                expected.push((
+                    "incoming".to_owned(),
+                    relation.to_owned(),
+                    format!("REQ-NEIGHBOUR-{i}"),
+                ));
+            }
+        }
+        assert_eq!(actual, expected);
+    }
+    let output = mara(
+        fixture.path(),
+        &["--format", "json", "item", "related", "REQ-HUB"],
+    );
+    let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(page["items"].as_array().unwrap().len(), 20);
+    assert_eq!(page["has_more"], true);
+}
+
+#[test]
+fn related_pages_reject_changed_inputs_and_invalid_continuation() {
+    let fixture = retrieval_fixture();
+    let first = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "related",
+            "REQ-ALPHA",
+            "--limit",
+            "1",
+        ],
+    );
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+    for args in [
+        vec![
+            "item",
+            "related",
+            "REQ-ALPHA",
+            "--limit",
+            "2",
+            "--cursor",
+            cursor,
+        ],
+        vec![
+            "item", "related", "SCN-BASE", "--limit", "1", "--cursor", cursor,
+        ],
+        vec![
+            "item",
+            "related",
+            "REQ-ALPHA",
+            "--limit",
+            "1",
+            "--direction",
+            "incoming",
+            "--cursor",
+            cursor,
+        ],
+        vec![
+            "item",
+            "related",
+            "REQ-ALPHA",
+            "--limit",
+            "1",
+            "--relation",
+            "satisfies",
+            "--cursor",
+            cursor,
+        ],
+        vec![
+            "item",
+            "related",
+            "REQ-ALPHA",
+            "--limit",
+            "1",
+            "--flavour",
+            "design",
+            "--cursor",
+            cursor,
+        ],
+        vec!["item", "list", "--limit", "1", "--cursor", cursor],
+        vec!["item", "related", "REQ-ALPHA", "--cursor", "malformed"],
+    ] {
+        let output = mara(fixture.path(), &args);
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("restart"), "{}", stderr(&output));
+    }
+    for position in ["0000000000000000", "ffffffffffffffff"] {
+        let invalid_cursor = format!("{}{position}", &cursor[..19]);
+        let output = mara(
+            fixture.path(),
+            &[
+                "item",
+                "related",
+                "REQ-ALPHA",
+                "--limit",
+                "1",
+                "--cursor",
+                &invalid_cursor,
+            ],
+        );
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("restart"));
+    }
+    for limit in ["0", "101"] {
+        let output = mara(
+            fixture.path(),
+            &["item", "related", "REQ-ALPHA", "--limit", limit],
+        );
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("1 through 100"));
+    }
+    for relative in ["docs/a.mara.md", ".mara/schema.yaml"] {
+        let path = fixture.path().join(relative);
+        let original = fs::read_to_string(&path).unwrap();
+        let changed = if relative.ends_with("yaml") {
+            original.replace("[draft, accepted]", "[draft, accepted, reviewed]")
+        } else {
+            format!("Narrative edit.\n{original}")
+        };
+        fs::write(&path, changed).unwrap();
+        let output = mara(
+            fixture.path(),
+            &[
+                "item",
+                "related",
+                "REQ-ALPHA",
+                "--limit",
+                "1",
+                "--cursor",
+                cursor,
+            ],
+        );
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("restart"));
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(
+                    2,
+                    "item_related",
+                    json!({"id":"REQ-ALPHA","limit":1,"cursor":cursor}),
+                ),
+                mcp_call(
+                    3,
+                    "item_related",
+                    json!({"id":"REQ-ALPHA","cursor":"malformed"}),
+                ),
+                mcp_call(4, "item_related", json!({"id":"REQ-ALPHA","limit":101})),
+            ],
+        );
+        for id in [2, 3, 4] {
+            assert_eq!(mcp_response(&responses, id)["result"]["isError"], true);
+        }
+        fs::write(path, original).unwrap();
+        let restored = mara(
+            fixture.path(),
+            &[
+                "--format",
+                "json",
+                "item",
+                "related",
+                "REQ-ALPHA",
+                "--limit",
+                "1",
+                "--cursor",
+                cursor,
+            ],
+        );
+        assert!(restored.status.success(), "{}", stdout(&restored));
+        let page: Value = serde_json::from_slice(&restored.stdout).unwrap();
+        assert_eq!(page["items"][0]["direction"], "incoming");
+        assert_eq!(page["has_more"], false);
+        assert!(page["next_cursor"].is_null());
+    }
+}
+
+#[test]
+fn related_pages_bound_escaped_unicode_titles_and_preserve_every_entry() {
+    let fixture = retrieval_fixture();
+    let title = "界\"\\".repeat(200);
+    let source = (0..100).map(|i| format!(":::mara design DES-BUDGET-{i}\n:title: {title}\n:satisfies: REQ-ALPHA\n\nBody.\n:::\n\n")).collect::<String>();
+    fs::write(fixture.path().join("docs/budget.mara.md"), source).unwrap();
+    let mut cursor: Option<String> = None;
+    let mut ids = Vec::new();
+    let mut pages = 0;
+    loop {
+        assert!(pages < 10);
+        let mut args = vec![
+            "--format",
+            "json",
+            "item",
+            "related",
+            "REQ-ALPHA",
+            "--direction",
+            "incoming",
+            "--limit",
+            "100",
+        ];
+        let mut params = json!({"id":"REQ-ALPHA", "direction":"incoming", "limit":100});
+        if let Some(cursor) = &cursor {
+            args.extend(["--cursor", cursor]);
+            params["cursor"] = json!(cursor);
+        }
+        let output = mara(fixture.path(), &args);
+        assert!(output.status.success(), "{}", stdout(&output));
+        assert!(output.stdout.len() - 1 <= 65_536);
+        let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, "item_related", params),
+            ],
+        );
+        assert_eq!(
+            mcp_response(&responses, 2)["result"]["structuredContent"],
+            page
+        );
+        if pages == 0 {
+            assert!(page["items"].as_array().unwrap().len() < 100);
+        }
+        for entry in page["items"].as_array().unwrap() {
+            let item = &entry["item"];
+            if item["id"] != "DES-ALPHA" {
+                assert_eq!(item["title_truncated"], true);
+                assert_eq!(item["title"], title.chars().take(256).collect::<String>());
+            }
+            ids.push(item["id"].as_str().unwrap().to_owned());
+        }
+        pages += 1;
+        cursor = page["next_cursor"].as_str().map(ToOwned::to_owned);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    let mut expected = vec!["DES-ALPHA".to_owned()];
+    expected.extend((0..100).map(|i| format!("DES-BUDGET-{i}")));
+    assert_eq!(ids, expected);
+    let human = mara(
+        fixture.path(),
+        &["item", "related", "REQ-ALPHA", "--direction", "incoming"],
+    );
+    assert!(stdout(&human).contains(" [title truncated]"));
+    assert!(stdout(&human).contains("page\thas_more=true\tnext_cursor="));
+    let full = mara(
+        fixture.path(),
+        &["--format", "json", "item", "get", "DES-BUDGET-0"],
+    );
+    let full: Value = serde_json::from_slice(&full.stdout).unwrap();
+    assert_eq!(full["summary"]["title"], title);
+}
+
+#[test]
+fn related_pages_fail_on_an_oversized_entry_without_skipping_it() {
+    let fixture = retrieval_fixture();
+    let long_id = format!("DES-{}", "A".repeat(66_000));
+    fs::write(
+        fixture.path().join("docs/oversized.mara.md"),
+        format!(
+            ":::mara design {long_id}\n:title: Huge identity\n:satisfies: REQ-ALPHA\n\nBody.\n:::\n"
+        ),
+    )
+    .unwrap();
+    let args = [
+        "--format",
+        "json",
+        "item",
+        "related",
+        "REQ-ALPHA",
+        "--direction",
+        "incoming",
+    ];
+    let output = mara(fixture.path(), &args);
+    assert!(output.status.success(), "{}", stdout(&output));
+    let first: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(first["items"].as_array().unwrap().len(), 1);
+    assert_eq!(first["items"][0]["item"]["id"], "DES-ALPHA");
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let output = mara(
+        fixture.path(),
+        &[
+            "item",
+            "related",
+            "REQ-ALPHA",
+            "--direction",
+            "incoming",
+            "--cursor",
+            cursor,
+        ],
+    );
+    assert!(!output.status.success());
+    assert!(stdout(&output).is_empty());
+    assert!(stderr(&output).contains("shorten oversized identity/location fields"));
+    assert!(output.stderr.len() < 1024);
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "item_related",
+                json!({"id":"REQ-ALPHA", "direction":"incoming", "cursor":cursor}),
+            ),
+        ],
+    );
+    let result = &mcp_response(&responses, 2)["result"];
+    assert_eq!(result["isError"], true);
+    assert!(serde_json::to_vec(result).unwrap().len() < 1024);
+}
+
+#[test]
 fn bounded_search_and_list_continue_completely_with_cli_mcp_parity() {
     let fixture = retrieval_fixture();
     let source = (0..45)
@@ -3576,7 +3984,7 @@ fn item_related_returns_filtered_direct_neighbours_with_relation_and_direction()
     assert!(related.status.success(), "{}", stderr(&related));
     assert_eq!(
         stdout(&related),
-        "outgoing\tderives_from\tSCN-BASE\tscenario\tBase scenario\tdocs/a.mara.md:1\nincoming\tsatisfies\tDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\n"
+        "outgoing\tderives_from\tSCN-BASE\tscenario\tBase scenario\tdocs/a.mara.md:1\nincoming\tsatisfies\tDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\npage\thas_more=false\n"
     );
 
     let incoming = mara(
@@ -3596,7 +4004,7 @@ fn item_related_returns_filtered_direct_neighbours_with_relation_and_direction()
     assert!(incoming.status.success(), "{}", stderr(&incoming));
     assert_eq!(
         stdout(&incoming),
-        "incoming\tsatisfies\tDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\n"
+        "incoming\tsatisfies\tDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\npage\thas_more=false\n"
     );
 
     let no_match = mara(
@@ -3612,7 +4020,7 @@ fn item_related_returns_filtered_direct_neighbours_with_relation_and_direction()
         ],
     );
     assert!(no_match.status.success(), "{}", stderr(&no_match));
-    assert!(stdout(&no_match).is_empty());
+    assert_eq!(stdout(&no_match), "page\thas_more=false\n");
 }
 
 #[test]

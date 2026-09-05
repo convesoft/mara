@@ -281,7 +281,7 @@ are repeatable. Outgoing results precede incoming results, with each group in
 corpus and authored relation order. Full bodies require explicit `item get`
 calls.
 
-Planned alpha.3 continuation follows [[REQ-RELATED-PAGINATION]]. Each call
+Bounded pagination follows [[REQ-RELATED-PAGINATION]]. Each call
 remains direct-neighbour retrieval; the caller selects further items to read.
 :::
 
@@ -417,16 +417,15 @@ Item movement and explicit transaction rollback follow [[DES-ITEM-MOVEMENT]].
 MCP `item_move` accepts `reference`, `file`, and optional `line`.
 
 CLI `--format json` and MCP `structuredContent` serialize the same domain result.
-Related-item collections use `{ "items": [...] }`; search/list collections
-follow [[DES-RETRIEVAL-CONTINUATION]]. Project and item validation return
+Search/list and related-item collections follow [[DES-RETRIEVAL-CONTINUATION]].
+Project and item validation return
 `valid`, `project`, `target`, and `diagnostics`; an invalid target is a completed
 result, with each diagnostic providing `scope`, optional `path` and `line`, and
 `message`. Invocation failures use `{ "error": { "message": ... } }` in CLI
 JSON and a caller-visible MCP tool error.
 
-Search excerpt options follow [[DES-SEARCH-EXCERPT-OPTIONS]]. Related-item
-pagination and partial-read schemas remain open in
-[[DES-RETRIEVAL-CONTINUATION]].
+Search excerpt options follow [[DES-SEARCH-EXCERPT-OPTIONS]]. Partial item-read
+schemas remain open in [[DES-RETRIEVAL-CONTINUATION]].
 :::
 
 :::mara design DES-DURABLE-ITEM-IDENTITIES

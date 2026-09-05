@@ -242,6 +242,12 @@ struct ItemRelatedToolParams {
     relations: Vec<String>,
     #[serde(default)]
     flavours: Vec<String>,
+    /// Page size from 1 through 100; defaults to 20.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Continue using next_cursor with the same item and options.
+    #[serde(default)]
+    cursor: Option<String>,
 }
 
 impl ItemRelatedToolParams {
@@ -253,6 +259,8 @@ impl ItemRelatedToolParams {
                 direction: self.direction,
                 relations: self.relations,
                 flavours: self.flavours,
+                limit: self.limit,
+                cursor: self.cursor,
             },
         )
     }
@@ -491,7 +499,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_related",
-        description = "List direct incoming or outgoing neighbours of one item with optional exact filters."
+        description = "List bounded pages of direct incoming or outgoing relation entries with exact filters. Continue with next_cursor and unchanged item/options; restart after source changes. Neighbour bodies require item_get."
     )]
     fn item_related(
         &self,

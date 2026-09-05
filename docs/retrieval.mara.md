@@ -5,8 +5,9 @@
 :title: Define the alpha 3 retrieval boundary
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
-This is the accepted scope for 0.1.0-alpha.3. Search/list pagination and search
-excerpts are implemented; the other capabilities below remain planned.
+This is the accepted scope for 0.1.0-alpha.3. Search/list pagination, search
+excerpts, and direct-neighbour pagination are implemented; the other
+capabilities below remain planned.
 Current retrieval contracts are [[REQ-ITEM-SEARCH]], [[REQ-ITEM-GET]], and
 [[REQ-ITEM-RELATED]]. Open choices in the planned contracts must be settled
 before implementation; no search library is selected here.
@@ -51,18 +52,20 @@ preserve complete item handles for subsequent retrieval. Full titles remain
 retrievable through item get. Bounds must handle Unicode and oversized single
 lines without presenting omitted content as complete.
 
-Search/list pages default to 20 items and accept `limit` from 1 through 100.
-Each serialized JSON domain result is at most 65,536 UTF-8 bytes, including
-JSON escaping and pagination metadata; CLI framing and MCP transport wrappers
+Search/list and related pages default to 20 entries and accept `limit` from
+1 through 100. Each serialized JSON domain result is at most 65,536 UTF-8 bytes,
+including JSON escaping and pagination metadata; CLI framing and MCP transport wrappers
 are outside that budget. The byte budget may shorten a page before its count
 limit. Summary titles retain at most 256 Unicode scalar values and carry
 `title_truncated: true` when shortened; human output appends `[title truncated]`.
-Complete IDs, MIDs, flavours, and paths are preserved. If one entry cannot fit
-an otherwise empty page, fail with a bounded diagnostic directing the caller
-to shorten oversized identity/location fields. Never skip that entry silently.
+Complete IDs, MIDs, flavours, paths, and relation names are preserved. If one
+entry cannot fit an otherwise empty page, fail with a bounded diagnostic
+directing the caller to shorten oversized identity/location fields or relation
+names as applicable.
+Never skip that entry silently.
 
-Excerpt limits are defined in [[DES-SEARCH-EXCERPT-OPTIONS]]. Bounds for related
-and get responses remain open for their owning capabilities.
+Excerpt limits are defined in [[DES-SEARCH-EXCERPT-OPTIONS]]. Bounds for get
+responses remain open for its owning capability.
 :::
 
 :::mara requirement REQ-SEARCH-PAGINATION
@@ -87,8 +90,11 @@ Item related must return bounded pages of direct incoming and outgoing
 neighbours, retaining relation names, directions, and existing filters. Make
 remaining results explicit and retrievable through continuation. Preserve
 outgoing-before-incoming and corpus/authored relation ordering. Neighbour
-bodies require explicit retrieval by the caller.
-Continuation interface and source-change choices are open in
+bodies require explicit retrieval by the caller. Paginate relation occurrences,
+not unique neighbours: multiple relations to the same item retain separate
+entries, and a self-relation retains its outgoing and incoming entries.
+Apply filters before pagination; an empty result has no continuation.
+Bounds follow [[REQ-RETRIEVAL-BOUNDS]] and continuation follows
 [[DES-RETRIEVAL-CONTINUATION]].
 :::
 
@@ -221,11 +227,14 @@ input, continuation must cover the requested content without omissions or
 duplication. Rank search results before pagination; body reads remain
 consecutive rather than selecting query matches.
 
-Search/list accept CLI `--cursor` and MCP `cursor`. Their result is
-`{items, has_more, next_cursor}`; `next_cursor` is null exactly when no results
-remain. Human output ends with a page line containing `has_more` and, when
+Search/list and related accept CLI `--limit`/`--cursor` and MCP `limit`/`cursor`.
+Their result is `{items, has_more, next_cursor}`; `next_cursor` is null exactly
+when no results remain. Human output ends with a page line containing `has_more` and, when
 present, `next_cursor`. Repeat the same operation, query, filters, limit, and
-excerpt options with the returned opaque cursor. Cursors are versioned,
+excerpt options with the returned opaque cursor. For related, repeat the exact
+item handle, direction, relation/flavour filters, and limit. Related `items`
+retain `{direction, relation, item}` entries, where `item` is a bounded neighbour
+summary; both directions share one continuation sequence. Cursors are versioned,
 stateless continuation markers, not persisted indexes or snapshot storage.
 
 Reject malformed cursors and cursors whose source/schema or request fingerprint
@@ -235,8 +244,8 @@ to identical input restores validity; no historical snapshot is retained.
 Cursor compatibility across application upgrades is not promised. Matching and
 ordering finish before the count and serialized-byte budgets are applied.
 
-Related/get request shapes, body/relation positions, independent resumption,
-and source-change handling remain open for their owning capabilities.
+Get request shapes, body/relation positions, independent resumption, and
+source-change handling remain open for its owning capability.
 :::
 
 :::mara verification VER-BOUNDED-RETRIEVAL
@@ -256,7 +265,9 @@ appear only when requested and identify matching source passages; consecutive
 reads must retain text between those passages. Use real queries with expected
 items to demonstrate typo recovery, useful relevance ordering, and preservation
 of exact matches. Repeat unchanged queries to verify stable ordering and page
-coverage. Apply the agreed source-change continuation policy once specified.
+coverage. For related pages, verify both directions across page boundaries,
+filtered continuation, title truncation, the serialized byte budget, and
+rejection after source, schema, or request changes.
 
 Release preparation follows evidence that this workflow passes; these are
 planned checks, not evidence that alpha.3 functionality already exists.
@@ -264,12 +275,12 @@ planned checks, not evidence that alpha.3 functionality already exists.
 
 :::mara decision ADR-SEARCH-CONTINUATION
 :mid: 01M1S1WPMD2PNHTZ4643CCB1CN
-:title: Restart search pagination after source changes
+:title: Restart search and relation pagination after source changes
 :justifies: DES-RETRIEVAL-CONTINUATION
 
-Use stateless, versioned search/list cursors that bind a result position to the
-source and request fingerprint. Reject changed inputs rather than silently
-continuing an offset into a different result set. This preserves complete page
+Use stateless, versioned search/list and related cursors that bind a result
+position to the source and request fingerprint. Reject changed inputs rather
+than silently continuing an offset into a different result set. This preserves complete page
 coverage for unchanged input without storing snapshots or an index; callers
 restart discovery after edits.
 :::

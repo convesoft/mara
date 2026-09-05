@@ -15,6 +15,13 @@ pub struct ItemCollectionResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct RelatedItemsResult {
+    pub items: Vec<RelatedItem>,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct SearchExcerpt {
     pub text: String,
     pub start_byte: usize,
@@ -30,11 +37,19 @@ pub(super) fn filtered_page(
     filters: &ItemFilters,
     query: Option<&str>,
 ) -> Result<ItemCollectionResult, QueryError> {
-    let limit = filters.limit.unwrap_or(20);
-    if !(1..=100).contains(&limit) {
-        return Err(page_error("page limit must be 1 through 100"));
-    }
-    let fingerprint = fingerprint(corpus, schema, filters, query, limit)?;
+    let limit = page_limit(filters.limit)?;
+    let request = (
+        "items",
+        &filters.flavours,
+        &filters.fields,
+        &filters.relations,
+        &filters.paths,
+        &filters.ids,
+        filters.excerpts,
+        query,
+        limit,
+    );
+    let fingerprint = fingerprint(corpus, schema, &request)?;
     let start = cursor_position(filters.cursor.as_deref(), &fingerprint)?;
     let matches = filtered_items(corpus, schema, filters, query)?;
     if filters.cursor.is_some() && (start == 0 || start >= matches.len()) {
@@ -50,10 +65,7 @@ pub(super) fn filtered_page(
     };
     for item in matches.iter().skip(start).take(limit) {
         let mut summary = ItemSummary::from(*item);
-        if let Some((end, _)) = summary.title.char_indices().nth(TITLE_CHARS) {
-            summary.title.truncate(end);
-            summary.title_truncated = true;
-        }
+        truncate_title(&mut summary);
         if filters.excerpts {
             let document = corpus
                 .documents()
@@ -82,6 +94,74 @@ pub(super) fn filtered_page(
     Ok(page)
 }
 
+pub(super) fn related_page(
+    corpus: &Corpus,
+    schema: &Schema,
+    id: &str,
+    filters: &RelatedFilters,
+) -> Result<RelatedItemsResult, QueryError> {
+    let limit = page_limit(filters.limit)?;
+    let request = (
+        "related",
+        id,
+        filters.direction,
+        &filters.relations,
+        &filters.flavours,
+        limit,
+    );
+    let fingerprint = fingerprint(corpus, schema, &request)?;
+    let start = cursor_position(filters.cursor.as_deref(), &fingerprint)?;
+    let matches = related_matches(corpus, schema, id, filters)?;
+    let total = matches.len();
+    if filters.cursor.is_some() && (start == 0 || start >= total) {
+        return Err(page_error(
+            "invalid continuation position; restart from the first page",
+        ));
+    }
+    let mut page = RelatedItemsResult {
+        items: Vec::new(),
+        has_more: false,
+        next_cursor: None,
+    };
+    for mut entry in matches.into_iter().skip(start).take(limit) {
+        truncate_title(&mut entry.item);
+        page.items.push(entry);
+        (page.has_more, page.next_cursor) =
+            continuation(start, page.items.len(), total, &fingerprint);
+        if serde_json::to_vec(&page)
+            .map_err(|_| page_error("could not serialize related page"))?
+            .len()
+            > PAGE_BYTES
+        {
+            page.items.pop();
+            if page.items.is_empty() {
+                return Err(page_error(
+                    "a relation entry cannot fit the 65536-byte page budget; shorten oversized identity/location fields or relation names in the source",
+                ));
+            }
+            (page.has_more, page.next_cursor) =
+                continuation(start, page.items.len(), total, &fingerprint);
+            break;
+        }
+    }
+    Ok(page)
+}
+
+fn page_limit(limit: Option<usize>) -> Result<usize, QueryError> {
+    let limit = limit.unwrap_or(20);
+    if !(1..=100).contains(&limit) {
+        return Err(page_error("page limit must be 1 through 100"));
+    }
+    Ok(limit)
+}
+
+fn truncate_title(summary: &mut ItemSummary) {
+    if let Some((end, _)) = summary.title.char_indices().nth(TITLE_CHARS) {
+        summary.title.truncate(end);
+        summary.title_truncated = true;
+    }
+}
+
 fn page_error(message: &str) -> QueryError {
     QueryError::InvalidPage {
         message: message.to_owned(),
@@ -94,37 +174,34 @@ fn set_continuation(
     total: usize,
     fingerprint: &str,
 ) {
-    let next = start + page.items.len();
-    page.has_more = next < total;
-    page.next_cursor = page
-        .has_more
-        .then(|| format!("1-{fingerprint}-{next:016x}"));
+    (page.has_more, page.next_cursor) = continuation(start, page.items.len(), total, fingerprint);
+}
+
+fn continuation(
+    start: usize,
+    count: usize,
+    total: usize,
+    fingerprint: &str,
+) -> (bool, Option<String>) {
+    let next = start + count;
+    let has_more = next < total;
+    (
+        has_more,
+        has_more.then(|| format!("1-{fingerprint}-{next:016x}")),
+    )
 }
 
 fn fingerprint(
     corpus: &Corpus,
     schema: &Schema,
-    filters: &ItemFilters,
-    query: Option<&str>,
-    limit: usize,
+    request: &impl Serialize,
 ) -> Result<String, QueryError> {
     // Deterministic across processes of this build. This is change detection,
     // not an authentication token; cursors confer no access to stored state.
     let mut hash = DefaultHasher::new();
     env!("CARGO_PKG_VERSION").hash(&mut hash);
-    let request = (
-        &filters.flavours,
-        &filters.fields,
-        &filters.relations,
-        &filters.paths,
-        &filters.ids,
-        filters.excerpts,
-        query,
-        limit,
-        schema,
-    );
-    serde_json::to_vec(&request)
-        .map_err(|_| page_error("could not fingerprint search/list request"))?
+    serde_json::to_vec(&(request, schema))
+        .map_err(|_| page_error("could not fingerprint retrieval request"))?
         .hash(&mut hash);
     for document in corpus.documents() {
         document.path().hash(&mut hash);
