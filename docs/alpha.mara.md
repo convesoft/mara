@@ -139,7 +139,9 @@ an MCP server and installs the Mara skill separately. The existing
 `@convesoft/mara` package also contains an Agent Plugins 1.0 manifest, the same
 skill, and stdio MCP configuration as an optional complete-plugin convenience.
 The skill guides agents to select an explicit project and discover its schema
-before operating. Neither route creates or modifies project `AGENTS.md`.
+before operating. It prefers MCP and, when MCP is unavailable, guides agents to
+use the installed CLI with `--format json` for equivalent structured operations.
+Neither route creates or modifies project `AGENTS.md`.
 Complete-plugin compatibility is client-managed and is not a release gate.
 :::
 
