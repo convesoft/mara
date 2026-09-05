@@ -21,10 +21,10 @@ pub use corpus::{
     validate_corpus, validate_corpus_independent,
 };
 pub use mutation::{
-    BackfilledMid, BackfilledMids, ItemCreation, ItemCreationRequest, ItemDeletion, ItemLocation,
-    ItemMove, ItemRename, ItemUpdate, RelationMutation, TransactionRollback, add_relation,
-    backfill_mids, create_item, delete_item, move_item, remove_relation, rename_item,
-    rollback_transaction, update_item,
+    BackfilledMid, BackfilledMids, InitialRelation, ItemCreation, ItemCreationRequest,
+    ItemDeletion, ItemLocation, ItemMove, ItemRename, ItemUpdate, RelationMutation,
+    TransactionRollback, add_relation, backfill_mids, create_item, delete_item, move_item,
+    remove_relation, rename_item, rollback_transaction, update_item,
 };
 pub use operations::{
     DeclarationSummary, FieldValue, ItemCreateParams, ItemCreationResult, ItemFilterParams,

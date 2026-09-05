@@ -141,7 +141,7 @@ fn parses_the_repository_documents_deterministically() {
 
     assert_eq!(first, second);
     assert_eq!(first.documents().len(), 4);
-    assert_eq!(first.items().count(), 48);
+    assert_eq!(first.items().count(), 49);
     assert!(
         first
             .items()

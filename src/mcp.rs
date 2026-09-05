@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use mara::{
-    FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult, ItemFilterParams,
-    ItemGetParams, ItemGetResult, ItemMove, ItemMoveParams, ItemRelatedParams, ItemSearchParams,
-    ItemUpdate, ItemUpdateParams, OperationContext, ProjectInitializationResult,
+    FieldValue, InitialRelation, ItemCollectionResult, ItemCreateParams, ItemCreationResult,
+    ItemFilterParams, ItemGetParams, ItemGetResult, ItemMove, ItemMoveParams, ItemRelatedParams,
+    ItemSearchParams, ItemUpdate, ItemUpdateParams, OperationContext, ProjectInitializationResult,
     ProjectMidBackfillResult, RelatedItemsResult, RelationDirection, RelationMutationResult,
     RelationParams, SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult,
     Template, TransactionRollbackResult, ValidationResult,
@@ -66,8 +66,12 @@ struct ItemCreateToolParams {
     id: String,
     file: PathBuf,
     title: String,
+    /// Custom fields only; excludes title, MID, and typed relations. Use relations for initial edges.
     #[serde(default)]
     fields: Vec<FieldValue>,
+    /// Initial outgoing edges, created atomically. Omitted or empty adds none; use relation_add/remove for later edits.
+    #[serde(default)]
+    relations: Vec<InitialRelation>,
     #[serde(default)]
     body: Option<String>,
     #[serde(default)]
@@ -84,6 +88,7 @@ impl ItemCreateToolParams {
                 file: self.file,
                 title: self.title,
                 fields: self.fields,
+                relations: self.relations,
                 body: self.body,
                 line: self.line,
             },
@@ -389,7 +394,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_create",
-        description = "Create one schema-valid item in a project-relative Mara document."
+        description = "Create one item and optional initial outgoing relations atomically in a project-relative Mara document; an omitted required body creates a scaffold."
     )]
     fn item_create(
         &self,

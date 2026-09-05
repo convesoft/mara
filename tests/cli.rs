@@ -3207,6 +3207,325 @@ fn schema_get_rejects_an_unknown_declaration() {
 }
 
 #[test]
+fn item_create_initial_relations_cli_and_mcp_publish_complete_edges() {
+    for surface in ["cli", "mcp"] {
+        let fixture = retrieval_fixture();
+        let backfill = mara(fixture.path(), &["project", "mid", "backfill"]);
+        assert!(backfill.status.success(), "{}", stderr(&backfill));
+        let target = mara(
+            fixture.path(),
+            &["--format", "json", "item", "get", "DES-ALPHA"],
+        );
+        let target: Value = serde_json::from_slice(&target.stdout).unwrap();
+        let target_mid = target["summary"]["mid"].as_str().unwrap();
+        let original = fs::read(fixture.path().join("docs/b.mara.md")).unwrap();
+        let created = if surface == "cli" {
+            let output = mara(
+                fixture.path(),
+                &[
+                    "--format",
+                    "json",
+                    "item",
+                    "create",
+                    "decision",
+                    "ADR-NEW",
+                    "docs/new.mara.md",
+                    "--title",
+                    "Atomic decision",
+                    "--body",
+                    "Rationale.",
+                    "--relation",
+                    "justifies=REQ-ALPHA",
+                    "--relation",
+                    &format!("justifies={target_mid}"),
+                ],
+            );
+            assert!(output.status.success(), "{}", stderr(&output));
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()
+        } else {
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(
+                        2,
+                        "item_create",
+                        json!({
+                            "flavour":"decision", "id":"ADR-NEW", "file":"docs/new.mara.md",
+                            "title":"Atomic decision", "body":"Rationale.",
+                            "relations":[{"relation":"justifies","target":"REQ-ALPHA"},
+                                         {"relation":"justifies","target":target_mid}]
+                        }),
+                    ),
+                ],
+            );
+            let result = &mcp_response(&responses, 2)["result"];
+            assert_ne!(result["isError"], true, "{result}");
+            result["structuredContent"].clone()
+        };
+        assert_eq!(created["complete"], true);
+        assert_eq!(created["missing"], json!([]));
+        assert!(is_mid(created["mid"].as_str().unwrap()));
+        assert_eq!(
+            fs::read(fixture.path().join("docs/b.mara.md")).unwrap(),
+            original
+        );
+        let source = fs::read_to_string(fixture.path().join("docs/new.mara.md")).unwrap();
+        assert!(source.contains(":justifies: REQ-ALPHA\n:justifies: DES-ALPHA\n"));
+        assert_eq!(source.matches(":mid:").count(), 1);
+
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, "item_get", json!({"id":"ADR-NEW"})),
+                mcp_call(
+                    3,
+                    "item_related",
+                    json!({"id":"REQ-ALPHA","direction":"incoming","relations":["justifies"]}),
+                ),
+                mcp_call(
+                    4,
+                    "item_related",
+                    json!({"id":target_mid,"direction":"incoming","relations":["justifies"]}),
+                ),
+                mcp_call(5, "project_validate", json!({})),
+                mcp_request(6, "tools/list", json!({})),
+            ],
+        );
+        for (id, args) in [
+            (2, vec!["item", "get", "ADR-NEW"]),
+            (
+                3,
+                vec![
+                    "item",
+                    "related",
+                    "REQ-ALPHA",
+                    "--direction",
+                    "incoming",
+                    "--relation",
+                    "justifies",
+                ],
+            ),
+            (
+                4,
+                vec![
+                    "item",
+                    "related",
+                    target_mid,
+                    "--direction",
+                    "incoming",
+                    "--relation",
+                    "justifies",
+                ],
+            ),
+        ] {
+            let mut cli_args = vec!["--format", "json"];
+            cli_args.extend(args);
+            let output = mara(fixture.path(), &cli_args);
+            assert!(output.status.success(), "{}", stderr(&output));
+            let cli: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(
+                cli,
+                mcp_response(&responses, id)["result"]["structuredContent"]
+            );
+        }
+        let item = &mcp_response(&responses, 2)["result"]["structuredContent"];
+        assert_eq!(item["summary"]["mid"], created["mid"]);
+        assert_eq!(item["outgoing_relations"].as_array().unwrap().len(), 2);
+        for id in [3, 4] {
+            let related = &mcp_response(&responses, id)["result"]["structuredContent"]["items"];
+            assert_eq!(related.as_array().unwrap().len(), 1);
+            assert_eq!(related[0]["item"]["id"], "ADR-NEW");
+        }
+        assert_eq!(
+            mcp_response(&responses, 5)["result"]["structuredContent"]["valid"],
+            true
+        );
+        let tools = mcp_response(&responses, 6)["result"]["tools"]
+            .as_array()
+            .unwrap();
+        let create = tools
+            .iter()
+            .find(|tool| tool["name"] == "item_create")
+            .unwrap();
+        assert_eq!(
+            create["inputSchema"]["properties"]["relations"]["type"],
+            "array"
+        );
+    }
+}
+
+#[test]
+fn item_create_initial_relations_reject_invalid_edges_without_any_source_change() {
+    let fixture = retrieval_fixture();
+    let backfill = mara(fixture.path(), &["project", "mid", "backfill"]);
+    assert!(backfill.status.success());
+    let target = mara(
+        fixture.path(),
+        &["--format", "json", "item", "get", "REQ-ALPHA"],
+    );
+    let target: Value = serde_json::from_slice(&target.stdout).unwrap();
+    let mid = target["summary"]["mid"].as_str().unwrap();
+    for (relation, target, expected) in [
+        ("unknown", "REQ-ALPHA", "unknown relation"),
+        ("justifies", "REQ-MISSING", "was not found"),
+        ("justifies", "SCN-BASE", "does not allow target flavour"),
+        ("satisfies", "REQ-ALPHA", "does not allow source flavour"),
+        ("justifies", mid, "already has relation"),
+    ] {
+        for file in ["docs/a.mara.md", "docs/missing.mara.md"] {
+            let path = fixture.path().join(file);
+            let before = fs::read(&path).ok();
+            let output = mara(
+                fixture.path(),
+                &[
+                    "item",
+                    "create",
+                    "decision",
+                    "ADR-REJECTED",
+                    file,
+                    "--title",
+                    "Rejected",
+                    "--body",
+                    "Body.",
+                    "--relation",
+                    "justifies=REQ-ALPHA",
+                    "--relation",
+                    &format!("{relation}={target}"),
+                ],
+            );
+            assert!(!output.status.success());
+            assert!(stderr(&output).contains(expected), "{}", stderr(&output));
+            assert_eq!(fs::read(&path).ok(), before);
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(
+                        2,
+                        "item_create",
+                        json!({
+                            "flavour":"decision", "id":"ADR-REJECTED", "file":file,
+                            "title":"Rejected", "body":"Body.",
+                            "relations":[{"relation":"justifies","target":"REQ-ALPHA"},
+                                         {"relation":relation,"target":target}]
+                        }),
+                    ),
+                ],
+            );
+            let error = &mcp_response(&responses, 2)["result"];
+            assert_eq!(error["isError"], true, "{error}");
+            assert!(error.to_string().contains(expected), "{error}");
+            assert_eq!(fs::read(&path).ok(), before);
+        }
+    }
+}
+
+#[test]
+fn item_create_initial_relations_preserve_self_edges_insertion_and_scaffolds() {
+    let fixture = TempDir::new().unwrap();
+    assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    fs::write(fixture.path().join("items.mara.md"), "Before.\n\nAfter.\n").unwrap();
+    let output = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "create",
+            "requirement",
+            "REQ-SELF",
+            "items.mara.md",
+            "--title",
+            "Self",
+            "--relation",
+            "depends_on=REQ-SELF",
+            "--line",
+            "3",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["complete"], false);
+    assert_eq!(result["missing"], json!(["body"]));
+    let source = fs::read_to_string(fixture.path().join("items.mara.md")).unwrap();
+    assert!(source.starts_with("Before.\n\n:::mara requirement REQ-SELF"));
+    assert!(source.ends_with(":depends_on: REQ-SELF\n\n:::\n\nAfter.\n"));
+    let duplicate = mara(
+        fixture.path(),
+        &["relation", "add", "REQ-SELF", "depends_on", "REQ-SELF"],
+    );
+    assert!(!duplicate.status.success());
+    assert!(stderr(&duplicate).contains("already has relation"));
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("items.mara.md")).unwrap(),
+        source
+    );
+}
+
+#[test]
+fn item_create_initial_relations_validate_candidate_body_and_preserve_empty_input() {
+    let fixture = retrieval_fixture();
+    let backfill = mara(fixture.path(), &["project", "mid", "backfill"]);
+    assert!(backfill.status.success());
+    for file in ["docs/a.mara.md", "docs/missing.mara.md"] {
+        let path = fixture.path().join(file);
+        let before = fs::read(&path).ok();
+        let output = mara(
+            fixture.path(),
+            &[
+                "item",
+                "create",
+                "decision",
+                "ADR-INVALID-BODY",
+                file,
+                "--title",
+                "Invalid body",
+                "--body",
+                "See [[REQ-MISSING]].",
+                "--relation",
+                "justifies=REQ-ALPHA",
+            ],
+        );
+        assert!(!output.status.success());
+        assert!(
+            stderr(&output).contains("missing item 'REQ-MISSING'"),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(fs::read(&path).ok(), before);
+    }
+    let mut params = json!({"flavour":"decision", "id":"ADR-OMITTED", "title":"Scaffold", "file":"docs/scaffolds.mara.md"});
+    let omitted = params.clone();
+    params["id"] = json!("ADR-EMPTY");
+    params["relations"] = json!([]);
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "item_create", omitted),
+            mcp_call(3, "item_create", params),
+            mcp_call(4, "item_get", json!({"id":"ADR-EMPTY"})),
+        ],
+    );
+    for id in [2, 3] {
+        let result = &mcp_response(&responses, id)["result"]["structuredContent"];
+        assert_eq!(result["complete"], false);
+        assert_eq!(result["missing"], json!(["body"]));
+        assert!(is_mid(result["mid"].as_str().unwrap()));
+    }
+    assert_eq!(
+        mcp_response(&responses, 4)["result"]["structuredContent"]["outgoing_relations"],
+        json!([])
+    );
+}
+
+#[test]
 fn item_create_writes_complete_items_and_required_body_scaffolds() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);

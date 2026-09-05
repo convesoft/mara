@@ -35,6 +35,28 @@ or modify `AGENTS.md` as part of Mara onboarding.
 4. Run the narrowest relevant validation after a mutation and use
    `project_validate` when the requested work affects corpus-wide integrity.
 
+To create an item with initial outgoing relations, inspect the schema and target
+items, then pass `relations` separately from custom `fields` in one `item_create`
+call. For example, after resolving `REQ-EXAMPLE` in `/absolute/project`:
+
+```json
+{
+  "project": "/absolute/project",
+  "flavour": "decision",
+  "id": "ADR-EXAMPLE",
+  "file": "decisions.mara.md",
+  "title": "Keep initial authoring atomic",
+  "body": "Publish the item and its edges together so a failed edge leaves no partial item.",
+  "relations": [{"relation": "justifies", "target": "REQ-EXAMPLE"}]
+}
+```
+
+Creation accepts exact human-ID or MID targets and rejects the whole request if
+an edge is invalid. `justifies` is a typed relation, not a custom field;
+title and MID are structural metadata. Inspect the result with `item_get` and
+`item_related`, then validate. Use `relation_add` and `relation_remove` for
+subsequent edge changes.
+
 Mara source files remain canonical. Do not treat MCP results as a separate
 authoring store. Use `item_update` for partial title, custom-field, or body edits;
 use `item_move` to relocate an item while preserving identity. Update warnings

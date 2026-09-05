@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::Write,
     path::{Component, Path, PathBuf},
@@ -30,8 +30,18 @@ pub struct ItemCreationRequest {
     pub file: PathBuf,
     pub title: String,
     pub fields: Vec<(String, String)>,
+    pub relations: Vec<InitialRelation>,
     pub body: Option<String>,
     pub line: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InitialRelation {
+    /// Schema-declared outgoing relation name, not a custom field.
+    pub relation: String,
+    /// Exact human ID or canonical MID; the new item's human ID may target itself.
+    pub target: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,11 +146,31 @@ impl BackfilledMid {
 pub fn create_item(
     project: &Project,
     schema: &Schema,
-    request: ItemCreationRequest,
+    mut request: ItemCreationRequest,
 ) -> Result<ItemCreation, Error> {
     let _lock = MutationLock::acquire(project)?;
     let corpus = load_corpus(project, schema)?;
     validate_new_item(&corpus, schema, &request)?;
+    if !request.relations.is_empty() {
+        ensure_unambiguous_item_identities(&corpus, "create an item with relations")?;
+        let mut edges = BTreeSet::new();
+        for edge in &mut request.relations {
+            let (target_id, target_flavour) = if edge.target == request.id {
+                (request.id.as_str(), request.flavour.as_str())
+            } else {
+                let target = resolve_item(&corpus, &edge.target, "target")?;
+                (target.id(), target.flavour())
+            };
+            validate_relation_endpoints(schema, &edge.relation, &request.flavour, target_flavour)?;
+            if !edges.insert((edge.relation.clone(), target_id.to_owned())) {
+                return invalid(format!(
+                    "item '{}' already has relation '{}' to '{}'",
+                    request.id, edge.relation, edge.target
+                ));
+            }
+            edge.target = target_id.to_owned();
+        }
+    }
     let (path, absolute, existed) = resolve_document_path(project, &request.file)?;
     if !document_is_discoverable(project, &path)? {
         return invalid(format!(
@@ -204,6 +234,25 @@ pub fn create_item(
                     .is_some_and(|body| !body.trim().is_empty())
         });
 
+    if !request.relations.is_empty() {
+        let projected = corpus
+            .with_replacements(&BTreeMap::from([(path.clone(), candidate.clone())]), schema)?;
+        if let Some(diagnostic) =
+            validate_corpus(&projected, schema)
+                .into_iter()
+                .find(|diagnostic| {
+                    (diagnostic.applies_to_item(&request.id)
+                        || (diagnostic.source().path() == created.source().path()
+                            && diagnostic.source().span().start_byte()
+                                >= created.source().span().start_byte()
+                            && diagnostic.source().span().end_byte()
+                                <= created.source().span().end_byte()))
+                        && !(!complete && diagnostic.is_missing_body())
+                })
+        {
+            return invalid(diagnostic.message());
+        }
+    }
     atomic_replace(&absolute, &candidate, existed)?;
     Ok(ItemCreation {
         path,
@@ -534,37 +583,12 @@ fn mutate_relation(
     ensure_unambiguous_item_identities(&corpus, "mutate relations")?;
     let source_item = resolve_item(&corpus, source_id, "source")?;
     let target_item = resolve_item(&corpus, target_id, "target")?;
-    let definition = schema
-        .relations
-        .get(relation_name)
-        .ok_or_else(|| Error::InvalidMutation {
-            message: format!("unknown relation '{relation_name}'"),
-        })?;
-    if !definition
-        .source
-        .iter()
-        .any(|flavour| flavour == source_item.flavour())
-    {
-        return invalid(format!(
-            "relation '{relation_name}' does not allow source flavour '{}'",
-            source_item.flavour()
-        ));
-    }
-    if !definition
-        .target
-        .iter()
-        .any(|flavour| flavour == target_item.flavour())
-    {
-        return invalid(format!(
-            "relation '{relation_name}' does not allow target flavour '{}'",
-            target_item.flavour()
-        ));
-    }
-    if definition.same_flavour && source_item.flavour() != target_item.flavour() {
-        return invalid(format!(
-            "relation '{relation_name}' requires matching source and target flavours"
-        ));
-    }
+    validate_relation_endpoints(
+        schema,
+        relation_name,
+        source_item.flavour(),
+        target_item.flavour(),
+    )?;
 
     let path = source_item.source().path().to_path_buf();
     let document = corpus
@@ -631,6 +655,47 @@ fn mutate_relation(
         target_mid: target_item.mid().map(ToOwned::to_owned),
         path,
     })
+}
+
+fn validate_relation_endpoints(
+    schema: &Schema,
+    relation_name: &str,
+    source_flavour: &str,
+    target_flavour: &str,
+) -> Result<(), Error> {
+    let definition = schema
+        .relations
+        .get(relation_name)
+        .ok_or_else(|| Error::InvalidMutation {
+            message: format!("unknown relation '{relation_name}'"),
+        })?;
+    if !definition
+        .source
+        .iter()
+        .any(|flavour| flavour == source_flavour)
+    {
+        return invalid(format!(
+            "relation '{relation_name}' does not allow source flavour '{}'",
+            source_flavour
+        ));
+    }
+    if !definition
+        .target
+        .iter()
+        .any(|flavour| flavour == target_flavour)
+    {
+        return invalid(format!(
+            "relation '{relation_name}' does not allow target flavour '{}'",
+            target_flavour
+        ));
+    }
+    if definition.same_flavour && source_flavour != target_flavour {
+        return invalid(format!(
+            "relation '{relation_name}' requires matching source and target flavours"
+        ));
+    }
+
+    Ok(())
 }
 
 fn validate_new_item(
@@ -888,6 +953,9 @@ fn render_item(request: &ItemCreationRequest, mid: &str, newline: &str) -> Strin
         source.push_str(name);
         source.push_str(": ");
         source.push_str(value.trim());
+    }
+    for edge in &request.relations {
+        source.push_str(&format!("{newline}:{}: {}", edge.relation, edge.target));
     }
     source.push_str(newline);
     source.push_str(newline);

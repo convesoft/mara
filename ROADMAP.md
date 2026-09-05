@@ -39,6 +39,8 @@ evidence and priorities change; detailed behavior becomes canonical in
 - Read large item bodies in bounded consecutive portions and continue relation
   lists without silently omitting content.
 - Add typo-tolerant word matching and deterministic relevance ranking.
+- Create one item with its initial outgoing relations atomically through CLI/MCP;
+  see [item creation](docs/alpha.mara.md).
 - Investigate whether and how narrative outside items should be searchable;
   implementation scope remains undecided.
 

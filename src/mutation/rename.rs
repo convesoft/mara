@@ -273,6 +273,7 @@ mod tests {
                     file: file.into(),
                     title: id.into(),
                     fields: Vec::new(),
+                    relations: Vec::new(),
                     body: Some(body.into()),
                     line: None,
                 },

@@ -9,12 +9,13 @@ use std::{
 
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
-    EntryRange, FieldValue, ItemCollectionResult, ItemCreateParams, ItemFilterParams,
-    ItemGetParams, ItemGetResult, ItemMoveParams, ItemRelatedParams, ItemSearchParams, ItemSummary,
-    ItemUpdateParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
-    RelatedItem, RelationDirection, RelationMutationResult, RelationParams, RelationSummary,
-    SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult, Template,
-    ValidationResult, ValidationScope, ValidationTargetKind, project_initialize,
+    EntryRange, FieldValue, InitialRelation, ItemCollectionResult, ItemCreateParams,
+    ItemFilterParams, ItemGetParams, ItemGetResult, ItemMoveParams, ItemRelatedParams,
+    ItemSearchParams, ItemSummary, ItemUpdateParams, OperationContext, ProjectInitializationResult,
+    ProjectMidBackfillResult, RelatedItem, RelationDirection, RelationMutationResult,
+    RelationParams, RelationSummary, SchemaGetResult, SchemaKind, SchemaListResult,
+    SchemaValidationResult, Template, ValidationResult, ValidationScope, ValidationTargetKind,
+    project_initialize,
 };
 use serde::Serialize;
 
@@ -127,8 +128,12 @@ enum ItemCommand {
         #[arg(long)]
         title: String,
 
-        #[arg(long = "field", value_parser = parse_field)]
+        #[arg(long = "field", value_parser = parse_field, help = "Custom KEY=VALUE field; excludes title, MID, and typed relations")]
         fields: Vec<CliField>,
+
+        #[arg(long = "relation", value_name = "NAME=TARGET", value_parser = parse_initial_relation,
+            help = "Initial outgoing relation; repeat for multiple edges. TARGET is an exact human ID or MID")]
+        relations: Vec<InitialRelation>,
 
         #[arg(long)]
         body: Option<String>,
@@ -556,6 +561,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                     file,
                     title,
                     fields,
+                    relations,
                     body,
                     line,
                 },
@@ -567,6 +573,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                 file,
                 title,
                 fields: fields.into_iter().map(Into::into).collect(),
+                relations,
                 body,
                 line,
             })?;
@@ -717,6 +724,19 @@ fn run(cli: Cli) -> Result<bool, String> {
 
 fn operations(selected: Option<PathBuf>) -> Result<OperationContext, String> {
     OperationContext::from_environment(selected)
+}
+
+fn parse_initial_relation(value: &str) -> Result<InitialRelation, String> {
+    let (relation, target) = value
+        .split_once('=')
+        .ok_or_else(|| "relation must use NAME=TARGET".to_owned())?;
+    if relation.is_empty() || target.is_empty() {
+        return Err("relation name and target must not be empty".into());
+    }
+    Ok(InitialRelation {
+        relation: relation.to_owned(),
+        target: target.to_owned(),
+    })
 }
 
 fn parse_field(value: &str) -> Result<CliField, String> {
