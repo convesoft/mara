@@ -86,20 +86,20 @@ struct ItemCreateToolParams {
     flavour: String,
     /// New unique human ID with the flavour's prefix (for example REQ-EXAMPLE), not a MID. Mara generates the MID.
     id: String,
-    /// Destination project-relative *.mara.md path selected by project discovery; parent directory must exist. Creates the file if absent.
+    /// Destination project-relative *.mara.md path selected by project discovery; parent directory must exist. Creates the file if absent; no absolute paths or .. components.
     file: PathBuf,
-    /// Nonempty single-line title; surrounding whitespace is trimmed.
+    /// Single-line title; surrounding whitespace is trimmed. Empty or whitespace-only titles and line breaks are rejected.
     title: String,
-    /// Schema-declared custom fields only; excludes structural title/MID metadata and typed relations. Repeat keys only when schema-repeatable. Omitted or empty supplies none; required fields must be supplied. Use relations for initial edges or relation_add for later edits.
+    /// Schema-declared custom fields only; excludes structural title/MID metadata and typed relations. Repeat keys only when schema-repeatable. Omitted or [] supplies none; required fields must be supplied. Values are schema-validated scalar text, trimmed, with line breaks rejected; empty values remain present when schema-valid. Use relations for initial edges or relation_add for later edits.
     #[serde(default)]
     fields: Vec<FieldValue>,
-    /// Initial outgoing typed relations, created atomically with the item. Omitted or empty adds none; use relation_add/relation_remove for later edits.
+    /// Initial schema-declared outgoing typed relations, created atomically with the item. Targets are exact human IDs or canonical MIDs; the new ID may target itself. Duplicate edges are rejected. Omitted or [] adds none; use relation_add/relation_remove for later edits.
     #[serde(default)]
     relations: Vec<InitialRelation>,
-    /// Literal Markdown body (- is literal; no stdin). Omitted or null supplies no body; a missing or blank required body creates a scaffold.
+    /// Literal Markdown body (- is literal; no stdin). An omitted, null, empty, or whitespace-only required body creates an incomplete scaffold.
     #[serde(default)]
     body: Option<String>,
-    /// Insert before this one-based destination line; line_count + 1 means end of file. Omitted or null appends. Insertion inside another item is rejected.
+    /// Insert before this one-based destination line; valid range is 1 through line_count + 1 (end of file). Omitted or null appends. Insertion inside another item is rejected.
     #[serde(default)]
     line: Option<usize>,
 }
@@ -130,13 +130,13 @@ struct ItemUpdateToolParams {
     project: Option<PathBuf>,
     /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     reference: String,
-    /// Replacement nonempty single-line title, trimmed; omitted or null leaves it unchanged.
+    /// Replacement single-line title; surrounding whitespace is trimmed. Empty or whitespace-only titles and line breaks are rejected; omitted or null leaves it unchanged.
     #[serde(default)]
     title: Option<String>,
-    /// Replace all values of each named schema-declared custom field; repeat keys only when schema-repeatable. Excludes structural title/MID metadata and typed relations; use relation_add/relation_remove for edges. Omitted or empty leaves fields unchanged; an empty value is not a clear.
+    /// Replace all values of each named schema-declared custom field; repeat keys only when schema-repeatable. Values are schema-validated scalar text, trimmed, with line breaks rejected. Excludes structural title/MID metadata and typed relations; use relation_add/relation_remove for edges. Omitted or [] leaves fields unchanged; an empty value is not a clear (use clear_fields).
     #[serde(default)]
     fields: Vec<FieldValue>,
-    /// Remove all values of named optional custom fields; cannot also set those keys in fields. Excludes title, MID, and typed relations. Omitted or empty clears nothing.
+    /// Remove all values of named optional custom fields; cannot also set those keys in fields. Excludes title/MID and typed relations. Omitted or [] clears nothing; an absent optional field is a no-op.
     #[serde(default)]
     clear_fields: Vec<String>,
     /// Replacement literal Markdown body (- is literal). Omitted or null leaves it unchanged; an empty string clears an optional body. Empty or whitespace-only replacement of a required body is rejected.
@@ -152,7 +152,7 @@ struct ItemRenameToolParams {
     project: Option<PathBuf>,
     /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     reference: String,
-    /// New unique human ID with the item's flavour prefix. Preserves the MID; the old human ID is not kept as an alias.
+    /// New unique human ID with the item's flavour prefix. Preserves the MID; the old human ID is not kept as an alias. The current ID is a no-op.
     new_id: String,
 }
 
@@ -174,9 +174,9 @@ struct ItemMoveToolParams {
     project: Option<PathBuf>,
     /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     reference: String,
-    /// Destination project-relative *.mara.md path selected by project discovery; parent directory must exist. Creates the file if absent.
+    /// Destination project-relative *.mara.md path selected by project discovery; parent directory must exist. Creates the file if absent; no absolute paths or .. components.
     file: PathBuf,
-    /// Insert before this one-based line in the original destination, including same-file moves. Omitted or null appends; line_count + 1 means end of file. Insertion inside an item is rejected.
+    /// Insert before this one-based line in the original destination, including same-file moves; valid range is 1 through line_count + 1 (end of file). Omitted or null appends. Insertion inside an item is rejected; the moved item's boundaries are no-ops.
     #[serde(default)]
     line: Option<usize>,
 }
@@ -199,10 +199,10 @@ struct ItemGetToolParams {
     project: Option<PathBuf>,
     /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     id: String,
-    /// Maximum combined direct relation entries per page, 1 through 100; omitted or null defaults to 20. Body and metadata portions are byte-bounded independently of this count.
+    /// Maximum combined direct relation entries per page, 1 through 100; omitted or null defaults to 20. The byte budget may return fewer. Body and metadata portions are byte-bounded independently of this count.
     #[serde(default)]
     limit: Option<usize>,
-    /// Opaque next_cursor from the previous response; keep all other inputs unchanged. Omit or null for the first page; restart after source/schema changes. Follow body, metadata, then relations until has_more is false.
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid. Portions follow body, metadata, then relations.
     #[serde(default)]
     cursor: Option<String>,
 }
@@ -213,13 +213,13 @@ struct ItemFilterToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Exact flavour names, combined with OR and intersected with other filter categories. Omitted or empty selects all flavours.
+    /// Exact flavour names, combined with OR and intersected with other filter categories. Omitted or [] selects all flavours.
     #[serde(default)]
     flavours: Vec<String>,
-    /// Exact schema-declared custom-field key/value filters; excludes title/MID and typed relations. OR within one key, AND across keys and other filter categories. Omitted or empty adds no restriction.
+    /// Exact schema-declared custom-field key/value filters; excludes title/MID and typed relations. Key and scalar text value match exactly, without trimming; an empty value matches an empty field value. OR within one key, AND across keys and other filter categories. Omitted or [] adds no restriction.
     #[serde(default)]
     fields: Vec<FieldValue>,
-    /// Exact authored outgoing relation names, combined with OR and intersected with other filters. Omitted or empty adds no restriction.
+    /// Exact authored outgoing relation names, combined with OR and intersected with other filters. Omitted or [] adds no restriction.
     #[serde(default)]
     relations: Vec<String>,
     /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, .., empty path elements, . or ./; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
@@ -228,7 +228,7 @@ struct ItemFilterToolParams {
     /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer.
     #[serde(default)]
     limit: Option<usize>,
-    /// Opaque next_cursor from the previous response; keep all other inputs unchanged. Omit or null for the first page; restart after source/schema changes.
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid.
     #[serde(default)]
     cursor: Option<String>,
 }
@@ -257,13 +257,13 @@ struct ItemSearchToolParams {
     project: Option<PathBuf>,
     /// Unicode case-insensitive words matched across ID, title, body, and metadata. Every distinct word must match; empty or punctuation-only text matches all items within the filters.
     query: String,
-    /// Exact flavour names, combined with OR and intersected with other filter categories. Omitted or empty selects all flavours.
+    /// Exact flavour names, combined with OR and intersected with other filter categories. Omitted or [] selects all flavours.
     #[serde(default)]
     flavours: Vec<String>,
-    /// Exact schema-declared custom-field key/value filters; excludes title/MID and typed relations. OR within one key, AND across keys and other filter categories. Omitted or empty adds no restriction.
+    /// Exact schema-declared custom-field key/value filters; excludes title/MID and typed relations. Key and scalar text value match exactly, without trimming; an empty value matches an empty field value. OR within one key, AND across keys and other filter categories. Omitted or [] adds no restriction.
     #[serde(default)]
     fields: Vec<FieldValue>,
-    /// Exact authored outgoing relation names, combined with OR and intersected with other filters. Omitted or empty adds no restriction.
+    /// Exact authored outgoing relation names, combined with OR and intersected with other filters. Omitted or [] adds no restriction.
     #[serde(default)]
     relations: Vec<String>,
     /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, .., empty path elements, . or ./; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
@@ -272,10 +272,10 @@ struct ItemSearchToolParams {
     /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer.
     #[serde(default)]
     limit: Option<usize>,
-    /// Opaque next_cursor from the previous response; keep all other inputs unchanged. Omit or null for the first page; restart after source/schema changes.
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid.
     #[serde(default)]
     cursor: Option<String>,
-    /// Exact human IDs or canonical MIDs (uppercase 26-character ULIDs), combined with OR and intersected with other filters. Omitted or empty adds no restriction.
+    /// Exact human IDs or canonical MIDs (uppercase 26-character ULIDs), combined with OR and intersected with other filters. Omitted or [] adds no restriction.
     #[serde(default)]
     ids: Vec<String>,
     /// Include up to three bounded, partial source excerpts per match. Defaults to false; excerpts may skip content and do not replace item_get.
@@ -313,16 +313,16 @@ struct ItemRelatedToolParams {
     /// Edge direction relative to the selected item: incoming or outgoing. Omitted or null includes both, outgoing first.
     #[serde(default)]
     direction: Option<RelationDirection>,
-    /// Exact relation names, combined with OR and intersected with the neighbour flavour filter. Omitted or empty includes all.
+    /// Exact relation names, combined with OR and intersected with the neighbour flavour filter. Omitted or [] includes all.
     #[serde(default)]
     relations: Vec<String>,
-    /// Exact neighbour flavour names, combined with OR. Omitted or empty includes all.
+    /// Exact neighbour flavour names, combined with OR. Omitted or [] includes all.
     #[serde(default)]
     flavours: Vec<String>,
     /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer. Counts relation entries, not unique neighbours.
     #[serde(default)]
     limit: Option<usize>,
-    /// Opaque next_cursor from the previous response; keep all other inputs unchanged. Omit or null for the first page; restart after source/schema changes.
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid.
     #[serde(default)]
     cursor: Option<String>,
 }
@@ -404,7 +404,7 @@ impl MaraMcp {
 
     #[tool(
         name = "project_mid_backfill",
-        description = "Deliberately add generated MIDs to every legacy item that lacks one after a validation preflight."
+        description = "Deliberately add generated MIDs to every legacy item that lacks one after a validation preflight; preserve existing MIDs."
     )]
     fn project_mid_backfill(
         &self,
@@ -443,7 +443,7 @@ impl MaraMcp {
 
     #[tool(
         name = "schema_validate",
-        description = "Validate the selected project's configured Mara schema."
+        description = "Validate the selected project's configured Mara schema without validating item content."
     )]
     fn schema_validate(
         &self,
@@ -456,7 +456,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_create",
-        description = "Create one item and optional initial outgoing relations atomically in a project-relative Mara document; an omitted required body creates a scaffold."
+        description = "Create one item with a generated MID and optional initial outgoing relations atomically in a project-relative Mara document; an omitted or blank required body creates an incomplete scaffold."
     )]
     fn item_create(
         &self,
@@ -513,7 +513,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_move",
-        description = "Move one item by exact MID or human ID to a project-relative document; optional line is one-based in the original destination."
+        description = "Move one item by exact MID or human ID within a valid project to a project-relative document. Preserve identity, content, and relations; keep the source document. Optional line is one-based in the original destination."
     )]
     fn item_move(
         &self,
@@ -530,7 +530,7 @@ impl MaraMcp {
 
     #[tool(
         name = "project_transaction_rollback",
-        description = "Explicitly roll back a pending mutation journal to its original files. Stop other Mara writers first; later manual edits are never overwritten."
+        description = "Explicitly roll back a pending mutation journal to its original files. Stop other Mara writers first; conflicting manual edits are rejected. No journal is a no-op."
     )]
     fn project_transaction_rollback(
         &self,
@@ -560,7 +560,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_list",
-        description = "List bounded item-summary pages in corpus order. Continue with next_cursor and unchanged options; restart after source changes."
+        description = "List bounded item-summary pages in document-path and source order. Continue with next_cursor and unchanged options; restart after source/schema changes."
     )]
     fn item_list(
         &self,
@@ -584,7 +584,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_related",
-        description = "List bounded pages of direct incoming or outgoing relation entries with exact filters. Continue with next_cursor and unchanged item/options; restart after source changes. Neighbour bodies require item_get."
+        description = "List bounded pages of direct incoming or outgoing relation entries with exact filters. Continue with next_cursor and unchanged item/options; restart after source/schema changes. Neighbour bodies require item_get."
     )]
     fn item_related(
         &self,

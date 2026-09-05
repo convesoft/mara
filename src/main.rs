@@ -68,9 +68,9 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum ProjectCommand {
-    /// Initialize a Mara project without overwriting existing content.
+    /// Initialize a Mara project without overwriting existing content; rejects an existing Mara project.
     Init {
-        /// Destination directory; defaults to the working directory. Cannot combine with --project.
+        /// Destination directory (absolute or relative to the working directory), created if missing. Defaults to the working directory only when --project is also omitted. Cannot combine PATH with --project.
         path: Option<PathBuf>,
 
         /// Initial schema: minimal includes common flavours and relations; empty declares none.
@@ -114,14 +114,14 @@ enum ProjectMidCommand {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
-    /// Rename a human ID and its internal references, preserving the MID.
+    /// Rename a human ID and supported internal references across a valid project, preserving the MID.
     Rename {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         reference: String,
-        /// New unique human ID with the flavour's prefix; the old ID is not kept as an alias.
+        /// New unique human ID with the flavour's prefix; the old ID is not kept as an alias. The current ID is a no-op.
         new_id: String,
     },
-    /// Delete one item only when no surviving relations or mentions refer to it.
+    /// Delete one item from a valid project only when no surviving relations or supported wiki mentions refer to it; keep the containing document.
     Delete {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         reference: String,
@@ -130,15 +130,16 @@ enum ItemCommand {
     Update {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         reference: String,
-        /// Replace the nonempty title; omission leaves it unchanged.
+        /// Replacement single-line title; surrounding whitespace is trimmed. Empty or whitespace-only titles and line breaks are rejected; omission leaves it unchanged.
         #[arg(long)]
         title: Option<String>,
         /// Replace all values of a custom KEY=VALUE field; repeat for schema-repeatable keys.
         /// KEY= keeps an empty value; use --clear-field KEY to remove the field.
+        /// Values are schema-validated scalar text: surrounding whitespace is trimmed and line breaks are rejected. Omission leaves fields unchanged.
         /// Excludes title, MID, and typed relations; use relation add/remove for edges.
         #[arg(long = "field", value_parser = parse_field)]
         fields: Vec<CliField>,
-        /// Remove all values of an optional custom field (repeatable); cannot also set that key.
+        /// Remove all values of an optional custom field (repeatable); cannot also set that key. Excludes title/MID and typed relations. Omission clears nothing; an absent optional field is a no-op.
         #[arg(long = "clear-field")]
         clear_fields: Vec<String>,
         #[arg(
@@ -147,13 +148,13 @@ enum ItemCommand {
         )]
         body: Option<String>,
     },
-    /// Move an item without changing its identity, content, or relations.
+    /// Move an item within a valid project without changing its identity, content, or relations; keep the source document.
     Move {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         reference: String,
-        /// Destination project-relative *.mara.md file; parent must exist and discovery must include it.
+        /// Destination project-relative *.mara.md file; parent must exist and discovery must include it. Creates the file if absent; no absolute paths or .. components.
         file: PathBuf,
-        /// Insert before this one-based line in the original destination; omission appends.
+        /// Insert before this one-based line in the original destination, including same-file moves; valid range is 1 through line_count + 1 (end of file). Omission appends. Insertion inside an item is rejected; the moved item's boundaries are no-ops.
         #[arg(long)]
         line: Option<usize>,
     },
@@ -163,25 +164,25 @@ enum ItemCommand {
         flavour: String,
         /// New unique human ID with the flavour's prefix (for example REQ-EXAMPLE); not a MID.
         id: String,
-        /// Destination project-relative *.mara.md file; parent must exist and discovery must include it.
+        /// Destination project-relative *.mara.md file; parent must exist and discovery must include it. Creates the file if absent; no absolute paths or .. components.
         file: PathBuf,
 
-        /// Nonempty single-line item title.
+        /// Single-line item title; surrounding whitespace is trimmed. Empty or whitespace-only titles and line breaks are rejected.
         #[arg(long)]
         title: String,
 
-        #[arg(long = "field", value_parser = parse_field, help = "Schema-declared custom KEY=VALUE field; repeat only for repeatable keys. Excludes title, MID, and typed relations; use --relation or relation add for edges")]
+        #[arg(long = "field", value_parser = parse_field, help = "Schema-declared custom KEY=VALUE field; repeat only for repeatable keys. Values are schema-validated scalar text: surrounding whitespace is trimmed and line breaks are rejected. KEY= supplies an empty value when schema-valid; supply all required fields. Excludes title, MID, and typed relations; use --relation or relation add for edges")]
         fields: Vec<CliField>,
 
         #[arg(long = "relation", value_name = "NAME=TARGET", value_parser = parse_initial_relation,
-            help = "Initial outgoing relation, created atomically with the item (repeatable). TARGET is an exact human ID or canonical MID (uppercase 26-character ULID)")]
+            help = "Initial schema-declared outgoing relation, created atomically with the item (repeatable). TARGET is an exact human ID or canonical MID (uppercase 26-character ULID); the new ID may target itself. Duplicate edges are rejected; omission adds none. Later edits use relation add/remove")]
         relations: Vec<InitialRelation>,
 
         /// Body text, or - to read stdin; an omitted, empty, or whitespace-only required body creates an incomplete scaffold.
         #[arg(long)]
         body: Option<String>,
 
-        /// Insert before this one-based line; omission appends, line_count + 1 means end of file.
+        /// Insert before this one-based line; valid range is 1 through line_count + 1 (end of file). Omission appends. Insertion inside another item is rejected.
         #[arg(long)]
         line: Option<usize>,
     },
@@ -191,12 +192,12 @@ enum ItemCommand {
         id: String,
         #[arg(
             long,
-            help = "Maximum combined relation entries per page (1-100, default 20)"
+            help = "Maximum combined relation entries per page (1-100, default 20); the byte budget may return fewer. Body and metadata portions are byte-bounded independently of this count"
         )]
         limit: Option<usize>,
         #[arg(
             long,
-            help = "Opaque next_cursor from the previous page; keep id/limit unchanged until has_more is false; omit to start or restart after source/schema changes"
+            help = "Opaque next_cursor from the previous page; keep id/limit unchanged until has_more is false; omit to start or restart after source/schema changes. Empty strings are invalid"
         )]
         cursor: Option<String>,
     },
@@ -205,9 +206,9 @@ enum ItemCommand {
         #[command(flatten)]
         filters: ItemFilterArgs,
     },
-    /// Rank word matches by relevance with typo tolerance; ID/MID words and filters stay exact.
+    /// Rank word matches by relevance with typo tolerance; exact matches rank first, then ID/title matches carry more weight. ID/MID words and filters stay exact.
     Search {
-        /// Words to match across ID, title, body, and metadata; all words must match. An empty string or punctuation-only text matches all items within the filters.
+        /// Unicode case-insensitive words to match across ID, title, body, and metadata; every distinct word must match. An empty string or punctuation-only text matches all items within the filters.
         query: String,
 
         #[command(flatten)]
@@ -215,13 +216,13 @@ enum ItemCommand {
 
         #[arg(
             long = "id",
-            help = "Select exact human IDs or canonical MIDs (uppercase 26-character ULIDs); repeat for OR, intersected with other filters"
+            help = "Select exact human IDs or canonical MIDs (uppercase 26-character ULIDs); repeat for OR, intersected with other filters. Omission adds no restriction"
         )]
         ids: Vec<String>,
 
         #[arg(
             long,
-            help = "Include up to three bounded, partial source excerpts per match; use item get for complete content"
+            help = "Include up to three bounded, partial source excerpts per match; omitted by default. Excerpts may skip content; use item get for complete content"
         )]
         excerpts: bool,
     },
@@ -230,11 +231,11 @@ enum ItemCommand {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         id: String,
 
-        /// Select edge direction relative to this item; omission includes both.
+        /// Select edge direction relative to this item; omission includes both, outgoing first.
         #[arg(long, value_enum)]
         direction: Option<CliRelationDirection>,
 
-        /// Select exact relation names (repeatable, OR); intersects the neighbour flavour filter.
+        /// Select exact relation names (repeatable, OR); intersects the neighbour flavour filter. Omission includes all.
         #[arg(long)]
         relation: Vec<String>,
 
@@ -242,12 +243,15 @@ enum ItemCommand {
         #[arg(long)]
         flavour: Vec<String>,
 
-        #[arg(long, help = "Page size: 1 through 100 (default 20)")]
+        #[arg(
+            long,
+            help = "Maximum relation entries per page: 1 through 100 (default 20), not unique neighbours; the byte budget may return fewer"
+        )]
         limit: Option<usize>,
 
         #[arg(
             long,
-            help = "Opaque next_cursor from the previous page; keep item/options unchanged; omit to start or restart after source/schema changes"
+            help = "Opaque next_cursor from the previous page; keep item/options unchanged until has_more is false; omit to start or restart after source/schema changes. Empty strings are invalid"
         )]
         cursor: Option<String>,
     },
@@ -297,15 +301,15 @@ impl From<CliField> for FieldValue {
 
 #[derive(Debug, Args)]
 struct ItemFilterArgs {
-    /// Select exact flavours (repeatable, OR); distinct filter categories combine with AND.
+    /// Select exact flavours (repeatable, OR); distinct filter categories combine with AND. Omission selects all flavours.
     #[arg(long)]
     flavour: Vec<String>,
 
-    /// Exact schema-declared custom-field KEY=VALUE filter; excludes title/MID and typed relations. OR within one key, AND across keys (repeatable).
+    /// Exact schema-declared custom-field KEY=VALUE filter; excludes title/MID and typed relations. Key and scalar text value match exactly, without trimming; KEY= matches an empty value. OR within one key, AND across keys and other filter categories (repeatable). Omission adds no restriction.
     #[arg(long = "field", value_parser = parse_field)]
     fields: Vec<CliField>,
 
-    /// Select items with these authored outgoing relation names (repeatable, OR).
+    /// Select items with these exact authored outgoing relation names (repeatable, OR). Omission adds no restriction.
     #[arg(long)]
     relation: Vec<String>,
 
@@ -315,12 +319,15 @@ struct ItemFilterArgs {
     )]
     path: Vec<PathBuf>,
 
-    #[arg(long, help = "Page size: 1 through 100 (default 20)")]
+    #[arg(
+        long,
+        help = "Maximum entries per page: 1 through 100 (default 20); the byte budget may return fewer"
+    )]
     limit: Option<usize>,
 
     #[arg(
         long,
-        help = "Opaque next_cursor from the previous page; keep query/options unchanged; omit to start or restart after source/schema changes"
+        help = "Opaque next_cursor from the previous page; keep query/options unchanged until has_more is false; omit to start or restart after source/schema changes. Empty strings are invalid"
     )]
     cursor: Option<String>,
 }

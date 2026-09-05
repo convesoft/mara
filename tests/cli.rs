@@ -3965,6 +3965,74 @@ fn item_create_initial_relations_validate_candidate_body_and_preserve_empty_inpu
 }
 
 #[test]
+fn cli_and_mcp_mutations_trim_titles_and_reject_blank_titles() {
+    for use_mcp in [false, true] {
+        let fixture = TempDir::new().unwrap();
+        assert!(mara(fixture.path(), &["project", "init"]).status.success());
+        let path = fixture.path().join("titles.mara.md");
+        for (operation, id, title, succeeds) in [
+            ("create", "REQ-TITLE", " \tOriginal title  ", true),
+            ("update", "REQ-TITLE", "  Updated title\t ", true),
+            ("update", "REQ-TITLE", "", false),
+            ("update", "REQ-TITLE", " \t ", false),
+            ("create", "REQ-REJECTED", "", false),
+            ("create", "REQ-REJECTED", " \t ", false),
+        ] {
+            let before = fs::read(&path).ok();
+            if use_mcp {
+                let params = if operation == "create" {
+                    json!({"flavour":"requirement", "id":id, "file":"titles.mara.md", "title":title, "body":"Title normalization."})
+                } else {
+                    json!({"reference":id, "title":title})
+                };
+                let responses = mcp_exchange(
+                    fixture.path(),
+                    &[
+                        mcp_initialize(1),
+                        json!({"jsonrpc":"2.0", "method":"notifications/initialized"}),
+                        mcp_call(2, &format!("item_{operation}"), params),
+                    ],
+                );
+                let result = &mcp_response(&responses, 2)["result"];
+                assert_eq!(result["isError"], !succeeds, "{result:#}");
+            } else {
+                let args = if operation == "create" {
+                    vec![
+                        "item",
+                        operation,
+                        "requirement",
+                        id,
+                        "titles.mara.md",
+                        "--title",
+                        title,
+                        "--body",
+                        "Title normalization.",
+                    ]
+                } else {
+                    vec!["item", operation, id, "--title", title]
+                };
+                let output = mara(fixture.path(), &args);
+                assert_eq!(output.status.success(), succeeds, "{}", stderr(&output));
+            }
+            if succeeds {
+                let source = fs::read_to_string(&path).unwrap();
+                assert!(
+                    source
+                        .lines()
+                        .any(|line| line == format!(":title: {}", title.trim()))
+                );
+            } else {
+                assert_eq!(
+                    fs::read(&path).ok(),
+                    before,
+                    "rejected {operation} changed source"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn item_create_writes_complete_items_and_required_body_scaffolds() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -4008,7 +4076,7 @@ fn item_create_writes_complete_items_and_required_body_scaffolds() {
             "REQ-COMPLETE",
             "docs/items.mara.md",
             "--title",
-            "Complete item",
+            " \tComplete item  ",
             "--field",
             "status=draft",
             "--field",
@@ -5626,6 +5694,16 @@ fn every_command_help_describes_commands_arguments_and_options() {
         assert!(output.status.success(), "{command:?}: {}", stderr(&output));
         assert!(stderr(&output).is_empty(), "{}", stderr(&output));
         let help = stdout(&output);
+        if command == ["project", "init"] {
+            let path_help = help
+                .lines()
+                .find(|line| line.trim_start().starts_with("[PATH]"))
+                .unwrap();
+            assert!(
+                path_help.contains("only when --project is also omitted"),
+                "{path_help}"
+            );
+        }
         if command == ["item", "search"] {
             let query_help = help
                 .lines()
@@ -5742,6 +5820,141 @@ fn mcp_tools_list_exposes_parameter_guidance() {
             "missing tool description: {tool:#}"
         );
         check_properties(&tool["inputSchema"]);
+
+        // Compare invocation conventions on the real CLI and MCP surfaces together.
+        // Transport-specific syntax (stdin, null, arrays, project selection) stays explicit.
+        let name = tool["name"].as_str().unwrap();
+        let mut command = name.split('_').collect::<Vec<_>>();
+        command.push("--help");
+        let output = mara(fixture.path(), &command);
+        assert!(output.status.success(), "{name}: {}", stderr(&output));
+        let help = stdout(&output);
+        for (property, schema) in tool["inputSchema"]["properties"].as_object().unwrap() {
+            let (cli_input, conventions): (&str, &[&str]) = match property.as_str() {
+                "title" => (
+                    "--title",
+                    &[
+                        "single-line",
+                        "surrounding whitespace",
+                        "trimmed",
+                        "whitespace-only",
+                        "line breaks",
+                        "rejected",
+                    ],
+                ),
+                "file" => (
+                    "<FILE>",
+                    &[
+                        "project-relative",
+                        "*.mara.md",
+                        "parent",
+                        "creat",
+                        "absent",
+                        "absolute paths",
+                        ".. components",
+                    ],
+                ),
+                "line" => (
+                    "--line",
+                    &[
+                        "one-based",
+                        "1 through line_count + 1",
+                        "appends",
+                        "inside",
+                        "rejected",
+                    ],
+                ),
+                "limit" => ("--limit", &["1", "100", "20", "byte budget", "fewer"]),
+                "cursor" => (
+                    "--cursor",
+                    &[
+                        "next_cursor",
+                        "unchanged",
+                        "has_more",
+                        "source/schema",
+                        "empty strings are invalid",
+                    ],
+                ),
+                "fields" if matches!(name, "item_create" | "item_update") => (
+                    "--field",
+                    &[
+                        "custom",
+                        "schema-validated scalar text",
+                        "trimmed",
+                        "line breaks",
+                        "rejected",
+                        "empty value",
+                        "typed relations",
+                    ],
+                ),
+                "fields" => (
+                    "--field",
+                    &[
+                        "custom",
+                        "without trimming",
+                        "empty value",
+                        "typed relations",
+                    ],
+                ),
+                "clear_fields" => (
+                    "--clear-field",
+                    &[
+                        "optional custom field",
+                        "cannot also set",
+                        "clears nothing",
+                        "absent optional field",
+                        "no-op",
+                    ],
+                ),
+                "relations" if name == "item_create" => (
+                    "--relation",
+                    &[
+                        "schema-declared",
+                        "atomically",
+                        "new id may target itself",
+                        "duplicate edges are rejected",
+                        "adds none",
+                    ],
+                ),
+                "direction" => (
+                    "--direction",
+                    &["relative to", "includes both", "outgoing first"],
+                ),
+                "query" => (
+                    "<QUERY>",
+                    &[
+                        "unicode case-insensitive",
+                        "distinct",
+                        "punctuation-only",
+                        "all items within the filters",
+                    ],
+                ),
+                "excerpts" => ("--excerpts", &["three", "partial", "skip"]),
+                "new_id" => (
+                    "<NEW_ID>",
+                    &[
+                        "unique human id",
+                        "flavour",
+                        "alias",
+                        "current id is a no-op",
+                    ],
+                ),
+                _ => continue,
+            };
+            let cli_help = help
+                .lines()
+                .find(|line| line.trim_start().starts_with(cli_input))
+                .unwrap_or_else(|| panic!("{name} is missing {cli_input}: {help}"));
+            let mcp_help = schema["description"].as_str().unwrap();
+            for convention in conventions {
+                for (surface, text) in [("CLI", cli_help), ("MCP", mcp_help)] {
+                    assert!(
+                        text.to_lowercase().contains(convention),
+                        "{name}.{property} {surface} lacks {convention}: {text}"
+                    );
+                }
+            }
+        }
     }
     for name in ["item_create", "item_update"] {
         let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
