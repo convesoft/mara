@@ -5626,6 +5626,12 @@ fn every_command_help_describes_commands_arguments_and_options() {
         assert!(output.status.success(), "{command:?}: {}", stderr(&output));
         assert!(stderr(&output).is_empty(), "{}", stderr(&output));
         let help = stdout(&output);
+        if command == ["item", "update"] {
+            let field_help = help.lines().find(|line| line.contains("--field")).unwrap();
+            for convention in ["KEY=", "empty value", "--clear-field", "remove"] {
+                assert!(field_help.contains(convention), "{field_help}");
+            }
+        }
         if command == ["item", "create"] {
             let body_help = help.lines().find(|line| line.contains("--body")).unwrap();
             for convention in ["omitted", "empty", "whitespace-only", "scaffold"] {
@@ -6604,6 +6610,13 @@ fn item_update_preserves_source_and_permissions_while_replacing_repeated_fields(
         .replace(":tag: second\r\n", "")
         .replace(":tag: third\r\n", "");
     assert_eq!(fs::read_to_string(&path).unwrap(), expected);
+    let emptied = mara(
+        fixture.path(),
+        &["item", "update", "REQ-EDIT", "--field", "tag="],
+    );
+    assert!(emptied.status.success(), "{}", stderr(&emptied));
+    let expected = expected.replace(":tag:\tonly  ", ":tag:\t  ");
+    assert_eq!(fs::read_to_string(&path).unwrap(), expected);
     let cleared = mara(
         fixture.path(),
         &["item", "update", "REQ-EDIT", "--clear-field", "tag"],
@@ -6611,7 +6624,7 @@ fn item_update_preserves_source_and_permissions_while_replacing_repeated_fields(
     assert!(cleared.status.success(), "{}", stderr(&cleared));
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
-        expected.replace(":tag:\tonly  \r\n", "")
+        expected.replace(":tag:\t  \r\n", "")
     );
     assert!(
         mara(fixture.path(), &["project", "validate"])

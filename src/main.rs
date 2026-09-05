@@ -134,6 +134,7 @@ enum ItemCommand {
         #[arg(long)]
         title: Option<String>,
         /// Replace all values of a custom KEY=VALUE field; repeat for schema-repeatable keys.
+        /// KEY= keeps an empty value; use --clear-field KEY to remove the field.
         /// Excludes title, MID, and typed relations; use relation add/remove for edges.
         #[arg(long = "field", value_parser = parse_field)]
         fields: Vec<CliField>,
