@@ -279,6 +279,8 @@ Substring modes, stemming, and synonym expansion are not supported.
 Both query commands accept repeatable
 `--flavour <name>`, `--field <key=value>`, `--relation <name>`, and
 `--path <project-relative-path>` filters plus `--limit <count>`.
+Field filters accept only schema-declared custom-field keys, excluding
+structural title/MID metadata and typed relations; key and value matching is exact.
 Path filters select exact documents or directory subtrees, including nested
 documents and excluding similarly prefixed sibling names. Path selection and
 normalization follow [[DES-ITEM-PATH-SELECTION]].

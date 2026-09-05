@@ -216,7 +216,7 @@ struct ItemFilterToolParams {
     /// Exact flavour names, combined with OR and intersected with other filter categories. Omitted or empty selects all flavours.
     #[serde(default)]
     flavours: Vec<String>,
-    /// Exact metadata key/value filters: OR within one key, AND across keys and other filter categories. Omitted or empty adds no restriction.
+    /// Exact schema-declared custom-field key/value filters; excludes title/MID and typed relations. OR within one key, AND across keys and other filter categories. Omitted or empty adds no restriction.
     #[serde(default)]
     fields: Vec<FieldValue>,
     /// Exact authored outgoing relation names, combined with OR and intersected with other filters. Omitted or empty adds no restriction.
@@ -260,7 +260,7 @@ struct ItemSearchToolParams {
     /// Exact flavour names, combined with OR and intersected with other filter categories. Omitted or empty selects all flavours.
     #[serde(default)]
     flavours: Vec<String>,
-    /// Exact metadata key/value filters: OR within one key, AND across keys and other filter categories. Omitted or empty adds no restriction.
+    /// Exact schema-declared custom-field key/value filters; excludes title/MID and typed relations. OR within one key, AND across keys and other filter categories. Omitted or empty adds no restriction.
     #[serde(default)]
     fields: Vec<FieldValue>,
     /// Exact authored outgoing relation names, combined with OR and intersected with other filters. Omitted or empty adds no restriction.

@@ -300,7 +300,7 @@ struct ItemFilterArgs {
     #[arg(long)]
     flavour: Vec<String>,
 
-    /// Exact metadata KEY=VALUE filter; OR within one key, AND across different keys (repeatable).
+    /// Exact schema-declared custom-field KEY=VALUE filter; excludes title/MID and typed relations. OR within one key, AND across keys (repeatable).
     #[arg(long = "field", value_parser = parse_field)]
     fields: Vec<CliField>,
 

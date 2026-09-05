@@ -5583,6 +5583,12 @@ fn every_command_help_describes_commands_arguments_and_options() {
         assert!(output.status.success(), "{command:?}: {}", stderr(&output));
         assert!(stderr(&output).is_empty(), "{}", stderr(&output));
         let help = stdout(&output);
+        if command == ["item", "list"] || command == ["item", "search"] {
+            let field_help = help.lines().find(|line| line.contains("--field")).unwrap();
+            for convention in ["custom", "title/MID", "typed relations"] {
+                assert!(field_help.contains(convention), "{command:?}: {field_help}");
+            }
+        }
         let (purpose, _) = help.split_once("Usage:").expect("help has usage");
         assert!(!purpose.trim().is_empty(), "{command:?}: {help}");
 
@@ -5667,6 +5673,18 @@ fn mcp_tools_list_exposes_parameter_guidance() {
             .unwrap();
         for convention in ["custom", "title/MID", "typed relations", "relation_add"] {
             assert!(fields.contains(convention), "{name}: {fields}");
+        }
+    }
+    for name in ["item_list", "item_search"] {
+        let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
+        for description in [
+            &tool["inputSchema"]["properties"]["fields"]["description"],
+            &tool["inputSchema"]["$defs"]["FieldValue"]["properties"]["key"]["description"],
+        ] {
+            let description = description.as_str().unwrap();
+            for convention in ["custom", "title/MID", "typed relations"] {
+                assert!(description.contains(convention), "{name}: {description}");
+            }
         }
     }
     let create = tools
