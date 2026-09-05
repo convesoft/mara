@@ -176,7 +176,7 @@ enum ItemCommand {
             help = "Initial outgoing relation, created atomically with the item (repeatable). TARGET is an exact human ID or canonical MID (uppercase 26-character ULID)")]
         relations: Vec<InitialRelation>,
 
-        /// Body text, or - to read stdin; omission creates a scaffold when a body is required.
+        /// Body text, or - to read stdin; an omitted, empty, or whitespace-only required body creates an incomplete scaffold.
         #[arg(long)]
         body: Option<String>,
 

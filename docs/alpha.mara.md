@@ -155,8 +155,8 @@ project's content include, Git ignore, and directory-symlink discovery rules.
 `--line N` inserts immediately before the one-based line `N`; `line_count + 1`
 means end of file. Body input accepts an inline value or `-` for standard input.
 
-When a required body is omitted, creation succeeds as an incomplete scaffold
-and reports `complete: false` with `body` missing. Validation continues to
+When a required body is omitted, empty, or whitespace-only, creation succeeds
+as an incomplete scaffold and reports `complete: false` with `body` missing. Validation continues to
 reject the item until its body is filled. An optional body may remain empty.
 
 Mara generates the item's MID, writes it as exactly one `:mid:` entry

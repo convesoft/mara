@@ -4067,6 +4067,38 @@ fn item_create_writes_complete_items_and_required_body_scaffolds() {
     let invalid = mara(fixture.path(), &["item", "validate", "REQ-SCAFFOLD"]);
     assert!(!invalid.status.success());
     assert!(stderr(&invalid).contains("required body is empty"));
+
+    for (id, body, stdin) in [
+        ("REQ-EMPTY-BODY", "", ""),
+        ("REQ-BLANK-STDIN", "-", " \t\n"),
+    ] {
+        let created = mara_with_stdin(
+            fixture.path(),
+            &[
+                "--format",
+                "json",
+                "item",
+                "create",
+                "requirement",
+                id,
+                "docs/items.mara.md",
+                "--title",
+                "Blank body",
+                "--field",
+                "status=draft",
+                "--body",
+                body,
+            ],
+            stdin,
+        );
+        assert!(created.status.success(), "{}", stderr(&created));
+        let result: Value = serde_json::from_slice(&created.stdout).unwrap();
+        assert_eq!(result["complete"], false);
+        assert_eq!(result["missing"], json!(["body"]));
+        let invalid = mara(fixture.path(), &["item", "validate", id]);
+        assert!(!invalid.status.success());
+        assert!(stderr(&invalid).contains("required body is empty"));
+    }
 }
 
 #[test]
@@ -5583,6 +5615,12 @@ fn every_command_help_describes_commands_arguments_and_options() {
         assert!(output.status.success(), "{command:?}: {}", stderr(&output));
         assert!(stderr(&output).is_empty(), "{}", stderr(&output));
         let help = stdout(&output);
+        if command == ["item", "create"] {
+            let body_help = help.lines().find(|line| line.contains("--body")).unwrap();
+            for convention in ["omitted", "empty", "whitespace-only", "scaffold"] {
+                assert!(body_help.contains(convention), "{body_help}");
+            }
+        }
         if command == ["item", "list"] || command == ["item", "search"] {
             let field_help = help.lines().find(|line| line.contains("--field")).unwrap();
             for convention in ["custom", "title/MID", "typed relations"] {
