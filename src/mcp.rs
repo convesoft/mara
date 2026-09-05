@@ -112,6 +112,15 @@ struct ItemUpdateToolParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct ItemRenameToolParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    reference: String,
+    new_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct ItemDeleteToolParams {
     #[serde(default)]
     project: Option<PathBuf>,
@@ -370,6 +379,19 @@ impl MaraMcp {
     }
 
     #[tool(
+        name = "item_rename",
+        description = "Rename one human ID by exact MID or human ID, rewriting supported internal references across the valid corpus. Preserves the MID and unrelated source; retains no alias. Uses recoverable file replacement."
+    )]
+    fn item_rename(
+        &self,
+        Parameters(params): Parameters<ItemRenameToolParams>,
+    ) -> Result<Json<mara::ItemRename>, String> {
+        self.for_project(params.project)?
+            .item_rename(&params.reference, &params.new_id)
+            .map(Json)
+    }
+
+    #[tool(
         name = "item_delete",
         description = "Delete one item by exact MID or human ID after validating the project. Refuses surviving incoming relations or supported wiki mentions and reports every blocking source location. Keeps the containing document."
     )]
@@ -401,7 +423,7 @@ impl MaraMcp {
 
     #[tool(
         name = "project_transaction_rollback",
-        description = "Explicitly roll back a pending move journal to its original files. Stop other Mara writers first; later manual edits are never overwritten."
+        description = "Explicitly roll back a pending mutation journal to its original files. Stop other Mara writers first; later manual edits are never overwritten."
     )]
     fn project_transaction_rollback(
         &self,

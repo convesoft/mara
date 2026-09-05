@@ -173,6 +173,11 @@ impl OperationContext {
         })
     }
 
+    pub fn item_rename(&self, reference: &str, new_id: &str) -> Result<crate::ItemRename, String> {
+        let (project, schema) = self.load_project()?;
+        crate::rename_item(&project, &schema, reference, new_id).map_err(|error| error.to_string())
+    }
+
     pub fn item_delete(&self, reference: &str) -> Result<crate::ItemDeletion, String> {
         let (project, schema) = self.load_project()?;
         crate::delete_item(&project, &schema, reference).map_err(|error| error.to_string())

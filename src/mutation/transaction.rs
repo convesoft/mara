@@ -241,7 +241,7 @@ pub(super) fn commit(
     commit_with_hook(project, changes, verify, |_| Ok(()))
 }
 
-fn commit_with_hook(
+pub(super) fn commit_with_hook(
     project: &Project,
     changes: Vec<Change>,
     verify: impl FnOnce() -> Result<(), Error>,

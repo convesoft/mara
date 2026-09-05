@@ -22,11 +22,12 @@ content update, and deletion are separate operations.
 
 :::mara requirement REQ-RECOVERABLE-MUTATION
 :mid: 01M1RKZY3VJKYP7V8GNDKR84GT
-:title: Recover interrupted multi-file movement without losing source data
+:title: Recover interrupted multi-file mutations without losing source data
 
-Before replacing any original, movement verifies every preimage and insertion
-point, stages every candidate, and validates the complete candidate corpus.
-Cross-file replacement records durable project-local recovery information first.
+Before replacing any original, movement and rename verify every planned edit
+against its preimage, stage every candidate, and validate the complete candidate
+corpus. Their journaled replacements record durable project-local recovery
+information first.
 An in-process replacement failure restores every original, including removing a
 new destination. An interrupted operation supports explicit rollback.
 
@@ -282,4 +283,77 @@ recheck source bytes, permissions, project configuration, schema, discovery,
 and the full corpus before atomic replacement, without a multi-file journal.
 Concurrent manual filesystem edits during publication remain outside the
 advisory lock, as described in [[DES-ITEM-MOVEMENT]].
+:::
+
+:::mara requirement REQ-ITEM-RENAME
+:mid: 01M1RW50QWRZSKHK5TP4B4QMFV
+:title: Rename human IDs without changing resolved identity
+
+`item rename <reference> <new-id>` and MCP `item_rename` rename exactly one
+item resolved by exact MID or human ID. Require a valid complete project,
+a replacement matching the ID grammar and selected flavour prefix, and
+project-wide uniqueness. Preserve the MID and flavour.
+
+Rewrite only the opener ID and schema-defined typed-relation or supported body
+wiki-mention targets authored with the old human ID, including self-references.
+Supported mentions follow [[DES-DOCUMENT-FORMAT]]. Preserve MID-authored targets,
+labels, other metadata values, unrelated prose, code and raw contexts, metadata
+order, whitespace, Markdown layout, existing line endings, and file permissions.
+
+Validate the complete candidate corpus before publication; every relation and
+mention must retain its MID endpoints. Use [[REQ-RECOVERABLE-MUTATION]] for
+publication and recovery. On success, the new ID resolves to the original MID
+and the old ID no longer resolves. Requesting the current ID succeeds without
+writing and returns no affected paths.
+
+Human output, CLI JSON, and MCP identify the unchanged MID, old and new IDs,
+and affected paths. No alias, MID rename, flavour change, external or historical
+rewrite, bulk rename, history record, or Git operation is included.
+:::
+
+:::mara design DES-ITEM-RENAME
+:mid: 01M1RW50RC4BK3RAH78AEJVR2T
+:title: Patch parsed ID targets through the recoverable transaction
+:satisfies: REQ-ITEM-RENAME
+:satisfies: REQ-RECOVERABLE-MUTATION
+:satisfies: REQ-SURFACE-PARITY
+
+CLI accepts `item rename <reference> <new-id>`. MCP accepts `reference`,
+`new_id`, and the usual optional project selection. Both invoke one operation
+and return `{mid, old_id, new_id, paths}`. Paths are unique project-relative
+changed document paths in lexical order, empty for an unchanged ID.
+
+Hold the project mutation lock and validate the full corpus before resolution
+and replacement-ID checks. Plan byte patches from the selected item's opener,
+schema-defined relation metadata spans, and parser-recognized mention spans.
+Check each opener, metadata scalar, and mention against its parsed preimage;
+replace only the human-ID token. Reject overlapping or mismatched patches and
+apply them in reverse byte order per file without rendering Markdown.
+Labelled wiki syntax is not introduced; unsupported syntax remains literal.
+
+Reparse all changed documents and validate the complete projected corpus.
+Verify the same item MIDs, expected human IDs, flavours, and document paths,
+and the same ordered relation names and resolved relation and mention MID
+endpoints. Stage every changed file with original permissions and recheck the
+project configuration, schema, discovery, corpus, and file preimages before
+replacing any original.
+
+Publish every nonempty rename through the journal format 1 transaction in
+[[DES-ITEM-MOVEMENT]], including a rename affecting only one document. Its
+rollback, interrupted-process recovery, pending-state blocking, manual-edit
+protection, and platform durability limits apply unchanged. No-op renames still
+require a valid corpus and an available mutation lock.
+:::
+
+:::mara decision ADR-RENAME-WITHOUT-ALIASES
+:mid: 01M1RW50RVQY5MM2V2S7FQFCD1
+:title: Keep one current human handle per durable identity
+:justifies: REQ-ITEM-RENAME
+
+Rename replaces the current human-readable handle without retaining aliases.
+The immutable MID already provides a stable target when a reference must survive
+human-ID changes. Keeping alias state would add a second persisted naming
+contract and ambiguous future ID reuse. Rewrite supported current-corpus human
+references in the same recoverable transaction; external systems and historical
+revisions retain their authored text and are outside the rename boundary.
 :::

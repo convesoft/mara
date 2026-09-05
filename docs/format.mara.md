@@ -32,7 +32,8 @@ Failures preserve user data and produce actionable diagnostics.
 - An ID matches `[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+`, is mandatory and unique in
   the repository, and includes its human-meaningful prefix: `REQ-1`, not `1`.
 - Flavours and ID prefixes follow the project taxonomy.
-- IDs are stable handles. Renaming one requires updating all of its references.
+- IDs are current human-readable handles. Renaming follows [[DES-ITEM-RENAME]];
+  the immutable MID remains the stable machine identity.
 - An item closes with an exact standalone `:::`. Items cannot nest.
 
 ## Metadata and body
