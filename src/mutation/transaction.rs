@@ -17,6 +17,14 @@ pub(super) struct MutationLock {
     _file: File,
 }
 
+impl Drop for MutationLock {
+    fn drop(&mut self) {
+        // Release at the operation boundary even if a concurrent subprocess
+        // temporarily inherited a descriptor for the same lock file.
+        let _ = self._file.unlock();
+    }
+}
+
 impl MutationLock {
     pub(super) fn acquire(project: &Project) -> Result<Self, Error> {
         let lock = Self::lock(project)?;
@@ -570,6 +578,20 @@ mod tests {
         assert!(rollback_transaction(&project).is_err());
         drop(lock);
         assert!(MutationLock::acquire(&project).is_ok());
+    }
+
+    #[test]
+    fn mutation_lock_is_released_even_when_a_descriptor_is_inherited() {
+        let (_directory, project) = fixture();
+        let lock = MutationLock::acquire(&project).unwrap();
+        // A concurrent subprocess launch can inherit this open file description
+        // briefly before exec closes it, even though the handle is close-on-exec.
+        let inherited = lock._file.try_clone().unwrap();
+        assert!(MutationLock::acquire(&project).is_err());
+        drop(lock);
+        let next = MutationLock::acquire(&project).unwrap();
+        drop(inherited);
+        drop(next);
     }
 
     #[test]
