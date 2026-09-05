@@ -40,7 +40,7 @@ pub struct ItemCreationRequest {
 pub struct InitialRelation {
     /// Schema-declared outgoing relation name, not a custom field.
     pub relation: String,
-    /// Exact human ID or canonical MID; the new item's human ID may target itself.
+    /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix); the new item's human ID may target itself.
     pub target: String,
 }
 
