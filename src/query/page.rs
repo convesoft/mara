@@ -323,7 +323,7 @@ fn matching_spans(value: &str, terms: &BTreeSet<String>) -> Vec<(usize, usize)> 
     }
     canonical
         .unicode_word_indices()
-        .filter(|(_, word)| terms.contains(*word))
+        .filter(|(_, word)| terms.iter().any(|term| word_matches(term, word)))
         .map(|(start, word)| {
             let first = mapping.partition_point(|entry| entry.1 <= start);
             let last = mapping.partition_point(|entry| entry.0 < start + word.len()) - 1;
