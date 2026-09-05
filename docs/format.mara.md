@@ -1,6 +1,7 @@
 # Mara document format
 
 :::mara design DES-DOCUMENT-FORMAT
+:mid: 01M1PXP2KG381MM1VNN6XC7S4M
 :title: Mara document format
 
 This contract defines the smallest authoring surface needed to dogfood Mara.
@@ -17,6 +18,7 @@ An item has an explicit namespace, flavour, and complete human-readable ID:
 
 ```markdown
 :::mara requirement REQ-FAIL-SAFETY
+:mid: 01M1PXP2KGVW5ZF2JGP9K4XE9B
 :title: Fail safely and observably
 :depends_on: REQ-ACTIONABLE-DIAGNOSTICS
 
@@ -47,21 +49,23 @@ Failures preserve user data and produce actionable diagnostics.
 ## Machine identity
 
 - `mid` is reserved structural metadata, not a configurable field.
-- During pre-alpha, `:mid:` may be absent because Mara cannot generate it yet.
-- Once identity generation exists, every item has exactly one Mara-generated
-  MID on the line immediately after its opener. It is repository-wide unique
-  and immutable for the item's lifetime.
-- Do not create or copy placeholder MIDs. Existing pre-alpha items receive MIDs
-  through one deliberate backfill before identity-dependent features ship.
+- Every item has exactly one Mara-generated MID on the line immediately after
+  its opener.
+- A MID is a raw canonical uppercase 26-character ULID with no prefix.
+- The MID is repository-wide unique and immutable for the item's lifetime.
+- Callers never provide, copy, edit, or update MIDs through item operations.
+- Do not create or copy placeholder MIDs by hand. Existing pre-alpha items
+  receive MIDs through one deliberate backfill before identity-dependent
+  editing is used.
 
 ## References and relations
 
 - `[[REQ-FAIL-SAFETY]]` is a readable internal mention resolved by exact ID.
 - Typed relations are metadata entries whose key names the relation and whose
-  value is one target ID. Repeat the key for multiple targets.
+  value is one target handle. Repeat the key for multiple targets.
 - Use only relation names whose meaning is defined by the project corpus.
-- Relations resolve to MIDs internally once machine identity exists. Inverses
-  and backlinks are derived and are not authored a second time.
+- Relations resolve target handles to MIDs internally once machine identity
+  exists. Inverses and backlinks are derived and are not authored a second time.
 - Inline references are mentions; typed relations are authored in metadata.
 
 ## In-memory projection
@@ -85,6 +89,7 @@ versions remain independent from the Mara application version.
 :::
 
 :::mara decision ADR-RUSHDOWN-PARSER-ADAPTER
+:mid: 01M1PXP2KGG86FFPSNS8QWEXRZ
 :title: Use Rushdown behind a Mara-owned Markdown adapter
 :justifies: DES-DOCUMENT-FORMAT
 

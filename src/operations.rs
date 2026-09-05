@@ -6,10 +6,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Corpus, Diagnostic, FieldFilter, FlavourDefinition, ItemCreationRequest, ItemFilters,
     ItemSummary, Project, RelatedFilters, RelatedItem, RelationDefinition, RelationDirection,
-    ResolvedItem, Schema, Template, add_relation, create_item, get_item, initialize_project,
-    list_items, load_corpus, load_corpus_for_validation, load_corpus_syntax_for_validation,
-    load_schema, load_schema_for_validation, related_items, remove_relation, resolve_project,
-    resolve_project_for_validation, search_items, validate_corpus, validate_corpus_independent,
+    ResolvedItem, Schema, Template, add_relation, backfill_mids, create_item, get_item,
+    initialize_project, list_items, load_corpus, load_corpus_for_validation,
+    load_corpus_syntax_for_validation, load_schema, load_schema_for_validation, related_items,
+    remove_relation, resolve_project, resolve_project_for_validation, search_items,
+    validate_corpus, validate_corpus_independent,
 };
 
 #[derive(Debug, Clone)]
@@ -63,6 +64,24 @@ impl OperationContext {
 
     pub fn project_validate(&self) -> Result<ValidationResult, String> {
         self.validate(None)
+    }
+
+    pub fn project_mid_backfill(&self) -> Result<ProjectMidBackfillResult, String> {
+        let (project, schema) = self.load_project()?;
+        let result = backfill_mids(&project, &schema).map_err(|error| error.to_string())?;
+        Ok(ProjectMidBackfillResult {
+            project: project.root().to_path_buf(),
+            changed: result
+                .entries()
+                .iter()
+                .map(|entry| BackfilledMidResult {
+                    id: entry.id().to_owned(),
+                    mid: entry.mid().to_owned(),
+                    path: entry.path().to_path_buf(),
+                    line: entry.line(),
+                })
+                .collect(),
+        })
     }
 
     pub fn item_validate(&self, id: &str) -> Result<ValidationResult, String> {
@@ -142,6 +161,7 @@ impl OperationContext {
         let complete = created.is_complete();
         Ok(ItemCreationResult {
             id,
+            mid: created.mid().to_owned(),
             path: created.path().to_path_buf(),
             line: created.line(),
             complete,
@@ -234,8 +254,10 @@ impl OperationContext {
         Ok(RelationMutationResult {
             action,
             source: mutation.source().to_owned(),
+            source_mid: mutation.source_mid().map(ToOwned::to_owned),
             relation: mutation.relation().to_owned(),
             target: mutation.target().to_owned(),
+            target_mid: mutation.target_mid().map(ToOwned::to_owned),
             path: mutation.path().to_path_buf(),
         })
     }
@@ -329,6 +351,20 @@ pub struct ProjectSummary {
     pub name: String,
     pub schema_path: PathBuf,
     pub content_patterns: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProjectMidBackfillResult {
+    pub project: PathBuf,
+    pub changed: Vec<BackfilledMidResult>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct BackfilledMidResult {
+    pub id: String,
+    pub mid: String,
+    pub path: PathBuf,
+    pub line: usize,
 }
 
 pub fn project_initialize(
@@ -443,6 +479,7 @@ pub struct ItemCreateParams {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct ItemCreationResult {
     pub id: String,
+    pub mid: String,
     pub path: PathBuf,
     pub line: usize,
     pub complete: bool,
@@ -566,8 +603,12 @@ impl RelationAction {
 pub struct RelationMutationResult {
     pub action: RelationAction,
     pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_mid: Option<String>,
     pub relation: String,
     pub target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_mid: Option<String>,
     pub path: PathBuf,
 }
 
@@ -635,7 +676,10 @@ fn collect_validation_result(
     }
     let selected_item_missing = selected.is_some_and(|id| {
         context.corpus.is_complete()
-            && !context.corpus.items().any(|item| item.id() == id)
+            && !context
+                .corpus
+                .items()
+                .any(|item| item_matches_handle(item, id))
             && !context
                 .diagnostics
                 .iter()
@@ -651,7 +695,7 @@ fn collect_validation_result(
                     || context
                         .corpus
                         .items()
-                        .filter(|item| item.id() == id)
+                        .filter(|item| item_matches_handle(item, id))
                         .any(|item| {
                             diagnostic.source().span().start_byte()
                                 >= item.source().span().start_byte()
@@ -704,5 +748,13 @@ fn collect_validation_result(
             id: selected.map(str::to_owned),
         },
         diagnostics,
+    }
+}
+
+fn item_matches_handle(item: &crate::Item, handle: &str) -> bool {
+    if crate::is_mid(handle) {
+        item.mid() == Some(handle)
+    } else {
+        item.id() == handle
     }
 }

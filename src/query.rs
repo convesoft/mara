@@ -60,6 +60,7 @@ impl From<&SourceLocation> for ItemSource {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct ItemSummary {
     id: String,
+    mid: Option<String>,
     flavour: String,
     title: String,
     path: PathBuf,
@@ -69,6 +70,10 @@ pub struct ItemSummary {
 impl ItemSummary {
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    pub fn mid(&self) -> Option<&str> {
+        self.mid.as_deref()
     }
 
     pub fn flavour(&self) -> &str {
@@ -92,6 +97,7 @@ impl From<&Item> for ItemSummary {
     fn from(item: &Item) -> Self {
         Self {
             id: item.id().to_owned(),
+            mid: item.mid().map(ToOwned::to_owned),
             flavour: item.flavour().to_owned(),
             title: item.title().to_owned(),
             path: item.source().path().to_path_buf(),
@@ -284,6 +290,9 @@ pub enum QueryError {
     AmbiguousItem {
         id: String,
     },
+    AmbiguousMid {
+        mid: String,
+    },
     MissingRelationTarget {
         source: String,
         relation: String,
@@ -313,6 +322,7 @@ impl fmt::Display for QueryError {
         match self {
             Self::MissingItem { id } => write!(formatter, "item '{id}' was not found"),
             Self::AmbiguousItem { id } => write!(formatter, "item ID '{id}' is ambiguous"),
+            Self::AmbiguousMid { mid } => write!(formatter, "item MID '{mid}' is ambiguous"),
             Self::MissingRelationTarget {
                 source,
                 relation,
@@ -356,19 +366,23 @@ pub fn get_item(corpus: &Corpus, id: &str) -> Result<ResolvedItem, QueryError> {
             })
         })
         .collect::<Result<_, QueryError>>()?;
-    let incoming_relations = corpus
-        .items()
-        .flat_map(|source| {
-            source
-                .relations()
-                .iter()
-                .filter(move |relation| relation.target() == item.id())
-                .map(move |relation| RelationSummary {
+    let mut incoming_relations = Vec::new();
+    for source in corpus.items() {
+        for relation in source
+            .relations()
+            .iter()
+            .filter(|relation| relation_handle_can_target_item(relation.target(), item))
+        {
+            let target =
+                resolve_relation_target(corpus, source, relation.name(), relation.target())?;
+            if same_item_identity(target, item) {
+                incoming_relations.push(RelationSummary {
                     relation: relation.name().to_owned(),
                     item: source.into(),
-                })
-        })
-        .collect();
+                });
+            }
+        }
+    }
 
     Ok(ResolvedItem {
         summary: item.into(),
@@ -437,18 +451,20 @@ pub fn related_items(
             if !matches_name(&filters.flavours, source.flavour()) {
                 continue;
             }
-            for relation in source
-                .relations()
-                .iter()
-                .filter(|relation| relation.target() == item.id())
-            {
-                if matches_name(&filters.relations, relation.name()) {
-                    related.push(RelatedItem {
-                        direction: RelationDirection::Incoming,
-                        relation: relation.name().to_owned(),
-                        item: source.into(),
-                    });
+            for relation in source.relations().iter().filter(|relation| {
+                matches_name(&filters.relations, relation.name())
+                    && relation_handle_can_target_item(relation.target(), item)
+            }) {
+                let target =
+                    resolve_relation_target(corpus, source, relation.name(), relation.target())?;
+                if !same_item_identity(target, item) {
+                    continue;
                 }
+                related.push(RelatedItem {
+                    direction: RelationDirection::Incoming,
+                    relation: relation.name().to_owned(),
+                    item: source.into(),
+                });
             }
         }
     }
@@ -591,14 +607,39 @@ fn matches_name_filter(names: &[String], predicate: impl Fn(&str) -> bool) -> bo
 }
 
 fn resolve_item<'a>(corpus: &'a Corpus, id: &str) -> Result<&'a Item, QueryError> {
-    let mut matches = corpus.items().filter(|item| item.id() == id);
+    let by_mid = crate::is_mid(id);
+    let mut matches = corpus.items().filter(|item| {
+        if by_mid {
+            item.mid() == Some(id)
+        } else {
+            item.id() == id
+        }
+    });
     let Some(item) = matches.next() else {
         return Err(QueryError::MissingItem { id: id.to_owned() });
     };
     if matches.next().is_some() {
+        if by_mid {
+            return Err(QueryError::AmbiguousMid { mid: id.to_owned() });
+        }
         return Err(QueryError::AmbiguousItem { id: id.to_owned() });
     }
     Ok(item)
+}
+
+fn relation_handle_can_target_item(handle: &str, item: &Item) -> bool {
+    if crate::is_mid(handle) {
+        item.mid() == Some(handle)
+    } else {
+        item.id() == handle
+    }
+}
+
+fn same_item_identity(left: &Item, right: &Item) -> bool {
+    match (left.mid(), right.mid()) {
+        (Some(left_mid), Some(right_mid)) => left_mid == right_mid,
+        _ => left.id() == right.id(),
+    }
 }
 
 fn resolve_relation_target<'a>(

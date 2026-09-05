@@ -10,7 +10,7 @@ use tempfile::NamedTempFile;
 use crate::{
     BodyRequirement, Corpus, Error, FieldDefinition, FieldType, Item, Project, Schema,
     corpus::{document_is_discoverable, parse_document_source},
-    is_item_id, load_corpus,
+    is_item_id, load_corpus, load_corpus_for_validation, validate_corpus,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,6 +28,7 @@ pub struct ItemCreationRequest {
 pub struct ItemCreation {
     path: PathBuf,
     line: usize,
+    mid: String,
     complete: bool,
 }
 
@@ -40,6 +41,10 @@ impl ItemCreation {
         self.line
     }
 
+    pub fn mid(&self) -> &str {
+        &self.mid
+    }
+
     pub fn is_complete(&self) -> bool {
         self.complete
     }
@@ -48,14 +53,20 @@ impl ItemCreation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelationMutation {
     source: String,
+    source_mid: Option<String>,
     relation: String,
     target: String,
+    target_mid: Option<String>,
     path: PathBuf,
 }
 
 impl RelationMutation {
     pub fn source(&self) -> &str {
         &self.source
+    }
+
+    pub fn source_mid(&self) -> Option<&str> {
+        self.source_mid.as_deref()
     }
 
     pub fn relation(&self) -> &str {
@@ -66,8 +77,49 @@ impl RelationMutation {
         &self.target
     }
 
+    pub fn target_mid(&self) -> Option<&str> {
+        self.target_mid.as_deref()
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackfilledMids {
+    entries: Vec<BackfilledMid>,
+}
+
+impl BackfilledMids {
+    pub fn entries(&self) -> &[BackfilledMid] {
+        &self.entries
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackfilledMid {
+    id: String,
+    mid: String,
+    path: PathBuf,
+    line: usize,
+}
+
+impl BackfilledMid {
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn mid(&self) -> &str {
+        &self.mid
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn line(&self) -> usize {
+        self.line
     }
 }
 
@@ -114,7 +166,8 @@ pub fn create_item(
     }
 
     let newline = newline_style(&source);
-    let block = render_item(&request, newline);
+    let mid = generate_mid(corpus.items().filter_map(Item::mid));
+    let block = render_item(&request, &mid, newline);
     let candidate = insert_block(&source, position, &block, newline);
     let projected = parse_document_source(&path, &candidate, schema)?;
     let created = projected
@@ -144,8 +197,79 @@ pub fn create_item(
     Ok(ItemCreation {
         path,
         line,
+        mid,
         complete,
     })
+}
+
+pub fn backfill_mids(project: &Project, schema: &Schema) -> Result<BackfilledMids, Error> {
+    let (corpus, mut diagnostics) = load_corpus_for_validation(project, schema)?;
+    diagnostics.extend(validate_corpus(&corpus, schema));
+    let blocking = diagnostics
+        .into_iter()
+        .filter(|diagnostic| !diagnostic.is_missing_mid())
+        .collect::<Vec<_>>();
+    if let Some(diagnostic) = blocking.first() {
+        return invalid(format!(
+            "cannot backfill MIDs while validation fails at {}:{}: {}",
+            diagnostic.source().path().display(),
+            diagnostic.source().span().start_line(),
+            diagnostic.message()
+        ));
+    }
+
+    let mut known_mids = corpus
+        .items()
+        .filter_map(Item::mid)
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    let mut by_path = BTreeMap::<PathBuf, Vec<(usize, BackfilledMid)>>::new();
+    for document in corpus.documents() {
+        for item in document.items().iter().filter(|item| item.mid().is_none()) {
+            let mid = generate_mid(known_mids.iter().map(String::as_str));
+            known_mids.push(mid.clone());
+            by_path
+                .entry(document.path().to_path_buf())
+                .or_default()
+                .push((
+                    end_of_line_containing(document.source(), item.source().span().start_byte()),
+                    BackfilledMid {
+                        id: item.id().to_owned(),
+                        mid,
+                        path: document.path().to_path_buf(),
+                        line: item.source().span().start_line() + 1,
+                    },
+                ));
+        }
+    }
+
+    let mut candidates = BTreeMap::<PathBuf, String>::new();
+    let mut entries = Vec::new();
+    for (path, mut insertions) in by_path {
+        let document = corpus
+            .documents()
+            .iter()
+            .find(|document| document.path() == path)
+            .expect("backfill target belongs to the loaded corpus");
+        let newline = newline_style(document.source());
+        insertions.sort_by_key(|(position, _)| *position);
+        for (offset, (_, entry)) in insertions.iter_mut().enumerate() {
+            entry.line += offset;
+        }
+        let mut candidate = document.source().to_owned();
+        for (position, entry) in insertions.iter().rev() {
+            candidate.insert_str(*position, &format!(":mid: {}{newline}", entry.mid()));
+        }
+        parse_document_source(&path, &candidate, schema)?;
+        entries.extend(insertions.into_iter().map(|(_, entry)| entry));
+        candidates.insert(path, candidate);
+    }
+
+    for (path, candidate) in candidates {
+        atomic_replace(&project.root().join(&path), &candidate, true)?;
+    }
+
+    Ok(BackfilledMids { entries })
 }
 
 pub fn add_relation(
@@ -190,6 +314,7 @@ fn mutate_relation(
     kind: MutationKind,
 ) -> Result<RelationMutation, Error> {
     let corpus = load_corpus(project, schema)?;
+    ensure_unambiguous_item_identities(&corpus)?;
     let source_item = resolve_item(&corpus, source_id, "source")?;
     let target_item = resolve_item(&corpus, target_id, "target")?;
     let definition = schema
@@ -233,7 +358,11 @@ fn mutate_relation(
     let authored = source_item
         .relations()
         .iter()
-        .filter(|existing| existing.name() == relation_name && existing.target() == target_id)
+        .filter(|existing| {
+            existing.name() == relation_name
+                && resolve_item(&corpus, existing.target(), "target")
+                    .is_ok_and(|item| same_item_identity(item, target_item))
+        })
         .collect::<Vec<_>>();
     let candidate = match kind {
         MutationKind::Add if !authored.is_empty() => {
@@ -250,7 +379,7 @@ fn mutate_relation(
                 .span()
                 .end_byte();
             let newline = newline_style(document.source());
-            let entry = format!("{newline}:{relation_name}: {target_id}");
+            let entry = format!("{newline}:{relation_name}: {}", target_item.id());
             let mut candidate = document.source().to_owned();
             candidate.insert_str(insertion, &entry);
             candidate
@@ -278,9 +407,11 @@ fn mutate_relation(
     parse_document_source(&path, &candidate, schema)?;
     atomic_replace(&project.root().join(&path), &candidate, true)?;
     Ok(RelationMutation {
-        source: source_id.to_owned(),
+        source: source_item.id().to_owned(),
+        source_mid: source_item.mid().map(ToOwned::to_owned),
         relation: relation_name.to_owned(),
-        target: target_id.to_owned(),
+        target: target_item.id().to_owned(),
+        target_mid: target_item.mid().map(ToOwned::to_owned),
         path,
     })
 }
@@ -374,15 +505,71 @@ fn field_type_name(field_type: FieldType) -> &'static str {
 }
 
 fn resolve_item<'a>(corpus: &'a Corpus, id: &str, endpoint: &str) -> Result<&'a Item, Error> {
+    let by_mid = crate::is_mid(id);
     let matches = corpus
         .items()
-        .filter(|item| item.id() == id)
+        .filter(|item| {
+            if by_mid {
+                item.mid() == Some(id)
+            } else {
+                item.id() == id
+            }
+        })
         .collect::<Vec<_>>();
     match matches.as_slice() {
         [item] => Ok(item),
         [] => invalid(format!("relation {endpoint} item '{id}' was not found")),
+        _ if by_mid => invalid(format!("relation {endpoint} item MID '{id}' is ambiguous")),
         _ => invalid(format!("relation {endpoint} item '{id}' is ambiguous")),
     }
+}
+
+fn same_item_identity(left: &Item, right: &Item) -> bool {
+    match (left.mid(), right.mid()) {
+        (Some(left_mid), Some(right_mid)) => left_mid == right_mid,
+        _ => left.id() == right.id(),
+    }
+}
+
+fn ensure_unambiguous_item_identities(corpus: &Corpus) -> Result<(), Error> {
+    let mut ids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
+    let mut mids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
+
+    for item in corpus.items() {
+        ids.entry(item.id()).or_default().push(item);
+        let mid_entries = item
+            .metadata()
+            .iter()
+            .filter(|entry| entry.key() == "mid")
+            .collect::<Vec<_>>();
+        let [mid_entry] = mid_entries.as_slice() else {
+            return invalid(format!(
+                "cannot mutate relations while item '{}' does not have exactly one MID; run project validate",
+                item.id()
+            ));
+        };
+        if !crate::is_mid(mid_entry.value()) {
+            return invalid(format!(
+                "cannot mutate relations while item '{}' has invalid MID '{}'; run project validate",
+                item.id(),
+                mid_entry.value()
+            ));
+        }
+        mids.entry(mid_entry.value()).or_default().push(item);
+    }
+
+    if let Some((id, _)) = ids.iter().find(|(_, items)| items.len() > 1) {
+        return invalid(format!(
+            "cannot mutate relations while item ID '{id}' is ambiguous; run project validate"
+        ));
+    }
+    if let Some((mid, _)) = mids.iter().find(|(_, items)| items.len() > 1) {
+        return invalid(format!(
+            "cannot mutate relations while item MID '{mid}' is ambiguous; run project validate"
+        ));
+    }
+
+    Ok(())
 }
 
 fn resolve_document_path(
@@ -471,9 +658,9 @@ fn insertion_position(source: &str, line: Option<usize>) -> Result<usize, Error>
         .expect("a requested existing line has a preceding newline"))
 }
 
-fn render_item(request: &ItemCreationRequest, newline: &str) -> String {
+fn render_item(request: &ItemCreationRequest, mid: &str, newline: &str) -> String {
     let mut source = format!(
-        ":::mara {} {}{newline}:title: {}",
+        ":::mara {} {}{newline}:mid: {mid}{newline}:title: {}",
         request.flavour,
         request.id,
         request.title.trim()
@@ -536,6 +723,22 @@ fn full_line_end(source: &str, end: usize) -> usize {
         end + 1
     } else {
         end
+    }
+}
+
+fn end_of_line_containing(source: &str, start: usize) -> usize {
+    source[start..]
+        .find('\n')
+        .map_or(source.len(), |offset| start + offset + 1)
+}
+
+fn generate_mid<'a>(existing: impl IntoIterator<Item = &'a str>) -> String {
+    let existing = existing.into_iter().collect::<Vec<_>>();
+    loop {
+        let mid = ulid::Ulid::new().to_string();
+        if !existing.iter().any(|value| **value == mid) {
+            return mid;
+        }
     }
 }
 

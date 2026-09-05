@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs, io,
     path::{Path, PathBuf},
 };
@@ -55,6 +55,7 @@ impl Document {
 pub struct Item {
     flavour: String,
     id: String,
+    mid: Option<String>,
     title: String,
     metadata: Vec<MetadataEntry>,
     body: String,
@@ -73,6 +74,10 @@ impl Item {
 
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    pub fn mid(&self) -> Option<&str> {
+        self.mid.as_deref()
     }
 
     pub fn title(&self) -> &str {
@@ -217,7 +222,14 @@ pub struct Diagnostic {
     source: SourceLocation,
     item_ids: Vec<String>,
     applies_to_all_items: bool,
+    kind: DiagnosticKind,
     message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiagnosticKind {
+    Other,
+    MissingMid,
 }
 
 impl Diagnostic {
@@ -230,11 +242,15 @@ impl Diagnostic {
     pub fn message(&self) -> &str {
         &self.message
     }
+    pub(crate) fn is_missing_mid(&self) -> bool {
+        self.kind == DiagnosticKind::MissingMid
+    }
 }
 
 pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
     let mut diagnostics = validate_corpus_independent(corpus);
     let ids = item_index(corpus);
+    let mids = mid_index(corpus);
 
     for item in corpus.items() {
         let Some(flavour) = schema.flavour_for_validation(item.flavour()) else {
@@ -247,8 +263,8 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
             }
             for relation in item.relations() {
                 if schema.relation_is_valid(relation.name()) {
-                    match ids.get(relation.target()).map(Vec::len) {
-                        None if corpus.is_complete() => diagnostic(
+                    match resolve_indexed_item(&ids, &mids, relation.target()) {
+                        IndexedItem::Missing if corpus.is_complete() => diagnostic(
                             &mut diagnostics,
                             relation.source(),
                             format!(
@@ -257,8 +273,8 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                                 relation.target()
                             ),
                         ),
-                        None | Some(1) => {}
-                        Some(_) => diagnostic(
+                        IndexedItem::Missing | IndexedItem::One(_) => {}
+                        IndexedItem::Ambiguous => diagnostic(
                             &mut diagnostics,
                             relation.source(),
                             format!(
@@ -382,8 +398,8 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 if !schema.relation_is_valid(relation.name()) {
                     continue;
                 }
-                match ids.get(relation.target()).map(Vec::as_slice) {
-                    Some([target]) => {
+                match resolve_indexed_item(&ids, &mids, relation.target()) {
+                    IndexedItem::One(target) => {
                         if schema.relation_target_is_valid(relation.name())
                             && !definition
                                 .target
@@ -414,7 +430,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             );
                         }
                     }
-                    Some(_) => diagnostic(
+                    IndexedItem::Ambiguous => diagnostic(
                         &mut diagnostics,
                         relation.source(),
                         format!(
@@ -423,7 +439,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             relation.target()
                         ),
                     ),
-                    None if corpus.is_complete() => diagnostic(
+                    IndexedItem::Missing if corpus.is_complete() => diagnostic(
                         &mut diagnostics,
                         relation.source(),
                         format!(
@@ -432,7 +448,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             relation.target()
                         ),
                     ),
-                    None => {}
+                    IndexedItem::Missing => {}
                 }
             }
         }
@@ -444,6 +460,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
 pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let ids = item_index(corpus);
+    let mids = mid_index(corpus);
 
     for duplicates in ids.values().filter(|items| items.len() > 1) {
         for item in duplicates {
@@ -455,7 +472,83 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
         }
     }
 
+    for (mid, duplicates) in mids.iter().filter(|(_, items)| items.len() > 1) {
+        for item in duplicates {
+            if let Some(entry) = mid_entries(item)
+                .into_iter()
+                .find(|entry| entry.value() == *mid)
+            {
+                diagnostic(
+                    &mut diagnostics,
+                    entry.source(),
+                    format!("duplicate item MID '{mid}'"),
+                );
+            }
+        }
+    }
+
     for item in corpus.items() {
+        let mids = mid_entries(item);
+        match mids.as_slice() {
+            [] => diagnostic_with_kind(
+                &mut diagnostics,
+                item.source(),
+                DiagnosticKind::MissingMid,
+                format!("item '{}' is missing its MID", item.id()),
+            ),
+            [entry] => {
+                if !crate::is_mid(entry.value()) {
+                    diagnostic(
+                        &mut diagnostics,
+                        entry.source(),
+                        format!("invalid item MID '{}'", entry.value()),
+                    );
+                }
+                if entry.source().span().start_line() != item.source().span().start_line() + 1 {
+                    diagnostic(
+                        &mut diagnostics,
+                        entry.source(),
+                        format!(
+                            "item '{}' MID must immediately follow its opener",
+                            item.id()
+                        ),
+                    );
+                }
+            }
+            [first, rest @ ..] => {
+                if !crate::is_mid(first.value()) {
+                    diagnostic(
+                        &mut diagnostics,
+                        first.source(),
+                        format!("invalid item MID '{}'", first.value()),
+                    );
+                }
+                if first.source().span().start_line() != item.source().span().start_line() + 1 {
+                    diagnostic(
+                        &mut diagnostics,
+                        first.source(),
+                        format!(
+                            "item '{}' MID must immediately follow its opener",
+                            item.id()
+                        ),
+                    );
+                }
+                for entry in rest {
+                    diagnostic(
+                        &mut diagnostics,
+                        entry.source(),
+                        format!("item '{}' has more than one MID entry", item.id()),
+                    );
+                    if !crate::is_mid(entry.value()) {
+                        diagnostic(
+                            &mut diagnostics,
+                            entry.source(),
+                            format!("invalid item MID '{}'", entry.value()),
+                        );
+                    }
+                }
+            }
+        }
         for mention in item.mentions() {
             match ids.get(mention.target()).map(Vec::len) {
                 None if corpus.is_complete() => diagnostic(
@@ -482,6 +575,52 @@ fn item_index(corpus: &Corpus) -> BTreeMap<&str, Vec<&Item>> {
         ids.entry(item.id()).or_default().push(item);
     }
     ids
+}
+
+fn mid_index(corpus: &Corpus) -> BTreeMap<&str, Vec<&Item>> {
+    let mut mids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
+    for item in corpus.items() {
+        let mut seen = BTreeSet::new();
+        for entry in mid_entries(item)
+            .into_iter()
+            .filter(|entry| crate::is_mid(entry.value()))
+        {
+            if seen.insert(entry.value()) {
+                mids.entry(entry.value()).or_default().push(item);
+            }
+        }
+    }
+    mids
+}
+
+enum IndexedItem<'a> {
+    Missing,
+    One(&'a Item),
+    Ambiguous,
+}
+
+fn resolve_indexed_item<'a>(
+    ids: &BTreeMap<&str, Vec<&'a Item>>,
+    mids: &BTreeMap<&str, Vec<&'a Item>>,
+    handle: &str,
+) -> IndexedItem<'a> {
+    let matches = if crate::is_mid(handle) {
+        mids.get(handle)
+    } else {
+        ids.get(handle)
+    };
+    match matches.map(Vec::as_slice) {
+        Some([item]) => IndexedItem::One(item),
+        Some(_) => IndexedItem::Ambiguous,
+        None => IndexedItem::Missing,
+    }
+}
+
+fn mid_entries(item: &Item) -> Vec<&MetadataEntry> {
+    item.metadata()
+        .iter()
+        .filter(|entry| entry.key() == "mid")
+        .collect()
 }
 
 fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
@@ -533,6 +672,7 @@ fn load_corpus_for_validation_with_schema(
                     },
                     item_ids: Vec::new(),
                     applies_to_all_items: true,
+                    kind: DiagnosticKind::Other,
                     message: format!("could not read Mara document: {error}"),
                 });
                 continue;
@@ -554,6 +694,7 @@ fn load_corpus_for_validation_with_schema(
             },
             item_ids: error.item_ids,
             applies_to_all_items: false,
+            kind: DiagnosticKind::Other,
             message: error.message,
         }));
         if retain_document {
@@ -570,10 +711,20 @@ fn load_corpus_for_validation_with_schema(
 }
 
 fn diagnostic(diagnostics: &mut Vec<Diagnostic>, source: &SourceLocation, message: String) {
+    diagnostic_with_kind(diagnostics, source, DiagnosticKind::Other, message);
+}
+
+fn diagnostic_with_kind(
+    diagnostics: &mut Vec<Diagnostic>,
+    source: &SourceLocation,
+    kind: DiagnosticKind,
+    message: String,
+) {
     diagnostics.push(Diagnostic {
         source: source.clone(),
         item_ids: Vec::new(),
         applies_to_all_items: false,
+        kind,
         message,
     });
 }
@@ -676,6 +827,7 @@ fn discover_for_validation(root: &Path, matcher: &GlobSet) -> (Vec<PathBuf>, Vec
                 },
                 item_ids: Vec::new(),
                 applies_to_all_items: true,
+                kind: DiagnosticKind::Other,
                 message: format!("could not discover Mara documents: {error}"),
             }),
         }
@@ -858,6 +1010,10 @@ fn project_document(
             Item {
                 flavour: parsed.flavour,
                 id: parsed.id,
+                mid: metadata
+                    .iter()
+                    .find(|entry| entry.key == "mid" && crate::is_mid(&entry.value))
+                    .map(|entry| entry.value.clone()),
                 title: parsed.title,
                 metadata,
                 body: source[parsed.body.clone()].to_owned(),

@@ -51,6 +51,21 @@ fn stdout(output: &std::process::Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("stdout is UTF-8")
 }
 
+fn is_mid(value: &str) -> bool {
+    value.len() == 26
+        && value.chars().all(|character| {
+            matches!(
+                character,
+                '0'..='9'
+                    | 'A'..='H'
+                    | 'J'..='K'
+                    | 'M'..='N'
+                    | 'P'..='T'
+                    | 'V'..='Z'
+            )
+        })
+}
+
 fn mcp_exchange(current_directory: &Path, requests: &[Value]) -> Vec<Value> {
     mcp_exchange_with_arguments(current_directory, &["mcp"], requests)
 }
@@ -267,7 +282,7 @@ fn current_directory_content_patterns_discover_project_documents() {
     .unwrap();
     fs::write(
         fixture.path().join("included.mara.md"),
-        ":::mara requirement REQ-INCLUDED\n:title: Included\n\nBody.\n:::\n",
+        ":::mara requirement REQ-INCLUDED\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: Included\n\nBody.\n:::\n",
     )
     .unwrap();
 
@@ -284,7 +299,7 @@ fn project_and_item_validation_run_through_the_real_cli() {
     assert!(init.status.success(), "{}", stderr(&init));
     fs::write(
         fixture.path().join("valid.mara.md"),
-        ":::mara requirement REQ-VALID\n:title: Valid\n\nA complete requirement.\n:::\n",
+        ":::mara requirement REQ-VALID\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: Valid\n\nA complete requirement.\n:::\n",
     )
     .unwrap();
 
@@ -321,6 +336,513 @@ A complete requirement.
 }
 
 #[test]
+fn project_validation_reports_missing_malformed_duplicate_and_misplaced_mids() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        r#":::mara requirement REQ-MISSING
+:title: Missing MID
+
+Body.
+:::
+
+:::mara requirement REQ-MALFORMED
+:mid: not-a-mid
+:title: Malformed MID
+
+Body.
+:::
+
+:::mara requirement REQ-OVERFLOW
+:mid: ZZZZZZZZZZZZZZZZZZZZZZZZZZ
+:title: Overflow MID
+
+Body.
+:::
+
+:::mara requirement REQ-DUPLICATE-ONE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: Duplicate one
+
+Body.
+:::
+
+:::mara requirement REQ-DUPLICATE-TWO
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: Duplicate two
+
+Body.
+:::
+
+:::mara requirement REQ-MISPLACED
+:title: Misplaced MID
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    for expected in [
+        "item 'REQ-MISSING' is missing its MID",
+        "invalid item MID 'not-a-mid'",
+        "invalid item MID 'ZZZZZZZZZZZZZZZZZZZZZZZZZZ'",
+        "duplicate item MID '01ARZ3NDEKTSV4RRFFQ69G5F00'",
+        "item 'REQ-MISPLACED' MID must immediately follow its opener",
+    ] {
+        assert!(
+            errors.contains(expected),
+            "missing {expected:?} in {errors}"
+        );
+    }
+}
+
+#[test]
+fn project_validation_rejects_non_bijective_item_identities() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        r#":::mara requirement REQ-SHARED-ID
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: Shared ID one
+
+Body.
+:::
+
+:::mara requirement REQ-SHARED-ID
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: Shared ID two
+
+Body.
+:::
+
+:::mara requirement REQ-SHARED-MID-ONE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02
+:title: Shared MID one
+
+Body.
+:::
+
+:::mara requirement REQ-SHARED-MID-TWO
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02
+:title: Shared MID two
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+
+    assert!(!validate.status.success());
+    let errors = stderr(&validate);
+    assert_eq!(
+        errors.matches("duplicate item ID 'REQ-SHARED-ID'").count(),
+        2,
+        "{errors}"
+    );
+    assert_eq!(
+        errors
+            .matches("duplicate item MID '01ARZ3NDEKTSV4RRFFQ69G5F02'")
+            .count(),
+        2,
+        "{errors}"
+    );
+}
+
+#[test]
+fn project_validation_reports_the_duplicated_secondary_mid_entry() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("invalid.mara.md"),
+        r#":::mara requirement REQ-FIRST
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: First
+
+Body.
+:::
+
+:::mara requirement REQ-SECOND
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: Second
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["--format", "json", "project", "validate"]);
+
+    assert!(!validate.status.success());
+    assert!(stderr(&validate).is_empty(), "{}", stderr(&validate));
+    let validate: Value = serde_json::from_str(&stdout(&validate)).unwrap();
+    let duplicate_mids = validate["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic["message"] == "duplicate item MID '01ARZ3NDEKTSV4RRFFQ69G5F01'"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(duplicate_mids.len(), 2, "{validate:#}");
+    assert!(
+        duplicate_mids
+            .iter()
+            .any(|diagnostic| diagnostic["line"] == 3),
+        "{validate:#}"
+    );
+    assert!(
+        duplicate_mids
+            .iter()
+            .any(|diagnostic| diagnostic["line"] == 10),
+        "{validate:#}"
+    );
+}
+
+#[test]
+fn project_mid_backfill_is_deliberate_preflighted_and_idempotent() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let path = fixture.path().join("legacy.mara.md");
+    fs::write(
+        &path,
+        r#":::mara scenario SCN-LEGACY
+:title: Legacy scenario
+
+Legacy.
+:::
+
+:::mara requirement REQ-LEGACY
+:title: Legacy requirement
+:derives_from: SCN-LEGACY
+
+Legacy body.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+    assert!(!validate.status.success());
+    assert!(stderr(&validate).contains("is missing its MID"));
+
+    let backfill = mara(
+        fixture.path(),
+        &["--format", "json", "project", "mid", "backfill"],
+    );
+    assert!(backfill.status.success(), "{}", stderr(&backfill));
+    let backfill: Value = serde_json::from_str(&stdout(&backfill)).unwrap();
+    let changed = backfill["changed"].as_array().unwrap();
+    assert_eq!(changed.len(), 2);
+    assert_eq!(changed[0]["id"], "SCN-LEGACY");
+    assert_eq!(changed[0]["line"], 2);
+    assert_eq!(changed[1]["id"], "REQ-LEGACY");
+    assert_eq!(changed[1]["line"], 9);
+    assert!(
+        changed
+            .iter()
+            .all(|entry| is_mid(entry["mid"].as_str().unwrap()))
+    );
+
+    let source = fs::read_to_string(&path).unwrap();
+    assert!(source.contains(":::mara scenario SCN-LEGACY\n:mid: "));
+    assert!(source.contains(":::mara requirement REQ-LEGACY\n:mid: "));
+    assert!(source.contains(":derives_from: SCN-LEGACY"));
+    let validate = mara(fixture.path(), &["project", "validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+
+    let again = mara(
+        fixture.path(),
+        &["--format", "json", "project", "mid", "backfill"],
+    );
+    assert!(again.status.success(), "{}", stderr(&again));
+    let again: Value = serde_json::from_str(&stdout(&again)).unwrap();
+    assert!(again["changed"].as_array().unwrap().is_empty());
+    assert_eq!(fs::read_to_string(&path).unwrap(), source);
+
+    fs::write(
+        &path,
+        r#":::mara requirement REQ-BROKEN
+:mid: invalid
+:title: Broken
+
+Body.
+:::
+"#,
+    )
+    .unwrap();
+    let original = fs::read_to_string(&path).unwrap();
+    let rejected = mara(fixture.path(), &["project", "mid", "backfill"]);
+    assert!(!rejected.status.success());
+    assert!(stderr(&rejected).contains("cannot backfill MIDs while validation fails"));
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+}
+
+#[test]
+fn project_mid_backfill_preflight_does_not_match_user_text_as_missing_mid() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace(
+            "    id_prefix: REQ-\n    body: required\n    fields: {}",
+            "    id_prefix: REQ-\n    body: required\n    fields:\n      blocked:\n        type: boolean",
+        ),
+    )
+    .unwrap();
+    let path = fixture.path().join("legacy.mara.md");
+    fs::write(
+        &path,
+        r#":::mara requirement REQ-LEGACY
+:title: Legacy requirement
+:blocked: bad is missing its MID
+
+Legacy body.
+:::
+"#,
+    )
+    .unwrap();
+    let original = fs::read_to_string(&path).unwrap();
+
+    let rejected = mara(fixture.path(), &["project", "mid", "backfill"]);
+
+    assert!(!rejected.status.success());
+    assert!(
+        stderr(&rejected).contains("invalid boolean value 'bad is missing its MID'"),
+        "{}",
+        stderr(&rejected)
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
+}
+
+#[test]
+fn mcp_project_mid_backfill_backfills_a_selected_project() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("legacy.mara.md"),
+        ":::mara requirement REQ-LEGACY\n:title: Legacy\n\nBody.\n:::\n",
+    )
+    .unwrap();
+
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            mcp_call(2, "project_mid_backfill", json!({})),
+            mcp_call(3, "project_validate", json!({})),
+        ],
+    );
+
+    let backfill = &mcp_response(&responses, 2)["result"]["structuredContent"];
+    assert_eq!(backfill["changed"].as_array().unwrap().len(), 1);
+    assert!(is_mid(backfill["changed"][0]["mid"].as_str().unwrap()));
+    assert_eq!(
+        mcp_response(&responses, 3)["result"]["structuredContent"]["valid"],
+        true
+    );
+}
+
+#[test]
+fn item_taking_operations_resolve_mids_but_author_relations_as_human_ids() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("items.mara.md"),
+        r#":::mara scenario SCN-TARGET
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: Target
+
+Target.
+:::
+
+:::mara requirement REQ-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: Source
+
+Source.
+:::
+"#,
+    )
+    .unwrap();
+
+    let get = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "get",
+            "01ARZ3NDEKTSV4RRFFQ69G5F01",
+        ],
+    );
+    assert!(get.status.success(), "{}", stderr(&get));
+    let item: Value = serde_json::from_str(&stdout(&get)).unwrap();
+    assert_eq!(item["summary"]["id"], "REQ-SOURCE");
+    assert_eq!(item["summary"]["mid"], "01ARZ3NDEKTSV4RRFFQ69G5F01");
+
+    let list = mara(fixture.path(), &["--format", "json", "item", "list"]);
+    assert!(list.status.success(), "{}", stderr(&list));
+    let list: Value = serde_json::from_str(&stdout(&list)).unwrap();
+    assert_eq!(list["items"][0]["id"], "SCN-TARGET");
+    assert_eq!(list["items"][0]["mid"], "01ARZ3NDEKTSV4RRFFQ69G5F00");
+
+    let search = mara(
+        fixture.path(),
+        &["--format", "json", "item", "search", "source"],
+    );
+    assert!(search.status.success(), "{}", stderr(&search));
+    let search: Value = serde_json::from_str(&stdout(&search)).unwrap();
+    assert_eq!(search["items"][0]["id"], "REQ-SOURCE");
+    assert_eq!(search["items"][0]["mid"], "01ARZ3NDEKTSV4RRFFQ69G5F01");
+
+    let add = mara(
+        fixture.path(),
+        &[
+            "relation",
+            "add",
+            "01ARZ3NDEKTSV4RRFFQ69G5F01",
+            "derives_from",
+            "01ARZ3NDEKTSV4RRFFQ69G5F00",
+        ],
+    );
+    assert!(add.status.success(), "{}", stderr(&add));
+    let source = fs::read_to_string(fixture.path().join("items.mara.md")).unwrap();
+    assert!(source.contains(":derives_from: SCN-TARGET"));
+    assert!(!source.contains(":derives_from: 01ARZ3NDEKTSV4RRFFQ69G5F00"));
+}
+
+#[test]
+fn relation_traversal_resolves_authored_mids_as_item_identity() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("items.mara.md"),
+        r#":::mara scenario SCN-TARGET
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: Target
+
+Target.
+:::
+
+:::mara requirement REQ-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: Source
+:derives_from: 01ARZ3NDEKTSV4RRFFQ69G5F00
+
+Source.
+:::
+"#,
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["project", "validate"]);
+    assert!(validate.status.success(), "{}", stderr(&validate));
+
+    let get = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "get",
+            "01ARZ3NDEKTSV4RRFFQ69G5F00",
+        ],
+    );
+    assert!(get.status.success(), "{}", stderr(&get));
+    let item: Value = serde_json::from_str(&stdout(&get)).unwrap();
+    assert_eq!(item["incoming_relations"][0]["item"]["id"], "REQ-SOURCE");
+
+    let related = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "related",
+            "01ARZ3NDEKTSV4RRFFQ69G5F00",
+        ],
+    );
+    assert!(related.status.success(), "{}", stderr(&related));
+    let related: Value = serde_json::from_str(&stdout(&related)).unwrap();
+    assert_eq!(related["items"][0]["item"]["id"], "REQ-SOURCE");
+    assert_eq!(related["items"][0]["direction"], "incoming");
+}
+
+#[test]
+fn incoming_relation_traversal_rejects_ambiguous_human_id_targets() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        fixture.path().join("items.mara.md"),
+        r#":::mara requirement REQ-DUP
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: First
+
+First.
+:::
+
+:::mara requirement REQ-DUP
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: Second
+
+Second.
+:::
+
+:::mara design DES-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02
+:title: Source
+:satisfies: REQ-DUP
+
+Source.
+:::
+"#,
+    )
+    .unwrap();
+
+    let get = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "item",
+            "get",
+            "01ARZ3NDEKTSV4RRFFQ69G5F00",
+        ],
+    );
+
+    assert!(!get.status.success());
+    let error: Value = serde_json::from_str(&stdout(&get)).unwrap();
+    assert_eq!(
+        error["error"]["message"],
+        "relation 'satisfies' from 'DES-SOURCE' references ambiguous item 'REQ-DUP'"
+    );
+}
+
+#[test]
 fn project_validation_reports_all_independently_available_diagnostics() {
     let fixture = TempDir::new().unwrap();
     let init = mara(fixture.path(), &["project", "init"]);
@@ -354,7 +876,7 @@ Body.
         "references missing item 'MISSING-RELATION'",
         "mention references missing item 'MISSING-MENTION'",
         "unknown flavour 'mystery'",
-        "validation failed with 5 diagnostics",
+        "validation failed with 7 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -364,7 +886,7 @@ Body.
 
     let item = mara(fixture.path(), &["item", "validate", "WRONG-ID"]);
     assert!(!item.status.success());
-    assert!(stderr(&item).contains("validation failed with 4 diagnostics"));
+    assert!(stderr(&item).contains("validation failed with 5 diagnostics"));
 }
 
 #[test]
@@ -375,6 +897,7 @@ fn item_validation_reports_ambiguous_relation_and_mention_targets() {
     fs::write(
         fixture.path().join("source.mara.md"),
         r#":::mara requirement REQ-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
 :title: Source
 :derives_from: REQ-TARGET
 
@@ -705,7 +1228,7 @@ fn project_validation_uses_unaffected_schema_declarations() {
         "required body is empty",
         "unknown metadata field 'unknown'",
         "relation 'derives_from' references missing item 'MISSING-TARGET'",
-        "validation failed with 5 diagnostics",
+        "validation failed with 6 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -745,7 +1268,7 @@ fn project_validation_runs_schema_independent_checks_after_schema_errors() {
         "flavour 'requirement' has invalid ID prefix 'REQ--'",
         "duplicate item ID 'REQ-DUPLICATE'",
         "mention references missing item 'MISSING-MENTION'",
-        "validation failed with 4 diagnostics",
+        "validation failed with 6 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -817,7 +1340,7 @@ fn project_validation_retains_valid_include_entries_after_a_type_error() {
     for expected in [
         "invalid project configuration value 'content.include[1]'",
         "item ID 'WRONG-ID' must start with 'REQ-'",
-        "validation failed with 2 diagnostics",
+        "validation failed with 3 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -859,7 +1382,7 @@ fn project_validation_retains_item_context_after_title_errors() {
         "required body is empty",
         "unknown metadata field 'unknown'",
         "relation 'derives_from' references missing item 'MISSING-TARGET'",
-        "validation failed with 6 diagnostics",
+        "validation failed with 8 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -905,7 +1428,7 @@ fn project_validation_uses_declarations_unaffected_by_schema_decode_errors() {
         "required body is empty",
         "unknown metadata field 'unknown'",
         "relation 'derives_from' references missing item 'MISSING-TARGET'",
-        "validation failed with 5 diagnostics",
+        "validation failed with 6 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -954,7 +1477,7 @@ Body.
         "flavour 'requirement' is invalid",
         "item ID 'WRONG-ID' must start with 'REQ-'",
         "invalid integer value 'nope' for field 'count'",
-        "validation failed with 3 diagnostics",
+        "validation failed with 4 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -1003,7 +1526,7 @@ relations: invalid
         "item ID 'WRONG-ID' must start with 'REQ-'",
         "required body is empty",
         "invalid integer value 'nope' for field 'count'",
-        "validation failed with 4 diagnostics",
+        "validation failed with 5 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -1044,7 +1567,7 @@ fn project_validation_retains_known_configuration_after_unknown_keys() {
         "item ID 'WRONG-ID' must start with 'REQ-'",
         "required body is empty",
         "unknown metadata field 'unknown'",
-        "validation failed with 4 diagnostics",
+        "validation failed with 5 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -1081,7 +1604,7 @@ fn project_validation_retains_schema_after_unknown_root_keys() {
         "item ID 'WRONG-ID' must start with 'REQ-'",
         "required body is empty",
         "unknown metadata field 'unknown'",
-        "validation failed with 4 diagnostics",
+        "validation failed with 5 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -1154,7 +1677,7 @@ Body.
     for expected in [
         "invalid metadata entry",
         "duplicate item ID 'REQ-DUPLICATE'",
-        "validation failed with 3 diagnostics",
+        "validation failed with 5 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -1190,7 +1713,7 @@ Body.
         "invalid metadata entry",
         "unknown metadata field 'unknown'",
         "relation 'derives_from' references missing item 'REQ-MISSING'",
-        "validation failed with 3 diagnostics",
+        "validation failed with 4 diagnostics",
     ] {
         assert!(
             errors.contains(expected),
@@ -1221,7 +1744,7 @@ fn project_validation_checks_title_errors_proven_before_malformed_metadata() {
         for expected in [
             "invalid metadata entry",
             "item must have exactly one non-empty title entry",
-            "validation failed with 2 diagnostics",
+            "validation failed with 3 diagnostics",
         ] {
             assert!(
                 errors.contains(expected),
@@ -1239,6 +1762,7 @@ fn project_validation_does_not_infer_missing_targets_after_item_parse_failures()
     fs::write(
         fixture.path().join("source.mara.md"),
         r#":::mara requirement REQ-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
 :title: Source
 :derives_from: REQ-TARGET
 
@@ -1309,7 +1833,7 @@ fn project_validation_retains_opener_semantics_after_a_missing_close() {
         "{errors}"
     );
     assert!(
-        errors.contains("validation failed with 5 diagnostics"),
+        errors.contains("validation failed with 7 diagnostics"),
         "{errors}"
     );
 }
@@ -1332,6 +1856,7 @@ fn project_validation_does_not_infer_missing_targets_after_include_recovery() {
     fs::write(
         fixture.path().join("source.mara.md"),
         r#":::mara requirement REQ-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
 :title: Source
 :derives_from: REQ-TARGET
 
@@ -1377,6 +1902,7 @@ fn item_validation_fails_when_incomplete_corpus_recovery_skips_context_checks() 
     fs::write(
         fixture.path().join("source.mara.md"),
         r#":::mara requirement REQ-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
 :title: Source
 :derives_from: REQ-TARGET
 
@@ -1422,7 +1948,7 @@ fn project_validation_continues_after_directory_walk_errors() {
     .unwrap();
     fs::write(
         fixture.path().join("valid.mara.md"),
-        ":::mara requirement REQ-VALID\n:title: Valid\n\nMentions [[MISSING-TARGET]].\n:::\n",
+        ":::mara requirement REQ-VALID\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: Valid\n\nMentions [[MISSING-TARGET]].\n:::\n",
     )
     .unwrap();
     let unreadable = fixture.path().join("unreadable");
@@ -1909,9 +2435,21 @@ fn item_create_writes_complete_items_and_required_body_scaffolds() {
     assert!(complete.status.success(), "{}", stderr(&complete));
     assert!(stdout(&complete).contains("created item 'REQ-COMPLETE'"));
     assert!(stdout(&complete).contains("complete: true"));
+    let source = fs::read_to_string(fixture.path().join("docs/items.mara.md")).unwrap();
+    let lines = source.lines().collect::<Vec<_>>();
+    assert_eq!(lines[0], ":::mara requirement REQ-COMPLETE");
+    assert!(lines[1].strip_prefix(":mid: ").is_some_and(is_mid));
     assert_eq!(
-        fs::read_to_string(fixture.path().join("docs/items.mara.md")).unwrap(),
-        ":::mara requirement REQ-COMPLETE\n:title: Complete item\n:status: draft\n:tag: alpha\n:tag: primary\n\nCreated from standard input.\n:::\n"
+        lines[2..],
+        [
+            ":title: Complete item",
+            ":status: draft",
+            ":tag: alpha",
+            ":tag: primary",
+            "",
+            "Created from standard input.",
+            ":::"
+        ]
     );
     let valid = mara(fixture.path(), &["item", "validate", "REQ-COMPLETE"]);
     assert!(valid.status.success(), "{}", stderr(&valid));
@@ -1935,9 +2473,8 @@ fn item_create_writes_complete_items_and_required_body_scaffolds() {
     assert!(stdout(&scaffold).contains("complete: false"));
     assert!(stdout(&scaffold).contains("missing: body"));
     let source = fs::read_to_string(fixture.path().join("docs/items.mara.md")).unwrap();
-    assert!(source.contains(
-        ":::\n\n:::mara requirement REQ-SCAFFOLD\n:title: Scaffolded item\n:status: draft\n\n:::\n"
-    ));
+    assert!(source.contains(":::\n\n:::mara requirement REQ-SCAFFOLD\n:mid: "));
+    assert!(source.contains(":title: Scaffolded item\n:status: draft\n\n:::\n"));
     let invalid = mara(fixture.path(), &["item", "validate", "REQ-SCAFFOLD"]);
     assert!(!invalid.status.success());
     assert!(stderr(&invalid).contains("required body is empty"));
@@ -1989,9 +2526,28 @@ fn item_create_inserts_at_an_explicit_safe_line_without_corrupting_the_source() 
 
     assert!(insert.status.success(), "{}", stderr(&insert));
     let source = fs::read_to_string(&path).unwrap();
+    let lines = source.lines().collect::<Vec<_>>();
     assert_eq!(
-        source,
-        "# Notes\n\nBefore.\n\n:::mara requirement REQ-INSERTED\n:title: Inserted item\n\nInserted body.\n:::\n\nAfter.\n"
+        lines[0..5],
+        [
+            "# Notes",
+            "",
+            "Before.",
+            "",
+            ":::mara requirement REQ-INSERTED"
+        ]
+    );
+    assert!(lines[5].strip_prefix(":mid: ").is_some_and(is_mid));
+    assert_eq!(
+        lines[6..],
+        [
+            ":title: Inserted item",
+            "",
+            "Inserted body.",
+            ":::",
+            "",
+            "After."
+        ]
     );
     #[cfg(unix)]
     assert_eq!(
@@ -2208,7 +2764,7 @@ fn relation_add_and_remove_validate_endpoints_and_update_only_the_source_item() 
     assert!(init.status.success(), "{}", stderr(&init));
     fs::write(
         fixture.path().join("items.mara.md"),
-        ":::mara scenario SCN-TARGET\n:title: Target scenario\n\nTarget.\n:::\n\n:::mara design DES-WRONG\n:title: Wrong target\n\nWrong.\n:::\n\n:::mara requirement REQ-SOURCE\n:title: Source requirement\n\nSource.\n:::\n",
+        ":::mara scenario SCN-TARGET\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: Target scenario\n\nTarget.\n:::\n\n:::mara design DES-WRONG\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: Wrong target\n\nWrong.\n:::\n\n:::mara requirement REQ-SOURCE\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02\n:title: Source requirement\n\nSource.\n:::\n",
     )
     .unwrap();
 
@@ -2227,7 +2783,7 @@ fn relation_add_and_remove_validate_endpoints_and_update_only_the_source_item() 
     assert!(stdout(&add).contains("added relation 'derives_from'"));
     let authored = fs::read_to_string(fixture.path().join("items.mara.md")).unwrap();
     assert!(authored.contains(
-        ":::mara requirement REQ-SOURCE\n:title: Source requirement\n:derives_from: SCN-TARGET\n\nSource.\n:::\n"
+        ":::mara requirement REQ-SOURCE\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02\n:title: Source requirement\n:derives_from: SCN-TARGET\n\nSource.\n:::\n"
     ));
     assert_eq!(authored.matches(":derives_from: SCN-TARGET").count(), 1);
     let valid = mara(fixture.path(), &["project", "validate"]);
@@ -2289,6 +2845,115 @@ fn relation_add_and_remove_validate_endpoints_and_update_only_the_source_item() 
     assert!(!removed.contains(":derives_from: SCN-TARGET"));
     let valid = mara(fixture.path(), &["project", "validate"]);
     assert!(valid.status.success(), "{}", stderr(&valid));
+}
+
+#[test]
+fn relation_mutation_rejects_ambiguous_item_identities_before_writing() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let path = fixture.path().join("items.mara.md");
+    fs::write(
+        &path,
+        r#":::mara requirement REQ-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: Source
+:depends_on: REQ-SECOND
+
+Source.
+:::
+
+:::mara requirement REQ-FIRST
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: First
+
+First.
+:::
+
+:::mara requirement REQ-SECOND
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: Second
+
+Second.
+:::
+"#,
+    )
+    .unwrap();
+    let original = fs::read_to_string(&path).unwrap();
+
+    for action in ["add", "remove"] {
+        let rejected = mara(
+            fixture.path(),
+            &["relation", action, "REQ-SOURCE", "depends_on", "REQ-FIRST"],
+        );
+
+        assert!(!rejected.status.success(), "{action}");
+        assert!(
+            stderr(&rejected).contains(
+                "cannot mutate relations while item MID '01ARZ3NDEKTSV4RRFFQ69G5F01' is ambiguous"
+            ),
+            "{}",
+            stderr(&rejected)
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    }
+}
+
+#[test]
+fn relation_mutation_rejects_secondary_authored_mids_before_writing() {
+    let fixture = TempDir::new().unwrap();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let path = fixture.path().join("items.mara.md");
+    fs::write(
+        &path,
+        r#":::mara requirement REQ-SOURCE
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: Source
+:depends_on: 01ARZ3NDEKTSV4RRFFQ69G5F02
+
+Source.
+:::
+
+:::mara requirement REQ-FIRST
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02
+:title: First
+
+First.
+:::
+
+:::mara requirement REQ-SECOND
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02
+:title: Second
+
+Second.
+:::
+"#,
+    )
+    .unwrap();
+    let original = fs::read_to_string(&path).unwrap();
+
+    let rejected = mara(
+        fixture.path(),
+        &[
+            "relation",
+            "remove",
+            "REQ-SOURCE",
+            "depends_on",
+            "REQ-FIRST",
+        ],
+    );
+
+    assert!(!rejected.status.success());
+    assert!(
+        stderr(&rejected).contains(
+            "cannot mutate relations while item 'REQ-FIRST' does not have exactly one MID"
+        ),
+        "{}",
+        stderr(&rejected)
+    );
+    assert_eq!(fs::read_to_string(&path).unwrap(), original);
 }
 
 fn retrieval_fixture() -> TempDir {
@@ -2780,6 +3445,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
         BTreeSet::from([
             "project_init",
             "project_validate",
+            "project_mid_backfill",
             "schema_get",
             "schema_list",
             "schema_validate",
@@ -3025,7 +3691,7 @@ fn cli_json_and_mcp_return_the_same_structured_validation_diagnostics() {
     assert!(stderr(&cli).is_empty(), "{}", stderr(&cli));
     let cli_result: Value = serde_json::from_str(&stdout(&cli)).unwrap();
     assert_eq!(cli_result["valid"], false);
-    assert_eq!(cli_result["diagnostics"].as_array().unwrap().len(), 2);
+    assert_eq!(cli_result["diagnostics"].as_array().unwrap().len(), 3);
 
     let responses = mcp_exchange(
         fixture.path(),

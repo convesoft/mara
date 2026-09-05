@@ -10,10 +10,10 @@ use std::{
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
     FieldValue, ItemCollectionResult, ItemCreateParams, ItemFilterParams, ItemRelatedParams,
-    ItemSummary, OperationContext, ProjectInitializationResult, RelatedItem, RelationDirection,
-    RelationMutationResult, RelationParams, RelationSummary, ResolvedItem, SchemaGetResult,
-    SchemaKind, SchemaListResult, SchemaValidationResult, Template, ValidationResult,
-    ValidationScope, ValidationTargetKind, project_initialize,
+    ItemSummary, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
+    RelatedItem, RelationDirection, RelationMutationResult, RelationParams, RelationSummary,
+    ResolvedItem, SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult, Template,
+    ValidationResult, ValidationScope, ValidationTargetKind, project_initialize,
 };
 use serde::Serialize;
 
@@ -68,6 +68,15 @@ enum ProjectCommand {
         template: CliTemplate,
     },
     Validate,
+    Mid {
+        #[command(subcommand)]
+        command: ProjectMidCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectMidCommand {
+    Backfill,
 }
 
 #[derive(Debug, Subcommand)]
@@ -350,6 +359,16 @@ fn run(cli: Cli) -> Result<bool, String> {
             let result = operations(project)?.project_validate()?;
             emit_validation(format, &result)
         }
+        Command::Project {
+            command:
+                ProjectCommand::Mid {
+                    command: ProjectMidCommand::Backfill,
+                },
+        } => {
+            let result = operations(project)?.project_mid_backfill()?;
+            emit(format, &result, print_project_mid_backfill)?;
+            Ok(true)
+        }
         Command::Item {
             command:
                 ItemCommand::Create {
@@ -383,8 +402,9 @@ fn run(cli: Cli) -> Result<bool, String> {
             })?;
             emit(format, &result, |result| {
                 println!(
-                    "created item '{}' at {}:{}",
+                    "created item '{}' with MID {} at {}:{}",
                     result.id,
+                    result.mid,
                     result.path.display(),
                     result.line
                 );
@@ -550,6 +570,29 @@ fn print_project_initialization(result: &ProjectInitializationResult) -> Result<
     Ok(())
 }
 
+fn print_project_mid_backfill(result: &ProjectMidBackfillResult) -> Result<(), String> {
+    if result.changed.is_empty() {
+        println!("no missing MIDs in project at {}", result.project.display());
+        return Ok(());
+    }
+    println!(
+        "backfilled {} MID{} in project at {}",
+        result.changed.len(),
+        if result.changed.len() == 1 { "" } else { "s" },
+        result.project.display()
+    );
+    for entry in &result.changed {
+        println!(
+            "{}\t{}\t{}:{}",
+            entry.id,
+            entry.mid,
+            entry.path.display(),
+            entry.line
+        );
+    }
+    Ok(())
+}
+
 fn print_resolved_item(item: &ResolvedItem) {
     print_item_heading(item.summary());
     let source = item.source();
@@ -591,18 +634,40 @@ fn print_item_summaries(items: &[ItemSummary]) {
 }
 
 fn print_item_heading(item: &ItemSummary) {
-    println!("{}\t{}\t{}", item.id(), item.flavour(), item.title());
+    if let Some(mid) = item.mid() {
+        println!(
+            "{}\t{}\t{}\t{}",
+            item.id(),
+            mid,
+            item.flavour(),
+            item.title()
+        );
+    } else {
+        println!("{}\t{}\t{}", item.id(), item.flavour(), item.title());
+    }
 }
 
 fn print_item_summary(item: &ItemSummary) {
-    println!(
-        "{}\t{}\t{}\t{}:{}",
-        item.id(),
-        item.flavour(),
-        item.title(),
-        item.path().display(),
-        item.line()
-    );
+    if let Some(mid) = item.mid() {
+        println!(
+            "{}\t{}\t{}\t{}\t{}:{}",
+            item.id(),
+            mid,
+            item.flavour(),
+            item.title(),
+            item.path().display(),
+            item.line()
+        );
+    } else {
+        println!(
+            "{}\t{}\t{}\t{}:{}",
+            item.id(),
+            item.flavour(),
+            item.title(),
+            item.path().display(),
+            item.line()
+        );
+    }
 }
 
 fn print_relation_summary(direction: RelationDirection, relation: &RelationSummary) {
@@ -616,16 +681,30 @@ fn print_related_items(items: &[RelatedItem]) {
 }
 
 fn print_related_line(direction: RelationDirection, relation: &str, item: &ItemSummary) {
-    println!(
-        "{}\t{}\t{}\t{}\t{}\t{}:{}",
-        direction.as_str(),
-        relation,
-        item.id(),
-        item.flavour(),
-        item.title(),
-        item.path().display(),
-        item.line()
-    );
+    if let Some(mid) = item.mid() {
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}:{}",
+            direction.as_str(),
+            relation,
+            item.id(),
+            mid,
+            item.flavour(),
+            item.title(),
+            item.path().display(),
+            item.line()
+        );
+    } else {
+        println!(
+            "{}\t{}\t{}\t{}\t{}\t{}:{}",
+            direction.as_str(),
+            relation,
+            item.id(),
+            item.flavour(),
+            item.title(),
+            item.path().display(),
+            item.line()
+        );
+    }
 }
 
 fn print_relation_mutation(result: &RelationMutationResult) -> Result<(), String> {
