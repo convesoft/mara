@@ -9,12 +9,12 @@ use std::{
 
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
-    FieldValue, ItemCollectionResult, ItemCreateParams, ItemFilterParams, ItemMoveParams,
-    ItemRelatedParams, ItemSearchParams, ItemSummary, ItemUpdateParams, OperationContext,
-    ProjectInitializationResult, ProjectMidBackfillResult, RelatedItem, RelationDirection,
-    RelationMutationResult, RelationParams, RelationSummary, ResolvedItem, SchemaGetResult,
-    SchemaKind, SchemaListResult, SchemaValidationResult, Template, ValidationResult,
-    ValidationScope, ValidationTargetKind, project_initialize,
+    EntryRange, FieldValue, ItemCollectionResult, ItemCreateParams, ItemFilterParams,
+    ItemGetParams, ItemGetResult, ItemMoveParams, ItemRelatedParams, ItemSearchParams, ItemSummary,
+    ItemUpdateParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
+    RelatedItem, RelationDirection, RelationMutationResult, RelationParams, RelationSummary,
+    SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult, Template,
+    ValidationResult, ValidationScope, ValidationTargetKind, project_initialize,
 };
 use serde::Serialize;
 
@@ -138,6 +138,16 @@ enum ItemCommand {
     },
     Get {
         id: String,
+        #[arg(
+            long,
+            help = "Maximum combined relation entries per page (1-100, default 20)"
+        )]
+        limit: Option<usize>,
+        #[arg(
+            long,
+            help = "Continue body, metadata, and relations using next_cursor with unchanged options"
+        )]
+        cursor: Option<String>,
     },
     List {
         #[command(flatten)]
@@ -582,9 +592,9 @@ fn run(cli: Cli) -> Result<bool, String> {
             emit_validation(format, &result)
         }
         Command::Item {
-            command: ItemCommand::Get { id },
+            command: ItemCommand::Get { id, limit, cursor },
         } => {
-            let result = operations(project)?.item_get(&id)?;
+            let result = operations(project)?.item_get(ItemGetParams { id, limit, cursor })?;
             emit(format, &result, |item| {
                 print_resolved_item(item);
                 Ok(())
@@ -774,9 +784,9 @@ fn print_project_mid_backfill(result: &ProjectMidBackfillResult) -> Result<(), S
     Ok(())
 }
 
-fn print_resolved_item(item: &ResolvedItem) {
-    print_item_heading(item.summary());
-    let source = item.source();
+fn print_resolved_item(item: &ItemGetResult) {
+    print_item_heading(&item.summary);
+    let source = &item.source;
     println!(
         "source\t{}\tstart_byte={}\tend_byte={}\tstart_line={}\tend_line={}",
         source.path().display(),
@@ -786,21 +796,47 @@ fn print_resolved_item(item: &ResolvedItem) {
         source.end_line()
     );
     println!("metadata");
-    for entry in item.metadata() {
-        println!("{}\t{}", entry.key(), entry.value());
+    for entry in &item.metadata {
+        println!("{}\t{}", entry.key, entry.value);
+        println!(
+            "metadata_fragment\tindex={}\tstart_byte={}\tend_byte={}\ttotal_bytes={}\tpartial={}",
+            entry.index,
+            entry.range.start_byte,
+            entry.range.end_byte,
+            entry.range.total_bytes,
+            entry.range.partial
+        );
     }
+    print_entry_range("metadata_range", &item.metadata_range);
     println!("body");
-    print!("{}", item.body());
-    if !item.body().ends_with('\n') {
+    print!("{}", item.body);
+    if !item.body.ends_with('\n') {
         println!();
     }
+    println!(
+        "body_range\tstart_byte={}\tend_byte={}\ttotal_bytes={}\tpartial={}",
+        item.body_range.start_byte,
+        item.body_range.end_byte,
+        item.body_range.total_bytes,
+        item.body_range.partial
+    );
     println!("relations");
-    for relation in item.outgoing_relations() {
+    for relation in &item.outgoing_relations {
         print_relation_summary(RelationDirection::Outgoing, relation);
     }
-    for relation in item.incoming_relations() {
+    for relation in &item.incoming_relations {
         print_relation_summary(RelationDirection::Incoming, relation);
     }
+    print_entry_range("outgoing_relations_range", &item.outgoing_relations_range);
+    print_entry_range("incoming_relations_range", &item.incoming_relations_range);
+    print_page_continuation(item.has_more, item.next_cursor.as_deref());
+}
+
+fn print_entry_range(label: &str, range: &EntryRange) {
+    println!(
+        "{label}\tstart_index={}\tend_index={}\ttotal={}\tpartial={}",
+        range.start_index, range.end_index, range.total, range.partial
+    );
 }
 
 fn print_item_collection(result: &ItemCollectionResult) -> Result<(), String> {
@@ -833,16 +869,15 @@ fn print_page_continuation(has_more: bool, next_cursor: Option<&str>) {
 }
 
 fn print_item_heading(item: &ItemSummary) {
-    if let Some(mid) = item.mid() {
-        println!(
-            "{}\t{}\t{}\t{}",
-            item.id(),
-            mid,
-            item.flavour(),
-            item.title()
-        );
+    let title = if item.title_truncated() {
+        format!("{} [title truncated]", item.title())
     } else {
-        println!("{}\t{}\t{}", item.id(), item.flavour(), item.title());
+        item.title().to_owned()
+    };
+    if let Some(mid) = item.mid() {
+        println!("{}\t{}\t{}\t{}", item.id(), mid, item.flavour(), title);
+    } else {
+        println!("{}\t{}\t{}", item.id(), item.flavour(), title);
     }
 }
 

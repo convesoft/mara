@@ -2,11 +2,11 @@ use std::path::PathBuf;
 
 use mara::{
     FieldValue, ItemCollectionResult, ItemCreateParams, ItemCreationResult, ItemFilterParams,
-    ItemMove, ItemMoveParams, ItemRelatedParams, ItemSearchParams, ItemUpdate, ItemUpdateParams,
-    OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, RelatedItemsResult,
-    RelationDirection, RelationMutationResult, RelationParams, ResolvedItem, SchemaGetResult,
-    SchemaKind, SchemaListResult, SchemaValidationResult, Template, TransactionRollbackResult,
-    ValidationResult,
+    ItemGetParams, ItemGetResult, ItemMove, ItemMoveParams, ItemRelatedParams, ItemSearchParams,
+    ItemUpdate, ItemUpdateParams, OperationContext, ProjectInitializationResult,
+    ProjectMidBackfillResult, RelatedItemsResult, RelationDirection, RelationMutationResult,
+    RelationParams, SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult,
+    Template, TransactionRollbackResult, ValidationResult,
 };
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -144,6 +144,20 @@ struct ItemIdToolParams {
     #[serde(default)]
     project: Option<PathBuf>,
     id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemGetToolParams {
+    #[serde(default)]
+    project: Option<PathBuf>,
+    id: String,
+    /// Maximum combined relation entries per page, 1 through 100; defaults to 20.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Continue consecutive body, metadata, and relation portions with unchanged options.
+    #[serde(default)]
+    cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -462,14 +476,18 @@ impl MaraMcp {
 
     #[tool(
         name = "item_get",
-        description = "Get one complete item with source, metadata, body, and direct relations."
+        description = "Read an item in bounded consecutive portions: body, metadata values (including full title), then direct relations. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged id/limit until has_more is false; restart after source/schema changes."
     )]
     fn item_get(
         &self,
-        Parameters(params): Parameters<ItemIdToolParams>,
-    ) -> Result<Json<ResolvedItem>, String> {
+        Parameters(params): Parameters<ItemGetToolParams>,
+    ) -> Result<Json<ItemGetResult>, String> {
         self.for_project(params.project)?
-            .item_get(&params.id)
+            .item_get(ItemGetParams {
+                id: params.id,
+                limit: params.limit,
+                cursor: params.cursor,
+            })
             .map(Json)
     }
 

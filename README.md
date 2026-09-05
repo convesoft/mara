@@ -100,8 +100,10 @@ Run `mara --help` or `mara <object> <operation> --help` for the complete command
 surface. The canonical alpha behavior is documented in
 [`docs/alpha.mara.md`](docs/alpha.mara.md). Structured update, move, rename,
 delete, and recovery follow [`docs/editing.mara.md`](docs/editing.mara.md).
-Search/list and `item related` return bounded pages; repeat the same command with
-`--cursor <next_cursor>` to continue. Inspect selected search passages with
+Search/list, `item related`, and `item get` return bounded pages; repeat the same
+command with `--cursor <next_cursor>` to continue. Get returns consecutive body
+and metadata fragments, then direct relations; follow continuation to retrieve
+the complete item. Inspect selected search passages with
 `mara item search "primary workflow" --id REQ-EXAMPLE --excerpts`.
 Bounds, continuation, and excerpt options follow
 [`docs/retrieval.mara.md`](docs/retrieval.mara.md).

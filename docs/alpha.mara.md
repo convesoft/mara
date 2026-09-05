@@ -225,7 +225,7 @@ whose prerequisites are invalid.
 
 :::mara requirement REQ-ITEM-GET
 :mid: 01M1PXP2KGGWT0WRKDJXC5NS4G
-:title: Retrieve one complete resolved item
+:title: Retrieve one resolved item through bounded portions
 :derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
 
 `item get <id-or-mid>` returns the item's flavour, human ID, MID, metadata,
@@ -234,7 +234,7 @@ and structured output represent the same result. Relation entries include the
 relation name and a compact summary containing both identities for the directly
 related item.
 
-Planned alpha.3 bounds and continuation are specified by
+Bounds and consecutive continuation are specified by
 [[REQ-RETRIEVAL-BOUNDS]] and [[REQ-PARTIAL-ITEM-READ]].
 :::
 

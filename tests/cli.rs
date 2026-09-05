@@ -471,7 +471,7 @@ fn related_pages_bound_escaped_unicode_titles_and_preserve_every_entry() {
         &["--format", "json", "item", "get", "DES-BUDGET-0"],
     );
     let full: Value = serde_json::from_slice(&full.stdout).unwrap();
-    assert_eq!(full["summary"]["title"], title);
+    assert_eq!(full["metadata"][0]["value"], title);
 }
 
 #[test]
@@ -638,7 +638,7 @@ fn search_excerpts_preserve_unicode_source_positions_and_exact_selection() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["title_truncated"], true);
     assert_eq!(items[0]["title"].as_str().unwrap().chars().count(), 256);
-    assert_eq!(got["summary"]["title"], title);
+    assert_eq!(got["metadata"][1]["value"], title);
     let excerpts = items[0]["excerpts"].as_array().unwrap();
     assert!(!excerpts.is_empty() && excerpts.len() <= 3);
     let mut previous_end = 0;
@@ -3824,7 +3824,7 @@ fn item_get_returns_one_complete_item_with_authored_and_incoming_relations() {
     assert!(get.status.success(), "{}", stderr(&get));
     assert_eq!(
         stdout(&get),
-        "REQ-ALPHA\trequirement\tAlpha requirement\nsource\tdocs/a.mara.md\tstart_byte=69\tend_byte=202\tstart_line=7\tend_line=13\nmetadata\ntitle\tAlpha requirement\nstatus\tdraft\nderives_from\tSCN-BASE\nbody\nNeed searchable Zebra knowledge.\nrelations\noutgoing\tderives_from\tSCN-BASE\tscenario\tBase scenario\tdocs/a.mara.md:1\nincoming\tsatisfies\tDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\n"
+        "REQ-ALPHA\trequirement\tAlpha requirement\nsource\tdocs/a.mara.md\tstart_byte=69\tend_byte=202\tstart_line=7\tend_line=13\nmetadata\ntitle\tAlpha requirement\nmetadata_fragment\tindex=0\tstart_byte=0\tend_byte=17\ttotal_bytes=17\tpartial=false\nstatus\tdraft\nmetadata_fragment\tindex=1\tstart_byte=0\tend_byte=5\ttotal_bytes=5\tpartial=false\nderives_from\tSCN-BASE\nmetadata_fragment\tindex=2\tstart_byte=0\tend_byte=8\ttotal_bytes=8\tpartial=false\nmetadata_range\tstart_index=0\tend_index=3\ttotal=3\tpartial=false\nbody\nNeed searchable Zebra knowledge.\nbody_range\tstart_byte=0\tend_byte=33\ttotal_bytes=33\tpartial=false\nrelations\noutgoing\tderives_from\tSCN-BASE\tscenario\tBase scenario\tdocs/a.mara.md:1\nincoming\tsatisfies\tDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\noutgoing_relations_range\tstart_index=0\tend_index=1\ttotal=1\tpartial=false\nincoming_relations_range\tstart_index=0\tend_index=1\ttotal=1\tpartial=false\npage\thas_more=false\n"
     );
 
     let missing = mara(fixture.path(), &["item", "get", "REQ-MISSING"]);
@@ -6188,4 +6188,409 @@ fn item_rename_rejections_leave_source_unchanged_with_cli_mcp_parity() {
         fs::read_to_string(fixture.path().join("source.mara.md")).unwrap(),
         source
     );
+}
+
+fn get_pages_with_cli_mcp_parity(root: &Path, id: &str, limit: Option<usize>) -> Vec<Value> {
+    let mut pages = Vec::new();
+    let mut cursor: Option<String> = None;
+    let limit_text = limit.map(|limit| limit.to_string());
+    loop {
+        assert!(pages.len() < 60, "get continuation must finish");
+        let mut args = vec!["--format", "json", "item", "get", id];
+        let mut params = json!({"id": id});
+        if let Some(limit) = &limit_text {
+            args.extend(["--limit", limit]);
+            params["limit"] = json!(limit.parse::<usize>().unwrap());
+        }
+        if let Some(cursor) = &cursor {
+            args.extend(["--cursor", cursor]);
+            params["cursor"] = json!(cursor);
+        }
+        let output = mara(root, &args);
+        assert!(output.status.success(), "{}", stdout(&output));
+        assert!(output.stdout.len() - 1 <= 65_536);
+        let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let responses = mcp_exchange(
+            root,
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, "item_get", params),
+            ],
+        );
+        let result = &mcp_response(&responses, 2)["result"]["structuredContent"];
+        assert_eq!(result, &page);
+        assert!(serde_json::to_vec(result).unwrap().len() <= 65_536);
+        assert_eq!(page["has_more"], !page["next_cursor"].is_null());
+        let next = page["next_cursor"].as_str().map(ToOwned::to_owned);
+        if next.is_some() {
+            assert_ne!(cursor, next);
+        }
+        cursor = next;
+        pages.push(page);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    pages
+}
+
+#[test]
+fn item_get_fragments_reconstruct_unicode_body_metadata_and_relations_via_cli_mcp() {
+    let fixture = retrieval_fixture();
+    let schema_path = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_path).unwrap();
+    fs::write(schema_path, schema.replace("        values: [draft, accepted]", "        values: [draft, accepted]\n      tag:\n        type: string\n        repeatable: true")).unwrap();
+    let title = "界\"\\🦀".repeat(16_000);
+    let tag = "cafe\u{301}\"\\🦀".repeat(9_000);
+    // One enormous line plus its structural final newline, with JSON escaping
+    // and combining sequences. Expected bytes come directly from authored text.
+    let body = format!(
+        "Start {} intervening text {} end.\n",
+        "界\"\\🦀".repeat(20_000),
+        "e\u{301}".repeat(25_000)
+    );
+    let mut source = format!(
+        ":::mara requirement REQ-FRAGMENTS\n:title: {title}\n:tag: {tag}\n:tag: \n:tag: last\n"
+    );
+    source.push_str(":depends_on: REQ-FRAGMENTS\n");
+    for i in (0..43).rev() {
+        source.push_str(&format!(":depends_on: REQ-PART-{i}\n"));
+    }
+    source.push_str(&format!("\n{body}:::\n\n"));
+    for i in 0..43 {
+        source.push_str(&format!(":::mara requirement REQ-PART-{i}\n:title: Part {i}\n:depends_on: REQ-FRAGMENTS\n:supersedes: REQ-FRAGMENTS\n\nPart.\n:::\n\n"));
+    }
+    let path = fixture.path().join("docs/fragments.mara.md");
+    fs::write(&path, &source).unwrap();
+    let pages = get_pages_with_cli_mcp_parity(fixture.path(), "REQ-FRAGMENTS", Some(7));
+    assert!(pages.len() > 20);
+    assert_eq!(pages[0]["body_range"]["partial"], true);
+    assert_eq!(pages[0]["summary"]["title_truncated"], true);
+    let mut actual_body = String::new();
+    let mut metadata = vec![String::new(); 48];
+    let mut keys = vec![String::new(); 48];
+    let mut outgoing = Vec::new();
+    let mut incoming = Vec::new();
+    let mut fragmented_metadata = BTreeSet::new();
+    for page in &pages {
+        let text = page["body"].as_str().unwrap();
+        let range = &page["body_range"];
+        assert_eq!(range["start_byte"], actual_body.len());
+        actual_body.push_str(text);
+        assert_eq!(range["end_byte"], actual_body.len());
+        assert_eq!(range["total_bytes"], body.len());
+        assert_eq!(range["partial"], text != body);
+        for entry in page["metadata"].as_array().unwrap() {
+            let index = entry["index"].as_u64().unwrap() as usize;
+            let key = entry["key"].as_str().unwrap();
+            if !keys[index].is_empty() {
+                assert_eq!(keys[index], key);
+            }
+            keys[index] = key.to_owned();
+            assert_eq!(entry["range"]["start_byte"], metadata[index].len());
+            metadata[index].push_str(entry["value"].as_str().unwrap());
+            assert_eq!(entry["range"]["end_byte"], metadata[index].len());
+            if entry["range"]["partial"] == true {
+                fragmented_metadata.insert(index);
+            }
+            assert!(
+                entry["range"]["end_byte"].as_u64().unwrap()
+                    <= entry["range"]["total_bytes"].as_u64().unwrap()
+            );
+        }
+        let out = page["outgoing_relations"].as_array().unwrap();
+        let inc = page["incoming_relations"].as_array().unwrap();
+        assert!(out.len() + inc.len() <= 7);
+        assert_eq!(
+            page["outgoing_relations_range"]["start_index"],
+            outgoing.len()
+        );
+        assert_eq!(
+            page["incoming_relations_range"]["start_index"],
+            incoming.len()
+        );
+        for entry in out {
+            outgoing.push(entry["item"]["id"].as_str().unwrap().to_owned());
+        }
+        for entry in inc {
+            incoming.push((
+                entry["relation"].as_str().unwrap().to_owned(),
+                entry["item"]["id"].as_str().unwrap().to_owned(),
+            ));
+        }
+        assert_eq!(
+            page["outgoing_relations_range"]["end_index"],
+            outgoing.len()
+        );
+        assert_eq!(
+            page["incoming_relations_range"]["end_index"],
+            incoming.len()
+        );
+        assert_eq!(page["outgoing_relations_range"]["total"], 44);
+        assert_eq!(page["incoming_relations_range"]["total"], 87);
+    }
+    assert_eq!(actual_body, body);
+    let mut expected_metadata = vec![
+        title,
+        tag,
+        String::new(),
+        "last".to_owned(),
+        "REQ-FRAGMENTS".to_owned(),
+    ];
+    expected_metadata.extend((0..43).rev().map(|i| format!("REQ-PART-{i}")));
+    assert_eq!(metadata, expected_metadata);
+    assert_eq!(keys[..4], ["title", "tag", "tag", "tag"]);
+    assert!(keys[4..].iter().all(|key| key == "depends_on"));
+    assert!(fragmented_metadata.contains(&0) && fragmented_metadata.contains(&1));
+    let expected_outgoing = std::iter::once("REQ-FRAGMENTS".to_owned())
+        .chain((0..43).rev().map(|i| format!("REQ-PART-{i}")))
+        .collect::<Vec<_>>();
+    assert_eq!(outgoing, expected_outgoing);
+    let mut expected_incoming = vec![("depends_on".to_owned(), "REQ-FRAGMENTS".to_owned())];
+    for i in 0..43 {
+        for name in ["depends_on", "supersedes"] {
+            expected_incoming.push((name.to_owned(), format!("REQ-PART-{i}")));
+        }
+    }
+    assert_eq!(incoming, expected_incoming);
+    assert_eq!(fs::read_to_string(path).unwrap(), source);
+    let human = mara(fixture.path(), &["item", "get", "REQ-FRAGMENTS"]);
+    assert!(stdout(&human).contains("[title truncated]"));
+    assert!(stdout(&human).contains("partial=true"));
+    assert!(stdout(&human).contains("page\thas_more=true\tnext_cursor="));
+}
+
+#[test]
+fn item_get_returns_complete_fitting_body_before_paging_metadata_and_default_relations() {
+    let fixture = retrieval_fixture();
+    let body = format!("{}\n", "body 🦀\"\\ ".repeat(3_000));
+    let mut source = format!(
+        ":::mara requirement REQ-COMPLETE\n:title: {}\n",
+        "title".repeat(20_000)
+    );
+    for _ in 0..23 {
+        source.push_str(":depends_on: REQ-ALPHA\n");
+    }
+    source.push_str(&format!("\n{body}:::\n"));
+    fs::write(fixture.path().join("docs/complete.mara.md"), source).unwrap();
+    let pages = get_pages_with_cli_mcp_parity(fixture.path(), "REQ-COMPLETE", None);
+    assert_eq!(pages[0]["body"], body);
+    assert_eq!(pages[0]["body_range"]["partial"], false);
+    assert_eq!(pages[0]["metadata_range"]["partial"], true);
+    assert!(
+        pages
+            .iter()
+            .any(|page| page["outgoing_relations"].as_array().unwrap().len() == 20)
+    );
+    assert_eq!(
+        pages
+            .iter()
+            .map(|p| p["outgoing_relations"].as_array().unwrap().len())
+            .sum::<usize>(),
+        23
+    );
+    let small = get_pages_with_cli_mcp_parity(fixture.path(), "REQ-BETA", None);
+    assert_eq!(small.len(), 1);
+    assert_eq!(small[0]["body"], "Second requirement body.\n");
+    for name in [
+        "body_range",
+        "metadata_range",
+        "outgoing_relations_range",
+        "incoming_relations_range",
+    ] {
+        assert_eq!(small[0][name]["partial"], false);
+    }
+}
+
+#[test]
+fn item_get_rejects_changed_inputs_and_invalid_fragment_cursors() {
+    let fixture = retrieval_fixture();
+    fs::write(
+        fixture.path().join("docs/long.mara.md"),
+        format!(
+            ":::mara requirement REQ-LONG\n:title: Long\n\n{}\n:::\n",
+            "🦀".repeat(30_000)
+        ),
+    )
+    .unwrap();
+    let first = mara(
+        fixture.path(),
+        &["--format", "json", "item", "get", "REQ-LONG"],
+    );
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+    for (id, limit, token) in [
+        ("REQ-LONG", "1", cursor),
+        ("REQ-ALPHA", "20", cursor),
+        ("REQ-LONG", "20", "malformed"),
+    ] {
+        let output = mara(
+            fixture.path(),
+            &["item", "get", id, "--limit", limit, "--cursor", token],
+        );
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("restart"));
+    }
+    for token in [
+        format!(
+            "{}0000000000000001-0000000000000000-0000000000000000-0000000000000000",
+            &cursor[..20]
+        ),
+        format!(
+            "{}0000000000000000-0000000000000000-0000000000000000-0000000000000000",
+            &cursor[..20]
+        ),
+        format!(
+            "{}ffffffffffffffff-ffffffffffffffff-ffffffffffffffff-ffffffffffffffff",
+            &cursor[..20]
+        ),
+    ] {
+        let output = mara(
+            fixture.path(),
+            &["item", "get", "REQ-LONG", "--cursor", &token],
+        );
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("restart"));
+    }
+    let cross_operation = mara(fixture.path(), &["item", "list", "--cursor", cursor]);
+    assert!(!cross_operation.status.success());
+    for limit in ["0", "101"] {
+        let output = mara(
+            fixture.path(),
+            &["item", "get", "REQ-LONG", "--limit", limit],
+        );
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("1 through 100"));
+    }
+    for relative in ["docs/long.mara.md", "docs/a.mara.md", ".mara/schema.yaml"] {
+        let path = fixture.path().join(relative);
+        let original = fs::read_to_string(&path).unwrap();
+        let changed = if relative.ends_with("yaml") {
+            original.replace("[draft, accepted]", "[draft, accepted, reviewed]")
+        } else {
+            format!("Narrative edit.\n{original}")
+        };
+        fs::write(&path, changed).unwrap();
+        let output = mara(
+            fixture.path(),
+            &["item", "get", "REQ-LONG", "--cursor", cursor],
+        );
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("restart"));
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, "item_get", json!({"id":"REQ-LONG", "cursor":cursor})),
+                mcp_call(3, "item_get", json!({"id":"REQ-LONG", "limit":101})),
+            ],
+        );
+        for id in [2, 3] {
+            assert_eq!(mcp_response(&responses, id)["result"]["isError"], true);
+        }
+        fs::write(&path, original).unwrap();
+        let restored = mara(
+            fixture.path(),
+            &["item", "get", "REQ-LONG", "--cursor", cursor],
+        );
+        assert!(restored.status.success(), "{}", stderr(&restored));
+    }
+}
+
+#[test]
+fn item_get_bounds_large_relation_pages_and_fails_on_unpageable_fields() {
+    let fixture = retrieval_fixture();
+    let title = "🦀\"\\".repeat(300);
+    let source = (0..100).map(|i| format!(":::mara design DES-GET-{i}\n:title: {title}\n:satisfies: REQ-ALPHA\n\nBody.\n:::\n\n")).collect::<String>();
+    fs::write(fixture.path().join("docs/relations.mara.md"), source).unwrap();
+    let pages = get_pages_with_cli_mcp_parity(fixture.path(), "REQ-ALPHA", Some(100));
+    assert!(pages.len() > 1);
+    assert!(pages[0]["incoming_relations"].as_array().unwrap().len() < 99);
+    let ids = pages
+        .iter()
+        .flat_map(|page| page["incoming_relations"].as_array().unwrap())
+        .map(|entry| {
+            if entry["item"]["id"] != "DES-ALPHA" {
+                assert_eq!(entry["item"]["title_truncated"], true);
+                assert_eq!(
+                    entry["item"]["title"],
+                    title.chars().take(256).collect::<String>()
+                );
+            }
+            entry["item"]["id"].as_str().unwrap().to_owned()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ids,
+        std::iter::once("DES-ALPHA".to_owned())
+            .chain((0..100).map(|i| format!("DES-GET-{i}")))
+            .collect::<Vec<_>>()
+    );
+
+    // Fixed identity cannot be fragmented; the error must remain bounded.
+    let long_id = format!("DES-{}", "A".repeat(66_000));
+    fs::write(fixture.path().join("docs/oversized.mara.md"), format!(":::mara design {long_id}\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: Oversized\n:satisfies: REQ-ALPHA\n\nBody.\n:::\n")).unwrap();
+    let output = mara(
+        fixture.path(),
+        &["item", "get", "01ARZ3NDEKTSV4RRFFQ69G5F01"],
+    );
+    assert!(!output.status.success());
+    assert!(stdout(&output).is_empty());
+    assert!(stderr(&output).contains("shorten oversized identity/location fields"));
+    assert!(output.stderr.len() < 1024);
+
+    // A huge relation is reported when reached; prior fitting entries remain
+    // readable, and continuation must not silently skip the failing entry.
+    let mut cursor: Option<String> = None;
+    let mut read = 0;
+    loop {
+        let mut args = vec![
+            "--format",
+            "json",
+            "item",
+            "get",
+            "REQ-ALPHA",
+            "--limit",
+            "100",
+        ];
+        if let Some(cursor) = &cursor {
+            args.extend(["--cursor", cursor]);
+        }
+        let output = mara(fixture.path(), &args);
+        if !output.status.success() {
+            assert_eq!(
+                read, 1,
+                "the enormous entry follows DES-ALPHA in corpus order"
+            );
+            assert!(stdout(&output).contains("shorten oversized identity/location fields"));
+            assert!(output.stdout.len() < 1024);
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(
+                        2,
+                        "item_get",
+                        json!({"id":"REQ-ALPHA", "limit":100, "cursor":cursor}),
+                    ),
+                ],
+            );
+            let result = &mcp_response(&responses, 2)["result"];
+            assert_eq!(result["isError"], true);
+            assert!(serde_json::to_vec(result).unwrap().len() < 1024);
+            break;
+        }
+        let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+        read += page["incoming_relations"].as_array().unwrap().len();
+        assert!(read <= 1);
+        cursor = Some(
+            page["next_cursor"]
+                .as_str()
+                .expect("oversized relation remains")
+                .to_owned(),
+        );
+    }
 }
