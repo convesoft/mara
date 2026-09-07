@@ -71,29 +71,48 @@ boundaries, verification expectations, and the accepted narrative boundary.
 
 - Declare the stable single-project workflow.
 
-## 0.2.0 — Multi-project workspaces
+## 0.2.0 — Guided authoring
 
-- Support multi-project and monorepo configuration.
-- Define nested project discovery and boundaries.
-- Add workspace list, search, and validation with explicit mutation scoping.
-- Add reusable template packs and configuration composition.
-- Address global plugin installation and project discovery using observed client
-  behavior.
-- Improve scale only where measurements justify it.
-- Do not require cross-project relations in the initial 0.2 scope.
+- Prioritize bundled template files, an optional engineering template, and
+  project-defined flavour selection guidance together.
+- Supply useful engineering traceability relations through the template.
+- Add bounded discovery and reading of canonical document context outside items.
+- Evaluate diagnostic codes and severity as a candidate addition.
 
-## 0.3.0 — Change-aware knowledge
+See [planned outcomes and open decisions](docs/guided-authoring.mara.md) before
+ticket planning. This scope retains one project and schema for package-local
+documents in a monorepo and does not expand the 0.1 stabilization sequence.
 
-- Add Git-aware item and document diffs.
-- Show move and rename history through immutable identity.
-- Analyze relation impact for changed knowledge.
-- Support review workflows centered on knowledge changes.
-- Define schema evolution and migrations.
-- Add cross-project relations or imports only if 0.2 usage demonstrates the
-  need.
+## 0.3.0 — Knowledge change review (provisional)
+
+- Compare items and documents across Git revisions, distinguishing content and
+  relation changes from moves and human-ID renames.
+- Follow item history through immutable identity.
+- Identify related knowledge that may need review and explain its connection
+  to a change; these are review candidates, not proven inconsistencies.
+- Combine diffs, history, and relation context in a bounded review workflow.
+
+## 0.4.0 — Traceability and evolution (provisional)
+
+- Add project-configured traceability rules driven by demonstrated checks.
+- Support deliberate schema migrations for observed vocabulary changes.
+- Generate useful specification and traceability-matrix views from the corpus.
+- Add typed external links when a concrete workflow needs them.
+- Evaluate a code-traceability pilot for one demonstrated language and workflow.
+
+The 0.3 and 0.4 groupings are planning directions; define their detailed
+contracts from usage before scheduling implementation.
 
 ## Later
 
+- Multi-project aggregation, nested project boundaries, and cross-project
+  relations when independent corpora need a shared operation.
+- Remote template packs and configuration composition when bundled seeds and
+  project-owned schemas are insufficient.
+- Delivery synchronization and richer graph provenance for concrete consumers.
+- Global plugin installation and discovery improvements for observed client
+  problems.
+- Scale targets and optimization based on measurements.
 - Language Server Protocol and editor integration.
 - Persisted indexes or a graph store when measured scale requires them.
 - Semantic or hybrid search when deterministic retrieval proves insufficient.
