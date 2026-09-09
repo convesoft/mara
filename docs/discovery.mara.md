@@ -56,7 +56,7 @@ Accepted direction for 0.2; not implemented by 0.1.
 | Filters | Project-relative path filters apply to all result kinds. Item ID, flavour, custom-field, and schema-relation filters select items only. Narrative never inherits item metadata. |
 | Connections | Explicit resolved references create `mentions` edges, with incoming backlinks. Expose derived structural membership and direct parent/child connections under [[DES-DOCUMENT-STRUCTURE]]. Preserve source locations and distinguish structural connections, mentions, and schema-defined typed relations. |
 | Source reading | Return locations sufficient for the actor's existing file-reading tools. This workflow assumes access to the same project sources. Do not add generic document `list`/`get` operations or recreate plain file reading. Existing structured item operations remain separately useful. |
-| Navigation | Follow [[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]] from every result kind. Excerpts support selection; they are not a claim to include all connected context. |
+| Navigation | Replace CLI `mara item related` with `mara related <reference>` for items and structural discovery nodes, with equivalent unified MCP navigation. Accept item IDs/MIDs and returned discovery handles. Follow [[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]] from every result kind. Excerpts support selection; they are not a claim to include all connected context. |
 
 Markdown blocks can participate in the discovery graph without becoming
 schema-defined items. Graph membership does not infer semantic obligations or
@@ -68,8 +68,8 @@ Link and anchor resolution follows [[DES-DOCUMENT-STRUCTURE]].
 
 Implementation details still to settle: source handles and stale-location
 rejection; representation of built-in connection kinds versus schema relations;
-mixed-result ranking, wire fields, excerpt and continuation limits; neighbour
-operation naming; and migration/alias policy for the existing CLI/MCP search
+mixed-result ranking, wire fields, excerpt and continuation limits; MCP operation naming;
+and migration/alias policy for the existing CLI/MCP search
 names.
 
 The private in-memory graph backend follows [[ADR-PETGRAPH-DISCOVERY]]. The
