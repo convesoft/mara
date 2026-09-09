@@ -1,8 +1,0 @@
-format_version = 1
-
-[project]
-name = "mara-project"
-schema = ".mara/schema.yaml"
-
-[content]
-include = ["**/*.mara.md"]

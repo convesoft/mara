@@ -4,8 +4,7 @@ Accepted scope for 0.2.0: a solo developer can start useful engineering
 documentation, choose its vocabulary, and give an agent access to document
 context as well as items. Schema format 2, mandatory flavour guidance,
 all three bundled templates, and engineering traceability relations are
-implemented in `0.2.0-alpha.0`. Unified discovery remains planned. See the
-[alpha.0 release scope](release-0.2-alpha.0.mara.md).
+implemented in `0.2.0-alpha.0`. Unified discovery remains planned.
 
 Prioritize bundled templates and flavour guidance together, then useful
 engineering relations and unified discovery. Diagnostic codes and severity are
@@ -72,12 +71,11 @@ generates only `.mara/project.toml` and `.mara/schema.yaml`, with no starter
 Markdown or separate guidance document. The schema is editable project-owned
 data; templates do not copy Mara's product items or MIDs.
 
-Maintain template content in source files bundled into the executable, without
-requiring a runtime template directory. Store the shared project configuration
-and each of `minimal`, `empty`, and `engineering` as ordinary files under
-`templates/`, embedded at compile time. Derive the project name from the target
-directory and serialize it as TOML. Changing a bundled template must not
-silently rewrite schemas in projects already initialized from it.
+Maintain the `minimal`, `empty`, and `engineering` schema templates as source
+files embedded in the executable, without requiring a runtime template directory.
+Generate project configuration programmatically, deriving the project name from
+the destination directory. Changing a bundled schema template must not silently
+rewrite schemas in projects already initialized from it.
 :::
 
 :::mara requirement REQ-FLAVOUR-AUTHORING-GUIDANCE

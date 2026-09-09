@@ -3,10 +3,6 @@
 All notable changes to Mara are generated from Conventional Commit history.
 ## [0.2.0-alpha.0]
 
-Schema format 2 is required. Existing projects must follow the
-[schema guidance migration](https://github.com/convesoft/mara/blob/v0.2.0-alpha.0/docs/migration-0.2.mara.md#schema-guidance).
-This prerelease adds the bundled engineering template; unified discovery remains planned.
-
 ### Added
 
 - Require schema format 2 and flavour guidance

@@ -1409,14 +1409,20 @@ fn remove_empty_directory(created: bool, directory: &Path) {
 }
 
 fn project_template(name: &str) -> Result<String, Error> {
-    let invalid_template = |message: String| Error::InvalidProject {
+    toml::to_string_pretty(&ProjectFile {
+        format_version: 1,
+        project: ProjectSection {
+            name: name.into(),
+            schema: SCHEMA_FILE.into(),
+        },
+        content: ContentSection {
+            include: vec!["**/*.mara.md".into()],
+        },
+    })
+    .map_err(|source| Error::InvalidProject {
         path: PathBuf::from(PROJECT_FILE),
-        message,
-    };
-    let mut config: ProjectFile = toml::from_str(include_str!("../templates/project.toml"))
-        .map_err(|error| invalid_template(error.to_string()))?;
-    config.project.name = name.into();
-    toml::to_string_pretty(&config).map_err(|error| invalid_template(error.to_string()))
+        message: source.to_string(),
+    })
 }
 
 fn schema_template(template: Template) -> &'static str {
