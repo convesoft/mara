@@ -1,5 +1,9 @@
 # Mara document format
 
+This file describes the current 0.1 format and projection. The accepted 0.2
+[discovery direction](discovery.mara.md) extends narrative projection and mention
+navigation; it does not claim those features are already implemented.
+
 :::mara design DES-DOCUMENT-FORMAT
 :mid: 01M1PXP2KG381MM1VNN6XC7S4M
 :title: Mara document format

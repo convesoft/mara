@@ -9,7 +9,7 @@
       "source": {
         "source": "npm",
         "package": "@convesoft/mara",
-        "version": "next",
+        "version": "latest",
         "registry": "https://registry.npmjs.org"
       },
       "policy": {

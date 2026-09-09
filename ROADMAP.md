@@ -30,7 +30,7 @@ evidence and priorities change; detailed behavior becomes canonical in
 - Preserve relation and validation integrity throughout lifecycle changes.
 - Clarify the alpha.3 retrieval scope in canonical documents before release.
 
-### 0.1.0-alpha.3 — Enhanced deterministic retrieval (current)
+### 0.1.0-alpha.3 — Enhanced deterministic retrieval (published)
 
 - Paginate search/list results and bound summaries; offer opt-in search excerpts
   and selected-item filtering.
@@ -52,48 +52,59 @@ evidence and priorities change; detailed behavior becomes canonical in
 See [retrieval scope and contracts](docs/retrieval.mara.md) for implementation
 boundaries, verification expectations, and the accepted narrative boundary.
 
-### 0.1.0-beta.0
+### 0.1.0 — Stable single-project workflow (in preparation)
 
-- Complete the intended 0.1 feature set.
-- Validate format and compatibility behavior with real projects and clients.
+- Retain the published alpha.3 runtime and formats, reconcile documentation,
+  and verify stable release artifacts through one release PR.
+- Follow the [stable scope and readiness contract](docs/release-0.1.mara.md).
+  Separate beta/RC publications are not required by the revised release path.
 
-### 0.1.0-beta.N
+## 0.2.0 — Guided authoring
 
-- Stabilize demonstrated workflows and compatibility.
-- Add no planned new feature areas.
+- Prioritize bundled template files, an optional engineering template, and
+  project-defined flavour selection guidance together.
+- Require flavour guidance for existing and new schemas as a documented
+  breaking change, with a migration guide for 0.2.
+- Supply useful engineering traceability relations through the template.
+- Unify item and narrative discovery under `mara search`, bounded node reading
+  under `mara get`, and direct connections under `mara related`;
+  see [the accepted discovery direction](docs/discovery.mara.md).
 
-### 0.1.0-rc.0
+See [accepted outcomes and designs](docs/guided-authoring.mara.md) before
+ticket planning. This scope retains one project and schema for package-local
+documents in a monorepo and does not expand the 0.1 stabilization sequence.
 
-- Release the exact candidate artifacts.
-- Accept only release blockers and documentation corrections.
+## 0.3.0 — Knowledge change review (provisional)
 
-### 0.1.0
+- Compare items and documents across Git revisions, distinguishing content and
+  relation changes from moves and human-ID renames.
+- Follow item history through immutable identity.
+- Identify related knowledge that may need review and explain its connection
+  to a change; these are review candidates, not proven inconsistencies.
+- Combine diffs, history, and relation context in a bounded review workflow.
 
-- Declare the stable single-project workflow.
+## 0.4.0 — Traceability and evolution (provisional)
 
-## 0.2.0 — Multi-project workspaces
+- Add project-configured traceability rules driven by demonstrated checks.
+- Support deliberate schema migrations for observed vocabulary changes.
+- Generate useful specification and traceability-matrix views from the corpus.
+- Add typed external links when a concrete workflow needs them.
+- Evaluate a code-traceability pilot for one demonstrated language and workflow.
 
-- Support multi-project and monorepo configuration.
-- Define nested project discovery and boundaries.
-- Add workspace list, search, and validation with explicit mutation scoping.
-- Add reusable template packs and configuration composition.
-- Address global plugin installation and project discovery using observed client
-  behavior.
-- Improve scale only where measurements justify it.
-- Do not require cross-project relations in the initial 0.2 scope.
-
-## 0.3.0 — Change-aware knowledge
-
-- Add Git-aware item and document diffs.
-- Show move and rename history through immutable identity.
-- Analyze relation impact for changed knowledge.
-- Support review workflows centered on knowledge changes.
-- Define schema evolution and migrations.
-- Add cross-project relations or imports only if 0.2 usage demonstrates the
-  need.
+The 0.3 and 0.4 groupings are planning directions; define their detailed
+contracts from usage before scheduling implementation.
 
 ## Later
 
+- Diagnostic codes and severity when a concrete consumer workflow needs them.
+- Multi-project aggregation, nested project boundaries, and cross-project
+  relations when independent corpora need a shared operation.
+- Remote template packs and configuration composition when bundled seeds and
+  project-owned schemas are insufficient.
+- Delivery synchronization and richer graph provenance for concrete consumers.
+- Global plugin installation and discovery improvements for observed client
+  problems.
+- Scale targets and optimization based on measurements.
 - Language Server Protocol and editor integration.
 - Persisted indexes or a graph store when measured scale requires them.
 - Semantic or hybrid search when deterministic retrieval proves insufficient.
