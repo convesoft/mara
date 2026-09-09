@@ -161,7 +161,7 @@ larger than a search excerpt. The 0.1 boundary in
 | Area | Open decision |
 |---|---|
 | Schema transition | Finalize the schema-format transition and migration guide. Reconcile the existing taxonomy with schema-owned guidance so each definition has one authority. Guidance shape, validation rules, and engineering relation definitions are settled in the designs below. |
-| Discovery interface | Unified search over items, sections, and Markdown blocks, `mara related` replacing `mara item related`, structural connection names, and link/anchor resolution are settled in [discovery](discovery.mara.md). Finalize handles, connection-kind representation, ranking, response bounds, wire fields, MCP operation naming, and CLI/MCP migration policy. |
+| Discovery interface | Unified search over items, sections, and Markdown blocks, `mara related` replacing `mara item related`, source handles, structural connection names, and link/anchor resolution are settled in [discovery](discovery.mara.md). Finalize connection-kind representation, ranking, response bounds, wire fields, MCP operation naming, and CLI/MCP migration policy. |
 
 After settling each area's product choices, record its interface or persisted
 contract as a design and consequential rationale as a decision. Delivery tickets

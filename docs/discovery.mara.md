@@ -66,8 +66,23 @@ richer traceability are later work, not prerequisites for 0.2.
 
 Link and anchor resolution follows [[DES-DOCUMENT-STRUCTURE]].
 
-Implementation details still to settle: source handles and stale-location
-rejection; representation of built-in connection kinds versus schema relations;
+Generate versioned, opaque discovery handles deterministically from the
+project-relative document path, a hash of its current source contents, node
+kind, and start/end byte offsets. Apply this to blocks, sections, and documents;
+items retain durable MIDs. Handles require neither authored IDs nor persistent
+storage. Identical inputs produce identical handles across commands and
+restarts. Editing or moving the containing document invalidates its old
+handles; reject them and instruct the actor to search again. Use working-file
+contents, including uncommitted edits, rather than a Git commit.
+
+Changes to another document leave a node handle valid; its connections reflect
+the current corpus. Pagination cursors retain broader source/schema and request
+invalidation because other documents can change result membership and ordering.
+The token encoding and hash algorithm are implementation details; do not expose
+private graph indexes as handles.
+
+Implementation details still to settle: representation of built-in connection
+kinds versus schema relations;
 mixed-result ranking, wire fields, excerpt and continuation limits; MCP operation naming;
 and migration/alias policy for the existing CLI/MCP search
 names.
