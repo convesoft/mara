@@ -6,9 +6,12 @@
 use std::{cell::RefCell, collections::HashMap, fmt, ops::Range, rc::Rc};
 
 use rushdown::{
-    ast::{Arena, HeadingKind, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, TypeData},
+    ast::{
+        Arena, CodeBlockKind, HeadingKind, KindData, NodeKind, NodeRef, NodeType, PrettyPrint,
+        TypeData,
+    },
     parser::{self, AnyBlockParser, BlockParser, Parser, ParserExtension, ParserExtensionFn},
-    text::{BasicReader, MultilineValue, Reader as _, Segment, Value},
+    text::{BasicReader, Lines, MultilineValue, Reader as _, Segment, Value},
 };
 
 use super::{ParsedBlock, ParsedDocument, ParsedItem, source_lines};
@@ -285,6 +288,13 @@ fn leaf_end(
     limit: usize,
 ) -> Option<usize> {
     match arena[node].kind_data() {
+        // These parsers retain their complete content lines, with enclosing
+        // quote separators already excluded. Keep literal `>` and blank lines
+        // that belong inside the block instead of trimming physical source.
+        KindData::HtmlBlock(block) => parsed_lines_end(block.value()),
+        KindData::CodeBlock(block) if block.code_block_kind() == CodeBlockKind::Indented => {
+            parsed_lines_end(block.value())
+        }
         KindData::Heading(heading) => {
             let mut end = line_end(source, start, limit);
             if heading.heading_kind() == HeadingKind::Setext {
@@ -312,6 +322,13 @@ fn leaf_end(
             };
             Some(line_end(source, content_end, limit))
         }
+        _ => None,
+    }
+}
+
+fn parsed_lines_end(lines: &Lines) -> Option<usize> {
+    match lines {
+        Lines::Segments(segments) => segments.last().map(Segment::stop),
         _ => None,
     }
 }

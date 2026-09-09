@@ -516,6 +516,56 @@ fn container_boundaries_preserve_code_context_and_adjacent_empty_items() {
 }
 
 #[test]
+fn quoted_html_and_indented_code_end_at_their_parsed_content() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    for (body, expected, kind) in [
+        (
+            "> <!-- comment -->\n>\n> para\n",
+            "<!-- comment -->\n",
+            Kind::HtmlBlock,
+        ),
+        (">     code\n>\n> para\n", "code\n", Kind::CodeBlock),
+        (
+            "> > <script>\r\n> >\r\n> > α\r\n> > </script>\r\n> >\r\n> > para\r\n",
+            "<script>\r\n> >\r\n> > α\r\n> > </script>\r\n",
+            Kind::HtmlBlock,
+        ),
+        (
+            "> >     α\r\n> >\r\n> >     > literal\r\n> >\r\n> > para\r\n",
+            "α\r\n> >\r\n> >     > literal\r\n",
+            Kind::CodeBlock,
+        ),
+    ] {
+        let source = format!(":::mara requirement REQ-RAW\n:title: Raw\n\n{body}:::\n");
+        write(fixture.path(), "raw.mara.md", &source);
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let mut blocks = item.body_blocks();
+        while blocks[0].kind() == Kind::Blockquote {
+            blocks = blocks[0].children();
+        }
+        assert_eq!(blocks[0].kind(), kind);
+        let span = blocks[0].source().span();
+        assert_eq!(
+            &source[span.start_byte()..span.end_byte()],
+            expected,
+            "{body}"
+        );
+        assert_eq!(span.start_byte(), source.find(expected).unwrap());
+        assert_eq!(span.start_line(), 4);
+        assert_eq!(span.end_line(), 3 + expected.lines().count());
+        assert_eq!(blocks[1].kind(), Kind::Paragraph);
+        assert_eq!(item.body(), body);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("raw.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+#[test]
 fn quoted_leaf_blocks_exclude_following_quote_separators() {
     use mara::MarkdownBlockKind as Kind;
 
