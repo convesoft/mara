@@ -1,18 +1,18 @@
 # Unified knowledge discovery
 
 Accepted 0.2 direction: search canonical documentation once, then inspect
-direct connections from either an item or a narrative passage. These contracts
+direct connections from items, sections, and ordinary Markdown blocks. These contracts
 extend the [guided-authoring scope](guided-authoring.mara.md); they are not
 implemented by the [0.1 retrieval contract](retrieval.mara.md).
 
 :::mara requirement REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
 :mid: 01M232S32V718GRMEHSBPY46CQ
-:title: Explore direct connections from items and narrative passages
+:title: Explore direct connections from items and narrative Markdown blocks
 :derives_from: SCN-READ-DOCUMENT-CONTEXT
 
-In 0.2, an actor can start from either an item or a narrative passage returned
-by search and inspect its direct outgoing and incoming connections through CLI
-or MCP. Return the connection kind, direction, neighbouring node, and source
+In 0.2, an actor can start from an item, section, or Markdown block returned by
+search and inspect its direct outgoing and incoming connections through CLI or
+MCP. Return the connection kind, direction, neighbouring node, and source
 location so the actor can choose the next step and read the evidence.
 
 Resolved explicit references from narrative produce `mentions` edges and
@@ -20,10 +20,10 @@ derived incoming backlinks. Schema-defined typed relations remain authored on
 items; narrative does not acquire a flavour or inherit adjacent items' metadata
 or relations.
 
-Expose structural membership for item and passage results. Actors can navigate
-direct parent/child connections through derived sections and documents to select
-possible sibling context. These built-in connections are distinct from authored
-semantic relations. Structure and item ownership follow
+Expose structural membership for item and Markdown block results. Actors can
+navigate direct parent/child connections through derived sections and documents
+to select possible sibling context. These built-in connections are distinct
+from authored semantic relations. Structure and item ownership follow
 [[DES-DOCUMENT-STRUCTURE]].
 
 Each call returns direct neighbours only, with bounded results and explicit
@@ -36,12 +36,12 @@ Verify a narrative search hit leading through a mention to an item and through
 that item's typed relation to another item, as successive calls. Verify the
 corresponding incoming connections and continuation without silently expanding
 an additional hop. Also verify an item's visible section membership and
-successive parent/child navigation to a sibling narrative passage.
+successive parent/child navigation to a sibling narrative Markdown block.
 :::
 
 :::mara design DES-UNIFIED-KNOWLEDGE-DISCOVERY
 :mid: 01M232SX5VJZ65J1ZGGKZ556S9
-:title: Search items and passages through one discovery surface
+:title: Search items and Markdown blocks through one discovery surface
 :satisfies: REQ-DOCUMENT-CONTEXT-DISCOVERY
 :satisfies: REQ-DOCUMENT-CONTEXT-READ
 :satisfies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
@@ -50,29 +50,27 @@ Accepted direction for 0.2; not implemented by 0.1.
 
 | Concern | Contract |
 |---|---|
-| Entry point | Move CLI search to `mara search`, with equivalent unified MCP discovery. Search covers items and narrative passages in the selected project's canonical documents, including documents without items. Do not introduce a second document-search operation. |
-| Document structure | Follow [[DES-DOCUMENT-STRUCTURE]] for Rushdown item containers, derived sections, passage boundaries, and owning-item search results. |
-| Result kinds | Distinguish items from passages explicitly. Both are searchable, addressable discovery nodes with excerpts and source locations. Items retain their IDs/MIDs; a passage handle locates source in a particular revision and is not a permanent item identity. |
-| Filters | Project-relative path filters apply to both kinds. Item ID, flavour, custom-field, and schema-relation filters select items only. Narrative never inherits item metadata. |
+| Entry point | Move CLI search to `mara search`, with equivalent unified MCP discovery. Search covers items, sections, and ordinary Markdown blocks in the selected project's canonical documents, including documents without items. Do not introduce a second document-search operation. |
+| Document structure | Follow [[DES-DOCUMENT-STRUCTURE]] for Rushdown item containers, derived sections, Markdown block selection, and owning-item search results. |
+| Result kinds | Return item, section, or Markdown block results, exposing the block's specific kind. All are addressable discovery nodes with excerpts and source locations. Items retain their IDs/MIDs; a Markdown block handle locates source in a particular revision and is not a permanent item identity. |
+| Filters | Project-relative path filters apply to all result kinds. Item ID, flavour, custom-field, and schema-relation filters select items only. Narrative never inherits item metadata. |
 | Connections | Explicit resolved references create `mentions` edges, with incoming backlinks. Expose derived structural membership and direct parent/child connections under [[DES-DOCUMENT-STRUCTURE]]. Preserve source locations and distinguish structural connections, mentions, and schema-defined typed relations. |
 | Source reading | Return locations sufficient for the actor's existing file-reading tools. This workflow assumes access to the same project sources. Do not add generic document `list`/`get` operations or recreate plain file reading. Existing structured item operations remain separately useful. |
-| Navigation | Follow [[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]] from either result kind. Excerpts support selection; they are not a claim to include all connected context. |
+| Navigation | Follow [[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]] from every result kind. Excerpts support selection; they are not a claim to include all connected context. |
 
-Passages can participate in the discovery graph without becoming schema-defined
-items. Graph membership does not infer semantic obligations or implementation
-claims from prose. Raw URLs and code links remain source content until their
-target-resolution contract exists. Code-symbol extraction and richer
-traceability are later work, not prerequisites for 0.2.
+Markdown blocks can participate in the discovery graph without becoming
+schema-defined items. Graph membership does not infer semantic obligations or
+implementation claims from prose. Raw URLs and code links remain source content
+until their target-resolution contract exists. Code-symbol extraction and
+richer traceability are later work, not prerequisites for 0.2.
 
-Implementation details still to settle: exact Markdown passage grouping and
-oversized-block treatment; passage handles and stale-location rejection;
-Markdown destination/anchor resolution (including section targets and broken or
-ambiguous destinations); heading-only search results; structural handle/edge
-names; mixed-result ranking and wire fields; continuation
-limits; neighbour operation naming; and migration/alias policy for the existing
-CLI/MCP search names. Supporting both `[[ID]]` mentions and resolvable Markdown
-links is intended; exact resolution rules must be specified before
-implementation.
+Implementation details still to settle: source handles and stale-location
+rejection; supported Markdown anchor forms and broken or ambiguous
+destinations; structural edge names and their distinction from schema
+relations; mixed-result ranking, wire fields, excerpt and continuation limits;
+neighbour operation naming; and migration/alias policy for the existing CLI/MCP
+search names. Supporting both `[[ID]]` mentions and resolvable Markdown links
+is intended; exact resolution rules must be specified before implementation.
 
 The private in-memory graph backend follows [[ADR-PETGRAPH-DISCOVERY]]. The
 existing disposable-projection boundary remains: source documents own meaning,
@@ -85,11 +83,11 @@ and parser/library node indexes must not become public identities.
 :justifies: DES-UNIFIED-KNOWLEDGE-DISCOVERY
 :justifies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
 
-Use one search surface for structured items and ordinary narrative. Passages
-are first-class discovery nodes whose explicit references connect them to items
-and provide backlinks. Require no authored flavour or MID for narrative. Actors
-choose each next direct neighbour; 0.2 has no hop-count parameter or automatic
-traversal.
+Use one search surface for structured items and ordinary narrative. Markdown
+blocks are first-class discovery nodes whose explicit references connect them
+to items and provide backlinks. Require no authored flavour or MID for
+narrative. Actors choose each next direct neighbour; 0.2 has no hop-count
+parameter or automatic traversal.
 
 An actor may find an explanation first, follow its mention to a requirement,
 then inspect a connected design or decision. Discovery must work from that
@@ -100,13 +98,13 @@ why each neighbour matters.
 This replaces the earlier preference for separate document/passage search and
 the proposal to implement generic document reads in Mara. Existing
 source-reading tools provide the content once Mara locates it. Lack of durable
-item identity does not exclude a passage from the graph.
+item identity does not exclude a Markdown block from the graph.
 
 The 0.1 item-only contract remains unchanged. The POC's narrative-span and
 derived-mention concepts are useful precedent. The private backend is decided
-separately in [[ADR-PETGRAPH-DISCOVERY]]; the POC's multi-hop traversal and broader
-traceability contracts are not adopted here. Richer graph analysis and code
-traceability remain provisional 0.3/0.4 work.
+separately in [[ADR-PETGRAPH-DISCOVERY]]; the POC's multi-hop traversal and
+broader traceability contracts are not adopted here. Richer graph analysis and
+code traceability remain provisional 0.3/0.4 work.
 :::
 
 :::mara decision ADR-PETGRAPH-DISCOVERY
@@ -115,21 +113,22 @@ traceability remain provisional 0.3/0.4 work.
 :justifies: DES-UNIFIED-KNOWLEDGE-DISCOVERY
 :justifies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
 
-Adopt petgraph when implementing the 0.2 discovery graph. Use a private directed
-representation for items, passages, derived sections, and documents, with typed
-relations, resolved mentions, and structural connections under
-[[DES-DOCUMENT-STRUCTURE]]. Enumerate incoming and outgoing edge references for
-direct-neighbour queries; derive backlinks from those edges rather than
-authoring inverse links.
-Support distinct relation kinds between the same endpoints.
+Adopt petgraph when implementing the 0.2 discovery graph. Use a private
+directed representation for items, Markdown blocks, derived sections, and
+documents, with typed relations, resolved mentions, and structural connections
+under [[DES-DOCUMENT-STRUCTURE]]. Enumerate incoming and outgoing edge
+references for direct-neighbour queries; derive backlinks from those edges
+rather than authoring inverse links. Support distinct relation kinds between
+the same endpoints.
 
 The immediate need is shared adjacency storage and direct navigation across
 knowledge and structural nodes. Reuse the library's node/edge storage and
-directional iteration instead of maintaining an equivalent custom graph. Future graph
-algorithms reinforce this choice but are not the sole justification. The
-[petgraph Graph API](https://docs.rs/petgraph/0.8.3/petgraph/graph/struct.Graph.html)
-supports associated node/edge data, parallel edges, and directional edge
-iteration; dependency version selection belongs to implementation.
+directional iteration instead of maintaining an equivalent custom graph. Future
+graph algorithms reinforce this choice but are not the sole justification. The
+[petgraph Graph
+API](https://docs.rs/petgraph/0.8.3/petgraph/graph/struct.Graph.html) supports
+associated node/edge data, parallel edges, and directional edge iteration;
+dependency version selection belongs to implementation.
 
 Mara owns identity and reference resolution, connection meaning, source
 provenance, schema validation, deterministic result ordering, and pagination.
@@ -179,38 +178,65 @@ heading scope, so headings inside it cannot close outer document sections.
 Other Markdown container boundaries must likewise preserve their own children.
 Content before a heading belongs directly to its containing document or block.
 
-A section carries its heading text, level, and source location. Its heading is
-not an artificial narrative passage. Sections may contain narrative passages,
-items, and subsections in source order; narrative before and after an item can
-belong to the same section. Passage grouping operates on narrative Markdown
-blocks within this structure and must not cross item or section boundaries.
+A section carries its heading text, level, and source location. Sections contain
+ordinary Markdown blocks, items, and subsections in source order. Prose before
+and after an item can belong to the same section. Add no abstract passage
+container around those blocks or special passage node for a heading.
 
-## Discovery and containment
+## Discovery units
 
-Documents and sections are addressable structural nodes in discovery navigation.
-Search results expose an item's or passage's structural parent and section
-context when present; actors can inspect direct parent/child connections and
-select sibling context. Derive containment and its reverse view from document
-structure. Keep these built-in structural connections distinct from mentions
-and schema-authored typed relations; add no required authored IDs,
+Return one of three result categories: item, section, or Markdown block. Expose
+the specific Markdown block kind. Retaining an AST child does not require
+returning that child as an independent search hit.
+
+| Match location | Result unit |
+|---|---|
+| Anywhere inside a Mara item, including its nested headings and sections | Owning item, with the actual match location. |
+| Section heading outside an item | Section. |
+| Standalone paragraph outside an item | Paragraph. |
+| List content, including nested lists | Outermost containing list. |
+| Table cell content | Whole table. |
+| Code-block content | Whole code block. |
+| Blockquote content | Whole blockquote. |
+
+Item ownership takes precedence. Otherwise retain the outermost ordinary
+Markdown block container: for example, a list within a blockquote returns the
+blockquote. Do not duplicate the same match as both its child and enclosing
+result unit. Large blocks remain single nodes with bounded excerpts; size alone
+does not introduce synthetic passage nodes. Excerpt size and continuation wire
+fields remain to be specified.
+
+## Connections and containment
+
+ID links target items. Markdown heading links target their sections, including
+the section's full structural extent; this does not automatically retrieve its
+children. An explicit anchor within ordinary content targets its containing
+discovery block while retaining the precise anchor location. Specify supported
+anchor forms and ambiguous/broken-destination handling before implementation.
+Search grouping and item ownership must not erase a link's precise destination.
+
+Documents and sections are addressable structural nodes. Results expose their
+structural parent and section context when present. Actors can inspect direct
+parent/child connections and select sibling context. Derive containment and its
+reverse view from source structure. Keep these built-in connections distinct
+from mentions and schema-authored typed relations. Require no authored IDs,
 flavours, metadata, or dedicated section/document authoring operations.
 
-A text match anywhere inside an item, including its nested sections, returns
-the owning item with the precise matching source location, not a separate
-passage result. Heading links identify their actual structural destination;
-search result grouping must not redirect them to an arbitrary nearby passage.
-A shared parent indicates possible context, not a semantic dependency.
+Proposed API vocabulary, pending naming agreement: `contains` from direct parent
+to child, with `contained_by` for its reverse view. These names describe immediate
+containment, not all descendants. The connection representation must distinguish
+built-in structural kinds from schema-defined relation names.
 
-Sibling discovery is successive direct navigation: inspect the item's parent,
-then that parent's children. It does not require an automatic sibling relation,
-recursive expansion, or a hops parameter. Raw Markdown inline nodes need not
-become discovery graph nodes.
+Sibling discovery remains successive direct navigation: inspect the item's
+parent, then that parent's children. A shared parent indicates possible context,
+not a semantic dependency. Add no automatic sibling relation, recursive
+expansion, or hops parameter. Raw Markdown inline nodes need not become discovery
+graph nodes.
 
-Before implementation, specify structural handle and edge wire names,
-heading-only search results, anchor resolution, and passage grouping/size rules.
-Verify interleaved items and prose, headings inside items, skipped heading
-levels, heading-free content, direct containment in both directions, and item
-ownership of nested matches, alongside existing format and editing contracts.
+Verify interleaved items and prose, nested lists/quotes, tables, headings inside
+items, skipped heading levels, heading-free content, direct containment in both
+directions, heading-link targets, and item ownership of nested matches,
+alongside existing format and editing contracts.
 :::
 
 :::mara decision ADR-MARKDOWN-STRUCTURAL-DISCOVERY
@@ -221,18 +247,18 @@ ownership of nested matches, alongside existing format and editing contracts.
 Treat Mara as a Markdown extension: model items as real container blocks and
 retain the Markdown structure inside and around them. Derive section hierarchy
 for context and navigation instead of treating each heading as a narrative
-passage or attaching it only to the next prose fragment.
+Markdown block or attaching it only to the next prose fragment.
 
-Interleaved passages and items share section context. An actor must be able to
-see that parentage and navigate to possible sibling context from either kind
-of search result. Sections are internal in the sense that they are derived and
-need no authored identities or CRUD operations; they are visible to actors
+Interleaved Markdown blocks and items share section context. An actor must be
+able to see that parentage and navigate to possible sibling context from either
+kind of search result. Sections are internal in the sense that they are derived
+and need no authored identities or CRUD operations; they are visible to actors
 through locations and structural connections.
 
 The POC already specified Markdown item bodies and a complete hierarchy of
 sections, narrative blocks, and item placements. This decision accepts that
-structural direction for 0.2 without copying the POC's old item syntax or broader
-traceability scope. The `:::` form follows a fenced-container extension
+structural direction for 0.2 without copying the POC's old item syntax or
+broader traceability scope. The `:::` form follows a fenced-container extension
 convention; it is not syntax standardized by CommonMark itself. Mara owns its
 exact grammar and restrictions.
 

@@ -42,10 +42,10 @@ flavour without relying on knowledge of Mara's own repository taxonomy.
 :title: Discover narrative and follow its connections through Mara
 
 An actor searches the selected project's canonical documentation through Mara
-and finds either a structured item or an ordinary narrative passage, including
-content in documents without items. Starting from a passage's explicit mention,
-the actor inspects the referenced requirement and then its direct connections
-to designs or decisions, choosing each subsequent step.
+and finds a structured item, section, or ordinary Markdown block, including
+content in documents without items. Starting from a Markdown block's explicit
+mention, the actor inspects the referenced requirement and then its direct
+connections to designs or decisions, choosing each subsequent step.
 
 Search and neighbour results expose source locations and connection meaning.
 The actor reads the needed source context using existing file tools with access
@@ -114,23 +114,24 @@ this requirement does not introduce a graph-rule engine.
 :title: Discover canonical context outside item blocks
 :derives_from: SCN-READ-DOCUMENT-CONTEXT
 
-CLI and MCP must discover matching items and narrative passages through one
-bounded search surface in the selected project's canonical documents, including
-narrative-only documents. Move the CLI entry point to `mara search`. Return
-explicit result kinds, source locations, and continuation when more matches
-remain. Do not add a separate document-search operation.
+CLI and MCP must discover matching items, sections, and ordinary Markdown
+blocks through one bounded search surface in the selected project's canonical
+documents, including narrative-only documents. Move the CLI entry point to
+`mara search`. Return explicit result kinds, source locations, and continuation
+when more matches remain. Do not add a separate document-search operation.
 
-Passages are first-class discovery nodes without requiring authored item IDs,
-MIDs, or flavours. Their explicit connections follow
-[[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]]. Result boundaries, filters, source reading,
-and remaining interface details follow [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
+Markdown blocks are first-class discovery nodes without requiring authored item
+IDs, MIDs, or flavours. Their explicit connections follow
+[[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]]. Result boundaries, filters, source
+reading, and remaining interface details follow
+[[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
 
 Expose structural membership under [[DES-DOCUMENT-STRUCTURE]] so an actor can
 identify the containing section or document and navigate from it.
 
-Verify mixed item/passage results, narrative-only documents, path and item-only
-filters, bounded continuation, and absence of duplicated item-body hits through
-CLI and MCP.
+Verify mixed item/section/block results, narrative-only documents, path and
+item-only filters, bounded continuation, and absence of duplicated item-body
+hits through CLI and MCP.
 :::
 
 :::mara requirement REQ-DOCUMENT-CONTEXT-READ
@@ -139,15 +140,15 @@ CLI and MCP.
 :derives_from: SCN-READ-DOCUMENT-CONTEXT
 
 Discovery and direct-neighbour results must identify the source document and
-exact location needed to read the selected item or narrative passage using the
-actor's existing file tools. The workflow assumes access to the same project
-sources. Excerpts aid selection and must not imply that the full source or
-connected context has been returned.
+exact location needed to read the selected item or narrative Markdown block
+using the actor's existing file tools. The workflow assumes access to the same
+project sources. Excerpts aid selection and must not imply that the full source
+or connected context has been returned.
 
-Do not add generic document list/get or a plain-read command in 0.2. This replaces
-the earlier proposal for consecutive document reads through Mara; existing
-structured item retrieval remains available. Location and revision handling
-follow [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
+Do not add generic document list/get or a plain-read command in 0.2. This
+replaces the earlier proposal for consecutive document reads through Mara;
+existing structured item retrieval remains available. Location and revision
+handling follow [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
 
 Verify that an actor can locate a narrative search hit and its linked item,
 then read their complete original source with file tools, including content
@@ -160,7 +161,7 @@ larger than a search excerpt. The 0.1 boundary in
 | Area | Open decision |
 |---|---|
 | Schema transition | Finalize the schema-format transition and migration guide. Reconcile the existing taxonomy with schema-owned guidance so each definition has one authority. Guidance shape, validation rules, and engineering relation definitions are settled in the designs below. |
-| Discovery interface | The unified search and passage-navigation direction is settled in [discovery](discovery.mara.md). Finalize passage grouping, handles, link/anchor resolution, ranking, response bounds, wire fields, neighbour operation naming, and CLI/MCP migration policy. Do not reopen the separate document-search/read proposal. |
+| Discovery interface | Unified search over items, sections, and Markdown blocks is settled in [discovery](discovery.mara.md). Finalize handles, supported anchor forms, ambiguous/broken-link behavior, structural edge names, ranking, response bounds, wire fields, neighbour operation naming, and CLI/MCP migration policy. |
 
 After settling each area's product choices, record its interface or persisted
 contract as a design and consequential rationale as a decision. Delivery tickets
