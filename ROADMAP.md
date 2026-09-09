@@ -79,7 +79,6 @@ boundaries, verification expectations, and the accepted narrative boundary.
   breaking change, with a migration guide for 0.2.
 - Supply useful engineering traceability relations through the template.
 - Add bounded discovery and reading of canonical document context outside items.
-- Evaluate diagnostic codes and severity as a candidate addition.
 
 See [planned outcomes and open decisions](docs/guided-authoring.mara.md) before
 ticket planning. This scope retains one project and schema for package-local
@@ -107,6 +106,7 @@ contracts from usage before scheduling implementation.
 
 ## Later
 
+- Diagnostic codes and severity when a concrete consumer workflow needs them.
 - Multi-project aggregation, nested project boundaries, and cross-project
   relations when independent corpora need a shared operation.
 - Remote template packs and configuration composition when bundled seeds and

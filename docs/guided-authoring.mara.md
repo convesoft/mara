@@ -6,8 +6,8 @@ context as well as items. The scenarios and requirements below describe future
 outcomes; they do not claim implementation or settle the open designs below.
 
 Prioritize bundled templates and flavour guidance together, then useful
-engineering relations and document access. Diagnostic codes and severity remain
-a candidate addition pending the consumer and compatibility decisions below.
+engineering relations and document access. Diagnostic codes and severity are
+deferred beyond 0.2 until a concrete consumer workflow demonstrates a need.
 
 This scope uses one Mara project and schema, including documents inside package
 directories. It does not require workspace aggregation, template inheritance,
@@ -58,7 +58,9 @@ The same workflow is available through CLI and MCP.
 Offer an optional `engineering` template based on the reusable vocabulary in
 [the self-hosting taxonomy](taxonomy.mara.md). Keep `minimal` as the default and
 retain `empty`. Initialization preserves [[REQ-PROJECT-INITIALIZATION]] and
-produces an editable project schema without copying Mara's product items or MIDs.
+generates only `.mara/project.toml` and `.mara/schema.yaml`, with no starter
+Markdown or separate guidance document. The schema is editable project-owned
+data; templates do not copy Mara's product items or MIDs.
 
 Maintain template content in source files bundled into the executable, without
 requiring a runtime template directory. Changing a bundled template must not
@@ -71,19 +73,20 @@ silently rewrite schemas in projects already initialized from it.
 :derives_from: SCN-CHOOSE-KNOWLEDGE-FLAVOUR
 
 In 0.2.0, every declared flavour must provide guidance covering its purpose,
-when to use it, when to avoid it, and distinctions from other flavours. Missing
-required guidance is a schema validation error, including for existing project
-schemas; it is not optional legacy behavior. An empty schema has no flavours
-that require guidance.
+when to use it, when to avoid it, and distinctions from other flavours. Keep the
+existing `description` for purpose and add `use_when`, `avoid_when`, and
+`distinguish_from`. Missing required guidance is a schema validation error,
+including for existing project schemas; it is not optional legacy behavior.
+An empty schema has no flavours that require guidance.
 
 CLI and MCP schema inspection must expose the same project-defined guidance
 under [[REQ-SCHEMA-DISCOVERY]] and [[REQ-SURFACE-PARITY]]. Bundled templates must
 supply complete guidance for their declared flavours. Guidance must not
 introduce hardcoded business flavours in the engine.
 
-The persisted shape and detailed content-validation rules remain open design
-questions. This requirement is a breaking change for 0.2.0; it does not change
-0.1 schema validation.
+The value types, nesting, empty-value rules, and schema-format transition remain
+open design questions. This requirement is a breaking change for 0.2.0; it does
+not change 0.1 schema validation.
 :::
 
 :::mara requirement REQ-ENGINEERING-TRACEABILITY
@@ -139,18 +142,16 @@ settled before implementation. The current alpha.3 file-access decision
 
 | Area | Open decision |
 |---|---|
-| Template contents | Ship the schema alone, or also a small navigation/guidance document? Avoid duplicating guidance between generated documents and schema data. |
-| Flavour guidance | Guidance is mandatory in 0.2, including for existing schemas. Choose its persisted shape, detailed validation constraints, and schema-format transition. Reconcile the existing taxonomy with schema-owned guidance so each definition has one authority. |
+| Flavour guidance | The names `description`, `use_when`, `avoid_when`, and `distinguish_from` are settled. Choose value types, nesting, empty-value rules, and the schema-format transition. Reconcile the existing taxonomy with schema-owned guidance so each definition has one authority. |
 | Engineering relations | Confirm names, direction, and endpoint flavours for verification, evidence, implementation, and risk links. Candidate names are `verifies`, `validates`, `evidences`, `implements`, `affects`, and `mitigates`; this document does not add them to the schema. |
-| Document access | Choose the public discovery/read surface and resolve the result-unit, ranking, filtering, continuation, and compatibility questions in the retrieval investigation. |
-| Diagnostics | Confirm the consumer workflow and whether codes alone or codes plus severity belong in 0.2. Define output compatibility and the effect of severity on validity and exit status before accepting a diagnostic contract. |
+| Document access | Discuss after engineering relations. Choose the public discovery/read surface and resolve the result-unit, ranking, filtering, continuation, and compatibility questions in the retrieval investigation. |
 
 After settling each area's product choices, record its interface or persisted
 contract as a design and consequential rationale as a decision. Delivery tickets
 reference those items and the requirements above; verification belongs with each
 implemented outcome. The full 0.2 ticket breakdown follows this scope review.
 
-## Migration and compatibility
+## Decisions and migration
 
 :::mara requirement REQ-FLAVOUR-GUIDANCE-MIGRATION
 :mid: 01M22ZQ349GZHVT2F2R1MRX90G
@@ -189,4 +190,17 @@ and agents can rely on guidance for every declared flavour. The earlier alpha
 schema contract does not justify making that guarantee permanently optional.
 The implementation and migration guide belong to 0.2; the 0.1 release retains
 its existing schema behavior.
+:::
+
+:::mara decision ADR-SCHEMA-ONLY-TEMPLATES
+:mid: 01M230NZB3DX52SQDS91XXF06A
+:title: Generate configuration and schema without starter documents
+:justifies: REQ-ENGINEERING-TEMPLATE
+
+Bundled templates generate project configuration and schema only. Flavour
+guidance belongs in the schema and is exposed through Mara's schema inspection.
+Do not generate starter Markdown or a second guidance document.
+
+This keeps initialization small, gives project authors ownership of document
+structure, and avoids maintaining duplicate guidance in schema and Markdown.
 :::
