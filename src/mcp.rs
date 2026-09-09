@@ -47,7 +47,7 @@ struct ProjectInitParams {
     /// Absolute destination directory; required unless the server was started with --project, in which case omit it. Creates a missing directory; rejects an existing Mara project.
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Initial schema: minimal (default) includes common flavours and relations; empty declares none.
+    /// Initial schema: minimal (default) includes common flavours and relations; empty declares none; engineering adds the full engineering vocabulary and traceability relations.
     #[serde(default)]
     template: Template,
 }

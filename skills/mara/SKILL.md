@@ -40,7 +40,9 @@ executable or runner rather than assuming a PATH installation or changing versio
 If the intended root has no `.mara/project.toml` and the user wants to start a
 Mara project, call `project_init` with the absolute root, or omit `project` when
 the MCP server was started with that root bound by `--project`. Use the default
-`minimal` template unless the user explicitly requests `empty`. The CLI equivalent
+`minimal` template unless the user explicitly requests `empty` or `engineering`.
+`engineering` includes engineering flavours, selection guidance, and traceability
+relations; all templates generate configuration and schema only. The CLI equivalent
 is `"${mara_cli[@]}" --project /absolute/project --format json project init`.
 Do not create or modify `AGENTS.md` as part of Mara onboarding.
 
