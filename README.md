@@ -5,7 +5,7 @@ designs, decisions, and other durable facts stable identities, types, relations,
 validation, and deterministic retrieval. The same operations are available as
 a CLI and a stdio MCP server.
 
-Mara is currently pre-release software. The supported alpha hosts are x64 and
+Mara 0.1.0 provides the single-project CLI and MCP workflow. Supported hosts are x64 and
 arm64 macOS, plus x64 and arm64 Linux compatible with Ubuntu 22.04's glibc
 baseline.
 
@@ -14,9 +14,9 @@ baseline.
 Pin the exact version so an MCP restart cannot silently change behavior:
 
 ```bash
-npx -y @convesoft/mara@0.1.0-alpha.3 --version
-npx -y @convesoft/mara@0.1.0-alpha.3 project init ./example
-npx -y @convesoft/mara@0.1.0-alpha.3 --project ./example project validate
+npx -y @convesoft/mara@0.1.0 --version
+npx -y @convesoft/mara@0.1.0 project init ./example
+npx -y @convesoft/mara@0.1.0 --project ./example project validate
 ```
 
 The npm packages contain prebuilt native binaries and use no install scripts.
@@ -29,7 +29,7 @@ For a client that starts stdio servers in the project directory:
 ```toml
 [mcp_servers.mara]
 command = "npx"
-args = ["-y", "@convesoft/mara@0.1.0-alpha.3", "mcp"]
+args = ["-y", "@convesoft/mara@0.1.0", "mcp"]
 ```
 
 To bind the server to one project regardless of its execution directory, place
@@ -40,7 +40,7 @@ To bind the server to one project regardless of its execution directory, place
 command = "npx"
 args = [
   "-y",
-  "@convesoft/mara@0.1.0-alpha.3",
+  "@convesoft/mara@0.1.0",
   "mcp",
   "--project",
   "/absolute/path/to/project",
@@ -57,7 +57,7 @@ Register the installed Mara executable as an MCP server and install the Mara
 skill separately:
 
 ```bash
-codex mcp add mara -- npx -y @convesoft/mara@0.1.0-alpha.3 mcp
+codex mcp add mara -- npx -y @convesoft/mara@0.1.0 mcp
 npx skills add convesoft/mara --skill mara -g -a codex
 ```
 
@@ -97,7 +97,7 @@ mara item get REQ-EXAMPLE
 ```
 
 Run `mara --help` or `mara <object> <operation> --help` for the complete command
-surface. The canonical alpha behavior is documented in
+surface. The core behavior is documented in
 [`docs/alpha.mara.md`](docs/alpha.mara.md). Structured update, move, rename,
 delete, and recovery follow [`docs/editing.mara.md`](docs/editing.mara.md).
 Search/list, `item related`, and `item get` return bounded pages; repeat the same
@@ -116,6 +116,8 @@ For existing projects whose items lack machine identities, run
 `mara project mid backfill`, then `mara project validate` before editing.
 Distribution and release guarantees are in
 [`docs/distribution.mara.md`](docs/distribution.mara.md).
+The [stable 0.1 contract](docs/release-0.1.mara.md) records scope and limitations;
+[planned 0.2 changes](docs/guided-authoring.mara.md) are not part of this version.
 
 ## Development
 

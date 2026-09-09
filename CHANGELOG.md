@@ -1,6 +1,11 @@
 # Changelog
 
 All notable changes to Mara are generated from Conventional Commit history.
+## [0.1.0]
+
+### Maintenance
+
+- Release 0.1.0
 ## [0.1.0-alpha.3]
 
 ### Added

@@ -30,7 +30,7 @@ evidence and priorities change; detailed behavior becomes canonical in
 - Preserve relation and validation integrity throughout lifecycle changes.
 - Clarify the alpha.3 retrieval scope in canonical documents before release.
 
-### 0.1.0-alpha.3 — Enhanced deterministic retrieval (current)
+### 0.1.0-alpha.3 — Enhanced deterministic retrieval (published)
 
 - Paginate search/list results and bound summaries; offer opt-in search excerpts
   and selected-item filtering.
@@ -52,24 +52,12 @@ evidence and priorities change; detailed behavior becomes canonical in
 See [retrieval scope and contracts](docs/retrieval.mara.md) for implementation
 boundaries, verification expectations, and the accepted narrative boundary.
 
-### 0.1.0-beta.0
+### 0.1.0 — Stable single-project workflow (in preparation)
 
-- Complete the intended 0.1 feature set.
-- Validate format and compatibility behavior with real projects and clients.
-
-### 0.1.0-beta.N
-
-- Stabilize demonstrated workflows and compatibility.
-- Add no planned new feature areas.
-
-### 0.1.0-rc.0
-
-- Release the exact candidate artifacts.
-- Accept only release blockers and documentation corrections.
-
-### 0.1.0
-
-- Declare the stable single-project workflow.
+- Retain the published alpha.3 runtime and formats, reconcile documentation,
+  and verify stable release artifacts through one release PR.
+- Follow the [stable scope and readiness contract](docs/release-0.1.mara.md).
+  Separate beta/RC publications are not required by the revised release path.
 
 ## 0.2.0 — Guided authoring
 
