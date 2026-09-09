@@ -53,7 +53,7 @@ Accepted direction for 0.2; not implemented by 0.1.
 | Entry point | Move CLI search to `mara search`, with equivalent unified MCP discovery. Search covers items, sections, and ordinary Markdown blocks in the selected project's canonical documents, including documents without items. Do not introduce a second document-search operation. |
 | Document structure | Follow [[DES-DOCUMENT-STRUCTURE]] for Rushdown item containers, derived sections, Markdown block selection, and owning-item search results. |
 | Result kinds | Return item, section, or Markdown block results, exposing the block's specific kind. All are addressable discovery nodes with excerpts and source locations. Items retain their IDs/MIDs; a Markdown block handle locates source in a particular revision and is not a permanent item identity. |
-| Filters | Project-relative path filters apply to all result kinds. Item ID, flavour, custom-field, and schema-relation filters select items only. Narrative never inherits item metadata. |
+| Filters | Project-relative path filters apply to all result kinds. Item ID, flavour, custom-field, and schema-relation filters select items only. Narrative never inherits item metadata. Omit node-kind filters (`--kind` or an MCP equivalent) in 0.2; keep node kinds in result output. |
 | Connections | Explicit resolved references create `mentions` edges, with incoming backlinks. Expose derived structural membership and direct parent/child connections under [[DES-DOCUMENT-STRUCTURE]]. Preserve source locations and distinguish structural connections, mentions, and schema-defined typed relations. |
 | Reading | Replace `mara item get` with `mara get <reference>` for items, sections, Markdown blocks, and documents, with equivalent MCP retrieval. Accept item IDs/MIDs and discovery handles. Return node kind, source location, structural context, bounded consecutive content, and item metadata when applicable. Provide continuation for complete reads; enumerate neighbours through `related`. File tools remain optional. |
 | Navigation | Replace CLI `mara item related` with `mara related <reference>` for items and structural discovery nodes, with equivalent unified MCP navigation. Accept item IDs/MIDs and returned discovery handles. Follow [[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]] from every result kind. Excerpts support selection; they are not a claim to include all connected context. |
@@ -70,6 +70,21 @@ schema-defined items. Graph membership does not infer semantic obligations or
 implementation claims from prose. Raw URLs and code links remain source content
 until their target-resolution contract exists. Code-symbol extraction and
 richer traceability are later work, not prerequisites for 0.2.
+
+Unified search matches heading text as section results, ordinary content
+outside items as Markdown block results, and content within items as owning
+item results, including their nested headings. A section hit identifies the
+whole section for reading and navigation; it does not match merely because a
+child block contains the query. This keeps heading discovery available without
+requiring actors to choose Markdown node types before searching.
+
+Discovery relation names distinguish `schema:` from `builtin:`. Resolve an
+unqualified name when it exists in exactly one namespace: `satisfies` resolves
+to `schema:satisfies`, and `contains` resolves to `builtin:contains` unless
+the schema also declares it. If both declare a name, reject the unqualified
+form and identify the fully qualified alternatives. Explicit names select their
+namespace. Resolve against the available vocabulary, not the connections
+present in a result, so shorthand meaning is stable across queries.
 
 Link and anchor resolution follows [[DES-DOCUMENT-STRUCTURE]].
 
@@ -88,10 +103,10 @@ invalidation because other documents can change result membership and ordering.
 The token encoding and hash algorithm are implementation details; do not expose
 private graph indexes as handles.
 
-Implementation details still to settle: representation of built-in connection
-kinds versus schema relations; mixed-result ranking, wire fields, excerpt and
-read/continuation limits; MCP operation naming; and migration/alias policy for
-the existing CLI/MCP search, get, and related names.
+Implementation details still to settle: mixed-result ranking, connection and
+node wire fields, excerpt and read/continuation limits; MCP operation naming;
+and migration/alias policy for the existing CLI/MCP search, get, and related
+names.
 
 The private in-memory graph backend follows [[ADR-PETGRAPH-DISCOVERY]]. The
 existing disposable-projection boundary remains: source documents own meaning,
