@@ -73,7 +73,7 @@ enum ProjectCommand {
         /// Destination directory (absolute or relative to the working directory), created if missing. Defaults to the working directory only when --project is also omitted. Cannot combine PATH with --project.
         path: Option<PathBuf>,
 
-        /// Initial schema: minimal includes common flavours and relations; empty declares none.
+        /// Initial schema: minimal (default) includes common flavours and relations; empty declares none; engineering adds the full engineering vocabulary and traceability relations.
         #[arg(long, value_enum, default_value_t)]
         template: CliTemplate,
     },
@@ -402,6 +402,7 @@ enum CliTemplate {
     #[default]
     Minimal,
     Empty,
+    Engineering,
 }
 
 impl From<CliTemplate> for Template {
@@ -409,6 +410,7 @@ impl From<CliTemplate> for Template {
         match value {
             CliTemplate::Minimal => Self::Minimal,
             CliTemplate::Empty => Self::Empty,
+            CliTemplate::Engineering => Self::Engineering,
         }
     }
 }

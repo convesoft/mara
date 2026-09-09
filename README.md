@@ -6,7 +6,8 @@ validation, and deterministic retrieval. The same operations are available as
 a CLI and a stdio MCP server.
 
 Released Mara 0.1.0 provides the single-project CLI and MCP workflow. Development
-version 0.2.0-alpha.0 requires [schema format 2 and flavour guidance](docs/migration-0.2.mara.md).
+version 0.2.0-alpha.0 requires [schema format 2 and flavour guidance](docs/migration-0.2.mara.md)
+and adds `mara project init --template engineering`.
 Supported hosts are x64 and
 arm64 macOS, plus x64 and arm64 Linux compatible with Ubuntu 22.04's glibc
 baseline.

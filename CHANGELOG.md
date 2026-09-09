@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Mara are generated from Conventional Commit history.
+## [0.2.0-alpha.0]
+
+### Added
+
+- Require schema format 2 and flavour guidance
+- Add bundled engineering templates and prepare 0.2.0-alpha.0
 ## [0.1.0]
 
 ### Maintenance

@@ -2,9 +2,9 @@
 
 Accepted scope for 0.2.0: a solo developer can start useful engineering
 documentation, choose its vocabulary, and give an agent access to document
-context as well as items. Schema format 2, mandatory flavour guidance, and
-minimal/empty template migration are implemented in `0.2.0-alpha.0`. The other
-outcomes and designs below remain planned.
+context as well as items. Schema format 2, mandatory flavour guidance,
+all three bundled templates, and engineering traceability relations are
+implemented in `0.2.0-alpha.0`. Unified discovery remains planned.
 
 Prioritize bundled templates and flavour guidance together, then useful
 engineering relations and unified discovery. Diagnostic codes and severity are
@@ -71,9 +71,11 @@ generates only `.mara/project.toml` and `.mara/schema.yaml`, with no starter
 Markdown or separate guidance document. The schema is editable project-owned
 data; templates do not copy Mara's product items or MIDs.
 
-Maintain template content in source files bundled into the executable, without
-requiring a runtime template directory. Changing a bundled template must not
-silently rewrite schemas in projects already initialized from it.
+Maintain the `minimal`, `empty`, and `engineering` schema templates as source
+files embedded in the executable, without requiring a runtime template directory.
+Generate project configuration programmatically, deriving the project name from
+the destination directory. Changing a bundled schema template must not silently
+rewrite schemas in projects already initialized from it.
 :::
 
 :::mara requirement REQ-FLAVOUR-AUTHORING-GUIDANCE
@@ -171,9 +173,8 @@ Discovery commands, node reading, handles, link resolution, relation names,
 ranking, response fields/bounds, and CLI/MCP migration are settled in
 [discovery](discovery.mara.md).
 
-Next, review the complete 0.2 scope and prepare the ticket breakdown. Delivery
-tickets reference the accepted designs, decisions, and requirements; verification
-belongs with each implemented outcome.
+Delivery tickets reference the accepted designs, decisions, and requirements;
+verification belongs with each implemented outcome.
 
 ## Decisions and migration
 
