@@ -3,7 +3,7 @@
 Planning scope for 0.2.0: a solo developer can start useful engineering
 documentation, choose its vocabulary, and give an agent access to document
 context as well as items. The scenarios and requirements below describe future
-outcomes; they do not claim implementation or settle the open designs below.
+outcomes; the accepted designs below do not claim implementation.
 
 Prioritize bundled templates and flavour guidance together, then useful
 engineering relations and unified discovery. Diagnostic codes and severity are
@@ -160,20 +160,19 @@ budget and rejection of stale handles/continuation. This extends 0.2 only;
 [[ADR-ALPHA-NARRATIVE-FILE-ACCESS]] retains the 0.1 boundary.
 :::
 
-## Decisions needed before implementation planning
+## Implementation planning
 
-| Area | Open decision |
-|---|---|
-| Schema transition | Finalize the schema-format transition and migration guide. Reconcile the existing taxonomy with schema-owned guidance so each definition has one authority. Guidance shape, validation rules, and engineering relation definitions are settled in the designs below. |
+Schema format 2, schema-owned flavour guidance, and the taxonomy transition are
+accepted in [[DES-FLAVOUR-AUTHORING-GUIDANCE]]. Follow the short
+[0.2 migration guide](migration-0.2.mara.md).
 
 Discovery commands, node reading, handles, link resolution, relation names,
 ranking, response fields/bounds, and CLI/MCP migration are settled in
 [discovery](discovery.mara.md).
 
-After settling each area's product choices, record its interface or persisted
-contract as a design and consequential rationale as a decision. Delivery tickets
-reference those items and the requirements above; verification belongs with each
-implemented outcome. The full 0.2 ticket breakdown follows this scope review.
+Next, review the complete 0.2 scope and prepare the ticket breakdown. Delivery
+tickets reference the accepted designs, decisions, and requirements; verification
+belongs with each implemented outcome.
 
 ## Decisions and migration
 
@@ -186,7 +185,7 @@ The 0.2.0 release must identify mandatory flavour guidance as a breaking schema
 change and link a canonical migration guide from its release notes. Version the
 incompatible persisted schema contract independently of the application version.
 
-The guide must provide the supported schema-format transition and before/after
+The guide must describe schema format 1 to 2 migration and before/after
 YAML examples using [[DES-FLAVOUR-AUTHORING-GUIDANCE]]. Explain how to preserve
 custom flavours, fields, relations, and item identities while adding guidance
 to every declared flavour, then verify schema and project validation through
@@ -195,8 +194,8 @@ replace a customized schema with a bundled template.
 
 Verification must demonstrate that a schema missing required guidance is
 rejected by 0.2 and that following the guide makes it valid without unrelated
-corpus changes. Finalize the schema-format transition before completing the
-guide and implementing the new loader.
+corpus changes. Follow the transition in [[DES-FLAVOUR-AUTHORING-GUIDANCE]]
+and the [0.2 migration guide](migration-0.2.mara.md).
 :::
 
 :::mara decision ADR-MANDATORY-FLAVOUR-GUIDANCE
@@ -212,7 +211,11 @@ instead of retaining an optional-guidance exception for older schemas.
 The project accepts the migration cost at this early adoption stage so authors
 and agents can rely on guidance for every declared flavour. The earlier alpha
 schema contract does not justify making that guarantee permanently optional.
-The implementation and migration guide belong to 0.2; the 0.1 release retains
+Use schema format 2 to distinguish this required-guidance contract from
+format 1. Make the schema authoritative for flavour descriptions and selection
+guidance, retaining broader policy in the taxonomy. This prevents duplicated
+definitions from drifting between schema inspection and prose documentation.
+The implementation and schema migration belong to 0.2; the 0.1 release retains
 its existing schema behavior.
 :::
 
@@ -235,6 +238,18 @@ structure, and avoids maintaining duplicate guidance in schema and Markdown.
 :mid: 01M231916PQP6XRY5PYCMMW8QE
 :title: Store mandatory guidance directly in each flavour declaration
 :satisfies: REQ-FLAVOUR-AUTHORING-GUIDANCE
+
+Starting with 0.2, schemas use `format_version: 2`. Bundled templates
+emit version 2, and existing version-1 schemas require explicit migration;
+reject them with a migration diagnostic rather than silently upgrading them.
+This change does not alter document or project-configuration format versions.
+
+The selected project's schema owns flavour descriptions and selection guidance.
+During the 0.2 migration, move duplicated flavour definitions from the
+self-hosting taxonomy into schema guidance, preserving their useful meaning.
+Keep broader authoring policy and links in the taxonomy; do not maintain a
+second set of flavour definitions. Schema inspection exposes the authoritative
+declarations. The 0.1 release retains its current schema and taxonomy.
 
 The guidance keys are direct members of each flavour declaration alongside its
 existing ID prefix, body requirement, and field declarations. There is no extra

@@ -9,5 +9,6 @@ documents only when a current user workflow requires them.
 - [Item editing and recovery](editing.mara.md)
 - [Bounded retrieval and planned alpha.3 extensions](retrieval.mara.md)
 - [Distribution and release](distribution.mara.md)
-- [Guided authoring: planned 0.2 outcomes and open decisions](guided-authoring.mara.md)
-- [Unified discovery: accepted 0.2 direction and remaining interface details](discovery.mara.md)
+- [Guided authoring: accepted 0.2 scope and designs](guided-authoring.mara.md)
+- [Unified discovery: accepted 0.2 contracts](discovery.mara.md)
+- [Migration to 0.2: schema guidance and discovery interface](migration-0.2.mara.md)

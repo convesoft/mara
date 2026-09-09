@@ -4,6 +4,9 @@ This is Mara's project profile, not a built-in process imposed on other
 projects. Use only flavours that represent durable knowledge; a trace may be
 sparse and must not be completed with placeholder items.
 
+This is the current 0.1 taxonomy. The accepted 0.2 guidance-ownership transition
+is specified in [[DES-FLAVOUR-AUTHORING-GUIDANCE]].
+
 | Flavour | ID prefix | Purpose |
 |---|---|---|
 | `term` | `TERM-` | Controlled project vocabulary |

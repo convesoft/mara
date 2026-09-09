@@ -82,7 +82,7 @@ boundaries, verification expectations, and the accepted narrative boundary.
   under `mara get`, and direct connections under `mara related`;
   see [the accepted discovery direction](docs/discovery.mara.md).
 
-See [planned outcomes and open decisions](docs/guided-authoring.mara.md) before
+See [accepted outcomes and designs](docs/guided-authoring.mara.md) before
 ticket planning. This scope retains one project and schema for package-local
 documents in a monorepo and does not expand the 0.1 stabilization sequence.
 
