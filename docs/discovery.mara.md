@@ -66,7 +66,7 @@ richer traceability are later work, not prerequisites for 0.2.
 
 Implementation details still to settle: source handles and stale-location
 rejection; supported Markdown anchor forms and broken or ambiguous
-destinations; structural edge names and their distinction from schema
+destinations; representation of built-in connection kinds versus schema
 relations; mixed-result ranking, wire fields, excerpt and continuation limits;
 neighbour operation naming; and migration/alias policy for the existing CLI/MCP
 search names. Supporting both `[[ID]]` mentions and resolvable Markdown links
@@ -222,9 +222,9 @@ reverse view from source structure. Keep these built-in connections distinct
 from mentions and schema-authored typed relations. Require no authored IDs,
 flavours, metadata, or dedicated section/document authoring operations.
 
-Proposed API vocabulary, pending naming agreement: `contains` from direct parent
-to child, with `contained_by` for its reverse view. These names describe immediate
-containment, not all descendants. The connection representation must distinguish
+Use `contains` from direct parent to child and `contained_by` for its reverse
+view. These are two directions of one derived structural connection, describing
+immediate containment rather than all descendants. The connection representation must distinguish
 built-in structural kinds from schema-defined relation names.
 
 Sibling discovery remains successive direct navigation: inspect the item's
