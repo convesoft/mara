@@ -514,3 +514,90 @@ fn container_boundaries_preserve_code_context_and_adjacent_empty_items() {
     assert!(items[1].body_blocks().is_empty());
     assert_eq!(items[1].source().span().end_byte(), source.len());
 }
+
+#[test]
+fn table_children_retain_only_their_own_source() {
+    use mara::{MarkdownBlock, MarkdownBlockKind as Kind};
+
+    fn text<'a>(source: &'a str, block: &MarkdownBlock) -> &'a str {
+        let span = block.source().span();
+        &source[span.start_byte()..span.end_byte()]
+    }
+
+    let (fixture, project, schema) = initialized_project();
+    // Header-only and quoted tables must not lend separator rows or enclosing
+    // quote markers to their cells. Short rows contain synthetic empty cells.
+    for (body, header, rows, cells) in [
+        (
+            "| A | B |\n|---|---|\n| a | b |\n",
+            "| A | B |\n",
+            vec!["| a | b |\n"],
+            vec![vec!["A", "B"], vec!["a", "b"]],
+        ),
+        (
+            "| A | B |\n|---|---|\n",
+            "| A | B |\n",
+            vec![],
+            vec![vec!["A", "B"]],
+        ),
+        (
+            "> | α | β |\r\n> | --- | --- |\r\n> | a\\|b | `γ` |\r\n> | δ |\r\n>\r\n",
+            "| α | β |\r\n",
+            vec!["| a\\|b | `γ` |\r\n", "| δ |\r\n"],
+            vec![vec!["α", "β"], vec!["a\\|b", "`γ`"], vec!["δ", ""]],
+        ),
+    ] {
+        let source =
+            format!("Prelude.\n\n:::mara requirement REQ-TABLE\n:title: Table\n\n{body}:::\n");
+        write(fixture.path(), "table.mara.md", &source);
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let block = &item.body_blocks()[0];
+        let table = if block.kind() == Kind::Blockquote {
+            &block.children()[0]
+        } else {
+            block
+        };
+        assert_eq!(
+            table.kind(),
+            Kind::Table,
+            "body: {body:?}, blocks: {:?}",
+            item.body_blocks()
+        );
+        let table_header = &table.children()[0];
+        let header_row = &table_header.children()[0];
+        assert_eq!(text(&source, table_header), header);
+        assert_eq!(text(&source, header_row), header);
+        let body_rows = table
+            .children()
+            .get(1)
+            .map_or(&[][..], |body| body.children());
+        assert_eq!(
+            body_rows
+                .iter()
+                .map(|row| text(&source, row))
+                .collect::<Vec<_>>(),
+            rows
+        );
+        for (row, expected) in std::iter::once(header_row).chain(body_rows).zip(cells) {
+            assert_eq!(
+                row.children()
+                    .iter()
+                    .map(|cell| text(&source, cell))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            for cell in row.children() {
+                let span = cell.source().span();
+                assert!(span.start_byte() >= row.source().span().start_byte());
+                assert!(span.end_byte() <= row.source().span().end_byte());
+                assert_eq!(span.start_line(), span.end_line());
+            }
+        }
+        assert_eq!(item.body(), body);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("table.mara.md")).unwrap(),
+            source
+        );
+    }
+}

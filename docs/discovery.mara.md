@@ -311,8 +311,12 @@ boundaries. It then parses each recognized item as a Rushdown container owning
 its identity, ordered metadata, body, and closing delimiter. Ordinary body
 blocks, including GFM tables, are projected into Mara-owned `MarkdownBlock`
 values with block kind, source location, and nested block children, available
-through `Item::body_blocks()`. Headings retain their level. Rushdown types stay
-private; reads and edits use the original source rather than rendered AST text.
+through `Item::body_blocks()`. Headings retain their level. Table row spans
+cover their authored lines; cell spans cover their Markdown content without
+surrounding separators or whitespace. Padded cells in short rows have empty
+spans at the row's content end. The table owns its separator row; header and
+cell spans do not include it. Rushdown types stay private; reads and edits use
+the original source rather than rendered AST text.
 Validation recovery retains partial item data but exposes no body blocks for
 items with invalid metadata or incomplete structure. Derived sections and the
 remaining discovery contracts below are separate implementation work.

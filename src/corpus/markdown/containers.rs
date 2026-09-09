@@ -182,6 +182,59 @@ fn node_start(arena: &Arena, node: NodeRef) -> Option<usize> {
     })
 }
 
+fn line_end(source: &str, start: usize, limit: usize) -> usize {
+    source[start..limit]
+        .find('\n')
+        .map_or(limit, |offset| start + offset + 1)
+}
+
+fn table_span(
+    arena: &Arena,
+    node: NodeRef,
+    source: &str,
+    scope: Range<usize>,
+) -> Option<Range<usize>> {
+    match arena[node].kind_data() {
+        KindData::TableCell(_) => {
+            let TypeData::Block(block) = arena[node].type_data() else {
+                return None;
+            };
+            if let (Some(first), Some(last)) = (block.source().first(), block.source().last()) {
+                // Cell positions can point at a preceding pipe (or the last
+                // byte of a quote prefix). Content segments are exact UTF-8
+                // bounds and exclude the row's structural separators.
+                Some(first.start()..last.stop())
+            } else {
+                // Rushdown pads short rows with cells having no source. Keep
+                // those as empty spans at the authored row's content end.
+                let end = scope.start + source[scope.clone()].trim_end_matches(['\r', '\n']).len();
+                Some(end..end)
+            }
+        }
+        KindData::TableRow(_) => {
+            let start = node_start(arena, node)?;
+            Some(start..line_end(source, start, scope.end))
+        }
+        KindData::TableHeader(_) | KindData::TableBody(_) => {
+            let first = table_span(arena, arena[node].first_child()?, source, scope.clone())?;
+            let last = table_span(arena, arena[node].last_child()?, source, scope)?;
+            Some(first.start..last.end)
+        }
+        KindData::Table(_) => {
+            let header = table_span(arena, arena[node].first_child()?, source, scope.clone())?;
+            let last = arena[node].last_child()?;
+            let end = if matches!(arena[last].kind_data(), KindData::TableBody(_)) {
+                table_span(arena, last, source, scope)?.end
+            } else {
+                // A header-only table still owns its following delimiter row.
+                line_end(source, header.end, scope.end)
+            };
+            Some(header.start..end)
+        }
+        _ => None,
+    }
+}
+
 fn project_children(
     arena: &Arena,
     parent: NodeRef,
@@ -196,6 +249,13 @@ fn project_children(
         .iter()
         .enumerate()
         .map(|(index, &(child, kind))| {
+            if let Some(span) = table_span(arena, child, source, scope.clone()) {
+                return ParsedBlock {
+                    kind,
+                    children: project_children(arena, child, source, span.clone()),
+                    source: span,
+                };
+            }
             let start = node_start(arena, child)
                 .unwrap_or(scope.start)
                 .clamp(scope.start, scope.end);
