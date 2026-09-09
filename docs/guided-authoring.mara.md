@@ -73,20 +73,18 @@ silently rewrite schemas in projects already initialized from it.
 :derives_from: SCN-CHOOSE-KNOWLEDGE-FLAVOUR
 
 In 0.2.0, every declared flavour must provide guidance covering its purpose,
-when to use it, when to avoid it, and distinctions from other flavours. Keep the
-existing `description` for purpose and add `use_when`, `avoid_when`, and
-`distinguish_from`. Missing required guidance is a schema validation error,
-including for existing project schemas; it is not optional legacy behavior.
-An empty schema has no flavours that require guidance.
+when to use it, when to avoid it, and distinctions from other flavours. Missing
+required guidance is a schema validation error, including for existing project
+schemas. An empty schema has no flavours that require guidance.
 
-CLI and MCP schema inspection must expose the same project-defined guidance
-under [[REQ-SCHEMA-DISCOVERY]] and [[REQ-SURFACE-PARITY]]. Bundled templates must
-supply complete guidance for their declared flavours. Guidance must not
-introduce hardcoded business flavours in the engine.
+The persisted keys, value types, and content-validation rules follow
+[[DES-FLAVOUR-AUTHORING-GUIDANCE]]. CLI and MCP schema inspection must expose the
+same project-defined guidance under [[REQ-SCHEMA-DISCOVERY]] and
+[[REQ-SURFACE-PARITY]]. Bundled templates must supply complete guidance for
+their declared flavours without hardcoded business flavours in the engine.
 
-The value types, nesting, empty-value rules, and schema-format transition remain
-open design questions. This requirement is a breaking change for 0.2.0; it does
-not change 0.1 schema validation.
+This is a breaking change for 0.2.0; it does not change 0.1 schema validation.
+Migration follows [[REQ-FLAVOUR-GUIDANCE-MIGRATION]].
 :::
 
 :::mara requirement REQ-ENGINEERING-TRACEABILITY
@@ -96,8 +94,8 @@ not change 0.1 schema validation.
 
 The engineering template must provide relations for connecting verification to
 its targets, evidence to verification, implementation artifacts to requirements
-or designs, and risks to affected knowledge and mitigation. Define the relation
-meanings and allowed endpoints in the project vocabulary before adding them.
+or designs, and risks to affected knowledge and mitigation. Names, meanings,
+directions, and allowed endpoints follow [[DES-ENGINEERING-RELATION-VOCABULARY]].
 
 Authors add only links that carry useful meaning. The template must not require
 placeholder items, a complete trace chain, or a particular lifecycle. Existing
@@ -142,9 +140,8 @@ settled before implementation. The current alpha.3 file-access decision
 
 | Area | Open decision |
 |---|---|
-| Flavour guidance | The names `description`, `use_when`, `avoid_when`, and `distinguish_from` are settled. Choose value types, nesting, empty-value rules, and the schema-format transition. Reconcile the existing taxonomy with schema-owned guidance so each definition has one authority. |
-| Engineering relations | Confirm names, direction, and endpoint flavours for verification, evidence, implementation, and risk links. Candidate names are `verifies`, `validates`, `evidences`, `implements`, `affects`, and `mitigates`; this document does not add them to the schema. |
-| Document access | Discuss after engineering relations. Choose the public discovery/read surface and resolve the result-unit, ranking, filtering, continuation, and compatibility questions in the retrieval investigation. |
+| Schema transition | Finalize the schema-format transition and migration guide. Reconcile the existing taxonomy with schema-owned guidance so each definition has one authority. Guidance shape, validation rules, and engineering relation definitions are settled in the designs below. |
+| Document access | Choose the public discovery/read surface and resolve the result-unit, ranking, filtering, continuation, and compatibility questions in the retrieval investigation. |
 
 After settling each area's product choices, record its interface or persisted
 contract as a design and consequential rationale as a decision. Delivery tickets
@@ -163,16 +160,16 @@ change and link a canonical migration guide from its release notes. Version the
 incompatible persisted schema contract independently of the application version.
 
 The guide must provide the supported schema-format transition and before/after
-YAML examples once the persisted guidance shape is settled. It must explain how
-to preserve custom flavours, fields, relations, and item identities while adding
-guidance to every declared flavour, then verify schema and project validation
-through CLI and MCP. Do not instruct users to reinitialize an existing project
-or replace a customized schema with a bundled template.
+YAML examples using [[DES-FLAVOUR-AUTHORING-GUIDANCE]]. Explain how to preserve
+custom flavours, fields, relations, and item identities while adding guidance
+to every declared flavour, then verify schema and project validation through
+CLI and MCP. Do not instruct users to reinitialize an existing project or
+replace a customized schema with a bundled template.
 
 Verification must demonstrate that a schema missing required guidance is
 rejected by 0.2 and that following the guide makes it valid without unrelated
-corpus changes. No finished YAML migration recipe is specified until the new
-schema shape is accepted.
+corpus changes. Finalize the schema-format transition before completing the
+guide and implementing the new loader.
 :::
 
 :::mara decision ADR-MANDATORY-FLAVOUR-GUIDANCE
@@ -203,4 +200,74 @@ Do not generate starter Markdown or a second guidance document.
 
 This keeps initialization small, gives project authors ownership of document
 structure, and avoids maintaining duplicate guidance in schema and Markdown.
+:::
+
+## Accepted 0.2 designs
+
+:::mara design DES-FLAVOUR-AUTHORING-GUIDANCE
+:mid: 01M231916PQP6XRY5PYCMMW8QE
+:title: Store mandatory guidance directly in each flavour declaration
+:satisfies: REQ-FLAVOUR-AUTHORING-GUIDANCE
+
+The guidance keys are direct members of each flavour declaration alongside its
+existing ID prefix, body requirement, and field declarations. There is no extra
+`guidance` wrapper, and purpose continues to use `description`.
+
+| Key | Type and validation |
+|---|---|
+| `description` | Required nonblank string. |
+| `use_when` | Required sequence with at least one nonblank string. |
+| `avoid_when` | Required sequence of nonblank strings; `[]` is valid when no meaningful exclusion applies. |
+| `distinguish_from` | Required mapping from another declared flavour's name to a nonblank explanation; `{}` is valid when no confusable flavour applies. |
+
+Omitting any key, supplying the wrong type, using blank entries, or naming an
+unknown or the same flavour as a distinction target is invalid. Empty
+collections explicitly express absence of applicable exclusions or distinctions;
+authors must not add filler merely to satisfy validation.
+
+Example guidance fragment inside the `requirement` declaration, assuming
+`design` is also declared:
+
+```yaml
+description: An independently verifiable obligation.
+use_when:
+  - State behavior that must hold.
+avoid_when:
+  - Describe how a solution works.
+distinguish_from:
+  design: Describes how the obligation is satisfied.
+```
+
+CLI and MCP schema inspection expose these same declarations. Verify nonblank
+content, missing keys, invalid value types, empty optional-content collections,
+and unknown/self distinction targets through the real schema-loading workflow.
+:::
+
+:::mara design DES-ENGINEERING-RELATION-VOCABULARY
+:mid: 01M231916ZSZ50Y2XCAFYF4JZJ
+:title: Define the engineering template's additional typed relations
+:satisfies: REQ-ENGINEERING-TRACEABILITY
+
+The engineering template adds the following project-defined relations to the
+existing vocabulary. Each edge is authored on its source and points to its
+target; incoming views remain derived.
+
+| Relation | Source flavours | Target flavours | Meaning |
+|---|---|---|---|
+| `verifies` | verification | requirement, design | Checks conformance to a specified obligation. |
+| `validates` | verification | goal, scenario | Checks whether the intended outcome is achieved. |
+| `evidences` | evidence | verification | Records a result from performing that verification. |
+| `implements` | artifact | requirement, design | Identifies the implementation. |
+| `affects` | risk | any flavour in the engineering template | Identifies knowledge exposed to that risk. |
+| `mitigates` | requirement, design, decision, verification | risk | Specifies or provides a measure reducing that risk. |
+
+Verification describes the check; evidence records its result. These links are
+optional and do not require a complete trace chain. Existing relation meanings
+and endpoints are unchanged. The engine continues to validate schema-declared
+endpoints rather than hardcoding these names or introducing external or derived
+source-code nodes.
+
+Verify initialization from the engineering template, creation of representative
+source/target items, relation addition, and incoming/outgoing retrieval through
+CLI and MCP. Rejected endpoint combinations must preserve source files.
 :::
