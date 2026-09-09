@@ -64,13 +64,13 @@ implementation claims from prose. Raw URLs and code links remain source content
 until their target-resolution contract exists. Code-symbol extraction and
 richer traceability are later work, not prerequisites for 0.2.
 
+Link and anchor resolution follows [[DES-DOCUMENT-STRUCTURE]].
+
 Implementation details still to settle: source handles and stale-location
-rejection; supported Markdown anchor forms and broken or ambiguous
-destinations; representation of built-in connection kinds versus schema
-relations; mixed-result ranking, wire fields, excerpt and continuation limits;
-neighbour operation naming; and migration/alias policy for the existing CLI/MCP
-search names. Supporting both `[[ID]]` mentions and resolvable Markdown links
-is intended; exact resolution rules must be specified before implementation.
+rejection; representation of built-in connection kinds versus schema relations;
+mixed-result ranking, wire fields, excerpt and continuation limits; neighbour
+operation naming; and migration/alias policy for the existing CLI/MCP search
+names.
 
 The private in-memory graph backend follows [[ADR-PETGRAPH-DISCOVERY]]. The
 existing disposable-projection boundary remains: source documents own meaning,
@@ -208,12 +208,40 @@ fields remain to be specified.
 
 ## Connections and containment
 
-ID links target items. Markdown heading links target their sections, including
-the section's full structural extent; this does not automatically retrieve its
-children. An explicit anchor within ordinary content targets its containing
-discovery block while retaining the precise anchor location. Specify supported
-anchor forms and ambiguous/broken-destination handling before implementation.
-Search grouping and item ownership must not erase a link's precise destination.
+### Links and anchors
+
+Resolve item references to items, a Markdown link without a fragment to its
+document, and a heading fragment to its section. Section destinations cover
+their full structural extent without automatically retrieving children.
+Same-document fragments and cross-document links use the same anchor rules.
+Resolve relative paths from the linking document, including `./` and `../`:
+`[retry policy](./architecture.mara.md#retry-policy)` targets a section in
+another document in the project.
+
+Use [GitHub-compatible heading anchors](https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#section-links):
+lowercase heading text, replace spaces with hyphens, remove punctuation and
+formatting, and number duplicate generated anchors with `-1`, `-2`, and so on.
+Allocate heading anchors across the whole document, including headings inside
+items; heading nesting remains scoped as specified above. Renaming or
+reordering headings can change these generated destinations.
+
+Support explicit anchors written as `<a name="retry-policy"></a>`.
+An anchor inside ordinary content targets its containing discovery block and
+retains its precise source location. A standalone anchor immediately before a
+heading targets that section; before another block it targets that block.
+Do not attach anchors across an item or section boundary. Explicit anchors
+provide a stable alternative to generated heading names. Search grouping and
+item ownership must not erase a link's precise destination.
+
+Resolved links produce `mentions` connections and derived incoming backlinks.
+Broken internal destinations and ambiguous anchors are validation errors;
+preserve the written link but create no resolved connection. External URLs
+remain source links without network validation. Code-link and other unresolved
+target categories retain the scope boundary in [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
+
+Verify same-document and relative cross-document section links, whole-document
+links, duplicate heading names including headings inside items, explicit anchor
+placement, and broken or ambiguous internal destinations.
 
 Documents and sections are addressable structural nodes. Results expose their
 structural parent and section context when present. Actors can inspect direct
