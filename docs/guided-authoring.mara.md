@@ -6,7 +6,7 @@ context as well as items. The scenarios and requirements below describe future
 outcomes; they do not claim implementation or settle the open designs below.
 
 Prioritize bundled templates and flavour guidance together, then useful
-engineering relations and document access. Diagnostic codes and severity are
+engineering relations and unified discovery. Diagnostic codes and severity are
 deferred beyond 0.2 until a concrete consumer workflow demonstrates a need.
 
 This scope uses one Mara project and schema, including documents inside package
@@ -39,13 +39,19 @@ flavour without relying on knowledge of Mara's own repository taxonomy.
 
 :::mara scenario SCN-READ-DOCUMENT-CONTEXT
 :mid: 01M1XSJZVV5V98210YBNJ3XYY4
-:title: Retrieve narrative context through Mara
+:title: Discover narrative and follow its connections through Mara
 
-An agent using Mara's interface discovers relevant canonical document content
-outside item blocks, including a document with no items, then reads the needed
-source context in bounded portions. Results identify the source location without
-inventing an item identity or requiring the author to turn narrative into items.
-The same workflow is available through CLI and MCP.
+An actor searches the selected project's canonical documentation through Mara
+and finds either a structured item or an ordinary narrative passage, including
+content in documents without items. Starting from a passage's explicit mention,
+the actor inspects the referenced requirement and then its direct connections
+to designs or decisions, choosing each subsequent step.
+
+Search and neighbour results expose source locations and connection meaning.
+The actor reads the needed source context using existing file tools with access
+to the same repository. Authors need not turn narrative into items. Discovery
+and direct navigation have equivalent CLI and MCP behavior; richer graph
+analysis and code-symbol extraction are later work.
 :::
 
 ## Intended requirements
@@ -108,32 +114,42 @@ this requirement does not introduce a graph-rule engine.
 :title: Discover canonical context outside item blocks
 :derives_from: SCN-READ-DOCUMENT-CONTEXT
 
-CLI and MCP must let callers discover matching content outside item blocks in
-the selected project's canonical documents, including narrative-only documents.
-Discovery must return bounded results with source locations and an explicit way
-to continue when more results remain. It must respect project content discovery
-and distinguish document context from identified items.
+CLI and MCP must discover matching items and narrative passages through one
+bounded search surface in the selected project's canonical documents, including
+narrative-only documents. Move the CLI entry point to `mara search`. Return
+explicit result kinds, source locations, and continuation when more matches
+remain. Do not add a separate document-search operation.
 
-The result unit, matching and ranking, path filters, and whether discovery covers
-whole documents or narrative-only passages remain open. Reuse the investigation
-in [retrieval](retrieval.mara.md#narrative-retrieval-investigation); do not assign
-synthetic item IDs or typed relations to narrative.
+Passages are first-class discovery nodes without requiring authored item IDs,
+MIDs, or flavours. Their explicit connections follow
+[[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]]. Result boundaries, filters, source reading,
+and remaining interface details follow [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
+
+Verify mixed item/passage results, narrative-only documents, path and item-only
+filters, bounded continuation, and absence of duplicated item-body hits through
+CLI and MCP.
 :::
 
 :::mara requirement REQ-DOCUMENT-CONTEXT-READ
 :mid: 01M1XSKPPTZCGKHDSYW0SKMB6B
-:title: Read document context completely through bounded portions
+:title: Locate discovered context for existing source-reading tools
 :derives_from: SCN-READ-DOCUMENT-CONTEXT
 
-CLI and MCP must let callers read selected canonical document context in bounded
-consecutive portions with source locations, explicit continuation, and an
-explicit completion signal. Following continuation must recover the selected
-content without silent gaps, including oversized Markdown and narrative-only
-documents. Continuation must not silently combine different source revisions.
+Discovery and direct-neighbour results must identify the source document and
+exact location needed to read the selected item or narrative passage using the
+actor's existing file tools. The workflow assumes access to the same project
+sources. Excerpts aid selection and must not imply that the full source or
+connected context has been returned.
 
-The command surface, read unit, limits, and source-change behavior must be
-settled before implementation. The current alpha.3 file-access decision
-[[ADR-ALPHA-NARRATIVE-FILE-ACCESS]] remains its own release boundary.
+Do not add generic document list/get or a plain-read command in 0.2. This replaces
+the earlier proposal for consecutive document reads through Mara; existing
+structured item retrieval remains available. Location and revision handling
+follow [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
+
+Verify that an actor can locate a narrative search hit and its linked item,
+then read their complete original source with file tools, including content
+larger than a search excerpt. The 0.1 boundary in
+[[ADR-ALPHA-NARRATIVE-FILE-ACCESS]] remains unchanged.
 :::
 
 ## Decisions needed before implementation planning
@@ -141,7 +157,7 @@ settled before implementation. The current alpha.3 file-access decision
 | Area | Open decision |
 |---|---|
 | Schema transition | Finalize the schema-format transition and migration guide. Reconcile the existing taxonomy with schema-owned guidance so each definition has one authority. Guidance shape, validation rules, and engineering relation definitions are settled in the designs below. |
-| Document access | Choose the public discovery/read surface and resolve the result-unit, ranking, filtering, continuation, and compatibility questions in the retrieval investigation. |
+| Discovery interface | The unified search and passage-navigation direction is settled in [discovery](discovery.mara.md). Finalize passage grouping, handles, link/anchor resolution, ranking, response bounds, wire fields, neighbour operation naming, and CLI/MCP migration policy. Do not reopen the separate document-search/read proposal. |
 
 After settling each area's product choices, record its interface or persisted
 contract as a design and consequential rationale as a decision. Delivery tickets

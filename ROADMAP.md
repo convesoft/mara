@@ -78,7 +78,9 @@ boundaries, verification expectations, and the accepted narrative boundary.
 - Require flavour guidance for existing and new schemas as a documented
   breaking change, with a migration guide for 0.2.
 - Supply useful engineering traceability relations through the template.
-- Add bounded discovery and reading of canonical document context outside items.
+- Unify item and narrative discovery under `mara search`, with direct connections
+  from either result kind and source locations for existing file-reading tools;
+  see [the accepted discovery direction](docs/discovery.mara.md).
 
 See [planned outcomes and open decisions](docs/guided-authoring.mara.md) before
 ticket planning. This scope retains one project and schema for package-local
