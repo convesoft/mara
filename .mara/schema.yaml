@@ -1,57 +1,121 @@
-format_version: 1
+format_version: 2
 flavours:
   term:
     description: Controlled project vocabulary whose stable meaning prevents ambiguity.
+    use_when:
+      - "Define project-specific vocabulary whose ambiguity would harm authoring or review."
+    avoid_when:
+      - "Repeat words with their ordinary meaning or temporary implementation names."
+    distinguish_from: {}
     id_prefix: TERM-
     body: required
     fields: {}
   actor:
     description: A durable participant role or external system.
+    use_when:
+      - "Identify a durable human role, agent, service, or external system that participates in behaviour and is referenced across items."
+    avoid_when:
+      - "Record an individual assignee or temporary delivery ownership."
+    distinguish_from: {}
     id_prefix: ACT-
     body: required
     fields: {}
   goal:
     description: A durable desired stakeholder or product outcome.
+    use_when:
+      - "State a durable desired outcome that explains lower-level work and spans multiple scenarios or releases."
+    avoid_when:
+      - "Record implementation tasks, milestones, or concrete interaction steps."
+    distinguish_from:
+      scenario: "Describes a concrete behavioural flow rather than a broader desired outcome."
     id_prefix: GOAL-
     body: required
     fields: {}
   scenario:
     description: A concrete behavioural flow with an observable outcome.
+    use_when:
+      - Describe one user, system, failure, or agent flow to discover and validate behaviour.
+    avoid_when:
+      - Record delivery tasks or obligations that hold across multiple flows.
+    distinguish_from:
+      requirement: States an obligation that may apply across multiple flows.
     id_prefix: SCN-
     body: required
     fields: {}
   requirement:
     description: An independently verifiable obligation.
+    use_when:
+      - State an obligation whose non-conformance can be determined from observable evidence.
+    avoid_when:
+      - Combine separable obligations or include rationale and solution choices.
+    distinguish_from:
+      scenario: Describes one concrete flow with an observable outcome.
+      design: Defines how an obligation is satisfied.
     id_prefix: REQ-
     body: required
     fields: {}
   design:
     description: A solution or interface contract that satisfies requirements.
+    use_when:
+      - Define durable architecture, interfaces, formats, components, or algorithms for implementers.
+    avoid_when:
+      - State product obligations or selection rationale.
+    distinguish_from:
+      requirement: States what must hold, rather than how it is satisfied.
+      decision: Records why a consequential choice was selected.
     id_prefix: DES-
     body: required
     fields: {}
   decision:
     description: A consequential choice and its durable rationale.
+    use_when:
+      - Preserve consequential rationale or meaningful trade-offs among alternatives.
+    avoid_when:
+      - Record routine or easily reversible details.
+    distinguish_from:
+      design: Defines the selected solution contract rather than selection rationale.
     id_prefix: ADR-
     body: required
     fields: {}
   risk:
     description: A material uncertain condition that could cause harm.
+    use_when:
+      - "Record an uncertain condition whose exposure or mitigation should influence durable product, delivery, safety, or maintainability work."
+    avoid_when:
+      - "Track known defects or ordinary follow-up work; keep those in the backlog."
+    distinguish_from: {}
     id_prefix: RISK-
     body: required
     fields: {}
   verification:
     description: A repeatable verification or validation method.
+    use_when:
+      - "Define a repeatable test, inspection, analysis, or demonstration with observable expectations when the method needs durable identity or traceability."
+    avoid_when:
+      - "Duplicate ordinary automated tests from code or record a particular execution result."
+    distinguish_from:
+      evidence: "Records the result and provenance of one verification execution."
     id_prefix: VER-
     body: required
     fields: {}
   evidence:
     description: One concrete verification or validation result with provenance.
+    use_when:
+      - "Record one concrete verification or validation result with provenance when the result needs durable auditability."
+    avoid_when:
+      - "Duplicate routine CI results, logs, or the reusable verification method."
+    distinguish_from:
+      verification: "Defines a repeatable method and its observable expectations."
     id_prefix: EVD-
     body: required
     fields: {}
   artifact:
     description: A concrete implementation or external output with independent identity.
+    use_when:
+      - "Identify meaningful commands, APIs, schemas, services, reports, standards, or other concrete outputs whose identity matters independently of location."
+    avoid_when:
+      - "Create an item for every source file, document, section, or symbol."
+    distinguish_from: {}
     id_prefix: ART-
     body: required
     fields: {}

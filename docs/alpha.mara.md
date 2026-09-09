@@ -377,11 +377,12 @@ deliberately.
 :satisfies: REQ-SCHEMA-DISCOVERY
 :satisfies: REQ-PROJECT-VALIDATION
 
-The default `minimal` template writes `.mara/schema.yaml` draft format 1 with
+The default `minimal` template writes `.mara/schema.yaml` format 2 with
 `scenario`, `requirement`, `design`, and `decision`; `empty` writes empty
-`flavours` and `relations` maps. A flavour declares its description, ID prefix,
-body requirement, and custom fields. Custom fields are flat string, integer,
-number, boolean, or enum values with required and repeatable constraints. The
+`flavours` and `relations` maps. A flavour declares its description, selection
+guidance under [[DES-FLAVOUR-AUTHORING-GUIDANCE]], ID prefix, body requirement,
+and custom fields. Custom fields are flat string, integer, number, boolean, or
+enum values with required and repeatable constraints. The
 structural names `mid`, `flavour`, `id`, `title`, and `body` cannot be custom
 fields. Enum members are non-empty, unique, and have no surrounding whitespace.
 Relation names cannot be structural names or match a custom field declared by

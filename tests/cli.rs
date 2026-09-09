@@ -126,6 +126,329 @@ fn mcp_response(responses: &[Value], id: u64) -> &Value {
 }
 
 #[test]
+fn schema_guidance_rejects_invalid_declarations_through_cli_and_mcp() {
+    let fixture = TempDir::new().unwrap();
+    assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    let path = fixture.path().join(".mara/schema.yaml");
+    let valid = "format_version: 2\nflavours:\n  note:\n    description: A project note.\n    use_when: [Record useful context.]\n    avoid_when: []\n    distinguish_from: {}\n    id_prefix: NOTE-\n    body: optional\nrelations: {}\n";
+    fs::write(&path, valid).unwrap();
+    let accepted = mara(fixture.path(), &["schema", "validate"]);
+    assert!(accepted.status.success(), "{}", stderr(&accepted));
+    let cases = [
+        ("format_version: 2", "format_version: 1", "migrate"),
+        ("    description: A project note.\n", "", "description"),
+        (
+            "description: A project note.",
+            "description: '  '",
+            "description",
+        ),
+        (
+            "description: A project note.",
+            "description: 42",
+            "description",
+        ),
+        ("    use_when: [Record useful context.]\n", "", "use_when"),
+        (
+            "use_when: [Record useful context.]",
+            "use_when: []",
+            "use_when",
+        ),
+        (
+            "use_when: [Record useful context.]",
+            "use_when: ['  ']",
+            "use_when",
+        ),
+        (
+            "use_when: [Record useful context.]",
+            "use_when: context",
+            "use_when",
+        ),
+        (
+            "use_when: [Record useful context.]",
+            "use_when: [true]",
+            "use_when",
+        ),
+        ("    avoid_when: []\n", "", "avoid_when"),
+        ("avoid_when: []", "avoid_when: ['  ']", "avoid_when"),
+        ("avoid_when: []", "avoid_when: {}", "avoid_when"),
+        ("avoid_when: []", "avoid_when: [42]", "avoid_when"),
+        ("    distinguish_from: {}\n", "", "distinguish_from"),
+        (
+            "distinguish_from: {}",
+            "distinguish_from: []",
+            "distinguish_from",
+        ),
+        (
+            "distinguish_from: {}",
+            "distinguish_from: {note: '  '}",
+            "distinguish_from",
+        ),
+        (
+            "distinguish_from: {}",
+            "distinguish_from: {note: true}",
+            "distinguish_from",
+        ),
+        (
+            "distinguish_from: {}",
+            "distinguish_from: {note: Same flavour.}",
+            "itself",
+        ),
+        (
+            "distinguish_from: {}",
+            "distinguish_from: {missing: Unknown flavour.}",
+            "unknown flavour 'missing'",
+        ),
+        (
+            "avoid_when: []",
+            "avoid_when: []\n    guidance: {}",
+            "unknown configuration key 'guidance'",
+        ),
+    ];
+    for (from, to, expected) in cases {
+        let source = valid.replace(from, to);
+        fs::write(&path, &source).unwrap();
+        let cli = mara(fixture.path(), &["schema", "validate"]);
+        assert!(!cli.status.success(), "accepted {to}");
+        assert!(stderr(&cli).contains(expected), "{}", stderr(&cli));
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, "schema_validate", json!({})),
+                mcp_call(3, "project_validate", json!({})),
+            ],
+        );
+        let result = &mcp_response(&responses, 2)["result"];
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(result.to_string().contains(expected), "{result}");
+        assert_eq!(
+            mcp_response(&responses, 3)["result"]["structuredContent"]["valid"],
+            false
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+    }
+}
+
+#[test]
+fn format_two_templates_initialize_and_inspect_equally_through_cli_and_mcp() {
+    for template in ["minimal", "empty"] {
+        let fixture = TempDir::new().unwrap();
+        let cli_root = fixture.path().join("cli");
+        let mcp_root = fixture.path().join("mcp");
+        let init = mara(
+            fixture.path(),
+            &[
+                "project",
+                "init",
+                cli_root.to_str().unwrap(),
+                "--template",
+                template,
+            ],
+        );
+        assert!(init.status.success(), "{}", stderr(&init));
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(
+                    2,
+                    "project_init",
+                    json!({"project":mcp_root,"template":template}),
+                ),
+                mcp_call(3, "schema_get", json!({"project":mcp_root})),
+                mcp_call(4, "project_validate", json!({"project":mcp_root})),
+                mcp_call(
+                    5,
+                    "project_init",
+                    json!({"project":mcp_root,"template":template}),
+                ),
+            ],
+        );
+        assert_ne!(mcp_response(&responses, 2)["result"]["isError"], true);
+        assert_eq!(
+            mcp_response(&responses, 4)["result"]["structuredContent"]["valid"],
+            true
+        );
+        assert_eq!(mcp_response(&responses, 5)["result"]["isError"], true);
+        let output = mara(&cli_root, &["--format", "json", "schema", "get"]);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let cli: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            cli,
+            mcp_response(&responses, 3)["result"]["structuredContent"]
+        );
+        assert_eq!(cli["schema"]["format_version"], 2);
+        let flavours = cli["schema"]["flavours"].as_object().unwrap();
+        assert_eq!(flavours.len(), if template == "minimal" { 4 } else { 0 });
+        for declaration in flavours.values() {
+            assert!(!declaration["use_when"].as_array().unwrap().is_empty());
+            assert!(declaration["avoid_when"].is_array());
+            assert!(declaration["distinguish_from"].is_object());
+        }
+        let schema = fs::read(cli_root.join(".mara/schema.yaml")).unwrap();
+        assert_eq!(
+            schema,
+            fs::read(mcp_root.join(".mara/schema.yaml")).unwrap()
+        );
+        assert!(
+            !mara(&cli_root, &["project", "init", "--template", template])
+                .status
+                .success()
+        );
+        assert_eq!(
+            schema,
+            fs::read(cli_root.join(".mara/schema.yaml")).unwrap()
+        );
+        for root in [&cli_root, &mcp_root] {
+            let config = fs::read_to_string(root.join(".mara/project.toml")).unwrap();
+            assert!(config.contains("format_version = 1"));
+        }
+    }
+}
+
+#[test]
+fn documented_schema_migration_preserves_custom_declarations_and_item_identities() {
+    let guide = include_str!("../docs/migration-0.2.mara.md");
+    let examples: Vec<_> = guide
+        .split("```yaml\n")
+        .skip(1)
+        .map(|part| part.split("```").next().unwrap())
+        .collect();
+    let before = examples[0];
+    let after = examples[1];
+    let old: Value = serde_saphyr::from_str(before).unwrap();
+    let new: Value = serde_saphyr::from_str(after).unwrap();
+    assert_eq!(old["relations"], new["relations"]);
+    for (flavour, declaration) in old["flavours"].as_object().unwrap() {
+        for (key, value) in declaration.as_object().unwrap() {
+            assert_eq!(*value, new["flavours"][flavour][key]);
+        }
+    }
+
+    let fixture = TempDir::new().unwrap();
+    assert!(
+        mara(fixture.path(), &["project", "init", "--template", "empty"])
+            .status
+            .success()
+    );
+    let schema = fixture.path().join(".mara/schema.yaml");
+    // Create genuine source items with generated identities and custom metadata,
+    // then exercise the version-1 to version-2 transition against those bytes.
+    fs::write(&schema, after).unwrap();
+    for (id, extra) in [
+        ("TERM-BASE", vec![]),
+        ("TERM-CUSTOM", vec!["--relation", "clarifies=TERM-BASE"]),
+    ] {
+        let mut args = vec![
+            "item",
+            "create",
+            "term",
+            id,
+            "terms.mara.md",
+            "--title",
+            id,
+            "--body",
+            "Project-specific terminology.",
+            "--field",
+            "alias=custom",
+            "--field",
+            "alias=second",
+        ];
+        args.extend(extra);
+        let output = mara(fixture.path(), &args);
+        assert!(output.status.success(), "{}", stderr(&output));
+    }
+    let document = fs::read(fixture.path().join("terms.mara.md")).unwrap();
+    let configuration = fs::read(fixture.path().join(".mara/project.toml")).unwrap();
+    assert!(String::from_utf8_lossy(&configuration).contains("format_version = 1"));
+    fs::write(&schema, before).unwrap();
+    let rejected = mara(fixture.path(), &["schema", "validate"]);
+    assert!(!rejected.status.success());
+    assert!(
+        stderr(&rejected).contains("migrate"),
+        "{}",
+        stderr(&rejected)
+    );
+    fs::write(
+        &schema,
+        before.replace("format_version: 1", "format_version: 2"),
+    )
+    .unwrap();
+    let missing_guidance = mara(fixture.path(), &["schema", "validate"]);
+    assert!(!missing_guidance.status.success());
+    assert!(stderr(&missing_guidance).contains("use_when"));
+    fs::write(&schema, after).unwrap();
+
+    for (arguments, tool, params) in [
+        (vec!["schema", "get"], "schema_get", json!({})),
+        (
+            vec!["schema", "get", "flavour", "term"],
+            "schema_get",
+            json!({"kind":"flavour","name":"term"}),
+        ),
+        (
+            vec!["schema", "list", "flavour"],
+            "schema_list",
+            json!({"kind":"flavour"}),
+        ),
+        (
+            vec!["schema", "list", "relation"],
+            "schema_list",
+            json!({"kind":"relation"}),
+        ),
+        (vec!["schema", "validate"], "schema_validate", json!({})),
+        (vec!["project", "validate"], "project_validate", json!({})),
+        (
+            vec!["item", "get", "TERM-CUSTOM"],
+            "item_get",
+            json!({"id":"TERM-CUSTOM"}),
+        ),
+    ] {
+        let mut args = vec!["--format", "json"];
+        args.extend(arguments);
+        let output = mara(fixture.path(), &args);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let cli: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, tool, params),
+            ],
+        );
+        assert_eq!(
+            cli,
+            mcp_response(&responses, 2)["result"]["structuredContent"]
+        );
+        if tool == "schema_get" {
+            let declaration = if cli["kind"] == "schema" {
+                &cli["schema"]["flavours"]["term"]
+            } else {
+                &cli["definition"]
+            };
+            for key in ["description", "use_when", "avoid_when", "distinguish_from"] {
+                assert_eq!(declaration[key], new["flavours"]["term"][key]);
+            }
+        }
+        if tool.ends_with("validate") {
+            assert_eq!(cli["valid"], true);
+        }
+    }
+    assert_eq!(
+        fs::read(fixture.path().join("terms.mara.md")).unwrap(),
+        document
+    );
+    assert_eq!(
+        fs::read(fixture.path().join(".mara/project.toml")).unwrap(),
+        configuration
+    );
+    assert_eq!(fs::read_to_string(schema).unwrap(), after);
+}
+
+#[test]
 fn related_pages_continue_in_order_with_filters_and_cli_mcp_parity() {
     let fixture = retrieval_fixture();
     let mut source = String::from(":::mara requirement REQ-HUB\n:title: Hub\n");
@@ -1493,7 +1816,7 @@ fn empty_template_creates_no_project_flavours() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         fs::read_to_string(fixture.path().join(".mara/schema.yaml")).unwrap(),
-        "format_version: 1\nflavours: {}\nrelations: {}\n"
+        "format_version: 2\nflavours: {}\nrelations: {}\n"
     );
 }
 
@@ -2714,10 +3037,13 @@ fn project_validation_uses_properties_unaffected_by_a_flavour_decode_error() {
     assert!(init.status.success(), "{}", stderr(&init));
     fs::write(
         fixture.path().join(".mara/schema.yaml"),
-        r#"format_version: 1
+        r#"format_version: 2
 flavours:
   requirement:
     description: An independently verifiable obligation.
+    use_when: [Record project knowledge.]
+    avoid_when: []
+    distinguish_from: {}
     id_prefix: REQ-
     body: invalid
     fields:
@@ -2763,10 +3089,13 @@ fn project_validation_uses_flavours_when_the_relations_section_is_malformed() {
     assert!(init.status.success(), "{}", stderr(&init));
     fs::write(
         fixture.path().join(".mara/schema.yaml"),
-        r#"format_version: 1
+        r#"format_version: 2
 flavours:
   requirement:
     description: An independently verifiable obligation.
+    use_when: [Record project knowledge.]
+    avoid_when: []
+    distinguish_from: {}
     id_prefix: REQ-
     body: required
     fields:
@@ -3318,7 +3647,7 @@ fn project_validation_does_not_invent_a_schema_version_after_decode_failure() {
     assert!(init.status.success(), "{}", stderr(&init));
     let schema_file = fixture.path().join(".mara/schema.yaml");
     let schema = fs::read_to_string(&schema_file).unwrap();
-    fs::write(&schema_file, schema.replacen("format_version: 1\n", "", 1)).unwrap();
+    fs::write(&schema_file, schema.replacen("format_version: 2\n", "", 1)).unwrap();
 
     let validate = mara(fixture.path(), &["project", "validate"]);
 
@@ -3353,7 +3682,7 @@ fn real_cli_discovers_and_inspects_the_effective_minimal_schema() {
     let complete = mara(&nested, &["schema", "get"]);
     assert!(complete.status.success(), "{}", stderr(&complete));
     let complete = stdout(&complete);
-    assert!(complete.contains("format_version: 1"));
+    assert!(complete.contains("format_version: 2"));
     assert!(complete.contains("requirement:"));
     assert!(complete.contains("satisfies:"));
 
@@ -3400,10 +3729,13 @@ fn schema_commands_load_the_schema_configured_by_the_selected_project() {
     .unwrap();
     fs::write(
         selected.join(".mara/custom.yaml"),
-        r#"format_version: 1
+        r#"format_version: 2
 flavours:
   note:
     description: A concise project note.
+    use_when: [Record project knowledge.]
+    avoid_when: []
+    distinguish_from: {}
     id_prefix: NOTE-
     body: optional
     fields:

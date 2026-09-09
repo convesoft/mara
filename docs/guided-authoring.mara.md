@@ -1,9 +1,10 @@
 # Guided authoring
 
-Planning scope for 0.2.0: a solo developer can start useful engineering
+Accepted scope for 0.2.0: a solo developer can start useful engineering
 documentation, choose its vocabulary, and give an agent access to document
-context as well as items. The scenarios and requirements below describe future
-outcomes; the accepted designs below do not claim implementation.
+context as well as items. Schema format 2, mandatory flavour guidance, and
+minimal/empty template migration are implemented in `0.2.0-alpha.0`. The other
+outcomes and designs below remain planned.
 
 Prioritize bundled templates and flavour guidance together, then useful
 engineering relations and unified discovery. Diagnostic codes and severity are
