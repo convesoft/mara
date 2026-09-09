@@ -3,12 +3,12 @@
 //! recognition pass's boundaries, then parse real containers without changing
 //! which physical source lines are accepted as Mara syntax.
 
-use std::{fmt, ops::Range};
+use std::{cell::RefCell, collections::HashMap, fmt, ops::Range, rc::Rc};
 
 use rushdown::{
-    ast::{Arena, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, TypeData},
+    ast::{Arena, HeadingKind, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, TypeData},
     parser::{self, AnyBlockParser, BlockParser, Parser, ParserExtension, ParserExtensionFn},
-    text::{BasicReader, Reader as _, Segment},
+    text::{BasicReader, MultilineValue, Reader as _, Segment, Value},
 };
 
 use super::{ParsedBlock, ParsedDocument, ParsedItem, source_lines};
@@ -106,9 +106,88 @@ impl From<MaraItemParser> for AnyBlockParser {
     }
 }
 
-fn item_tree(source: &str, item: &ParsedItem) -> (Arena, NodeRef) {
+/// Rushdown consumes closing fences without retaining them in CodeBlock.value.
+/// Record the consumed lines while delegating all fence grammar to Rushdown.
+#[derive(Debug)]
+struct FencedCodeWithSpans {
+    parser: parser::FencedCodeBlockParser,
+    ends: Rc<RefCell<HashMap<usize, usize>>>,
+}
+
+impl BlockParser for FencedCodeWithSpans {
+    fn trigger(&self) -> &[u8] {
+        self.parser.trigger()
+    }
+
+    fn open(
+        &self,
+        arena: &mut Arena,
+        parent: NodeRef,
+        reader: &mut BasicReader,
+        context: &mut parser::Context,
+    ) -> Option<(NodeRef, parser::State)> {
+        let segment = reader.peek_line_segment()?;
+        let start = segment.start() + context.block_offset().unwrap_or(0);
+        let end = segment.stop();
+        let result = self.parser.open(arena, parent, reader, context)?;
+        self.ends.borrow_mut().insert(start, end);
+        Some(result)
+    }
+
+    fn cont(
+        &self,
+        arena: &mut Arena,
+        node: NodeRef,
+        reader: &mut BasicReader,
+        context: &mut parser::Context,
+    ) -> Option<parser::State> {
+        let segment = reader.peek_line_segment()?;
+        let state = self.parser.cont(arena, node, reader, context);
+        if state.is_some() || reader.position().1.start() > segment.start() {
+            self.ends.borrow_mut().insert(
+                arena[node].pos().expect("opened fenced code position"),
+                segment.stop(),
+            );
+        }
+        state
+    }
+
+    fn close(
+        &self,
+        arena: &mut Arena,
+        node: NodeRef,
+        reader: &mut BasicReader,
+        context: &mut parser::Context,
+    ) {
+        self.parser.close(arena, node, reader, context);
+    }
+
+    fn can_interrupt_paragraph(&self) -> bool {
+        self.parser.can_interrupt_paragraph()
+    }
+}
+
+impl From<FencedCodeWithSpans> for AnyBlockParser {
+    fn from(parser: FencedCodeWithSpans) -> Self {
+        Self::Extension(Box::new(parser))
+    }
+}
+
+fn item_tree(source: &str, item: &ParsedItem) -> (Arena, NodeRef, HashMap<usize, usize>) {
     let container_item = item.clone();
+    let code_ends = Rc::new(RefCell::new(HashMap::new()));
+    let tracked_ends = Rc::clone(&code_ends);
     let extension = ParserExtensionFn::new(move |parser: &mut Parser| {
+        parser.add_block_parser(
+            move || FencedCodeWithSpans {
+                parser: parser::FencedCodeBlockParser::new(),
+                ends: Rc::clone(&tracked_ends),
+            },
+            parser::NoParserOptions,
+            // Rushdown 0.18 registers its default fence parser at the
+            // indented-code priority; run the tracking delegate first.
+            parser::PRIORITY_INDENTED_CODE_BLOCK - 1,
+        );
         parser.add_block_parser(
             move || MaraItemParser {
                 item: container_item.clone(),
@@ -126,7 +205,9 @@ fn item_tree(source: &str, item: &ParsedItem) -> (Arena, NodeRef) {
         .find('\n')
         .map_or(item.source.end, |offset| item.source.start + offset + 1);
     reader.set_position(0, Segment::new(item.source.start, first_line_end));
-    parser.parse(&mut reader)
+    let (arena, root) = parser.parse(&mut reader);
+    let ends = code_ends.take();
+    (arena, root, ends)
 }
 
 pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
@@ -136,7 +217,7 @@ pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
         if !item.body_valid {
             continue;
         }
-        let (arena, root) = item_tree(source, item);
+        let (arena, root, code_ends) = item_tree(source, item);
         let container = arena[root]
             .first_child()
             .expect("recognized Mara item container");
@@ -144,7 +225,7 @@ pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
         *item = rushdown::as_extension_data!(arena, container, MaraItemNode)
             .item
             .clone();
-        item.blocks = project_children(&arena, container, source, item.body.clone());
+        item.blocks = project_children(&arena, container, source, item.body.clone(), &code_ends);
     }
 }
 
@@ -194,6 +275,45 @@ fn line_end(source: &str, start: usize, limit: usize) -> usize {
     source[start..limit]
         .find('\n')
         .map_or(limit, |offset| start + offset + 1)
+}
+
+fn leaf_end(
+    arena: &Arena,
+    node: NodeRef,
+    source: &str,
+    start: usize,
+    limit: usize,
+) -> Option<usize> {
+    match arena[node].kind_data() {
+        KindData::Heading(heading) => {
+            let mut end = line_end(source, start, limit);
+            if heading.heading_kind() == HeadingKind::Setext {
+                if let TypeData::Block(block) = arena[node].type_data()
+                    && let Some(last) = block.source().last()
+                {
+                    end = line_end(source, last.stop().saturating_sub(1).max(start), limit);
+                }
+                end = line_end(source, end, limit);
+            }
+            Some(end)
+        }
+        KindData::ThematicBreak(_) => Some(line_end(source, start, limit)),
+        KindData::LinkReferenceDefinition(definition) => {
+            let destination_end = match definition.destination() {
+                Value::Index(index) => index.stop(),
+                _ => return None,
+            };
+            let content_end = match definition.title() {
+                Some(MultilineValue::Indices(indices)) => indices
+                    .iter()
+                    .last()
+                    .map_or(destination_end, |index| index.stop()),
+                _ => destination_end,
+            };
+            Some(line_end(source, content_end, limit))
+        }
+        _ => None,
+    }
 }
 
 fn table_span(
@@ -248,6 +368,7 @@ fn project_children(
     parent: NodeRef,
     source: &str,
     scope: Range<usize>,
+    code_ends: &HashMap<usize, usize>,
 ) -> Vec<ParsedBlock> {
     let children = arena[parent]
         .children(arena)
@@ -260,7 +381,7 @@ fn project_children(
             if let Some(span) = table_span(arena, child, source, scope.clone()) {
                 return ParsedBlock {
                     kind,
-                    children: project_children(arena, child, source, span.clone()),
+                    children: project_children(arena, child, source, span.clone(), code_ends),
                     source: span,
                 };
             }
@@ -282,11 +403,17 @@ fn project_children(
             };
             // Include authored block markers and closing fences, but not blank
             // separator lines. Never serialize the AST to reconstruct source.
-            let mut end = source_lines(&source[start..limit])
-                .iter()
-                .rev()
-                .find(|line| !line.text.trim().is_empty())
-                .map_or(start, |line| start + line.full_end);
+            let mut end = code_ends
+                .get(&start)
+                .copied()
+                .or_else(|| leaf_end(arena, child, source, start, limit))
+                .unwrap_or_else(|| {
+                    source_lines(&source[start..limit])
+                        .iter()
+                        .rev()
+                        .find(|line| !line.text.trim().is_empty())
+                        .map_or(start, |line| start + line.full_end)
+                });
             if kind == MarkdownBlockKind::Paragraph
                 && let TypeData::Block(block) = arena[child].type_data()
                 && let Some(last) = block.source().last()
@@ -301,7 +428,7 @@ fn project_children(
             let span = start..end;
             ParsedBlock {
                 kind,
-                children: project_children(arena, child, source, span.clone()),
+                children: project_children(arena, child, source, span.clone(), code_ends),
                 source: span,
             }
         })
@@ -317,7 +444,7 @@ mod tests {
         let source =
             "Prelude.\n\n:::mara requirement REQ-ONE\n:title: One\n\n# Heading\n\nBody.\n:::\n";
         let parsed = super::super::parse(source).unwrap();
-        let (arena, root) = item_tree(source, &parsed.items[0]);
+        let (arena, root, _) = item_tree(source, &parsed.items[0]);
         let container = arena[root].first_child().unwrap();
         assert_eq!(arena[container].kind_data().typ(), NodeType::ContainerBlock);
         assert_eq!(arena[container].kind_data().kind_name(), "MaraItem");

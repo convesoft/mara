@@ -516,6 +516,77 @@ fn container_boundaries_preserve_code_context_and_adjacent_empty_items() {
 }
 
 #[test]
+fn quoted_leaf_blocks_exclude_following_quote_separators() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    for (block_text, kind) in [
+        ("# Héading ###\n", Kind::Heading { level: 1 }),
+        ("Two-line\nheading\n===\n", Kind::Heading { level: 1 }),
+        ("```text\n>\n\n```\n", Kind::CodeBlock),
+        ("~~~\n~~~\n", Kind::CodeBlock),
+        ("---\n", Kind::ThematicBreak),
+        ("[foo]: /url\n", Kind::LinkReferenceDefinition),
+        (
+            "[foo]: /url\n  \"A\n  title\"\n",
+            Kind::LinkReferenceDefinition,
+        ),
+        ("[foo]: /url\n  \"\"\n", Kind::LinkReferenceDefinition),
+    ] {
+        for prefix in ["> ", "> > "] {
+            let quoted = block_text
+                .lines()
+                .map(|line| format!("{prefix}{line}\r\n"))
+                .collect::<String>();
+            let body = format!("{quoted}{prefix}\r\n{prefix}para\r\n");
+            let source = format!(":::mara requirement REQ-QUOTE\n:title: Quote\n\n{body}:::\n");
+            write(fixture.path(), "quote.mara.md", &source);
+            let corpus = load_corpus(&project, &schema).unwrap();
+            let item = corpus.items().next().unwrap();
+            let mut blocks = item.body_blocks();
+            while blocks[0].kind() == Kind::Blockquote {
+                blocks = blocks[0].children();
+            }
+            assert_eq!(blocks[0].kind(), kind, "{body}");
+            let span = blocks[0].source().span();
+            assert_eq!(
+                &source[span.start_byte()..span.end_byte()],
+                &quoted[prefix.len()..],
+                "{body}"
+            );
+            assert_eq!(span.start_line(), 4);
+            assert_eq!(span.end_line(), 3 + block_text.lines().count());
+            assert_eq!(blocks[1].kind(), Kind::Paragraph);
+            assert_eq!(item.body(), body);
+            assert_eq!(
+                fs::read_to_string(fixture.path().join("quote.mara.md")).unwrap(),
+                source
+            );
+        }
+    }
+}
+
+#[test]
+fn quoted_unclosed_fence_preserves_literal_quote_lines_until_container_end() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    let source = ":::mara requirement REQ-CODE\n:title: Code\n\n> ```text\n> literal\n> >\n\nOutside.\n:::\n";
+    write(fixture.path(), "code.mara.md", source);
+    let corpus = load_corpus(&project, &schema).unwrap();
+    let blocks = corpus.items().next().unwrap().body_blocks();
+    assert_eq!(blocks[0].kind(), Kind::Blockquote);
+    assert_eq!(blocks[1].kind(), Kind::Paragraph);
+    let code = &blocks[0].children()[0];
+    assert_eq!(code.kind(), Kind::CodeBlock);
+    let span = code.source().span();
+    assert_eq!(
+        &source[span.start_byte()..span.end_byte()],
+        "```text\n> literal\n> >\n"
+    );
+}
+
+#[test]
 fn reference_definitions_and_adjacent_prose_have_separate_source_spans() {
     use mara::MarkdownBlockKind as Kind;
 
