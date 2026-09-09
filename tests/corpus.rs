@@ -422,3 +422,95 @@ fn rejects_nested_items_after_the_body_boundary() {
     assert!(error.contains("nested.mara.md:4"), "{error}");
     assert!(error.contains("items cannot nest"), "{error}");
 }
+
+#[test]
+fn retains_markdown_children_inside_items_with_original_utf8_crlf_spans() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    let body = "### Héading\r\n\r\n> Quote.\r\n>\r\n> - Outer\r\n>   - Inner with **bold** and `code`.\r\n\r\n| Name | Value |\r\n| --- | --- |\r\n| α | β |\r\n\r\n```text\r\n:::mara requirement REQ-EXAMPLE\r\n:::\r\n```\r\n\r\n<script>\r\n:::mara requirement REQ-RAW\r\n:::\r\n</script>\r\n\r\nLast paragraph with [[REQ-TARGET]].\r\n";
+    let source = format!(
+        "# Outside\r\n\r\n:::mara requirement REQ-TREE\r\n:title: Tree\r\n:tag: first\r\n:tag: second\r\n\r\n{body}:::\r\n\r\n# After\r\n"
+    );
+    write(fixture.path(), "tree.mara.md", &source);
+
+    let corpus = load_corpus(&project, &schema).unwrap();
+    let item = corpus.items().next().unwrap();
+    assert_eq!(corpus.items().count(), 1);
+    assert_eq!(item.body(), body);
+    assert_eq!(corpus.documents()[0].source(), source);
+    let blocks = item.body_blocks();
+    assert_eq!(
+        blocks.iter().map(|block| block.kind()).collect::<Vec<_>>(),
+        [
+            Kind::Heading { level: 3 },
+            Kind::Blockquote,
+            Kind::Table,
+            Kind::CodeBlock,
+            Kind::HtmlBlock,
+            Kind::Paragraph,
+        ]
+    );
+    assert_eq!(blocks[1].children()[1].kind(), Kind::List);
+    let quote_paragraph = blocks[1].children()[0].source().span();
+    assert_eq!(
+        &source[quote_paragraph.start_byte()..quote_paragraph.end_byte()],
+        "Quote.\r\n"
+    );
+    let outer_item = &blocks[1].children()[1].children()[0];
+    assert_eq!(outer_item.kind(), Kind::ListItem);
+    assert_eq!(outer_item.children()[1].kind(), Kind::List);
+    assert_eq!(item.mentions().len(), 1);
+    assert_eq!(item.mentions()[0].target(), "REQ-TARGET");
+    let expected = [
+        "### Héading\r\n",
+        "> Quote.\r\n>\r\n> - Outer\r\n>   - Inner with **bold** and `code`.\r\n",
+        "| Name | Value |\r\n| --- | --- |\r\n| α | β |\r\n",
+        "```text\r\n:::mara requirement REQ-EXAMPLE\r\n:::\r\n```\r\n",
+        "<script>\r\n:::mara requirement REQ-RAW\r\n:::\r\n</script>\r\n",
+        "Last paragraph with [[REQ-TARGET]].\r\n",
+    ];
+    for (block, expected) in blocks.iter().zip(expected) {
+        assert_eq!(
+            &source[block.source().span().start_byte()..block.source().span().end_byte()],
+            expected,
+            "{:?}",
+            block.kind()
+        );
+        let start = source.find(expected).unwrap();
+        assert_eq!(block.source().span().start_byte(), start);
+        assert_eq!(
+            block.source().span().start_line(),
+            source[..start].bytes().filter(|&b| b == b'\n').count() + 1
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("tree.mara.md")).unwrap(),
+        source
+    );
+}
+
+#[test]
+fn container_boundaries_preserve_code_context_and_adjacent_empty_items() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    let source = "    :::mara requirement REQ-INDENTED\n\n> :::mara requirement REQ-QUOTED\n\n:::mara requirement REQ-CODE\n:title: Code\n\n`multiline\n:::\n:::mara requirement REQ-EXAMPLE\n`\n\n    :::mara requirement REQ-INDENTED-BODY\n    :::\n\nEnd.\n:::\n:::mara requirement REQ-EMPTY\n:title: Empty\n\n:::";
+    write(fixture.path(), "contexts.mara.md", source);
+    let corpus = load_corpus(&project, &schema).unwrap();
+    let items = corpus.items().collect::<Vec<_>>();
+    assert_eq!(
+        items.iter().map(|item| item.id()).collect::<Vec<_>>(),
+        ["REQ-CODE", "REQ-EMPTY"]
+    );
+    assert_eq!(
+        items[0]
+            .body_blocks()
+            .iter()
+            .map(|block| block.kind())
+            .collect::<Vec<_>>(),
+        [Kind::Paragraph, Kind::CodeBlock, Kind::Paragraph]
+    );
+    assert!(items[1].body_blocks().is_empty());
+    assert_eq!(items[1].source().span().end_byte(), source.len());
+}

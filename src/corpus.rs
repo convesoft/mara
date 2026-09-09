@@ -80,6 +80,7 @@ pub struct Item {
     title: String,
     metadata: Vec<MetadataEntry>,
     body: String,
+    body_blocks: Vec<MarkdownBlock>,
     relations: Vec<Relation>,
     mentions: Vec<Mention>,
     source: SourceLocation,
@@ -113,6 +114,11 @@ impl Item {
         &self.body
     }
 
+    /// Ordinary Markdown blocks within this item's body, in source order.
+    pub fn body_blocks(&self) -> &[MarkdownBlock] {
+        &self.body_blocks
+    }
+
     pub fn relations(&self) -> &[Relation] {
         &self.relations
     }
@@ -136,6 +142,47 @@ impl Item {
     fn body_is_valid(&self) -> bool {
         self.body_valid
     }
+}
+
+/// A Markdown block retained inside an item. Its source is canonical; this
+/// projection is never used to render or rewrite authored Markdown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkdownBlock {
+    kind: MarkdownBlockKind,
+    source: SourceLocation,
+    children: Vec<MarkdownBlock>,
+}
+
+impl MarkdownBlock {
+    pub fn kind(&self) -> MarkdownBlockKind {
+        self.kind
+    }
+
+    pub fn source(&self) -> &SourceLocation {
+        &self.source
+    }
+
+    pub fn children(&self) -> &[MarkdownBlock] {
+        &self.children
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkdownBlockKind {
+    Paragraph,
+    Heading { level: u8 },
+    ThematicBreak,
+    CodeBlock,
+    Blockquote,
+    List,
+    ListItem,
+    HtmlBlock,
+    LinkReferenceDefinition,
+    Table,
+    TableHeader,
+    TableBody,
+    TableRow,
+    TableCell,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1044,6 +1091,11 @@ fn project_document(
                 title: parsed.title,
                 metadata,
                 body: source[parsed.body.clone()].to_owned(),
+                body_blocks: parsed
+                    .blocks
+                    .into_iter()
+                    .map(|block| project_block(&path, &line_starts, block))
+                    .collect(),
                 relations,
                 mentions,
                 source: location(&path, &line_starts, parsed.source.start, parsed.source.end),
@@ -1058,6 +1110,22 @@ fn project_document(
         path,
         source,
         items,
+    }
+}
+
+fn project_block(
+    path: &Path,
+    line_starts: &[usize],
+    block: markdown::ParsedBlock,
+) -> MarkdownBlock {
+    MarkdownBlock {
+        kind: block.kind,
+        source: location(path, line_starts, block.source.start, block.source.end),
+        children: block
+            .children
+            .into_iter()
+            .map(|child| project_block(path, line_starts, child))
+            .collect(),
     }
 }
 

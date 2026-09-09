@@ -1,0 +1,263 @@
+//! The block parser cannot decide whether a delimiter is inside a multiline
+//! code span: Rushdown parses inline nodes only after closing blocks. Use the
+//! recognition pass's boundaries, then parse real containers without changing
+//! which physical source lines are accepted as Mara syntax.
+
+use std::{fmt, ops::Range};
+
+use rushdown::{
+    ast::{Arena, KindData, NodeKind, NodeRef, NodeType, PrettyPrint, TypeData},
+    parser::{self, AnyBlockParser, BlockParser, Parser, ParserExtension, ParserExtensionFn},
+    text::{BasicReader, Reader as _, Segment},
+};
+
+use super::{ParsedBlock, ParsedDocument, ParsedItem, source_lines};
+use crate::MarkdownBlockKind;
+
+/// The container owns the parsed identity, ordered metadata, and exact
+/// opening/body/closing provenance alongside its ordinary Markdown children.
+#[derive(Debug)]
+struct MaraItemNode {
+    item: ParsedItem,
+}
+
+impl NodeKind for MaraItemNode {
+    fn typ(&self) -> NodeType {
+        NodeType::ContainerBlock
+    }
+
+    fn kind_name(&self) -> &'static str {
+        "MaraItem"
+    }
+}
+
+impl PrettyPrint for MaraItemNode {
+    fn pretty_print(
+        &self,
+        writer: &mut dyn fmt::Write,
+        _source: &str,
+        level: usize,
+    ) -> fmt::Result {
+        writeln!(writer, "{}MaraItem", "  ".repeat(level))
+    }
+}
+
+impl From<MaraItemNode> for KindData {
+    fn from(node: MaraItemNode) -> Self {
+        Self::Extension(Box::new(node))
+    }
+}
+
+#[derive(Debug)]
+struct MaraItemParser {
+    item: ParsedItem,
+}
+
+impl BlockParser for MaraItemParser {
+    fn trigger(&self) -> &[u8] {
+        b":"
+    }
+
+    fn open(
+        &self,
+        arena: &mut Arena,
+        _parent: NodeRef,
+        reader: &mut BasicReader,
+        _context: &mut parser::Context,
+    ) -> Option<(NodeRef, parser::State)> {
+        if reader.peek_line_segment()?.start() != self.item.source.start {
+            return None;
+        }
+        reader.advance_to_eol();
+        Some((
+            arena.new_node(MaraItemNode {
+                item: self.item.clone(),
+            }),
+            parser::State::HAS_CHILDREN,
+        ))
+    }
+
+    fn cont(
+        &self,
+        arena: &mut Arena,
+        node: NodeRef,
+        reader: &mut BasicReader,
+        _context: &mut parser::Context,
+    ) -> Option<parser::State> {
+        let item = &rushdown::as_extension_data!(arena, node, MaraItemNode).item;
+        let start = reader.peek_line_segment()?.start();
+        if start < item.body.start {
+            // Metadata and the blank body boundary are owned by Mara, not
+            // ordinary Markdown paragraphs or reference definitions.
+            reader.advance_to_eol();
+            return Some(parser::State::NO_CHILDREN);
+        }
+        if start >= item.body.end {
+            reader.advance_to_eol();
+            return None;
+        }
+        Some(parser::State::HAS_CHILDREN)
+    }
+}
+
+impl From<MaraItemParser> for AnyBlockParser {
+    fn from(parser: MaraItemParser) -> Self {
+        Self::Extension(Box::new(parser))
+    }
+}
+
+fn item_tree(source: &str, item: &ParsedItem) -> (Arena, NodeRef) {
+    let container_item = item.clone();
+    let extension = ParserExtensionFn::new(move |parser: &mut Parser| {
+        parser.add_block_parser(
+            move || MaraItemParser {
+                item: container_item.clone(),
+            },
+            parser::NoParserOptions,
+            super::DELIMITER_BLOCK_PRIORITY,
+        );
+        parser::gfm_table().apply(parser);
+    });
+    let parser = Parser::with_extensions(parser::Options::default(), extension);
+    // Retain document-relative byte offsets, including UTF-8 and CRLF. Start
+    // at the already recognized opener and stop after its closing delimiter.
+    let mut reader = BasicReader::new(&source[..item.source.end]);
+    let first_line_end = source[item.source.clone()]
+        .find('\n')
+        .map_or(item.source.end, |offset| item.source.start + offset + 1);
+    reader.set_position(0, Segment::new(item.source.start, first_line_end));
+    parser.parse(&mut reader)
+}
+
+pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
+    for item in &mut document.items {
+        // Validation recovery retains partial identities and metadata. It
+        // must not present a malformed item's body as trustworthy structure.
+        if !item.body_valid {
+            continue;
+        }
+        let (arena, root) = item_tree(source, item);
+        let container = arena[root]
+            .first_child()
+            .expect("recognized Mara item container");
+        debug_assert_eq!(arena[container].kind_data().kind_name(), "MaraItem");
+        *item = rushdown::as_extension_data!(arena, container, MaraItemNode)
+            .item
+            .clone();
+        item.blocks = project_children(&arena, container, source, item.body.clone());
+    }
+}
+
+fn block_kind(kind: &KindData) -> Option<MarkdownBlockKind> {
+    Some(match kind {
+        KindData::Paragraph(_) => MarkdownBlockKind::Paragraph,
+        KindData::Heading(heading) => MarkdownBlockKind::Heading {
+            level: heading.level(),
+        },
+        KindData::ThematicBreak(_) => MarkdownBlockKind::ThematicBreak,
+        KindData::CodeBlock(_) => MarkdownBlockKind::CodeBlock,
+        KindData::Blockquote(_) => MarkdownBlockKind::Blockquote,
+        KindData::List(_) => MarkdownBlockKind::List,
+        KindData::ListItem(_) => MarkdownBlockKind::ListItem,
+        KindData::HtmlBlock(_) => MarkdownBlockKind::HtmlBlock,
+        KindData::LinkReferenceDefinition(_) => MarkdownBlockKind::LinkReferenceDefinition,
+        KindData::Table(_) => MarkdownBlockKind::Table,
+        KindData::TableHeader(_) => MarkdownBlockKind::TableHeader,
+        KindData::TableBody(_) => MarkdownBlockKind::TableBody,
+        KindData::TableRow(_) => MarkdownBlockKind::TableRow,
+        KindData::TableCell(_) => MarkdownBlockKind::TableCell,
+        _ => return None,
+    })
+}
+
+fn node_start(arena: &Arena, node: NodeRef) -> Option<usize> {
+    let own = arena[node].pos().or_else(|| match arena[node].type_data() {
+        TypeData::Block(block) => block.source().first().map(Segment::start),
+        _ => None,
+    });
+    own.or_else(|| {
+        arena[node]
+            .children(arena)
+            .find_map(|child| node_start(arena, child))
+    })
+}
+
+fn project_children(
+    arena: &Arena,
+    parent: NodeRef,
+    source: &str,
+    scope: Range<usize>,
+) -> Vec<ParsedBlock> {
+    let children = arena[parent]
+        .children(arena)
+        .filter_map(|child| block_kind(arena[child].kind_data()).map(|kind| (child, kind)))
+        .collect::<Vec<_>>();
+    children
+        .iter()
+        .enumerate()
+        .map(|(index, &(child, kind))| {
+            let start = node_start(arena, child)
+                .unwrap_or(scope.start)
+                .clamp(scope.start, scope.end);
+            let limit = children
+                .get(index + 1)
+                .and_then(|&(next, _)| node_start(arena, next))
+                .unwrap_or(scope.end)
+                .clamp(start, scope.end);
+            // A sibling in a quote/list may start after its line's prefix.
+            // That prefix does not belong to the preceding block.
+            let next_line_start = source[..limit].rfind('\n').map_or(0, |pos| pos + 1);
+            let limit = if next_line_start > start {
+                next_line_start
+            } else {
+                limit
+            };
+            // Include authored block markers and closing fences, but not blank
+            // separator lines. Never serialize the AST to reconstruct source.
+            let mut end = source_lines(&source[start..limit])
+                .iter()
+                .rev()
+                .find(|line| !line.text.trim().is_empty())
+                .map_or(start, |line| start + line.full_end);
+            if kind == MarkdownBlockKind::Paragraph
+                && let TypeData::Block(block) = arena[child].type_data()
+                && let Some(last) = block.source().last()
+            {
+                // Rushdown knows the paragraph's last content line, even
+                // when a following blank quote line still contains `>`.
+                let content_end = last.stop().clamp(start, end);
+                end = source[content_end..end]
+                    .find('\n')
+                    .map_or(end, |offset| content_end + offset + 1);
+            }
+            let span = start..end;
+            ParsedBlock {
+                kind,
+                children: project_children(arena, child, source, span.clone()),
+                source: span,
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rushdown_item_is_a_container_with_only_markdown_body_children() {
+        let source =
+            "Prelude.\n\n:::mara requirement REQ-ONE\n:title: One\n\n# Heading\n\nBody.\n:::\n";
+        let parsed = super::super::parse(source).unwrap();
+        let (arena, root) = item_tree(source, &parsed.items[0]);
+        let container = arena[root].first_child().unwrap();
+        assert_eq!(arena[container].kind_data().typ(), NodeType::ContainerBlock);
+        assert_eq!(arena[container].kind_data().kind_name(), "MaraItem");
+        let children = arena[container]
+            .children(&arena)
+            .map(|child| arena[child].kind_data().kind_name())
+            .collect::<Vec<_>>();
+        assert_eq!(children, ["Heading", "Paragraph"]);
+        assert!(arena[container].next_sibling().is_none());
+    }
+}

@@ -16,9 +16,9 @@ mod operations;
 mod query;
 
 pub use corpus::{
-    Corpus, Diagnostic, Document, Item, Mention, MetadataEntry, Relation, SourceLocation,
-    SourceSpan, load_corpus, load_corpus_for_validation, load_corpus_syntax_for_validation,
-    validate_corpus, validate_corpus_independent,
+    Corpus, Diagnostic, Document, Item, MarkdownBlock, MarkdownBlockKind, Mention, MetadataEntry,
+    Relation, SourceLocation, SourceSpan, load_corpus, load_corpus_for_validation,
+    load_corpus_syntax_for_validation, validate_corpus, validate_corpus_independent,
 };
 pub use mutation::{
     BackfilledMid, BackfilledMids, InitialRelation, ItemCreation, ItemCreationRequest,

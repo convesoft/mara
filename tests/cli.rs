@@ -6615,6 +6615,92 @@ fn mcp_tools_list_exposes_parameter_guidance() {
 }
 
 #[test]
+fn nested_markdown_round_trips_through_real_authoring_and_editing() {
+    let fixture = TempDir::new().unwrap();
+    assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    let body = "## Résumé\n\n> - Outer\n>   - Inner with **emphasis**.\n\n| Name | Value |\n| --- | --- |\n| α | β |\n\n```markdown\n:::mara requirement REQ-EXAMPLE\n:::\n```\n\n`multiline\n:::\n`\n";
+    let created = mara(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-NESTED",
+            "source.mara.md",
+            "--title",
+            "Nested Markdown",
+            "--body",
+            body,
+        ],
+    );
+    assert!(created.status.success(), "{}", stderr(&created));
+    let original = fs::read_to_string(fixture.path().join("source.mara.md")).unwrap();
+    assert!(original.contains(body));
+
+    let updated = mara(
+        fixture.path(),
+        &[
+            "item",
+            "update",
+            "REQ-NESTED",
+            "--title",
+            "Retained Markdown",
+        ],
+    );
+    assert!(updated.status.success(), "{}", stderr(&updated));
+    let expected = original.replace(":title: Nested Markdown", ":title: Retained Markdown");
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("source.mara.md")).unwrap(),
+        expected
+    );
+
+    let moved = mara(
+        fixture.path(),
+        &["item", "move", "REQ-NESTED", "destination.mara.md"],
+    );
+    assert!(moved.status.success(), "{}", stderr(&moved));
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("destination.mara.md")).unwrap(),
+        expected
+    );
+    let fetched = mara(
+        fixture.path(),
+        &["--format", "json", "item", "get", "REQ-NESTED"],
+    );
+    assert!(fetched.status.success(), "{}", stderr(&fetched));
+    let fetched: Value = serde_json::from_slice(&fetched.stdout).unwrap();
+    assert_eq!(fetched["body"], body);
+
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_request(
+                1,
+                "initialize",
+                json!({
+                    "protocolVersion": "2024-11-05", "capabilities": {},
+                    "clientInfo": {"name": "mara-test", "version": "1"}
+                }),
+            ),
+            mcp_request(
+                2,
+                "tools/call",
+                json!({"name": "item_get", "arguments": {
+                    "project": fixture.path().to_str().unwrap(), "id": "REQ-NESTED"
+                }}),
+            ),
+        ],
+    );
+    assert_eq!(responses[1]["result"]["structuredContent"], fetched);
+    let validated = mara(fixture.path(), &["--format", "json", "project", "validate"]);
+    assert!(validated.status.success(), "{}", stdout(&validated));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&validated.stdout).unwrap()["valid"],
+        true
+    );
+}
+
+#[test]
 fn primary_workflows_run_end_to_end_against_real_source_files() {
     let fixture = TempDir::new().unwrap();
 

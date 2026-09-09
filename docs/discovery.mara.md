@@ -305,10 +305,17 @@ current authoring syntax, exact source spans, code/raw-context handling, and
 rejection of nested items and malformed delimiters. Do not broaden allowed item
 placement as a side effect of changing the parser representation.
 
-The existing 0.1 adapter recognizes delimiter and mention extension nodes, then
-pairs delimiters and extracts item ranges. 0.2 replaces this item projection
-with the container model while keeping Rushdown APIs behind Mara-owned types
-and preserving the original source for reads and edits.
+The adapter first recognizes delimiters and mentions in full-document Markdown
+context so multiline code spans and raw blocks retain the existing syntax
+boundaries. It then parses each recognized item as a Rushdown container owning
+its identity, ordered metadata, body, and closing delimiter. Ordinary body
+blocks, including GFM tables, are projected into Mara-owned `MarkdownBlock`
+values with block kind, source location, and nested block children, available
+through `Item::body_blocks()`. Headings retain their level. Rushdown types stay
+private; reads and edits use the original source rather than rendered AST text.
+Validation recovery retains partial item data but exposes no body blocks for
+items with invalid metadata or incomplete structure. Derived sections and the
+remaining discovery contracts below are separate implementation work.
 
 ## Derived sections
 
