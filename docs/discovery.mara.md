@@ -221,6 +221,22 @@ result unit. Large blocks remain single nodes with bounded excerpts; size alone
 does not introduce synthetic passage nodes. Excerpt size and continuation wire
 fields remain to be specified.
 
+## Item movement and link safety
+
+In 0.2, item movement preserves ID/MID references because the selected item's
+identity is unchanged. Preflight Markdown links against the candidate source
+structure: reject movement that would break or silently retarget an existing
+surviving link, and report affected source locations before writing any files.
+Check incoming links to sections or blocks inside the moved item, outgoing
+relative or same-document links carried with it, and generated heading anchors
+affected in either document. Same-document moves can also change numbered
+heading anchors. A move remains allowed when link destinations are preserved.
+
+Do not automatically rewrite Markdown links during movement in 0.2. Authors
+must resolve reported link impacts before retrying. This extends the current
+movement contract in [item editing](editing.mara.md) for the new discovery
+model; it does not change the 0.1 implementation.
+
 ## Connections and containment
 
 ### Links and anchors
