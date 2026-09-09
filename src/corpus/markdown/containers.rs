@@ -275,8 +275,11 @@ fn node_start(arena: &Arena, node: NodeRef) -> Option<usize> {
 }
 
 fn line_end(source: &str, start: usize, limit: usize) -> usize {
-    source[start..limit]
-        .find('\n')
+    // A probe just before an exclusive content end can be inside a UTF-8
+    // character. Scan bytes; the returned newline boundary remains valid UTF-8.
+    source.as_bytes()[start..limit]
+        .iter()
+        .position(|&byte| byte == b'\n')
         .map_or(limit, |offset| start + offset + 1)
 }
 

@@ -6615,6 +6615,63 @@ fn mcp_tools_list_exposes_parameter_guidance() {
 }
 
 #[test]
+fn unicode_setext_headings_create_and_reload_through_the_real_cli() {
+    for (body, level) in [("Café\n====\n", 1), ("First line\r\n終🙂\r\n----\r\n", 2)] {
+        let fixture = TempDir::new().unwrap();
+        let initialized = mara(fixture.path(), &["project", "init"]);
+        assert!(initialized.status.success(), "{}", stderr(&initialized));
+        let created = mara(
+            fixture.path(),
+            &[
+                "item",
+                "create",
+                "requirement",
+                "REQ-UNICODE",
+                "unicode.mara.md",
+                "--title",
+                "Unicode heading",
+                "--body",
+                body,
+            ],
+        );
+        assert!(created.status.success(), "{}", stderr(&created));
+        let original = fs::read_to_string(fixture.path().join("unicode.mara.md")).unwrap();
+        let fetched = mara(
+            fixture.path(),
+            &["--format", "json", "item", "get", "REQ-UNICODE"],
+        );
+        assert!(fetched.status.success(), "{}", stderr(&fetched));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fetched.stdout).unwrap()["body"],
+            body
+        );
+        let validated = mara(fixture.path(), &["--format", "json", "project", "validate"]);
+        assert!(validated.status.success(), "{}", stderr(&validated));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&validated.stdout).unwrap()["valid"],
+            true
+        );
+
+        let project = resolve_project(Some(fixture.path()), fixture.path()).unwrap();
+        let schema = mara::load_schema(&project).unwrap();
+        let corpus = mara::load_corpus(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let heading = &item.body_blocks()[0];
+        assert_eq!(heading.kind(), mara::MarkdownBlockKind::Heading { level });
+        let span = heading.source().span();
+        assert_eq!(&original[span.start_byte()..span.end_byte()], body);
+        assert_eq!(
+            span.end_line() - span.start_line() + 1,
+            body.lines().count()
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("unicode.mara.md")).unwrap(),
+            original
+        );
+    }
+}
+
+#[test]
 fn nested_markdown_round_trips_through_real_authoring_and_editing() {
     let fixture = TempDir::new().unwrap();
     assert!(mara(fixture.path(), &["project", "init"]).status.success());
