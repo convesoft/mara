@@ -44,6 +44,7 @@ pub use query::{
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";
 pub const SCHEMA_FILE: &str = ".mara/schema.yaml";
+pub const SCHEMA_FORMAT_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -110,6 +111,9 @@ struct SchemaFileForValidation {
 #[derive(Debug, Deserialize)]
 struct FlavourFileForValidation {
     description: Option<SchemaValue>,
+    use_when: Option<SchemaValue>,
+    avoid_when: Option<SchemaValue>,
+    distinguish_from: Option<SchemaValue>,
     id_prefix: Option<SchemaValue>,
     body: Option<SchemaValue>,
     fields: Option<SchemaValue>,
@@ -130,7 +134,6 @@ struct RecoveredFlavour {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct SchemaValidationState {
-    format_version_invalid: bool,
     flavours_section_invalid: bool,
     relations_section_invalid: bool,
     invalid_flavours: HashSet<String>,
@@ -225,7 +228,6 @@ impl Schema {
     fn validation_errors(&mut self) -> Vec<String> {
         let recovered = std::mem::take(&mut self.validation);
         self.validation = SchemaValidationState {
-            format_version_invalid: recovered.format_version_invalid,
             flavours_section_invalid: recovered.flavours_section_invalid,
             relations_section_invalid: recovered.relations_section_invalid,
             invalid_flavours: recovered.invalid_flavours,
@@ -238,13 +240,6 @@ impl Schema {
             ..SchemaValidationState::default()
         };
         let mut errors = Vec::new();
-        if !self.validation.format_version_invalid && self.format_version != 1 {
-            errors.push(format!(
-                "unsupported schema format version {}",
-                self.format_version
-            ));
-        }
-
         for (name, flavour) in &self.flavours {
             if !is_snake_name(name) {
                 errors.push(format!("invalid flavour name '{name}'"));
@@ -254,6 +249,17 @@ impl Schema {
                 && flavour.description.trim().is_empty()
             {
                 errors.push(format!("flavour '{name}' description must not be empty"));
+            }
+            for target in flavour.distinguish_from.keys() {
+                if target == name {
+                    errors.push(format!(
+                        "flavour '{name}' distinguish_from must not reference itself"
+                    ));
+                } else if !self.flavour_is_declared(target) {
+                    errors.push(format!(
+                        "flavour '{name}' distinguish_from references unknown flavour '{target}'"
+                    ));
+                }
             }
             if !self.validation.invalid_id_prefixes.contains(name)
                 && !is_id_prefix(&flavour.id_prefix)
@@ -379,6 +385,9 @@ impl Schema {
 #[serde(deny_unknown_fields)]
 pub struct FlavourDefinition {
     description: String,
+    use_when: Vec<String>,
+    avoid_when: Vec<String>,
+    distinguish_from: BTreeMap<String, String>,
     id_prefix: String,
     body: BodyRequirement,
     #[serde(default)]
@@ -388,6 +397,18 @@ pub struct FlavourDefinition {
 impl FlavourDefinition {
     pub fn description(&self) -> &str {
         &self.description
+    }
+
+    pub fn use_when(&self) -> &[String] {
+        &self.use_when
+    }
+
+    pub fn avoid_when(&self) -> &[String] {
+        &self.avoid_when
+    }
+
+    pub fn distinguish_from(&self) -> &BTreeMap<String, String> {
+        &self.distinguish_from
     }
 
     pub fn fields(&self) -> &BTreeMap<String, FieldDefinition> {
@@ -784,11 +805,17 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
         decode_schema_configuration_value(format_version, "format_version", &mut errors);
     let format_version_invalid = format_version.is_none();
     let format_version = format_version.unwrap_or_default();
+    if !format_version_invalid && format_version != SCHEMA_FORMAT_VERSION {
+        errors.insert(0, if format_version == 1 {
+            "schema format version 1 requires explicit migration: migrate the existing schema to format_version: 2 and add description, use_when, avoid_when, and distinguish_from to every flavour; preserve custom declarations and item identities, do not reinitialize. See https://github.com/convesoft/mara/blob/main/docs/migration-0.2.mara.md".into()
+        } else {
+            format!("unsupported schema format version {format_version}; expected {SCHEMA_FORMAT_VERSION}")
+        });
+    }
     let flavour_values: Option<BTreeMap<String, SchemaValue>> =
         decode_schema_configuration_value(flavours, "flavours", &mut errors);
     let flavours_section_invalid = flavour_values.is_none();
     let mut validation = SchemaValidationState {
-        format_version_invalid,
         flavours_section_invalid,
         ..SchemaValidationState::default()
     };
@@ -858,6 +885,41 @@ fn recover_flavour(name: &str, value: &SchemaValue) -> Result<RecoveredFlavour, 
         .collect::<Vec<_>>();
     let description =
         decode_flavour_property(name, "description", configuration.description, &mut errors);
+    let use_when: Option<Vec<String>> =
+        decode_flavour_property(name, "use_when", configuration.use_when, &mut errors);
+    let avoid_when: Option<Vec<String>> =
+        decode_flavour_property(name, "avoid_when", configuration.avoid_when, &mut errors);
+    let distinguish_from: Option<BTreeMap<String, String>> = decode_flavour_property(
+        name,
+        "distinguish_from",
+        configuration.distinguish_from,
+        &mut errors,
+    );
+    if use_when.as_ref().is_some_and(Vec::is_empty) {
+        errors.push(format!(
+            "flavour '{name}' use_when must contain at least one nonblank string"
+        ));
+    }
+    for (property, entries) in [("use_when", &use_when), ("avoid_when", &avoid_when)] {
+        if let Some(entries) = entries {
+            for (index, entry) in entries.iter().enumerate() {
+                if entry.trim().is_empty() {
+                    errors.push(format!(
+                        "flavour '{name}' {property}[{index}] must be a nonblank string"
+                    ));
+                }
+            }
+        }
+    }
+    if let Some(entries) = &distinguish_from {
+        for (target, explanation) in entries {
+            if explanation.trim().is_empty() {
+                errors.push(format!(
+                    "flavour '{name}' distinguish_from '{target}' must have a nonblank explanation"
+                ));
+            }
+        }
+    }
     let id_prefix =
         decode_flavour_property(name, "id_prefix", configuration.id_prefix, &mut errors);
     let body = decode_flavour_property(name, "body", configuration.body, &mut errors);
@@ -892,6 +954,9 @@ fn recover_flavour(name: &str, value: &SchemaValue) -> Result<RecoveredFlavour, 
     Ok(RecoveredFlavour {
         definition: FlavourDefinition {
             description: description.clone().unwrap_or_default(),
+            use_when: use_when.unwrap_or_default(),
+            avoid_when: avoid_when.unwrap_or_default(),
+            distinguish_from: distinguish_from.unwrap_or_default(),
             id_prefix: id_prefix.clone().unwrap_or_default(),
             body: body.unwrap_or(BodyRequirement::Optional),
             fields,
@@ -915,7 +980,7 @@ where
     T: DeserializeOwned,
 {
     match value {
-        Some(value) => match decode_schema_declaration(&value) {
+        Some(value) => match serde_json::to_value(&value).and_then(serde_json::from_value) {
             Ok(value) => Some(value),
             Err(error) => {
                 errors.push(format!(
@@ -1366,37 +1431,63 @@ fn schema_template(template: Template) -> &'static str {
     }
 }
 
-const EMPTY_SCHEMA: &str = "format_version: 1\nflavours: {}\nrelations: {}\n";
+const EMPTY_SCHEMA: &str = "format_version: 2\nflavours: {}\nrelations: {}\n";
 
-const MINIMAL_SCHEMA: &str = r#"format_version: 1
+const MINIMAL_SCHEMA: &str = r#"format_version: 2
 flavours:
   scenario:
     description: A concrete behavioural flow with an observable outcome.
+    use_when:
+      - Describe one user, system, failure, or agent flow to discover and validate behaviour.
+    avoid_when:
+      - Record delivery tasks or obligations that hold across multiple flows.
+    distinguish_from:
+      requirement: States an obligation that may apply across multiple flows.
     id_prefix: SCN-
     body: required
     fields: {}
   requirement:
     description: An independently verifiable obligation.
+    use_when:
+      - State an obligation whose non-conformance can be determined from observable evidence.
+    avoid_when:
+      - Combine separable obligations or include rationale and solution choices.
+    distinguish_from:
+      scenario: Describes one concrete flow with an observable outcome.
+      design: Defines how an obligation is satisfied.
     id_prefix: REQ-
     body: required
     fields: {}
   design:
     description: A solution or interface contract that satisfies requirements.
+    use_when:
+      - Define durable architecture, interfaces, formats, components, or algorithms for implementers.
+    avoid_when:
+      - State product obligations or selection rationale.
+    distinguish_from:
+      requirement: States what must hold, rather than how it is satisfied.
+      decision: Records why a consequential choice was selected.
     id_prefix: DES-
     body: required
     fields: {}
   decision:
     description: A consequential choice and its durable rationale.
+    use_when:
+      - Preserve consequential rationale or meaningful trade-offs among alternatives.
+    avoid_when:
+      - Record routine or easily reversible details.
+    distinguish_from:
+      design: Defines the selected solution contract rather than selection rationale.
     id_prefix: ADR-
     body: required
     fields: {}
 relations:
   derives_from:
-    description: The source originates from or refines the target intent.
+    description: The source originates from or refines the target’s intent. Use for a direct semantic basis, not chronology or general association.
     source: [requirement, design]
     target: [scenario, requirement]
   depends_on:
-    description: The source cannot be satisfied or understood without the target.
+    description: The source cannot be satisfied, understood, or implemented independently of the target. Do not use merely because items concern the same topic.
     source: [scenario, requirement, design, decision]
     target: [scenario, requirement, design, decision]
   satisfies:
@@ -1408,7 +1499,7 @@ relations:
     source: [decision]
     target: [requirement, design]
   supersedes:
-    description: The source replaces an older target of the same flavour.
+    description: The source replaces an older target of the same flavour, retaining the target as history. Do not use for ordinary revisions of one item.
     source: [scenario, requirement, design, decision]
     target: [scenario, requirement, design, decision]
     same_flavour: true

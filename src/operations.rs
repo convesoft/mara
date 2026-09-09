@@ -344,7 +344,7 @@ impl OperationContext {
             .collect();
         let (schema, schema_diagnostics, corpus, diagnostics) = if schema_available {
             match load_schema_for_validation(&project) {
-                Ok((schema, errors)) if schema.format_version() == 1 => {
+                Ok((schema, errors)) if schema.format_version() == crate::SCHEMA_FORMAT_VERSION => {
                     let schema_diagnostics = errors
                         .into_iter()
                         .map(|message| ValidationDiagnostic {
