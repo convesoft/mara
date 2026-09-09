@@ -516,6 +516,68 @@ fn container_boundaries_preserve_code_context_and_adjacent_empty_items() {
 }
 
 #[test]
+fn reference_definitions_and_adjacent_prose_have_separate_source_spans() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    for (definitions, prose, newline, prefix) in [
+        (vec!["[foo]: /url"], "ordinary paragraph", "\n", ""),
+        (
+            vec!["[foo]: /url", "[bar]: /other \"Title\""],
+            "Résumé with [foo] and [bar].",
+            "\r\n",
+            "> ",
+        ),
+    ] {
+        let body = definitions
+            .iter()
+            .copied()
+            .chain(std::iter::once(prose))
+            .map(|line| format!("{prefix}{line}{newline}"))
+            .collect::<String>();
+        let source =
+            format!("Prelude.\n\n:::mara requirement REQ-REF\n:title: References\n\n{body}:::\n");
+        write(fixture.path(), "references.mara.md", &source);
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let blocks = if prefix.is_empty() {
+            item.body_blocks()
+        } else {
+            item.body_blocks()[0].children()
+        };
+        assert_eq!(blocks.len(), definitions.len() + 1);
+        let mut previous_end = item.body_source().span().start_byte();
+        for (index, (block, expected)) in blocks
+            .iter()
+            .zip(definitions.iter().copied().chain(std::iter::once(prose)))
+            .enumerate()
+        {
+            assert_eq!(
+                block.kind(),
+                if index < definitions.len() {
+                    Kind::LinkReferenceDefinition
+                } else {
+                    Kind::Paragraph
+                }
+            );
+            let expected = format!("{expected}{newline}");
+            let span = block.source().span();
+            assert_eq!(&source[span.start_byte()..span.end_byte()], expected);
+            assert_eq!(span.start_byte(), source.find(&expected).unwrap());
+            assert_eq!(span.start_line(), 6 + index);
+            assert_eq!(span.end_line(), span.start_line());
+            assert!(span.start_byte() >= previous_end);
+            previous_end = span.end_byte();
+        }
+        assert_eq!(item.body(), body);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("references.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+#[test]
 fn table_children_retain_only_their_own_source() {
     use mara::{MarkdownBlock, MarkdownBlockKind as Kind};
 

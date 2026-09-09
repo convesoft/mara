@@ -171,10 +171,18 @@ fn block_kind(kind: &KindData) -> Option<MarkdownBlockKind> {
 }
 
 fn node_start(arena: &Arena, node: NodeRef) -> Option<usize> {
-    let own = arena[node].pos().or_else(|| match arena[node].type_data() {
+    let content_start = match arena[node].type_data() {
         TypeData::Block(block) => block.source().first().map(Segment::start),
         _ => None,
-    });
+    };
+    // Paragraph transformers can extract leading reference definitions without
+    // updating the original node position. Only its remaining source belongs
+    // to the paragraph; other block positions retain authored opening markers.
+    let own = if matches!(arena[node].kind_data(), KindData::Paragraph(_)) {
+        content_start.or(arena[node].pos())
+    } else {
+        arena[node].pos().or(content_start)
+    };
     own.or_else(|| {
         arena[node]
             .children(arena)
