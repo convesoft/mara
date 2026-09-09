@@ -349,20 +349,26 @@ result unit. Large blocks remain single nodes with bounded excerpts; size alone
 does not introduce synthetic passage nodes. Ranking and response bounds follow
 [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]], which also defines response and continuation fields.
 
-## Item movement and link safety
+## Item mutation and link safety
 
-In 0.2, item movement preserves ID/MID references because the selected item's
-identity is unchanged. Preflight Markdown links against the candidate source
-structure: reject movement that would break or silently retarget an existing
-surviving link, and report affected source locations before writing any files.
-Check incoming links to sections or blocks inside the moved item, outgoing
-relative or same-document links carried with it, and generated heading anchors
-affected in either document. Same-document moves can also change numbered
-heading anchors. A move remains allowed when link destinations are preserved.
+In 0.2, preflight all item mutations against the candidate source structure.
+Reject operations that would break or silently retarget an untouched surviving
+link, and report affected source locations before writing any files. Explicitly
+edited links may change destination subject to validation; references removed
+with deleted content do not count as surviving links. Rename retains automatic
+rewriting of supported item-ID references while preserving their identity
+targets, including references in ordinary Markdown.
 
-Do not automatically rewrite Markdown links during movement in 0.2. Authors
-must resolve reported link impacts before retrying. This extends the current
-movement contract in [item editing](editing.mara.md) for the new discovery
+Movement preserves ID/MID references because the item's identity is unchanged.
+Check incoming links to sections or blocks inside the moved item, relative or
+same-document links carried with it, and generated heading anchors affected in
+either document. Same-document moves can also change numbered heading anchors.
+Creation, update, and deletion must likewise preserve destinations of untouched
+surviving links when heading anchors shift.
+
+Do not automatically repair Markdown links as a side effect of these operations
+in 0.2. Authors must resolve reported link impacts before retrying. This extends
+the current [item editing](editing.mara.md) contracts for the new discovery
 model; it does not change the 0.1 implementation.
 
 ## Connections and containment
