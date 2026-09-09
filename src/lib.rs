@@ -1483,11 +1483,11 @@ flavours:
     fields: {}
 relations:
   derives_from:
-    description: The source originates from or refines the target intent.
+    description: The source originates from or refines the target’s intent. Use for a direct semantic basis, not chronology or general association.
     source: [requirement, design]
     target: [scenario, requirement]
   depends_on:
-    description: The source cannot be satisfied or understood without the target.
+    description: The source cannot be satisfied, understood, or implemented independently of the target. Do not use merely because items concern the same topic.
     source: [scenario, requirement, design, decision]
     target: [scenario, requirement, design, decision]
   satisfies:
@@ -1499,7 +1499,7 @@ relations:
     source: [decision]
     target: [requirement, design]
   supersedes:
-    description: The source replaces an older target of the same flavour.
+    description: The source replaces an older target of the same flavour, retaining the target as history. Do not use for ordinary revisions of one item.
     source: [scenario, requirement, design, decision]
     target: [scenario, requirement, design, decision]
     same_flavour: true
