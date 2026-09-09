@@ -165,7 +165,7 @@ budget and rejection of stale handles/continuation. This extends 0.2 only;
 | Area | Open decision |
 |---|---|
 | Schema transition | Finalize the schema-format transition and migration guide. Reconcile the existing taxonomy with schema-owned guidance so each definition has one authority. Guidance shape, validation rules, and engineering relation definitions are settled in the designs below. |
-| Discovery interface | Top-level `mara search/get/related`, bounded node reading, source handles, relation namespaces and unambiguous shorthand, link/anchor resolution, and omission of node-kind filters in 0.2 are settled in [discovery](discovery.mara.md). Finalize ranking, response bounds, wire fields, MCP operation naming, and CLI/MCP migration policy. |
+| Discovery interface | Top-level `mara search/get/related`, node reading, source handles, relation namespaces and unambiguous shorthand, link/anchor resolution, omission of node-kind filters, ranking, and response bounds are settled in [discovery](discovery.mara.md). Finalize wire fields, MCP operation naming, and CLI/MCP migration policy. |
 
 After settling each area's product choices, record its interface or persisted
 contract as a design and consequential rationale as a decision. Delivery tickets

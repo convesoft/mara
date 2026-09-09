@@ -103,10 +103,46 @@ invalidation because other documents can change result membership and ordering.
 The token encoding and hash algorithm are implementation details; do not expose
 private graph indexes as handles.
 
-Implementation details still to settle: mixed-result ranking, connection and
-node wire fields, excerpt and read/continuation limits; MCP operation naming;
-and migration/alias policy for the existing CLI/MCP search, get, and related
-names.
+## Ranking and response bounds
+
+Retain normalization and word-level typo tolerance under
+[[REQ-FUZZY-ITEM-SEARCH]]. Every distinct query term must match the result's own
+searchable content. Results matching every term exactly precede any result
+requiring typo tolerance. Within each group, sum each term's highest matching
+field weight: item ID, title, or heading = 3; body and other metadata = 1.
+Headings inside an item contribute to that item's score. Parent section titles
+provide context without making their child blocks match. Repeated occurrences
+add no weight. Break ties by document path and source order; give no score
+bonus for node kind, connection count, or document length.
+
+Carry forward [[REQ-RETRIEVAL-BOUNDS]] for 0.2 with these changes and extensions:
+
+| Area | 0.2 contract |
+|---|---|
+| Search and related pages | Default 20 entries; `limit` accepts 1 through 100. Related counts connections, including distinct relations to the same neighbour. |
+| Response bytes | At most 65,536 UTF-8 bytes per serialized JSON domain result, including escaping and continuation metadata; transport wrappers remain outside the budget. |
+| Search excerpts | Include one source excerpt of at most 240 Unicode scalar values per hit by default. Mark omitted content; use `get` for complete reading. This replaces 0.1's opt-in excerpts and maximum of three. |
+| Summary titles/headings | At most 256 Unicode scalar values; mark truncation. Complete text remains retrievable through `get`. |
+| Node reading | Return consecutive content and applicable metadata up to the response budget, then explicit continuation. Preserve complete handles and source locations. |
+
+Apply filters and ordering before pagination; the byte budget may shorten a
+page below its entry limit. Preserve the existing no-silent-skip rule when
+mandatory fields cannot fit. Large blocks remain single nodes: paginate their
+content, not their identity. Content and metadata fragments must reconstruct
+complete values without gaps or duplication, respecting Unicode boundaries.
+
+Remove the relation-count `--limit` option and equivalent MCP parameter from
+`get`, which no longer enumerates neighbours. Retain its continuation cursor;
+`search` and `related` retain both limit and cursor.
+
+Verify mixed-result ranking, exact-before-fuzzy order, equal title/heading
+weights including headings inside items, absence of ancestor-title inheritance
+and repetition bonuses, stable ties, default excerpts, byte-limited pages, and
+complete consecutive reads of oversized nodes.
+
+Implementation details still to settle: connection and node wire fields,
+MCP operation naming, and migration/alias policy for the existing CLI/MCP
+search, get, and related names.
 
 The private in-memory graph backend follows [[ADR-PETGRAPH-DISCOVERY]]. The
 existing disposable-projection boundary remains: source documents own meaning,
@@ -247,8 +283,8 @@ Item ownership takes precedence. Otherwise retain the outermost ordinary
 Markdown block container: for example, a list within a blockquote returns the
 blockquote. Do not duplicate the same match as both its child and enclosing
 result unit. Large blocks remain single nodes with bounded excerpts; size alone
-does not introduce synthetic passage nodes. Excerpt size and continuation wire
-fields remain to be specified.
+does not introduce synthetic passage nodes. Ranking and response bounds follow
+[[DES-UNIFIED-KNOWLEDGE-DISCOVERY]]; continuation wire fields remain to be specified.
 
 ## Item movement and link safety
 
