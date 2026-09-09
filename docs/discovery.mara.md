@@ -67,10 +67,9 @@ CLI/MCP search names. Supporting both `[[ID]]` mentions and resolvable Markdown
 links is intended; exact resolution rules must be specified before
 implementation.
 
-This design specifies a discovery graph, not a graph-engine dependency or
-persisted graph store. The existing disposable-projection boundary remains:
-source documents own meaning, and parser/library node indexes must not become
-public identities.
+The private in-memory graph backend follows [[ADR-PETGRAPH-DISCOVERY]]. The
+existing disposable-projection boundary remains: source documents own meaning,
+and parser/library node indexes must not become public identities.
 :::
 
 :::mara decision ADR-UNIFIED-KNOWLEDGE-DISCOVERY
@@ -97,8 +96,42 @@ source-reading tools provide the content once Mara locates it. Lack of durable
 item identity does not exclude a passage from the graph.
 
 The 0.1 item-only contract remains unchanged. The POC's narrative-span and
-derived-mention concepts are useful precedent, but its petgraph choice, bounded
-multi-hop traversal, and broader traceability contracts are not adopted by this
-decision. Richer graph analysis and code traceability remain provisional
-0.3/0.4 work.
+derived-mention concepts are useful precedent. The private backend is decided
+separately in [[ADR-PETGRAPH-DISCOVERY]]; the POC's multi-hop traversal and broader
+traceability contracts are not adopted here. Richer graph analysis and code
+traceability remain provisional 0.3/0.4 work.
+:::
+
+:::mara decision ADR-PETGRAPH-DISCOVERY
+:mid: 01M2335G69NFYNP2J5BBBEGFYY
+:title: Use petgraph for the private 0.2 discovery graph
+:justifies: DES-UNIFIED-KNOWLEDGE-DISCOVERY
+:justifies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
+
+Adopt petgraph when implementing the 0.2 discovery graph. Use a private directed
+representation for item and passage nodes, typed relations, and resolved
+mentions. Enumerate incoming and outgoing edge references for direct-neighbour
+queries; derive backlinks from those edges rather than authoring inverse links.
+Support distinct relation kinds between the same endpoints.
+
+The immediate need is shared adjacency storage and direct navigation across
+items and passages. Reuse the library's node/edge storage and directional
+iteration instead of maintaining an equivalent custom graph. Future graph
+algorithms reinforce this choice but are not the sole justification. The
+[petgraph Graph API](https://docs.rs/petgraph/0.8.3/petgraph/graph/struct.Graph.html)
+supports associated node/edge data, parallel edges, and directional edge
+iteration; dependency version selection belongs to implementation.
+
+Mara owns identity and reference resolution, connection meaning, source
+provenance, schema validation, deterministic result ordering, and pagination.
+Library node/edge indexes remain private and process-local. Adapt petgraph
+results to Mara-owned types at the boundary. Preserve the disposable projection
+of canonical sources; this decision introduces no persisted graph store.
+
+This dependency is justified by implementation reuse, not a measured speedup.
+Keyword matching, typo tolerance, and text ranking remain separate. A graph
+backend does not provide a full-text index or automatically improve relevance.
+0.2 remains direct-neighbour only, without a hops parameter; richer traversal,
+traceability, and code-symbol extraction retain their later scope. Add no
+runtime dependency or feature implementation to the 0.1 release preparation.
 :::
