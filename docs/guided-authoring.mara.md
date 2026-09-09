@@ -67,17 +67,23 @@ silently rewrite schemas in projects already initialized from it.
 
 :::mara requirement REQ-FLAVOUR-AUTHORING-GUIDANCE
 :mid: 01M1XSKPP7HRP5JKTDX05EFE04
-:title: Expose project-defined flavour selection guidance
+:title: Require project-defined flavour selection guidance
 :derives_from: SCN-CHOOSE-KNOWLEDGE-FLAVOUR
 
-Project schemas must be able to describe each flavour's purpose, when to use it,
-when to avoid it, and distinctions from other flavours. CLI and MCP schema
-inspection must expose the same project-defined guidance under
-[[REQ-SCHEMA-DISCOVERY]] and [[REQ-SURFACE-PARITY]].
+In 0.2.0, every declared flavour must provide guidance covering its purpose,
+when to use it, when to avoid it, and distinctions from other flavours. Missing
+required guidance is a schema validation error, including for existing project
+schemas; it is not optional legacy behavior. An empty schema has no flavours
+that require guidance.
 
-Bundled templates must supply guidance for their declared flavours. The persisted
-shape, validation rules, and treatment of existing schemas remain open design
-questions. Guidance must not introduce hardcoded business flavours in the engine.
+CLI and MCP schema inspection must expose the same project-defined guidance
+under [[REQ-SCHEMA-DISCOVERY]] and [[REQ-SURFACE-PARITY]]. Bundled templates must
+supply complete guidance for their declared flavours. Guidance must not
+introduce hardcoded business flavours in the engine.
+
+The persisted shape and detailed content-validation rules remain open design
+questions. This requirement is a breaking change for 0.2.0; it does not change
+0.1 schema validation.
 :::
 
 :::mara requirement REQ-ENGINEERING-TRACEABILITY
@@ -134,7 +140,7 @@ settled before implementation. The current alpha.3 file-access decision
 | Area | Open decision |
 |---|---|
 | Template contents | Ship the schema alone, or also a small navigation/guidance document? Avoid duplicating guidance between generated documents and schema data. |
-| Flavour guidance | Choose the persisted shape, optionality for existing schemas, validation constraints, and format compatibility. Reconcile the existing taxonomy with schema-owned guidance so each definition has one authority. |
+| Flavour guidance | Guidance is mandatory in 0.2, including for existing schemas. Choose its persisted shape, detailed validation constraints, and schema-format transition. Reconcile the existing taxonomy with schema-owned guidance so each definition has one authority. |
 | Engineering relations | Confirm names, direction, and endpoint flavours for verification, evidence, implementation, and risk links. Candidate names are `verifies`, `validates`, `evidences`, `implements`, `affects`, and `mitigates`; this document does not add them to the schema. |
 | Document access | Choose the public discovery/read surface and resolve the result-unit, ranking, filtering, continuation, and compatibility questions in the retrieval investigation. |
 | Diagnostics | Confirm the consumer workflow and whether codes alone or codes plus severity belong in 0.2. Define output compatibility and the effect of severity on validity and exit status before accepting a diagnostic contract. |
@@ -143,3 +149,44 @@ After settling each area's product choices, record its interface or persisted
 contract as a design and consequential rationale as a decision. Delivery tickets
 reference those items and the requirements above; verification belongs with each
 implemented outcome. The full 0.2 ticket breakdown follows this scope review.
+
+## Migration and compatibility
+
+:::mara requirement REQ-FLAVOUR-GUIDANCE-MIGRATION
+:mid: 01M22ZQ349GZHVT2F2R1MRX90G
+:title: Document migration to mandatory flavour guidance
+:derives_from: REQ-FLAVOUR-AUTHORING-GUIDANCE
+
+The 0.2.0 release must identify mandatory flavour guidance as a breaking schema
+change and link a canonical migration guide from its release notes. Version the
+incompatible persisted schema contract independently of the application version.
+
+The guide must provide the supported schema-format transition and before/after
+YAML examples once the persisted guidance shape is settled. It must explain how
+to preserve custom flavours, fields, relations, and item identities while adding
+guidance to every declared flavour, then verify schema and project validation
+through CLI and MCP. Do not instruct users to reinitialize an existing project
+or replace a customized schema with a bundled template.
+
+Verification must demonstrate that a schema missing required guidance is
+rejected by 0.2 and that following the guide makes it valid without unrelated
+corpus changes. No finished YAML migration recipe is specified until the new
+schema shape is accepted.
+:::
+
+:::mara decision ADR-MANDATORY-FLAVOUR-GUIDANCE
+:mid: 01M22ZQ34GZX9EKMPR81DH87P3
+:title: Require complete flavour guidance starting with 0.2
+:justifies: REQ-FLAVOUR-AUTHORING-GUIDANCE
+:justifies: REQ-FLAVOUR-GUIDANCE-MIGRATION
+
+Apply mandatory flavour guidance to existing project schemas as well as bundled
+templates in 0.2.0. Accept a documented breaking change and explicit migration
+instead of retaining an optional-guidance exception for older schemas.
+
+The project accepts the migration cost at this early adoption stage so authors
+and agents can rely on guidance for every declared flavour. The earlier alpha
+schema contract does not justify making that guarantee permanently optional.
+The implementation and migration guide belong to 0.2; the 0.1 release retains
+its existing schema behavior.
+:::

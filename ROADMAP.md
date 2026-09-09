@@ -75,6 +75,8 @@ boundaries, verification expectations, and the accepted narrative boundary.
 
 - Prioritize bundled template files, an optional engineering template, and
   project-defined flavour selection guidance together.
+- Require flavour guidance for existing and new schemas as a documented
+  breaking change, with a migration guide for 0.2.
 - Supply useful engineering traceability relations through the template.
 - Add bounded discovery and reading of canonical document context outside items.
 - Evaluate diagnostic codes and severity as a candidate addition.
