@@ -55,8 +55,15 @@ Accepted direction for 0.2; not implemented by 0.1.
 | Result kinds | Return item, section, or Markdown block results, exposing the block's specific kind. All are addressable discovery nodes with excerpts and source locations. Items retain their IDs/MIDs; a Markdown block handle locates source in a particular revision and is not a permanent item identity. |
 | Filters | Project-relative path filters apply to all result kinds. Item ID, flavour, custom-field, and schema-relation filters select items only. Narrative never inherits item metadata. |
 | Connections | Explicit resolved references create `mentions` edges, with incoming backlinks. Expose derived structural membership and direct parent/child connections under [[DES-DOCUMENT-STRUCTURE]]. Preserve source locations and distinguish structural connections, mentions, and schema-defined typed relations. |
-| Source reading | Return locations sufficient for the actor's existing file-reading tools. This workflow assumes access to the same project sources. Do not add generic document `list`/`get` operations or recreate plain file reading. Existing structured item operations remain separately useful. |
+| Reading | Replace `mara item get` with `mara get <reference>` for items, sections, Markdown blocks, and documents, with equivalent MCP retrieval. Accept item IDs/MIDs and discovery handles. Return node kind, source location, structural context, bounded consecutive content, and item metadata when applicable. Provide continuation for complete reads; enumerate neighbours through `related`. File tools remain optional. |
 | Navigation | Replace CLI `mara item related` with `mara related <reference>` for items and structural discovery nodes, with equivalent unified MCP navigation. Accept item IDs/MIDs and returned discovery handles. Follow [[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]] from every result kind. Excerpts support selection; they are not a claim to include all connected context. |
+
+Keep `search`, `get`, and `related` at the CLI top level. Group them as
+"Discovery and reading" in help and documentation without adding a command
+namespace. Item creation, update, rename, move, deletion, list, and validation
+remain under `item` and accept items only. `relation add/remove` continue to
+author schema-defined relations between items; structural connections and
+mentions are derived from document structure and links.
 
 Markdown blocks can participate in the discovery graph without becoming
 schema-defined items. Graph membership does not infer semantic obligations or
@@ -82,10 +89,9 @@ The token encoding and hash algorithm are implementation details; do not expose
 private graph indexes as handles.
 
 Implementation details still to settle: representation of built-in connection
-kinds versus schema relations;
-mixed-result ranking, wire fields, excerpt and continuation limits; MCP operation naming;
-and migration/alias policy for the existing CLI/MCP search
-names.
+kinds versus schema relations; mixed-result ranking, wire fields, excerpt and
+read/continuation limits; MCP operation naming; and migration/alias policy for
+the existing CLI/MCP search, get, and related names.
 
 The private in-memory graph backend follows [[ADR-PETGRAPH-DISCOVERY]]. The
 existing disposable-projection boundary remains: source documents own meaning,
@@ -110,10 +116,18 @@ entry point without requiring the actor to know which content kind contains the
 answer. Keep connection kinds and source locations so the actor can understand
 why each neighbour matters.
 
-This replaces the earlier preference for separate document/passage search and
-the proposal to implement generic document reads in Mara. Existing
-source-reading tools provide the content once Mara locates it. Lack of durable
-item identity does not exclude a Markdown block from the graph.
+Use top-level `search`, `get`, and `related` for discovery and reading.
+Bounded node retrieval lets actors search, read, inspect direct connections,
+and read a selected neighbour through Mara regardless of node kind. Requiring
+a switch to filesystem tools for Markdown content would interrupt this same
+workflow, especially for MCP-only actors. File tools remain an optional route.
+
+This replaces separate document/passage search and the earlier 0.2 decision
+requiring file tools for narrative reads. Lack of durable item identity does
+not exclude a Markdown block from the graph or bounded retrieval. Keep item
+authoring commands under `item` so that "item" consistently means an authored
+Mara item; another namespace for the primary read workflow adds no useful
+distinction.
 
 The 0.1 item-only contract remains unchanged. The POC's narrative-span and
 derived-mention concepts are useful precedent. The private backend is decided

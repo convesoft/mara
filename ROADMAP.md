@@ -78,8 +78,8 @@ boundaries, verification expectations, and the accepted narrative boundary.
 - Require flavour guidance for existing and new schemas as a documented
   breaking change, with a migration guide for 0.2.
 - Supply useful engineering traceability relations through the template.
-- Unify item and narrative discovery under `mara search`, with direct connections
-  from either result kind and source locations for existing file-reading tools;
+- Unify item and narrative discovery under `mara search`, bounded node reading
+  under `mara get`, and direct connections under `mara related`;
   see [the accepted discovery direction](docs/discovery.mara.md).
 
 See [planned outcomes and open decisions](docs/guided-authoring.mara.md) before

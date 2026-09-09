@@ -48,10 +48,12 @@ mention, the actor inspects the referenced requirement and then its direct
 connections to designs or decisions, choosing each subsequent step.
 
 Search and neighbour results expose source locations and connection meaning.
-The actor reads the needed source context using existing file tools with access
-to the same repository. Authors need not turn narrative into items. Discovery
-and direct navigation have equivalent CLI and MCP behavior; richer graph
-analysis and code-symbol extraction are later work.
+The actor reads each selected node through Mara, continuing bounded reads
+until the needed content is complete. This workflow does not require client
+filesystem access when a neighbour is a Markdown block, section, or document.
+Authors need not turn narrative into items. Discovery, reading, and direct
+navigation have equivalent CLI and MCP behavior; richer graph analysis and
+code-symbol extraction are later work.
 :::
 
 ## Intended requirements
@@ -136,24 +138,26 @@ hits through CLI and MCP.
 
 :::mara requirement REQ-DOCUMENT-CONTEXT-READ
 :mid: 01M1XSKPPTZCGKHDSYW0SKMB6B
-:title: Locate discovered context for existing source-reading tools
+:title: Read discovered nodes through bounded Mara retrieval
 :derives_from: SCN-READ-DOCUMENT-CONTEXT
 
-Discovery and direct-neighbour results must identify the source document and
-exact location needed to read the selected item or narrative Markdown block
-using the actor's existing file tools. The workflow assumes access to the same
-project sources. Excerpts aid selection and must not imply that the full source
-or connected context has been returned.
+In 0.2, an actor can read an item, section, Markdown block, or document
+identified by an item ID/MID or discovery handle through CLI and MCP. Return
+node kind, source location, structural context, and bounded consecutive
+content, with item metadata when applicable. Provide explicit continuation
+that reconstructs complete content without gaps, including oversized nodes.
 
-Do not add generic document list/get or a plain-read command in 0.2. This
-replaces the earlier proposal for consecutive document reads through Mara;
-existing structured item retrieval remains available. Location and revision
-handling follow [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
+Discovery excerpts aid selection and may omit content; they do not replace
+consecutive retrieval. Enumerate direct connections through the separate
+related operation. Client filesystem access is optional throughout discovery,
+reading, and successive direct navigation. Command and handle contracts follow
+[[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
 
-Verify that an actor can locate a narrative search hit and its linked item,
-then read their complete original source with file tools, including content
-larger than a search excerpt. The 0.1 boundary in
-[[ADR-ALPHA-NARRATIVE-FILE-ACCESS]] remains unchanged.
+Verify search, node read, direct-neighbour lookup, and neighbour read through
+both CLI and MCP, including a narrative-only document and item, section, and
+block targets. Verify complete reconstruction for content exceeding a response
+budget and rejection of stale handles/continuation. This extends 0.2 only;
+[[ADR-ALPHA-NARRATIVE-FILE-ACCESS]] retains the 0.1 boundary.
 :::
 
 ## Decisions needed before implementation planning
@@ -161,7 +165,7 @@ larger than a search excerpt. The 0.1 boundary in
 | Area | Open decision |
 |---|---|
 | Schema transition | Finalize the schema-format transition and migration guide. Reconcile the existing taxonomy with schema-owned guidance so each definition has one authority. Guidance shape, validation rules, and engineering relation definitions are settled in the designs below. |
-| Discovery interface | Unified search over items, sections, and Markdown blocks, `mara related` replacing `mara item related`, source handles, structural connection names, and link/anchor resolution are settled in [discovery](discovery.mara.md). Finalize connection-kind representation, ranking, response bounds, wire fields, MCP operation naming, and CLI/MCP migration policy. |
+| Discovery interface | Top-level `mara search/get/related`, bounded reading for all discovery node kinds, source handles, structural connection names, and link/anchor resolution are settled in [discovery](discovery.mara.md). Finalize connection-kind representation, ranking, response bounds, wire fields, MCP operation naming, and CLI/MCP migration policy. |
 
 After settling each area's product choices, record its interface or persisted
 contract as a design and consequential rationale as a decision. Delivery tickets

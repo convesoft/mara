@@ -531,6 +531,6 @@ limitation that clients with only Mara MCP cannot retrieve all canonical
 narrative.
 
 The later 0.2 decision [[ADR-UNIFIED-KNOWLEDGE-DISCOVERY]] adds unified discovery
-and direct navigation while retaining existing file tools for source reading.
+with bounded node reads and direct navigation; file tools become optional.
 It does not change this 0.1 release boundary.
 :::
