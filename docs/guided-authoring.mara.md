@@ -125,6 +125,9 @@ MIDs, or flavours. Their explicit connections follow
 [[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]]. Result boundaries, filters, source reading,
 and remaining interface details follow [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
 
+Expose structural membership under [[DES-DOCUMENT-STRUCTURE]] so an actor can
+identify the containing section or document and navigate from it.
+
 Verify mixed item/passage results, narrative-only documents, path and item-only
 filters, bounded continuation, and absence of duplicated item-body hits through
 CLI and MCP.

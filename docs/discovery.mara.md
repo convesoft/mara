@@ -18,8 +18,13 @@ location so the actor can choose the next step and read the evidence.
 Resolved explicit references from narrative produce `mentions` edges and
 derived incoming backlinks. Schema-defined typed relations remain authored on
 items; narrative does not acquire a flavour or inherit adjacent items' metadata
-or relations. Document/section containment is structural context, not another
-authored semantic relation.
+or relations.
+
+Expose structural membership for item and passage results. Actors can navigate
+direct parent/child connections through derived sections and documents to select
+possible sibling context. These built-in connections are distinct from authored
+semantic relations. Structure and item ownership follow
+[[DES-DOCUMENT-STRUCTURE]].
 
 Each call returns direct neighbours only, with bounded results and explicit
 continuation. There is no `hops` parameter, recursive expansion, automatic path
@@ -30,7 +35,8 @@ traceability remain future 0.3/0.4 scope.
 Verify a narrative search hit leading through a mention to an item and through
 that item's typed relation to another item, as successive calls. Verify the
 corresponding incoming connections and continuation without silently expanding
-an additional hop.
+an additional hop. Also verify an item's visible section membership and
+successive parent/child navigation to a sibling narrative passage.
 :::
 
 :::mara design DES-UNIFIED-KNOWLEDGE-DISCOVERY
@@ -45,10 +51,10 @@ Accepted direction for 0.2; not implemented by 0.1.
 | Concern | Contract |
 |---|---|
 | Entry point | Move CLI search to `mara search`, with equivalent unified MCP discovery. Search covers items and narrative passages in the selected project's canonical documents, including documents without items. Do not introduce a second document-search operation. |
-| Passage extraction | Use ordinary Markdown structure from Rushdown through the Mara-owned adapter. Headings and item boundaries inform passage grouping; retain heading context and intact Markdown constructs. Item bodies are searched as items, not duplicated as narrative candidates. No new authoring markers or flavour are required. |
+| Document structure | Follow [[DES-DOCUMENT-STRUCTURE]] for Rushdown item containers, derived sections, passage boundaries, and owning-item search results. |
 | Result kinds | Distinguish items from passages explicitly. Both are searchable, addressable discovery nodes with excerpts and source locations. Items retain their IDs/MIDs; a passage handle locates source in a particular revision and is not a permanent item identity. |
 | Filters | Project-relative path filters apply to both kinds. Item ID, flavour, custom-field, and schema-relation filters select items only. Narrative never inherits item metadata. |
-| Connections | Explicit resolved references create `mentions` edges, with incoming backlinks. Preserve the written link's source location and distinguish mentions from schema-defined typed relations. Document paths and heading hierarchy provide structural context. |
+| Connections | Explicit resolved references create `mentions` edges, with incoming backlinks. Expose derived structural membership and direct parent/child connections under [[DES-DOCUMENT-STRUCTURE]]. Preserve source locations and distinguish structural connections, mentions, and schema-defined typed relations. |
 | Source reading | Return locations sufficient for the actor's existing file-reading tools. This workflow assumes access to the same project sources. Do not add generic document `list`/`get` operations or recreate plain file reading. Existing structured item operations remain separately useful. |
 | Navigation | Follow [[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]] from either result kind. Excerpts support selection; they are not a claim to include all connected context. |
 
@@ -60,8 +66,9 @@ traceability are later work, not prerequisites for 0.2.
 
 Implementation details still to settle: exact Markdown passage grouping and
 oversized-block treatment; passage handles and stale-location rejection;
-Markdown destination/anchor resolution (including passage targets and broken or
-ambiguous destinations); mixed-result ranking and wire fields; continuation
+Markdown destination/anchor resolution (including section targets and broken or
+ambiguous destinations); heading-only search results; structural handle/edge
+names; mixed-result ranking and wire fields; continuation
 limits; neighbour operation naming; and migration/alias policy for the existing
 CLI/MCP search names. Supporting both `[[ID]]` mentions and resolvable Markdown
 links is intended; exact resolution rules must be specified before
@@ -109,14 +116,16 @@ traceability remain provisional 0.3/0.4 work.
 :justifies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
 
 Adopt petgraph when implementing the 0.2 discovery graph. Use a private directed
-representation for item and passage nodes, typed relations, and resolved
-mentions. Enumerate incoming and outgoing edge references for direct-neighbour
-queries; derive backlinks from those edges rather than authoring inverse links.
+representation for items, passages, derived sections, and documents, with typed
+relations, resolved mentions, and structural connections under
+[[DES-DOCUMENT-STRUCTURE]]. Enumerate incoming and outgoing edge references for
+direct-neighbour queries; derive backlinks from those edges rather than
+authoring inverse links.
 Support distinct relation kinds between the same endpoints.
 
 The immediate need is shared adjacency storage and direct navigation across
-items and passages. Reuse the library's node/edge storage and directional
-iteration instead of maintaining an equivalent custom graph. Future graph
+knowledge and structural nodes. Reuse the library's node/edge storage and
+directional iteration instead of maintaining an equivalent custom graph. Future graph
 algorithms reinforce this choice but are not the sole justification. The
 [petgraph Graph API](https://docs.rs/petgraph/0.8.3/petgraph/graph/struct.Graph.html)
 supports associated node/edge data, parallel edges, and directional edge
@@ -134,4 +143,100 @@ backend does not provide a full-text index or automatically improve relevance.
 0.2 remains direct-neighbour only, without a hops parameter; richer traversal,
 traceability, and code-symbol extraction retain their later scope. Add no
 runtime dependency or feature implementation to the 0.1 release preparation.
+:::
+
+:::mara design DES-DOCUMENT-STRUCTURE
+:mid: 01M234WMS5522HC5HDV42NG886
+:title: Retain Markdown item containers and navigable section structure
+:satisfies: REQ-DOCUMENT-CONTEXT-DISCOVERY
+:satisfies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
+
+Accepted for 0.2. Keep Markdown syntax, derived document structure, and search
+result selection distinct.
+
+## Item containers
+
+Represent an entire Mara item as a custom Rushdown container block whose body
+contains ordinary Markdown AST children. Mara parses its opening identity,
+metadata, and closing delimiter; Rushdown parses the Markdown body. Preserve the
+current authoring syntax, exact source spans, code/raw-context handling, and
+rejection of nested items and malformed delimiters. Do not broaden allowed item
+placement as a side effect of changing the parser representation.
+
+The existing 0.1 adapter recognizes delimiter and mention extension nodes, then
+pairs delimiters and extracts item ranges. 0.2 replaces this item projection
+with the container model while keeping Rushdown APIs behind Mara-owned types
+and preserving the original source for reads and edits.
+
+## Derived sections
+
+Headings remain Markdown nodes. Derive sections from heading levels within their
+containing scope: a section ends before the next heading of the same or higher
+importance, or at the containing scope's end. Lower-importance headings open
+subsections. Accept skipped levels without inventing missing headings; H1 after
+H3 ends the H3 section rather than nesting inside it. An item's body has its own
+heading scope, so headings inside it cannot close outer document sections.
+Other Markdown container boundaries must likewise preserve their own children.
+Content before a heading belongs directly to its containing document or block.
+
+A section carries its heading text, level, and source location. Its heading is
+not an artificial narrative passage. Sections may contain narrative passages,
+items, and subsections in source order; narrative before and after an item can
+belong to the same section. Passage grouping operates on narrative Markdown
+blocks within this structure and must not cross item or section boundaries.
+
+## Discovery and containment
+
+Documents and sections are addressable structural nodes in discovery navigation.
+Search results expose an item's or passage's structural parent and section
+context when present; actors can inspect direct parent/child connections and
+select sibling context. Derive containment and its reverse view from document
+structure. Keep these built-in structural connections distinct from mentions
+and schema-authored typed relations; add no required authored IDs,
+flavours, metadata, or dedicated section/document authoring operations.
+
+A text match anywhere inside an item, including its nested sections, returns
+the owning item with the precise matching source location, not a separate
+passage result. Heading links identify their actual structural destination;
+search result grouping must not redirect them to an arbitrary nearby passage.
+A shared parent indicates possible context, not a semantic dependency.
+
+Sibling discovery is successive direct navigation: inspect the item's parent,
+then that parent's children. It does not require an automatic sibling relation,
+recursive expansion, or a hops parameter. Raw Markdown inline nodes need not
+become discovery graph nodes.
+
+Before implementation, specify structural handle and edge wire names,
+heading-only search results, anchor resolution, and passage grouping/size rules.
+Verify interleaved items and prose, headings inside items, skipped heading
+levels, heading-free content, direct containment in both directions, and item
+ownership of nested matches, alongside existing format and editing contracts.
+:::
+
+:::mara decision ADR-MARKDOWN-STRUCTURAL-DISCOVERY
+:mid: 01M234WMSE4STR6JPWZYHGQC1R
+:title: Build discovery on Markdown containers and visible structural context
+:justifies: DES-DOCUMENT-STRUCTURE
+
+Treat Mara as a Markdown extension: model items as real container blocks and
+retain the Markdown structure inside and around them. Derive section hierarchy
+for context and navigation instead of treating each heading as a narrative
+passage or attaching it only to the next prose fragment.
+
+Interleaved passages and items share section context. An actor must be able to
+see that parentage and navigate to possible sibling context from either kind
+of search result. Sections are internal in the sense that they are derived and
+need no authored identities or CRUD operations; they are visible to actors
+through locations and structural connections.
+
+The POC already specified Markdown item bodies and a complete hierarchy of
+sections, narrative blocks, and item placements. This decision accepts that
+structural direction for 0.2 without copying the POC's old item syntax or broader
+traceability scope. The `:::` form follows a fenced-container extension
+convention; it is not syntax standardized by CommonMark itself. Mara owns its
+exact grammar and restrictions.
+
+Keep search results focused on the owning item when content matches within its
+body, while retaining the actual source location and structural context. The
+0.1 implementation remains unchanged by this planning decision.
 :::
