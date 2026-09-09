@@ -140,9 +140,72 @@ weights including headings inside items, absence of ancestor-title inheritance
 and repetition bonuses, stable ties, default excerpts, byte-limited pages, and
 complete consecutive reads of oversized nodes.
 
-Implementation details still to settle: connection and node wire fields,
-MCP operation naming, and migration/alias policy for the existing CLI/MCP
-search, get, and related names.
+## Discovery response format
+
+CLI JSON and MCP use the same domain result with `format_version: 1`.
+Version this discovery response contract independently from schema and
+application versions. MCP tools are `search`, `get`, and `related`, matching
+the top-level CLI commands. MCP `get` and `related` accept `reference`
+instead of `id`; project selection remains unchanged.
+
+Use one node summary across operations:
+
+| Fields | Meaning |
+|---|---|
+| `reference`, `kind` | Reference accepted by get/related; kind is item, section, block, or document. |
+| `source` | Project-relative path, start/end byte offsets, and start/end lines for the complete node. |
+| `title`, `title_truncated` | Item title or section heading where applicable, with explicit truncation. |
+| `context` | Direct parent and nearest section references when present, without recursive expansion. |
+| `id`, `mid`, `flavour` | Items only. |
+| `block_kind` | Blocks only. |
+| `heading_level` | Sections only. |
+
+All responses include `has_more` and `next_cursor`, null when no content
+remains. Their operation-specific fields are:
+
+| Operation | Fields |
+|---|---|
+| search | `results: [{node, excerpt}]` |
+| get | `node`, `content`, `content_range`, `metadata`, `metadata_range` |
+| related | `node`, `connections: [{relation, direction, neighbour, source}]` |
+
+For items, content is the parsed body; other nodes return their original
+Markdown span, including contained source for sections and documents.
+`content_range` uses the existing body-relative text-range shape, and metadata
+keeps the ordered fragment/range semantics of [[DES-RETRIEVAL-CONTINUATION]].
+Non-items have empty metadata. Excerpts retain source text, locations, and
+partial markers under the limits above.
+
+A connection's `relation` is one string using the same ambiguity rule as
+input: emit the short name if unique in the available vocabulary, otherwise
+`builtin:name` or `schema:name`. Direction is relative to the requested
+node; neighbour uses the shared summary, and source locates the connection's
+evidence. JSON uses canonical `contains` with direction; human output renders
+its incoming view as `contained_by`.
+
+## Migration from 0.1
+
+0.2 removes the old discovery names without aliases. Other item, relation,
+schema, and project command names remain unchanged.
+
+| Old usage | 0.2 replacement |
+|---|---|
+| CLI `item search/get/related`; MCP `item_search/item_get/item_related` | Top-level CLI and MCP `search/get/related` |
+| MCP get/related `id` argument | `reference` |
+| Search `--excerpts` / MCP `excerpts` | Remove; one excerpt is automatic |
+| Get `--limit` / MCP `limit` | Remove; neighbour limits belong to related |
+| Search `items`; related `items` | `results`; `connections` using shared node summaries |
+| Get `summary`, `body`, `body_range` | `node`, `content`, `content_range`; source is in node |
+| Get incoming/outgoing neighbour collections | Read through related |
+
+For example, CLI `mara item get REQ-RETRY` becomes
+`mara get REQ-RETRY`. The equivalent MCP invocation changes from
+`item_get({"id":"REQ-RETRY"})` to `get({"reference":"REQ-RETRY"})`.
+
+Discard old cursors on upgrade and update response parsers for mixed node
+kinds and the discovery format above. Keep the migration guide to this mapping,
+the CLI/MCP example, and the cursor note; link to the response contract instead
+of duplicating field definitions.
 
 The private in-memory graph backend follows [[ADR-PETGRAPH-DISCOVERY]]. The
 existing disposable-projection boundary remains: source documents own meaning,
@@ -284,7 +347,7 @@ Markdown block container: for example, a list within a blockquote returns the
 blockquote. Do not duplicate the same match as both its child and enclosing
 result unit. Large blocks remain single nodes with bounded excerpts; size alone
 does not introduce synthetic passage nodes. Ranking and response bounds follow
-[[DES-UNIFIED-KNOWLEDGE-DISCOVERY]]; continuation wire fields remain to be specified.
+[[DES-UNIFIED-KNOWLEDGE-DISCOVERY]], which also defines response and continuation fields.
 
 ## Item movement and link safety
 
