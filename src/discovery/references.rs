@@ -152,9 +152,15 @@ impl<'corpus> DiscoveryGraph<'corpus> {
         let default = self.reference_node(anchor.source(), false)?;
         let span = self.graph[node].source.span();
         let anchor_span = anchor.source().span();
-        let standalone = document.source()[span.start_byte()..anchor_span.start_byte()]
-            .trim()
-            .is_empty()
+        // HTML blocks can contain several declarations. Placement belongs to
+        // this declaration's line, not all earlier content in the shared block.
+        let line_start = document.source()[..anchor_span.start_byte()]
+            .rfind('\n')
+            .map_or(0, |offset| offset + 1)
+            .max(span.start_byte());
+        let standalone = document.source()[line_start..anchor_span.start_byte()]
+            .chars()
+            .all(|c| c.is_whitespace() || c == '>')
             && document.source()[anchor_span.end_byte()..span.end_byte()]
                 .trim()
                 .is_empty();

@@ -190,7 +190,15 @@ fn markdown_tree(
     source: &str,
     scope: Range<usize>,
     items: &[ParsedItem],
+    references: &[super::ParsedReference],
 ) -> (Arena, NodeRef, HashMap<usize, usize>, HashMap<usize, usize>) {
+    let mentions = Rc::new(
+        references
+            .iter()
+            .filter(|reference| reference.kind == crate::ReferenceKind::Item)
+            .map(|reference| (reference.source.start, reference.source.end))
+            .collect::<HashMap<_, _>>(),
+    );
     let link_ends = Rc::new(RefCell::new(HashMap::new()));
     let tracked_links = Rc::clone(&link_ends);
     let container_items = items.to_vec();
@@ -268,7 +276,12 @@ fn markdown_tree(
             100,
         );
         parser.add_inline_parser(
-            move || super::references::LinkParserWithSpans::new(Rc::clone(&tracked_links)),
+            move || {
+                super::references::LinkParserWithSpans::new(
+                    Rc::clone(&tracked_links),
+                    Rc::clone(&mentions),
+                )
+            },
             parser::NoParserOptions,
             parser::PRIORITY_LINK,
         );
@@ -323,7 +336,12 @@ pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
     // Parse ordinary content and item bodies together so Rushdown resolves
     // references against one document-wide definition context. Recognized item
     // boundaries still shield metadata and scope each item's Markdown children.
-    let (arena, root, ends, link_ends) = markdown_tree(source, 0..source.len(), &document.items);
+    let (arena, root, ends, link_ends) = markdown_tree(
+        source,
+        0..source.len(),
+        &document.items,
+        &document.references,
+    );
     document.blocks = project_children(&arena, root, source, 0..source.len(), &ends);
     populate_item_blocks(&arena, root, source, &ends, &mut document.items);
     super::references::collect(&arena, root, source, &link_ends, document);
@@ -702,6 +720,7 @@ mod tests {
             source,
             parsed.items[0].source.clone(),
             std::slice::from_ref(&parsed.items[0]),
+            &parsed.references,
         );
         let container = arena[root].first_child().unwrap();
         assert_eq!(arena[container].kind_data().typ(), NodeType::ContainerBlock);

@@ -456,3 +456,107 @@ fn item_mentions_take_precedence_over_markdown_reference_definitions() {
         assert_eq!(json["valid"], true);
     }
 }
+
+#[test]
+fn mention_boundaries_survive_inline_and_reference_link_suffixes() {
+    let fixture = TempDir::new().unwrap();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    for (suffix, destination, valid) in [
+        ("(#missing)", "dest", true),
+        ("[target]", "dest", true),
+        ("[target]", "missing", false),
+    ] {
+        let mention_text = format!("[[REQ-ONE]]{suffix} [[{MID}]]{suffix}");
+        let source = format!(
+            "{mention_text}\n\n{}\n# Dest\n\n[target]: #{destination}\n",
+            item(&mention_text)
+        );
+        fs::write(fixture.path().join("suffix.mara.md"), &source).unwrap();
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let references = corpus.documents()[0].references();
+        assert_eq!(
+            references
+                .iter()
+                .filter(|r| r.kind() == ReferenceKind::Item)
+                .count(),
+            4
+        );
+        let links = references
+            .iter()
+            .filter(|r| r.kind() == ReferenceKind::MarkdownLink)
+            .collect::<Vec<_>>();
+        // A trailing shortcut reference remains a separate Markdown link; its
+        // label must never consume the preceding recognized Mara mention.
+        assert_eq!(links.len(), if suffix == "[target]" { 4 } else { 0 });
+        for link in links {
+            let span = link.source().span();
+            assert_eq!(&source[span.start_byte()..span.end_byte()], "[target]");
+        }
+        let graph = corpus.discovery();
+        assert_eq!(graph.diagnostics().is_empty(), valid);
+        let item_edges = graph
+            .nodes()
+            .flat_map(|n| n.connections(Direction::Outgoing))
+            .filter(|c| {
+                c.kind == ConnectionKind::Mentions && matches!(c.neighbour.kind(), Node::Item(_))
+            })
+            .count();
+        assert_eq!(item_edges, 4);
+        let output = Command::new(env!("CARGO_BIN_EXE_mara"))
+            .args([
+                "--project",
+                fixture.path().to_str().unwrap(),
+                "--format",
+                "json",
+                "project",
+                "validate",
+            ])
+            .output()
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(output.status.success(), valid, "{json}");
+        assert_eq!(json["valid"], valid);
+    }
+}
+
+#[test]
+fn final_standalone_anchor_in_a_shared_html_block_targets_following_content() {
+    let fixture = TempDir::new().unwrap();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    for (following, newline) in [
+        ("# Target\n\nBody.\n", "\n"),
+        ("Target paragraph.\n", "\r\n"),
+    ] {
+        let source = format!("[first](#first) [last](#last)\n\n<a name=\"first\"></a>\n<a name=\"last\"></a>\n\n{following}").replace('\n', newline);
+        fs::write(fixture.path().join("group.mara.md"), &source).unwrap();
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let graph = corpus.discovery();
+        assert!(graph.diagnostics().is_empty(), "{:?}", graph.diagnostics());
+        let links = graph
+            .nodes()
+            .flat_map(|n| n.connections(Direction::Outgoing))
+            .filter(|c| c.kind == ConnectionKind::Mentions)
+            .collect::<Vec<_>>();
+        assert_eq!(links.len(), 2);
+        for link in links {
+            let evidence = link.source.span();
+            let target = link.neighbour.source().span();
+            let target_text = &source[target.start_byte()..target.end_byte()];
+            match &source[evidence.start_byte()..evidence.end_byte()] {
+                "[first](#first)" => assert!(target_text.starts_with("<a name=\"first\"")),
+                "[last](#last)" => {
+                    assert_eq!(target_text, following.replace('\n', newline));
+                    assert!(
+                        link.neighbour
+                            .connections(Direction::Incoming)
+                            .iter()
+                            .any(|c| c.kind == ConnectionKind::Mentions && c.source == link.source)
+                    );
+                }
+                unexpected => panic!("unexpected link {unexpected}"),
+            }
+        }
+    }
+}

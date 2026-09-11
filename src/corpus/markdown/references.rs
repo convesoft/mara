@@ -2,9 +2,9 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use rushdown::{
-    ast::{Arena, KindData, NodeRef},
+    ast::{Arena, KindData, NodeRef, Text},
     parser::{self, AnyInlineParser, InlineParser},
-    text::{BlockReader, Reader as _},
+    text::{BlockReader, Index, Reader as _},
 };
 
 use super::{ParsedDocument, ParsedReference};
@@ -14,13 +14,18 @@ use crate::ReferenceKind;
 pub(super) struct LinkParserWithSpans {
     parser: parser::LinkParser,
     ends: Rc<RefCell<HashMap<usize, usize>>>,
+    mentions: Rc<HashMap<usize, usize>>,
 }
 
 impl LinkParserWithSpans {
-    pub(super) fn new(ends: Rc<RefCell<HashMap<usize, usize>>>) -> Self {
+    pub(super) fn new(
+        ends: Rc<RefCell<HashMap<usize, usize>>>,
+        mentions: Rc<HashMap<usize, usize>>,
+    ) -> Self {
         Self {
             parser: parser::LinkParser::new(),
             ends,
+            mentions,
         }
     }
 }
@@ -37,6 +42,13 @@ impl InlineParser for LinkParserWithSpans {
         reader: &mut BlockReader,
         context: &mut parser::Context,
     ) -> Option<NodeRef> {
+        let start = reader.position().1.start();
+        if let Some(&end) = self.mentions.get(&start) {
+            // Preserve recognition-pass boundaries before Rushdown can push a
+            // link label. Retain literal heading text and original source bytes.
+            reader.advance(end - start);
+            return Some(arena.new_node(Text::new(Index::new(start, end))));
+        }
         let node = self.parser.parse(arena, parent, reader, context)?;
         if matches!(arena[node].kind_data(), KindData::Link(_))
             && let Some(start) = arena[node].pos()
@@ -83,14 +95,6 @@ pub(super) fn collect(
             KindData::Link(link) => {
                 if let Some(&end) = ends.get(&start)
                     && source.get(start..end).is_some()
-                    // Recognition already gave Mara mentions precedence over
-                    // Markdown. A matching reference definition must not turn
-                    // their inner brackets into a second, unrelated link.
-                    && !document.references.iter().any(|reference| {
-                        reference.kind == ReferenceKind::Item
-                            && reference.source.start <= start
-                            && reference.source.end >= end
-                    })
                 {
                     document.references.push(ParsedReference {
                         kind: ReferenceKind::MarkdownLink,
