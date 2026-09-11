@@ -9471,3 +9471,77 @@ fn unified_search_resolves_schema_relation_filters_against_vocabulary() {
         assert_eq!(mcp_response(&responses, id)["result"]["isError"], true);
     }
 }
+
+#[test]
+fn unified_search_excerpts_locate_decoded_headings_inside_owning_nodes() {
+    let fixture = retrieval_fixture();
+    let path = fixture.path().join("docs/decoded-search.mara.md");
+    for heading in ["disco&#118;ery", "disco**very**", "disco&#x76;ery"] {
+        for newline in ["\n", "\r\n"] {
+            for in_item in [true, false] {
+                let introduction = "Unrelated introduction. ".repeat(30);
+                let source = if in_item {
+                    format!(":::mara requirement REQ-OWNER\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: Owner\n\n{introduction}\n\n## {heading}\n\nDetails.\n:::\n")
+                } else {
+                    format!("> {introduction}\n>\n> ## {heading}\n>\n> Details.\n")
+                }.replace('\n', newline);
+                fs::write(&path, &source).unwrap();
+                let output = mara(
+                    fixture.path(),
+                    &[
+                        "--format",
+                        "json",
+                        "search",
+                        "discovery",
+                        "--path",
+                        "docs/decoded-search.mara.md",
+                    ],
+                );
+                assert!(output.status.success(), "{}", stderr(&output));
+                let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+                let hits = page["results"].as_array().unwrap();
+                assert_eq!(hits.len(), 1, "{heading} {in_item}");
+                assert_eq!(
+                    hits[0]["node"]["kind"],
+                    if in_item { "item" } else { "block" }
+                );
+                assert_eq!(hits[0]["node"]["source"]["start_byte"], 0);
+                let excerpt = &hits[0]["excerpt"];
+                let start = excerpt["start_byte"].as_u64().unwrap() as usize;
+                let end = excerpt["end_byte"].as_u64().unwrap() as usize;
+                let heading_start = source.find(heading).unwrap();
+                assert!(
+                    start <= heading_start && end >= heading_start + heading.len(),
+                    "excerpt {start}..{end} misses heading at {heading_start}: {heading} {in_item}"
+                );
+                assert_eq!(excerpt["text"], source[start..end]);
+                assert_eq!(excerpt["partial"], true);
+                assert!(excerpt["text"].as_str().unwrap().chars().count() <= 240);
+                assert_eq!(
+                    excerpt["start_line"],
+                    source[..start].bytes().filter(|b| *b == b'\n').count() + 1
+                );
+                assert_eq!(
+                    excerpt["end_line"],
+                    source[..end - 1].bytes().filter(|b| *b == b'\n').count() + 1
+                );
+                let responses = mcp_exchange(
+                    fixture.path(),
+                    &[
+                        mcp_initialize(1),
+                        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                        mcp_call(
+                            2,
+                            "search",
+                            json!({"query":"discovery", "paths":["docs/decoded-search.mara.md"]}),
+                        ),
+                    ],
+                );
+                assert_eq!(
+                    mcp_response(&responses, 2)["result"]["structuredContent"],
+                    page
+                );
+            }
+        }
+    }
+}

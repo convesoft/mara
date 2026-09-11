@@ -184,20 +184,54 @@ fn add_headings<'a>(blocks: &'a [MarkdownBlock], fields: &mut Vec<(&'a str, usiz
     }
 }
 
+fn matching_heading<'a>(
+    blocks: &'a [MarkdownBlock],
+    terms: &BTreeSet<String>,
+) -> Option<&'a MarkdownBlock> {
+    for block in blocks {
+        if let Some(text) = block.heading_text()
+            && keyword_terms(text)
+                .iter()
+                .any(|word| terms.iter().any(|term| word_matches(term, word)))
+        {
+            return Some(block);
+        }
+        if let Some(heading) = matching_heading(block.children(), terms) {
+            return Some(heading);
+        }
+    }
+    None
+}
+
 fn excerpt(node: DiscoveryNode<'_, '_>, source: &str, terms: &BTreeSet<String>) -> SearchExcerpt {
     if let DiscoveryNodeKind::Item(item) = node.kind()
         && let Some(excerpt) = excerpts(source, item, terms).into_iter().next()
     {
         return excerpt;
     }
-    let span = match node.kind() {
+    let mut span = match node.kind() {
         DiscoveryNodeKind::Section { heading } => heading.source().span(),
         _ => node.source().span(),
     };
     let value = &source[span.start_byte()..span.end_byte()];
-    let matched = matching_spans(value, terms, true)
-        .first()
-        .map_or(0, |(start, _)| *start);
+    let matched = if let Some((start, _)) = matching_spans(value, terms, true).first() {
+        *start
+    } else {
+        // Ranking also searches decoded headings. Their words may not occur
+        // literally in Markdown (entities or inline formatting), so retain
+        // that heading's source span rather than excerpting the owner's start.
+        let blocks = match node.kind() {
+            DiscoveryNodeKind::Item(item) => item.body_blocks(),
+            DiscoveryNodeKind::MarkdownBlock(block) => std::slice::from_ref(block),
+            DiscoveryNodeKind::Section { heading } => std::slice::from_ref(heading),
+            DiscoveryNodeKind::Document(_) => &[],
+        };
+        if let Some(heading) = matching_heading(blocks, terms) {
+            span = heading.source().span();
+        }
+        0
+    };
+    let value = &source[span.start_byte()..span.end_byte()];
     let start = value[..matched]
         .char_indices()
         .rev()
