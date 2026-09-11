@@ -51,7 +51,9 @@ Accepted direction for 0.2; not implemented by 0.1.
 Unified search is implemented by CLI `mara search` and MCP `search`, using the
 shared node summaries, ranking, excerpts, filters, and continuation below.
 The old CLI `item search`, MCP `item_search`, and optional excerpt flags are
-removed. Unified `get` and `related` remain separate implementation work.
+removed. Unified CLI/MCP `get` reads every node kind with consecutive content
+and metadata pages; the old `item get` / `item_get` names and relation-count
+limit are removed. Unified `related` remains separate implementation work.
 
 | Concern | Contract |
 |---|---|
@@ -375,7 +377,8 @@ schema-independent diagnostics. `DiscoveryNode::reference()` and `summary()` exp
 reusable references and the shared projection under [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]];
 `DiscoveryGraph::resolve()` accepts those references and item IDs/MIDs against
 the loaded snapshot. Unified CLI/MCP search selects the owning result units
-below; unified reading and navigation remain separate work.
+below; unified CLI/MCP `get` reads those nodes and their structural context.
+Unified navigation remains separate work.
 
 ## Discovery units
 

@@ -96,23 +96,24 @@ mara item create requirement REQ-EXAMPLE docs/example.mara.md \
   --body "The project must demonstrate its primary workflow."
 mara project validate
 mara search "primary workflow"
-mara item get REQ-EXAMPLE
+mara get REQ-EXAMPLE
 ```
 
 Run `mara --help` or `mara <object> <operation> --help` for the complete command
 surface. The core behavior is documented in
 [`docs/alpha.mara.md`](docs/alpha.mara.md). Structured update, move, rename,
 delete, and recovery follow [`docs/editing.mara.md`](docs/editing.mara.md).
-Search/list, `item related`, and `item get` return bounded pages; repeat the same
-command with `--cursor <next_cursor>` to continue. Get returns consecutive body
-and metadata fragments, then direct relations; follow continuation to retrieve
-the complete item. Search items, section headings, and ordinary Markdown blocks
-with `mara search "primary workflow"` (MCP `search`). Each result includes its
+Search/list, `item related`, and `get` return bounded pages; repeat the same
+command with `--cursor <next_cursor>` to continue. Get returns consecutive
+content and item metadata fragments; follow continuation to retrieve the complete
+node. Read neighbours through `item related`. Search items, section headings,
+and ordinary Markdown blocks with `mara search "primary workflow"` (MCP `search`). Each result includes its
 kind, source location, reusable reference, and one bounded source excerpt.
 Item filters such as `--id REQ-EXAMPLE` exclude narrative; path filters cover
 all result kinds. Ranking, mixed JSON results, and continuation follow
-[`docs/discovery.mara.md`](docs/discovery.mara.md). Unified node reading and
-navigation remain planned; complete narrative content currently requires file reads.
+[`docs/discovery.mara.md`](docs/discovery.mara.md). Use `mara get <reference>`
+(MCP `get`) to read any returned node, including its parent document or section.
+Unified navigation remains planned.
 For existing projects whose items lack machine identities, run
 `mara project mid backfill`, then `mara project validate` before editing.
 Distribution and release guarantees are in

@@ -16,7 +16,7 @@ use crate::{Corpus, Item, Schema, SourceLocation};
 mod get;
 mod page;
 mod search;
-pub use get::{EntryRange, ItemGetResult, MetadataFragment, TextRange, get_item_page};
+pub use get::{EntryRange, GetResult, MetadataFragment, TextRange, get};
 pub use page::{ItemCollectionResult, RelatedItemsResult, SearchExcerpt};
 pub use search::{SearchHit, SearchResult, search};
 
