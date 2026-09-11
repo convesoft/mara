@@ -372,12 +372,16 @@ fn table_span(
                 Some(first.start()..last.stop())
             } else {
                 // Rushdown pads short rows with cells having no source. Keep
-                // those as empty spans at the authored row's content end.
-                let end = scope.start
-                    + source
-                        .get(scope.clone())?
-                        .trim_end_matches(['\r', '\n'])
-                        .len();
+                // them at the last authored cell's content end, before any
+                // trailing pipe or whitespace. Multiple padded cells share it.
+                let end = arena[arena[node].parent()?]
+                    .children(arena)
+                    .filter_map(|cell| match arena[cell].type_data() {
+                        TypeData::Block(block) => block.source().last().map(Segment::stop),
+                        _ => None,
+                    })
+                    .next_back()
+                    .unwrap_or(scope.start);
                 Some(end..end)
             }
         }

@@ -908,6 +908,51 @@ fn reference_definitions_and_adjacent_prose_have_separate_source_spans() {
 }
 
 #[test]
+fn padded_table_cells_follow_the_last_authored_content() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    for (row, content, prefix, newline) in [
+        ("| x |   ", "x", "", "\n"),
+        ("| x   ", "x", "", "\n"),
+        ("| α\\|β | \t ", "α\\|β", "> ", "\r\n"),
+        ("| `終🙂` |   ", "`終🙂`", "", "\r\n"),
+    ] {
+        let body = format!(
+            "{prefix}| A | B | C |{newline}{prefix}|---|---|---|{newline}{prefix}{row}{newline}"
+        );
+        let source = format!(":::mara requirement REQ-PADDED\n:title: Padded\n\n{body}:::\n");
+        write(fixture.path(), "padded.mara.md", &source);
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let block = &item.body_blocks()[0];
+        let table = if block.kind() == Kind::Blockquote {
+            &block.children()[0]
+        } else {
+            block
+        };
+        assert_eq!(table.kind(), Kind::Table);
+        let row = &table.children()[1].children()[0];
+        let cells = row.children();
+        assert_eq!(cells.len(), 3);
+        let content_end = source.find(content).unwrap() + content.len();
+        assert_eq!(cells[0].source().span().end_byte(), content_end);
+        for padded in &cells[1..] {
+            let span = padded.source().span();
+            assert_eq!(span.start_byte(), content_end, "{body:?}");
+            assert_eq!(span.end_byte(), content_end);
+            assert_eq!(span.start_line(), 6);
+            assert_eq!(span.end_line(), 6);
+        }
+        assert_eq!(item.body(), body);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("padded.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+#[test]
 fn table_children_retain_only_their_own_source() {
     use mara::{MarkdownBlock, MarkdownBlockKind as Kind};
 
