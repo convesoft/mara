@@ -51,14 +51,14 @@ Do not create or modify `AGENTS.md` as part of Mara onboarding.
 ## Choose the operation
 
 CLI entries below follow `"${mara_cli[@]}" --project /absolute/project --format json`;
-inspect `<object> <operation> --help` for positional arguments and options.
+inspect `<command> --help` for positional arguments and options.
 
 | Intent | MCP operation | CLI command |
 |---|---|---|
 | Discover vocabulary and field/edge constraints | `schema_list`, then `schema_get`; omit kind/name for the full schema | `schema list`, `schema get` |
-| Find items by text or enumerate exact filters | `item_search` or `item_list` | `item search`, `item list` |
-| Read selected items, metadata, and direct relations | `item_get` | `item get` |
-| Inspect direct neighbours, then fetch selected bodies | `item_related`, then `item_get` | `item related`, then `item get` |
+| Search items and narrative, or list items with exact filters | `search` or `item_list` | `search`, `item list` |
+| Read an item, section, Markdown block, or document | `get` | `get` |
+| Inspect direct item neighbours, then read a selected neighbour | `item_related`, then `get` | `item related`, then `get` |
 | Create an item, optionally with initial edges | `item_create` | `item create` |
 | Change title, custom fields, or body | `item_update` | `item update` |
 | Relocate an item; preserve ID and MID | `item_move` | `item move` |
@@ -75,23 +75,37 @@ MCP results are not a separate authoring store.
 
 ## Retrieve enough context
 
-For example, search with `{"query":"recovery","limit":5}`, select an ID from
-the results, and pass it to `item_get` and `item_related` as `id`. Use the project
-context selected above. Use `excerpts:true` on search when matching passages
-help selection; excerpts may skip content and do not replace an item read.
+Call `search` with `{"query":"recovery","limit":5}`. Results contain
+`{node, excerpt}`; pass a selected `node.reference` to `get` as
+`{"reference":"<selected reference>"}`. Get also accepts exact item IDs/MIDs.
+Use the project context selected above. One source excerpt is included per search
+hit; it may omit content and does not replace a consecutive read. Do not pass
+`excerpts` or `--excerpts` to search. Item filters select items only; path filters
+also cover narrative.
 
-Search, list, related, and get return `has_more` and `next_cursor`. When requested
-content is incomplete, repeat the same operation with that opaque `cursor`,
-keeping project, handle/query, filters, limit, and excerpt options unchanged.
-Continue until the needed content is retrieved; full enumeration/read requires
-`has_more:false`. Get can split body, metadata values, and relations across pages:
-use their byte/index ranges to reconstruct content, including complete titles.
-Restart without a cursor after source/schema changes. Related follows only direct
-edges; choose further neighbours explicitly.
+Get returns `node`, `content`, `content_range`, `metadata`, and `metadata_range`.
+Items return their parsed body and ordered metadata; other nodes return their
+original Markdown span, including contained source for sections and documents,
+with empty metadata. Read `node.context.parent` or `node.context.section` through
+get when structural context is needed. Get does not enumerate neighbours or
+accept `limit`. For item connections, call `item_related` with the item's ID/MID
+as `id`, then read a selected neighbour through get with `reference`. Unified
+navigation from structural nodes is not yet available.
 
-CLI retrieval uses the same JSON result fields: for example,
-`"${mara_cli[@]}" --project /absolute/project --format json item search recovery --limit 5`.
-Use `--cursor '<next_cursor>'` for continuation and `--excerpts` for passages.
+Search, list, item related, and get return `has_more` and `next_cursor`. Repeat
+the same operation with that opaque `cursor`, keeping project, reference/query,
+filters, and any supported limit unchanged. Continue until the needed content
+is retrieved; full enumeration/read requires `has_more:false`. Get splits
+consecutive content and metadata values across pages: use their byte/index
+ranges to reconstruct complete values, including titles and repeated metadata.
+Restart without a cursor after source/schema changes. If a discovery handle is
+stale, search again. Item related follows only direct edges; choose further
+neighbours explicitly.
+
+CLI retrieval uses the same JSON result fields:
+`"${mara_cli[@]}" --project /absolute/project --format json search recovery --limit 5`,
+then `"${mara_cli[@]}" --project /absolute/project --format json get '<reference>'`.
+Use `--cursor '<next_cursor>'` for continuation.
 
 ## Keep metadata inputs distinct
 
@@ -115,8 +129,8 @@ through `--field`. CLI `--body -` reads stdin; MCP `body` is literal text.
 
 ## Author and verify
 
-1. Inspect the schema and resolve existing targets with `item_get`. In this
-   example, the schema permits `decision` → `justifies` → `requirement`, and
+1. Inspect the schema and resolve existing targets with `get` using `reference`.
+   In this example, the schema permits `decision` → `justifies` → `requirement`, and
    `REQ-EXAMPLE` already exists. Replace `/absolute/project` with the selected root,
    or omit `project` when the server is bound to it.
 2. Call `item_create` with a meaningful body and any required custom fields:
@@ -152,9 +166,9 @@ atomically, rejecting the whole request if an edge is invalid. Targets accept
 exact human IDs or MIDs. Do not add the same edge again; use `relation_add` and
 `relation_remove` for later changes (both take `source`, `relation`, `target`).
 
-5. Call `item_get` with `id:"ADR-EXAMPLE"`; inspect generated MID, title, body,
-   custom metadata, and outgoing relations. Call `item_related` with
-   `id:"ADR-EXAMPLE",direction:"outgoing"`, then with
+5. Call `get` with `reference:"ADR-EXAMPLE"`; inspect `node` for the generated
+   MID/title, `content` for the body, and `metadata` for authored values.
+   Call `item_related` with `id:"ADR-EXAMPLE",direction:"outgoing"`, then with
    `id:"REQ-EXAMPLE",direction:"incoming"` to verify both views of the edge.
 6. Call `item_validate` with `id:"ADR-EXAMPLE"`; use `project_validate` for
    corpus-wide integrity after relation or reference changes. Use the same project
@@ -173,12 +187,12 @@ For the same authoring workflow through CLI, after resolving `mara_cli` and
 ```bash
 mara_project=/absolute/project
 "${mara_cli[@]}" --project "$mara_project" --format json schema get
-"${mara_cli[@]}" --project "$mara_project" --format json item get REQ-EXAMPLE
+"${mara_cli[@]}" --project "$mara_project" --format json get REQ-EXAMPLE
 "${mara_cli[@]}" --project "$mara_project" --format json item create decision ADR-EXAMPLE decisions.mara.md \
   --title 'Keep edits recoverable' \
   --body 'Preserve the previous content until validation succeeds so rejected edits can be retried.' \
   --relation justifies=REQ-EXAMPLE
-"${mara_cli[@]}" --project "$mara_project" --format json item get ADR-EXAMPLE
+"${mara_cli[@]}" --project "$mara_project" --format json get ADR-EXAMPLE
 "${mara_cli[@]}" --project "$mara_project" --format json item related ADR-EXAMPLE --direction outgoing
 "${mara_cli[@]}" --project "$mara_project" --format json item related REQ-EXAMPLE --direction incoming
 "${mara_cli[@]}" --project "$mara_project" --format json project validate
