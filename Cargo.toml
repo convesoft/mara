@@ -19,6 +19,7 @@ repository = "https://github.com/convesoft/mara"
 clap = { version = "4.5", features = ["derive"] }
 globset = "0.4"
 ignore = "0.4"
+petgraph = { version = "0.8.3", default-features = false, features = ["std"] }
 rmcp = { version = "3.2", features = ["schemars", "server", "transport-io"] }
 rushdown = "0.18.0"
 schemars = "1.2"

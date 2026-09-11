@@ -11,6 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 mod corpus;
+mod discovery;
 mod mutation;
 mod operations;
 mod query;
@@ -19,6 +20,9 @@ pub use corpus::{
     Corpus, Diagnostic, Document, Item, MarkdownBlock, MarkdownBlockKind, Mention, MetadataEntry,
     Relation, SourceLocation, SourceSpan, load_corpus, load_corpus_for_validation,
     load_corpus_syntax_for_validation, validate_corpus, validate_corpus_independent,
+};
+pub use discovery::{
+    ConnectionKind, DiscoveryConnection, DiscoveryGraph, DiscoveryNode, DiscoveryNodeKind,
 };
 pub use mutation::{
     BackfilledMid, BackfilledMids, InitialRelation, ItemCreation, ItemCreationRequest,

@@ -25,6 +25,11 @@ impl Corpus {
         self.documents.iter().flat_map(|document| document.items())
     }
 
+    /// Build disposable document structure and direct connections from this snapshot.
+    pub fn discovery(&self) -> crate::DiscoveryGraph<'_> {
+        crate::DiscoveryGraph::new(self)
+    }
+
     pub fn is_complete(&self) -> bool {
         self.complete
     }
@@ -56,6 +61,7 @@ pub struct Document {
     path: PathBuf,
     source: String,
     items: Vec<Item>,
+    blocks: Vec<MarkdownBlock>,
 }
 
 impl Document {
@@ -69,6 +75,11 @@ impl Document {
 
     pub fn items(&self) -> &[Item] {
         &self.items
+    }
+
+    /// Ordinary document blocks outside items, retaining Markdown containers.
+    pub fn blocks(&self) -> &[MarkdownBlock] {
+        &self.blocks
     }
 }
 
@@ -144,11 +155,12 @@ impl Item {
     }
 }
 
-/// A Markdown block retained inside an item. Its source is canonical; this
+/// A Markdown block retained in a document or item. Its source is canonical; this
 /// projection is never used to render or rewrite authored Markdown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarkdownBlock {
     kind: MarkdownBlockKind,
+    heading_text: Option<String>,
     source: SourceLocation,
     children: Vec<MarkdownBlock>,
 }
@@ -160,6 +172,11 @@ impl MarkdownBlock {
 
     pub fn source(&self) -> &SourceLocation {
         &self.source
+    }
+
+    /// Parsed heading text without Markdown formatting; absent on other blocks.
+    pub fn heading_text(&self) -> Option<&str> {
+        self.heading_text.as_deref()
     }
 
     pub fn children(&self) -> &[MarkdownBlock] {
@@ -1106,10 +1123,16 @@ fn project_document(
         })
         .collect();
 
+    let blocks = parsed
+        .blocks
+        .into_iter()
+        .map(|block| project_block(&path, &line_starts, block))
+        .collect();
     Document {
         path,
         source,
         items,
+        blocks,
     }
 }
 
@@ -1120,6 +1143,7 @@ fn project_block(
 ) -> MarkdownBlock {
     MarkdownBlock {
         kind: block.kind,
+        heading_text: block.heading_text,
         source: location(path, line_starts, block.source.start, block.source.end),
         children: block
             .children
@@ -1150,7 +1174,12 @@ fn source_lines(source: &str) -> Vec<SourceLine> {
     lines
 }
 
-fn location(path: &Path, line_starts: &[usize], start: usize, end: usize) -> SourceLocation {
+pub(crate) fn location(
+    path: &Path,
+    line_starts: &[usize],
+    start: usize,
+    end: usize,
+) -> SourceLocation {
     SourceLocation {
         path: path.to_path_buf(),
         span: SourceSpan {

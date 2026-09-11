@@ -9097,3 +9097,63 @@ fn item_get_bounds_large_relation_pages_and_fails_on_unpageable_fields() {
         );
     }
 }
+
+#[test]
+fn eof_reference_titles_load_through_real_cli_workflows() {
+    for newline in ["\n", "\r\n"] {
+        let fixture = TempDir::new().unwrap();
+        assert!(mara(fixture.path(), &["project", "init"]).status.success());
+        let created = mara(
+            fixture.path(),
+            &[
+                "item",
+                "create",
+                "requirement",
+                "REQ-ONE",
+                "eof.mara.md",
+                "--title",
+                "One",
+                "--body",
+                "Body.",
+            ],
+        );
+        assert!(created.status.success(), "{}", stderr(&created));
+        let path = fixture.path().join("eof.mara.md");
+        let source = format!(
+            "{}\n[ref]: https://example.com\n  \"終🙂 title\"",
+            fs::read_to_string(&path).unwrap()
+        )
+        .replace('\n', newline);
+        fs::write(&path, &source).unwrap();
+        let validated = mara(fixture.path(), &["--format", "json", "project", "validate"]);
+        assert!(validated.status.success(), "{}", stderr(&validated));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&validated.stdout).unwrap()["valid"],
+            true
+        );
+        let fetched = mara(
+            fixture.path(),
+            &["--format", "json", "item", "get", "REQ-ONE"],
+        );
+        assert!(fetched.status.success(), "{}", stderr(&fetched));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fetched.stdout).unwrap()["body"],
+            format!("Body.{newline}")
+        );
+        let project = resolve_project(Some(fixture.path()), fixture.path()).unwrap();
+        let schema = mara::load_schema(&project).unwrap();
+        let corpus = mara::load_corpus(&project, &schema).unwrap();
+        let definition = &corpus.documents()[0].blocks()[0];
+        assert_eq!(
+            definition.kind(),
+            mara::MarkdownBlockKind::LinkReferenceDefinition
+        );
+        let span = definition.source().span();
+        assert_eq!(
+            &source[span.start_byte()..span.end_byte()],
+            format!("[ref]: https://example.com{newline}  \"終🙂 title\"")
+        );
+        assert_eq!(span.end_byte(), source.len());
+        assert_eq!(fs::read_to_string(path).unwrap(), source);
+    }
+}

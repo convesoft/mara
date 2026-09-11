@@ -308,8 +308,10 @@ placement as a side effect of changing the parser representation.
 The adapter first recognizes delimiters and mentions in full-document Markdown
 context so multiline code spans and raw blocks retain the existing syntax
 boundaries. It then parses each recognized item as a Rushdown container owning
-its identity, ordered metadata, body, and closing delimiter. Ordinary body
-blocks, including GFM tables, are projected into Mara-owned `MarkdownBlock`
+its identity, ordered metadata, body, and closing delimiter. Narrative and valid
+item bodies share one document-wide Markdown reference-definition context,
+including definitions before or after an item; heading scopes remain local.
+Ordinary body blocks, including GFM tables, are projected into Mara-owned `MarkdownBlock`
 values with block kind, source location, and nested block children, available
 through `Item::body_blocks()`. Headings retain their level. Table row spans
 cover their authored lines; cell spans cover their Markdown content without
@@ -317,13 +319,13 @@ surrounding separators or whitespace. Padded cells in short rows have empty
 spans at the row's content end. The table owns its separator row; header and
 cell spans do not include it. Rushdown types stay private; reads and edits use
 the original source rather than rendered AST text. Bound container spans at
-following siblings; omit parser children positioned outside their enclosing
+following siblings; preserve the final line at EOF even without a trailing
+newline. Omit parser children positioned outside their enclosing
 source range rather than assigning neighbouring bytes to them. Apply these
 bounds to complete table spans too; do not truncate an escaping table into a
 valid-looking child. Use UTF-8 byte boundaries for every exposed source span.
 Validation recovery retains partial item data but exposes no body blocks for
-items with invalid metadata or incomplete structure. Derived sections and the
-remaining discovery contracts below are separate implementation work.
+items with invalid metadata or incomplete structure.
 
 ## Derived sections
 
@@ -336,10 +338,21 @@ heading scope, so headings inside it cannot close outer document sections.
 Other Markdown container boundaries must likewise preserve their own children.
 Content before a heading belongs directly to its containing document or block.
 
-A section carries its heading text, level, and source location. Sections contain
+A section carries its heading text, level, and source location. Heading text
+decodes Markdown backslash escapes and named/numeric character references once
+in ordinary text nodes; code spans retain their literal content. Sections contain
 ordinary Markdown blocks, items, and subsections in source order. Prose before
 and after an item can belong to the same section. Add no abstract passage
 container around those blocks or special passage node for a heading.
+
+The Rust projection retains narrative blocks through `Document::blocks()` and
+heading text through `MarkdownBlock::heading_text()`. `Corpus::discovery()` builds
+a disposable petgraph graph from that loaded snapshot. Borrowed `DiscoveryNode`
+values expose node kind, source, parent, children, and directional connections;
+sections retain their original heading block and a source span covering their
+full extent. Graph indexes stay private. Existing item relations and resolved
+item-body mentions share this graph with containment. Narrative link resolution,
+discovery handles, search selection, and CLI/MCP discovery remain separate work.
 
 ## Discovery units
 

@@ -8,7 +8,7 @@ use std::{cell::RefCell, collections::HashMap, fmt, ops::Range, rc::Rc};
 use rushdown::{
     ast::{
         Arena, CodeBlockKind, HeadingKind, KindData, NodeKind, NodeRef, NodeType, PrettyPrint,
-        TypeData,
+        TextQualifier, TypeData,
     },
     parser::{self, AnyBlockParser, BlockParser, Parser, ParserExtension, ParserExtensionFn},
     text::{BasicReader, Lines, MultilineValue, Reader as _, Segment, Value},
@@ -53,7 +53,7 @@ impl From<MaraItemNode> for KindData {
 
 #[derive(Debug)]
 struct MaraItemParser {
-    item: ParsedItem,
+    items: Vec<ParsedItem>,
 }
 
 impl BlockParser for MaraItemParser {
@@ -68,14 +68,11 @@ impl BlockParser for MaraItemParser {
         reader: &mut BasicReader,
         _context: &mut parser::Context,
     ) -> Option<(NodeRef, parser::State)> {
-        if reader.peek_line_segment()?.start() != self.item.source.start {
-            return None;
-        }
+        let start = reader.peek_line_segment()?.start();
+        let item = self.items.iter().find(|item| item.source.start == start)?;
         reader.advance_to_eol();
         Some((
-            arena.new_node(MaraItemNode {
-                item: self.item.clone(),
-            }),
+            arena.new_node(MaraItemNode { item: item.clone() }),
             parser::State::HAS_CHILDREN,
         ))
     }
@@ -96,10 +93,23 @@ impl BlockParser for MaraItemParser {
             return Some(parser::State::NO_CHILDREN);
         }
         if start >= item.body.end {
-            reader.advance_to_eol();
+            // A recovered item may end at the next opener without a closer.
+            // Leave that opener available to the document parser.
+            if start < item.source.end {
+                reader.advance_to_eol();
+            }
             return None;
         }
-        Some(parser::State::HAS_CHILDREN)
+        if item.body_valid && item.title_valid {
+            Some(parser::State::HAS_CHILDREN)
+        } else {
+            reader.advance_to_eol();
+            Some(parser::State::NO_CHILDREN)
+        }
+    }
+
+    fn can_interrupt_paragraph(&self) -> bool {
+        true
     }
 }
 
@@ -176,8 +186,12 @@ impl From<BlockParserWithSpans> for AnyBlockParser {
     }
 }
 
-fn item_tree(source: &str, item: &ParsedItem) -> (Arena, NodeRef, HashMap<usize, usize>) {
-    let container_item = item.clone();
+fn markdown_tree(
+    source: &str,
+    scope: Range<usize>,
+    items: &[ParsedItem],
+) -> (Arena, NodeRef, HashMap<usize, usize>) {
+    let container_items = items.to_vec();
     let block_ends = Rc::new(RefCell::new(HashMap::new()));
     let tracked_ends = Rc::clone(&block_ends);
     let quote_ends = Rc::clone(&block_ends);
@@ -200,44 +214,60 @@ fn item_tree(source: &str, item: &ParsedItem) -> (Arena, NodeRef, HashMap<usize,
             parser::NoParserOptions,
             parser::PRIORITY_BLOCKQUOTE - 1,
         );
-        parser.add_block_parser(
-            move || MaraItemParser {
-                item: container_item.clone(),
-            },
-            parser::NoParserOptions,
-            super::DELIMITER_BLOCK_PRIORITY,
-        );
+        if !container_items.is_empty() {
+            parser.add_block_parser(
+                move || MaraItemParser {
+                    items: container_items.clone(),
+                },
+                parser::NoParserOptions,
+                super::DELIMITER_BLOCK_PRIORITY,
+            );
+        }
         parser::gfm_table().apply(parser);
     });
     let parser = Parser::with_extensions(parser::Options::default(), extension);
     // Retain document-relative byte offsets, including UTF-8 and CRLF. Start
-    // at the already recognized opener and stop after its closing delimiter.
-    let mut reader = BasicReader::new(&source[..item.source.end]);
-    let first_line_end = source[item.source.clone()]
+    // at a recognized scope boundary without copying or rewriting its bytes.
+    let mut reader = BasicReader::new(&source[..scope.end]);
+    let first_line_end = source[scope.clone()]
         .find('\n')
-        .map_or(item.source.end, |offset| item.source.start + offset + 1);
-    reader.set_position(0, Segment::new(item.source.start, first_line_end));
+        .map_or(scope.end, |offset| scope.start + offset + 1);
+    reader.set_position(0, Segment::new(scope.start, first_line_end));
     let (arena, root) = parser.parse(&mut reader);
     let ends = block_ends.take();
     (arena, root, ends)
 }
 
 pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
-    for item in &mut document.items {
-        // Validation recovery retains partial identities and metadata. It
-        // must not present a malformed item's body as trustworthy structure.
-        if !item.body_valid || !item.title_valid {
-            continue;
+    // Parse ordinary content and item bodies together so Rushdown resolves
+    // references against one document-wide definition context. Recognized item
+    // boundaries still shield metadata and scope each item's Markdown children.
+    let (arena, root, ends) = markdown_tree(source, 0..source.len(), &document.items);
+    document.blocks = project_children(&arena, root, source, 0..source.len(), &ends);
+    populate_item_blocks(&arena, root, source, &ends, &mut document.items);
+}
+
+fn populate_item_blocks(
+    arena: &Arena,
+    node: NodeRef,
+    source: &str,
+    ends: &HashMap<usize, usize>,
+    items: &mut [ParsedItem],
+) {
+    if arena[node].kind_data().kind_name() == "MaraItem" {
+        let parsed = &rushdown::as_extension_data!(arena, node, MaraItemNode).item;
+        let index = items
+            .binary_search_by_key(&parsed.source.start, |item| item.source.start)
+            .expect("recognized Mara item");
+        let item = &mut items[index];
+        // Validation recovery must not expose malformed bodies as structure.
+        if item.body_valid && item.title_valid {
+            item.blocks = project_children(arena, node, source, item.body.clone(), ends);
         }
-        let (arena, root, block_ends) = item_tree(source, item);
-        let container = arena[root]
-            .first_child()
-            .expect("recognized Mara item container");
-        debug_assert_eq!(arena[container].kind_data().kind_name(), "MaraItem");
-        *item = rushdown::as_extension_data!(arena, container, MaraItemNode)
-            .item
-            .clone();
-        item.blocks = project_children(&arena, container, source, item.body.clone(), &block_ends);
+        return;
+    }
+    for child in arena[node].children(arena) {
+        populate_item_blocks(arena, child, source, ends, items);
     }
 }
 
@@ -426,15 +456,21 @@ fn project_children(
 ) -> Vec<ParsedBlock> {
     let children = arena[parent]
         .children(arena)
-        .filter_map(|child| block_kind(arena[child].kind_data()).map(|kind| (child, kind)))
+        .filter_map(|child| {
+            let kind = block_kind(arena[child].kind_data());
+            (kind.is_some() || arena[child].kind_data().kind_name() == "MaraItem")
+                .then_some((child, kind))
+        })
         .collect::<Vec<_>>();
     children
         .iter()
         .enumerate()
         .filter_map(|(index, &(child, kind))| {
-            let sibling_limit = children
+            let kind = kind?;
+            let sibling_start = children
                 .get(index + 1)
-                .and_then(|&(next, _)| node_start(arena, next))
+                .and_then(|&(next, _)| node_start(arena, next));
+            let sibling_limit = sibling_start
                 .unwrap_or(scope.end)
                 .clamp(scope.start, scope.end);
             if matches!(
@@ -448,6 +484,7 @@ fn project_children(
                 let span = table_span(arena, child, source, scope.start..sibling_limit)?;
                 return Some(ParsedBlock {
                     kind,
+                    heading_text: None,
                     children: project_children(arena, child, source, span.clone(), block_ends),
                     source: span,
                 });
@@ -460,16 +497,18 @@ fn project_children(
             }
             let limit = sibling_limit.max(start);
             // A sibling in a quote/list may start after its line's prefix.
-            // That prefix does not belong to the preceding block.
+            // That prefix does not belong to the preceding block. A scope end
+            // at EOF is not a sibling prefix: its final line still belongs here.
             let next_line_start = source.as_bytes()[..limit]
                 .iter()
                 .rposition(|&byte| byte == b'\n')
                 .map_or(0, |pos| pos + 1);
-            let limit = if next_line_start > start {
-                next_line_start
-            } else {
-                limit
-            };
+            let limit =
+                if sibling_start.is_some_and(|next| next <= scope.end) && next_line_start > start {
+                    next_line_start
+                } else {
+                    limit
+                };
             if !source.is_char_boundary(limit) {
                 return None;
             }
@@ -495,6 +534,7 @@ fn project_children(
                     .map_or(own_end, |last| own_end.max(last.source.end));
                 return Some(ParsedBlock {
                     kind,
+                    heading_text: None,
                     children: nested,
                     source: start..end,
                 });
@@ -527,11 +567,41 @@ fn project_children(
             let span = start..end;
             Some(ParsedBlock {
                 kind,
+                heading_text: matches!(kind, MarkdownBlockKind::Heading { .. })
+                    .then(|| heading_text(arena, child, source)),
                 children: project_children(arena, child, source, span.clone(), block_ends),
                 source: span,
             })
         })
         .collect()
+}
+
+fn heading_text(arena: &Arena, node: NodeRef, source: &str) -> String {
+    let mut text = String::new();
+    for child in arena[node].children(arena) {
+        match arena[child].kind_data() {
+            KindData::Text(value) => {
+                // Rushdown's writer applies Markdown escapes and character
+                // references in one pass. Undo only its HTML output escaping;
+                // decoding the authored text in separate passes would turn
+                // literal `\&amp;` or `&amp;copy;` into a different value.
+                let mut escaped = String::new();
+                rushdown::renderer::html::Writer::new()
+                    .write(&mut escaped, value.str(source))
+                    .expect("writing heading text to a String");
+                let decoded = rushdown::util::resolve_entity_references(escaped.as_bytes());
+                text.push_str(std::str::from_utf8(&decoded).expect("decoded heading is UTF-8"));
+                if value.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
+                    || value.has_qualifiers(TextQualifier::HARD_LINE_BREAK)
+                {
+                    text.push(' ');
+                }
+            }
+            KindData::CodeSpan(value) => text.push_str(&value.str(source)),
+            _ => text.push_str(&heading_text(arena, child, source)),
+        }
+    }
+    text
 }
 
 #[cfg(test)]
@@ -543,7 +613,11 @@ mod tests {
         let source =
             "Prelude.\n\n:::mara requirement REQ-ONE\n:title: One\n\n# Heading\n\nBody.\n:::\n";
         let parsed = super::super::parse(source).unwrap();
-        let (arena, root, _) = item_tree(source, &parsed.items[0]);
+        let (arena, root, _) = markdown_tree(
+            source,
+            parsed.items[0].source.clone(),
+            std::slice::from_ref(&parsed.items[0]),
+        );
         let container = arena[root].first_child().unwrap();
         assert_eq!(arena[container].kind_data().typ(), NodeType::ContainerBlock);
         assert_eq!(arena[container].kind_data().kind_name(), "MaraItem");
