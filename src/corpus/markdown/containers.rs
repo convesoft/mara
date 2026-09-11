@@ -406,17 +406,20 @@ fn project_children(
     children
         .iter()
         .enumerate()
-        .map(|(index, &(child, kind))| {
+        .filter_map(|(index, &(child, kind))| {
             if let Some(span) = table_span(arena, child, source, scope.clone()) {
-                return ParsedBlock {
+                return Some(ParsedBlock {
                     kind,
                     children: project_children(arena, child, source, span.clone(), block_ends),
                     source: span,
-                };
+                });
             }
-            let start = node_start(arena, child)
-                .unwrap_or(scope.start)
-                .clamp(scope.start, scope.end);
+            let start = node_start(arena, child).unwrap_or(scope.start);
+            // Tab padding can give an empty Rushdown child a position beyond
+            // its parent's source. Do not move it onto another block's bytes.
+            if !scope.contains(&start) {
+                return None;
+            }
             let limit = children
                 .get(index + 1)
                 .and_then(|&(next, _)| node_start(arena, next))
@@ -443,17 +446,18 @@ fn project_children(
                 let own_end = block_ends
                     .get(&start)
                     .copied()
-                    .unwrap_or_else(|| line_end(source, start, limit));
+                    .unwrap_or_else(|| line_end(source, start, limit))
+                    .clamp(start, limit);
                 // Lazy paragraph continuations may extend past the last
                 // explicit quote marker, so retain the children's full extent.
                 let end = nested
                     .last()
                     .map_or(own_end, |last| own_end.max(last.source.end));
-                return ParsedBlock {
+                return Some(ParsedBlock {
                     kind,
                     children: nested,
                     source: start..end,
-                };
+                });
             }
             // Include authored block markers and closing fences, but not blank
             // separator lines. Never serialize the AST to reconstruct source.
@@ -467,7 +471,8 @@ fn project_children(
                         .rev()
                         .find(|line| !line.text.trim().is_empty())
                         .map_or(start, |line| start + line.full_end)
-                });
+                })
+                .clamp(start, limit);
             if kind == MarkdownBlockKind::Paragraph
                 && let TypeData::Block(block) = arena[child].type_data()
                 && let Some(last) = block.source().last()
@@ -480,11 +485,11 @@ fn project_children(
                     .map_or(end, |offset| content_end + offset + 1);
             }
             let span = start..end;
-            ParsedBlock {
+            Some(ParsedBlock {
                 kind,
                 children: project_children(arena, child, source, span.clone(), block_ends),
                 source: span,
-            }
+            })
         })
         .collect()
 }

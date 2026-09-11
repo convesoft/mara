@@ -575,6 +575,61 @@ fn container_boundaries_preserve_code_context_and_adjacent_empty_items() {
 }
 
 #[test]
+fn tab_indented_containers_do_not_overlap_following_siblings() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    for newline in ["\n", "\r\n"] {
+        let first = format!("*\t>\t-{newline}");
+        let following = format!(">\ttéxt 🌱{newline}end{newline}");
+        let body = format!("{first}{following}");
+        let source = format!(":::mara requirement REQ-TABS\n:title: Tabs\n\n{body}:::\n");
+        write(fixture.path(), "tabs.mara.md", &source);
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let blocks = item.body_blocks();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].kind(), Kind::List);
+        assert_eq!(blocks[1].kind(), Kind::Blockquote);
+        let list_span = blocks[0].source().span();
+        let quote_span = blocks[1].source().span();
+        assert!(list_span.end_byte() <= quote_span.start_byte());
+        assert_eq!(&source[list_span.start_byte()..list_span.end_byte()], first);
+        assert_eq!(
+            &source[quote_span.start_byte()..quote_span.end_byte()],
+            following
+        );
+        assert_eq!(list_span.start_line(), 4);
+        assert_eq!(list_span.end_line(), 4);
+        assert_eq!(quote_span.start_line(), 5);
+        assert_eq!(quote_span.end_line(), 6);
+        let paragraph = blocks[1].children()[0].source().span();
+        assert_eq!(
+            &source[paragraph.start_byte()..paragraph.end_byte()],
+            &following[2..]
+        );
+        let mut pending = blocks.iter().collect::<Vec<_>>();
+        while let Some(parent) = pending.pop() {
+            let span = parent.source().span();
+            let mut previous_end = span.start_byte();
+            for child in parent.children() {
+                let child_span = child.source().span();
+                assert!(previous_end <= child_span.start_byte());
+                assert!(child_span.start_byte() <= child_span.end_byte());
+                assert!(child_span.end_byte() <= span.end_byte());
+                previous_end = child_span.end_byte();
+                pending.push(child);
+            }
+        }
+        assert_eq!(item.body(), body);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("tabs.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+#[test]
 fn nested_containers_exclude_outer_quote_separators() {
     use mara::MarkdownBlockKind as Kind;
 
