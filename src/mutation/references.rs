@@ -159,52 +159,75 @@ fn same_destination(
     old_graph: &crate::DiscoveryGraph<'_>,
     new_graph: &crate::DiscoveryGraph<'_>,
 ) -> bool {
-    let (old_source, new_source) = match (old.kind(), new.kind()) {
+    let old_source = match (old.kind(), new.kind()) {
         (DiscoveryNodeKind::Item(a), DiscoveryNodeKind::Item(b)) => {
             return a.mid().unwrap_or(a.id()) == b.mid().unwrap_or(b.id());
         }
         (DiscoveryNodeKind::Document(a), DiscoveryNodeKind::Document(b)) => {
             return a.path() == b.path();
         }
-        (DiscoveryNodeKind::Section { heading: a }, DiscoveryNodeKind::Section { heading: b }) => {
-            (a.source(), b.source())
+        (DiscoveryNodeKind::Section { heading: a }, DiscoveryNodeKind::Section { .. }) => {
+            a.source()
         }
         (DiscoveryNodeKind::MarkdownBlock(a), DiscoveryNodeKind::MarkdownBlock(b))
             if a.kind() == b.kind() =>
         {
-            (a.source(), b.source())
+            a.source()
         }
         _ => return false,
     };
-    let Some((path, start)) = point(maps, old_source, old_source.span().start_byte()) else {
-        return false;
-    };
-    // Prefix edits move the old first character inside the same block. The
-    // surviving-content check below still rejects movement to another block.
-    let same_start = match old.kind() {
-        DiscoveryNodeKind::MarkdownBlock(_) => {
-            (new_source.span().start_byte()..new_source.span().end_byte()).contains(&start)
-        }
-        _ => start == new_source.span().start_byte(),
-    };
-    if path != new_source.path() || !same_start {
-        return false;
-    }
     // A text diff can align an identical heading with a newly inserted duplicate.
     // Its surviving content must belong to the same destination too. Compare only
     // the heading/block's owning scope: moving a contained item out of a narrative
     // section does not replace that section's identity.
-    let map = maps
-        .iter()
-        .find(|map| {
-            map.before
-                .local(old_source.path(), old_source.span().start_byte())
+    let Some(map) = maps.iter().find(|map| {
+        map.before
+            .local(old_source.path(), old_source.span().start_byte())
+            .is_some()
+    }) else {
+        return false;
+    };
+    if map
+        .after
+        .local(new.source().path(), new.source().span().start_byte())
+        .is_none()
+    {
+        return false;
+    }
+    let old_content = map.before.content(old.source());
+    let new_content = map.after.content(new.source());
+    // An intact, unique structural node survives a reorder even when a character
+    // diff represents all of it as deletion/insertion. Require uniqueness in both
+    // snapshots so identical blocks or duplicate headings do not confer identity.
+    let matches_content = |node: DiscoveryNode<'_, '_>, source: &Source| {
+        let same_kind = match (old.kind(), node.kind()) {
+            (DiscoveryNodeKind::Section { .. }, DiscoveryNodeKind::Section { .. }) => true,
+            (DiscoveryNodeKind::MarkdownBlock(a), DiscoveryNodeKind::MarkdownBlock(b)) => {
+                a.kind() == b.kind()
+            }
+            _ => false,
+        };
+        same_kind
+            && source
+                .local(node.source().path(), node.source().span().start_byte())
                 .is_some()
-        })
-        .unwrap();
+            && source.content(node.source()).trim() == old_content.trim()
+    };
+    let mut retained = new_graph
+        .nodes()
+        .filter(|node| matches_content(*node, &map.after));
+    if let Some(candidate) = retained.next()
+        && retained.next().is_none()
+        && old_graph
+            .nodes()
+            .filter(|node| matches_content(*node, &map.before))
+            .take(2)
+            .count()
+            == 1
+    {
+        return candidate.source() == new.source();
+    }
     if let DiscoveryNodeKind::Section { heading } = old.kind() {
-        let old_content = map.before.content(old.source());
-        let new_content = map.after.content(new.source());
         let same_heading = |node: DiscoveryNode<'_, '_>, source: &Source| {
             matches!(node.kind(), DiscoveryNodeKind::Section { heading: candidate }
                 if candidate.heading_text() == heading.heading_text())
@@ -255,6 +278,9 @@ fn same_destination(
             }
         }
     }
+    // Edited blocks need retained content, not a retained first byte. All mapped
+    // non-whitespace content must remain inside the same candidate destination.
+    let mut retained_content = false;
     for part in &map.before.parts {
         if part.path != old.source().path() {
             continue;
@@ -269,16 +295,18 @@ fn same_destination(
             if character.is_whitespace() {
                 continue;
             }
-            if let Some((path, byte)) = map.point(&part.path, start + offset)
-                && (path != new.source().path()
+            if let Some((path, byte)) = map.point(&part.path, start + offset) {
+                if path != new.source().path()
                     || !(new.source().span().start_byte()..new.source().span().end_byte())
-                        .contains(&byte))
-            {
-                return false;
+                        .contains(&byte)
+                {
+                    return false;
+                }
+                retained_content = true;
             }
         }
     }
-    true
+    retained_content
 }
 
 fn connections<'graph, 'corpus>(

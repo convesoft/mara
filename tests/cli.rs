@@ -382,6 +382,26 @@ fn reference_review_allows_prefix_edits_to_anchored_paragraphs() {
     );
 }
 
+#[test]
+fn reference_review_allows_replacing_anchored_paragraph_prefixes() {
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        "<a name=\"stable\"></a>\n\nFirst sentence.",
+        "<a name=\"stable\"></a>\n\nSecond sentence.",
+        true,
+    );
+}
+
+#[test]
+fn reference_review_allows_reordering_intact_unique_sections() {
+    reference_body_update(
+        "[ref](#alpha) [other](#beta)\n\n",
+        "# Alpha\n\nAlpha text.\n\n# Beta\n\nBeta text.",
+        "# Beta\n\nBeta text.\n\n# Alpha\n\nAlpha text.",
+        true,
+    );
+}
+
 fn mcp_response(responses: &[Value], id: u64) -> &Value {
     responses
         .iter()

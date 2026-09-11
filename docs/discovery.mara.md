@@ -433,7 +433,10 @@ replacement body; absence from a text diff's equal ranges does not imply removal
 Unchanged link usages remain protected unless the body update explicitly changes
 their reference-style destination definition. Validate such edited destinations;
 merely moving a usage into another definition context grants no exemption.
-Prepending text within the same anchored block does not change its destination.
+Editing a paragraph's leading text within the same anchored block does not
+change its destination. Intact, uniquely identifiable sections or blocks retain
+their destinations through reordering even when the character diff does not
+retain their original first byte.
 Preserve the existing missing-body scaffold allowance while validating newly
 authored references.
 
