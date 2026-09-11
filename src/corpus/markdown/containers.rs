@@ -8,7 +8,7 @@ use std::{cell::RefCell, collections::HashMap, fmt, ops::Range, rc::Rc};
 use rushdown::{
     ast::{
         Arena, CodeBlockKind, HeadingKind, KindData, NodeKind, NodeRef, NodeType, PrettyPrint,
-        TypeData,
+        TextQualifier, TypeData,
     },
     parser::{self, AnyBlockParser, BlockParser, Parser, ParserExtension, ParserExtensionFn},
     text::{BasicReader, Lines, MultilineValue, Reader as _, Segment, Value},
@@ -53,7 +53,8 @@ impl From<MaraItemNode> for KindData {
 
 #[derive(Debug)]
 struct MaraItemParser {
-    item: ParsedItem,
+    items: Vec<ParsedItem>,
+    parse_bodies: bool,
 }
 
 impl BlockParser for MaraItemParser {
@@ -68,15 +69,16 @@ impl BlockParser for MaraItemParser {
         reader: &mut BasicReader,
         _context: &mut parser::Context,
     ) -> Option<(NodeRef, parser::State)> {
-        if reader.peek_line_segment()?.start() != self.item.source.start {
-            return None;
-        }
+        let start = reader.peek_line_segment()?.start();
+        let item = self.items.iter().find(|item| item.source.start == start)?;
         reader.advance_to_eol();
         Some((
-            arena.new_node(MaraItemNode {
-                item: self.item.clone(),
-            }),
-            parser::State::HAS_CHILDREN,
+            arena.new_node(MaraItemNode { item: item.clone() }),
+            if self.parse_bodies {
+                parser::State::HAS_CHILDREN
+            } else {
+                parser::State::NO_CHILDREN
+            },
         ))
     }
 
@@ -99,7 +101,16 @@ impl BlockParser for MaraItemParser {
             reader.advance_to_eol();
             return None;
         }
-        Some(parser::State::HAS_CHILDREN)
+        if self.parse_bodies {
+            Some(parser::State::HAS_CHILDREN)
+        } else {
+            reader.advance_to_eol();
+            Some(parser::State::NO_CHILDREN)
+        }
+    }
+
+    fn can_interrupt_paragraph(&self) -> bool {
+        true
     }
 }
 
@@ -176,8 +187,13 @@ impl From<BlockParserWithSpans> for AnyBlockParser {
     }
 }
 
-fn item_tree(source: &str, item: &ParsedItem) -> (Arena, NodeRef, HashMap<usize, usize>) {
-    let container_item = item.clone();
+fn markdown_tree(
+    source: &str,
+    scope: Range<usize>,
+    items: &[ParsedItem],
+    parse_bodies: bool,
+) -> (Arena, NodeRef, HashMap<usize, usize>) {
+    let container_items = items.to_vec();
     let block_ends = Rc::new(RefCell::new(HashMap::new()));
     let tracked_ends = Rc::clone(&block_ends);
     let quote_ends = Rc::clone(&block_ends);
@@ -200,36 +216,48 @@ fn item_tree(source: &str, item: &ParsedItem) -> (Arena, NodeRef, HashMap<usize,
             parser::NoParserOptions,
             parser::PRIORITY_BLOCKQUOTE - 1,
         );
-        parser.add_block_parser(
-            move || MaraItemParser {
-                item: container_item.clone(),
-            },
-            parser::NoParserOptions,
-            super::DELIMITER_BLOCK_PRIORITY,
-        );
+        if !container_items.is_empty() {
+            parser.add_block_parser(
+                move || MaraItemParser {
+                    items: container_items.clone(),
+                    parse_bodies,
+                },
+                parser::NoParserOptions,
+                super::DELIMITER_BLOCK_PRIORITY,
+            );
+        }
         parser::gfm_table().apply(parser);
     });
     let parser = Parser::with_extensions(parser::Options::default(), extension);
     // Retain document-relative byte offsets, including UTF-8 and CRLF. Start
-    // at the already recognized opener and stop after its closing delimiter.
-    let mut reader = BasicReader::new(&source[..item.source.end]);
-    let first_line_end = source[item.source.clone()]
+    // at a recognized scope boundary without copying or rewriting its bytes.
+    let mut reader = BasicReader::new(&source[..scope.end]);
+    let first_line_end = source[scope.clone()]
         .find('\n')
-        .map_or(item.source.end, |offset| item.source.start + offset + 1);
-    reader.set_position(0, Segment::new(item.source.start, first_line_end));
+        .map_or(scope.end, |offset| scope.start + offset + 1);
+    reader.set_position(0, Segment::new(scope.start, first_line_end));
     let (arena, root) = parser.parse(&mut reader);
     let ends = block_ends.take();
     (arena, root, ends)
 }
 
 pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
+    // Keep full-document Markdown context (including reference definitions),
+    // but shield recognized item bodies and metadata from narrative parsing.
+    let (arena, root, ends) = markdown_tree(source, 0..source.len(), &document.items, false);
+    document.blocks = project_children(&arena, root, source, 0..source.len(), &ends);
     for item in &mut document.items {
         // Validation recovery retains partial identities and metadata. It
         // must not present a malformed item's body as trustworthy structure.
         if !item.body_valid || !item.title_valid {
             continue;
         }
-        let (arena, root, block_ends) = item_tree(source, item);
+        let (arena, root, block_ends) = markdown_tree(
+            source,
+            item.source.clone(),
+            std::slice::from_ref(item),
+            true,
+        );
         let container = arena[root]
             .first_child()
             .expect("recognized Mara item container");
@@ -426,12 +454,17 @@ fn project_children(
 ) -> Vec<ParsedBlock> {
     let children = arena[parent]
         .children(arena)
-        .filter_map(|child| block_kind(arena[child].kind_data()).map(|kind| (child, kind)))
+        .filter_map(|child| {
+            let kind = block_kind(arena[child].kind_data());
+            (kind.is_some() || arena[child].kind_data().kind_name() == "MaraItem")
+                .then_some((child, kind))
+        })
         .collect::<Vec<_>>();
     children
         .iter()
         .enumerate()
         .filter_map(|(index, &(child, kind))| {
+            let kind = kind?;
             let sibling_limit = children
                 .get(index + 1)
                 .and_then(|&(next, _)| node_start(arena, next))
@@ -448,6 +481,7 @@ fn project_children(
                 let span = table_span(arena, child, source, scope.start..sibling_limit)?;
                 return Some(ParsedBlock {
                     kind,
+                    heading_text: None,
                     children: project_children(arena, child, source, span.clone(), block_ends),
                     source: span,
                 });
@@ -495,6 +529,7 @@ fn project_children(
                     .map_or(own_end, |last| own_end.max(last.source.end));
                 return Some(ParsedBlock {
                     kind,
+                    heading_text: None,
                     children: nested,
                     source: start..end,
                 });
@@ -527,11 +562,32 @@ fn project_children(
             let span = start..end;
             Some(ParsedBlock {
                 kind,
+                heading_text: matches!(kind, MarkdownBlockKind::Heading { .. })
+                    .then(|| heading_text(arena, child, source)),
                 children: project_children(arena, child, source, span.clone(), block_ends),
                 source: span,
             })
         })
         .collect()
+}
+
+fn heading_text(arena: &Arena, node: NodeRef, source: &str) -> String {
+    let mut text = String::new();
+    for child in arena[node].children(arena) {
+        match arena[child].kind_data() {
+            KindData::Text(value) => {
+                text.push_str(value.str(source));
+                if value.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
+                    || value.has_qualifiers(TextQualifier::HARD_LINE_BREAK)
+                {
+                    text.push(' ');
+                }
+            }
+            KindData::CodeSpan(value) => text.push_str(&value.str(source)),
+            _ => text.push_str(&heading_text(arena, child, source)),
+        }
+    }
+    text
 }
 
 #[cfg(test)]
@@ -543,7 +599,12 @@ mod tests {
         let source =
             "Prelude.\n\n:::mara requirement REQ-ONE\n:title: One\n\n# Heading\n\nBody.\n:::\n";
         let parsed = super::super::parse(source).unwrap();
-        let (arena, root, _) = item_tree(source, &parsed.items[0]);
+        let (arena, root, _) = markdown_tree(
+            source,
+            parsed.items[0].source.clone(),
+            std::slice::from_ref(&parsed.items[0]),
+            true,
+        );
         let container = arena[root].first_child().unwrap();
         assert_eq!(arena[container].kind_data().typ(), NodeType::ContainerBlock);
         assert_eq!(arena[container].kind_data().kind_name(), "MaraItem");

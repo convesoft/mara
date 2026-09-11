@@ -22,6 +22,7 @@ const MARA_INLINE_PRIORITY: u32 = PRIORITY_LINK - 50;
 #[derive(Debug)]
 pub(super) struct ParsedDocument {
     pub(super) items: Vec<ParsedItem>,
+    pub(super) blocks: Vec<ParsedBlock>,
     pub(super) complete: bool,
 }
 
@@ -43,6 +44,7 @@ pub(super) struct ParsedItem {
 #[derive(Debug, Clone)]
 pub(super) struct ParsedBlock {
     pub(super) kind: super::MarkdownBlockKind,
+    pub(super) heading_text: Option<String>,
     pub(super) source: Range<usize>,
     pub(super) children: Vec<ParsedBlock>,
 }
@@ -409,6 +411,7 @@ fn project(
 
     Ok(ParsedDocument {
         items,
+        blocks: Vec::new(),
         complete: true,
     })
 }
@@ -457,7 +460,14 @@ fn project_for_validation(
         }
     }
 
-    (ParsedDocument { items, complete }, errors)
+    (
+        ParsedDocument {
+            items,
+            blocks: Vec::new(),
+            complete,
+        },
+        errors,
+    )
 }
 
 fn project_item(

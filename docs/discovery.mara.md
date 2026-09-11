@@ -322,8 +322,7 @@ source range rather than assigning neighbouring bytes to them. Apply these
 bounds to complete table spans too; do not truncate an escaping table into a
 valid-looking child. Use UTF-8 byte boundaries for every exposed source span.
 Validation recovery retains partial item data but exposes no body blocks for
-items with invalid metadata or incomplete structure. Derived sections and the
-remaining discovery contracts below are separate implementation work.
+items with invalid metadata or incomplete structure.
 
 ## Derived sections
 
@@ -340,6 +339,15 @@ A section carries its heading text, level, and source location. Sections contain
 ordinary Markdown blocks, items, and subsections in source order. Prose before
 and after an item can belong to the same section. Add no abstract passage
 container around those blocks or special passage node for a heading.
+
+The Rust projection retains narrative blocks through `Document::blocks()` and
+heading text through `MarkdownBlock::heading_text()`. `Corpus::discovery()` builds
+a disposable petgraph graph from that loaded snapshot. Borrowed `DiscoveryNode`
+values expose node kind, source, parent, children, and directional connections;
+sections retain their original heading block and a source span covering their
+full extent. Graph indexes stay private. Existing item relations and resolved
+item-body mentions share this graph with containment. Narrative link resolution,
+discovery handles, search selection, and CLI/MCP discovery remain separate work.
 
 ## Discovery units
 
