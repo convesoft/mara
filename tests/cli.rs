@@ -8262,7 +8262,7 @@ fn item_delete_ignores_outgoing_self_references_and_code_examples() {
     let source = source.replace(":title: REQ-DELETE", &format!(":title: REQ-DELETE\n:depends_on: REQ-KEEP\n:depends_on: REQ-DELETE\n:depends_on: {mid}"))
         .replace("Exact Unicode body: żółć.", &format!("[[REQ-KEEP]] [[REQ-DELETE]] [[{mid}]]"));
     let other = other.replace("Exact Unicode body: żółć.", &format!("`[[REQ-DELETE]] [[{mid}]]`\n\n```text\n[[REQ-DELETE]] [[{mid}]]\n```\n\n\\[[REQ-DELETE]] \\[[{mid}]]"));
-    let other = format!("Narrative [[REQ-DELETE]] [[{mid}]].\n\n{other}");
+    let other = format!("Narrative `[[REQ-DELETE]] [[{mid}]]`.\n\n{other}");
     fs::write(fixture.path().join("delete.mara.md"), &source).unwrap();
     fs::write(fixture.path().join("keep.mara.md"), &other).unwrap();
     assert!(
@@ -8425,12 +8425,12 @@ Unsupported labelled syntax [[REQ-MOVE|REQ-MOVE]].
 "#
             ),
         );
-    let destination = format!("Narrative [[REQ-MOVE]].\n\n{destination}\nTail REQ-MOVE");
+    let destination = format!("Narrative `[[REQ-MOVE]]`.\n\n{destination}\nTail REQ-MOVE");
     fs::write(fixture.path().join("source.mara.md"), &source).unwrap();
     fs::write(fixture.path().join("destination.mara.md"), &destination).unwrap();
     fs::write(
         fixture.path().join("untouched.mara.md"),
-        "REQ-MOVE [[REQ-MOVE]]\r\n",
+        "REQ-MOVE `[[REQ-MOVE]]`\r\n",
     )
     .unwrap();
     assert!(
@@ -8495,7 +8495,7 @@ fn item_rename_preserves_bytes_and_mid_graph_across_documents() {
     );
     assert_eq!(
         fs::read(fixture.path().join("untouched.mara.md")).unwrap(),
-        b"REQ-MOVE [[REQ-MOVE]]\r\n"
+        b"REQ-MOVE `[[REQ-MOVE]]`\r\n"
     );
     #[cfg(unix)]
     for (path, mode) in [("source.mara.md", 0o640), ("destination.mara.md", 0o604)] {

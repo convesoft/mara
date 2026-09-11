@@ -62,6 +62,7 @@ pub struct Document {
     source: String,
     items: Vec<Item>,
     blocks: Vec<MarkdownBlock>,
+    references: Vec<DocumentReference>,
 }
 
 impl Document {
@@ -77,9 +78,40 @@ impl Document {
         &self.items
     }
 
+    /// Explicit source references, including unresolved links and anchor declarations.
+    pub fn references(&self) -> &[DocumentReference] {
+        &self.references
+    }
+
     /// Ordinary document blocks outside items, retaining Markdown containers.
     pub fn blocks(&self) -> &[MarkdownBlock] {
         &self.blocks
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceKind {
+    Item,
+    MarkdownLink,
+    Anchor,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentReference {
+    kind: ReferenceKind,
+    target: String,
+    source: SourceLocation,
+}
+
+impl DocumentReference {
+    pub fn kind(&self) -> ReferenceKind {
+        self.kind
+    }
+    pub fn target(&self) -> &str {
+        &self.target
+    }
+    pub fn source(&self) -> &SourceLocation {
+        &self.source
     }
 }
 
@@ -640,22 +672,8 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
                 }
             }
         }
-        for mention in item.mentions() {
-            match resolve_indexed_item(&ids, &mid_targets, mention.target()) {
-                IndexedItem::Missing if corpus.is_complete() => diagnostic(
-                    &mut diagnostics,
-                    mention.source(),
-                    format!("mention references missing item '{}'", mention.target()),
-                ),
-                IndexedItem::Missing | IndexedItem::One(_) => {}
-                IndexedItem::Ambiguous => diagnostic(
-                    &mut diagnostics,
-                    mention.source(),
-                    format!("mention references ambiguous item '{}'", mention.target()),
-                ),
-            }
-        }
     }
+    diagnostics.extend_from_slice(corpus.discovery().diagnostics());
     sort_diagnostics(&mut diagnostics);
     diagnostics
 }
@@ -801,7 +819,11 @@ fn load_corpus_for_validation_with_schema(
     ))
 }
 
-fn diagnostic(diagnostics: &mut Vec<Diagnostic>, source: &SourceLocation, message: String) {
+pub(crate) fn diagnostic(
+    diagnostics: &mut Vec<Diagnostic>,
+    source: &SourceLocation,
+    message: String,
+) {
     diagnostic_with_kind(diagnostics, source, DiagnosticKind::Other, message);
 }
 
@@ -1128,7 +1150,22 @@ fn project_document(
         .into_iter()
         .map(|block| project_block(&path, &line_starts, block))
         .collect();
+    let references = parsed
+        .references
+        .into_iter()
+        .map(|reference| DocumentReference {
+            kind: reference.kind,
+            target: reference.target,
+            source: location(
+                &path,
+                &line_starts,
+                reference.source.start,
+                reference.source.end,
+            ),
+        })
+        .collect();
     Document {
+        references,
         path,
         source,
         items,

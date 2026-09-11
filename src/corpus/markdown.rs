@@ -2,6 +2,7 @@
 //! delimiter rules; the container pass retains ordinary item-body children.
 
 mod containers;
+mod references;
 
 use std::{fmt, ops::Range};
 
@@ -23,7 +24,15 @@ const MARA_INLINE_PRIORITY: u32 = PRIORITY_LINK - 50;
 pub(super) struct ParsedDocument {
     pub(super) items: Vec<ParsedItem>,
     pub(super) blocks: Vec<ParsedBlock>,
+    pub(super) references: Vec<ParsedReference>,
     pub(super) complete: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ParsedReference {
+    pub(super) kind: super::ReferenceKind,
+    pub(super) target: String,
+    pub(super) source: Range<usize>,
 }
 
 #[derive(Debug, Clone)]
@@ -331,6 +340,7 @@ fn mara_extension() -> impl ParserExtension {
 pub(super) fn parse(source: &str) -> Result<ParsedDocument, ParseError> {
     let (delimiters, mentions) = parse_extensions(source);
     let mut document = project(source, &delimiters, &mentions)?;
+    populate_mentions(&mut document, mentions);
     containers::populate(source, &mut document);
     Ok(document)
 }
@@ -338,8 +348,30 @@ pub(super) fn parse(source: &str) -> Result<ParsedDocument, ParseError> {
 pub(super) fn parse_for_validation(source: &str) -> (ParsedDocument, Vec<ParseError>) {
     let (delimiters, mentions) = parse_extensions(source);
     let (mut document, errors) = project_for_validation(source, &delimiters, &mentions);
+    populate_mentions(&mut document, mentions);
     containers::populate(source, &mut document);
     (document, errors)
+}
+
+fn populate_mentions(document: &mut ParsedDocument, mentions: Vec<ParsedMention>) {
+    document.references.extend(
+        mentions
+            .into_iter()
+            .filter(|mention| {
+                document.items.iter().all(|item| {
+                    !item.source.contains(&mention.source.start)
+                        || (item.metadata_valid
+                            && item.body_valid
+                            && mention.source.start >= item.body.start
+                            && mention.source.end <= item.body.end)
+                })
+            })
+            .map(|mention| ParsedReference {
+                kind: super::ReferenceKind::Item,
+                target: mention.target,
+                source: mention.source,
+            }),
+    );
 }
 
 fn parse_extensions(source: &str) -> (Vec<Delimiter>, Vec<ParsedMention>) {
@@ -412,6 +444,7 @@ fn project(
     Ok(ParsedDocument {
         items,
         blocks: Vec::new(),
+        references: Vec::new(),
         complete: true,
     })
 }
@@ -464,6 +497,7 @@ fn project_for_validation(
         ParsedDocument {
             items,
             blocks: Vec::new(),
+            references: Vec::new(),
             complete,
         },
         errors,

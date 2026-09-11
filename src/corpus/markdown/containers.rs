@@ -20,8 +20,8 @@ use crate::MarkdownBlockKind;
 /// The container owns the parsed identity, ordered metadata, and exact
 /// opening/body/closing provenance alongside its ordinary Markdown children.
 #[derive(Debug)]
-struct MaraItemNode {
-    item: ParsedItem,
+pub(super) struct MaraItemNode {
+    pub(super) item: ParsedItem,
 }
 
 impl NodeKind for MaraItemNode {
@@ -190,12 +190,19 @@ fn markdown_tree(
     source: &str,
     scope: Range<usize>,
     items: &[ParsedItem],
-) -> (Arena, NodeRef, HashMap<usize, usize>) {
+) -> (Arena, NodeRef, HashMap<usize, usize>, HashMap<usize, usize>) {
+    let link_ends = Rc::new(RefCell::new(HashMap::new()));
+    let tracked_links = Rc::clone(&link_ends);
     let container_items = items.to_vec();
     let block_ends = Rc::new(RefCell::new(HashMap::new()));
     let tracked_ends = Rc::clone(&block_ends);
     let quote_ends = Rc::clone(&block_ends);
     let extension = ParserExtensionFn::new(move |parser: &mut Parser| {
+        parser.add_inline_parser(
+            move || super::references::LinkParserWithSpans::new(Rc::clone(&tracked_links)),
+            parser::NoParserOptions,
+            parser::PRIORITY_LINK - 1,
+        );
         parser.add_block_parser(
             move || BlockParserWithSpans {
                 parser: parser::FencedCodeBlockParser::new().into(),
@@ -235,16 +242,20 @@ fn markdown_tree(
     reader.set_position(0, Segment::new(scope.start, first_line_end));
     let (arena, root) = parser.parse(&mut reader);
     let ends = block_ends.take();
-    (arena, root, ends)
+    (arena, root, ends, link_ends.take())
 }
 
 pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
     // Parse ordinary content and item bodies together so Rushdown resolves
     // references against one document-wide definition context. Recognized item
     // boundaries still shield metadata and scope each item's Markdown children.
-    let (arena, root, ends) = markdown_tree(source, 0..source.len(), &document.items);
+    let (arena, root, ends, link_ends) = markdown_tree(source, 0..source.len(), &document.items);
     document.blocks = project_children(&arena, root, source, 0..source.len(), &ends);
     populate_item_blocks(&arena, root, source, &ends, &mut document.items);
+    super::references::collect(&arena, root, source, &link_ends, document);
+    document
+        .references
+        .sort_by_key(|reference| reference.source.start);
 }
 
 fn populate_item_blocks(
@@ -613,7 +624,7 @@ mod tests {
         let source =
             "Prelude.\n\n:::mara requirement REQ-ONE\n:title: One\n\n# Heading\n\nBody.\n:::\n";
         let parsed = super::super::parse(source).unwrap();
-        let (arena, root, _) = markdown_tree(
+        let (arena, root, _, _) = markdown_tree(
             source,
             parsed.items[0].source.clone(),
             std::slice::from_ref(&parsed.items[0]),
