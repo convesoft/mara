@@ -109,15 +109,15 @@ impl From<MaraItemParser> for AnyBlockParser {
     }
 }
 
-/// Rushdown consumes closing fences without retaining them in CodeBlock.value.
-/// Record the consumed lines while delegating all fence grammar to Rushdown.
+/// Rushdown does not retain closing fences or quote markers in content segments.
+/// Record their consumed lines while delegating the grammar to Rushdown.
 #[derive(Debug)]
-struct FencedCodeWithSpans {
-    parser: parser::FencedCodeBlockParser,
+struct BlockParserWithSpans {
+    parser: AnyBlockParser,
     ends: Rc<RefCell<HashMap<usize, usize>>>,
 }
 
-impl BlockParser for FencedCodeWithSpans {
+impl BlockParser for BlockParserWithSpans {
     fn trigger(&self) -> &[u8] {
         self.parser.trigger()
     }
@@ -148,7 +148,7 @@ impl BlockParser for FencedCodeWithSpans {
         let state = self.parser.cont(arena, node, reader, context);
         if state.is_some() || reader.position().1.start() > segment.start() {
             self.ends.borrow_mut().insert(
-                arena[node].pos().expect("opened fenced code position"),
+                arena[node].pos().expect("opened block position"),
                 segment.stop(),
             );
         }
@@ -170,26 +170,35 @@ impl BlockParser for FencedCodeWithSpans {
     }
 }
 
-impl From<FencedCodeWithSpans> for AnyBlockParser {
-    fn from(parser: FencedCodeWithSpans) -> Self {
+impl From<BlockParserWithSpans> for AnyBlockParser {
+    fn from(parser: BlockParserWithSpans) -> Self {
         Self::Extension(Box::new(parser))
     }
 }
 
 fn item_tree(source: &str, item: &ParsedItem) -> (Arena, NodeRef, HashMap<usize, usize>) {
     let container_item = item.clone();
-    let code_ends = Rc::new(RefCell::new(HashMap::new()));
-    let tracked_ends = Rc::clone(&code_ends);
+    let block_ends = Rc::new(RefCell::new(HashMap::new()));
+    let tracked_ends = Rc::clone(&block_ends);
+    let quote_ends = Rc::clone(&block_ends);
     let extension = ParserExtensionFn::new(move |parser: &mut Parser| {
         parser.add_block_parser(
-            move || FencedCodeWithSpans {
-                parser: parser::FencedCodeBlockParser::new(),
+            move || BlockParserWithSpans {
+                parser: parser::FencedCodeBlockParser::new().into(),
                 ends: Rc::clone(&tracked_ends),
             },
             parser::NoParserOptions,
             // Rushdown 0.18 registers its default fence parser at the
             // indented-code priority; run the tracking delegate first.
             parser::PRIORITY_INDENTED_CODE_BLOCK - 1,
+        );
+        parser.add_block_parser(
+            move || BlockParserWithSpans {
+                parser: parser::BlockquoteParser::new().into(),
+                ends: Rc::clone(&quote_ends),
+            },
+            parser::NoParserOptions,
+            parser::PRIORITY_BLOCKQUOTE - 1,
         );
         parser.add_block_parser(
             move || MaraItemParser {
@@ -209,7 +218,7 @@ fn item_tree(source: &str, item: &ParsedItem) -> (Arena, NodeRef, HashMap<usize,
         .map_or(item.source.end, |offset| item.source.start + offset + 1);
     reader.set_position(0, Segment::new(item.source.start, first_line_end));
     let (arena, root) = parser.parse(&mut reader);
-    let ends = code_ends.take();
+    let ends = block_ends.take();
     (arena, root, ends)
 }
 
@@ -220,7 +229,7 @@ pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
         if !item.body_valid || !item.title_valid {
             continue;
         }
-        let (arena, root, code_ends) = item_tree(source, item);
+        let (arena, root, block_ends) = item_tree(source, item);
         let container = arena[root]
             .first_child()
             .expect("recognized Mara item container");
@@ -228,7 +237,7 @@ pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
         *item = rushdown::as_extension_data!(arena, container, MaraItemNode)
             .item
             .clone();
-        item.blocks = project_children(&arena, container, source, item.body.clone(), &code_ends);
+        item.blocks = project_children(&arena, container, source, item.body.clone(), &block_ends);
     }
 }
 
@@ -388,7 +397,7 @@ fn project_children(
     parent: NodeRef,
     source: &str,
     scope: Range<usize>,
-    code_ends: &HashMap<usize, usize>,
+    block_ends: &HashMap<usize, usize>,
 ) -> Vec<ParsedBlock> {
     let children = arena[parent]
         .children(arena)
@@ -401,7 +410,7 @@ fn project_children(
             if let Some(span) = table_span(arena, child, source, scope.clone()) {
                 return ParsedBlock {
                     kind,
-                    children: project_children(arena, child, source, span.clone(), code_ends),
+                    children: project_children(arena, child, source, span.clone(), block_ends),
                     source: span,
                 };
             }
@@ -421,9 +430,34 @@ fn project_children(
             } else {
                 limit
             };
+            if matches!(
+                kind,
+                MarkdownBlockKind::Blockquote
+                    | MarkdownBlockKind::List
+                    | MarkdownBlockKind::ListItem
+            ) {
+                // Lists own their item markers and children, not trailing blank
+                // lines from an enclosing quote. Quotes additionally own each
+                // explicitly consumed `>` line, even when it has no children.
+                let nested = project_children(arena, child, source, start..limit, block_ends);
+                let own_end = block_ends
+                    .get(&start)
+                    .copied()
+                    .unwrap_or_else(|| line_end(source, start, limit));
+                // Lazy paragraph continuations may extend past the last
+                // explicit quote marker, so retain the children's full extent.
+                let end = nested
+                    .last()
+                    .map_or(own_end, |last| own_end.max(last.source.end));
+                return ParsedBlock {
+                    kind,
+                    children: nested,
+                    source: start..end,
+                };
+            }
             // Include authored block markers and closing fences, but not blank
             // separator lines. Never serialize the AST to reconstruct source.
-            let mut end = code_ends
+            let mut end = block_ends
                 .get(&start)
                 .copied()
                 .or_else(|| leaf_end(arena, child, source, start, limit))
@@ -448,7 +482,7 @@ fn project_children(
             let span = start..end;
             ParsedBlock {
                 kind,
-                children: project_children(arena, child, source, span.clone(), code_ends),
+                children: project_children(arena, child, source, span.clone(), block_ends),
                 source: span,
             }
         })

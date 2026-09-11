@@ -575,6 +575,70 @@ fn container_boundaries_preserve_code_context_and_adjacent_empty_items() {
 }
 
 #[test]
+fn nested_containers_exclude_outer_quote_separators() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    for (body, expected, kind) in [
+        ("> - one\n>\n> next\n", "- one\n", Kind::List),
+        ("> > inner\n>\n> outer\n", "> inner\n", Kind::Blockquote),
+        ("> -\n>\n> next\n", "-\n", Kind::List),
+        ("> >\n>\n> next\n", ">\n", Kind::Blockquote),
+        (
+            "> > α\r\n> >\r\n>\r\n> next\r\n",
+            "> α\r\n> >\r\n",
+            Kind::Blockquote,
+        ),
+        ("> - > α\n>   >\n>\n> next\n", "- > α\n>   >\n", Kind::List),
+        (
+            "> > inner\nlazy continuation\n>\n> outer\n",
+            "> inner\nlazy continuation\n",
+            Kind::Blockquote,
+        ),
+        (
+            "> - first\n>\n> - second\n>\n> next\n",
+            "- first\n>\n> - second\n",
+            Kind::List,
+        ),
+    ] {
+        let source =
+            format!(":::mara requirement REQ-CONTAINERS\n:title: Containers\n\n{body}:::\n");
+        write(fixture.path(), "containers.mara.md", &source);
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let outer = &item.body_blocks()[0];
+        assert_eq!(outer.kind(), Kind::Blockquote);
+        let blocks = outer.children();
+        assert_eq!(blocks[0].kind(), kind);
+        assert_eq!(blocks[1].kind(), Kind::Paragraph);
+        let span = blocks[0].source().span();
+        assert_eq!(
+            &source[span.start_byte()..span.end_byte()],
+            expected,
+            "{body}"
+        );
+        assert_eq!(span.start_byte(), source.find(expected).unwrap());
+        assert_eq!(span.start_line(), 4);
+        assert_eq!(span.end_line(), 3 + expected.lines().count());
+        if kind == Kind::List {
+            let last_item = blocks[0].children().last().unwrap();
+            assert_eq!(last_item.kind(), Kind::ListItem);
+            assert_eq!(last_item.source().span().end_byte(), span.end_byte());
+        }
+        let outer_span = outer.source().span();
+        assert_eq!(
+            &source[outer_span.start_byte()..outer_span.end_byte()],
+            body
+        );
+        assert_eq!(item.body(), body);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("containers.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+#[test]
 fn quoted_html_and_indented_code_end_at_their_parsed_content() {
     use mara::MarkdownBlockKind as Kind;
 
