@@ -132,6 +132,132 @@ fn mcp_call(id: u64, name: &str, arguments: Value) -> Value {
     )
 }
 
+#[test]
+fn cli_and_mcp_reference_preflight_preserve_files_for_all_item_mutations() {
+    for use_mcp in [false, true] {
+        let fixture = TempDir::new().unwrap();
+        assert!(mara(fixture.path(), &["project", "init"]).status.success());
+        let path = fixture.path().join("a.mara.md");
+        let source = "[first](#same) [second](#same)\n\n:::mara requirement REQ-ONE\n:mid: 01M1PXP2KG381MM1VNN6XC7S4M\n:title: One\n\n# Same\n\nFirst.\n:::\n\n# Same\n\nSecond.\n";
+        fs::write(&path, source).unwrap();
+        let cases = [
+            (
+                vec![
+                    "item",
+                    "create",
+                    "requirement",
+                    "REQ-NEW",
+                    "a.mara.md",
+                    "--title",
+                    "New",
+                    "--body",
+                    "# Same\n\nInserted.",
+                    "--line",
+                    "1",
+                ],
+                "item_create",
+                json!({"flavour":"requirement", "id":"REQ-NEW", "file":"a.mara.md", "title":"New", "body":"# Same\n\nInserted.", "line":1}),
+            ),
+            (
+                vec!["item", "update", "REQ-ONE", "--body", "# Changed\n\nFirst."],
+                "item_update",
+                json!({"reference":"REQ-ONE", "body":"# Changed\n\nFirst."}),
+            ),
+            (
+                vec!["item", "move", "REQ-ONE", "b.mara.md"],
+                "item_move",
+                json!({"reference":"REQ-ONE", "file":"b.mara.md"}),
+            ),
+            (
+                vec!["item", "delete", "REQ-ONE"],
+                "item_delete",
+                json!({"reference":"REQ-ONE"}),
+            ),
+        ];
+        for (args, tool, params) in cases {
+            let message = if use_mcp {
+                let responses = mcp_exchange(
+                    fixture.path(),
+                    &[
+                        mcp_initialize(1),
+                        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                        mcp_call(2, tool, params),
+                    ],
+                );
+                let result = &mcp_response(&responses, 2)["result"];
+                assert_eq!(result["isError"], true, "{result}");
+                result.to_string()
+            } else {
+                let output = mara(fixture.path(), &args);
+                assert!(!output.status.success());
+                stderr(&output)
+            };
+            assert!(
+                message.contains("a.mara.md:1")
+                    && message.contains("bytes")
+                    && message.contains("untouched link"),
+                "{message}"
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), source);
+            assert!(!fixture.path().join("b.mara.md").exists());
+        }
+
+        // Rewriting a mention inside a heading changes its generated anchor.
+        // The unchanged Markdown link must block rename before any file changes.
+        let rename_source = source
+            .replace("# Same", "# [[REQ-ONE]]")
+            .replace("#same", "#req-one");
+        fs::write(&path, &rename_source).unwrap();
+        let output = if use_mcp {
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(
+                        2,
+                        "item_rename",
+                        json!({"reference":"REQ-ONE", "new_id":"REQ-TWO"}),
+                    ),
+                ],
+            );
+            let result = &mcp_response(&responses, 2)["result"];
+            assert_eq!(result["isError"], true, "{result}");
+            result.to_string()
+        } else {
+            let output = mara(fixture.path(), &["item", "rename", "REQ-ONE", "REQ-TWO"]);
+            assert!(!output.status.success());
+            stderr(&output)
+        };
+        assert!(output.contains("untouched link"), "{output}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), rename_source);
+
+        fs::write(
+            &path,
+            source.replace("[first](#same) [second](#same)", "[[REQ-ONE]]"),
+        )
+        .unwrap();
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(
+                    2,
+                    "item_rename",
+                    json!({"reference":"REQ-ONE", "new_id":"REQ-TWO"}),
+                ),
+            ],
+        );
+        assert_eq!(mcp_response(&responses, 2)["result"]["isError"], false);
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .starts_with("[[REQ-TWO]]")
+        );
+    }
+}
+
 fn mcp_response(responses: &[Value], id: u64) -> &Value {
     responses
         .iter()
@@ -8132,6 +8258,8 @@ fn item_delete_reports_every_incoming_occurrence_with_cli_mcp_parity() {
         .unwrap();
     let third = third.replace(keep_mid, &third_mid);
     fs::write(fixture.path().join("third.mara.md"), &third).unwrap();
+    let narrative = "[[REQ-DELETE]]\n";
+    fs::write(fixture.path().join("narrative.mara.md"), narrative).unwrap();
     assert!(
         mara(fixture.path(), &["project", "validate"])
             .status
@@ -8144,7 +8272,11 @@ fn item_delete_reports_every_incoming_occurrence_with_cli_mcp_parity() {
     assert!(!cli.status.success());
     let result: Value = serde_json::from_slice(&cli.stdout).unwrap();
     let error = result["error"]["message"].as_str().unwrap();
-    assert_eq!(error.matches("(bytes ").count(), 10, "{error}");
+    assert_eq!(error.matches("(bytes ").count(), 11, "{error}");
+    assert!(
+        error.contains("narrative.mara.md:1 (bytes 0..14)"),
+        "{error}"
+    );
     for (file, body) in [("keep.mara.md", &other), ("third.mara.md", &third)] {
         for (offset, _) in body
             .match_indices(":depends_on:")
@@ -8180,6 +8312,7 @@ fn item_delete_reports_every_incoming_occurrence_with_cli_mcp_parity() {
         ("delete.mara.md", source),
         ("keep.mara.md", other),
         ("third.mara.md", third),
+        ("narrative.mara.md", narrative.to_owned()),
     ] {
         assert_eq!(
             fs::read_to_string(fixture.path().join(file)).unwrap(),

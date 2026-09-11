@@ -8,6 +8,7 @@ use std::{
 use tempfile::NamedTempFile;
 
 mod delete;
+mod references;
 mod rename;
 mod transaction;
 mod update;
@@ -234,11 +235,22 @@ pub fn create_item(
                     .is_some_and(|body| !body.trim().is_empty())
         });
 
-    if !request.relations.is_empty() {
-        let projected = corpus
-            .with_replacements(&BTreeMap::from([(path.clone(), candidate.clone())]), schema)?;
-        if let Some(diagnostic) =
-            validate_corpus(&projected, schema)
+    let candidate_corpus =
+        corpus.with_replacements(&BTreeMap::from([(path.clone(), candidate.clone())]), schema)?;
+    references::preflight(&corpus, &candidate_corpus, None)?;
+    if let Some(diagnostic) = candidate_corpus.discovery().diagnostics().first() {
+        return invalid(format!(
+            "cannot create item while reference validation fails at {}:{} (bytes {}..{}): {}",
+            diagnostic.source().path().display(),
+            diagnostic.source().span().start_line(),
+            diagnostic.source().span().start_byte(),
+            diagnostic.source().span().end_byte(),
+            diagnostic.message()
+        ));
+    }
+    if !request.relations.is_empty()
+        && let Some(diagnostic) =
+            validate_corpus(&candidate_corpus, schema)
                 .into_iter()
                 .find(|diagnostic| {
                     (diagnostic.applies_to_item(&request.id)
@@ -249,9 +261,8 @@ pub fn create_item(
                                 <= created.source().span().end_byte()))
                         && !(!complete && diagnostic.is_missing_body())
                 })
-        {
-            return invalid(diagnostic.message());
-        }
+    {
+        return invalid(diagnostic.message());
     }
     atomic_replace(&absolute, &candidate, existed)?;
     Ok(ItemCreation {
@@ -372,6 +383,7 @@ pub fn move_item(
         );
     }
     let projected = corpus.with_replacements(&candidates, schema)?;
+    references::preflight(&corpus, &projected, None)?;
     require_valid_move_corpus(&projected, schema)?;
     // Validity alone cannot detect a block hidden by Markdown context or changed mentions.
     if projected.items().count() != corpus.items().count() {

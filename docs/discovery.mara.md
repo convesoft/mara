@@ -424,6 +424,14 @@ with deleted content do not count as surviving links. Rename retains automatic
 rewriting of supported item-ID references while preserving their identity
 targets, including references in ordinary Markdown.
 
+Compare resolved connections in the original and candidate discovery graphs.
+Track item content by identity across paths and narrative content within its
+document; source correspondence is temporary and never persisted. Generated
+anchor strings and snapshot discovery handles alone cannot establish destination
+identity. Links left byte-for-byte unchanged within a replacement body remain
+protected; replacing the body does not exempt those links. Preserve the existing
+missing-body scaffold allowance while validating newly authored references.
+
 Movement preserves ID/MID references because the item's identity is unchanged.
 Check incoming links to sections or blocks inside the moved item, relative or
 same-document links carried with it, and generated heading anchors affected in
