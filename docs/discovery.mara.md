@@ -430,6 +430,9 @@ document; source correspondence is temporary and never persisted. Generated
 anchor strings and snapshot discovery handles alone cannot establish destination
 identity. Match surviving parsed links even when their source moves within a
 replacement body; absence from a text diff's equal ranges does not imply removal.
+Explicitly converting an occurrence inside the replacement body to code or
+escaped literal text removes that reference under [[DES-DOCUMENT-FORMAT]];
+retained source bytes alone do not make it a surviving link.
 Unchanged link usages remain protected unless the body update explicitly changes
 their reference-style destination definition. Validate such edited destinations;
 merely moving a usage into another definition context grants no exemption.

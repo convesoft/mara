@@ -340,7 +340,7 @@ pub(super) fn preflight(
     before: &Corpus,
     after: &Corpus,
     rename: Option<(&str, &str)>,
-    edited_body_document: Option<&std::path::Path>,
+    edited_body: Option<&SourceLocation>,
 ) -> Result<(), Error> {
     let mut new_sources = sources(after);
     let maps = sources(before)
@@ -426,7 +426,7 @@ pub(super) fn preflight(
         });
         if let (Some(original), Some(candidate)) = (reference, surviving)
             && original.kind() == ReferenceKind::MarkdownLink
-            && edited_body_document == Some(source.path())
+            && edited_body.map(SourceLocation::path) == Some(source.path())
             && candidate.source().path() == source.path()
             && original.target() != candidate.target()
         {
@@ -444,7 +444,19 @@ pub(super) fn preflight(
                     span.end_byte(),
                 )
             })
-            .or(mapped)
+            .or_else(|| {
+                // Literal-context edits inside the explicitly replaced body can
+                // remove a parsed reference while retaining all its raw bytes.
+                // Outside that body, disappearance still needs protection: a
+                // mutation must not silently hide an untouched reference.
+                let explicitly_replaced = reference.is_some()
+                    && edited_body.is_some_and(|body| {
+                        body.path() == source.path()
+                            && body.span().start_byte() <= location.1
+                            && body.span().end_byte() >= location.2
+                    });
+                if explicitly_replaced { None } else { mapped }
+            })
         else {
             continue; // Explicitly edited or removed reference.
         };

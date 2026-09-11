@@ -402,6 +402,27 @@ fn reference_review_allows_reordering_intact_unique_sections() {
     );
 }
 
+#[test]
+fn reference_review_allows_explicit_literal_context_edits() {
+    for link in ["[ref](#alpha)", "[[REQ-ONE]]"] {
+        let body = format!("# Alpha\n\n{link}");
+        for literal in [
+            format!("`{link}`"),
+            format!("```\n{link}\n```"),
+            format!("\\{link}"),
+        ] {
+            reference_body_update("", &body, &format!("# Alpha\n\n{literal}"), true);
+        }
+    }
+    // Literalizing one occurrence must not exempt another active link.
+    reference_body_update(
+        "",
+        "# Same\n\nFirst.\n\n# Same\n\nSecond.\n\n[example](#same) [active](#same)",
+        "# Same\n\nSecond.\n\n`[example](#same)` [active](#same)",
+        false,
+    );
+}
+
 fn mcp_response(responses: &[Value], id: u64) -> &Value {
     responses
         .iter()
