@@ -227,6 +227,25 @@ fn same_destination(
     {
         return candidate.source() == new.source();
     }
+    // An anchored block may be rewritten completely. Once an intact original
+    // elsewhere has been ruled out, the same slot in a corresponding container
+    // identifies that edited block without requiring any shared characters.
+    if matches!(old.kind(), DiscoveryNodeKind::MarkdownBlock(_))
+        && let (Some(old_parent), Some(new_parent)) = (old.parent(), new.parent())
+        && same_destination(old_parent, new_parent, maps, old_graph, new_graph)
+    {
+        let old_slot = old_parent
+            .children()
+            .iter()
+            .position(|node| node.source() == old.source());
+        let new_slot = new_parent
+            .children()
+            .iter()
+            .position(|node| node.source() == new.source());
+        if old_slot.is_some() && old_slot == new_slot {
+            return true;
+        }
+    }
     if let DiscoveryNodeKind::Section { heading } = old.kind() {
         let same_heading = |node: DiscoveryNode<'_, '_>, source: &Source| {
             matches!(node.kind(), DiscoveryNodeKind::Section { heading: candidate }
@@ -243,6 +262,11 @@ fn same_destination(
             .nodes()
             .filter(|node| same_heading(*node, &map.after))
             .count();
+        // A unique surviving heading identifies the section itself; promoting
+        // or demoting a child changes its extent, not that destination identity.
+        if old_sections.len() == 1 && new_count == 1 && same_heading(new, &map.after) {
+            return true;
+        }
         // Repeated headings have no persisted identity. An unchanged complete
         // section is stronger evidence than a diff's choice of equal '#' bytes.
         if (old_sections.len() > 1 || new_count > 1)

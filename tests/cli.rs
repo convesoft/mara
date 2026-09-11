@@ -423,6 +423,24 @@ fn reference_review_allows_explicit_literal_context_edits() {
     );
 }
 
+#[test]
+fn reference_review_allows_complete_anchored_paragraph_replacement() {
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        "<a name=\"stable\"></a>\n\nYes",
+        "<a name=\"stable\"></a>\n\nNo",
+        true,
+    );
+}
+
+#[test]
+fn reference_review_allows_section_extent_changes() {
+    let nested = "# Alpha\n\nAlpha text.\n\n## Beta\n\nBeta text.";
+    let siblings = "# Alpha\n\nAlpha text.\n\n# Beta\n\nBeta text.";
+    reference_body_update("[ref](#alpha) [other](#beta)\n\n", nested, siblings, true);
+    reference_body_update("[ref](#alpha) [other](#beta)\n\n", siblings, nested, true);
+}
+
 fn mcp_response(responses: &[Value], id: u64) -> &Value {
     responses
         .iter()
