@@ -391,3 +391,87 @@ fn retains_heading_text_and_exact_heading_spans_in_document_context() {
         assert_eq!(span.end_line(), 13);
     }
 }
+
+#[test]
+fn preserves_final_narrative_lines_without_a_trailing_newline() {
+    let fixture = TempDir::new().unwrap();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    for (lf, kind, children) in [
+        ("first\n終🙂", Block::Paragraph, 0),
+        ("- first\n- 終🙂", Block::List, 2),
+        ("> first\n> 終🙂", Block::Blockquote, 1),
+    ] {
+        for source in [lf.to_owned(), lf.replace('\n', "\r\n")] {
+            fs::write(fixture.path().join("eof.mara.md"), &source).unwrap();
+            let corpus = load_corpus(&project, &schema).unwrap();
+            let graph = corpus.discovery();
+            let content = graph.nodes().next().unwrap().children();
+            assert_eq!(content.len(), 1);
+            assert!(
+                matches!(content[0].kind(), Node::MarkdownBlock(block) if block.kind() == kind)
+            );
+            assert_eq!(text(content[0], &source), source);
+            assert_eq!(content[0].children().len(), children);
+            assert_eq!(content[0].source().span().end_line(), 2);
+            assert_eq!(
+                fs::read_to_string(fixture.path().join("eof.mara.md")).unwrap(),
+                source
+            );
+        }
+    }
+}
+
+#[test]
+fn item_heading_references_share_document_definition_context() {
+    let fixture = TempDir::new().unwrap();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    let body = "# [guide][ref]\n\nBody.\n";
+    let item_source = format!(":::mara requirement REQ-ONE\n:title: One\n\n{body}:::\n");
+    for definition_before in [true, false] {
+        let definition = "[ref]: https://example.com\n\n";
+        let narrative = "# [guide][ref]\n\n";
+        let lf = if definition_before {
+            format!("{definition}{narrative}{item_source}")
+        } else {
+            format!("{narrative}{item_source}\n{definition}")
+        };
+        for source in [lf.clone(), lf.replace('\n', "\r\n")] {
+            fs::write(fixture.path().join("references.mara.md"), &source).unwrap();
+            let corpus = load_corpus(&project, &schema).unwrap();
+            let graph = corpus.discovery();
+            let one = item(&graph, "REQ-ONE");
+            let local = one.children()[0];
+            let Node::Section { heading } = local.kind() else {
+                panic!("missing local section")
+            };
+            assert_eq!(heading.heading_text(), Some("guide"));
+            assert_eq!(local.parent().unwrap().source(), one.source());
+            assert!(
+                matches!(one.parent().unwrap().kind(), Node::Section { heading } if heading.heading_text() == Some("guide"))
+            );
+            let span = heading.source().span();
+            assert_eq!(
+                &source[span.start_byte()..span.end_byte()],
+                if source.contains('\r') {
+                    "# [guide][ref]\r\n"
+                } else {
+                    "# [guide][ref]\n"
+                }
+            );
+            assert_eq!(
+                corpus.items().next().unwrap().body(),
+                if source.contains('\r') {
+                    body.replace('\n', "\r\n")
+                } else {
+                    body.to_owned()
+                }
+            );
+            assert_eq!(
+                fs::read_to_string(fixture.path().join("references.mara.md")).unwrap(),
+                source
+            );
+        }
+    }
+}
