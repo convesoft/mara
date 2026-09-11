@@ -264,6 +264,15 @@ fn block_kind(kind: &KindData) -> Option<MarkdownBlockKind> {
 }
 
 fn node_start(arena: &Arena, node: NodeRef) -> Option<usize> {
+    if let KindData::CodeBlock(block) = arena[node].kind_data()
+        && block.code_block_kind() == CodeBlockKind::Indented
+        && let Lines::Segments(segments) = block.value()
+        && let Some(first) = segments.first()
+    {
+        // Tab padding can displace the node position into a UTF-8 character;
+        // indented code retains the actual content's byte position.
+        return Some(first.start());
+    }
     let content_start = match arena[node].type_data() {
         TypeData::Block(block) => block.source().first().map(Segment::start),
         _ => None,
@@ -351,7 +360,7 @@ fn table_span(
     source: &str,
     scope: Range<usize>,
 ) -> Option<Range<usize>> {
-    match arena[node].kind_data() {
+    let span = match arena[node].kind_data() {
         KindData::TableCell(_) => {
             let TypeData::Block(block) = arena[node].type_data() else {
                 return None;
@@ -364,32 +373,44 @@ fn table_span(
             } else {
                 // Rushdown pads short rows with cells having no source. Keep
                 // those as empty spans at the authored row's content end.
-                let end = scope.start + source[scope.clone()].trim_end_matches(['\r', '\n']).len();
+                let end = scope.start
+                    + source
+                        .get(scope.clone())?
+                        .trim_end_matches(['\r', '\n'])
+                        .len();
                 Some(end..end)
             }
         }
         KindData::TableRow(_) => {
             let start = node_start(arena, node)?;
-            Some(start..line_end(source, start, scope.end))
+            if !scope.contains(&start) {
+                return None;
+            }
+            Some(start..line_end(source, start, source.len()))
         }
         KindData::TableHeader(_) | KindData::TableBody(_) => {
             let first = table_span(arena, arena[node].first_child()?, source, scope.clone())?;
-            let last = table_span(arena, arena[node].last_child()?, source, scope)?;
+            let last = table_span(arena, arena[node].last_child()?, source, scope.clone())?;
             Some(first.start..last.end)
         }
         KindData::Table(_) => {
             let header = table_span(arena, arena[node].first_child()?, source, scope.clone())?;
             let last = arena[node].last_child()?;
             let end = if matches!(arena[last].kind_data(), KindData::TableBody(_)) {
-                table_span(arena, last, source, scope)?.end
+                table_span(arena, last, source, scope.clone())?.end
             } else {
                 // A header-only table still owns its following delimiter row.
-                line_end(source, header.end, scope.end)
+                if header.end >= scope.end {
+                    return None;
+                }
+                line_end(source, header.end, source.len())
             };
             Some(header.start..end)
         }
         _ => None,
-    }
+    }?;
+    (span.start >= scope.start && span.end <= scope.end && source.get(span.clone()).is_some())
+        .then_some(span)
 }
 
 fn project_children(
@@ -407,7 +428,20 @@ fn project_children(
         .iter()
         .enumerate()
         .filter_map(|(index, &(child, kind))| {
-            if let Some(span) = table_span(arena, child, source, scope.clone()) {
+            let sibling_limit = children
+                .get(index + 1)
+                .and_then(|&(next, _)| node_start(arena, next))
+                .unwrap_or(scope.end)
+                .clamp(scope.start, scope.end);
+            if matches!(
+                kind,
+                MarkdownBlockKind::Table
+                    | MarkdownBlockKind::TableHeader
+                    | MarkdownBlockKind::TableBody
+                    | MarkdownBlockKind::TableRow
+                    | MarkdownBlockKind::TableCell
+            ) {
+                let span = table_span(arena, child, source, scope.start..sibling_limit)?;
                 return Some(ParsedBlock {
                     kind,
                     children: project_children(arena, child, source, span.clone(), block_ends),
@@ -417,22 +451,24 @@ fn project_children(
             let start = node_start(arena, child).unwrap_or(scope.start);
             // Tab padding can give an empty Rushdown child a position beyond
             // its parent's source. Do not move it onto another block's bytes.
-            if !scope.contains(&start) {
+            if !scope.contains(&start) || !source.is_char_boundary(start) {
                 return None;
             }
-            let limit = children
-                .get(index + 1)
-                .and_then(|&(next, _)| node_start(arena, next))
-                .unwrap_or(scope.end)
-                .clamp(start, scope.end);
+            let limit = sibling_limit.max(start);
             // A sibling in a quote/list may start after its line's prefix.
             // That prefix does not belong to the preceding block.
-            let next_line_start = source[..limit].rfind('\n').map_or(0, |pos| pos + 1);
+            let next_line_start = source.as_bytes()[..limit]
+                .iter()
+                .rposition(|&byte| byte == b'\n')
+                .map_or(0, |pos| pos + 1);
             let limit = if next_line_start > start {
                 next_line_start
             } else {
                 limit
             };
+            if !source.is_char_boundary(limit) {
+                return None;
+            }
             if matches!(
                 kind,
                 MarkdownBlockKind::Blockquote

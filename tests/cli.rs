@@ -6672,6 +6672,73 @@ fn unicode_setext_headings_create_and_reload_through_the_real_cli() {
 }
 
 #[test]
+fn tab_indented_unicode_loads_through_real_cli_workflows() {
+    for body in ["1. a\n\n\t   α\n", "1. a\r\n\r\n\t   🙂\r\n"] {
+        let fixture = TempDir::new().unwrap();
+        let initialized = mara(fixture.path(), &["project", "init"]);
+        assert!(initialized.status.success(), "{}", stderr(&initialized));
+        let created = mara(
+            fixture.path(),
+            &[
+                "item",
+                "create",
+                "requirement",
+                "REQ-TABS",
+                "tabs.mara.md",
+                "--title",
+                "Tabs",
+                "--body",
+                body,
+            ],
+        );
+        assert!(created.status.success(), "{}", stderr(&created));
+        let original = fs::read_to_string(fixture.path().join("tabs.mara.md")).unwrap();
+        let fetched = mara(
+            fixture.path(),
+            &["--format", "json", "item", "get", "REQ-TABS"],
+        );
+        assert!(fetched.status.success(), "{}", stderr(&fetched));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fetched.stdout).unwrap()["body"],
+            body
+        );
+        let validated = mara(fixture.path(), &["--format", "json", "project", "validate"]);
+        assert!(validated.status.success(), "{}", stderr(&validated));
+        let project = resolve_project(Some(fixture.path()), fixture.path()).unwrap();
+        let schema = mara::load_schema(&project).unwrap();
+        let corpus = mara::load_corpus(&project, &schema).unwrap();
+        let mut blocks = corpus
+            .items()
+            .next()
+            .unwrap()
+            .body_blocks()
+            .iter()
+            .collect::<Vec<_>>();
+        let mut saw_code = false;
+        while let Some(block) = blocks.pop() {
+            let span = block.source().span();
+            assert!(
+                original.get(span.start_byte()..span.end_byte()).is_some(),
+                "{block:?}"
+            );
+            if block.kind() == mara::MarkdownBlockKind::CodeBlock {
+                saw_code = true;
+                assert_eq!(
+                    &original[span.start_byte()..span.end_byte()],
+                    body.rsplit_once('\t').unwrap().1.trim_start()
+                );
+            }
+            blocks.extend(block.children());
+        }
+        assert!(saw_code);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("tabs.mara.md")).unwrap(),
+            original
+        );
+    }
+}
+
+#[test]
 fn nested_markdown_round_trips_through_real_authoring_and_editing() {
     let fixture = TempDir::new().unwrap();
     assert!(mara(fixture.path(), &["project", "init"]).status.success());

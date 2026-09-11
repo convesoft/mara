@@ -575,6 +575,37 @@ fn container_boundaries_preserve_code_context_and_adjacent_empty_items() {
 }
 
 #[test]
+fn tables_outside_their_parent_scope_are_not_projected() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    let body = "* ```\n* x\n| a | b |\n|---|---|\nx\n y\n     ---\n";
+    let source = format!(":::mara requirement REQ-TABLE\n:title: Table\n\n{body}:::\n");
+    write(fixture.path(), "table.mara.md", &source);
+    let corpus = load_corpus(&project, &schema).unwrap();
+    let item = corpus.items().next().unwrap();
+    let mut pending = item.body_blocks().iter().collect::<Vec<_>>();
+    while let Some(parent) = pending.pop() {
+        assert_ne!(parent.kind(), Kind::Table);
+        let span = parent.source().span();
+        let mut previous_end = span.start_byte();
+        for child in parent.children() {
+            let child_span = child.source().span();
+            assert!(previous_end <= child_span.start_byte());
+            assert!(child_span.start_byte() <= child_span.end_byte());
+            assert!(child_span.end_byte() <= span.end_byte());
+            previous_end = child_span.end_byte();
+            pending.push(child);
+        }
+    }
+    assert_eq!(item.body(), body);
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("table.mara.md")).unwrap(),
+        source
+    );
+}
+
+#[test]
 fn tab_indented_containers_do_not_overlap_following_siblings() {
     use mara::MarkdownBlockKind as Kind;
 

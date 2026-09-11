@@ -318,7 +318,9 @@ spans at the row's content end. The table owns its separator row; header and
 cell spans do not include it. Rushdown types stay private; reads and edits use
 the original source rather than rendered AST text. Bound container spans at
 following siblings; omit parser children positioned outside their enclosing
-source range rather than assigning neighbouring bytes to them.
+source range rather than assigning neighbouring bytes to them. Apply these
+bounds to complete table spans too; do not truncate an escaping table into a
+valid-looking child. Use UTF-8 byte boundaries for every exposed source span.
 Validation recovery retains partial item data but exposes no body blocks for
 items with invalid metadata or incomplete structure. Derived sections and the
 remaining discovery contracts below are separate implementation work.
