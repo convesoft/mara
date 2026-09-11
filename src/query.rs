@@ -15,8 +15,10 @@ use crate::{Corpus, Item, Schema, SourceLocation};
 
 mod get;
 mod page;
+mod search;
 pub use get::{EntryRange, ItemGetResult, MetadataFragment, TextRange, get_item_page};
 pub use page::{ItemCollectionResult, RelatedItemsResult, SearchExcerpt};
+pub use search::{SearchHit, SearchResult, search};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct ItemSource {
@@ -356,6 +358,9 @@ pub enum QueryError {
     UnknownField {
         name: String,
     },
+    AmbiguousRelationName {
+        name: String,
+    },
     UnknownRelation {
         name: String,
     },
@@ -392,6 +397,7 @@ impl fmt::Display for QueryError {
             ),
             Self::UnknownFlavour { name } => write!(formatter, "unknown flavour '{name}'"),
             Self::UnknownField { name } => write!(formatter, "unknown field '{name}'"),
+            Self::AmbiguousRelationName { name } => write!(formatter, "ambiguous relation '{name}'; use schema:{name} or builtin:{name}; search filters accept schema relations only"),
             Self::UnknownRelation { name } => write!(formatter, "unknown relation '{name}'"),
             Self::InvalidPath { path } => write!(
                 formatter,
@@ -663,12 +669,25 @@ fn matches_fields(item: &Item, fields: &BTreeMap<&str, Vec<&str>>) -> bool {
 
 // The exact-match group dominates field weights, regardless of occurrences.
 fn search_rank(item: &Item, query: &BTreeSet<String>) -> Option<(bool, usize)> {
-    if query.is_empty() {
-        return Some((true, 0));
+    let mut fields = vec![(item.id(), 3, false), (item.body(), 1, true)];
+    for entry in item.metadata() {
+        fields.push((entry.key(), 1, true));
+        fields.push((
+            entry.value(),
+            if entry.key() == "title" { 3 } else { 1 },
+            entry.key() != "mid",
+        ));
     }
+    rank_fields(fields, query)
+}
+
+fn rank_fields<'a>(
+    fields: impl IntoIterator<Item = (&'a str, usize, bool)>,
+    query: &BTreeSet<String>,
+) -> Option<(bool, usize)> {
     let mut exact_words = BTreeMap::<String, usize>::new();
     let mut fuzzy_words = BTreeMap::<String, usize>::new();
-    let mut include = |value: &str, weight: usize, fuzzy: bool| {
+    for (value, weight, fuzzy) in fields {
         for word in keyword_terms(value) {
             if fuzzy {
                 fuzzy_words
@@ -681,16 +700,6 @@ fn search_rank(item: &Item, query: &BTreeSet<String>) -> Option<(bool, usize)> {
                 .and_modify(|current| *current = (*current).max(weight))
                 .or_insert(weight);
         }
-    };
-    include(item.id(), 3, false);
-    include(item.body(), 1, true);
-    for entry in item.metadata() {
-        include(entry.key(), 1, true);
-        include(
-            entry.value(),
-            if entry.key() == "title" { 3 } else { 1 },
-            entry.key() != "mid",
-        );
     }
 
     let mut all_exact = true;
