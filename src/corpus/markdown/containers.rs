@@ -588,6 +588,7 @@ fn project_children(
                 return Some(ParsedBlock {
                     kind,
                     heading_text: None,
+                    heading_source_offsets: Vec::new(),
                     children: project_children(arena, child, source, span.clone(), block_ends),
                     source: span,
                 });
@@ -638,6 +639,7 @@ fn project_children(
                 return Some(ParsedBlock {
                     kind,
                     heading_text: None,
+                    heading_source_offsets: Vec::new(),
                     children: nested,
                     source: start..end,
                 });
@@ -668,10 +670,17 @@ fn project_children(
                     .map_or(end, |offset| content_end + offset + 1);
             }
             let span = start..end;
+            let (heading_text, heading_source_offsets) =
+                if matches!(kind, MarkdownBlockKind::Heading { .. }) {
+                    let (text, offsets) = heading_text(arena, child, source);
+                    (Some(text), offsets)
+                } else {
+                    (None, Vec::new())
+                };
             Some(ParsedBlock {
                 kind,
-                heading_text: matches!(kind, MarkdownBlockKind::Heading { .. })
-                    .then(|| heading_text(arena, child, source)),
+                heading_text,
+                heading_source_offsets,
                 children: project_children(arena, child, source, span.clone(), block_ends),
                 source: span,
             })
@@ -679,32 +688,92 @@ fn project_children(
         .collect()
 }
 
-fn heading_text(arena: &Arena, node: NodeRef, source: &str) -> String {
+fn heading_text(arena: &Arena, node: NodeRef, source: &str) -> (String, Vec<usize>) {
     let mut text = String::new();
+    let mut offsets = Vec::new();
     for child in arena[node].children(arena) {
         match arena[child].kind_data() {
             KindData::Text(value) => {
-                // Rushdown's writer applies Markdown escapes and character
-                // references in one pass. Undo only its HTML output escaping;
-                // decoding the authored text in separate passes would turn
-                // literal `\&amp;` or `&amp;copy;` into a different value.
-                let mut escaped = String::new();
-                rushdown::renderer::html::Writer::new()
-                    .write(&mut escaped, value.str(source))
-                    .expect("writing heading text to a String");
-                let decoded = rushdown::util::resolve_entity_references(escaped.as_bytes());
-                text.push_str(std::str::from_utf8(&decoded).expect("decoded heading is UTF-8"));
+                let raw = value.str(source);
+                let base = value
+                    .index()
+                    .map_or_else(|| arena[child].pos().unwrap_or(0), |index| index.start());
+                let mut start = 0;
+                while start < raw.len() {
+                    // Keep an escape or entity together when asking Rushdown's
+                    // writer to decode it. This preserves its one-pass semantics
+                    // for literal \&amp; and &amp;copy; while retaining provenance.
+                    let rest = &raw[start..];
+                    let mut len = rest.chars().next().unwrap().len_utf8();
+                    if rest.starts_with('\\')
+                        && rest.as_bytes().get(1).is_some_and(u8::is_ascii_punctuation)
+                    {
+                        len = 2;
+                    } else if let Some(entity) = rest.strip_prefix('&') {
+                        let name_len = entity
+                            .bytes()
+                            .take_while(|b| b.is_ascii_alphanumeric() || *b == b'#')
+                            .count();
+                        if rest.as_bytes().get(name_len + 1) == Some(&b';') {
+                            len = name_len + 2;
+                        }
+                    }
+                    let token = &rest[..len];
+                    let mut escaped = String::new();
+                    rushdown::renderer::html::Writer::new()
+                        .write(&mut escaped, token)
+                        .expect("writing heading text to a String");
+                    let decoded = rushdown::util::resolve_entity_references(escaped.as_bytes());
+                    let decoded = std::str::from_utf8(&decoded).expect("decoded heading is UTF-8");
+                    text.push_str(decoded);
+                    if decoded == token {
+                        for (byte, ch) in token.char_indices() {
+                            offsets.extend(std::iter::repeat_n(base + start + byte, ch.len_utf8()));
+                        }
+                    } else {
+                        offsets.extend(std::iter::repeat_n(base + start, decoded.len()));
+                    }
+                    start += len;
+                }
                 if value.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
                     || value.has_qualifiers(TextQualifier::HARD_LINE_BREAK)
                 {
                     text.push(' ');
+                    offsets.push(base + raw.len());
                 }
             }
-            KindData::CodeSpan(value) => text.push_str(&value.str(source)),
-            _ => text.push_str(&heading_text(arena, child, source)),
+            KindData::CodeSpan(value) => {
+                // Code spans keep literal text, with line breaks normalized to
+                // spaces. Align from this AST node's source position, skipping
+                // delimiters and any enclosing block prefixes between lines.
+                let literal = value.str(source);
+                let mut position = arena[child].pos().unwrap_or(0);
+                position += source[position..]
+                    .bytes()
+                    .take_while(|b| *b == b'`')
+                    .count();
+                for ch in literal.chars() {
+                    if let Some((byte, raw)) = source[position..]
+                        .char_indices()
+                        .find(|(_, raw)| *raw == ch || (ch == ' ' && *raw == '\n'))
+                    {
+                        position += byte;
+                        offsets.extend(std::iter::repeat_n(position, ch.len_utf8()));
+                        position += raw.len_utf8();
+                    } else {
+                        offsets.extend(std::iter::repeat_n(position, ch.len_utf8()));
+                    }
+                }
+                text.push_str(&literal);
+            }
+            _ => {
+                let (nested, nested_offsets) = heading_text(arena, child, source);
+                text.push_str(&nested);
+                offsets.extend(nested_offsets);
+            }
         }
     }
-    text
+    (text, offsets)
 }
 
 #[cfg(test)]

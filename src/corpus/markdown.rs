@@ -54,6 +54,7 @@ pub(super) struct ParsedItem {
 pub(super) struct ParsedBlock {
     pub(super) kind: super::MarkdownBlockKind,
     pub(super) heading_text: Option<String>,
+    pub(super) heading_source_offsets: Vec<usize>,
     pub(super) source: Range<usize>,
     pub(super) children: Vec<ParsedBlock>,
 }

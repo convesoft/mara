@@ -184,20 +184,16 @@ fn add_headings<'a>(blocks: &'a [MarkdownBlock], fields: &mut Vec<(&'a str, usiz
     }
 }
 
-fn matching_heading<'a>(
-    blocks: &'a [MarkdownBlock],
-    terms: &BTreeSet<String>,
-) -> Option<&'a MarkdownBlock> {
+fn matching_heading_offset(blocks: &[MarkdownBlock], terms: &BTreeSet<String>) -> Option<usize> {
     for block in blocks {
         if let Some(text) = block.heading_text()
-            && keyword_terms(text)
-                .iter()
-                .any(|word| terms.iter().any(|term| word_matches(term, word)))
+            && let Some((start, _)) = matching_spans(text, terms, true).first()
+            && let Some(offset) = block.heading_source_offset(*start)
         {
-            return Some(block);
+            return Some(offset);
         }
-        if let Some(heading) = matching_heading(block.children(), terms) {
-            return Some(heading);
+        if let Some(offset) = matching_heading_offset(block.children(), terms) {
+            return Some(offset);
         }
     }
     None
@@ -209,7 +205,7 @@ fn excerpt(node: DiscoveryNode<'_, '_>, source: &str, terms: &BTreeSet<String>) 
     {
         return excerpt;
     }
-    let mut span = match node.kind() {
+    let span = match node.kind() {
         DiscoveryNodeKind::Section { heading } => heading.source().span(),
         _ => node.source().span(),
     };
@@ -218,20 +214,16 @@ fn excerpt(node: DiscoveryNode<'_, '_>, source: &str, terms: &BTreeSet<String>) 
         *start
     } else {
         // Ranking also searches decoded headings. Their words may not occur
-        // literally in Markdown (entities or inline formatting), so retain
-        // that heading's source span rather than excerpting the owner's start.
+        // literally in Markdown (entities or inline formatting). Map the
+        // decoded word back to its original source before centering context.
         let blocks = match node.kind() {
             DiscoveryNodeKind::Item(item) => item.body_blocks(),
             DiscoveryNodeKind::MarkdownBlock(block) => std::slice::from_ref(block),
             DiscoveryNodeKind::Section { heading } => std::slice::from_ref(heading),
             DiscoveryNodeKind::Document(_) => &[],
         };
-        if let Some(heading) = matching_heading(blocks, terms) {
-            span = heading.source().span();
-        }
-        0
+        matching_heading_offset(blocks, terms).map_or(0, |offset| offset - span.start_byte())
     };
-    let value = &source[span.start_byte()..span.end_byte()];
     let start = value[..matched]
         .char_indices()
         .rev()
