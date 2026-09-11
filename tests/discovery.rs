@@ -475,3 +475,83 @@ fn item_heading_references_share_document_definition_context() {
         }
     }
 }
+
+#[test]
+fn heading_text_decodes_markdown_text_once_and_preserves_code_literals() {
+    let fixture = TempDir::new().unwrap();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    let cases = [
+        (
+            r"A &amp; B &#169; &#x1F642; \*literal\* \\path \z",
+            r"A & B © 🙂 *literal* \path \z",
+        ),
+        (
+            r"&amp;copy; &#38;copy; \&copy; &bOgUs; &amp",
+            "&copy; &copy; &copy; &bOgUs; &amp",
+        ),
+        (
+            r"`&amp; &#65; \*literal\*` and **&lt;tag&gt;**",
+            r"&amp; &#65; \*literal\* and <tag>",
+        ),
+        (
+            r"&#92;plain &quot;quoted&quot; &apos;single&apos;",
+            r#"\plain "quoted" 'single'"#,
+        ),
+    ];
+    for newline in ["\n", "\r\n"] {
+        let headings = cases
+            .iter()
+            .map(|(authored, _)| format!("# {authored}{newline}{newline}"))
+            .collect::<String>();
+        let path = fixture.path().join("decoded.mara.md");
+        fs::write(&path, &headings).unwrap();
+        let created = Command::new(env!("CARGO_BIN_EXE_mara"))
+            .current_dir(fixture.path())
+            .args([
+                "item",
+                "create",
+                "requirement",
+                "REQ-DECODED",
+                "decoded.mara.md",
+                "--title",
+                "Decoded headings",
+                "--body",
+                &headings,
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            created.status.success(),
+            "{}",
+            String::from_utf8_lossy(&created.stderr)
+        );
+        let original = fs::read_to_string(&path).unwrap();
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let graph = corpus.discovery();
+        let sections = graph
+            .nodes()
+            .filter_map(|node| match node.kind() {
+                Node::Section { heading } => Some((node, heading)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(sections.len(), cases.len() * 2);
+        for (index, (node, heading)) in sections.iter().enumerate() {
+            let (authored, expected) = cases[index % cases.len()];
+            assert_eq!(heading.heading_text(), Some(expected));
+            let span = heading.source().span();
+            assert_eq!(
+                &original[span.start_byte()..span.end_byte()],
+                format!("# {authored}{newline}")
+            );
+            if index >= cases.len() {
+                assert!(
+                    matches!(node.parent().unwrap().kind(), Node::Item(item) if item.id() == "REQ-DECODED")
+                );
+            }
+        }
+        assert_eq!(corpus.items().next().unwrap().body(), headings);
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    }
+}

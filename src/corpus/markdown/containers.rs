@@ -581,7 +581,16 @@ fn heading_text(arena: &Arena, node: NodeRef, source: &str) -> String {
     for child in arena[node].children(arena) {
         match arena[child].kind_data() {
             KindData::Text(value) => {
-                text.push_str(value.str(source));
+                // Rushdown's writer applies Markdown escapes and character
+                // references in one pass. Undo only its HTML output escaping;
+                // decoding the authored text in separate passes would turn
+                // literal `\&amp;` or `&amp;copy;` into a different value.
+                let mut escaped = String::new();
+                rushdown::renderer::html::Writer::new()
+                    .write(&mut escaped, value.str(source))
+                    .expect("writing heading text to a String");
+                let decoded = rushdown::util::resolve_entity_references(escaped.as_bytes());
+                text.push_str(std::str::from_utf8(&decoded).expect("decoded heading is UTF-8"));
                 if value.has_qualifiers(TextQualifier::SOFT_LINE_BREAK)
                     || value.has_qualifiers(TextQualifier::HARD_LINE_BREAK)
                 {

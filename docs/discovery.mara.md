@@ -338,7 +338,9 @@ heading scope, so headings inside it cannot close outer document sections.
 Other Markdown container boundaries must likewise preserve their own children.
 Content before a heading belongs directly to its containing document or block.
 
-A section carries its heading text, level, and source location. Sections contain
+A section carries its heading text, level, and source location. Heading text
+decodes Markdown backslash escapes and named/numeric character references once
+in ordinary text nodes; code spans retain their literal content. Sections contain
 ordinary Markdown blocks, items, and subsections in source order. Prose before
 and after an item can belong to the same section. Add no abstract passage
 container around those blocks or special passage node for a heading.
