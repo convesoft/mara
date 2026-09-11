@@ -3,6 +3,9 @@
 use std::collections::BTreeMap;
 
 mod references;
+mod summary;
+
+pub use summary::{DiscoveryContext, DiscoveryKind, DiscoveryNodeSummary};
 
 use petgraph::{
     Direction,
@@ -18,12 +21,14 @@ use crate::{
 pub struct DiscoveryGraph<'corpus> {
     graph: DiGraph<NodeData<'corpus>, EdgeData<'corpus>>,
     diagnostics: Vec<crate::Diagnostic>,
+    references: BTreeMap<String, Vec<NodeIndex>>,
 }
 
 #[derive(Debug)]
 struct NodeData<'corpus> {
     kind: DiscoveryNodeKind<'corpus>,
     source: SourceLocation,
+    reference: String,
 }
 
 /// Source-backed node data. A section retains its original Markdown heading;
@@ -77,6 +82,7 @@ impl<'corpus> DiscoveryGraph<'corpus> {
         let mut result = Self {
             graph: DiGraph::new(),
             diagnostics: Vec::new(),
+            references: BTreeMap::new(),
         };
         for document in corpus.documents() {
             let lines = std::iter::once(0)
@@ -93,6 +99,7 @@ impl<'corpus> DiscoveryGraph<'corpus> {
             let root = result.graph.add_node(NodeData {
                 kind: DiscoveryNodeKind::Document(document),
                 source,
+                reference: String::new(),
             });
             let mut content = document
                 .blocks()
@@ -105,6 +112,7 @@ impl<'corpus> DiscoveryGraph<'corpus> {
         }
         result.add_item_connections();
         result.add_references(corpus);
+        result.index_references(corpus);
         result
     }
 
@@ -129,6 +137,7 @@ impl<'corpus> DiscoveryGraph<'corpus> {
         let child = self.graph.add_node(NodeData {
             kind,
             source: source.clone(),
+            reference: String::new(),
         });
         self.graph.add_edge(
             parent,

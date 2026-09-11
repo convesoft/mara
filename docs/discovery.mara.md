@@ -101,7 +101,8 @@ Changes to another document leave a node handle valid; its connections reflect
 the current corpus. Pagination cursors retain broader source/schema and request
 invalidation because other documents can change result membership and ordering.
 The token encoding and hash algorithm are implementation details; do not expose
-private graph indexes as handles.
+private graph indexes as handles. Source-identical structural nodes share a
+handle, including padded empty table cells with the same kind and byte range.
 
 ## Ranking and response bounds
 
@@ -155,10 +156,16 @@ Use one node summary across operations:
 | `reference`, `kind` | Reference accepted by get/related; kind is item, section, block, or document. |
 | `source` | Project-relative path, start/end byte offsets, and start/end lines for the complete node. |
 | `title`, `title_truncated` | Item title or section heading where applicable, with explicit truncation. |
-| `context` | Direct parent and nearest section references when present, without recursive expansion. |
+| `context` | `parent` is the direct parent reference; `section` is the nearest enclosing section reference, excluding the node itself. Omit absent references; never recursively expand context. |
 | `id`, `mid`, `flavour` | Items only. |
 | `block_kind` | Blocks only. |
 | `heading_level` | Sections only. |
+
+Omit fields that do not apply to the node kind. Always include
+`title_truncated` (false when no title applies). `reference` is the item's MID
+for valid items; legacy/recovery items without one use their human ID while
+validation continues to report the missing MID. Structural references identify
+source in the loaded document snapshot.
 
 All responses include `has_more` and `next_cursor`, null when no content
 remains. Their operation-specific fields are:
@@ -357,8 +364,10 @@ with precise source spans, including unresolved links. Link sources use their
 owning item or outermost ordinary Markdown block; link destinations retain
 sections and blocks inside items. `DiscoveryGraph::diagnostics()` reports broken
 internal references and ambiguous anchors; project validation includes these
-schema-independent diagnostics. Discovery handles, search selection, and CLI/MCP
-discovery remain separate work.
+schema-independent diagnostics. `DiscoveryNode::reference()` and `summary()` expose
+reusable references and the shared projection under [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]];
+`DiscoveryGraph::resolve()` accepts those references and item IDs/MIDs against
+the loaded snapshot. Search selection and CLI/MCP discovery remain separate work.
 
 ## Discovery units
 
