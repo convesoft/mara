@@ -9,12 +9,12 @@ use std::{
 
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
-    EntryRange, FieldValue, InitialRelation, ItemCollectionResult, ItemCreateParams,
-    ItemFilterParams, ItemGetParams, ItemGetResult, ItemMoveParams, ItemRelatedParams, ItemSummary,
+    EntryRange, FieldValue, GetParams, GetResult, InitialRelation, ItemCollectionResult,
+    ItemCreateParams, ItemFilterParams, ItemMoveParams, ItemRelatedParams, ItemSummary,
     ItemUpdateParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
-    RelatedItem, RelationDirection, RelationMutationResult, RelationParams, RelationSummary,
-    SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult, SearchParams, Template,
-    ValidationResult, ValidationScope, ValidationTargetKind, project_initialize,
+    RelatedItem, RelationDirection, RelationMutationResult, RelationParams, SchemaGetResult,
+    SchemaKind, SchemaListResult, SchemaValidationResult, SearchParams, Template, ValidationResult,
+    ValidationScope, ValidationTargetKind, project_initialize,
 };
 use serde::Serialize;
 
@@ -25,7 +25,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "Discovery and reading: mara search <QUERY> discovers items, sections, and Markdown blocks."
+    after_help = "Discovery and reading: mara search <QUERY> discovers items, sections, and Markdown blocks; mara get <REFERENCE> reads any discovery node."
 )]
 struct Cli {
     #[arg(
@@ -59,6 +59,17 @@ enum Command {
             help = "Select exact human IDs or canonical MIDs (uppercase 26-character ULIDs); repeat for OR, intersected with other filters. Omission adds no restriction"
         )]
         ids: Vec<String>,
+    },
+
+    /// Read an item, section, Markdown block, or document in bounded consecutive portions.
+    Get {
+        /// Exact item ID/MID or a discovery handle returned by search, get, or related.
+        reference: String,
+        #[arg(
+            long,
+            help = "Opaque next_cursor from the previous page; keep reference unchanged until has_more is false. Omit to start or restart after source/schema changes. Empty strings are invalid"
+        )]
+        cursor: Option<String>,
     },
 
     /// Initialize, validate, or recover a Mara project.
@@ -205,27 +216,12 @@ enum ItemCommand {
         #[arg(long)]
         line: Option<usize>,
     },
-    /// Read bounded consecutive portions of an item's body, metadata, and direct relations.
-    Get {
-        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
-        id: String,
-        #[arg(
-            long,
-            help = "Maximum combined relation entries per page (1-100, default 20); the byte budget may return fewer. Body and metadata portions are byte-bounded independently of this count"
-        )]
-        limit: Option<usize>,
-        #[arg(
-            long,
-            help = "Opaque next_cursor from the previous page; keep id/limit unchanged until has_more is false; omit to start or restart after source/schema changes. Empty strings are invalid"
-        )]
-        cursor: Option<String>,
-    },
     /// List compact item summaries in document-path and source order, with exact filters.
     List {
         #[command(flatten)]
         filters: ItemFilterArgs,
     },
-    /// List direct incoming and outgoing relation entries; retrieve neighbour bodies with item get.
+    /// List direct incoming and outgoing relation entries; retrieve neighbour content with get.
     Related {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         id: String,
@@ -694,12 +690,10 @@ fn run(cli: Cli) -> Result<bool, String> {
             let result = operations(project)?.item_validate(&id)?;
             emit_validation(format, &result)
         }
-        Command::Item {
-            command: ItemCommand::Get { id, limit, cursor },
-        } => {
-            let result = operations(project)?.item_get(ItemGetParams { id, limit, cursor })?;
+        Command::Get { reference, cursor } => {
+            let result = operations(project)?.get(GetParams { reference, cursor })?;
             emit(format, &result, |item| {
-                print_resolved_item(item);
+                print_get(item);
                 Ok(())
             })?;
             Ok(true)
@@ -925,9 +919,39 @@ fn print_project_mid_backfill(result: &ProjectMidBackfillResult) -> Result<(), S
     Ok(())
 }
 
-fn print_resolved_item(item: &ItemGetResult) {
-    print_item_heading(&item.summary);
-    let source = &item.source;
+fn print_get(item: &GetResult) {
+    let node = &item.node;
+    let kind = node.block_kind.map_or_else(
+        || format!("{:?}", node.kind),
+        |kind| format!("Block({kind:?})"),
+    );
+    println!(
+        "{}\t{}\t{}{}",
+        node.reference,
+        kind,
+        node.title.as_deref().unwrap_or(""),
+        if node.title_truncated {
+            " [title truncated]"
+        } else {
+            ""
+        }
+    );
+    if let Some(id) = &node.id {
+        println!("id\t{id}");
+    }
+    if let Some(flavour) = &node.flavour {
+        println!("flavour\t{flavour}");
+    }
+    if let Some(level) = node.heading_level {
+        println!("heading_level\t{level}");
+    }
+    if let Some(parent) = &node.context.parent {
+        println!("parent\t{parent}");
+    }
+    if let Some(section) = &node.context.section {
+        println!("section\t{section}");
+    }
+    let source = &node.source;
     println!(
         "source\t{}\tstart_byte={}\tend_byte={}\tstart_line={}\tend_line={}",
         source.path().display(),
@@ -949,27 +973,18 @@ fn print_resolved_item(item: &ItemGetResult) {
         );
     }
     print_entry_range("metadata_range", &item.metadata_range);
-    println!("body");
-    print!("{}", item.body);
-    if !item.body.ends_with('\n') {
+    println!("content");
+    print!("{}", item.content);
+    if !item.content.ends_with('\n') {
         println!();
     }
     println!(
-        "body_range\tstart_byte={}\tend_byte={}\ttotal_bytes={}\tpartial={}",
-        item.body_range.start_byte,
-        item.body_range.end_byte,
-        item.body_range.total_bytes,
-        item.body_range.partial
+        "content_range\tstart_byte={}\tend_byte={}\ttotal_bytes={}\tpartial={}",
+        item.content_range.start_byte,
+        item.content_range.end_byte,
+        item.content_range.total_bytes,
+        item.content_range.partial
     );
-    println!("relations");
-    for relation in &item.outgoing_relations {
-        print_relation_summary(RelationDirection::Outgoing, relation);
-    }
-    for relation in &item.incoming_relations {
-        print_relation_summary(RelationDirection::Incoming, relation);
-    }
-    print_entry_range("outgoing_relations_range", &item.outgoing_relations_range);
-    print_entry_range("incoming_relations_range", &item.incoming_relations_range);
     print_page_continuation(item.has_more, item.next_cursor.as_deref());
 }
 
@@ -1009,19 +1024,6 @@ fn print_page_continuation(has_more: bool, next_cursor: Option<&str>) {
     println!();
 }
 
-fn print_item_heading(item: &ItemSummary) {
-    let title = if item.title_truncated() {
-        format!("{} [title truncated]", item.title())
-    } else {
-        item.title().to_owned()
-    };
-    if let Some(mid) = item.mid() {
-        println!("{}\t{}\t{}\t{}", item.id(), mid, item.flavour(), title);
-    } else {
-        println!("{}\t{}\t{}", item.id(), item.flavour(), title);
-    }
-}
-
 fn print_item_summary(item: &ItemSummary) {
     let title = if item.title_truncated() {
         format!("{} [title truncated]", item.title())
@@ -1048,10 +1050,6 @@ fn print_item_summary(item: &ItemSummary) {
             item.line()
         );
     }
-}
-
-fn print_relation_summary(direction: RelationDirection, relation: &RelationSummary) {
-    print_related_line(direction, relation.relation(), relation.item());
 }
 
 fn print_related_items(items: &[RelatedItem]) {

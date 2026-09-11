@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
 use mara::{
-    FieldValue, InitialRelation, ItemCollectionResult, ItemCreateParams, ItemCreationResult,
-    ItemFilterParams, ItemGetParams, ItemGetResult, ItemMove, ItemMoveParams, ItemRelatedParams,
-    ItemUpdate, ItemUpdateParams, OperationContext, ProjectInitializationResult,
-    ProjectMidBackfillResult, RelatedItemsResult, RelationDirection, RelationMutationResult,
-    RelationParams, SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult,
-    SearchParams, Template, TransactionRollbackResult, ValidationResult,
+    FieldValue, GetParams, GetResult, InitialRelation, ItemCollectionResult, ItemCreateParams,
+    ItemCreationResult, ItemFilterParams, ItemMove, ItemMoveParams, ItemRelatedParams, ItemUpdate,
+    ItemUpdateParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
+    RelatedItemsResult, RelationDirection, RelationMutationResult, RelationParams, SchemaGetResult,
+    SchemaKind, SchemaListResult, SchemaValidationResult, SearchParams, Template,
+    TransactionRollbackResult, ValidationResult,
 };
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -193,16 +193,13 @@ struct ItemIdToolParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct ItemGetToolParams {
+struct GetToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
-    id: String,
-    /// Maximum combined direct relation entries per page, 1 through 100; omitted or null defaults to 20. The byte budget may return fewer. Body and metadata portions are byte-bounded independently of this count.
-    #[serde(default)]
-    limit: Option<usize>,
-    /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid. Portions follow body, metadata, then relations.
+    /// Exact item ID/MID or a discovery handle returned by search, get, or related.
+    reference: String,
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid. Portions follow content, then item metadata.
     #[serde(default)]
     cursor: Option<String>,
 }
@@ -538,17 +535,16 @@ impl MaraMcp {
     }
 
     #[tool(
-        name = "item_get",
-        description = "Read an item in bounded consecutive portions: body, metadata values (including full title), then direct relations. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged id/limit until has_more is false; restart after source/schema changes."
+        name = "get",
+        description = "Read an item, section, Markdown block, or document in bounded consecutive portions: content, then item metadata. Sections and documents include contained source; items return their parsed body. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged reference until has_more is false; restart after source/schema changes. Enumerate neighbours separately."
     )]
-    fn item_get(
+    fn get(
         &self,
-        Parameters(params): Parameters<ItemGetToolParams>,
-    ) -> Result<Json<ItemGetResult>, String> {
+        Parameters(params): Parameters<GetToolParams>,
+    ) -> Result<Json<GetResult>, String> {
         self.for_project(params.project)?
-            .item_get(ItemGetParams {
-                id: params.id,
-                limit: params.limit,
+            .get(GetParams {
+                reference: params.reference,
                 cursor: params.cursor,
             })
             .map(Json)
@@ -580,7 +576,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_related",
-        description = "List bounded pages of direct incoming or outgoing relation entries with exact filters. Continue with next_cursor and unchanged item/options; restart after source/schema changes. Neighbour bodies require item_get."
+        description = "List bounded pages of direct incoming or outgoing relation entries with exact filters. Continue with next_cursor and unchanged item/options; restart after source/schema changes. Neighbour content requires get."
     )]
     fn item_related(
         &self,

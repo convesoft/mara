@@ -4,10 +4,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Corpus, Diagnostic, FieldFilter, FlavourDefinition, InitialRelation, ItemCollectionResult,
-    ItemCreationRequest, ItemFilters, ItemGetResult, Project, RelatedFilters, RelatedItemsResult,
-    RelationDefinition, RelationDirection, Schema, SearchResult, Template, add_relation,
-    backfill_mids, create_item, get_item_page, initialize_project, list_items, load_corpus,
+    Corpus, Diagnostic, FieldFilter, FlavourDefinition, GetResult, InitialRelation,
+    ItemCollectionResult, ItemCreationRequest, ItemFilters, Project, RelatedFilters,
+    RelatedItemsResult, RelationDefinition, RelationDirection, Schema, SearchResult, Template,
+    add_relation, backfill_mids, create_item, get, initialize_project, list_items, load_corpus,
     load_corpus_for_validation, load_corpus_syntax_for_validation, load_schema,
     load_schema_for_validation, related_items, remove_relation, resolve_project,
     resolve_project_for_validation, search, validate_corpus, validate_corpus_independent,
@@ -229,13 +229,12 @@ impl OperationContext {
         })
     }
 
-    pub fn item_get(&self, params: ItemGetParams) -> Result<ItemGetResult, String> {
+    pub fn get(&self, params: GetParams) -> Result<GetResult, String> {
         let (corpus, schema) = self.load_query_project()?;
-        get_item_page(
+        get(
             &corpus,
             &schema,
-            &params.id,
-            params.limit,
+            &params.reference,
             params.cursor.as_deref(),
         )
         .map_err(|error| error.to_string())
@@ -662,10 +661,8 @@ pub struct ItemIdParams {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ItemGetParams {
-    pub id: String,
-    #[serde(default)]
-    pub limit: Option<usize>,
+pub struct GetParams {
+    pub reference: String,
     #[serde(default)]
     pub cursor: Option<String>,
 }

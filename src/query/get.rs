@@ -1,4 +1,5 @@
 use super::{page::*, *};
+use crate::{DiscoveryNodeKind, DiscoveryNodeSummary, MetadataEntry};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct TextRange {
@@ -47,48 +48,42 @@ pub struct MetadataFragment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
-pub struct ItemGetResult {
-    pub summary: ItemSummary,
-    pub source: ItemSource,
-    pub body: String,
-    pub body_range: TextRange,
+pub struct GetResult {
+    pub format_version: u8,
+    pub node: DiscoveryNodeSummary,
+    pub content: String,
+    pub content_range: TextRange,
     pub metadata: Vec<MetadataFragment>,
     pub metadata_range: EntryRange,
-    pub outgoing_relations: Vec<RelationSummary>,
-    pub outgoing_relations_range: EntryRange,
-    pub incoming_relations: Vec<RelationSummary>,
-    pub incoming_relations_range: EntryRange,
     pub has_more: bool,
     pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Position {
-    body: usize,
+    content: usize,
     metadata: usize,
     value: usize,
-    relations: usize,
 }
 
 impl Position {
-    fn complete(self, item: &ResolvedItem) -> bool {
-        self.body == item.body.len()
+    fn complete(self, item: &ReadContent<'_>) -> bool {
+        self.content == item.content.len()
             && self.metadata == item.metadata.len()
             && self.value == 0
-            && self.relations == item.outgoing_relations.len() + item.incoming_relations.len()
     }
 
     fn cursor(self, fingerprint: &str) -> String {
         format!(
-            "g1-{fingerprint}-{:016x}-{:016x}-{:016x}-{:016x}",
-            self.body, self.metadata, self.value, self.relations
+            "g2-{fingerprint}-{:016x}-{:016x}-{:016x}",
+            self.content, self.metadata, self.value
         )
     }
 
     fn read(
         cursor: Option<&str>,
         fingerprint: &str,
-        item: &ResolvedItem,
+        item: &ReadContent<'_>,
     ) -> Result<Self, QueryError> {
         let Some(cursor) = cursor else {
             return Ok(Self::default());
@@ -98,11 +93,11 @@ impl Position {
                 "invalid or stale get cursor; source or request changed; restart from the first page",
             )
         };
-        if cursor.len() != 87 {
+        if cursor.len() != 70 {
             return Err(invalid());
         }
         let mut parts = cursor.split('-');
-        if parts.next() != Some("g1") || parts.next() != Some(fingerprint) {
+        if parts.next() != Some("g2") || parts.next() != Some(fingerprint) {
             return Err(invalid());
         }
         let mut number = || {
@@ -113,24 +108,21 @@ impl Position {
             usize::from_str_radix(part, 16).map_err(|_| invalid())
         };
         let position = Self {
-            body: number()?,
+            content: number()?,
             metadata: number()?,
             value: number()?,
-            relations: number()?,
         };
         if parts.next().is_some()
-            || !item.body.is_char_boundary(position.body)
+            || !item.content.is_char_boundary(position.content)
             || position.metadata > item.metadata.len()
-            || position.relations > item.outgoing_relations.len() + item.incoming_relations.len()
-            || (position.body < item.body.len()
-                && (position.metadata != 0 || position.value != 0 || position.relations != 0))
+            || (position.content < item.content.len()
+                && (position.metadata != 0 || position.value != 0))
             || (position.metadata < item.metadata.len()
-                && (position.relations != 0
-                    || !item.metadata[position.metadata]
-                        .value
-                        .is_char_boundary(position.value)
+                && (!item.metadata[position.metadata]
+                    .value()
+                    .is_char_boundary(position.value)
                     || (position.value != 0
-                        && position.value == item.metadata[position.metadata].value.len())))
+                        && position.value == item.metadata[position.metadata].value().len())))
             || (position.metadata == item.metadata.len() && position.value != 0)
             || position == Self::default()
             || position.complete(item)
@@ -141,9 +133,15 @@ impl Position {
     }
 }
 
-impl ItemGetResult {
-    fn update(&mut self, start: Position, next: Position, item: &ResolvedItem, fingerprint: &str) {
-        self.body_range = TextRange::new(start.body, next.body, item.body.len());
+impl GetResult {
+    fn update(
+        &mut self,
+        start: Position,
+        next: Position,
+        item: &ReadContent<'_>,
+        fingerprint: &str,
+    ) {
+        self.content_range = TextRange::new(start.content, next.content, item.content.len());
         self.metadata_range = EntryRange::new(
             start.metadata,
             self.metadata
@@ -152,92 +150,96 @@ impl ItemGetResult {
             item.metadata.len(),
         );
         self.metadata_range.partial |= self.metadata.iter().any(|entry| entry.range.partial);
-        let outgoing = item.outgoing_relations.len();
-        self.outgoing_relations_range = EntryRange::new(
-            start.relations.min(outgoing),
-            next.relations.min(outgoing),
-            outgoing,
-        );
-        self.incoming_relations_range = EntryRange::new(
-            start.relations.saturating_sub(outgoing),
-            next.relations.saturating_sub(outgoing),
-            item.incoming_relations.len(),
-        );
         self.has_more = !next.complete(item);
         self.next_cursor = self.has_more.then(|| next.cursor(fingerprint));
     }
 
     fn fits(&self) -> Result<bool, QueryError> {
         Ok(serde_json::to_vec(self)
-            .map_err(|_| page_error("could not serialize item get page"))?
+            .map_err(|_| page_error("could not serialize get page"))?
             .len()
             <= PAGE_BYTES)
     }
 }
 
-/// Bounded transport retrieval. Mutations continue to use the complete internal
-/// `get_item` model so a retrieval page can never become replacement source data.
-pub fn get_item_page(
+struct ReadContent<'a> {
+    content: &'a str,
+    metadata: &'a [MetadataEntry],
+}
+
+/// Read consecutive source content and metadata without expanding neighbours.
+pub fn get(
     corpus: &Corpus,
     schema: &Schema,
-    id: &str,
-    limit: Option<usize>,
+    reference: &str,
     cursor: Option<&str>,
-) -> Result<ItemGetResult, QueryError> {
-    let limit = page_limit(limit)?;
-    let fingerprint = fingerprint(corpus, schema, &("get", id, limit))?;
-    let item = get_item(corpus, id)?;
+) -> Result<GetResult, QueryError> {
+    let graph = corpus.discovery();
+    let node = graph.resolve(reference)?;
+    let item = match node.kind() {
+        DiscoveryNodeKind::Item(item) => ReadContent {
+            content: item.body(),
+            metadata: item.metadata(),
+        },
+        _ => {
+            let source = node.source();
+            let document = corpus
+                .documents()
+                .iter()
+                .find(|document| document.path() == source.path())
+                .expect("discovery node belongs to a loaded document");
+            ReadContent {
+                content: &document.source()[source.span().start_byte()..source.span().end_byte()],
+                metadata: &[],
+            }
+        }
+    };
+    let fingerprint = fingerprint(corpus, schema, &("discovery-get-v1", reference))?;
     let start = Position::read(cursor, &fingerprint, &item)?;
     let mut next = start;
-    let mut summary = item.summary.clone();
-    truncate_title(&mut summary);
-    let mut result = ItemGetResult {
-        summary,
-        source: item.source.clone(),
-        body: String::new(),
-        body_range: TextRange::new(start.body, start.body, item.body.len()),
+    let mut result = GetResult {
+        format_version: 1,
+        node: node.summary(),
+        content: String::new(),
+        content_range: TextRange::new(start.content, start.content, item.content.len()),
         metadata: Vec::new(),
         metadata_range: EntryRange::new(start.metadata, start.metadata, item.metadata.len()),
-        outgoing_relations: Vec::new(),
-        outgoing_relations_range: EntryRange::new(0, 0, item.outgoing_relations.len()),
-        incoming_relations: Vec::new(),
-        incoming_relations_range: EntryRange::new(0, 0, item.incoming_relations.len()),
         has_more: false,
         next_cursor: None,
     };
     result.update(start, next, &item, &fingerprint);
     if !result.fits()? {
         return Err(page_error(
-            "item header cannot fit the 65536-byte get budget; shorten oversized identity/location fields in the source",
+            "node header cannot fit the 65536-byte get budget; shorten oversized identity/location fields in the source",
         ));
     }
 
-    if next.body < item.body.len() {
-        let end = fitting_end(&item.body, next.body, |end| {
-            result.body = item.body[start.body..end].to_owned();
-            next.body = end;
+    if next.content < item.content.len() {
+        let end = fitting_end(item.content, next.content, |end| {
+            result.content = item.content[start.content..end].to_owned();
+            next.content = end;
             result.update(start, next, &item, &fingerprint);
             result.fits()
         })?
-        .unwrap_or(start.body);
-        next.body = end;
-        result.body = item.body[start.body..end].to_owned();
+        .unwrap_or(start.content);
+        next.content = end;
+        result.content = item.content[start.content..end].to_owned();
     }
-    if next.body == item.body.len() {
+    if next.content == item.content.len() {
         while next.metadata < item.metadata.len() {
             let before = next;
             let entry = &item.metadata[next.metadata];
             result.metadata.push(MetadataFragment {
                 index: next.metadata,
-                key: entry.key.clone(),
+                key: entry.key().to_owned(),
                 value: String::new(),
-                range: TextRange::new(next.value, next.value, entry.value.len()),
+                range: TextRange::new(next.value, next.value, entry.value().len()),
             });
-            let end = fitting_end(&entry.value, before.value, |end| {
+            let end = fitting_end(entry.value(), before.value, |end| {
                 let fragment = result.metadata.last_mut().expect("inserted fragment");
-                fragment.value = entry.value[before.value..end].to_owned();
-                fragment.range = TextRange::new(before.value, end, entry.value.len());
-                next = if end == entry.value.len() {
+                fragment.value = entry.value()[before.value..end].to_owned();
+                fragment.range = TextRange::new(before.value, end, entry.value().len());
+                next = if end == entry.value().len() {
                     Position {
                         metadata: before.metadata + 1,
                         value: 0,
@@ -254,9 +256,9 @@ pub fn get_item_page(
             })?;
             if let Some(end) = end {
                 let fragment = result.metadata.last_mut().expect("inserted fragment");
-                fragment.value = entry.value[before.value..end].to_owned();
-                fragment.range = TextRange::new(before.value, end, entry.value.len());
-                if end == entry.value.len() {
+                fragment.value = entry.value()[before.value..end].to_owned();
+                fragment.range = TextRange::new(before.value, end, entry.value().len());
+                if end == entry.value().len() {
                     next = Position {
                         metadata: before.metadata + 1,
                         value: 0,
@@ -276,39 +278,10 @@ pub fn get_item_page(
             }
         }
     }
-    if next.metadata == item.metadata.len() && next.body == item.body.len() {
-        for relation in item
-            .outgoing_relations
-            .iter()
-            .chain(&item.incoming_relations)
-            .skip(next.relations)
-            .take(limit)
-        {
-            let outgoing = next.relations < item.outgoing_relations.len();
-            let mut relation = relation.clone();
-            truncate_title(&mut relation.item);
-            if outgoing {
-                result.outgoing_relations.push(relation);
-            } else {
-                result.incoming_relations.push(relation);
-            }
-            next.relations += 1;
-            result.update(start, next, &item, &fingerprint);
-            if !result.fits()? {
-                next.relations -= 1;
-                if outgoing {
-                    result.outgoing_relations.pop();
-                } else {
-                    result.incoming_relations.pop();
-                }
-                break;
-            }
-        }
-    }
     result.update(start, next, &item, &fingerprint);
     if next == start && result.has_more {
         return Err(page_error(
-            "next fragment or relation cannot fit the 65536-byte get budget; shorten oversized identity/location fields, metadata keys, or relation names in the source",
+            "next content or metadata fragment cannot fit the 65536-byte get budget; shorten oversized identity/location fields or metadata keys in the source",
         ));
     }
     Ok(result)
