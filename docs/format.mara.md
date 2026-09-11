@@ -1,8 +1,8 @@
 # Mara document format
 
-This file describes the current 0.1 format and projection. The accepted 0.2
-[discovery direction](discovery.mara.md) extends narrative projection and mention
-navigation; it does not claim those features are already implemented.
+This file defines the document syntax, including narrative mentions introduced
+in 0.2. See [discovery](discovery.mara.md) for derived structure, link resolution,
+and the remaining planned discovery interfaces.
 
 :::mara design DES-DOCUMENT-FORMAT
 :mid: 01M1PXP2KG381MM1VNN6XC7S4M
@@ -66,9 +66,10 @@ Failures preserve user data and produce actionable diagnostics.
 ## References and relations
 
 - `[[REQ-FAIL-SAFETY]]` and `[[<MID>]]` are internal mentions resolved by
-  exact human ID or canonical MID. Supported mentions occur in item bodies,
-  outside Markdown code and raw contexts; escaped openings are literal text.
-  Narrative outside items and metadata scalar values are not mention sources.
+  exact human ID or canonical MID. Supported mentions occur in item bodies and
+  narrative outside items, excluding Markdown code and raw contexts; escaped
+  openings are literal text. Metadata scalar values are not mention sources.
+  Narrative mention support begins in 0.2; 0.1 recognizes item-body mentions only.
 - Typed relations are metadata entries whose key names the relation and whose
   value is one target handle. Repeat the key for multiple targets.
 - Use only relation names whose meaning is defined by the project corpus.
@@ -85,6 +86,8 @@ Failures preserve user data and produce actionable diagnostics.
 - Each item retains its ordered metadata, exact Markdown body, schema-defined
   typed relations, body mentions outside fenced and inline code, and source
   locations.
+- Document structure, narrative references, link resolution, and diagnostics
+  follow [[DES-DOCUMENT-STRUCTURE]].
 - A source location contains the project-relative path, an end-exclusive UTF-8
   byte span, and one-based start and end lines.
 - The in-memory model is a disposable projection, never an authoring authority.
