@@ -560,3 +560,65 @@ fn final_standalone_anchor_in_a_shared_html_block_targets_following_content() {
         }
     }
 }
+
+#[test]
+fn list_item_markers_do_not_make_standalone_anchors_inline() {
+    let fixture = TempDir::new().unwrap();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    for (marker, inline, outer) in [
+        ("-", false, ""),
+        ("1.", false, ""),
+        ("12)", false, ""),
+        ("-", true, ""),
+        ("-", false, "- Outer\n"),
+        ("1.", false, "> "),
+    ] {
+        let indent = " ".repeat(marker.len() + 1);
+        let prefix = if inline { "Prose " } else { "" };
+        let body = format!(
+            "{marker} {prefix}<a name=\"stable\"></a>\n\n{indent}# Nested\n\n{indent}Body.\n"
+        );
+        let body = if outer == "> " {
+            body.lines()
+                .map(|line| format!("> {line}\n"))
+                .collect::<String>()
+        } else if !outer.is_empty() {
+            format!(
+                "{outer}{}",
+                body.lines()
+                    .map(|line| format!("  {line}\n"))
+                    .collect::<String>()
+            )
+        } else {
+            body
+        };
+        let source = format!("[anchor](#stable)\n\n{body}");
+        fs::write(fixture.path().join("list.mara.md"), &source).unwrap();
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let graph = corpus.discovery();
+        assert!(graph.diagnostics().is_empty(), "{:?}", graph.diagnostics());
+        let link = graph
+            .nodes()
+            .flat_map(|n| n.connections(Direction::Outgoing))
+            .find(|c| c.kind == ConnectionKind::Mentions)
+            .unwrap();
+        if inline {
+            assert!(
+                matches!(link.neighbour.kind(), Node::MarkdownBlock(block) if block.kind() == Block::List)
+            );
+        } else {
+            assert!(
+                matches!(link.neighbour.kind(), Node::Section { heading } if heading.heading_text() == Some("Nested")),
+                "marker {marker}: {:?}",
+                link.neighbour.kind()
+            );
+        }
+        assert!(
+            link.neighbour
+                .connections(Direction::Incoming)
+                .iter()
+                .any(|c| c.kind == ConnectionKind::Mentions && c.source == link.source)
+        );
+    }
+}
