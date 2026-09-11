@@ -216,7 +216,8 @@ fn same_destination(
     let mut retained = new_graph
         .nodes()
         .filter(|node| matches_content(*node, &map.after));
-    if let Some(candidate) = retained.next()
+    let first_retained = retained.next();
+    if let Some(candidate) = first_retained
         && retained.next().is_none()
         && old_graph
             .nodes()
@@ -228,9 +229,11 @@ fn same_destination(
         return candidate.source() == new.source();
     }
     // An anchored block may be rewritten completely. Once an intact original
-    // elsewhere has been ruled out, the same slot in a corresponding container
-    // identifies that edited block without requiring any shared characters.
+    // elsewhere (including duplicate matches) has been ruled out, the same slot
+    // in a corresponding container identifies that edited block without requiring
+    // any shared characters.
     if matches!(old.kind(), DiscoveryNodeKind::MarkdownBlock(_))
+        && first_retained.is_none()
         && let (Some(old_parent), Some(new_parent)) = (old.parent(), new.parent())
         && same_destination(old_parent, new_parent, maps, old_graph, new_graph)
     {

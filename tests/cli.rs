@@ -434,6 +434,24 @@ fn reference_review_allows_complete_anchored_paragraph_replacement() {
 }
 
 #[test]
+fn reference_review_protects_anchors_on_duplicate_blocks() {
+    let body = "<a name=\"stable\"></a>\n\nFirst.\n\nFirst.";
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "<a name=\"stable\"></a>\n\nInserted.\n\nFirst.\n\nFirst.",
+        false,
+    );
+    // Repeated content alone must not prevent edits after the linked block.
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "<a name=\"stable\"></a>\n\nFirst.\n\nInserted.\n\nFirst.",
+        true,
+    );
+}
+
+#[test]
 fn reference_review_allows_section_extent_changes() {
     let nested = "# Alpha\n\nAlpha text.\n\n## Beta\n\nBeta text.";
     let siblings = "# Alpha\n\nAlpha text.\n\n# Beta\n\nBeta text.";
