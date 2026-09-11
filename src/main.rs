@@ -10,9 +10,9 @@ use std::{
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
     EntryRange, FieldValue, GetParams, GetResult, InitialRelation, ItemCollectionResult,
-    ItemCreateParams, ItemFilterParams, ItemMoveParams, ItemRelatedParams, ItemSummary,
-    ItemUpdateParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
-    RelatedItem, RelationDirection, RelationMutationResult, RelationParams, SchemaGetResult,
+    ItemCreateParams, ItemFilterParams, ItemMoveParams, ItemSummary, ItemUpdateParams,
+    OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, RelatedConnection,
+    RelatedParams, RelationDirection, RelationMutationResult, RelationParams, SchemaGetResult,
     SchemaKind, SchemaListResult, SchemaValidationResult, SearchParams, Template, ValidationResult,
     ValidationScope, ValidationTargetKind, project_initialize,
 };
@@ -25,7 +25,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "Discovery and reading: mara search <QUERY> discovers items, sections, and Markdown blocks; mara get <REFERENCE> reads any discovery node."
+    after_help = "Discovery and reading: mara search <QUERY> discovers items, sections, and Markdown blocks; mara get <REFERENCE> reads any discovery node; mara related <REFERENCE> explores direct connections."
 )]
 struct Cli {
     #[arg(
@@ -68,6 +68,36 @@ enum Command {
         #[arg(
             long,
             help = "Opaque next_cursor from the previous page; keep reference unchanged until has_more is false. Omit to start or restart after source/schema changes. Empty strings are invalid"
+        )]
+        cursor: Option<String>,
+    },
+
+    /// Explore direct schema relations, mentions, and containment with source evidence; read neighbours with get.
+    Related {
+        /// Exact item ID/MID or a discovery handle.
+        reference: String,
+
+        /// Select edge direction relative to this node; omission includes both, outgoing first.
+        #[arg(long, value_enum)]
+        direction: Option<CliRelationDirection>,
+
+        /// Select relation names (schema:name or builtin:name; shorthand only when unambiguous) (repeatable, OR); intersects the neighbour flavour filter. Omission includes all.
+        #[arg(long)]
+        relation: Vec<String>,
+
+        /// Select exact neighbour flavours (repeatable, OR); nonempty selects item neighbours only, omission includes all.
+        #[arg(long)]
+        flavour: Vec<String>,
+
+        #[arg(
+            long,
+            help = "Maximum relation entries per page: 1 through 100 (default 20), not unique neighbours; the byte budget may return fewer"
+        )]
+        limit: Option<usize>,
+
+        #[arg(
+            long,
+            help = "Opaque next_cursor from the previous page; keep reference/options unchanged until has_more is false; omit to start or restart after source/schema changes. Empty strings are invalid"
         )]
         cursor: Option<String>,
     },
@@ -220,35 +250,6 @@ enum ItemCommand {
     List {
         #[command(flatten)]
         filters: ItemFilterArgs,
-    },
-    /// List direct incoming and outgoing relation entries; retrieve neighbour content with get.
-    Related {
-        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
-        id: String,
-
-        /// Select edge direction relative to this item; omission includes both, outgoing first.
-        #[arg(long, value_enum)]
-        direction: Option<CliRelationDirection>,
-
-        /// Select exact relation names (repeatable, OR); intersects the neighbour flavour filter. Omission includes all.
-        #[arg(long)]
-        relation: Vec<String>,
-
-        /// Select exact neighbour flavours (repeatable, OR); omission includes all.
-        #[arg(long)]
-        flavour: Vec<String>,
-
-        #[arg(
-            long,
-            help = "Maximum relation entries per page: 1 through 100 (default 20), not unique neighbours; the byte budget may return fewer"
-        )]
-        limit: Option<usize>,
-
-        #[arg(
-            long,
-            help = "Opaque next_cursor from the previous page; keep item/options unchanged until has_more is false; omit to start or restart after source/schema changes. Empty strings are invalid"
-        )]
-        cursor: Option<String>,
     },
     /// Report all discoverable validation diagnostics applicable to one item.
     Validate {
@@ -754,19 +755,16 @@ fn run(cli: Cli) -> Result<bool, String> {
             })?;
             Ok(true)
         }
-        Command::Item {
-            command:
-                ItemCommand::Related {
-                    id,
-                    direction,
-                    relation,
-                    flavour,
-                    limit,
-                    cursor,
-                },
+        Command::Related {
+            reference,
+            direction,
+            relation,
+            flavour,
+            limit,
+            cursor,
         } => {
-            let result = operations(project)?.item_related(ItemRelatedParams {
-                id,
+            let result = operations(project)?.related(RelatedParams {
+                reference,
                 direction: direction.map(Into::into),
                 relations: relation,
                 flavours: flavour,
@@ -774,7 +772,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                 cursor,
             })?;
             emit(format, &result, |result| {
-                print_related_items(&result.items);
+                print_related_connections(&result.connections);
                 print_page_continuation(result.has_more, result.next_cursor.as_deref());
                 Ok(())
             })?;
@@ -1052,40 +1050,32 @@ fn print_item_summary(item: &ItemSummary) {
     }
 }
 
-fn print_related_items(items: &[RelatedItem]) {
-    for item in items {
-        print_related_line(item.direction(), item.relation(), item.item());
-    }
-}
-
-fn print_related_line(direction: RelationDirection, relation: &str, item: &ItemSummary) {
-    let title = if item.title_truncated() {
-        format!("{} [title truncated]", item.title())
-    } else {
-        item.title().to_owned()
-    };
-    if let Some(mid) = item.mid() {
+fn print_related_connections(connections: &[RelatedConnection]) {
+    for connection in connections {
+        let relation = match (connection.relation.as_str(), connection.direction) {
+            ("contains", RelationDirection::Incoming) => "contained_by",
+            ("builtin:contains", RelationDirection::Incoming) => "builtin:contained_by",
+            (name, _) => name,
+        };
+        let node = &connection.neighbour;
         println!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}:{}",
-            direction.as_str(),
+            "{}\t{}\t{}\t{}\t{}{}\t{}:{}\tevidence={}:{}-{}\treference={}",
+            connection.direction.as_str(),
             relation,
-            item.id(),
-            mid,
-            item.flavour(),
-            title,
-            item.path().display(),
-            item.line()
-        );
-    } else {
-        println!(
-            "{}\t{}\t{}\t{}\t{}\t{}:{}",
-            direction.as_str(),
-            relation,
-            item.id(),
-            item.flavour(),
-            title,
-            item.path().display(),
-            item.line()
+            node.id.as_deref().unwrap_or(&node.reference),
+            format!("{:?}", node.kind).to_lowercase(),
+            node.title.as_deref().unwrap_or_default(),
+            if node.title_truncated {
+                " [title truncated]"
+            } else {
+                ""
+            },
+            node.source.path().display(),
+            node.source.start_line(),
+            connection.source.path().display(),
+            connection.source.start_line(),
+            connection.source.end_line(),
+            node.reference
         );
     }
 }

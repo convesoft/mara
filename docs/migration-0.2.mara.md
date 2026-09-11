@@ -1,9 +1,8 @@
 # Migration to 0.2
 
 Schema format 2 and mandatory flavour guidance are implemented starting with
-`0.2.0-alpha.0`. Released 0.1 versions use schema format 1. Unified `search`
-and `get` are implemented; the `related` migration below remains planned until
-its implementation lands.
+`0.2.0-alpha.0`. Released 0.1 versions use schema format 1. Unified `search`,
+`get`, and `related` are implemented.
 
 ## Schema guidance
 

@@ -15,9 +15,11 @@ use crate::{Corpus, Item, Schema, SourceLocation};
 
 mod get;
 mod page;
+mod related;
 mod search;
 pub use get::{EntryRange, GetResult, MetadataFragment, TextRange, get};
 pub use page::{ItemCollectionResult, RelatedItemsResult, SearchExcerpt};
+pub use related::{RelatedConnection, RelatedResult, related};
 pub use search::{SearchHit, SearchResult, search};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -397,7 +399,7 @@ impl fmt::Display for QueryError {
             ),
             Self::UnknownFlavour { name } => write!(formatter, "unknown flavour '{name}'"),
             Self::UnknownField { name } => write!(formatter, "unknown field '{name}'"),
-            Self::AmbiguousRelationName { name } => write!(formatter, "ambiguous relation '{name}'; use schema:{name} or builtin:{name}; search filters accept schema relations only"),
+            Self::AmbiguousRelationName { name } => write!(formatter, "ambiguous relation '{name}'; use schema:{name} or builtin:{name}"),
             Self::UnknownRelation { name } => write!(formatter, "unknown relation '{name}'"),
             Self::InvalidPath { path } => write!(
                 formatter,

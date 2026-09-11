@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use mara::{
     FieldValue, GetParams, GetResult, InitialRelation, ItemCollectionResult, ItemCreateParams,
-    ItemCreationResult, ItemFilterParams, ItemMove, ItemMoveParams, ItemRelatedParams, ItemUpdate,
-    ItemUpdateParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
-    RelatedItemsResult, RelationDirection, RelationMutationResult, RelationParams, SchemaGetResult,
+    ItemCreationResult, ItemFilterParams, ItemMove, ItemMoveParams, ItemUpdate, ItemUpdateParams,
+    OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, RelatedParams,
+    RelatedResult, RelationDirection, RelationMutationResult, RelationParams, SchemaGetResult,
     SchemaKind, SchemaListResult, SchemaValidationResult, SearchParams, Template,
     TransactionRollbackResult, ValidationResult,
 };
@@ -297,19 +297,19 @@ impl SearchToolParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct ItemRelatedToolParams {
+struct RelatedToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
-    id: String,
-    /// Edge direction relative to the selected item: incoming or outgoing. Omitted or null includes both, outgoing first.
+    /// Exact item ID/MID or a discovery handle returned by search, get, or related.
+    reference: String,
+    /// Edge direction relative to the selected node: incoming or outgoing. Omitted or null includes both, outgoing first.
     #[serde(default)]
     direction: Option<RelationDirection>,
-    /// Exact relation names, combined with OR and intersected with the neighbour flavour filter. Omitted or [] includes all.
+    /// Relation names (schema:name or builtin:name; shorthand only when unambiguous), combined with OR and intersected with the neighbour flavour filter. Omitted or [] includes all.
     #[serde(default)]
     relations: Vec<String>,
-    /// Exact neighbour flavour names, combined with OR. Omitted or [] includes all.
+    /// Exact neighbour flavour names, combined with OR. Nonempty selects item neighbours only; omitted or [] includes all.
     #[serde(default)]
     flavours: Vec<String>,
     /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer. Counts relation entries, not unique neighbours.
@@ -320,12 +320,12 @@ struct ItemRelatedToolParams {
     cursor: Option<String>,
 }
 
-impl ItemRelatedToolParams {
-    fn into_parts(self) -> (Option<PathBuf>, ItemRelatedParams) {
+impl RelatedToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, RelatedParams) {
         (
             self.project,
-            ItemRelatedParams {
-                id: self.id,
+            RelatedParams {
+                reference: self.reference,
                 direction: self.direction,
                 relations: self.relations,
                 flavours: self.flavours,
@@ -575,15 +575,15 @@ impl MaraMcp {
     }
 
     #[tool(
-        name = "item_related",
-        description = "List bounded pages of direct incoming or outgoing relation entries with exact filters. Continue with next_cursor and unchanged item/options; restart after source/schema changes. Neighbour content requires get."
+        name = "related",
+        description = "Explore direct schema relations, mentions, and containment from any node, with neighbour summaries and source evidence. Counts connections, not unique neighbours; traversal is caller-controlled. Continue with next_cursor and unchanged reference/options; restart after source/schema changes. Read neighbour content with get."
     )]
-    fn item_related(
+    fn related(
         &self,
-        Parameters(params): Parameters<ItemRelatedToolParams>,
-    ) -> Result<Json<RelatedItemsResult>, String> {
+        Parameters(params): Parameters<RelatedToolParams>,
+    ) -> Result<Json<RelatedResult>, String> {
         let (project, params) = params.into_parts();
-        self.for_project(project)?.item_related(params).map(Json)
+        self.for_project(project)?.related(params).map(Json)
     }
 
     #[tool(
