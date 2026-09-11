@@ -217,7 +217,7 @@ pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
     for item in &mut document.items {
         // Validation recovery retains partial identities and metadata. It
         // must not present a malformed item's body as trustworthy structure.
-        if !item.body_valid {
+        if !item.body_valid || !item.title_valid {
             continue;
         }
         let (arena, root, code_ends) = item_tree(source, item);

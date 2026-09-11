@@ -36,6 +36,7 @@ pub(super) struct ParsedItem {
     pub(super) mentions: Vec<ParsedMention>,
     pub(super) source: Range<usize>,
     pub(super) metadata_valid: bool,
+    pub(super) title_valid: bool,
     pub(super) body_valid: bool,
 }
 
@@ -582,6 +583,7 @@ fn project_item(
             mentions: item_mentions,
             source: opener_line.start..source_end,
             metadata_valid,
+            title_valid: !title_is_invalid,
             body_valid: metadata_valid && structure_complete,
         },
         errors,

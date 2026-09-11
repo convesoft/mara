@@ -206,6 +206,65 @@ fn validation_retains_independent_document_parse_diagnostics() {
 }
 
 #[test]
+fn validation_suppresses_body_blocks_for_invalid_titles() {
+    let (fixture, project, schema) = initialized_project();
+    for title_metadata in ["", ":title: \n", ":title: First\n:title: Second\n"] {
+        let source = format!(
+            ":::mara requirement REQ-FIRST\n:title: First\n\nBefore.\n:::\n\n:::mara requirement REQ-BROKEN\n{title_metadata}\n# Body\n\nSee [[REQ-FIRST]].\n:::\n\n:::mara requirement REQ-LAST\n:title: Last\n\nAfter.\n:::\n"
+        );
+        write(fixture.path(), "titles.mara.md", &source);
+        let (corpus, diagnostics) = load_corpus_for_validation(&project, &schema).unwrap();
+        let items = corpus.items().collect::<Vec<_>>();
+        assert_eq!(
+            items.iter().map(|item| item.id()).collect::<Vec<_>>(),
+            ["REQ-FIRST", "REQ-BROKEN", "REQ-LAST"]
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            diagnostics[0].message(),
+            "item must have exactly one non-empty title entry"
+        );
+        assert_eq!(diagnostics[0].source().span().start_line(), 7);
+        assert!(items[1].body_blocks().is_empty(), "{title_metadata:?}");
+        assert!(!items[0].body_blocks().is_empty());
+        assert!(!items[2].body_blocks().is_empty());
+        assert_eq!(items[1].body(), "# Body\n\nSee [[REQ-FIRST]].\n");
+        assert_eq!(items[1].mentions()[0].target(), "REQ-FIRST");
+        assert_eq!(
+            items[1]
+                .metadata()
+                .iter()
+                .filter(|entry| entry.key() == "title")
+                .count(),
+            title_metadata.lines().count()
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("titles.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+#[test]
+fn title_recovery_preserves_independent_missing_body_diagnostics() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "empty.mara.md",
+        ":::mara requirement REQ-EMPTY\n:title: \n\n:::\n",
+    );
+    let (corpus, parse_diagnostics) = load_corpus_for_validation(&project, &schema).unwrap();
+    assert!(parse_diagnostics.iter().any(
+        |diagnostic| diagnostic.message() == "item must have exactly one non-empty title entry"
+    ));
+    assert!(
+        mara::validate_corpus(&corpus, &schema)
+            .iter()
+            .any(|diagnostic| diagnostic.message() == "required body is empty")
+    );
+}
+
+#[test]
 fn validation_retains_valid_items_around_a_malformed_item() {
     let (fixture, project, schema) = initialized_project();
     write(
