@@ -20,8 +20,8 @@ use crate::MarkdownBlockKind;
 /// The container owns the parsed identity, ordered metadata, and exact
 /// opening/body/closing provenance alongside its ordinary Markdown children.
 #[derive(Debug)]
-struct MaraItemNode {
-    item: ParsedItem,
+pub(super) struct MaraItemNode {
+    pub(super) item: ParsedItem,
 }
 
 impl NodeKind for MaraItemNode {
@@ -190,20 +190,108 @@ fn markdown_tree(
     source: &str,
     scope: Range<usize>,
     items: &[ParsedItem],
-) -> (Arena, NodeRef, HashMap<usize, usize>) {
+    references: &[super::ParsedReference],
+) -> (Arena, NodeRef, HashMap<usize, usize>, HashMap<usize, usize>) {
+    let mentions = Rc::new(
+        references
+            .iter()
+            .filter(|reference| reference.kind == crate::ReferenceKind::Item)
+            .map(|reference| (reference.source.start, reference.source.end))
+            .collect::<HashMap<_, _>>(),
+    );
+    let link_ends = Rc::new(RefCell::new(HashMap::new()));
+    let tracked_links = Rc::clone(&link_ends);
     let container_items = items.to_vec();
     let block_ends = Rc::new(RefCell::new(HashMap::new()));
     let tracked_ends = Rc::clone(&block_ends);
     let quote_ends = Rc::clone(&block_ends);
     let extension = ParserExtensionFn::new(move |parser: &mut Parser| {
+        // Rushdown 0.18 has no per-parser replacement API. Install its CommonMark
+        // parsers explicitly so the span delegates replace, rather than precede,
+        // the defaults. Link-parser failures mutate the label stack and must not
+        // be retried by a second copy of the same parser.
+        parser.add_block_parser(
+            parser::ParagraphParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_PARAGRAPH,
+        );
+        parser.add_block_parser(
+            parser::IndentedCodeBlockParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_INDENTED_CODE_BLOCK,
+        );
+        parser.add_block_parser(
+            parser::AtxHeadingParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_ATX_HEADING,
+        );
+        parser.add_block_parser(
+            parser::SetextHeadingParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_SETTEXT_HEADING,
+        );
+        parser.add_block_parser(
+            parser::ThematicBreakParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_THEMATIC_BREAK,
+        );
+        parser.add_block_parser(
+            parser::ListParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_LIST,
+        );
+        parser.add_block_parser(
+            parser::ListItemParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_LIST_ITEM,
+        );
+        parser.add_block_parser(
+            parser::HtmlBlockParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_HTML_BLOCK,
+        );
+        parser.add_inline_parser(
+            parser::CodeSpanParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_CODE_SPAN,
+        );
+        parser.add_inline_parser(
+            parser::RawHtmlParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_RAW_HTML,
+        );
+        parser.add_inline_parser(
+            parser::EmphasisParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_EMPHASIS,
+        );
+        parser.add_inline_parser(
+            parser::AutoLinkParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_AUTO_LINK,
+        );
+        parser.add_paragraph_transformer(
+            parser::LinkReferenceParagraphTransformer::new,
+            parser::NoParserOptions,
+            100,
+        );
+        parser.add_inline_parser(
+            move || {
+                super::references::LinkParserWithSpans::new(
+                    Rc::clone(&tracked_links),
+                    Rc::clone(&mentions),
+                )
+            },
+            parser::NoParserOptions,
+            parser::PRIORITY_LINK,
+        );
         parser.add_block_parser(
             move || BlockParserWithSpans {
                 parser: parser::FencedCodeBlockParser::new().into(),
                 ends: Rc::clone(&tracked_ends),
             },
             parser::NoParserOptions,
-            // Rushdown 0.18 registers its default fence parser at the
-            // indented-code priority; run the tracking delegate first.
+            // Preserve the existing fence/indented-code precedence.
             parser::PRIORITY_INDENTED_CODE_BLOCK - 1,
         );
         parser.add_block_parser(
@@ -225,7 +313,13 @@ fn markdown_tree(
         }
         parser::gfm_table().apply(parser);
     });
-    let parser = Parser::with_extensions(parser::Options::default(), extension);
+    let parser = Parser::with_extensions(
+        parser::Options {
+            without_default_parsers: true,
+            ..parser::Options::default()
+        },
+        extension,
+    );
     // Retain document-relative byte offsets, including UTF-8 and CRLF. Start
     // at a recognized scope boundary without copying or rewriting its bytes.
     let mut reader = BasicReader::new(&source[..scope.end]);
@@ -235,16 +329,25 @@ fn markdown_tree(
     reader.set_position(0, Segment::new(scope.start, first_line_end));
     let (arena, root) = parser.parse(&mut reader);
     let ends = block_ends.take();
-    (arena, root, ends)
+    (arena, root, ends, link_ends.take())
 }
 
 pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
     // Parse ordinary content and item bodies together so Rushdown resolves
     // references against one document-wide definition context. Recognized item
     // boundaries still shield metadata and scope each item's Markdown children.
-    let (arena, root, ends) = markdown_tree(source, 0..source.len(), &document.items);
+    let (arena, root, ends, link_ends) = markdown_tree(
+        source,
+        0..source.len(),
+        &document.items,
+        &document.references,
+    );
     document.blocks = project_children(&arena, root, source, 0..source.len(), &ends);
     populate_item_blocks(&arena, root, source, &ends, &mut document.items);
+    super::references::collect(&arena, root, source, &link_ends, document);
+    document
+        .references
+        .sort_by_key(|reference| reference.source.start);
 }
 
 fn populate_item_blocks(
@@ -613,10 +716,11 @@ mod tests {
         let source =
             "Prelude.\n\n:::mara requirement REQ-ONE\n:title: One\n\n# Heading\n\nBody.\n:::\n";
         let parsed = super::super::parse(source).unwrap();
-        let (arena, root, _) = markdown_tree(
+        let (arena, root, _, _) = markdown_tree(
             source,
             parsed.items[0].source.clone(),
             std::slice::from_ref(&parsed.items[0]),
+            &parsed.references,
         );
         let container = arena[root].first_child().unwrap();
         assert_eq!(arena[container].kind_data().typ(), NodeType::ContainerBlock);

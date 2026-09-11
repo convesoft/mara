@@ -232,7 +232,7 @@ new missing required bodies or other invalid state.
 resolved by exact MID or human ID. Require a valid complete project before
 editing and a valid complete surviving corpus before publication.
 
-Refuse deletion when any surviving item's typed relation or supported wiki
+Refuse deletion when any surviving item's typed relation or supported body wiki
 mention resolves to the selected MID or human ID. Report every blocking
 occurrence with its source path, one-based line, and byte span. References
 inside the selected item, including self-references, disappear with it and do
@@ -267,6 +267,12 @@ Invocation errors follow [[DES-COMMAND-SURFACE]]; a blocked deletion names the
 selected identities and lists each source item, relation name or mention,
 path, one-based line, and end-exclusive UTF-8 byte span. Authors must remove or
 redirect those references explicitly before retrying.
+
+Narrative mentions also participate in complete-corpus validation. If deletion
+would leave one unresolved, candidate validation reports its source path and
+line and rejects the operation before writing. Narrative references are not yet
+included in the item-level blocker enumeration above; the planned reference-aware
+mutation preflight follows [[DES-DOCUMENT-STRUCTURE]].
 
 Remove the parser's complete item span, including the closing line terminator
 when present. If removal joins an empty line before the block with an empty
@@ -325,11 +331,18 @@ changed document paths in lexical order, empty for an unchanged ID.
 
 Hold the project mutation lock and validate the full corpus before resolution
 and replacement-ID checks. Plan byte patches from the selected item's opener,
-schema-defined relation metadata spans, and parser-recognized mention spans.
+schema-defined relation metadata spans, and parser-recognized item-body mention
+spans.
 Check each opener, metadata scalar, and mention against its parsed preimage;
 replace only the human-ID token. Reject overlapping or mismatched patches and
 apply them in reverse byte order per file without rendering Markdown.
 Labelled wiki syntax is not introduced; unsupported syntax remains literal.
+
+Narrative human-ID mentions are not yet rewritten. If the candidate leaves one
+unresolved, complete-corpus validation reports its source path and line and
+rejects the rename before writing. Narrative MID mentions remain valid because
+the MID is unchanged. Planned narrative rewriting and link-preservation checks
+follow [[DES-DOCUMENT-STRUCTURE]].
 
 Reparse all changed documents and validate the complete projected corpus.
 Verify the same item MIDs, expected human IDs, flavours, and document paths,

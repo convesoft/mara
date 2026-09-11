@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+mod references;
+
 use petgraph::{
     Direction,
     graph::{DiGraph, NodeIndex},
@@ -15,6 +17,7 @@ use crate::{
 #[derive(Debug)]
 pub struct DiscoveryGraph<'corpus> {
     graph: DiGraph<NodeData<'corpus>, EdgeData<'corpus>>,
+    diagnostics: Vec<crate::Diagnostic>,
 }
 
 #[derive(Debug)]
@@ -73,6 +76,7 @@ impl<'corpus> DiscoveryGraph<'corpus> {
     pub(crate) fn new(corpus: &'corpus Corpus) -> Self {
         let mut result = Self {
             graph: DiGraph::new(),
+            diagnostics: Vec::new(),
         };
         for document in corpus.documents() {
             let lines = std::iter::once(0)
@@ -100,7 +104,13 @@ impl<'corpus> DiscoveryGraph<'corpus> {
             result.add_scope(root, content, document.source().len(), &lines);
         }
         result.add_item_connections();
+        result.add_references(corpus);
         result
+    }
+
+    /// Broken internal destinations and ambiguous anchor declarations.
+    pub fn diagnostics(&self) -> &[crate::Diagnostic] {
+        &self.diagnostics
     }
 
     /// Document path order, then structural preorder within each document.
@@ -222,21 +232,13 @@ impl<'corpus> DiscoveryGraph<'corpus> {
             }
         }
         for (node, item) in items {
-            let connections = item
-                .relations()
-                .iter()
-                .map(|relation| {
-                    (
-                        relation.target(),
-                        EdgeKind::Schema(relation.name()),
-                        relation.source(),
-                    )
-                })
-                .chain(
-                    item.mentions()
-                        .iter()
-                        .map(|mention| (mention.target(), EdgeKind::Mentions, mention.source())),
-                );
+            let connections = item.relations().iter().map(|relation| {
+                (
+                    relation.target(),
+                    EdgeKind::Schema(relation.name()),
+                    relation.source(),
+                )
+            });
             for (target, kind, source) in connections {
                 // Validation owns diagnostics; never resolve missing or ambiguous identities.
                 if let Some([target]) = targets.get(target).map(Vec::as_slice) {

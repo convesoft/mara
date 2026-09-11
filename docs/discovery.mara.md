@@ -350,9 +350,15 @@ heading text through `MarkdownBlock::heading_text()`. `Corpus::discovery()` buil
 a disposable petgraph graph from that loaded snapshot. Borrowed `DiscoveryNode`
 values expose node kind, source, parent, children, and directional connections;
 sections retain their original heading block and a source span covering their
-full extent. Graph indexes stay private. Existing item relations and resolved
-item-body mentions share this graph with containment. Narrative link resolution,
-discovery handles, search selection, and CLI/MCP discovery remain separate work.
+full extent. Graph indexes stay private. Schema relations, resolved item and narrative
+references, and containment share this graph. `Document::references()` retains
+item mentions, Markdown link destinations, and explicit anchor declarations
+with precise source spans, including unresolved links. Link sources use their
+owning item or outermost ordinary Markdown block; link destinations retain
+sections and blocks inside items. `DiscoveryGraph::diagnostics()` reports broken
+internal references and ambiguous anchors; project validation includes these
+schema-independent diagnostics. Discovery handles, search selection, and CLI/MCP
+discovery remain separate work.
 
 ## Discovery units
 
