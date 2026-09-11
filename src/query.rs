@@ -327,6 +327,7 @@ impl RelatedItem {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryError {
+    InvalidDiscoveryReference,
     InvalidPage {
         message: String,
     },
@@ -366,6 +367,9 @@ pub enum QueryError {
 impl fmt::Display for QueryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidDiscoveryReference => formatter.write_str(
+                "invalid or stale discovery handle; the document may have changed or moved; search again to rediscover the node",
+            ),
             Self::InvalidPage { message } => formatter.write_str(message),
             Self::MissingItem { id } => write!(formatter, "item '{id}' was not found"),
             Self::AmbiguousItem { id } => write!(formatter, "item ID '{id}' is ambiguous"),

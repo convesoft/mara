@@ -23,7 +23,8 @@ pub use corpus::{
     validate_corpus_independent,
 };
 pub use discovery::{
-    ConnectionKind, DiscoveryConnection, DiscoveryGraph, DiscoveryNode, DiscoveryNodeKind,
+    ConnectionKind, DiscoveryConnection, DiscoveryContext, DiscoveryGraph, DiscoveryKind,
+    DiscoveryNode, DiscoveryNodeKind, DiscoveryNodeSummary,
 };
 pub use mutation::{
     BackfilledMid, BackfilledMids, InitialRelation, ItemCreation, ItemCreationRequest,
