@@ -83,6 +83,14 @@ pub(super) fn collect(
             KindData::Link(link) => {
                 if let Some(&end) = ends.get(&start)
                     && source.get(start..end).is_some()
+                    // Recognition already gave Mara mentions precedence over
+                    // Markdown. A matching reference definition must not turn
+                    // their inner brackets into a second, unrelated link.
+                    && !document.references.iter().any(|reference| {
+                        reference.kind == ReferenceKind::Item
+                            && reference.source.start <= start
+                            && reference.source.end >= end
+                    })
                 {
                     document.references.push(ParsedReference {
                         kind: ReferenceKind::MarkdownLink,

@@ -198,10 +198,79 @@ fn markdown_tree(
     let tracked_ends = Rc::clone(&block_ends);
     let quote_ends = Rc::clone(&block_ends);
     let extension = ParserExtensionFn::new(move |parser: &mut Parser| {
+        // Rushdown 0.18 has no per-parser replacement API. Install its CommonMark
+        // parsers explicitly so the span delegates replace, rather than precede,
+        // the defaults. Link-parser failures mutate the label stack and must not
+        // be retried by a second copy of the same parser.
+        parser.add_block_parser(
+            parser::ParagraphParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_PARAGRAPH,
+        );
+        parser.add_block_parser(
+            parser::IndentedCodeBlockParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_INDENTED_CODE_BLOCK,
+        );
+        parser.add_block_parser(
+            parser::AtxHeadingParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_ATX_HEADING,
+        );
+        parser.add_block_parser(
+            parser::SetextHeadingParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_SETTEXT_HEADING,
+        );
+        parser.add_block_parser(
+            parser::ThematicBreakParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_THEMATIC_BREAK,
+        );
+        parser.add_block_parser(
+            parser::ListParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_LIST,
+        );
+        parser.add_block_parser(
+            parser::ListItemParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_LIST_ITEM,
+        );
+        parser.add_block_parser(
+            parser::HtmlBlockParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_HTML_BLOCK,
+        );
+        parser.add_inline_parser(
+            parser::CodeSpanParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_CODE_SPAN,
+        );
+        parser.add_inline_parser(
+            parser::RawHtmlParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_RAW_HTML,
+        );
+        parser.add_inline_parser(
+            parser::EmphasisParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_EMPHASIS,
+        );
+        parser.add_inline_parser(
+            parser::AutoLinkParser::new,
+            parser::NoParserOptions,
+            parser::PRIORITY_AUTO_LINK,
+        );
+        parser.add_paragraph_transformer(
+            parser::LinkReferenceParagraphTransformer::new,
+            parser::NoParserOptions,
+            100,
+        );
         parser.add_inline_parser(
             move || super::references::LinkParserWithSpans::new(Rc::clone(&tracked_links)),
             parser::NoParserOptions,
-            parser::PRIORITY_LINK - 1,
+            parser::PRIORITY_LINK,
         );
         parser.add_block_parser(
             move || BlockParserWithSpans {
@@ -209,8 +278,7 @@ fn markdown_tree(
                 ends: Rc::clone(&tracked_ends),
             },
             parser::NoParserOptions,
-            // Rushdown 0.18 registers its default fence parser at the
-            // indented-code priority; run the tracking delegate first.
+            // Preserve the existing fence/indented-code precedence.
             parser::PRIORITY_INDENTED_CODE_BLOCK - 1,
         );
         parser.add_block_parser(
@@ -232,7 +300,13 @@ fn markdown_tree(
         }
         parser::gfm_table().apply(parser);
     });
-    let parser = Parser::with_extensions(parser::Options::default(), extension);
+    let parser = Parser::with_extensions(
+        parser::Options {
+            without_default_parsers: true,
+            ..parser::Options::default()
+        },
+        extension,
+    );
     // Retain document-relative byte offsets, including UTF-8 and CRLF. Start
     // at a recognized scope boundary without copying or rewriting its bytes.
     let mut reader = BasicReader::new(&source[..scope.end]);

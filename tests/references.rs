@@ -360,3 +360,99 @@ fn standalone_anchor_before_a_nested_heading_targets_the_section() {
         matches!(link.neighbour.kind(), Node::Section { heading } if heading.heading_text() == Some("Nested"))
     );
 }
+
+#[test]
+fn nested_link_labels_resolve_and_missing_destinations_fail_cli_validation() {
+    let fixture = TempDir::new().unwrap();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    for (destination, valid) in [("dest", true), ("missing", false)] {
+        let source = format!("[array[index]](#{destination})\n\n# Dest\n");
+        fs::write(fixture.path().join("nested-label.mara.md"), &source).unwrap();
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let reference = &corpus.documents()[0].references();
+        assert_eq!(reference.len(), 1);
+        assert_eq!(reference[0].target(), format!("#{destination}"));
+        assert_eq!(
+            &source[reference[0].source().span().start_byte()
+                ..reference[0].source().span().end_byte()],
+            format!("[array[index]](#{destination})")
+        );
+        let graph = corpus.discovery();
+        let links = graph
+            .nodes()
+            .flat_map(|n| n.connections(Direction::Outgoing))
+            .filter(|c| c.kind == ConnectionKind::Mentions)
+            .collect::<Vec<_>>();
+        assert_eq!(links.len(), usize::from(valid));
+        assert_eq!(graph.diagnostics().is_empty(), valid);
+        if valid {
+            assert!(
+                matches!(links[0].neighbour.kind(), Node::Section { heading } if heading.heading_text() == Some("Dest"))
+            );
+        }
+        let output = Command::new(env!("CARGO_BIN_EXE_mara"))
+            .args([
+                "--project",
+                fixture.path().to_str().unwrap(),
+                "--format",
+                "json",
+                "project",
+                "validate",
+            ])
+            .output()
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(output.status.success(), valid, "{json}");
+        assert_eq!(json["valid"], valid);
+    }
+}
+
+#[test]
+fn item_mentions_take_precedence_over_markdown_reference_definitions() {
+    let fixture = TempDir::new().unwrap();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    for destination in ["missing", "dest"] {
+        let source = format!(
+            "[[REQ-ONE]] [[{MID}]]\n\n{}\n# Dest\n\n[REQ-ONE]: #{destination}\n[{MID}]: #{destination}\n",
+            item(&format!("[[REQ-ONE]] [[{MID}]]"))
+        );
+        fs::write(fixture.path().join("mentions.mara.md"), &source).unwrap();
+        let corpus = load_corpus(&project, &schema).unwrap();
+        assert_eq!(corpus.documents()[0].references().len(), 4);
+        assert!(
+            corpus.documents()[0]
+                .references()
+                .iter()
+                .all(|r| r.kind() == ReferenceKind::Item)
+        );
+        let graph = corpus.discovery();
+        assert!(graph.diagnostics().is_empty(), "{:?}", graph.diagnostics());
+        let links = graph
+            .nodes()
+            .flat_map(|n| n.connections(Direction::Outgoing))
+            .filter(|c| c.kind == ConnectionKind::Mentions)
+            .collect::<Vec<_>>();
+        assert_eq!(links.len(), 4);
+        assert!(
+            links
+                .iter()
+                .all(|c| matches!(c.neighbour.kind(), Node::Item(_)))
+        );
+        let output = Command::new(env!("CARGO_BIN_EXE_mara"))
+            .args([
+                "--project",
+                fixture.path().to_str().unwrap(),
+                "--format",
+                "json",
+                "project",
+                "validate",
+            ])
+            .output()
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(output.status.success(), "{json}");
+        assert_eq!(json["valid"], true);
+    }
+}
