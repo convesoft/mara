@@ -237,7 +237,7 @@ pub fn create_item(
 
     let candidate_corpus =
         corpus.with_replacements(&BTreeMap::from([(path.clone(), candidate.clone())]), schema)?;
-    references::preflight(&corpus, &candidate_corpus, None)?;
+    references::preflight(&corpus, &candidate_corpus, None, None)?;
     if let Some(diagnostic) = candidate_corpus.discovery().diagnostics().first() {
         return invalid(format!(
             "cannot create item while reference validation fails at {}:{} (bytes {}..{}): {}",
@@ -383,7 +383,7 @@ pub fn move_item(
         );
     }
     let projected = corpus.with_replacements(&candidates, schema)?;
-    references::preflight(&corpus, &projected, None)?;
+    references::preflight(&corpus, &projected, None, None)?;
     require_valid_move_corpus(&projected, schema)?;
     // Validity alone cannot detect a block hidden by Markdown context or changed mentions.
     if projected.items().count() != corpus.items().count() {

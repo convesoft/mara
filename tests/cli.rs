@@ -258,6 +258,130 @@ fn cli_and_mcp_reference_preflight_preserve_files_for_all_item_mutations() {
     }
 }
 
+fn reference_body_update(prefix: &str, body: &str, replacement: &str, succeeds: bool) {
+    for use_mcp in [false, true] {
+        let fixture = TempDir::new().unwrap();
+        assert!(mara(fixture.path(), &["project", "init"]).status.success());
+        let path = fixture.path().join("a.mara.md");
+        let source = format!(
+            "{prefix}:::mara requirement REQ-ONE\n:mid: 01M1PXP2KG381MM1VNN6XC7S4M\n:title: One\n\n{body}\n:::\n"
+        );
+        fs::write(&path, &source).unwrap();
+        if use_mcp {
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(
+                        2,
+                        "item_update",
+                        json!({"reference":"REQ-ONE", "body":replacement}),
+                    ),
+                ],
+            );
+            let result = &mcp_response(&responses, 2)["result"];
+            assert_eq!(result["isError"], !succeeds, "{result}");
+            if !succeeds {
+                assert!(result.to_string().contains("a.mara.md:"), "{result}");
+            }
+        } else {
+            let output = mara(
+                fixture.path(),
+                &["item", "update", "REQ-ONE", "--body", replacement],
+            );
+            assert_eq!(
+                output.status.success(),
+                succeeds,
+                "{replacement:?}: {}",
+                stderr(&output)
+            );
+            if !succeeds {
+                assert!(stderr(&output).contains("a.mara.md:"));
+            }
+        }
+        let after = fs::read_to_string(&path).unwrap();
+        if succeeds {
+            assert_eq!(
+                after,
+                source.replace(
+                    &format!("\n\n{body}\n:::\n"),
+                    &format!("\n\n{replacement}\n:::\n")
+                )
+            );
+        } else {
+            assert_eq!(after, source);
+        }
+        assert!(
+            mara(fixture.path(), &["project", "validate"])
+                .status
+                .success()
+        );
+    }
+}
+
+#[test]
+fn reference_review_protects_relocated_unchanged_links() {
+    let body = "# Same\n\nFirst.\n\n# Same\n\nSecond.\n\n[link](#same)";
+    reference_body_update("", body, "[link](#same)\n\n# Same\n\nSecond.", false);
+    reference_body_update(
+        "",
+        body,
+        "# Same\n\nSecond.\n\n# Same\n\nFirst.\n\n[link](#same)",
+        false,
+    );
+    reference_body_update(
+        "",
+        body,
+        "[link](#same)\n\n# Same\n\nFirst.\n\n# Same\n\nSecond.",
+        true,
+    );
+}
+
+#[test]
+fn reference_review_allows_explicit_definition_edits() {
+    let body = "# One\n\nFirst.\n\n# Two\n\nSecond.\n\n[dest]: #one";
+    for prefix in ["[ref][dest]\n\n", "[dest][] [dest]\n\n"] {
+        reference_body_update(
+            prefix,
+            body,
+            &body.replace("[dest]: #one", "[dest]: #two"),
+            true,
+        );
+        reference_body_update(
+            prefix,
+            body,
+            &body.replace("[dest]: #one", "[dest]: #absent"),
+            false,
+        );
+    }
+    let body = format!("[ref][dest]\n\n{body}");
+    reference_body_update(
+        "",
+        &body,
+        &body.replace("[dest]: #one", "[dest]: #two"),
+        true,
+    );
+}
+
+#[test]
+fn reference_review_allows_prefix_edits_to_anchored_paragraphs() {
+    let body = "<a name=\"stable\"></a>\n\nFirst sentence.";
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "<a name=\"stable\"></a>\n\nThe First sentence.",
+        true,
+    );
+    // Inserting a separate paragraph really does retarget the anchor.
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "<a name=\"stable\"></a>\n\nDifferent paragraph.\n\nFirst sentence.",
+        false,
+    );
+}
+
 fn mcp_response(responses: &[Value], id: u64) -> &Value {
     responses
         .iter()

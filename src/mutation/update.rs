@@ -179,7 +179,12 @@ pub fn update_item(
     let path = document.path().to_path_buf();
     let projected =
         corpus.with_replacements(&BTreeMap::from([(path.clone(), candidate.clone())]), schema)?;
-    super::references::preflight(&corpus, &projected, None)?;
+    super::references::preflight(
+        &corpus,
+        &projected,
+        None,
+        request.body.as_ref().map(|_| path.as_path()),
+    )?;
     let warnings = validate_update(&corpus, &projected, schema, item, &request)?;
 
     let updated = projected

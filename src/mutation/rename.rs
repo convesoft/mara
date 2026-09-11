@@ -114,7 +114,7 @@ fn rename_with_hook(
         );
     }
     let projected = corpus.with_replacements(&candidates, schema)?;
-    super::references::preflight(&corpus, &projected, Some((old_id, new_id)))?;
+    super::references::preflight(&corpus, &projected, Some((old_id, new_id)), None)?;
     require_valid(&projected, schema)?;
     verify_identities_and_references(&corpus, &projected, &result)?;
     result.paths = candidates.keys().cloned().collect();

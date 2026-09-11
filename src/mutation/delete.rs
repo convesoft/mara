@@ -49,7 +49,7 @@ pub fn delete_item(
     let candidate = format!("{before}{after}");
     let projected =
         corpus.with_replacements(&BTreeMap::from([(path.clone(), candidate.clone())]), schema)?;
-    super::references::preflight(&corpus, &projected, None).map_err(|error| {
+    super::references::preflight(&corpus, &projected, None, None).map_err(|error| {
         Error::InvalidMutation {
             message: format!("cannot delete item '{}' with MID {mid}; {error}", item.id()),
         }

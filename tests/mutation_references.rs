@@ -132,6 +132,25 @@ fn cross_document_move_rejects_valid_but_retargeted_carried_links() {
 }
 
 #[test]
+fn moving_reference_usage_does_not_count_as_editing_its_definition() {
+    let source = format!("# One\n\nFirst.\n\n[dest]: #one\n\n{}", item("[ref][dest]"));
+    let (dir, project, schema) = fixture(&source);
+    let destination = "# Two\n\nSecond.\n\n[dest]: #two\n";
+    fs::write(dir.path().join("b.mara.md"), destination).unwrap();
+    let error =
+        mara::move_item(&project, &schema, "REQ-ONE", Path::new("b.mara.md"), None).unwrap_err();
+    assert!(error.to_string().contains("change destination"), "{error}");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("a.mara.md")).unwrap(),
+        source
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path().join("b.mara.md")).unwrap(),
+        destination
+    );
+}
+
+#[test]
 fn explicit_anchor_destination_cannot_silently_change_to_another_block() {
     let source = format!(
         "[inside](#stable)\n\n{}",

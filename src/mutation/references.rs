@@ -176,12 +176,18 @@ fn same_destination(
         }
         _ => return false,
     };
-    if point(maps, old_source, old_source.span().start_byte())
-        != Some((
-            new_source.path().to_path_buf(),
-            new_source.span().start_byte(),
-        ))
-    {
+    let Some((path, start)) = point(maps, old_source, old_source.span().start_byte()) else {
+        return false;
+    };
+    // Prefix edits move the old first character inside the same block. The
+    // surviving-content check below still rejects movement to another block.
+    let same_start = match old.kind() {
+        DiscoveryNodeKind::MarkdownBlock(_) => {
+            (new_source.span().start_byte()..new_source.span().end_byte()).contains(&start)
+        }
+        _ => start == new_source.span().start_byte(),
+    };
+    if path != new_source.path() || !same_start {
         return false;
     }
     // A text diff can align an identical heading with a newly inserted duplicate.
@@ -225,6 +231,28 @@ fn same_destination(
                 }))
         {
             return false;
+        }
+        // Like link usages, a moved paragraph can be absent from the diff's
+        // equal ranges. A uniquely retained direct block identifies its section
+        // more reliably than equal heading punctuation or a shared trailing dot.
+        for child in old.children() {
+            let DiscoveryNodeKind::MarkdownBlock(block) = child.kind() else {
+                continue;
+            };
+            let content = map.before.content(child.source());
+            let mut retained = new_graph.nodes().filter(|node| {
+                matches!(node.kind(), DiscoveryNodeKind::MarkdownBlock(candidate) if candidate.kind() == block.kind())
+                    && map.after.local(node.source().path(), node.source().span().start_byte()).is_some()
+                    && map.after.content(node.source()).trim() == content.trim()
+            });
+            if let Some(candidate) = retained.next()
+                && retained.next().is_none()
+                && (candidate.source().path() != new.source().path()
+                    || candidate.source().span().start_byte() < new.source().span().start_byte()
+                    || candidate.source().span().end_byte() > new.source().span().end_byte())
+            {
+                return false;
+            }
         }
     }
     for part in &map.before.parts {
@@ -284,6 +312,7 @@ pub(super) fn preflight(
     before: &Corpus,
     after: &Corpus,
     rename: Option<(&str, &str)>,
+    edited_body_document: Option<&std::path::Path>,
 ) -> Result<(), Error> {
     let mut new_sources = sources(after);
     let maps = sources(before)
@@ -323,20 +352,6 @@ pub(super) fn preflight(
                 .expect("schema edge has relation evidence");
             (relation.source(), relation.target(), Some(relation.name()))
         };
-        let Some((path, start)) = point(&maps, source, location.1) else {
-            continue;
-        };
-        let Some((end_path, last)) = point(&maps, source, location.2 - 1) else {
-            continue;
-        };
-        if path != end_path {
-            continue;
-        }
-        let candidate_doc = after
-            .documents()
-            .iter()
-            .find(|doc| doc.path() == path)
-            .unwrap();
         let raw = &document.source()[location.1..location.2];
         let expected = if let Some((old, new)) = rename
             && reference.is_some_and(|reference| {
@@ -346,11 +361,67 @@ pub(super) fn preflight(
         } else {
             raw.to_owned()
         };
-        if candidate_doc.source().get(start..last + 1) != Some(expected.as_str()) {
-            continue; // Explicitly edited or removed reference; candidate validation owns it.
+        let mapped = point(&maps, source, location.1).and_then(|(path, start)| {
+            let (end_path, last) = point(&maps, source, location.2 - 1)?;
+            let document = after.documents().iter().find(|doc| doc.path() == path)?;
+            (path == end_path && document.source().get(start..last + 1) == Some(expected.as_str()))
+                .then_some((path, start, last + 1))
+        });
+        // Diff equality is only a hint: relocation may be represented entirely
+        // as deletion/insertion. Match parsed occurrences in the surviving item
+        // or narrative scope before treating an unmapped usage as removed.
+        let surviving = reference.and_then(|original| {
+            let map = maps
+                .iter()
+                .find(|map| map.before.local(source.path(), location.1).is_some())?;
+            after
+                .documents()
+                .iter()
+                .flat_map(|doc| {
+                    doc.references().iter().filter(|candidate| {
+                        let span = candidate.source().span();
+                        candidate.kind() == original.kind()
+                            && map.after.local(doc.path(), span.start_byte()).is_some()
+                            && doc.source().get(span.start_byte()..span.end_byte())
+                                == Some(expected.as_str())
+                    })
+                })
+                .min_by_key(|candidate| {
+                    let span = candidate.source().span();
+                    let key = (
+                        candidate.source().path().to_path_buf(),
+                        span.start_byte(),
+                        span.end_byte(),
+                    );
+                    (Some(&key) != mapped.as_ref(), key)
+                })
+        });
+        if let (Some(original), Some(candidate)) = (reference, surviving)
+            && original.kind() == ReferenceKind::MarkdownLink
+            && edited_body_document == Some(source.path())
+            && candidate.source().path() == source.path()
+            && original.target() != candidate.target()
+        {
+            // Equal link usage with a changed parsed destination in a body-update
+            // document means its reference definition was edited. Candidate
+            // validation owns the new destination. Moves must not get this exemption.
+            continue;
         }
+        let Some((path, start, end)) = surviving
+            .map(|candidate| {
+                let span = candidate.source().span();
+                (
+                    candidate.source().path().to_path_buf(),
+                    span.start_byte(),
+                    span.end_byte(),
+                )
+            })
+            .or(mapped)
+        else {
+            continue; // Explicitly edited or removed reference.
+        };
         if new_connections
-            .get(&(path, start, last + 1))
+            .get(&(path, start, end))
             .is_none_or(|candidate| {
                 !same_destination(target, *candidate, &maps, &old_graph, &new_graph)
             })
