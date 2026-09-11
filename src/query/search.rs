@@ -51,7 +51,7 @@ pub fn search(
             if matches!(name.as_str(), "contains" | "mentions")
                 && schema.relations().contains_key(name)
             {
-                return Err(QueryError::AmbiguousRelationName { name: name.clone() });
+                return Err(QueryError::AmbiguousSearchRelationName { name: name.clone() });
             }
             Ok(name.clone())
         })

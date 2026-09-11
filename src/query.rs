@@ -360,6 +360,9 @@ pub enum QueryError {
     UnknownField {
         name: String,
     },
+    AmbiguousSearchRelationName {
+        name: String,
+    },
     AmbiguousRelationName {
         name: String,
     },
@@ -399,6 +402,7 @@ impl fmt::Display for QueryError {
             ),
             Self::UnknownFlavour { name } => write!(formatter, "unknown flavour '{name}'"),
             Self::UnknownField { name } => write!(formatter, "unknown field '{name}'"),
+            Self::AmbiguousSearchRelationName { name } => write!(formatter, "ambiguous relation '{name}'; search accepts schema relations only; use schema:{name}"),
             Self::AmbiguousRelationName { name } => write!(formatter, "ambiguous relation '{name}'; use schema:{name} or builtin:{name}"),
             Self::UnknownRelation { name } => write!(formatter, "unknown relation '{name}'"),
             Self::InvalidPath { path } => write!(

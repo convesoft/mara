@@ -9160,57 +9160,59 @@ fn unified_search_keeps_large_blocks_whole_and_never_skips_oversized_identities(
 
 #[test]
 fn unified_search_resolves_schema_relation_filters_against_vocabulary() {
-    let fixture = retrieval_fixture();
-    let schema_path = fixture.path().join(".mara/schema.yaml");
-    let schema = fs::read_to_string(&schema_path).unwrap();
-    fs::write(&schema_path, format!("{schema}\n  contains:\n    description: Authored containment\n    source: [requirement]\n    target: [scenario]\n")).unwrap();
-    let source_path = fixture.path().join("docs/a.mara.md");
-    let source = fs::read_to_string(&source_path)
-        .unwrap()
-        .replace(":derives_from: SCN-BASE", ":contains: SCN-BASE");
-    fs::write(source_path, source).unwrap();
-    let output = mara(
-        fixture.path(),
-        &[
-            "--format",
-            "json",
-            "search",
-            "",
-            "--relation",
-            "schema:contains",
-        ],
-    );
-    assert!(output.status.success(), "{}", stderr(&output));
-    let page: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(page["results"].as_array().unwrap().len(), 1);
-    assert_eq!(page["results"][0]["node"]["id"], "REQ-ALPHA");
-    let rejected = mara(fixture.path(), &["search", "", "--relation", "contains"]);
-    assert!(!rejected.status.success());
-    assert!(stderr(&rejected).contains("schema:contains or builtin:contains"));
-    let responses = mcp_exchange(
-        fixture.path(),
-        &[
-            mcp_initialize(1),
-            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-            mcp_call(
-                2,
-                "search",
-                json!({"query":"", "relations":["schema:contains"]}),
-            ),
-            mcp_call(3, "search", json!({"query":"", "relations":["contains"]})),
-            mcp_call(
-                4,
-                "search",
-                json!({"query":"", "relations":["builtin:contains"]}),
-            ),
-        ],
-    );
-    assert_eq!(
-        mcp_response(&responses, 2)["result"]["structuredContent"],
-        page
-    );
-    for id in [3, 4] {
-        assert_eq!(mcp_response(&responses, id)["result"]["isError"], true);
+    for name in ["contains", "mentions"] {
+        let fixture = retrieval_fixture();
+        let schema_path = fixture.path().join(".mara/schema.yaml");
+        let schema = fs::read_to_string(&schema_path).unwrap();
+        fs::write(&schema_path, format!("{schema}\n  {name}:\n    description: Authored relation\n    source: [requirement]\n    target: [scenario]\n")).unwrap();
+        let source_path = fixture.path().join("docs/a.mara.md");
+        let source = fs::read_to_string(&source_path)
+            .unwrap()
+            .replace(":derives_from: SCN-BASE", &format!(":{name}: SCN-BASE"));
+        fs::write(source_path, source).unwrap();
+        let qualified = format!("schema:{name}");
+        let builtin = format!("builtin:{name}");
+        let output = mara(
+            fixture.path(),
+            &["--format", "json", "search", "", "--relation", &qualified],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(page["results"].as_array().unwrap().len(), 1);
+        assert_eq!(page["results"][0]["node"]["id"], "REQ-ALPHA");
+        let rejected = mara(fixture.path(), &["search", "", "--relation", name]);
+        assert!(!rejected.status.success());
+        let expected = format!(
+            "ambiguous relation '{name}'; search accepts schema relations only; use {qualified}"
+        );
+        assert!(
+            stderr(&rejected).contains(&expected),
+            "{}",
+            stderr(&rejected)
+        );
+        assert!(!stderr(&rejected).contains(&builtin));
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, "search", json!({"query":"", "relations":[qualified]})),
+                mcp_call(3, "search", json!({"query":"", "relations":[name]})),
+                mcp_call(4, "search", json!({"query":"", "relations":[builtin]})),
+            ],
+        );
+        assert_eq!(
+            mcp_response(&responses, 2)["result"]["structuredContent"],
+            page
+        );
+        for id in [3, 4] {
+            assert_eq!(mcp_response(&responses, id)["result"]["isError"], true);
+        }
+        let message = mcp_response(&responses, 3)["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(message.contains(&expected), "{message}");
+        assert!(!message.contains(&builtin));
     }
 }
 
