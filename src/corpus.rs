@@ -193,6 +193,7 @@ impl Item {
 pub struct MarkdownBlock {
     kind: MarkdownBlockKind,
     heading_text: Option<String>,
+    heading_source_offsets: Vec<usize>,
     source: SourceLocation,
     children: Vec<MarkdownBlock>,
 }
@@ -209,6 +210,11 @@ impl MarkdownBlock {
     /// Parsed heading text without Markdown formatting; absent on other blocks.
     pub fn heading_text(&self) -> Option<&str> {
         self.heading_text.as_deref()
+    }
+
+    /// Map a byte offset in decoded heading text back to canonical source.
+    pub(crate) fn heading_source_offset(&self, byte: usize) -> Option<usize> {
+        self.heading_source_offsets.get(byte).copied()
     }
 
     pub fn children(&self) -> &[MarkdownBlock] {
@@ -1182,6 +1188,7 @@ fn project_block(
     MarkdownBlock {
         kind: block.kind,
         heading_text: block.heading_text,
+        heading_source_offsets: block.heading_source_offsets,
         source: location(path, line_starts, block.source.start, block.source.end),
         children: block
             .children

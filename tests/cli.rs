@@ -13,6 +13,20 @@ use mara::resolve_project;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
+fn collection_nodes(page: &Value) -> Vec<Value> {
+    if page.get("format_version").is_some() {
+        assert_eq!(page["format_version"], 1);
+        page["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|hit| hit["node"].clone())
+            .collect()
+    } else {
+        page["items"].as_array().unwrap().clone()
+    }
+}
+
 fn mara(current_directory: &Path, arguments: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_mara"))
         .current_dir(current_directory)
@@ -1130,7 +1144,11 @@ fn directory_path_filters_preserve_boundaries_and_exact_files() {
         ),
     ] {
         for operation in ["list", "search"] {
-            let mut args = vec!["--format", "json", "item", operation];
+            let mut args = if operation == "search" {
+                vec!["--format", "json", operation]
+            } else {
+                vec!["--format", "json", "item", operation]
+            };
             let mut params = json!({"paths": paths});
             if operation == "search" {
                 args.push("");
@@ -1144,11 +1162,9 @@ fn directory_path_filters_preserve_boundaries_and_exact_files() {
             let output = mara(&package, &args);
             assert!(output.status.success(), "{}", stderr(&output));
             let page: Value = serde_json::from_slice(&output.stdout).unwrap();
-            let ids: Vec<_> = page["items"]
-                .as_array()
-                .unwrap()
+            let ids: Vec<_> = collection_nodes(&page)
                 .iter()
-                .map(|item| item["id"].as_str().unwrap())
+                .map(|item| item["id"].as_str().unwrap().to_owned())
                 .collect();
             assert_eq!(ids, expected, "{operation} {paths:?}");
             assert_eq!(page["has_more"], false);
@@ -1157,7 +1173,15 @@ fn directory_path_filters_preserve_boundaries_and_exact_files() {
                 &[
                     mcp_initialize(1),
                     json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-                    mcp_call(2, &format!("item_{operation}"), params),
+                    mcp_call(
+                        2,
+                        &if operation == "search" {
+                            "search".to_owned()
+                        } else {
+                            format!("item_{operation}")
+                        },
+                        params,
+                    ),
                 ],
             );
             assert_eq!(
@@ -1175,7 +1199,11 @@ fn directory_path_filters_preserve_boundaries_and_exact_files() {
         "/packages/query",
     ] {
         for operation in ["list", "search"] {
-            let mut args = vec!["item", operation];
+            let mut args = if operation == "search" {
+                vec![operation]
+            } else {
+                vec!["item", operation]
+            };
             let mut params = json!({"paths":[path]});
             if operation == "search" {
                 args.push("cache");
@@ -1199,7 +1227,15 @@ fn directory_path_filters_preserve_boundaries_and_exact_files() {
                 &[
                     mcp_initialize(1),
                     json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-                    mcp_call(2, &format!("item_{operation}"), params),
+                    mcp_call(
+                        2,
+                        &if operation == "search" {
+                            "search".to_owned()
+                        } else {
+                            format!("item_{operation}")
+                        },
+                        params,
+                    ),
                 ],
             );
             assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
@@ -1422,7 +1458,11 @@ fn directory_path_filters_compose_with_ranking_and_cli_mcp_pagination() {
         let mut ids = Vec::new();
         loop {
             assert!(ids.len() < 4, "continuation must make progress");
-            let mut args = vec!["--format", "json", "item", operation];
+            let mut args = if operation == "search" {
+                vec!["--format", "json", operation]
+            } else {
+                vec!["--format", "json", "item", operation]
+            };
             let mut params = json!({
                 "paths":["packages/query/docs/", "packages/query/docs/nested"],
                 "flavours":["requirement"], "fields":[{"key":"status", "value":"draft"}],
@@ -1431,7 +1471,6 @@ fn directory_path_filters_compose_with_ranking_and_cli_mcp_pagination() {
             if operation == "search" {
                 args.extend([
                     "cache",
-                    "--excerpts",
                     "--id",
                     "REQ-PACK-A",
                     "--id",
@@ -1442,7 +1481,6 @@ fn directory_path_filters_compose_with_ranking_and_cli_mcp_pagination() {
                     "REQ-VIEWER",
                 ]);
                 params["query"] = json!("cache");
-                params["excerpts"] = json!(true);
                 params["ids"] = json!(["REQ-PACK-A", "REQ-PACK-B", "REQ-PACK-C", "REQ-VIEWER"]);
             }
             args.extend([
@@ -1471,7 +1509,15 @@ fn directory_path_filters_compose_with_ranking_and_cli_mcp_pagination() {
                 &[
                     mcp_initialize(1),
                     json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-                    mcp_call(2, &format!("item_{operation}"), params.clone()),
+                    mcp_call(
+                        2,
+                        &if operation == "search" {
+                            "search".to_owned()
+                        } else {
+                            format!("item_{operation}")
+                        },
+                        params.clone(),
+                    ),
                 ],
             );
             assert_eq!(
@@ -1479,11 +1525,11 @@ fn directory_path_filters_compose_with_ranking_and_cli_mcp_pagination() {
                 page
             );
             assert!(serde_json::to_vec(&page).unwrap().len() <= 65_536);
-            let items = page["items"].as_array().unwrap();
+            let items = collection_nodes(&page);
             assert_eq!(items.len(), 1);
             ids.push(items[0]["id"].as_str().unwrap().to_owned());
             if operation == "search" {
-                assert!(!items[0]["excerpts"].as_array().unwrap().is_empty());
+                assert!(page["results"][0]["excerpt"]["text"].is_string());
             }
             assert_eq!(page["has_more"], !page["next_cursor"].is_null());
             cursor = page["next_cursor"].as_str().map(ToOwned::to_owned);
@@ -1496,7 +1542,15 @@ fn directory_path_filters_compose_with_ranking_and_cli_mcp_pagination() {
                     &[
                         mcp_initialize(1),
                         json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-                        mcp_call(2, &format!("item_{operation}"), params),
+                        mcp_call(
+                            2,
+                            &if operation == "search" {
+                                "search".to_owned()
+                            } else {
+                                format!("item_{operation}")
+                            },
+                            params,
+                        ),
                     ],
                 );
                 assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
@@ -1557,7 +1611,11 @@ fn bounded_search_and_list_continue_completely_with_cli_mcp_parity() {
         let mut cursor: Option<String> = None;
         let mut ids = Vec::new();
         loop {
-            let mut args = vec!["--format", "json", "item", operation];
+            let mut args = if operation == "search" {
+                vec!["--format", "json", operation]
+            } else {
+                vec!["--format", "json", "item", operation]
+            };
             if operation == "search" {
                 args.push("bounded knowledge");
             }
@@ -1580,14 +1638,22 @@ fn bounded_search_and_list_continue_completely_with_cli_mcp_parity() {
                 &[
                     mcp_initialize(1),
                     json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-                    mcp_call(2, &format!("item_{operation}"), params),
+                    mcp_call(
+                        2,
+                        &if operation == "search" {
+                            "search".to_owned()
+                        } else {
+                            format!("item_{operation}")
+                        },
+                        params,
+                    ),
                 ],
             );
             assert_eq!(
                 mcp_response(&responses, 2)["result"]["structuredContent"],
                 page
             );
-            let items = page["items"].as_array().unwrap();
+            let items = collection_nodes(&page);
             assert!(!items.is_empty() && items.len() <= 7);
             for item in items {
                 assert!(item.get("body").is_none());
@@ -1607,7 +1673,7 @@ fn bounded_search_and_list_continue_completely_with_cli_mcp_parity() {
     }
     let default = mara(fixture.path(), &["--format", "json", "item", "list"]);
     let page: Value = serde_json::from_slice(&default.stdout).unwrap();
-    assert_eq!(page["items"].as_array().unwrap().len(), 20);
+    assert_eq!(collection_nodes(&page).len(), 20);
     assert_eq!(page["has_more"], true);
 }
 
@@ -1635,27 +1701,25 @@ fn search_excerpts_preserve_unicode_source_positions_and_exact_selection() {
         &[
             "--format",
             "json",
-            "item",
             "search",
-            "draft STRASSE CAFÉ",
+            "STRASSE CAFÉ",
             "--id",
             mid,
             "--id",
             "REQ-PASSAGE",
-            "--excerpts",
         ],
     );
     assert!(output.status.success(), "{}", stderr(&output));
     let page: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let items = page["items"].as_array().unwrap();
+    let items = collection_nodes(&page);
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["title_truncated"], true);
     assert_eq!(items[0]["title"].as_str().unwrap().chars().count(), 256);
     assert_eq!(got["metadata"][1]["value"], title);
-    let excerpts = items[0]["excerpts"].as_array().unwrap();
+    let excerpts = [page["results"][0]["excerpt"].clone()];
     assert!(!excerpts.is_empty() && excerpts.len() <= 3);
     let mut previous_end = 0;
-    for excerpt in excerpts {
+    for excerpt in &excerpts {
         let start = excerpt["start_byte"].as_u64().unwrap() as usize;
         let end = excerpt["end_byte"].as_u64().unwrap() as usize;
         let text = excerpt["text"].as_str().unwrap();
@@ -1690,14 +1754,10 @@ fn search_excerpts_preserve_unicode_source_positions_and_exact_selection() {
             json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
             mcp_call(
                 2,
-                "item_search",
-                json!({"query":"draft STRASSE CAFÉ", "ids":[mid,"REQ-PASSAGE"], "excerpts":true}),
+                "search",
+                json!({"query":"STRASSE CAFÉ", "ids":[mid,"REQ-PASSAGE"]}),
             ),
-            mcp_call(
-                3,
-                "item_search",
-                json!({"query":"draft", "ids":["REQ-MISSING"]}),
-            ),
+            mcp_call(3, "search", json!({"query":"draft", "ids":["REQ-MISSING"]})),
         ],
     );
     assert_eq!(
@@ -1710,7 +1770,6 @@ fn search_excerpts_preserve_unicode_source_positions_and_exact_selection() {
         &[
             "--format",
             "json",
-            "item",
             "search",
             "draft",
             "--id",
@@ -1720,44 +1779,24 @@ fn search_excerpts_preserve_unicode_source_positions_and_exact_selection() {
         ],
     );
     let excluded: Value = serde_json::from_slice(&excluded.stdout).unwrap();
-    assert_eq!(excluded["items"], json!([]));
-    let human = mara(
-        fixture.path(),
-        &[
-            "item",
-            "search",
-            "draft STRASSE CAFÉ",
-            "--id",
-            mid,
-            "--excerpts",
-        ],
-    );
+    assert_eq!(collection_nodes(&excluded), Vec::<Value>::new());
+    let human = mara(fixture.path(), &["search", "STRASSE CAFÉ", "--id", mid]);
     assert!(human.status.success(), "{}", stderr(&human));
     assert!(stdout(&human).contains("[title truncated]"));
     assert!(stdout(&human).contains("excerpt\tpartial=true\tdocs/passage.mara.md:"));
     assert!(stdout(&human).ends_with("page\thas_more=false\n"));
     let empty = mara(
         fixture.path(),
-        &[
-            "--format",
-            "json",
-            "item",
-            "search",
-            "",
-            "--id",
-            mid,
-            "--excerpts",
-        ],
+        &["--format", "json", "search", "", "--id", mid],
     );
     let empty: Value = serde_json::from_slice(&empty.stdout).unwrap();
-    assert_eq!(empty["items"][0]["excerpts"], json!([]));
+    assert!(empty["results"][0]["excerpt"]["text"].is_string());
     // Duplicate source IDs make exact selection ambiguous, even with a filter
     // that would otherwise remove every candidate.
     fs::write(fixture.path().join("docs/duplicate.mara.md"), &source).unwrap();
     let ambiguous = mara(
         fixture.path(),
         &[
-            "item",
             "search",
             "draft",
             "--id",
@@ -1779,18 +1818,14 @@ fn pagination_rejects_changed_inputs_and_invalid_limits() {
     let fixture = retrieval_fixture();
     let first = mara(
         fixture.path(),
-        &[
-            "--format", "json", "item", "search", "alpha", "--limit", "1",
-        ],
+        &["--format", "json", "search", "alpha", "--limit", "1"],
     );
     let first: Value = serde_json::from_slice(&first.stdout).unwrap();
     let cursor = first["next_cursor"].as_str().unwrap();
     for (query, limit) in [("alpha", "2"), ("beta", "1")] {
         let changed = mara(
             fixture.path(),
-            &[
-                "item", "search", query, "--limit", limit, "--cursor", cursor,
-            ],
+            &["search", query, "--limit", limit, "--cursor", cursor],
         );
         assert!(!changed.status.success());
         assert!(stderr(&changed).contains("restart"), "{}", stderr(&changed));
@@ -1800,9 +1835,7 @@ fn pagination_rejects_changed_inputs_and_invalid_limits() {
     fs::write(&path, format!("Narrative edit.\n{original}")).unwrap();
     let changed = mara(
         fixture.path(),
-        &[
-            "item", "search", "alpha", "--limit", "1", "--cursor", cursor,
-        ],
+        &["search", "alpha", "--limit", "1", "--cursor", cursor],
     );
     assert!(!changed.status.success());
     assert!(stderr(&changed).contains("restart"), "{}", stderr(&changed));
@@ -1813,7 +1846,7 @@ fn pagination_rejects_changed_inputs_and_invalid_limits() {
             json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
             mcp_call(
                 2,
-                "item_search",
+                "search",
                 json!({"query":"alpha","limit":1,"cursor":cursor}),
             ),
             mcp_call(3, "item_list", json!({"cursor":"malformed"})),
@@ -1826,9 +1859,7 @@ fn pagination_rejects_changed_inputs_and_invalid_limits() {
     fs::write(&path, original).unwrap();
     let restored = mara(
         fixture.path(),
-        &[
-            "item", "search", "alpha", "--limit", "1", "--cursor", cursor,
-        ],
+        &["search", "alpha", "--limit", "1", "--cursor", cursor],
     );
     assert!(restored.status.success(), "{}", stderr(&restored));
     let schema_path = fixture.path().join(".mara/schema.yaml");
@@ -1840,9 +1871,7 @@ fn pagination_rejects_changed_inputs_and_invalid_limits() {
     .unwrap();
     let changed = mara(
         fixture.path(),
-        &[
-            "item", "search", "alpha", "--limit", "1", "--cursor", cursor,
-        ],
+        &["search", "alpha", "--limit", "1", "--cursor", cursor],
     );
     assert!(!changed.status.success());
     assert!(stderr(&changed).contains("restart"), "{}", stderr(&changed));
@@ -1876,16 +1905,7 @@ fn search_pages_obey_serialized_byte_budget_without_losing_large_results() {
     let mut ids = Vec::new();
     let mut pages = 0;
     loop {
-        let mut args = vec![
-            "--format",
-            "json",
-            "item",
-            "search",
-            "needle",
-            "--excerpts",
-            "--limit",
-            "100",
-        ];
+        let mut args = vec!["--format", "json", "search", "needle", "--limit", "100"];
         if let Some(cursor) = &cursor {
             args.extend(["--cursor", cursor]);
         }
@@ -1901,11 +1921,7 @@ fn search_pages_obey_serialized_byte_budget_without_losing_large_results() {
                 &[
                     mcp_initialize(1),
                     json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-                    mcp_call(
-                        2,
-                        "item_search",
-                        json!({"query":"needle","excerpts":true,"limit":100}),
-                    ),
+                    mcp_call(2, "search", json!({"query":"needle","limit":100})),
                 ],
             );
             assert_eq!(
@@ -1913,9 +1929,9 @@ fn search_pages_obey_serialized_byte_budget_without_losing_large_results() {
                 page
             );
         }
-        for item in page["items"].as_array().unwrap() {
+        for item in collection_nodes(&page) {
             assert_eq!(item["title_truncated"], true);
-            assert_eq!(item["excerpts"].as_array().unwrap().len(), 3);
+            assert!(item.get("excerpts").is_none());
             ids.push(item["id"].as_str().unwrap().to_owned());
         }
         pages += 1;
@@ -2552,14 +2568,14 @@ Source.
     assert_eq!(list["items"][0]["id"], "SCN-TARGET");
     assert_eq!(list["items"][0]["mid"], "01ARZ3NDEKTSV4RRFFQ69G5F00");
 
-    let search = mara(
-        fixture.path(),
-        &["--format", "json", "item", "search", "source"],
-    );
+    let search = mara(fixture.path(), &["--format", "json", "search", "source"]);
     assert!(search.status.success(), "{}", stderr(&search));
     let search: Value = serde_json::from_str(&stdout(&search)).unwrap();
-    assert_eq!(search["items"][0]["id"], "REQ-SOURCE");
-    assert_eq!(search["items"][0]["mid"], "01ARZ3NDEKTSV4RRFFQ69G5F01");
+    assert_eq!(search["results"][0]["node"]["id"], "REQ-SOURCE");
+    assert_eq!(
+        search["results"][0]["node"]["mid"],
+        "01ARZ3NDEKTSV4RRFFQ69G5F01"
+    );
 
     let add = mara(
         fixture.path(),
@@ -4573,7 +4589,15 @@ fn cli_and_mcp_mutations_trim_titles_and_reject_blank_titles() {
                     &[
                         mcp_initialize(1),
                         json!({"jsonrpc":"2.0", "method":"notifications/initialized"}),
-                        mcp_call(2, &format!("item_{operation}"), params),
+                        mcp_call(
+                            2,
+                            &if operation == "search" {
+                                "search".to_owned()
+                            } else {
+                                format!("item_{operation}")
+                            },
+                            params,
+                        ),
                     ],
                 );
                 let result = &mcp_response(&responses, 2)["result"];
@@ -5353,23 +5377,25 @@ fn item_list_and_search_return_deterministic_compact_filtered_summaries() {
     }
 
     for query in ["zEbRa", "accepted", "DES-ALPHA"] {
-        let searched = mara(fixture.path(), &["item", "search", query]);
+        let searched = mara(fixture.path(), &["search", query]);
         assert!(searched.status.success(), "{}", stderr(&searched));
-        assert_eq!(stdout(&searched).lines().count(), 2, "query: {query}");
+        assert_eq!(
+            stdout(&searched)
+                .lines()
+                .filter(|line| line.contains("\tItem\t"))
+                .count(),
+            1,
+            "query: {query}"
+        );
     }
-    let searched = mara(fixture.path(), &["item", "search", "alpha"]);
+    let searched = mara(fixture.path(), &["search", "alpha"]);
     assert!(searched.status.success(), "{}", stderr(&searched));
-    assert_eq!(
-        stdout(&searched),
-        "REQ-ALPHA\trequirement\tAlpha requirement\tdocs/a.mara.md:7\nDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\npage\thas_more=false\n"
-    );
+    assert!(stdout(&searched).contains("REQ-ALPHA\tItem\tdocs/a.mara.md:7"));
+    assert!(stdout(&searched).contains("DES-ALPHA\tItem\tdocs/b.mara.md:9"));
 
-    let case_folded = mara(fixture.path(), &["item", "search", "STRASSE"]);
+    let case_folded = mara(fixture.path(), &["search", "STRASSE"]);
     assert!(case_folded.status.success(), "{}", stderr(&case_folded));
-    assert_eq!(
-        stdout(&case_folded),
-        "SCN-GERMAN\tscenario\tStraße\tdocs/b.mara.md:16\npage\thas_more=false\n"
-    );
+    assert!(stdout(&case_folded).contains("SCN-GERMAN\tItem\tdocs/b.mara.md:16\tStraße"));
 }
 
 #[test]
@@ -5387,17 +5413,17 @@ fn item_search_matches_distinct_complete_unicode_terms_across_values() {
         "project project validation",
         "projects validation", // A word-form variation within the edit budget.
     ] {
-        let searched = mara(fixture.path(), &["item", "search", query]);
+        let searched = mara(fixture.path(), &["search", query]);
         assert!(searched.status.success(), "{}", stderr(&searched));
-        assert_eq!(
-            stdout(&searched),
-            "REQ-CROSS-FIELD\trequirement\tProject knowledge\tdocs/search.mara.md:1\npage\thas_more=false\n",
+        assert!(
+            stdout(&searched)
+                .contains("REQ-CROSS-FIELD\tItem\tdocs/search.mara.md:1\tProject knowledge"),
             "query: {query}"
         );
     }
 
     for query in ["project missing", "prj validation", "project valid"] {
-        let searched = mara(fixture.path(), &["item", "search", query]);
+        let searched = mara(fixture.path(), &["search", query]);
         assert!(searched.status.success(), "{}", stderr(&searched));
         assert_eq!(
             stdout(&searched),
@@ -5406,15 +5432,15 @@ fn item_search_matches_distinct_complete_unicode_terms_across_values() {
         );
     }
 
-    let unicode_equivalent = mara(fixture.path(), &["item", "search", "CAFE\u{301} WORKFLOW"]);
+    let unicode_equivalent = mara(fixture.path(), &["search", "CAFE\u{301} WORKFLOW"]);
     assert!(
         unicode_equivalent.status.success(),
         "{}",
         stderr(&unicode_equivalent)
     );
-    assert_eq!(
-        stdout(&unicode_equivalent),
-        "SCN-UNICODE\tscenario\tCafé workflow\tdocs/search.mara.md:7\npage\thas_more=false\n"
+    assert!(
+        stdout(&unicode_equivalent)
+            .contains("SCN-UNICODE\tItem\tdocs/search.mara.md:7\tCafé workflow")
     );
 }
 
@@ -5456,7 +5482,7 @@ fn search_relevance_ranks_before_pagination_with_cli_mcp_parity() {
         "REQ-PROJCET-VALIDATON",
         "REQ-APPROX-BODY", // Approximate group, weights 6 and 2.
     ];
-    for (query, excerpts) in [
+    for (query, select_ids) in [
         ("project validation", false),
         ("VALIDATION project project", true),
     ] {
@@ -5466,7 +5492,6 @@ fn search_relevance_ranks_before_pagination_with_cli_mcp_parity() {
             let mut args = vec![
                 "--format",
                 "json",
-                "item",
                 "search",
                 query,
                 "--path",
@@ -5482,9 +5507,8 @@ fn search_relevance_ranks_before_pagination_with_cli_mcp_parity() {
             ];
             let mut params = json!({"query":query, "paths":["docs/ranking.mara.md"],
                 "flavours":["requirement"], "fields":[{"key":"status","value":"draft"}],
-                "relations":["derives_from"], "limit":2, "excerpts":excerpts});
-            if excerpts {
-                args.push("--excerpts");
+                "relations":["derives_from"], "limit":2});
+            if select_ids {
                 // Reversed selected handles must not control ranking.
                 for (id, _, _) in entries.iter().rev() {
                     args.extend(["--id", id]);
@@ -5512,14 +5536,14 @@ fn search_relevance_ranks_before_pagination_with_cli_mcp_parity() {
                 &[
                     mcp_initialize(1),
                     json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-                    mcp_call(2, "item_search", params),
+                    mcp_call(2, "search", params),
                 ],
             );
             assert_eq!(
                 mcp_response(&responses, 2)["result"]["structuredContent"],
                 page
             );
-            let items = page["items"].as_array().unwrap();
+            let items = collection_nodes(&page);
             assert_eq!(items.len(), 2);
             for item in items {
                 assert!(item.get("score").is_none());
@@ -5537,7 +5561,11 @@ fn search_relevance_ranks_before_pagination_with_cli_mcp_parity() {
     }
     // Zero-term queries and item list retain source order, including the filtered-out item.
     for operation in ["list", "search"] {
-        let mut args = vec!["--format", "json", "item", operation];
+        let mut args = if operation == "search" {
+            vec!["--format", "json", operation]
+        } else {
+            vec!["--format", "json", "item", operation]
+        };
         if operation == "search" {
             args.push("...");
         }
@@ -5545,11 +5573,9 @@ fn search_relevance_ranks_before_pagination_with_cli_mcp_parity() {
         let output = mara(fixture.path(), &args);
         assert!(output.status.success(), "{}", stderr(&output));
         let page: Value = serde_json::from_slice(&output.stdout).unwrap();
-        let actual = page["items"]
-            .as_array()
-            .unwrap()
+        let actual = collection_nodes(&page)
             .iter()
-            .map(|item| item["id"].as_str().unwrap())
+            .map(|item| item["id"].as_str().unwrap().to_owned())
             .collect::<Vec<_>>();
         let mut corpus_order = entries.iter().map(|entry| entry.0).collect::<Vec<_>>();
         corpus_order.push("REQ-EXCLUDED");
@@ -5598,18 +5624,16 @@ fn search_identity_fields_and_their_excerpts_match_exactly() {
                 &[
                     "--format",
                     "json",
-                    "item",
                     "search",
                     query,
                     "--path",
                     "docs/identity.mara.md",
-                    "--excerpts",
                 ],
             );
             assert!(output.status.success(), "{}", stderr(&output));
             let page: Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(
-                page["items"].as_array().unwrap().len(),
+                collection_nodes(&page).len(),
                 usize::from(exact || with_title_match),
                 "{query}, title={with_title_match}"
             );
@@ -5620,8 +5644,8 @@ fn search_identity_fields_and_their_excerpts_match_exactly() {
                     json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
                     mcp_call(
                         2,
-                        "item_search",
-                        json!({"query":query, "paths":["docs/identity.mara.md"], "excerpts":true}),
+                        "search",
+                        json!({"query":query, "paths":["docs/identity.mara.md"]}),
                     ),
                 ],
             );
@@ -5630,9 +5654,9 @@ fn search_identity_fields_and_their_excerpts_match_exactly() {
                 page
             );
             if with_title_match && !exact {
-                let excerpts = page["items"][0]["excerpts"].as_array().unwrap();
+                let excerpts = [page["results"][0]["excerpt"].clone()];
                 assert!(!excerpts.is_empty());
-                for excerpt in excerpts {
+                for excerpt in &excerpts {
                     let start = excerpt["start_byte"].as_u64().unwrap() as usize;
                     let end = excerpt["end_byte"].as_u64().unwrap() as usize;
                     assert_eq!(excerpt["text"], source[start..end]);
@@ -5680,18 +5704,16 @@ fn typo_tolerant_search_uses_normalized_word_lengths_and_bounded_edits() {
             &[
                 "--format",
                 "json",
-                "item",
                 "search",
                 query,
                 "--path",
                 "docs/word.mara.md",
-                "--excerpts",
             ],
         );
         assert!(output.status.success(), "{}", stderr(&output));
         let page: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(
-            page["items"].as_array().unwrap().len(),
+            collection_nodes(&page).len(),
             usize::from(expected),
             "{query} -> {word}"
         );
@@ -5702,8 +5724,8 @@ fn typo_tolerant_search_uses_normalized_word_lengths_and_bounded_edits() {
                 json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
                 mcp_call(
                     2,
-                    "item_search",
-                    json!({"query":query, "paths":["docs/word.mara.md"], "excerpts":true}),
+                    "search",
+                    json!({"query":query, "paths":["docs/word.mara.md"]}),
                 ),
             ],
         );
@@ -5712,14 +5734,14 @@ fn typo_tolerant_search_uses_normalized_word_lengths_and_bounded_edits() {
             page
         );
         if expected {
-            let excerpts = page["items"][0]["excerpts"].as_array().unwrap();
+            let excerpts = [page["results"][0]["excerpt"].clone()];
             assert!(
                 excerpts
                     .iter()
                     .any(|e| e["text"].as_str().unwrap().contains(word)),
                 "{query} -> {word}"
             );
-            for excerpt in excerpts {
+            for excerpt in &excerpts {
                 let start = excerpt["start_byte"].as_u64().unwrap() as usize;
                 let end = excerpt["end_byte"].as_u64().unwrap() as usize;
                 assert_eq!(excerpt["text"], source[start..end]);
@@ -5749,7 +5771,6 @@ fn typo_tolerant_search_preserves_exact_matches_filters_excerpts_and_pages() {
             let mut args = vec![
                 "--format",
                 "json",
-                "item",
                 "search",
                 query,
                 "--path",
@@ -5760,12 +5781,11 @@ fn typo_tolerant_search_preserves_exact_matches_filters_excerpts_and_pages() {
                 "derives_from",
                 "--limit",
                 "1",
-                "--excerpts",
             ];
             let mut params = json!({
                 "query": query, "paths": ["docs/typos.mara.md"],
                 "flavours": ["requirement"], "relations": ["derives_from"],
-                "limit": 1, "excerpts": true,
+                "limit": 1,
             });
             if let Some(cursor) = &cursor {
                 args.extend(["--cursor", cursor]);
@@ -5779,23 +5799,23 @@ fn typo_tolerant_search_preserves_exact_matches_filters_excerpts_and_pages() {
                 &[
                     mcp_initialize(1),
                     json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-                    mcp_call(2, "item_search", params),
+                    mcp_call(2, "search", params),
                 ],
             );
             assert_eq!(
                 mcp_response(&responses, 2)["result"]["structuredContent"],
                 page
             );
-            let items = page["items"].as_array().unwrap();
+            let items = collection_nodes(&page);
             assert_eq!(items.len(), 1, "query: {query}");
             ids.push(items[0]["id"].as_str().unwrap().to_owned());
-            let excerpts = items[0]["excerpts"].as_array().unwrap();
+            let excerpts = [page["results"][0]["excerpt"].clone()];
             assert!(
                 excerpts
                     .iter()
-                    .any(|e| e["text"].as_str().unwrap().contains("Validat"))
+                    .any(|e| e["text"].as_str().unwrap().contains("Project"))
             );
-            for excerpt in excerpts {
+            for excerpt in &excerpts {
                 let start = excerpt["start_byte"].as_u64().unwrap() as usize;
                 let end = excerpt["end_byte"].as_u64().unwrap() as usize;
                 assert_eq!(excerpt["text"], source[start..end]);
@@ -5857,7 +5877,6 @@ fn typo_tolerant_search_preserves_exact_matches_filters_excerpts_and_pages() {
             &[
                 "--format",
                 "json",
-                "item",
                 "search",
                 "projcet validation",
                 option,
@@ -5869,18 +5888,14 @@ fn typo_tolerant_search_preserves_exact_matches_filters_excerpts_and_pages() {
             &[
                 mcp_initialize(1),
                 json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-                mcp_call(2, "item_search", params),
+                mcp_call(2, "search", params),
             ],
         );
         let result = &mcp_response(&responses, 2)["result"];
         if let Some(count) = expected {
             assert!(output.status.success(), "{}", stderr(&output));
             let page: Value = serde_json::from_slice(&output.stdout).unwrap();
-            assert_eq!(
-                page["items"].as_array().unwrap().len(),
-                count,
-                "{option} {value}"
-            );
+            assert_eq!(collection_nodes(&page).len(), count, "{option} {value}");
             assert_eq!(result["structuredContent"], page);
         } else {
             assert!(!output.status.success(), "{option} {value}");
@@ -6181,7 +6196,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
     let cli_item: Value = serde_json::from_str(&stdout(&cli_item)).unwrap();
     let cli_search = mara(
         fixture.path(),
-        &["--format", "json", "item", "search", "alpha zebra"],
+        &["--format", "json", "search", "alpha zebra"],
     );
     assert!(cli_search.status.success(), "{}", stderr(&cli_search));
     let cli_search: Value = serde_json::from_str(&stdout(&cli_search)).unwrap();
@@ -6199,7 +6214,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
             json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
             mcp_request(2, "tools/list", json!({})),
             mcp_call(3, "item_get", json!({ "id": "REQ-ALPHA" })),
-            mcp_call(4, "item_search", json!({ "query": "alpha zebra" })),
+            mcp_call(4, "search", json!({ "query": "alpha zebra" })),
             mcp_call(5, "schema_list", json!({ "kind": "relation" })),
         ],
     );
@@ -6228,7 +6243,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
             "item_update",
             "item_get",
             "item_list",
-            "item_search",
+            "search",
             "item_related",
             "item_validate",
             "relation_add",
@@ -6287,12 +6302,16 @@ fn every_command_help_describes_commands_arguments_and_options() {
                 "{path_help}"
             );
         }
-        if command == ["item", "search"] {
+        if command == ["search"] {
             let query_help = help
                 .lines()
                 .find(|line| line.trim_start().starts_with("<QUERY>"))
                 .unwrap();
-            for convention in ["empty", "punctuation-only", "all items within the filters"] {
+            for convention in [
+                "empty",
+                "punctuation-only",
+                "all search units within the filters",
+            ] {
                 assert!(query_help.contains(convention), "{query_help}");
             }
         }
@@ -6307,7 +6326,7 @@ fn every_command_help_describes_commands_arguments_and_options() {
             }
         }
         if command == ["item", "list"]
-            || command == ["item", "search"]
+            || command == ["search"]
             || command == ["project", "validate"]
         {
             let path_help = help.lines().find(|line| line.contains("--path")).unwrap();
@@ -6321,7 +6340,7 @@ fn every_command_help_describes_commands_arguments_and_options() {
                 assert!(body_help.contains(convention), "{body_help}");
             }
         }
-        if command == ["item", "list"] || command == ["item", "search"] {
+        if command == ["item", "list"] || command == ["search"] {
             let field_help = help.lines().find(|line| line.contains("--field")).unwrap();
             for convention in ["custom", "title/MID", "typed relations"] {
                 assert!(field_help.contains(convention), "{command:?}: {field_help}");
@@ -6509,10 +6528,9 @@ fn mcp_tools_list_exposes_parameter_guidance() {
                         "unicode case-insensitive",
                         "distinct",
                         "punctuation-only",
-                        "all items within the filters",
+                        "all search units within the filters",
                     ],
                 ),
-                "excerpts" => ("--excerpts", &["three", "partial", "skip"]),
                 "new_id" => (
                     "<NEW_ID>",
                     &[
@@ -6529,7 +6547,7 @@ fn mcp_tools_list_exposes_parameter_guidance() {
                 .find(|line| line.trim_start().starts_with(cli_input))
                 .unwrap_or_else(|| panic!("{name} is missing {cli_input}: {help}"));
             let mcp_help = schema["description"].as_str().unwrap();
-            if property == "cursor" && matches!(name, "item_list" | "item_search") {
+            if property == "cursor" && matches!(name, "item_list" | "search") {
                 for (surface, text) in [("CLI", cli_help), ("MCP", mcp_help)] {
                     assert!(
                         text.contains("all other inputs unchanged"),
@@ -6556,7 +6574,7 @@ fn mcp_tools_list_exposes_parameter_guidance() {
             assert!(fields.contains(convention), "{name}: {fields}");
         }
     }
-    for name in ["item_list", "item_search"] {
+    for name in ["item_list", "search"] {
         let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
         for description in [
             &tool["inputSchema"]["properties"]["fields"]["description"],
@@ -6568,7 +6586,7 @@ fn mcp_tools_list_exposes_parameter_guidance() {
             }
         }
     }
-    for name in ["item_list", "item_search", "project_validate"] {
+    for name in ["item_list", "search", "project_validate"] {
         let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
         let paths = tool["inputSchema"]["properties"]["paths"]["description"]
             .as_str()
@@ -6600,14 +6618,8 @@ fn mcp_tools_list_exposes_parameter_guidance() {
             .unwrap()
             .contains("atomically")
     );
-    let search = tools
-        .iter()
-        .find(|tool| tool["name"] == "item_search")
-        .unwrap();
-    assert_eq!(
-        search["inputSchema"]["properties"]["excerpts"]["default"],
-        false
-    );
+    let search = tools.iter().find(|tool| tool["name"] == "search").unwrap();
+    assert_eq!(search["inputSchema"]["properties"]["excerpts"], Value::Null);
     assert_eq!(
         search["inputSchema"]["properties"]["ids"]["default"],
         json!([])
@@ -6883,7 +6895,6 @@ fn primary_workflows_run_end_to_end_against_real_source_files() {
     let searched = mara(
         fixture.path(),
         &[
-            "item",
             "search",
             "bounded",
             "--flavour",
@@ -6923,7 +6934,6 @@ fn dogfooded_repository_validates_and_retrieves_equivalently_through_cli_and_mcp
         &[
             "--format",
             "json",
-            "item",
             "search",
             "Start a project",
             "--flavour",
@@ -6936,7 +6946,10 @@ fn dogfooded_repository_validates_and_retrieves_equivalently_through_cli_and_mcp
     );
     assert!(cli_search.status.success(), "{}", stderr(&cli_search));
     let cli_search: Value = serde_json::from_str(&stdout(&cli_search)).unwrap();
-    assert_eq!(cli_search["items"][0]["id"], "SCN-START-STRUCTURED-PROJECT");
+    assert_eq!(
+        collection_nodes(&cli_search)[0]["id"],
+        "SCN-START-STRUCTURED-PROJECT"
+    );
 
     let cli_item = mara(
         repository,
@@ -6972,7 +6985,7 @@ fn dogfooded_repository_validates_and_retrieves_equivalently_through_cli_and_mcp
             mcp_call(2, "project_validate", json!({})),
             mcp_call(
                 3,
-                "item_search",
+                "search",
                 json!({
                     "query": "Start a project",
                     "flavours": ["scenario"],
@@ -9155,5 +9168,389 @@ fn eof_reference_titles_load_through_real_cli_workflows() {
         );
         assert_eq!(span.end_byte(), source.len());
         assert_eq!(fs::read_to_string(path).unwrap(), source);
+    }
+}
+
+#[test]
+fn unified_search_owns_blocks_ranks_mixed_hits_and_pages_with_mcp_parity() {
+    let fixture = retrieval_fixture();
+    let source = "# Needle\n\nUnrelated prose.\n\n:::mara requirement REQ-OWNED\n:title: Owner\n\n## Needle\n\nNeedle inside an item.\n:::\n\nNeedle paragraph.\n\n- Needle list\n  - Needle nested\n\n> Needle quote\n> - Needle nested list\n\n| Header |\n| --- |\n| Needle cell |\n\n```text\nNeedle code\n```\n\n# Other\n\nNeedle needle needle repeated.\n\n# Needel\n";
+    fs::write(fixture.path().join("docs/mixed.mara.md"), source).unwrap();
+    fs::write(
+        fixture.path().join("docs/narrative.mara.md"),
+        "# Needle\n\nPlain narrative.\n",
+    )
+    .unwrap();
+    let mut cursor: Option<String> = None;
+    let mut hits = Vec::new();
+    loop {
+        let mut args = vec!["--format", "json", "search", "needle", "--limit", "2"];
+        let mut params = json!({"query":"needle", "limit":2});
+        if let Some(cursor) = &cursor {
+            args.extend(["--cursor", cursor]);
+            params["cursor"] = json!(cursor);
+        }
+        let output = mara(fixture.path(), &args);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(page["format_version"], 1);
+        assert!(page.get("items").is_none());
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, "search", params),
+            ],
+        );
+        assert_eq!(
+            mcp_response(&responses, 2)["result"]["structuredContent"],
+            page
+        );
+        for hit in page["results"].as_array().unwrap() {
+            let path = hit["node"]["source"]["path"].as_str().unwrap();
+            let source = fs::read_to_string(fixture.path().join(path)).unwrap();
+            let excerpt = &hit["excerpt"];
+            let start = excerpt["start_byte"].as_u64().unwrap() as usize;
+            let end = excerpt["end_byte"].as_u64().unwrap() as usize;
+            assert_eq!(&source[start..end], excerpt["text"].as_str().unwrap());
+            assert!(excerpt["text"].as_str().unwrap().chars().count() <= 240);
+            hits.push(hit.clone());
+        }
+        assert!(hits.len() <= 10);
+        cursor = page["next_cursor"].as_str().map(ToOwned::to_owned);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(hits.len(), 10);
+    assert_eq!(hits[0]["node"]["kind"], "section");
+    assert_eq!(hits[1]["node"]["id"], "REQ-OWNED");
+    assert_eq!(hits[2]["node"]["source"]["path"], "docs/narrative.mara.md");
+    assert_eq!(hits[9]["node"]["title"], "Needel");
+    let kinds: Vec<_> = hits[3..9]
+        .iter()
+        .map(|h| h["node"]["block_kind"].clone())
+        .collect();
+    assert_eq!(
+        kinds,
+        json!([
+            "paragraph",
+            "list",
+            "blockquote",
+            "table",
+            "code_block",
+            "paragraph"
+        ])
+        .as_array()
+        .unwrap()
+        .clone()
+    );
+    assert_eq!(
+        hits.iter()
+            .map(|h| h["node"]["reference"].as_str().unwrap())
+            .collect::<BTreeSet<_>>()
+            .len(),
+        10
+    );
+    // The parent heading supplies context, never an inherited query term.
+    let output = mara(
+        fixture.path(),
+        &["--format", "json", "search", "needle unrelated"],
+    );
+    let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(page["results"], json!([]));
+    let output = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "search",
+            "needle",
+            "--flavour",
+            "requirement",
+        ],
+    );
+    let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(page["results"].as_array().unwrap().len(), 1);
+    assert_eq!(page["results"][0]["node"]["id"], "REQ-OWNED");
+}
+
+#[test]
+fn unified_search_rejects_removed_names_and_options_and_narrative_stale_cursors() {
+    let fixture = retrieval_fixture();
+    fs::write(
+        fixture.path().join("docs/narrative.mara.md"),
+        "# Needle\n\nNeedle paragraph.\n",
+    )
+    .unwrap();
+    for args in [
+        vec!["item", "search", "needle"],
+        vec!["search", "needle", "--excerpts"],
+        vec!["search", "needle", "--kind", "block"],
+    ] {
+        assert!(!mara(fixture.path(), &args).status.success());
+    }
+    let first = mara(
+        fixture.path(),
+        &["--format", "json", "search", "needle", "--limit", "1"],
+    );
+    let page: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let cursor = page["next_cursor"].as_str().unwrap();
+    fs::write(
+        fixture.path().join("docs/unrelated.mara.md"),
+        "Unrelated content.\n",
+    )
+    .unwrap();
+    let stale = mara(
+        fixture.path(),
+        &["search", "needle", "--limit", "1", "--cursor", cursor],
+    );
+    assert!(!stale.status.success());
+    assert!(stderr(&stale).contains("stale cursor"));
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "item_search", json!({"query":"needle"})),
+            mcp_call(3, "search", json!({"query":"needle","excerpts":true})),
+            mcp_call(4, "search", json!({"query":"needle","kind":"block"})),
+            mcp_call(
+                5,
+                "search",
+                json!({"query":"needle","limit":1,"cursor":cursor}),
+            ),
+        ],
+    );
+    for id in 2..=5 {
+        let response = mcp_response(&responses, id);
+        assert!(
+            response.get("error").is_some() || response["result"]["isError"] == true,
+            "{response}"
+        );
+    }
+}
+
+#[test]
+fn unified_search_keeps_large_blocks_whole_and_never_skips_oversized_identities() {
+    let fixture = retrieval_fixture();
+    let path = fixture.path().join("docs/large-search.mara.md");
+    let source = format!("{}needle\n\nneedle tail.\n", "界\"\\ ".repeat(20_000));
+    fs::write(&path, &source).unwrap();
+    let output = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "search",
+            "needle",
+            "--path",
+            "docs/large-search.mara.md",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let hits = page["results"].as_array().unwrap();
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0]["node"]["source"]["start_byte"], 0);
+    assert!(hits[0]["node"]["source"]["end_byte"].as_u64().unwrap() > 65_536);
+    assert_eq!(hits[0]["excerpt"]["partial"], true);
+    assert!(
+        hits[0]["excerpt"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("needle")
+    );
+    assert!(hits[0]["excerpt"]["text"].as_str().unwrap().chars().count() <= 240);
+    assert!(output.stdout.len() - 1 <= 65_536);
+
+    fs::write(&path, format!(":::mara requirement REQ-FIRST\n:title: Needle\n\nSmall.\n:::\n\n:::mara requirement REQ-{}\n:title: Needle\n\nLarge identity.\n:::\n\n:::mara requirement REQ-LAST\n:title: Needle\n\nMust not skip to here.\n:::\n", "X".repeat(70_000))).unwrap();
+    let first = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "search",
+            "needle",
+            "--path",
+            "docs/large-search.mara.md",
+            "--limit",
+            "100",
+        ],
+    );
+    assert!(first.status.success(), "{}", stderr(&first));
+    let page: Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(page["results"].as_array().unwrap().len(), 1);
+    assert_eq!(page["results"][0]["node"]["id"], "REQ-FIRST");
+    let cursor = page["next_cursor"].as_str().unwrap();
+    let next = mara(
+        fixture.path(),
+        &[
+            "search",
+            "needle",
+            "--path",
+            "docs/large-search.mara.md",
+            "--limit",
+            "100",
+            "--cursor",
+            cursor,
+        ],
+    );
+    assert!(!next.status.success());
+    assert!(stderr(&next).contains("cannot fit the 65536-byte page budget"));
+    assert!(next.stderr.len() < 1024);
+    assert!(next.stdout.is_empty());
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "search",
+                json!({"query":"needle", "paths":["docs/large-search.mara.md"],"limit":100,"cursor":cursor}),
+            ),
+        ],
+    );
+    assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
+}
+
+#[test]
+fn unified_search_resolves_schema_relation_filters_against_vocabulary() {
+    let fixture = retrieval_fixture();
+    let schema_path = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_path).unwrap();
+    fs::write(&schema_path, format!("{schema}\n  contains:\n    description: Authored containment\n    source: [requirement]\n    target: [scenario]\n")).unwrap();
+    let source_path = fixture.path().join("docs/a.mara.md");
+    let source = fs::read_to_string(&source_path)
+        .unwrap()
+        .replace(":derives_from: SCN-BASE", ":contains: SCN-BASE");
+    fs::write(source_path, source).unwrap();
+    let output = mara(
+        fixture.path(),
+        &[
+            "--format",
+            "json",
+            "search",
+            "",
+            "--relation",
+            "schema:contains",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(page["results"].as_array().unwrap().len(), 1);
+    assert_eq!(page["results"][0]["node"]["id"], "REQ-ALPHA");
+    let rejected = mara(fixture.path(), &["search", "", "--relation", "contains"]);
+    assert!(!rejected.status.success());
+    assert!(stderr(&rejected).contains("schema:contains or builtin:contains"));
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "search",
+                json!({"query":"", "relations":["schema:contains"]}),
+            ),
+            mcp_call(3, "search", json!({"query":"", "relations":["contains"]})),
+            mcp_call(
+                4,
+                "search",
+                json!({"query":"", "relations":["builtin:contains"]}),
+            ),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        page
+    );
+    for id in [3, 4] {
+        assert_eq!(mcp_response(&responses, id)["result"]["isError"], true);
+    }
+}
+
+#[test]
+fn unified_search_excerpts_locate_decoded_headings_inside_owning_nodes() {
+    let fixture = retrieval_fixture();
+    let path = fixture.path().join("docs/decoded-search.mara.md");
+    for (query, encoded) in [
+        ("discovery", "disco&#118;ery"),
+        ("discovery", "disco**very**"),
+        ("discovery", "disco&#x76;ery"),
+        ("strasse", "Stra&szlig;e"),
+        ("CAFÉ", "caf&#x65;&#x301;"),
+        ("discovery", "`disco`**very**"),
+    ] {
+        for prefix in [String::new(), "Background 界 &amp; ".repeat(30)] {
+            let heading = format!("{prefix}{encoded}");
+            for newline in ["\n", "\r\n"] {
+                for kind in ["item", "block", "section"] {
+                    let introduction = "Unrelated introduction. ".repeat(30);
+                    let source = if kind == "item" {
+                    format!(":::mara requirement REQ-OWNER\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: Owner\n\n{introduction}\n\n## {heading}\n\nDetails.\n:::\n")
+                } else if kind == "block" {
+                    format!("> {introduction}\n>\n> ## {heading}\n>\n> Details.\n")
+                } else {
+                    format!("## {heading}\n\nDetails.\n")
+                }.replace('\n', newline);
+                    fs::write(&path, &source).unwrap();
+                    let output = mara(
+                        fixture.path(),
+                        &[
+                            "--format",
+                            "json",
+                            "search",
+                            query,
+                            "--path",
+                            "docs/decoded-search.mara.md",
+                        ],
+                    );
+                    assert!(output.status.success(), "{}", stderr(&output));
+                    let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+                    let hits = page["results"].as_array().unwrap();
+                    assert_eq!(hits.len(), 1, "{heading} {kind}");
+                    assert_eq!(hits[0]["node"]["kind"], kind);
+                    assert_eq!(hits[0]["node"]["source"]["start_byte"], 0);
+                    let excerpt = &hits[0]["excerpt"];
+                    let start = excerpt["start_byte"].as_u64().unwrap() as usize;
+                    let end = excerpt["end_byte"].as_u64().unwrap() as usize;
+                    let heading_start = source.find(encoded).unwrap();
+                    assert!(
+                        start <= heading_start && end >= heading_start + encoded.len(),
+                        "excerpt {start}..{end} misses heading at {heading_start}: {heading} {kind}"
+                    );
+                    assert_eq!(excerpt["text"], source[start..end]);
+                    assert_eq!(excerpt["partial"], true);
+                    assert!(excerpt["text"].as_str().unwrap().chars().count() <= 240);
+                    assert_eq!(
+                        excerpt["start_line"],
+                        source[..start].bytes().filter(|b| *b == b'\n').count() + 1
+                    );
+                    assert_eq!(
+                        excerpt["end_line"],
+                        source[..end - 1].bytes().filter(|b| *b == b'\n').count() + 1
+                    );
+                    let responses = mcp_exchange(
+                        fixture.path(),
+                        &[
+                            mcp_initialize(1),
+                            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                            mcp_call(
+                                2,
+                                "search",
+                                json!({"query":query, "paths":["docs/decoded-search.mara.md"]}),
+                            ),
+                        ],
+                    );
+                    assert_eq!(
+                        mcp_response(&responses, 2)["result"]["structuredContent"],
+                        page
+                    );
+                }
+            }
+        }
     }
 }

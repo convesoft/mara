@@ -10,19 +10,23 @@ use std::{
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
     EntryRange, FieldValue, InitialRelation, ItemCollectionResult, ItemCreateParams,
-    ItemFilterParams, ItemGetParams, ItemGetResult, ItemMoveParams, ItemRelatedParams,
-    ItemSearchParams, ItemSummary, ItemUpdateParams, OperationContext, ProjectInitializationResult,
-    ProjectMidBackfillResult, RelatedItem, RelationDirection, RelationMutationResult,
-    RelationParams, RelationSummary, SchemaGetResult, SchemaKind, SchemaListResult,
-    SchemaValidationResult, Template, ValidationResult, ValidationScope, ValidationTargetKind,
-    project_initialize,
+    ItemFilterParams, ItemGetParams, ItemGetResult, ItemMoveParams, ItemRelatedParams, ItemSummary,
+    ItemUpdateParams, OperationContext, ProjectInitializationResult, ProjectMidBackfillResult,
+    RelatedItem, RelationDirection, RelationMutationResult, RelationParams, RelationSummary,
+    SchemaGetResult, SchemaKind, SchemaListResult, SchemaValidationResult, SearchParams, Template,
+    ValidationResult, ValidationScope, ValidationTargetKind, project_initialize,
 };
 use serde::Serialize;
 
 mod mcp;
 
 #[derive(Debug, Parser)]
-#[command(name = "mara", version, about = "Structured project knowledge")]
+#[command(
+    name = "mara",
+    version,
+    about = "Structured project knowledge",
+    after_help = "Discovery and reading: mara search <QUERY> discovers items, sections, and Markdown blocks."
+)]
 struct Cli {
     #[arg(
         long,
@@ -42,6 +46,21 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Search items and narrative with one source excerpt; exact matches rank first, then ID/title/heading weights. Item filters exclude narrative; ID/MID words and filters stay exact.
+    Search {
+        /// Unicode case-insensitive words to match across items, section headings, and ordinary Markdown blocks; every distinct word must match. An empty string or punctuation-only text matches all search units within the filters.
+        query: String,
+
+        #[command(flatten)]
+        filters: ItemFilterArgs,
+
+        #[arg(
+            long = "id",
+            help = "Select exact human IDs or canonical MIDs (uppercase 26-character ULIDs); repeat for OR, intersected with other filters. Omission adds no restriction"
+        )]
+        ids: Vec<String>,
+    },
+
     /// Initialize, validate, or recover a Mara project.
     Project {
         #[command(subcommand)]
@@ -205,26 +224,6 @@ enum ItemCommand {
     List {
         #[command(flatten)]
         filters: ItemFilterArgs,
-    },
-    /// Rank word matches by relevance with typo tolerance; exact matches rank first, then ID/title matches carry more weight. ID/MID words and filters stay exact.
-    Search {
-        /// Unicode case-insensitive words to match across ID, title, body, and metadata; every distinct word must match. An empty string or punctuation-only text matches all items within the filters.
-        query: String,
-
-        #[command(flatten)]
-        filters: ItemFilterArgs,
-
-        #[arg(
-            long = "id",
-            help = "Select exact human IDs or canonical MIDs (uppercase 26-character ULIDs); repeat for OR, intersected with other filters. Omission adds no restriction"
-        )]
-        ids: Vec<String>,
-
-        #[arg(
-            long,
-            help = "Include up to three bounded, partial source excerpts per match; omitted by default. Excerpts may skip content; use item get for complete content"
-        )]
-        excerpts: bool,
     },
     /// List direct incoming and outgoing relation entries; retrieve neighbour bodies with item get.
     Related {
@@ -712,17 +711,13 @@ fn run(cli: Cli) -> Result<bool, String> {
             emit(format, &result, print_item_collection)?;
             Ok(true)
         }
-        Command::Item {
-            command:
-                ItemCommand::Search {
-                    query,
-                    filters,
-                    ids,
-                    excerpts,
-                },
+        Command::Search {
+            query,
+            filters,
+            ids,
         } => {
             let filters = filters.into_params();
-            let result = operations(project)?.item_search(ItemSearchParams {
+            let result = operations(project)?.search(SearchParams {
                 query,
                 flavours: filters.flavours,
                 fields: filters.fields,
@@ -731,9 +726,38 @@ fn run(cli: Cli) -> Result<bool, String> {
                 limit: filters.limit,
                 cursor: filters.cursor,
                 ids,
-                excerpts,
             })?;
-            emit(format, &result, print_item_collection)?;
+            emit(format, &result, |page| {
+                for hit in &page.results {
+                    let node = &hit.node;
+                    let kind = node.block_kind.map_or_else(
+                        || format!("{:?}", node.kind),
+                        |kind| format!("Block({kind:?})"),
+                    );
+                    println!(
+                        "{}\t{}\t{}:{}\t{}{}",
+                        node.id.as_deref().unwrap_or(&node.reference),
+                        kind,
+                        node.source.path().display(),
+                        node.source.start_line(),
+                        node.title.as_deref().unwrap_or_default(),
+                        if node.title_truncated {
+                            " [title truncated]"
+                        } else {
+                            ""
+                        }
+                    );
+                    println!(
+                        "excerpt\tpartial={}\t{}:{}\t{}",
+                        hit.excerpt.partial,
+                        node.source.path().display(),
+                        hit.excerpt.start_line,
+                        hit.excerpt.text
+                    );
+                }
+                print_page_continuation(page.has_more, page.next_cursor.as_deref());
+                Ok(())
+            })?;
             Ok(true)
         }
         Command::Item {

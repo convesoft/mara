@@ -95,7 +95,7 @@ mara item create requirement REQ-EXAMPLE docs/example.mara.md \
   --title "State one verifiable obligation" \
   --body "The project must demonstrate its primary workflow."
 mara project validate
-mara item search "primary workflow"
+mara search "primary workflow"
 mara item get REQ-EXAMPLE
 ```
 
@@ -106,15 +106,13 @@ delete, and recovery follow [`docs/editing.mara.md`](docs/editing.mara.md).
 Search/list, `item related`, and `item get` return bounded pages; repeat the same
 command with `--cursor <next_cursor>` to continue. Get returns consecutive body
 and metadata fragments, then direct relations; follow continuation to retrieve
-the complete item. Inspect selected search passages with
-`mara item search "primary workflow" --id REQ-EXAMPLE --excerpts`.
-Search ranks exact matches before spelling corrections and favours ID/title
-matches. ID/MID field values use exact normalized words; item lookup and filters
-remain exact. Matching, bounds, continuation, and
-excerpts follow
-[`docs/retrieval.mara.md`](docs/retrieval.mara.md).
-Narrative outside item blocks remains accessible through file reads and file
-search; Mara MCP alone does not retrieve it.
+the complete item. Search items, section headings, and ordinary Markdown blocks
+with `mara search "primary workflow"` (MCP `search`). Each result includes its
+kind, source location, reusable reference, and one bounded source excerpt.
+Item filters such as `--id REQ-EXAMPLE` exclude narrative; path filters cover
+all result kinds. Ranking, mixed JSON results, and continuation follow
+[`docs/discovery.mara.md`](docs/discovery.mara.md). Unified node reading and
+navigation remain planned; complete narrative content currently requires file reads.
 For existing projects whose items lack machine identities, run
 `mara project mid backfill`, then `mara project validate` before editing.
 Distribution and release guarantees are in

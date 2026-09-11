@@ -182,7 +182,7 @@ fn set_continuation(
     (page.has_more, page.next_cursor) = continuation(start, page.items.len(), total, fingerprint);
 }
 
-fn continuation(
+pub(super) fn continuation(
     start: usize,
     count: usize,
     total: usize,
@@ -215,7 +215,10 @@ pub(super) fn fingerprint(
     Ok(format!("{:016x}", hash.finish()))
 }
 
-fn cursor_position(cursor: Option<&str>, fingerprint: &str) -> Result<usize, QueryError> {
+pub(super) fn cursor_position(
+    cursor: Option<&str>,
+    fingerprint: &str,
+) -> Result<usize, QueryError> {
     let Some(cursor) = cursor else {
         return Ok(0);
     };
@@ -241,7 +244,7 @@ fn cursor_position(cursor: Option<&str>, fingerprint: &str) -> Result<usize, Que
     usize::from_str_radix(position, 16).map_err(|_| invalid())
 }
 
-fn excerpts(source: &str, item: &Item, terms: &BTreeSet<String>) -> Vec<SearchExcerpt> {
+pub(super) fn excerpts(source: &str, item: &Item, terms: &BTreeSet<String>) -> Vec<SearchExcerpt> {
     if terms.is_empty() {
         return Vec::new();
     }
@@ -307,7 +310,7 @@ fn excerpts(source: &str, item: &Item, terms: &BTreeSet<String>) -> Vec<SearchEx
     fragments
 }
 
-fn line_at(source: &str, byte: usize) -> usize {
+pub(super) fn line_at(source: &str, byte: usize) -> usize {
     source.as_bytes()[..byte]
         .iter()
         .filter(|b| **b == b'\n')
@@ -315,7 +318,11 @@ fn line_at(source: &str, byte: usize) -> usize {
         + 1
 }
 
-fn matching_spans(value: &str, terms: &BTreeSet<String>, fuzzy: bool) -> Vec<(usize, usize)> {
+pub(super) fn matching_spans(
+    value: &str,
+    terms: &BTreeSet<String>,
+    fuzzy: bool,
+) -> Vec<(usize, usize)> {
     // Normalize whole grapheme clusters so composition and case-fold expansion
     // retain a mapping to their original source bytes (e.g. cafe + accent, ß).
     let mut canonical = String::new();

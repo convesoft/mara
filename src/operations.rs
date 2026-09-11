@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Corpus, Diagnostic, FieldFilter, FlavourDefinition, InitialRelation, ItemCollectionResult,
     ItemCreationRequest, ItemFilters, ItemGetResult, Project, RelatedFilters, RelatedItemsResult,
-    RelationDefinition, RelationDirection, Schema, Template, add_relation, backfill_mids,
-    create_item, get_item_page, initialize_project, list_items, load_corpus,
+    RelationDefinition, RelationDirection, Schema, SearchResult, Template, add_relation,
+    backfill_mids, create_item, get_item_page, initialize_project, list_items, load_corpus,
     load_corpus_for_validation, load_corpus_syntax_for_validation, load_schema,
     load_schema_for_validation, related_items, remove_relation, resolve_project,
-    resolve_project_for_validation, search_items, validate_corpus, validate_corpus_independent,
+    resolve_project_for_validation, search, validate_corpus, validate_corpus_independent,
 };
 
 #[derive(Debug, Clone)]
@@ -246,14 +246,14 @@ impl OperationContext {
         list_items(&corpus, &schema, &filters.into_domain()).map_err(|error| error.to_string())
     }
 
-    pub fn item_search(&self, params: ItemSearchParams) -> Result<ItemCollectionResult, String> {
+    pub fn search(&self, params: SearchParams) -> Result<SearchResult, String> {
         let (corpus, schema) = self.load_query_project()?;
-        let (query, filters, ids, excerpts) = params.into_parts();
-        search_items(
+        let (query, filters, ids) = params.into_parts();
+        search(
             &corpus,
             &schema,
             &query,
-            &filters.into_domain().with_search_options(ids, excerpts),
+            &filters.into_domain().with_search_options(ids, false),
         )
         .map_err(|error| error.to_string())
     }
@@ -619,7 +619,7 @@ impl ItemFilterParams {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ItemSearchParams {
+pub struct SearchParams {
     pub query: String,
     #[serde(default)]
     pub flavours: Vec<String>,
@@ -635,12 +635,10 @@ pub struct ItemSearchParams {
     pub cursor: Option<String>,
     #[serde(default)]
     pub ids: Vec<String>,
-    #[serde(default)]
-    pub excerpts: bool,
 }
 
-impl ItemSearchParams {
-    pub fn into_parts(self) -> (String, ItemFilterParams, Vec<String>, bool) {
+impl SearchParams {
+    pub fn into_parts(self) -> (String, ItemFilterParams, Vec<String>) {
         (
             self.query,
             ItemFilterParams {
@@ -652,7 +650,6 @@ impl ItemSearchParams {
                 cursor: self.cursor,
             },
             self.ids,
-            self.excerpts,
         )
     }
 }

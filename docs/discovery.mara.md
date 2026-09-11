@@ -48,6 +48,11 @@ successive parent/child navigation to a sibling narrative Markdown block.
 
 Accepted direction for 0.2; not implemented by 0.1.
 
+Unified search is implemented by CLI `mara search` and MCP `search`, using the
+shared node summaries, ranking, excerpts, filters, and continuation below.
+The old CLI `item search`, MCP `item_search`, and optional excerpt flags are
+removed. Unified `get` and `related` remain separate implementation work.
+
 | Concern | Contract |
 |---|---|
 | Entry point | Move CLI search to `mara search`, with equivalent unified MCP discovery. Search covers items, sections, and ordinary Markdown blocks in the selected project's canonical documents, including documents without items. Do not introduce a second document-search operation. |
@@ -347,7 +352,9 @@ Content before a heading belongs directly to its containing document or block.
 
 A section carries its heading text, level, and source location. Heading text
 decodes Markdown backslash escapes and named/numeric character references once
-in ordinary text nodes; code spans retain their literal content. Sections contain
+in ordinary text nodes; code spans retain their literal content. Preserve decoded
+heading byte-to-source offsets so bounded excerpts locate the matching word
+within long headings while returning original Markdown. Sections contain
 ordinary Markdown blocks, items, and subsections in source order. Prose before
 and after an item can belong to the same section. Add no abstract passage
 container around those blocks or special passage node for a heading.
@@ -367,7 +374,8 @@ internal references and ambiguous anchors; project validation includes these
 schema-independent diagnostics. `DiscoveryNode::reference()` and `summary()` expose
 reusable references and the shared projection under [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]];
 `DiscoveryGraph::resolve()` accepts those references and item IDs/MIDs against
-the loaded snapshot. Search selection and CLI/MCP discovery remain separate work.
+the loaded snapshot. Unified CLI/MCP search selects the owning result units
+below; unified reading and navigation remain separate work.
 
 ## Discovery units
 
