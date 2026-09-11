@@ -1,4 +1,7 @@
-//! Private Rushdown adapter for Mara's alpha document projection.
+//! Private Rushdown adapter. The recognition pass preserves Markdown-aware
+//! delimiter rules; the container pass retains ordinary item-body children.
+
+mod containers;
 
 use std::{fmt, ops::Range};
 
@@ -22,17 +25,26 @@ pub(super) struct ParsedDocument {
     pub(super) complete: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct ParsedItem {
     pub(super) flavour: String,
     pub(super) id: String,
     pub(super) title: String,
     pub(super) metadata: Vec<ParsedMetadataEntry>,
     pub(super) body: Range<usize>,
+    pub(super) blocks: Vec<ParsedBlock>,
     pub(super) mentions: Vec<ParsedMention>,
     pub(super) source: Range<usize>,
     pub(super) metadata_valid: bool,
+    pub(super) title_valid: bool,
     pub(super) body_valid: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ParsedBlock {
+    pub(super) kind: super::MarkdownBlockKind,
+    pub(super) source: Range<usize>,
+    pub(super) children: Vec<ParsedBlock>,
 }
 
 #[derive(Debug)]
@@ -42,14 +54,14 @@ struct ProjectedItem {
     complete: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct ParsedMetadataEntry {
     pub(super) key: String,
     pub(super) value: String,
     pub(super) source: Range<usize>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct ParsedMention {
     pub(super) target: String,
     pub(super) source: Range<usize>,
@@ -316,12 +328,16 @@ fn mara_extension() -> impl ParserExtension {
 
 pub(super) fn parse(source: &str) -> Result<ParsedDocument, ParseError> {
     let (delimiters, mentions) = parse_extensions(source);
-    project(source, &delimiters, &mentions)
+    let mut document = project(source, &delimiters, &mentions)?;
+    containers::populate(source, &mut document);
+    Ok(document)
 }
 
 pub(super) fn parse_for_validation(source: &str) -> (ParsedDocument, Vec<ParseError>) {
     let (delimiters, mentions) = parse_extensions(source);
-    project_for_validation(source, &delimiters, &mentions)
+    let (mut document, errors) = project_for_validation(source, &delimiters, &mentions);
+    containers::populate(source, &mut document);
+    (document, errors)
 }
 
 fn parse_extensions(source: &str) -> (Vec<Delimiter>, Vec<ParsedMention>) {
@@ -563,9 +579,11 @@ fn project_item(
             title,
             metadata,
             body: projected_body_start..body_end,
+            blocks: Vec::new(),
             mentions: item_mentions,
             source: opener_line.start..source_end,
             metadata_valid,
+            title_valid: !title_is_invalid,
             body_valid: metadata_valid && structure_complete,
         },
         errors,
