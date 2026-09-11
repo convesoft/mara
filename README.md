@@ -103,10 +103,10 @@ Run `mara --help` or `mara <object> <operation> --help` for the complete command
 surface. The core behavior is documented in
 [`docs/alpha.mara.md`](docs/alpha.mara.md). Structured update, move, rename,
 delete, and recovery follow [`docs/editing.mara.md`](docs/editing.mara.md).
-Search/list, `item related`, and `get` return bounded pages; repeat the same
+Search/list, `related`, and `get` return bounded pages; repeat the same
 command with `--cursor <next_cursor>` to continue. Get returns consecutive
 content and item metadata fragments; follow continuation to retrieve the complete
-node. Read neighbours through `item related`. Search items, section headings,
+node. Read neighbours through `related`. Search items, section headings,
 and ordinary Markdown blocks with `mara search "primary workflow"` (MCP `search`). Each result includes its
 kind, source location, reusable reference, and one bounded source excerpt.
 Item filters such as `--id REQ-EXAMPLE` exclude narrative; path filters cover

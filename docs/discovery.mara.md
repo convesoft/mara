@@ -53,7 +53,9 @@ shared node summaries, ranking, excerpts, filters, and continuation below.
 The old CLI `item search`, MCP `item_search`, and optional excerpt flags are
 removed. Unified CLI/MCP `get` reads every node kind with consecutive content
 and metadata pages; the old `item get` / `item_get` names and relation-count
-limit are removed. Unified `related` remains separate implementation work.
+limit are removed. Unified CLI/MCP `related` navigates every node kind through
+schema relations, mentions, and direct containment; the old `item related` /
+`item_related` names and MCP `id` argument are removed.
 
 | Concern | Contract |
 |---|---|
@@ -92,6 +94,14 @@ the schema also declares it. If both declare a name, reject the unqualified
 form and identify the fully qualified alternatives. Explicit names select their
 namespace. Resolve against the available vocabulary, not the connections
 present in a result, so shorthand meaning is stable across queries.
+
+Related retains direction, relation, and neighbour-flavour filters. Relation
+names within a filter are ORed; the flavour filter intersects them and selects
+item neighbours only. Omission includes every connection kind and node kind.
+Return outgoing connections first, then incoming, ordered within each direction
+by neighbour document path and structural source order, then authored evidence
+order. Preserve parallel connections and both views of self-connections.
+Selected unresolved authored relation targets remain traversal errors.
 
 Link and anchor resolution follows [[DES-DOCUMENT-STRUCTURE]].
 
@@ -378,7 +388,8 @@ reusable references and the shared projection under [[DES-UNIFIED-KNOWLEDGE-DISC
 `DiscoveryGraph::resolve()` accepts those references and item IDs/MIDs against
 the loaded snapshot. Unified CLI/MCP search selects the owning result units
 below; unified CLI/MCP `get` reads those nodes and their structural context.
-Unified navigation remains separate work.
+Unified CLI/MCP `related` exposes the graph's direct connections, preserving
+source evidence and both directions under [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
 
 ## Discovery units
 

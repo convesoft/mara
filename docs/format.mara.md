@@ -2,7 +2,7 @@
 
 This file defines the document syntax, including narrative mentions introduced
 in 0.2. See [discovery](discovery.mara.md) for derived structure, link resolution,
-and the remaining planned discovery interfaces.
+and unified discovery interfaces.
 
 :::mara design DES-DOCUMENT-FORMAT
 :mid: 01M1PXP2KG381MM1VNN6XC7S4M

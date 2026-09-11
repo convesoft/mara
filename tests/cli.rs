@@ -427,7 +427,6 @@ fn engineering_workflow_creates_connects_and_retrieves_through_cli_and_mcp() {
                     &[
                         "--format",
                         "json",
-                        "item",
                         "related",
                         id,
                         "--direction",
@@ -439,18 +438,18 @@ fn engineering_workflow_creates_connects_and_retrieves_through_cli_and_mcp() {
                 assert!(cli.status.success(), "{}", stderr(&cli));
                 let cli: Value = serde_json::from_slice(&cli.stdout).unwrap();
                 let mcp = call(
-                    "item_related",
-                    json!({"id":id,"direction":direction,"relations":[relation]}),
+                    "related",
+                    json!({"reference":id,"direction":direction,"relations":[relation]}),
                 );
                 assert_eq!(mcp["isError"], false, "{mcp}");
                 assert_eq!(cli, mcp["structuredContent"]);
                 assert_eq!(cli["has_more"], false);
                 assert!(
-                    cli["items"]
+                    cli["connections"]
                         .as_array()
                         .unwrap()
                         .iter()
-                        .any(|entry| entry["item"]["id"] == neighbour),
+                        .any(|entry| entry["neighbour"]["id"] == neighbour),
                     "{cli}"
                 );
             }
@@ -739,18 +738,18 @@ fn related_pages_continue_in_order_with_filters_and_cli_mcp_parity() {
         loop {
             assert!(pages.len() < 30, "continuation must make progress");
             let mut args = vec![
-                "--format", "json", "item", "related", "REQ-HUB", "--limit", "7",
+                "--format",
+                "json",
+                "related",
+                "REQ-HUB",
+                "--flavour",
+                "requirement",
+                "--limit",
+                "7",
             ];
-            let mut params = json!({"id":"REQ-HUB", "limit":7});
+            let mut params = json!({"reference":"REQ-HUB", "flavours":["requirement"], "limit":7});
             if filtered {
-                args.extend([
-                    "--direction",
-                    "incoming",
-                    "--relation",
-                    "supersedes",
-                    "--flavour",
-                    "requirement",
-                ]);
+                args.extend(["--direction", "incoming", "--relation", "supersedes"]);
                 params["direction"] = json!("incoming");
                 params["relations"] = json!(["supersedes"]);
                 params["flavours"] = json!(["requirement"]);
@@ -762,19 +761,19 @@ fn related_pages_continue_in_order_with_filters_and_cli_mcp_parity() {
             let output = mara(fixture.path(), &args);
             assert!(output.status.success(), "{}", stdout(&output));
             let page: Value = serde_json::from_slice(&output.stdout).unwrap();
-            let items = page["items"].as_array().unwrap();
+            let items = page["connections"].as_array().unwrap();
             assert!(!items.is_empty() && items.len() <= 7);
             for entry in items {
-                assert!(is_mid(entry["item"]["mid"].as_str().unwrap()));
-                assert!(entry["item"].get("body").is_none());
-                assert!(entry["item"].get("excerpts").is_none());
+                assert!(is_mid(entry["neighbour"]["mid"].as_str().unwrap()));
+                assert!(entry["neighbour"].get("body").is_none());
+                assert!(entry["neighbour"].get("excerpts").is_none());
                 actual.push((
                     entry["direction"].as_str().unwrap().to_owned(),
                     entry["relation"].as_str().unwrap().to_owned(),
-                    entry["item"]["id"].as_str().unwrap().to_owned(),
+                    entry["neighbour"]["id"].as_str().unwrap().to_owned(),
                 ));
             }
-            requests.push(mcp_call(pages.len() as u64 + 2, "item_related", params));
+            requests.push(mcp_call(pages.len() as u64 + 2, "related", params));
             assert_eq!(page["has_more"], !page["next_cursor"].is_null());
             cursor = page["next_cursor"].as_str().map(ToOwned::to_owned);
             pages.push(page);
@@ -791,7 +790,7 @@ fn related_pages_continue_in_order_with_filters_and_cli_mcp_parity() {
         }
         let mut expected = Vec::new();
         if !filtered {
-            for i in (0..43).rev() {
+            for i in 0..43 {
                 expected.push((
                     "outgoing".to_owned(),
                     "depends_on".to_owned(),
@@ -814,12 +813,9 @@ fn related_pages_continue_in_order_with_filters_and_cli_mcp_parity() {
         }
         assert_eq!(actual, expected);
     }
-    let output = mara(
-        fixture.path(),
-        &["--format", "json", "item", "related", "REQ-HUB"],
-    );
+    let output = mara(fixture.path(), &["--format", "json", "related", "REQ-HUB"]);
     let page: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(page["items"].as_array().unwrap().len(), 20);
+    assert_eq!(page["connections"].as_array().unwrap().len(), 20);
     assert_eq!(page["has_more"], true);
 }
 
@@ -828,33 +824,14 @@ fn related_pages_reject_changed_inputs_and_invalid_continuation() {
     let fixture = retrieval_fixture();
     let first = mara(
         fixture.path(),
-        &[
-            "--format",
-            "json",
-            "item",
-            "related",
-            "REQ-ALPHA",
-            "--limit",
-            "1",
-        ],
+        &["--format", "json", "related", "REQ-ALPHA", "--limit", "1"],
     );
     let first: Value = serde_json::from_slice(&first.stdout).unwrap();
     let cursor = first["next_cursor"].as_str().unwrap();
     for args in [
+        vec!["related", "REQ-ALPHA", "--limit", "2", "--cursor", cursor],
+        vec!["related", "SCN-BASE", "--limit", "1", "--cursor", cursor],
         vec![
-            "item",
-            "related",
-            "REQ-ALPHA",
-            "--limit",
-            "2",
-            "--cursor",
-            cursor,
-        ],
-        vec![
-            "item", "related", "SCN-BASE", "--limit", "1", "--cursor", cursor,
-        ],
-        vec![
-            "item",
             "related",
             "REQ-ALPHA",
             "--limit",
@@ -865,7 +842,6 @@ fn related_pages_reject_changed_inputs_and_invalid_continuation() {
             cursor,
         ],
         vec![
-            "item",
             "related",
             "REQ-ALPHA",
             "--limit",
@@ -876,7 +852,6 @@ fn related_pages_reject_changed_inputs_and_invalid_continuation() {
             cursor,
         ],
         vec![
-            "item",
             "related",
             "REQ-ALPHA",
             "--limit",
@@ -887,7 +862,7 @@ fn related_pages_reject_changed_inputs_and_invalid_continuation() {
             cursor,
         ],
         vec!["item", "list", "--limit", "1", "--cursor", cursor],
-        vec!["item", "related", "REQ-ALPHA", "--cursor", "malformed"],
+        vec!["related", "REQ-ALPHA", "--cursor", "malformed"],
     ] {
         let output = mara(fixture.path(), &args);
         assert!(!output.status.success());
@@ -898,7 +873,6 @@ fn related_pages_reject_changed_inputs_and_invalid_continuation() {
         let output = mara(
             fixture.path(),
             &[
-                "item",
                 "related",
                 "REQ-ALPHA",
                 "--limit",
@@ -911,10 +885,7 @@ fn related_pages_reject_changed_inputs_and_invalid_continuation() {
         assert!(stderr(&output).contains("restart"));
     }
     for limit in ["0", "101"] {
-        let output = mara(
-            fixture.path(),
-            &["item", "related", "REQ-ALPHA", "--limit", limit],
-        );
+        let output = mara(fixture.path(), &["related", "REQ-ALPHA", "--limit", limit]);
         assert!(!output.status.success());
         assert!(stderr(&output).contains("1 through 100"));
     }
@@ -929,15 +900,7 @@ fn related_pages_reject_changed_inputs_and_invalid_continuation() {
         fs::write(&path, changed).unwrap();
         let output = mara(
             fixture.path(),
-            &[
-                "item",
-                "related",
-                "REQ-ALPHA",
-                "--limit",
-                "1",
-                "--cursor",
-                cursor,
-            ],
+            &["related", "REQ-ALPHA", "--limit", "1", "--cursor", cursor],
         );
         assert!(!output.status.success());
         assert!(stderr(&output).contains("restart"));
@@ -948,15 +911,15 @@ fn related_pages_reject_changed_inputs_and_invalid_continuation() {
                 json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
                 mcp_call(
                     2,
-                    "item_related",
-                    json!({"id":"REQ-ALPHA","limit":1,"cursor":cursor}),
+                    "related",
+                    json!({"reference":"REQ-ALPHA","limit":1,"cursor":cursor}),
                 ),
                 mcp_call(
                     3,
-                    "item_related",
-                    json!({"id":"REQ-ALPHA","cursor":"malformed"}),
+                    "related",
+                    json!({"reference":"REQ-ALPHA","cursor":"malformed"}),
                 ),
-                mcp_call(4, "item_related", json!({"id":"REQ-ALPHA","limit":101})),
+                mcp_call(4, "related", json!({"reference":"REQ-ALPHA","limit":101})),
             ],
         );
         for id in [2, 3, 4] {
@@ -968,7 +931,6 @@ fn related_pages_reject_changed_inputs_and_invalid_continuation() {
             &[
                 "--format",
                 "json",
-                "item",
                 "related",
                 "REQ-ALPHA",
                 "--limit",
@@ -979,9 +941,7 @@ fn related_pages_reject_changed_inputs_and_invalid_continuation() {
         );
         assert!(restored.status.success(), "{}", stdout(&restored));
         let page: Value = serde_json::from_slice(&restored.stdout).unwrap();
-        assert_eq!(page["items"][0]["direction"], "incoming");
-        assert_eq!(page["has_more"], false);
-        assert!(page["next_cursor"].is_null());
+        assert!(!page["connections"].as_array().unwrap().is_empty());
     }
 }
 
@@ -999,15 +959,16 @@ fn related_pages_bound_escaped_unicode_titles_and_preserve_every_entry() {
         let mut args = vec![
             "--format",
             "json",
-            "item",
             "related",
             "REQ-ALPHA",
+            "--relation",
+            "satisfies",
             "--direction",
             "incoming",
             "--limit",
             "100",
         ];
-        let mut params = json!({"id":"REQ-ALPHA", "direction":"incoming", "limit":100});
+        let mut params = json!({"reference":"REQ-ALPHA", "relations":["satisfies"], "direction":"incoming", "limit":100});
         if let Some(cursor) = &cursor {
             args.extend(["--cursor", cursor]);
             params["cursor"] = json!(cursor);
@@ -1021,7 +982,7 @@ fn related_pages_bound_escaped_unicode_titles_and_preserve_every_entry() {
             &[
                 mcp_initialize(1),
                 json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-                mcp_call(2, "item_related", params),
+                mcp_call(2, "related", params),
             ],
         );
         assert_eq!(
@@ -1029,10 +990,10 @@ fn related_pages_bound_escaped_unicode_titles_and_preserve_every_entry() {
             page
         );
         if pages == 0 {
-            assert!(page["items"].as_array().unwrap().len() < 100);
+            assert!(page["connections"].as_array().unwrap().len() < 100);
         }
-        for entry in page["items"].as_array().unwrap() {
-            let item = &entry["item"];
+        for entry in page["connections"].as_array().unwrap() {
+            let item = &entry["neighbour"];
             if item["id"] != "DES-ALPHA" {
                 assert_eq!(item["title_truncated"], true);
                 assert_eq!(item["title"], title.chars().take(256).collect::<String>());
@@ -1050,7 +1011,7 @@ fn related_pages_bound_escaped_unicode_titles_and_preserve_every_entry() {
     assert_eq!(ids, expected);
     let human = mara(
         fixture.path(),
-        &["item", "related", "REQ-ALPHA", "--direction", "incoming"],
+        &["related", "REQ-ALPHA", "--direction", "incoming"],
     );
     assert!(stdout(&human).contains(" [title truncated]"));
     assert!(stdout(&human).contains("page\thas_more=true\tnext_cursor="));
@@ -1073,24 +1034,26 @@ fn related_pages_fail_on_an_oversized_entry_without_skipping_it() {
     let args = [
         "--format",
         "json",
-        "item",
         "related",
         "REQ-ALPHA",
+        "--relation",
+        "satisfies",
         "--direction",
         "incoming",
     ];
     let output = mara(fixture.path(), &args);
     assert!(output.status.success(), "{}", stdout(&output));
     let first: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(first["items"].as_array().unwrap().len(), 1);
-    assert_eq!(first["items"][0]["item"]["id"], "DES-ALPHA");
+    assert_eq!(first["connections"].as_array().unwrap().len(), 1);
+    assert_eq!(first["connections"][0]["neighbour"]["id"], "DES-ALPHA");
     let cursor = first["next_cursor"].as_str().unwrap();
     let output = mara(
         fixture.path(),
         &[
-            "item",
             "related",
             "REQ-ALPHA",
+            "--relation",
+            "satisfies",
             "--direction",
             "incoming",
             "--cursor",
@@ -1108,8 +1071,8 @@ fn related_pages_fail_on_an_oversized_entry_without_skipping_it() {
             json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
             mcp_call(
                 2,
-                "item_related",
-                json!({"id":"REQ-ALPHA", "direction":"incoming", "cursor":cursor}),
+                "related",
+                json!({"reference":"REQ-ALPHA", "relations":["satisfies"], "direction":"incoming", "cursor":cursor}),
             ),
         ],
     );
@@ -2622,15 +2585,16 @@ Source.
         &[
             "--format",
             "json",
-            "item",
             "related",
             "01ARZ3NDEKTSV4RRFFQ69G5F00",
+            "--relation",
+            "derives_from",
         ],
     );
     assert!(related.status.success(), "{}", stderr(&related));
     let related: Value = serde_json::from_str(&stdout(&related)).unwrap();
-    assert_eq!(related["items"][0]["item"]["id"], "REQ-SOURCE");
-    assert_eq!(related["items"][0]["direction"], "incoming");
+    assert_eq!(related["connections"][0]["neighbour"]["id"], "REQ-SOURCE");
+    assert_eq!(related["connections"][0]["direction"], "incoming");
 }
 
 #[test]
@@ -2667,13 +2631,7 @@ Source.
 
     let get = mara(
         fixture.path(),
-        &[
-            "--format",
-            "json",
-            "item",
-            "related",
-            "01ARZ3NDEKTSV4RRFFQ69G5F00",
-        ],
+        &["--format", "json", "related", "01ARZ3NDEKTSV4RRFFQ69G5F00"],
     );
 
     assert!(!get.status.success());
@@ -4300,13 +4258,13 @@ fn item_create_initial_relations_cli_and_mcp_publish_complete_edges() {
                 mcp_call(2, "get", json!({"reference":"ADR-NEW"})),
                 mcp_call(
                     3,
-                    "item_related",
-                    json!({"id":"REQ-ALPHA","direction":"incoming","relations":["justifies"]}),
+                    "related",
+                    json!({"reference":"REQ-ALPHA","direction":"incoming","relations":["justifies"]}),
                 ),
                 mcp_call(
                     4,
-                    "item_related",
-                    json!({"id":target_mid,"direction":"incoming","relations":["justifies"]}),
+                    "related",
+                    json!({"reference":target_mid,"direction":"incoming","relations":["justifies"]}),
                 ),
                 mcp_call(5, "project_validate", json!({})),
                 mcp_request(6, "tools/list", json!({})),
@@ -4317,7 +4275,6 @@ fn item_create_initial_relations_cli_and_mcp_publish_complete_edges() {
             (
                 3,
                 vec![
-                    "item",
                     "related",
                     "REQ-ALPHA",
                     "--direction",
@@ -4329,7 +4286,6 @@ fn item_create_initial_relations_cli_and_mcp_publish_complete_edges() {
             (
                 4,
                 vec![
-                    "item",
                     "related",
                     target_mid,
                     "--direction",
@@ -4361,9 +4317,10 @@ fn item_create_initial_relations_cli_and_mcp_publish_complete_edges() {
             2
         );
         for id in [3, 4] {
-            let related = &mcp_response(&responses, id)["result"]["structuredContent"]["items"];
+            let related =
+                &mcp_response(&responses, id)["result"]["structuredContent"]["connections"];
             assert_eq!(related.as_array().unwrap().len(), 1);
-            assert_eq!(related[0]["item"]["id"], "ADR-NEW");
+            assert_eq!(related[0]["neighbour"]["id"], "ADR-NEW");
         }
         assert_eq!(
             mcp_response(&responses, 5)["result"]["structuredContent"]["valid"],
@@ -5910,17 +5867,16 @@ fn typo_tolerant_search_preserves_exact_matches_filters_excerpts_and_pages() {
 fn item_related_returns_filtered_direct_neighbours_with_relation_and_direction() {
     let fixture = retrieval_fixture();
 
-    let related = mara(fixture.path(), &["item", "related", "REQ-ALPHA"]);
+    let related = mara(fixture.path(), &["related", "REQ-ALPHA"]);
     assert!(related.status.success(), "{}", stderr(&related));
-    assert_eq!(
-        stdout(&related),
-        "outgoing\tderives_from\tSCN-BASE\tscenario\tBase scenario\tdocs/a.mara.md:1\nincoming\tsatisfies\tDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\npage\thas_more=false\n"
-    );
+    let human = stdout(&related);
+    assert!(human.contains("outgoing\tderives_from\tSCN-BASE\titem\tBase scenario"));
+    assert!(human.contains("incoming\tcontained_by\t"));
+    assert!(human.contains("evidence=docs/a.mara.md:10-10"));
 
     let incoming = mara(
         fixture.path(),
         &[
-            "item",
             "related",
             "REQ-ALPHA",
             "--direction",
@@ -5934,13 +5890,12 @@ fn item_related_returns_filtered_direct_neighbours_with_relation_and_direction()
     assert!(incoming.status.success(), "{}", stderr(&incoming));
     assert_eq!(
         stdout(&incoming),
-        "incoming\tsatisfies\tDES-ALPHA\tdesign\tAlpha design\tdocs/b.mara.md:9\npage\thas_more=false\n"
+        "incoming\tsatisfies\tDES-ALPHA\titem\tAlpha design\tdocs/b.mara.md:9\tevidence=docs/b.mara.md:11-11\treference=DES-ALPHA\npage\thas_more=false\n"
     );
 
     let no_match = mara(
         fixture.path(),
         &[
-            "item",
             "related",
             "REQ-ALPHA",
             "--direction",
@@ -6234,7 +6189,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
             "get",
             "item_list",
             "search",
-            "item_related",
+            "related",
             "item_validate",
             "relation_add",
             "relation_remove",
@@ -6893,7 +6848,7 @@ fn primary_workflows_run_end_to_end_against_real_source_files() {
     let fetched = mara(fixture.path(), &["get", "REQ-DOGFOOD"]);
     assert!(fetched.status.success(), "{}", stderr(&fetched));
     assert!(stdout(&fetched).contains("Mara retrieves bounded knowledge"));
-    let neighbours = mara(fixture.path(), &["item", "related", "REQ-DOGFOOD"]);
+    let neighbours = mara(fixture.path(), &["related", "REQ-DOGFOOD"]);
     assert!(neighbours.status.success(), "{}", stderr(&neighbours));
     assert!(stdout(&neighbours).contains("outgoing\tderives_from\tSCN-DOGFOOD"));
 }
@@ -6943,14 +6898,13 @@ fn dogfooded_repository_validates_and_retrieves_equivalently_through_cli_and_mcp
         &[
             "--format",
             "json",
-            "item",
             "related",
             "SCN-START-STRUCTURED-PROJECT",
         ],
     );
     assert!(cli_related.status.success(), "{}", stderr(&cli_related));
     let cli_related: Value = serde_json::from_str(&stdout(&cli_related)).unwrap();
-    assert!(!cli_related["items"].as_array().unwrap().is_empty());
+    assert!(!cli_related["connections"].as_array().unwrap().is_empty());
 
     let responses = mcp_exchange(
         repository,
@@ -6975,8 +6929,8 @@ fn dogfooded_repository_validates_and_retrieves_equivalently_through_cli_and_mcp
             ),
             mcp_call(
                 5,
-                "item_related",
-                json!({ "id": "SCN-START-STRUCTURED-PROJECT" }),
+                "related",
+                json!({ "reference": "SCN-START-STRUCTURED-PROJECT" }),
             ),
         ],
     );
@@ -9206,57 +9160,59 @@ fn unified_search_keeps_large_blocks_whole_and_never_skips_oversized_identities(
 
 #[test]
 fn unified_search_resolves_schema_relation_filters_against_vocabulary() {
-    let fixture = retrieval_fixture();
-    let schema_path = fixture.path().join(".mara/schema.yaml");
-    let schema = fs::read_to_string(&schema_path).unwrap();
-    fs::write(&schema_path, format!("{schema}\n  contains:\n    description: Authored containment\n    source: [requirement]\n    target: [scenario]\n")).unwrap();
-    let source_path = fixture.path().join("docs/a.mara.md");
-    let source = fs::read_to_string(&source_path)
-        .unwrap()
-        .replace(":derives_from: SCN-BASE", ":contains: SCN-BASE");
-    fs::write(source_path, source).unwrap();
-    let output = mara(
-        fixture.path(),
-        &[
-            "--format",
-            "json",
-            "search",
-            "",
-            "--relation",
-            "schema:contains",
-        ],
-    );
-    assert!(output.status.success(), "{}", stderr(&output));
-    let page: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(page["results"].as_array().unwrap().len(), 1);
-    assert_eq!(page["results"][0]["node"]["id"], "REQ-ALPHA");
-    let rejected = mara(fixture.path(), &["search", "", "--relation", "contains"]);
-    assert!(!rejected.status.success());
-    assert!(stderr(&rejected).contains("schema:contains or builtin:contains"));
-    let responses = mcp_exchange(
-        fixture.path(),
-        &[
-            mcp_initialize(1),
-            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-            mcp_call(
-                2,
-                "search",
-                json!({"query":"", "relations":["schema:contains"]}),
-            ),
-            mcp_call(3, "search", json!({"query":"", "relations":["contains"]})),
-            mcp_call(
-                4,
-                "search",
-                json!({"query":"", "relations":["builtin:contains"]}),
-            ),
-        ],
-    );
-    assert_eq!(
-        mcp_response(&responses, 2)["result"]["structuredContent"],
-        page
-    );
-    for id in [3, 4] {
-        assert_eq!(mcp_response(&responses, id)["result"]["isError"], true);
+    for name in ["contains", "mentions"] {
+        let fixture = retrieval_fixture();
+        let schema_path = fixture.path().join(".mara/schema.yaml");
+        let schema = fs::read_to_string(&schema_path).unwrap();
+        fs::write(&schema_path, format!("{schema}\n  {name}:\n    description: Authored relation\n    source: [requirement]\n    target: [scenario]\n")).unwrap();
+        let source_path = fixture.path().join("docs/a.mara.md");
+        let source = fs::read_to_string(&source_path)
+            .unwrap()
+            .replace(":derives_from: SCN-BASE", &format!(":{name}: SCN-BASE"));
+        fs::write(source_path, source).unwrap();
+        let qualified = format!("schema:{name}");
+        let builtin = format!("builtin:{name}");
+        let output = mara(
+            fixture.path(),
+            &["--format", "json", "search", "", "--relation", &qualified],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(page["results"].as_array().unwrap().len(), 1);
+        assert_eq!(page["results"][0]["node"]["id"], "REQ-ALPHA");
+        let rejected = mara(fixture.path(), &["search", "", "--relation", name]);
+        assert!(!rejected.status.success());
+        let expected = format!(
+            "ambiguous relation '{name}'; search accepts schema relations only; use {qualified}"
+        );
+        assert!(
+            stderr(&rejected).contains(&expected),
+            "{}",
+            stderr(&rejected)
+        );
+        assert!(!stderr(&rejected).contains(&builtin));
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, "search", json!({"query":"", "relations":[qualified]})),
+                mcp_call(3, "search", json!({"query":"", "relations":[name]})),
+                mcp_call(4, "search", json!({"query":"", "relations":[builtin]})),
+            ],
+        );
+        assert_eq!(
+            mcp_response(&responses, 2)["result"]["structuredContent"],
+            page
+        );
+        for id in [3, 4] {
+            assert_eq!(mcp_response(&responses, id)["result"]["isError"], true);
+        }
+        let message = mcp_response(&responses, 3)["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap();
+        assert!(message.contains(&expected), "{message}");
+        assert!(!message.contains(&builtin));
     }
 }
 
@@ -9344,11 +9300,11 @@ fn unified_search_excerpts_locate_decoded_headings_inside_owning_nodes() {
 }
 
 fn related_snapshot(root: &Path, id: &str) -> Vec<Value> {
-    let output = mara(root, &["--format", "json", "item", "related", id]);
+    let output = mara(root, &["--format", "json", "related", id]);
     assert!(output.status.success(), "{}", stderr(&output));
     let result: Value = serde_json::from_slice(&output.stdout).unwrap();
-    result["items"].as_array().unwrap().iter().map(|entry| json!({
-        "direction": entry["direction"], "relation": entry["relation"], "mid": entry["item"]["mid"]
+    result["connections"].as_array().unwrap().iter().filter(|entry| entry["relation"] != "contains").map(|entry| json!({
+        "direction": entry["direction"], "relation": entry["relation"], "mid": entry["neighbour"]["mid"]
     })).collect()
 }
 
@@ -9499,4 +9455,278 @@ fn unified_get_rejects_stale_handles_cursors_and_removed_interface() {
     ] {
         assert!(!mara(fixture.path(), &args).status.success());
     }
+}
+
+fn related_cli_mcp(root: &Path, reference: &str, filters: &[(&str, &str)]) -> Value {
+    let mut args = vec!["--format", "json", "related", reference];
+    let mut params = json!({"reference":reference});
+    for (flag, value) in filters {
+        args.extend([*flag, *value]);
+        match *flag {
+            "--limit" => params["limit"] = json!(value.parse::<usize>().unwrap()),
+            "--relation" => params["relations"] = json!([value]),
+            "--flavour" => params["flavours"] = json!([value]),
+            flag => params[flag.trim_start_matches("--")] = json!(value),
+        }
+    }
+    let output = mara(root, &args);
+    assert!(output.status.success(), "{}", stdout(&output));
+    let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(serde_json::to_vec(&page).unwrap().len() <= 65_536);
+    assert_eq!(page["format_version"], 1);
+    let responses = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "related", params),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        page
+    );
+    page
+}
+
+#[test]
+fn unified_related_navigates_mentions_relations_and_structure_with_exact_evidence() {
+    let fixture = retrieval_fixture();
+    let source = "# Portal\r\n\r\nStart here [[REQ-HUB]] and [[REQ-HUB]].\r\n\r\n:::mara requirement REQ-HUB\r\n:title: Hub\r\n:depends_on: REQ-TARGET\r\n:depends_on: REQ-HUB\r\n\r\n## Inner\r\n\r\nSee [[REQ-TARGET]].\r\n:::\r\n\r\n:::mara requirement REQ-TARGET\r\n:title: Target\r\n\r\nTarget body.\r\n:::\r\n\r\n[Inner](#inner) and [document](a.mara.md).\r\n";
+    fs::write(fixture.path().join("docs/portal.mara.md"), source).unwrap();
+    assert!(
+        mara(fixture.path(), &["project", "mid", "backfill"])
+            .status
+            .success()
+    );
+    let output = mara(
+        fixture.path(),
+        &["--format", "json", "search", "Start here"],
+    );
+    let search: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let hit = &search["results"][0]["node"];
+    assert_eq!(hit["kind"], "block");
+    let reference = hit["reference"].as_str().unwrap();
+    let mut cursor = None::<String>;
+    let mut connections = Vec::new();
+    loop {
+        let mut filters = vec![("--limit", "1")];
+        if let Some(cursor) = &cursor {
+            filters.push(("--cursor", cursor));
+        }
+        let page = related_cli_mcp(fixture.path(), reference, &filters);
+        assert_eq!(page["node"], *hit);
+        let entries = page["connections"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        connections.extend(entries.iter().cloned());
+        assert!(
+            connections.len() <= 3,
+            "direct navigation must not expand another hop"
+        );
+        cursor = page["next_cursor"].as_str().map(ToOwned::to_owned);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(connections.len(), 3);
+    for edge in &connections[..2] {
+        assert_eq!(edge["relation"], "mentions");
+        assert_eq!(edge["direction"], "outgoing");
+        assert_eq!(edge["neighbour"]["id"], "REQ-HUB");
+        let source = fs::read_to_string(
+            fixture
+                .path()
+                .join(edge["source"]["path"].as_str().unwrap()),
+        )
+        .unwrap();
+        assert_eq!(
+            &source[edge["source"]["start_byte"].as_u64().unwrap() as usize
+                ..edge["source"]["end_byte"].as_u64().unwrap() as usize],
+            "[[REQ-HUB]]"
+        );
+    }
+    assert_ne!(connections[0]["source"], connections[1]["source"]);
+    assert_eq!(connections[2]["relation"], "contains");
+    assert_eq!(connections[2]["direction"], "incoming");
+    let hub = connections[0]["neighbour"]["reference"].as_str().unwrap();
+    let hub_page = related_cli_mcp(fixture.path(), hub, &[]);
+    let edges = hub_page["connections"].as_array().unwrap();
+    for edge in &connections[..2] {
+        assert!(edges.iter().any(|back| back["direction"] == "incoming"
+            && back["relation"] == "mentions"
+            && back["neighbour"]["reference"] == reference
+            && back["source"] == edge["source"]));
+    }
+    // Separate typed and mention connections to the same target; self-edges retain both directions.
+    let target_edges = edges
+        .iter()
+        .filter(|edge| edge["neighbour"]["id"] == "REQ-TARGET")
+        .collect::<Vec<_>>();
+    assert_eq!(target_edges.len(), 2);
+    assert_eq!(
+        target_edges
+            .iter()
+            .map(|edge| edge["relation"].as_str().unwrap())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from(["depends_on", "mentions"])
+    );
+    for direction in ["incoming", "outgoing"] {
+        assert!(edges.iter().any(|edge| edge["neighbour"]["id"] == "REQ-HUB"
+            && edge["direction"] == direction
+            && edge["relation"] == "depends_on"));
+    }
+    let target = target_edges[0]["neighbour"]["reference"].as_str().unwrap();
+    let target_page = related_cli_mcp(
+        fixture.path(),
+        target,
+        &[("--direction", "incoming"), ("--flavour", "requirement")],
+    );
+    assert_eq!(target_page["connections"].as_array().unwrap().len(), 2);
+    // Parent -> children is a second explicit call, exposing sibling context and reusable handles.
+    let section = connections[2]["neighbour"]["reference"].as_str().unwrap();
+    let section_page = related_cli_mcp(
+        fixture.path(),
+        section,
+        &[("--direction", "outgoing"), ("--relation", "contains")],
+    );
+    assert_eq!(section_page["node"]["kind"], "section");
+    assert!(
+        section_page["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|edge| edge["neighbour"]["reference"] == reference)
+    );
+    let document = section_page["node"]["context"]["parent"].as_str().unwrap();
+    let document_page = related_cli_mcp(fixture.path(), document, &[]);
+    assert_eq!(document_page["node"]["kind"], "document");
+    let read = mara(fixture.path(), &["--format", "json", "get", target]);
+    let read: Value = serde_json::from_slice(&read.stdout).unwrap();
+    assert!(read["content"].as_str().unwrap().contains("Target body."));
+    // Links can target a section within an item, without losing that precise destination.
+    let inner = edges
+        .iter()
+        .find(|edge| edge["relation"] == "contains")
+        .unwrap()["neighbour"]
+        .clone();
+    let inner_page = related_cli_mcp(
+        fixture.path(),
+        inner["reference"].as_str().unwrap(),
+        &[("--relation", "mentions"), ("--direction", "incoming")],
+    );
+    assert_eq!(inner_page["node"]["kind"], "section");
+    assert_eq!(inner_page["connections"].as_array().unwrap().len(), 1);
+    let filtered = related_cli_mcp(fixture.path(), reference, &[("--flavour", "requirement")]);
+    assert_eq!(filtered["connections"].as_array().unwrap().len(), 2);
+    let invalidated =
+        fs::read_to_string(fixture.path().join("docs/portal.mara.md")).unwrap() + "\nChanged.\n";
+    fs::write(fixture.path().join("docs/portal.mara.md"), invalidated).unwrap();
+    let stale = mara(fixture.path(), &["related", reference]);
+    assert!(!stale.status.success());
+    assert!(stderr(&stale).contains("rediscover"));
+}
+
+#[test]
+fn unified_related_qualifies_collisions_against_vocabulary_and_rejects_old_interface() {
+    let fixture = retrieval_fixture();
+    let path = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&path).unwrap();
+    fs::write(&path, format!("{schema}\n  contains:\n    description: Authored containment\n    source: [requirement]\n    target: [scenario]\n  mentions:\n    description: Authored mention\n    source: [requirement]\n    target: [scenario]\n")).unwrap();
+    let path = fixture.path().join("docs/a.mara.md");
+    let source = fs::read_to_string(&path).unwrap().replace(
+        ":derives_from: SCN-BASE",
+        ":contains: SCN-BASE\n:mentions: SCN-BASE",
+    );
+    fs::write(path, source).unwrap();
+    let page = related_cli_mcp(fixture.path(), "REQ-ALPHA", &[]);
+    let relations = page["connections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|edge| edge["relation"].as_str().unwrap())
+        .collect::<BTreeSet<_>>();
+    assert!(relations.contains("schema:contains"));
+    assert!(relations.contains("schema:mentions"));
+    assert!(relations.contains("builtin:contains"));
+    let typed = related_cli_mcp(
+        fixture.path(),
+        "REQ-ALPHA",
+        &[("--relation", "schema:contains")],
+    );
+    assert_eq!(typed["connections"].as_array().unwrap().len(), 1);
+    let structural = related_cli_mcp(
+        fixture.path(),
+        "REQ-ALPHA",
+        &[("--relation", "builtin:contains")],
+    );
+    assert_eq!(structural["connections"].as_array().unwrap().len(), 2);
+    let human = mara(
+        fixture.path(),
+        &[
+            "related",
+            "REQ-ALPHA",
+            "--relation",
+            "builtin:contains",
+            "--direction",
+            "incoming",
+        ],
+    );
+    assert!(stdout(&human).contains("incoming\tbuiltin:contained_by\t"));
+    // Even a node without either edge must reject ambiguous shorthand.
+    for name in ["contains", "mentions"] {
+        let output = mara(fixture.path(), &["related", "REQ-ZULU", "--relation", name]);
+        assert!(!output.status.success());
+        let error = stderr(&output);
+        assert!(
+            error.contains(&format!("schema:{name}")) && error.contains(&format!("builtin:{name}"))
+        );
+    }
+    for args in [
+        vec!["item", "related", "REQ-ALPHA"],
+        vec!["related", "REQ-ALPHA", "--hops", "2"],
+        vec!["related", "REQ-ALPHA", "--relation", "builtin:missing"],
+        vec!["related", "REQ-ALPHA", "--flavour", "missing"],
+    ] {
+        assert!(!mara(fixture.path(), &args).status.success());
+    }
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "item_related", json!({"id":"REQ-ALPHA"})),
+            mcp_call(3, "related", json!({"id":"REQ-ALPHA"})),
+            mcp_call(4, "related", json!({"reference":"REQ-ALPHA", "hops":2})),
+            mcp_call(
+                5,
+                "related",
+                json!({"reference":"REQ-ALPHA", "relations":["contains"]}),
+            ),
+        ],
+    );
+    for id in 2..=5 {
+        let response = mcp_response(&responses, id);
+        assert!(
+            response.get("error").is_some() || response["result"]["isError"] == true,
+            "{response}"
+        );
+    }
+}
+
+#[test]
+fn unified_related_rejects_oversized_requested_node_even_without_connections() {
+    let fixture = retrieval_fixture();
+    let reference = format!("REQ-{}", "A".repeat(66_000));
+    fs::write(
+        fixture.path().join("docs/huge.mara.md"),
+        format!(":::mara requirement {reference}\n:title: Huge\n\nBody.\n:::\n"),
+    )
+    .unwrap();
+    let output = mara(
+        fixture.path(),
+        &["related", &reference, "--relation", "depends_on"],
+    );
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("65536-byte"));
+    assert!(output.stderr.len() < 1024);
 }

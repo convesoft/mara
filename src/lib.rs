@@ -34,8 +34,8 @@ pub use mutation::{
 };
 pub use operations::{
     DeclarationSummary, FieldValue, GetParams, ItemCreateParams, ItemCreationResult,
-    ItemFilterParams, ItemIdParams, ItemMoveParams, ItemRelatedParams, ItemUpdateParams,
-    OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, ProjectSummary,
+    ItemFilterParams, ItemIdParams, ItemMoveParams, ItemUpdateParams, OperationContext,
+    ProjectInitializationResult, ProjectMidBackfillResult, ProjectSummary, RelatedParams,
     RelationAction, RelationMutationResult, RelationParams, SchemaGetResult, SchemaKind,
     SchemaListResult, SchemaValidationResult, SearchParams, TransactionRollbackResult,
     ValidationDiagnostic, ValidationResult, ValidationScope, ValidationSelection, ValidationTarget,
@@ -43,9 +43,10 @@ pub use operations::{
 };
 pub use query::{
     EntryRange, FieldFilter, GetResult, ItemCollectionResult, ItemFilters, ItemSource, ItemSummary,
-    MetadataFragment, MetadataValue, QueryError, RelatedFilters, RelatedItem, RelatedItemsResult,
-    RelationDirection, RelationSummary, ResolvedItem, SearchExcerpt, SearchHit, SearchResult,
-    TextRange, get, get_item, list_items, related_items, search, search_items,
+    MetadataFragment, MetadataValue, QueryError, RelatedConnection, RelatedFilters, RelatedItem,
+    RelatedItemsResult, RelatedResult, RelationDirection, RelationSummary, ResolvedItem,
+    SearchExcerpt, SearchHit, SearchResult, TextRange, get, get_item, list_items, related,
+    related_items, search, search_items,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";

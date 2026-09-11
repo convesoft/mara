@@ -5,11 +5,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Corpus, Diagnostic, FieldFilter, FlavourDefinition, GetResult, InitialRelation,
-    ItemCollectionResult, ItemCreationRequest, ItemFilters, Project, RelatedFilters,
-    RelatedItemsResult, RelationDefinition, RelationDirection, Schema, SearchResult, Template,
-    add_relation, backfill_mids, create_item, get, initialize_project, list_items, load_corpus,
+    ItemCollectionResult, ItemCreationRequest, ItemFilters, Project, RelatedFilters, RelatedResult,
+    RelationDefinition, RelationDirection, Schema, SearchResult, Template, add_relation,
+    backfill_mids, create_item, get, initialize_project, list_items, load_corpus,
     load_corpus_for_validation, load_corpus_syntax_for_validation, load_schema,
-    load_schema_for_validation, related_items, remove_relation, resolve_project,
+    load_schema_for_validation, related, remove_relation, resolve_project,
     resolve_project_for_validation, search, validate_corpus, validate_corpus_independent,
 };
 
@@ -257,11 +257,11 @@ impl OperationContext {
         .map_err(|error| error.to_string())
     }
 
-    pub fn item_related(&self, params: ItemRelatedParams) -> Result<RelatedItemsResult, String> {
+    pub fn related(&self, params: RelatedParams) -> Result<RelatedResult, String> {
         let (corpus, schema) = self.load_query_project()?;
         let filters = RelatedFilters::new(params.direction, params.relations, params.flavours)
             .with_page(params.limit, params.cursor);
-        related_items(&corpus, &schema, &params.id, &filters).map_err(|error| error.to_string())
+        related(&corpus, &schema, &params.reference, &filters).map_err(|error| error.to_string())
     }
 
     pub fn relation_add(&self, params: RelationParams) -> Result<RelationMutationResult, String> {
@@ -669,8 +669,8 @@ pub struct GetParams {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct ItemRelatedParams {
-    pub id: String,
+pub struct RelatedParams {
+    pub reference: String,
     #[serde(default)]
     pub direction: Option<RelationDirection>,
     #[serde(default)]
