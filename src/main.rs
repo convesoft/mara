@@ -25,7 +25,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "Discovery and reading: mara search <QUERY> discovers items, sections, and Markdown blocks; mara get <REFERENCE> reads any discovery node; mara related <REFERENCE> explores direct connections."
+    after_help = "Discovery and reading: mara search <QUERY> discovers items, sections, and Markdown blocks; mara get <REFERENCE> reads any discovery node; mara related <REFERENCE> explores direct connections.\n\nAuthoring: choose a template with mara project init --help, then inspect flavour guidance with mara schema get flavour <NAME> before creating items.\n\nUpgrading to 0.2: https://github.com/convesoft/mara/blob/main/docs/migration-0.2.mara.md"
 )]
 struct Cli {
     #[arg(
@@ -47,6 +47,9 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Search items and narrative with one source excerpt; exact matches rank first, then ID/title/heading weights. Item filters exclude narrative; ID/MID words and filters stay exact.
+    #[command(
+        after_help = "Discovery JSON format_version: 1 returns results: [{node, excerpt}]. Pass node.reference to get or related. Excerpts support selection; use get for complete content. Structural handles identify a document snapshot; search again after that document changes. Search has no node-kind filter."
+    )]
     Search {
         /// Unicode case-insensitive words to match across items, section headings, and ordinary Markdown blocks; every distinct word must match. An empty string or punctuation-only text matches all search units within the filters.
         query: String,
@@ -62,6 +65,9 @@ enum Command {
     },
 
     /// Read an item, section, Markdown block, or document in bounded consecutive portions.
+    #[command(
+        after_help = "Discovery JSON format_version: 1 returns node, content, content_range, metadata, and metadata_range. Items return their parsed body; sections and documents include contained Markdown source. Non-items have empty metadata. Reconstruct content and ordered metadata fragments using byte/index ranges until has_more is false. Get has no limit option and does not enumerate neighbours; use related. Search again if a structural handle is stale."
+    )]
     Get {
         /// Exact item ID/MID or a discovery handle returned by search, get, or related.
         reference: String,
@@ -73,6 +79,9 @@ enum Command {
     },
 
     /// Explore direct schema relations, mentions, and containment with source evidence; read neighbours with get.
+    #[command(
+        after_help = "Discovery JSON format_version: 1 returns node and connections: [{relation, direction, neighbour, source}]. Pass neighbour.reference to get or another related call; each call follows only direct connections. JSON represents containment as contains with direction; human output displays its incoming view as contained_by. Use --relation builtin:contains --direction incoming for the parent, then outgoing on that parent for its children. Search again if a structural handle is stale."
+    )]
     Related {
         /// Exact item ID/MID or a discovery handle.
         reference: String,
@@ -112,7 +121,7 @@ enum Command {
         #[command(subcommand)]
         command: SchemaCommand,
     },
-    /// Author, retrieve, and validate project knowledge items.
+    /// Author, list, and validate items; use top-level search/get/related for discovery and reading.
     Item {
         #[command(subcommand)]
         command: ItemCommand,
@@ -129,6 +138,9 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum ProjectCommand {
     /// Initialize a Mara project without overwriting existing content; rejects an existing Mara project.
+    #[command(
+        after_help = "All templates create only .mara/project.toml and .mara/schema.yaml, with schema format 2 and flavour guidance; no starter documents or items. Edit the resulting project-owned schema to customize it. For an existing project, migrate its schema in place rather than reinitializing or replacing it with a template. Use schema get to inspect guidance and relation endpoints, then schema validate and project validate."
+    )]
     Init {
         /// Destination directory (absolute or relative to the working directory), created if missing. Defaults to the working directory only when --project is also omitted. Cannot combine PATH with --project.
         path: Option<PathBuf>,
@@ -174,19 +186,25 @@ enum ProjectMidCommand {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
-    /// Rename a human ID and supported internal references across a valid project, preserving the MID.
+    /// Rename a human ID and supported typed relations/wiki mentions in items and narrative across a valid project, preserving the MID. Markdown links are preserved, not rewritten.
     Rename {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         reference: String,
         /// New unique human ID with the flavour's prefix; the old ID is not kept as an alias. The current ID is a no-op.
         new_id: String,
     },
-    /// Delete one item from a valid project only when no surviving relations or supported wiki mentions refer to it; keep the containing document.
+    /// Delete one item from a valid project only when no surviving typed relations, wiki mentions, or Markdown links refer to it or its contained nodes; keep the containing document.
+    #[command(
+        after_help = "Reject changes that break or retarget surviving internal links, including generated heading anchors affected elsewhere in the document. Resolve reported source locations before retrying; Markdown links are not automatically repaired."
+    )]
     Delete {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         reference: String,
     },
     /// Partially update an item's title, custom fields, or body; supply at least one change.
+    #[command(
+        after_help = "Validate newly authored internal references and preserve destinations of surviving links, including links to headings or blocks inside the item. Changes that break or silently retarget them are rejected before writing. Resolve reported link impacts before retrying; Markdown links are not automatically repaired."
+    )]
     Update {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         reference: String,
@@ -209,6 +227,9 @@ enum ItemCommand {
         body: Option<String>,
     },
     /// Move an item within a valid project without changing its identity, content, or relations; keep the source document.
+    #[command(
+        after_help = "ID/MID references retain item identity. Relative Markdown links carried with the item, incoming links to its contained nodes, and shifted heading anchors must keep their destinations. Resolve reported link impacts before retrying; Markdown links are not automatically repaired."
+    )]
     Move {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         reference: String,
@@ -219,8 +240,11 @@ enum ItemCommand {
         line: Option<usize>,
     },
     /// Create an item with a generated MID and optional initial relations, or a body scaffold.
+    #[command(
+        after_help = "Choose a flavour from schema get flavour <NAME>: description explains purpose, use_when gives selection criteria, avoid_when gives exclusions, and distinguish_from compares other flavours. These are schema guidance, not item fields. Inspect relation endpoints before adding initial edges. Newly authored references must resolve; creation rejects changes that break or retarget surviving links, including shifted heading anchors."
+    )]
     Create {
-        /// Schema-declared flavour; inspect with schema list flavour.
+        /// Schema-declared flavour; discover names with schema list flavour, then read selection guidance with schema get flavour NAME.
         flavour: String,
         /// New unique human ID with the flavour's prefix (for example REQ-EXAMPLE); not a MID.
         id: String,
@@ -305,7 +329,7 @@ struct ItemFilterArgs {
     #[arg(long = "field", value_parser = parse_field)]
     fields: Vec<CliField>,
 
-    /// Select items with these exact authored outgoing relation names (repeatable, OR). Omission adds no restriction.
+    /// Select items with these exact authored outgoing schema relation names (repeatable, OR). Search accepts schema:name to disambiguate a name shared with a built-in; item list uses schema names directly. Omission adds no restriction.
     #[arg(long)]
     relation: Vec<String>,
 
@@ -358,7 +382,10 @@ impl From<CliRelationDirection> for RelationDirection {
 
 #[derive(Debug, Subcommand)]
 enum SchemaCommand {
-    /// Get the complete effective schema, or one declaration by kind and name.
+    /// Get the complete effective schema, or one declaration with flavour selection guidance or relation endpoints.
+    #[command(
+        after_help = "Read flavour guidance before authoring: description explains purpose; use_when identifies suitable knowledge; avoid_when excludes unsuitable content; distinguish_from compares confusable flavours. Inspect id_prefix, body, and fields for item constraints, and relation source/target for allowed endpoints. Guidance belongs to the schema, not item --field metadata.\n\nSchema format 2 requires a nonblank description, a nonempty use_when list, an avoid_when list ([] is valid), and a distinguish_from mapping ({} is valid) on every flavour. Entries must be nonblank; distinction targets must be other declared flavours. To migrate format 1, add meaningful guidance in the existing schema and set format_version: 2, preserving custom declarations and item identities. Validate with schema validate and project validate."
+    )]
     Get {
         /// Declaration kind; supply with NAME, or omit both for the complete schema.
         #[arg(value_enum, requires = "name")]
@@ -368,13 +395,13 @@ enum SchemaCommand {
         #[arg(requires = "kind")]
         name: Option<String>,
     },
-    /// List declaration names and descriptions for one schema kind.
+    /// List declaration names and descriptions for one schema kind; use schema get for full guidance and constraints.
     List {
         /// Kind of schema declarations to list.
         #[arg(value_enum)]
         kind: CliSchemaKind,
     },
-    /// Validate the project's configured schema without validating item content.
+    /// Validate schema format 2, including required flavour guidance, without validating item content; use project validate for the corpus.
     Validate,
 }
 
