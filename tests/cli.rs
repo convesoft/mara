@@ -459,6 +459,78 @@ fn reference_review_allows_section_extent_changes() {
     reference_body_update("[ref](#alpha) [other](#beta)\n\n", siblings, nested, true);
 }
 
+#[test]
+fn reference_review_rejects_replacing_a_renamed_unique_heading() {
+    reference_body_update(
+        "[ref](#alpha)\n\n",
+        "# Alpha\n\nOld",
+        "# Beta\n\nOld\n\n# Alpha\n\nNew",
+        false,
+    );
+}
+
+#[test]
+fn reference_review_creation_ignores_unrelated_existing_errors() {
+    for source in [
+        "[broken](#absent)\n",
+        "<a name=\"same\"></a>\n\nFirst.\n\n<a name=\"same\"></a>\n\nSecond.\n\n[ambiguous](#same)\n",
+    ] {
+        for (body, succeeds) in [("New content.", true), ("[new broken](#missing)", false)] {
+            for use_mcp in [false, true] {
+                let fixture = TempDir::new().unwrap();
+                assert!(mara(fixture.path(), &["project", "init"]).status.success());
+                let path = fixture.path().join("a.mara.md");
+                fs::write(&path, source).unwrap();
+                if use_mcp {
+                    let responses = mcp_exchange(
+                        fixture.path(),
+                        &[
+                            mcp_initialize(1),
+                            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                            mcp_call(
+                                2,
+                                "item_create",
+                                json!({
+                                    "flavour":"requirement", "id":"REQ-NEW", "file":"a.mara.md",
+                                    "title":"New", "body":body, "line":1,
+                                }),
+                            ),
+                        ],
+                    );
+                    let result = &mcp_response(&responses, 2)["result"];
+                    assert_eq!(result["isError"], !succeeds, "{result}");
+                } else {
+                    let output = mara(
+                        fixture.path(),
+                        &[
+                            "item",
+                            "create",
+                            "requirement",
+                            "REQ-NEW",
+                            "a.mara.md",
+                            "--title",
+                            "New",
+                            "--body",
+                            body,
+                            "--line",
+                            "1",
+                        ],
+                    );
+                    assert_eq!(output.status.success(), succeeds, "{}", stderr(&output));
+                }
+                let after = fs::read_to_string(&path).unwrap();
+                if succeeds {
+                    assert!(after.ends_with(source));
+                    assert!(after.contains(body));
+                    assert!(mara(fixture.path(), &["get", "REQ-NEW"]).status.success());
+                } else {
+                    assert_eq!(after, source);
+                }
+            }
+        }
+    }
+}
+
 fn mcp_response(responses: &[Value], id: u64) -> &Value {
     responses
         .iter()

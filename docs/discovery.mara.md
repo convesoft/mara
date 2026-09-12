@@ -439,12 +439,16 @@ merely moving a usage into another definition context grants no exemption.
 Replacing an anchored paragraph's text, including all characters, preserves its
 destination when it remains in the same structural position; an intact original
 block surviving elsewhere must not be mistaken for that replacement. A unique
-surviving heading identifies its section independently of descendant containment:
-promoting or demoting subsections may change its extent without retargeting links.
+heading still requires source correspondence and checks for original direct
+content surviving elsewhere; renaming a section and adding another with its old
+heading must not retarget an unchanged link. Promoting or demoting subsections
+may change a surviving section's extent without changing its destination.
 Intact, uniquely identifiable sections or blocks retain their destinations through
 reordering even when the character diff does not retain their original first byte.
 Preserve the existing missing-body scaffold allowance while validating newly
-authored references.
+authored references. Creation validates reference diagnostics within the new item;
+unrelated pre-existing reference errors do not block it. The shared preflight
+still rejects regressions to previously resolved surviving links.
 
 Movement preserves ID/MID references because the item's identity is unchanged.
 Check incoming links to sections or blocks inside the moved item, relative or

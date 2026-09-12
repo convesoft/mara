@@ -249,6 +249,8 @@ fn same_destination(
             return true;
         }
     }
+    let mut correspondence_source = old.source();
+    let mut destination_source = new.source();
     if let DiscoveryNodeKind::Section { heading } = old.kind() {
         let same_heading = |node: DiscoveryNode<'_, '_>, source: &Source| {
             matches!(node.kind(), DiscoveryNodeKind::Section { heading: candidate }
@@ -265,11 +267,6 @@ fn same_destination(
             .nodes()
             .filter(|node| same_heading(*node, &map.after))
             .count();
-        // A unique surviving heading identifies the section itself; promoting
-        // or demoting a child changes its extent, not that destination identity.
-        if old_sections.len() == 1 && new_count == 1 && same_heading(new, &map.after) {
-            return true;
-        }
         // Repeated headings have no persisted identity. An unchanged complete
         // section is stronger evidence than a diff's choice of equal '#' bytes.
         if (old_sections.len() > 1 || new_count > 1)
@@ -304,16 +301,28 @@ fn same_destination(
                 return false;
             }
         }
+        // Unique heading text still needs source correspondence, and an intact
+        // direct block surviving elsewhere rules out a replacement section above.
+        // Compare the heading itself so promotion/demotion of descendants can
+        // change section extent without changing its destination identity.
+        if old_sections.len() == 1
+            && new_count == 1
+            && same_heading(new, &map.after)
+            && let DiscoveryNodeKind::Section { heading: candidate } = new.kind()
+        {
+            correspondence_source = heading.source();
+            destination_source = candidate.source();
+        }
     }
     // Edited blocks need retained content, not a retained first byte. All mapped
     // non-whitespace content must remain inside the same candidate destination.
     let mut retained_content = false;
     for part in &map.before.parts {
-        if part.path != old.source().path() {
+        if part.path != correspondence_source.path() {
             continue;
         }
-        let start = part.start.max(old.source().span().start_byte());
-        let end = (part.start + part.local.len()).min(old.source().span().end_byte());
+        let start = part.start.max(correspondence_source.span().start_byte());
+        let end = (part.start + part.local.len()).min(correspondence_source.span().end_byte());
         if start >= end {
             continue;
         }
@@ -323,8 +332,9 @@ fn same_destination(
                 continue;
             }
             if let Some((path, byte)) = map.point(&part.path, start + offset) {
-                if path != new.source().path()
-                    || !(new.source().span().start_byte()..new.source().span().end_byte())
+                if path != destination_source.path()
+                    || !(destination_source.span().start_byte()
+                        ..destination_source.span().end_byte())
                         .contains(&byte)
                 {
                     return false;

@@ -238,7 +238,16 @@ pub fn create_item(
     let candidate_corpus =
         corpus.with_replacements(&BTreeMap::from([(path.clone(), candidate.clone())]), schema)?;
     references::preflight(&corpus, &candidate_corpus, None, None)?;
-    if let Some(diagnostic) = candidate_corpus.discovery().diagnostics().first() {
+    if let Some(diagnostic) = candidate_corpus
+        .discovery()
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| {
+            diagnostic.source().path() == created.source().path()
+                && diagnostic.source().span().start_byte() >= created.source().span().start_byte()
+                && diagnostic.source().span().end_byte() <= created.source().span().end_byte()
+        })
+    {
         return invalid(format!(
             "cannot create item while reference validation fails at {}:{} (bytes {}..{}): {}",
             diagnostic.source().path().display(),
