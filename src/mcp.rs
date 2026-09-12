@@ -82,7 +82,7 @@ struct ItemCreateToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Schema-declared flavour; discover names with schema_list(kind="flavour").
+    /// Schema-declared flavour; discover names with schema_list(kind="flavour"), then read selection guidance with schema_get(kind="flavour", name=NAME).
     flavour: String,
     /// New unique human ID with the flavour's prefix (for example REQ-EXAMPLE), not a MID. Mara generates the MID.
     id: String,
@@ -371,7 +371,7 @@ impl MaraMcp {
 
     #[tool(
         name = "project_init",
-        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project."
+        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project. Templates create only .mara/project.toml and .mara/schema.yaml with schema format 2 and flavour guidance, no starter documents or items. Customize the project-owned schema; migrate existing schemas in place instead of reinitializing. Inspect guidance and relation endpoints with schema_get, then run schema_validate and project_validate."
     )]
     fn project_init(
         &self,
@@ -410,7 +410,7 @@ impl MaraMcp {
 
     #[tool(
         name = "schema_get",
-        description = "Get the complete effective schema, or one named flavour or relation declaration."
+        description = "Get the complete effective schema, or one named flavour or relation declaration. Before authoring, use description for purpose, use_when for selection criteria, avoid_when for exclusions, and distinguish_from to compare confusable flavours. These are schema guidance, not item fields. Inspect id_prefix, body, and fields for item constraints and relation source/target for allowed endpoints."
     )]
     fn schema_get(
         &self,
@@ -423,7 +423,7 @@ impl MaraMcp {
 
     #[tool(
         name = "schema_list",
-        description = "List all flavour or relation declarations in the effective schema."
+        description = "List declaration names and descriptions for flavours or relations in the effective schema. Follow with schema_get for full selection guidance, field constraints, and relation endpoints."
     )]
     fn schema_list(
         &self,
@@ -436,7 +436,7 @@ impl MaraMcp {
 
     #[tool(
         name = "schema_validate",
-        description = "Validate the selected project's configured Mara schema without validating item content."
+        description = "Validate schema format 2 without validating item content. Every flavour requires a nonblank description, nonempty use_when list, avoid_when list ([] is valid), and distinguish_from mapping ({} is valid). Entries must be nonblank; distinction targets must be other declared flavours. Migrate format 1 explicitly in the existing schema, preserving custom declarations and item identities; no automatic upgrade. Then run project_validate for the corpus."
     )]
     fn schema_validate(
         &self,
@@ -449,7 +449,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_create",
-        description = "Create one item with a generated MID and optional initial outgoing relations atomically in a project-relative Mara document; an omitted or blank required body creates an incomplete scaffold."
+        description = "Create one item with a generated MID and optional initial outgoing relations atomically in a project-relative Mara document; an omitted or blank required body creates an incomplete scaffold. Read schema_get flavour guidance and relation endpoints first. Newly authored references must resolve; reject changes that break or retarget surviving links, including shifted heading anchors."
     )]
     fn item_create(
         &self,
@@ -461,7 +461,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_update",
-        description = "Partially update one item by exact MID or human ID. Requires a title, custom field replacement or clear, or body. Preserves identity, relations, and untouched source."
+        description = "Partially update one item by exact MID or human ID. Requires a title, custom field replacement or clear, or body. Preserves identity, relations, and untouched source. Validate newly authored references; reject changes that break or retarget surviving internal links, including links to headings or blocks inside the item. Resolve reported impacts before retrying; Markdown links are not automatically repaired."
     )]
     fn item_update(
         &self,
@@ -480,7 +480,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_rename",
-        description = "Rename one human ID by exact MID or human ID, rewriting supported internal references across the valid corpus. Preserves the MID and unrelated source; retains no alias. Uses recoverable file replacement."
+        description = "Rename one human ID by exact MID or human ID, rewriting typed relations and supported wiki mentions in items and narrative across the valid corpus. Preserves the MID, Markdown links, and unrelated source; retains no alias. Uses recoverable file replacement."
     )]
     fn item_rename(
         &self,
@@ -493,7 +493,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_delete",
-        description = "Delete one item by exact MID or human ID after validating the project. Refuses surviving incoming relations or supported wiki mentions and reports every blocking source location. Keeps the containing document."
+        description = "Delete one item by exact MID or human ID after validating the project. Refuses surviving incoming typed relations, wiki mentions, and Markdown links to the item or its contained nodes, reporting blocking source locations. Also rejects broken or retargeted surviving links from shifted heading anchors. Keeps the containing document. Resolve reported impacts before retrying; Markdown links are not automatically repaired."
     )]
     fn item_delete(
         &self,
@@ -506,7 +506,7 @@ impl MaraMcp {
 
     #[tool(
         name = "item_move",
-        description = "Move one item by exact MID or human ID within a valid project to a project-relative document. Preserve identity, content, and relations; keep the source document. Optional line is one-based in the original destination."
+        description = "Move one item by exact MID or human ID within a valid project to a project-relative document. Preserve identity, content, and relations; keep the source document. Optional line is one-based in the original destination. Relative Markdown links carried with the item, incoming links to its contained nodes, and shifted heading anchors must keep their destinations. Resolve reported impacts before retrying; Markdown links are not automatically repaired."
     )]
     fn item_move(
         &self,
@@ -536,7 +536,7 @@ impl MaraMcp {
 
     #[tool(
         name = "get",
-        description = "Read an item, section, Markdown block, or document in bounded consecutive portions: content, then item metadata. Sections and documents include contained source; items return their parsed body. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged reference until has_more is false; restart after source/schema changes. Enumerate neighbours separately."
+        description = "Read an item, section, Markdown block, or document in bounded consecutive portions. Discovery format_version: 1 returns node, content, content_range, metadata, and metadata_range. Sections and documents include contained source; items return their parsed body, then ordered metadata fragments; non-items have empty metadata. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged reference until has_more is false; restart after source/schema changes. Search again if a structural handle is stale. Enumerate neighbours with related; get has no limit."
     )]
     fn get(
         &self,
@@ -564,7 +564,7 @@ impl MaraMcp {
 
     #[tool(
         name = "search",
-        description = "Search every distinct query word with typo tolerance, ranked by relevance before pagination. Exact matches rank first; ID/title/heading matches carry more weight. ID/MID field words and all filters stay exact. Search items, section headings, and outermost Markdown blocks. One bounded source excerpt is automatic; item filters exclude narrative. Follow next_cursor with unchanged inputs; restart after source/schema changes."
+        description = "Search every distinct query word with typo tolerance, ranked by relevance before pagination. Exact matches rank first; ID/title/heading matches carry more weight. ID/MID field words and all filters stay exact. Search items, section headings, and outermost Markdown blocks. Discovery format_version: 1 returns results: [{node, excerpt}]. One bounded source excerpt is automatic; item filters exclude narrative, and there is no node-kind filter. Pass node.reference to get for complete content or related for direct connections. Follow next_cursor with unchanged inputs; restart after source/schema changes. Structural handles identify a document snapshot; search again after that document changes."
     )]
     fn search(
         &self,
@@ -576,7 +576,7 @@ impl MaraMcp {
 
     #[tool(
         name = "related",
-        description = "Explore direct schema relations, mentions, and containment from any node, with neighbour summaries and source evidence. Counts connections, not unique neighbours; traversal is caller-controlled. Continue with next_cursor and unchanged reference/options; restart after source/schema changes. Read neighbour content with get."
+        description = "Explore direct schema relations, mentions, and containment from any node. Discovery format_version: 1 returns node and connections: [{relation, direction, neighbour, source}]. Counts connections, not unique neighbours; traversal is caller-controlled. Pass neighbour.reference to get or another related call. JSON uses contains with direction; its incoming view is displayed as contained_by in human CLI output. Select builtin:contains and incoming for the parent, then outgoing on that parent for its children. Continue with next_cursor and unchanged reference/options; restart after source/schema changes. Search again if a structural handle is stale."
     )]
     fn related(
         &self,
@@ -626,7 +626,7 @@ impl MaraMcp {
 
 #[tool_handler(
     name = "mara",
-    instructions = "Structured Mara operations. Pass an absolute project path, or omit it for execution-directory discovery (project_init requires an explicit destination only when the server is unbound). When the server starts with --project, omit request-level project selection, including for project_init; overrides are rejected."
+    instructions = "Structured Mara operations. Pass an absolute project path, or omit it for execution-directory discovery (project_init requires an explicit destination only when the server is unbound). When the server starts with --project, omit request-level project selection, including for project_init; overrides are rejected. Discovery and reading: search, get, and related cover items and narrative; item tools author, list, or validate items only. Before authoring, inspect schema_get flavour selection guidance and relation endpoints. Schema format 2 requires description, use_when, avoid_when, and distinguish_from for each flavour. Upgrade guidance: https://github.com/convesoft/mara/blob/main/docs/migration-0.2.mara.md"
 )]
 impl ServerHandler for MaraMcp {}
 

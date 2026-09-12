@@ -1,6 +1,6 @@
 ---
 name: mara
-description: Use Mara to initialize, discover, author, relate, retrieve, search, or validate structured project knowledge in Git-tracked *.mara.md files.
+description: Use Mara to discover and read items and narrative, or author and validate structured project knowledge in Git-tracked *.mara.md files.
 ---
 
 # Mara project knowledge
@@ -9,6 +9,12 @@ Prefer the Mara MCP tools for a project's canonical `*.mara.md` knowledge.
 When MCP is unavailable, use an available Mara CLI invocation with `--format json`
 for structured results. The same operation selection, authoring, continuation,
 and validation rules apply to both surfaces.
+
+This skill targets the 0.2 interface: schema format 2 and unified `search`,
+`get`, and `related`. Use the skill shipped with the selected executable or
+the same source revision. If an older installation exposes a different
+interface, report the mismatch and use its matching guidance; do not silently
+change the version pin or substitute removed commands.
 
 ## Resolve the CLI fallback
 
@@ -48,6 +54,44 @@ is `"${mara_cli[@]}" --project /absolute/project --format json project init --te
 where `<template>` is the selected `minimal`, `empty`, or `engineering` name.
 Do not create or modify `AGENTS.md` as part of Mara onboarding.
 
+## Choose vocabulary from the schema
+
+Call `schema_list` with `{"kind":"flavour"}`, then `schema_get` with
+`{"kind":"flavour","name":"requirement"}` for a candidate. CLI equivalents
+are `schema list flavour` and `schema get flavour requirement`.
+
+- `description` states purpose; `use_when` identifies suitable knowledge.
+- `avoid_when` excludes unsuitable content; `distinguish_from` compares
+  confusable flavours. Read the alternative declaration when the distinction
+  affects your choice.
+- `id_prefix`, `body`, and `fields` specify creation constraints. Guidance keys
+  belong to the schema declaration, not an item's `fields` or body.
+
+Use the selected project's declarations, including custom flavours. Keep
+supporting narrative as Markdown when it does not need an independent identity;
+search/get/related can still discover, read, and navigate it.
+
+Schema format 2 requires all four guidance keys directly on every flavour:
+a nonblank `description`, a nonempty list of nonblank `use_when` entries,
+an `avoid_when` list (`[]` is valid), and a `distinguish_from` mapping (`{}` is
+valid). Distinction targets must be other declared flavours with nonblank
+explanations. When asked to migrate format 1, edit the existing schema in place,
+set `format_version: 2`, and supply meaningful guidance. Preserve custom
+flavours, prefixes, fields, relations, document bytes, IDs, and MIDs; do not
+reinitialize or replace the schema with a template. Require `valid:true` from
+both `schema_validate` and `project_validate` (CLI `schema validate` and
+`project validate`).
+
+For the engineering template, inspect `schema_get` relation declarations before
+connecting items. `verification` describes a repeatable check; `evidence`
+records its result. The added relations are `verifies` (verification →
+requirement/design), `validates` (verification → goal/scenario), `evidences`
+(evidence → verification), `implements` (artifact → requirement/design),
+`affects` (risk → affected knowledge), and `mitigates`
+(requirement/design/decision/verification → risk). Add only meaningful links;
+no complete trace chain or placeholder items are required. Existing projects
+do not gain these declarations automatically.
+
 ## Choose the operation
 
 CLI entries below follow `"${mara_cli[@]}" --project /absolute/project --format json`;
@@ -55,10 +99,10 @@ inspect `<command> --help` for positional arguments and options.
 
 | Intent | MCP operation | CLI command |
 |---|---|---|
-| Discover vocabulary and field/edge constraints | `schema_list`, then `schema_get`; omit kind/name for the full schema | `schema list`, `schema get` |
+| Discover vocabulary and field/edge constraints | `schema_list` with kind, then `schema_get`; omit kind/name for the full schema | `schema list flavour` or `schema list relation`, then `schema get` |
 | Search items and narrative, or list items with exact filters | `search` or `item_list` | `search`, `item list` |
 | Read an item, section, Markdown block, or document | `get` | `get` |
-| Inspect direct item neighbours, then read a selected neighbour | `item_related`, then `get` | `item related`, then `get` |
+| Inspect direct connections from any node, then read a selected neighbour | `related`, then `get` | `related`, then `get` |
 | Create an item, optionally with initial edges | `item_create` | `item create` |
 | Change title, custom fields, or body | `item_update` | `item update` |
 | Relocate an item; preserve ID and MID | `item_move` | `item move` |
@@ -73,39 +117,78 @@ for correcting the input or selecting the right operation; it is not a reason
 to bypass validation by editing source lines. Mara source files remain canonical;
 MCP results are not a separate authoring store.
 
-## Retrieve enough context
+## Discovery and reading
 
 Call `search` with `{"query":"recovery","limit":5}`. Results contain
 `{node, excerpt}`; pass a selected `node.reference` to `get` as
 `{"reference":"<selected reference>"}`. Get also accepts exact item IDs/MIDs.
 Use the project context selected above. One source excerpt is included per search
-hit; it may omit content and does not replace a consecutive read. Do not pass
-`excerpts` or `--excerpts` to search. Item filters select items only; path filters
-also cover narrative.
+hit; it may omit content and does not replace a consecutive read. Item ID,
+flavour, custom-field, and schema-relation filters select items only; path
+filters also cover narrative. There is no node-kind filter.
 
 Get returns `node`, `content`, `content_range`, `metadata`, and `metadata_range`.
 Items return their parsed body and ordered metadata; other nodes return their
 original Markdown span, including contained source for sections and documents,
 with empty metadata. Read `node.context.parent` or `node.context.section` through
 get when structural context is needed. Get does not enumerate neighbours or
-accept `limit`. For item connections, call `item_related` with the item's ID/MID
-as `id`, then read a selected neighbour through get with `reference`. Unified
-navigation from structural nodes is not yet available.
+accept `limit`.
 
-Search, list, item related, and get return `has_more` and `next_cursor`. Repeat
+Call `related` with `{"reference":"<selected reference>"}` for direct schema
+relations, mentions, and containment. It returns `node` and
+`connections:[{relation,direction,neighbour,source}]`; pass a selected
+`neighbour.reference` to `get` or another `related` call. Each call follows only
+direct connections; there is no automatic expansion or hops option.
+
+Use `direction:"incoming"` or `"outgoing"`; omission includes both. Related
+`relations` accepts `schema:name` and `builtin:name`, with short names allowed
+only when unambiguous in the vocabulary. Related `flavours` selects item
+neighbours only. JSON represents containment as `contains` with direction;
+human output displays its incoming view as `contained_by`. To find sibling
+context, inspect `related` with `relations:["builtin:contains"]` and
+`direction:"incoming"`, then select the parent's outgoing containment. Read
+chosen children with `get`.
+
+Search, item list, related, and get return `has_more` and `next_cursor`. Repeat
 the same operation with that opaque `cursor`, keeping project, reference/query,
 filters, and any supported limit unchanged. Continue until the needed content
 is retrieved; full enumeration/read requires `has_more:false`. Get splits
 consecutive content and metadata values across pages: use their byte/index
 ranges to reconstruct complete values, including titles and repeated metadata.
-Restart without a cursor after source/schema changes. If a discovery handle is
-stale, search again. Item related follows only direct edges; choose further
-neighbours explicitly.
+Restart without a cursor after source/schema changes. Structural discovery
+handles identify source in a document snapshot; if stale, search again.
+Item MIDs retain durable identity. Search and related default to 20 entries
+and accept `limit` from 1 through 100; related counts connections, including
+different connections to the same neighbour. The byte budget may shorten pages.
+
+Unified discovery responses use `format_version: 1`, independently of schema
+format 2 and the application version. Inspect `node.kind` (item, section, block,
+or document); only items have ID/MID/flavour. Item list retains its item-only
+response. On upgrade, discard old cursors and update parsers for the mixed
+`results`, consecutive `content`, and `connections` shapes above.
 
 CLI retrieval uses the same JSON result fields:
 `"${mara_cli[@]}" --project /absolute/project --format json search recovery --limit 5`,
 then `"${mara_cli[@]}" --project /absolute/project --format json get '<reference>'`.
-Use `--cursor '<next_cursor>'` for continuation.
+Use `related '<reference>'` for connections, `--relation builtin:mentions` to
+select explicit mentions, and `--cursor '<next_cursor>'` for continuation.
+
+## Preserve authored references
+
+Use `[[ID]]`/`[[MID]]` in item bodies or narrative for item mentions, and
+Markdown links for documents, heading sections, or explicit anchors, for example
+`[policy](./policies.mara.md#retry-policy)`. Resolve relative paths from the
+linking document. `mentions` and containment are derived; author them in
+Markdown, not with relation mutations. Code examples and escaped references
+remain literal. External URLs are not network-validated.
+
+Rename rewrites typed relation targets and supported wiki mentions in items and
+narrative, preserving MID. Create/update validate new internal references;
+create/update/move/delete reject changes that break or retarget surviving links,
+including generated anchors and links to nodes inside an item. Move can affect
+relative links. Delete can be blocked by references to contained sections or
+blocks. Resolve reported source locations before retrying; Markdown links are
+not automatically repaired. Do not bypass a rejected mutation with raw edits.
 
 ## Keep metadata inputs distinct
 
@@ -168,8 +251,8 @@ exact human IDs or MIDs. Do not add the same edge again; use `relation_add` and
 
 5. Call `get` with `reference:"ADR-EXAMPLE"`; inspect `node` for the generated
    MID/title, `content` for the body, and `metadata` for authored values.
-   Call `item_related` with `id:"ADR-EXAMPLE",direction:"outgoing"`, then with
-   `id:"REQ-EXAMPLE",direction:"incoming"` to verify both views of the edge.
+   Call `related` with `reference:"ADR-EXAMPLE",direction:"outgoing"`, then with
+   `reference:"REQ-EXAMPLE",direction:"incoming"` to verify both views of the edge.
 6. Call `item_validate` with `id:"ADR-EXAMPLE"`; use `project_validate` for
    corpus-wide integrity after relation or reference changes. Use the same project
    context. Require `valid:true`, not just successful transport. Project
@@ -181,8 +264,7 @@ validation. Pending transactions block mutations; use `project_transaction_rollb
 other writers.
 
 For the same authoring workflow through CLI, after resolving `mara_cli` and
-`REQ-EXAMPLE`, use initial relations atomically when the selected version supports
-`--relation`, and inspect both directions:
+`REQ-EXAMPLE`, use initial relations atomically and inspect both directions:
 
 ```bash
 mara_project=/absolute/project
@@ -193,12 +275,7 @@ mara_project=/absolute/project
   --body 'Preserve the previous content until validation succeeds so rejected edits can be retried.' \
   --relation justifies=REQ-EXAMPLE
 "${mara_cli[@]}" --project "$mara_project" --format json get ADR-EXAMPLE
-"${mara_cli[@]}" --project "$mara_project" --format json item related ADR-EXAMPLE --direction outgoing
-"${mara_cli[@]}" --project "$mara_project" --format json item related REQ-EXAMPLE --direction incoming
+"${mara_cli[@]}" --project "$mara_project" --format json related ADR-EXAMPLE --direction outgoing
+"${mara_cli[@]}" --project "$mara_project" --format json related REQ-EXAMPLE --direction incoming
 "${mara_cli[@]}" --project "$mara_project" --format json project validate
 ```
-
-If the selected version lacks initial relations, or to use separate create/add,
-omit `--relation` during creation and then run
-`relation add ADR-EXAMPLE justifies REQ-EXAMPLE` with the same launcher and global
-project/JSON options. Check creation completeness and validation results as above.
