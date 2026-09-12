@@ -317,3 +317,43 @@ Verify initialization from the engineering template, creation of representative
 source/target items, relation addition, and incoming/outgoing retrieval through
 CLI and MCP. Rejected endpoint combinations must preserve source files.
 :::
+
+:::mara evidence EVD-02-PACKAGED-WORKFLOW
+:mid: 01M2B0SCR7CMFF4NF129FJKJX5
+:title: Packaged 0.2 workflow acceptance evidence
+
+Verified on 2026-09-12 for MARA-55 against implementation commit
+`0b8fc05e917a3a2bda46ff30e5560c105bc2f36f`, using the expanded
+[`scripts/smoke-npm.sh`](../scripts/smoke-npm.sh) in this change. The executable
+reports `0.2.0-alpha.0`; that version alone does not identify these unreleased
+changes. Host: Linux x86_64, Rust 1.97.1, Node 26.7.0, npm 11.19.0.
+
+From this checkout, reproduce with:
+
+```sh
+cargo build --locked --release
+scripts/smoke-npm.sh target/release/mara
+```
+
+The script builds local dispatcher/native npm tarballs, installs them with a
+fresh npm cache into a temporary directory, and launches the installed CLI and
+stdio MCP outside the repository. The acceptance calls use a PATH containing
+only Node; attempts to execute `cargo`, `rustc`, `rustup`, or a global `mara`
+return ENOENT. The installed skill matches the source packaged for this run.
+All five `PASS` checkpoints completed:
+
+| Accepted workflow | Observed result |
+|---|---|
+| [[SCN-START-ENGINEERING-KNOWLEDGE]] and [[SCN-CHOOSE-KNOWLEDGE-FLAVOUR]] | Engineering initialization generated only project configuration and schema. All 11 flavour declarations, including selection guidance, agreed through CLI/MCP. CLI created a requirement and design with `satisfies`; MCP created verification, added `verifies`, and exposed its incoming connection. |
+| [[SCN-READ-DOCUMENT-CONTEXT]] | Mixed search returned item, section, and block nodes. Successive get/related/get calls followed narrative to requirement to verification. Relative links from a narrative-only document resolved to another document and section, with incoming backlinks. Parent/child navigation selected sibling prose; every search/related continuation page agreed through CLI/MCP. |
+| [[REQ-DOCUMENT-CONTEXT-READ]] | Oversized Unicode block, section, and document reads reconstructed exact source bytes across multiple pages. Every domain page stayed within 65,536 bytes. |
+| [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]] | A different document's edit preserved structural handles but invalidated search/get/related cursors. Editing the containing document invalidated get/related handles. Both transports rejected stale input with recovery guidance; rediscovery succeeded. |
+| [[REQ-FLAVOUR-GUIDANCE-MIGRATION]] | The migration guide's custom `term` schema rejected format 1 and rejected a version-only change lacking guidance. Adding guidance in place preserved declarations, repeated aliases, `clarifies` relations, IDs/MIDs, document bytes, and configuration bytes. CLI/MCP schema and project validation passed; subsequent MCP item creation with custom fields and a relation succeeded. |
+
+The migration fixture uses Mara-generated identities, then stages the guide's
+format-1 schema over those real files before migrating it. It does not execute
+an older Mara binary. These are locally assembled packages of the specified
+source, not verification of a published npm release. This execution covers
+Linux x64 only; the existing release workflow runs the same smoke script on its
+other supported targets. Feature-level tests remain with their implementations.
+:::
