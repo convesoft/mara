@@ -132,6 +132,460 @@ fn mcp_call(id: u64, name: &str, arguments: Value) -> Value {
     )
 }
 
+#[test]
+fn cli_and_mcp_reference_preflight_preserve_files_for_all_item_mutations() {
+    for use_mcp in [false, true] {
+        let fixture = TempDir::new().unwrap();
+        assert!(mara(fixture.path(), &["project", "init"]).status.success());
+        let path = fixture.path().join("a.mara.md");
+        let source = "[first](#same) [second](#same)\n\n:::mara requirement REQ-ONE\n:mid: 01M1PXP2KG381MM1VNN6XC7S4M\n:title: One\n\n# Same\n\nFirst.\n:::\n\n# Same\n\nSecond.\n";
+        fs::write(&path, source).unwrap();
+        let cases = [
+            (
+                vec![
+                    "item",
+                    "create",
+                    "requirement",
+                    "REQ-NEW",
+                    "a.mara.md",
+                    "--title",
+                    "New",
+                    "--body",
+                    "# Same\n\nInserted.",
+                    "--line",
+                    "1",
+                ],
+                "item_create",
+                json!({"flavour":"requirement", "id":"REQ-NEW", "file":"a.mara.md", "title":"New", "body":"# Same\n\nInserted.", "line":1}),
+            ),
+            (
+                vec!["item", "update", "REQ-ONE", "--body", "# Changed\n\nFirst."],
+                "item_update",
+                json!({"reference":"REQ-ONE", "body":"# Changed\n\nFirst."}),
+            ),
+            (
+                vec!["item", "move", "REQ-ONE", "b.mara.md"],
+                "item_move",
+                json!({"reference":"REQ-ONE", "file":"b.mara.md"}),
+            ),
+            (
+                vec!["item", "delete", "REQ-ONE"],
+                "item_delete",
+                json!({"reference":"REQ-ONE"}),
+            ),
+        ];
+        for (args, tool, params) in cases {
+            let message = if use_mcp {
+                let responses = mcp_exchange(
+                    fixture.path(),
+                    &[
+                        mcp_initialize(1),
+                        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                        mcp_call(2, tool, params),
+                    ],
+                );
+                let result = &mcp_response(&responses, 2)["result"];
+                assert_eq!(result["isError"], true, "{result}");
+                result.to_string()
+            } else {
+                let output = mara(fixture.path(), &args);
+                assert!(!output.status.success());
+                stderr(&output)
+            };
+            assert!(
+                message.contains("a.mara.md:1")
+                    && message.contains("bytes")
+                    && message.contains("untouched link"),
+                "{message}"
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), source);
+            assert!(!fixture.path().join("b.mara.md").exists());
+        }
+
+        // Rewriting a mention inside a heading changes its generated anchor.
+        // The unchanged Markdown link must block rename before any file changes.
+        let rename_source = source
+            .replace("# Same", "# [[REQ-ONE]]")
+            .replace("#same", "#req-one");
+        fs::write(&path, &rename_source).unwrap();
+        let output = if use_mcp {
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(
+                        2,
+                        "item_rename",
+                        json!({"reference":"REQ-ONE", "new_id":"REQ-TWO"}),
+                    ),
+                ],
+            );
+            let result = &mcp_response(&responses, 2)["result"];
+            assert_eq!(result["isError"], true, "{result}");
+            result.to_string()
+        } else {
+            let output = mara(fixture.path(), &["item", "rename", "REQ-ONE", "REQ-TWO"]);
+            assert!(!output.status.success());
+            stderr(&output)
+        };
+        assert!(output.contains("untouched link"), "{output}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), rename_source);
+
+        fs::write(
+            &path,
+            source.replace("[first](#same) [second](#same)", "[[REQ-ONE]]"),
+        )
+        .unwrap();
+        let responses = mcp_exchange(
+            fixture.path(),
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(
+                    2,
+                    "item_rename",
+                    json!({"reference":"REQ-ONE", "new_id":"REQ-TWO"}),
+                ),
+            ],
+        );
+        assert_eq!(mcp_response(&responses, 2)["result"]["isError"], false);
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .starts_with("[[REQ-TWO]]")
+        );
+    }
+}
+
+fn reference_body_update(prefix: &str, body: &str, replacement: &str, succeeds: bool) {
+    for use_mcp in [false, true] {
+        let fixture = TempDir::new().unwrap();
+        assert!(mara(fixture.path(), &["project", "init"]).status.success());
+        let path = fixture.path().join("a.mara.md");
+        let source = format!(
+            "{prefix}:::mara requirement REQ-ONE\n:mid: 01M1PXP2KG381MM1VNN6XC7S4M\n:title: One\n\n{body}\n:::\n"
+        );
+        fs::write(&path, &source).unwrap();
+        if use_mcp {
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(
+                        2,
+                        "item_update",
+                        json!({"reference":"REQ-ONE", "body":replacement}),
+                    ),
+                ],
+            );
+            let result = &mcp_response(&responses, 2)["result"];
+            assert_eq!(result["isError"], !succeeds, "{result}");
+            if !succeeds {
+                assert!(result.to_string().contains("a.mara.md:"), "{result}");
+            }
+        } else {
+            let output = mara(
+                fixture.path(),
+                &["item", "update", "REQ-ONE", "--body", replacement],
+            );
+            assert_eq!(
+                output.status.success(),
+                succeeds,
+                "{replacement:?}: {}",
+                stderr(&output)
+            );
+            if !succeeds {
+                assert!(stderr(&output).contains("a.mara.md:"));
+            }
+        }
+        let after = fs::read_to_string(&path).unwrap();
+        if succeeds {
+            assert_eq!(
+                after,
+                source.replace(
+                    &format!("\n\n{body}\n:::\n"),
+                    &format!("\n\n{replacement}\n:::\n")
+                )
+            );
+        } else {
+            assert_eq!(after, source);
+        }
+        assert!(
+            mara(fixture.path(), &["project", "validate"])
+                .status
+                .success()
+        );
+    }
+}
+
+#[test]
+fn reference_review_protects_relocated_unchanged_links() {
+    let body = "# Same\n\nFirst.\n\n# Same\n\nSecond.\n\n[link](#same)";
+    reference_body_update("", body, "[link](#same)\n\n# Same\n\nSecond.", false);
+    reference_body_update(
+        "",
+        body,
+        "# Same\n\nSecond.\n\n# Same\n\nFirst.\n\n[link](#same)",
+        false,
+    );
+    reference_body_update(
+        "",
+        body,
+        "[link](#same)\n\n# Same\n\nFirst.\n\n# Same\n\nSecond.",
+        true,
+    );
+}
+
+#[test]
+fn reference_review_allows_explicit_definition_edits() {
+    let body = "# One\n\nFirst.\n\n# Two\n\nSecond.\n\n[dest]: #one";
+    for prefix in ["[ref][dest]\n\n", "[dest][] [dest]\n\n"] {
+        reference_body_update(
+            prefix,
+            body,
+            &body.replace("[dest]: #one", "[dest]: #two"),
+            true,
+        );
+        reference_body_update(
+            prefix,
+            body,
+            &body.replace("[dest]: #one", "[dest]: #absent"),
+            false,
+        );
+    }
+    let body = format!("[ref][dest]\n\n{body}");
+    reference_body_update(
+        "",
+        &body,
+        &body.replace("[dest]: #one", "[dest]: #two"),
+        true,
+    );
+}
+
+#[test]
+fn reference_review_allows_prefix_edits_to_anchored_paragraphs() {
+    let body = "<a name=\"stable\"></a>\n\nFirst sentence.";
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "<a name=\"stable\"></a>\n\nThe First sentence.",
+        true,
+    );
+    // Inserting a separate paragraph really does retarget the anchor.
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "<a name=\"stable\"></a>\n\nDifferent paragraph.\n\nFirst sentence.",
+        false,
+    );
+}
+
+#[test]
+fn reference_review_allows_replacing_anchored_paragraph_prefixes() {
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        "<a name=\"stable\"></a>\n\nFirst sentence.",
+        "<a name=\"stable\"></a>\n\nSecond sentence.",
+        true,
+    );
+}
+
+#[test]
+fn reference_review_allows_reordering_intact_unique_sections() {
+    reference_body_update(
+        "[ref](#alpha) [other](#beta)\n\n",
+        "# Alpha\n\nAlpha text.\n\n# Beta\n\nBeta text.",
+        "# Beta\n\nBeta text.\n\n# Alpha\n\nAlpha text.",
+        true,
+    );
+}
+
+#[test]
+fn reference_review_allows_explicit_literal_context_edits() {
+    for link in ["[ref](#alpha)", "[[REQ-ONE]]"] {
+        let body = format!("# Alpha\n\n{link}");
+        for literal in [
+            format!("`{link}`"),
+            format!("```\n{link}\n```"),
+            format!("\\{link}"),
+        ] {
+            reference_body_update("", &body, &format!("# Alpha\n\n{literal}"), true);
+        }
+    }
+    // Literalizing one occurrence must not exempt another active link.
+    reference_body_update(
+        "",
+        "# Same\n\nFirst.\n\n# Same\n\nSecond.\n\n[example](#same) [active](#same)",
+        "# Same\n\nSecond.\n\n`[example](#same)` [active](#same)",
+        false,
+    );
+}
+
+#[test]
+fn reference_review_allows_complete_anchored_paragraph_replacement() {
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        "<a name=\"stable\"></a>\n\nYes",
+        "<a name=\"stable\"></a>\n\nNo",
+        true,
+    );
+}
+
+#[test]
+fn reference_review_rejects_punctuation_only_correspondence_across_slots() {
+    let body = "<a name=\"stable\"></a>\n\nAAA.";
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "Inserted\n\n<a name=\"stable\"></a>\n\nBBB.",
+        false,
+    );
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "<a name=\"stable\"></a>\n\nBBB.",
+        true,
+    );
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "Inserted\n\n<a name=\"stable\"></a>\n\nAAA.",
+        true,
+    );
+}
+
+#[test]
+fn reference_review_rejects_same_slot_when_old_text_survives_elsewhere() {
+    let body = "<a name=\"stable\"></a>\n\nAAA";
+    for (replacement, succeeds) in [
+        ("<a name=\"stable\"></a>\n\nBBB\n\nAAAX", false),
+        ("<a name=\"stable\"></a>\n\nAAAX\n\nBBB", true),
+        ("<a name=\"stable\"></a>\n\nBBB", true),
+    ] {
+        reference_body_update("[ref](#stable)\n\n", body, replacement, succeeds);
+    }
+}
+
+#[test]
+fn reference_review_protects_anchors_on_duplicate_blocks() {
+    let body = "<a name=\"stable\"></a>\n\nFirst.\n\nFirst.";
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "<a name=\"stable\"></a>\n\nInserted.\n\nFirst.\n\nFirst.",
+        false,
+    );
+    // Repeated content alone must not prevent edits after the linked block.
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "<a name=\"stable\"></a>\n\nFirst.\n\nInserted.\n\nFirst.",
+        true,
+    );
+}
+
+#[test]
+fn reference_review_rejects_siblings_taking_an_anchored_blocks_slot() {
+    for (original, sibling) in [("A", "B"), ("First.", "Second.")] {
+        let body = format!("<a name=\"stable\"></a>\n\n{original}\n\n{sibling}");
+        reference_body_update(
+            "[ref](#stable)\n\n",
+            &body,
+            &format!("<a name=\"stable\"></a>\n\n{sibling}"),
+            false,
+        );
+        // Rewriting the target completely is still allowed when the sibling stays put.
+        reference_body_update(
+            "[ref](#stable)\n\n",
+            &body,
+            &format!("<a name=\"stable\"></a>\n\nReplacement\n\n{sibling}"),
+            true,
+        );
+    }
+}
+
+#[test]
+fn reference_review_allows_section_extent_changes() {
+    let nested = "# Alpha\n\nAlpha text.\n\n## Beta\n\nBeta text.";
+    let siblings = "# Alpha\n\nAlpha text.\n\n# Beta\n\nBeta text.";
+    reference_body_update("[ref](#alpha) [other](#beta)\n\n", nested, siblings, true);
+    reference_body_update("[ref](#alpha) [other](#beta)\n\n", siblings, nested, true);
+}
+
+#[test]
+fn reference_review_rejects_replacing_a_renamed_unique_heading() {
+    reference_body_update(
+        "[ref](#alpha)\n\n",
+        "# Alpha\n\nOld",
+        "# Beta\n\nOld\n\n# Alpha\n\nNew",
+        false,
+    );
+}
+
+#[test]
+fn reference_review_creation_ignores_unrelated_existing_errors() {
+    for source in [
+        "[broken](#absent)\n",
+        "<a name=\"same\"></a>\n\nFirst.\n\n<a name=\"same\"></a>\n\nSecond.\n\n[ambiguous](#same)\n",
+    ] {
+        for (body, succeeds) in [("New content.", true), ("[new broken](#missing)", false)] {
+            for use_mcp in [false, true] {
+                let fixture = TempDir::new().unwrap();
+                assert!(mara(fixture.path(), &["project", "init"]).status.success());
+                let path = fixture.path().join("a.mara.md");
+                fs::write(&path, source).unwrap();
+                if use_mcp {
+                    let responses = mcp_exchange(
+                        fixture.path(),
+                        &[
+                            mcp_initialize(1),
+                            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                            mcp_call(
+                                2,
+                                "item_create",
+                                json!({
+                                    "flavour":"requirement", "id":"REQ-NEW", "file":"a.mara.md",
+                                    "title":"New", "body":body, "line":1,
+                                }),
+                            ),
+                        ],
+                    );
+                    let result = &mcp_response(&responses, 2)["result"];
+                    assert_eq!(result["isError"], !succeeds, "{result}");
+                } else {
+                    let output = mara(
+                        fixture.path(),
+                        &[
+                            "item",
+                            "create",
+                            "requirement",
+                            "REQ-NEW",
+                            "a.mara.md",
+                            "--title",
+                            "New",
+                            "--body",
+                            body,
+                            "--line",
+                            "1",
+                        ],
+                    );
+                    assert_eq!(output.status.success(), succeeds, "{}", stderr(&output));
+                }
+                let after = fs::read_to_string(&path).unwrap();
+                if succeeds {
+                    assert!(after.ends_with(source));
+                    assert!(after.contains(body));
+                    assert!(mara(fixture.path(), &["get", "REQ-NEW"]).status.success());
+                } else {
+                    assert_eq!(after, source);
+                }
+            }
+        }
+    }
+}
+
 fn mcp_response(responses: &[Value], id: u64) -> &Value {
     responses
         .iter()
@@ -8132,6 +8586,8 @@ fn item_delete_reports_every_incoming_occurrence_with_cli_mcp_parity() {
         .unwrap();
     let third = third.replace(keep_mid, &third_mid);
     fs::write(fixture.path().join("third.mara.md"), &third).unwrap();
+    let narrative = "[[REQ-DELETE]]\n";
+    fs::write(fixture.path().join("narrative.mara.md"), narrative).unwrap();
     assert!(
         mara(fixture.path(), &["project", "validate"])
             .status
@@ -8144,7 +8600,11 @@ fn item_delete_reports_every_incoming_occurrence_with_cli_mcp_parity() {
     assert!(!cli.status.success());
     let result: Value = serde_json::from_slice(&cli.stdout).unwrap();
     let error = result["error"]["message"].as_str().unwrap();
-    assert_eq!(error.matches("(bytes ").count(), 10, "{error}");
+    assert_eq!(error.matches("(bytes ").count(), 11, "{error}");
+    assert!(
+        error.contains("narrative.mara.md:1 (bytes 0..14)"),
+        "{error}"
+    );
     for (file, body) in [("keep.mara.md", &other), ("third.mara.md", &third)] {
         for (offset, _) in body
             .match_indices(":depends_on:")
@@ -8180,6 +8640,7 @@ fn item_delete_reports_every_incoming_occurrence_with_cli_mcp_parity() {
         ("delete.mara.md", source),
         ("keep.mara.md", other),
         ("third.mara.md", third),
+        ("narrative.mara.md", narrative.to_owned()),
     ] {
         assert_eq!(
             fs::read_to_string(fixture.path().join(file)).unwrap(),

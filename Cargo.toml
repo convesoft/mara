@@ -27,6 +27,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde-saphyr = "1.2"
 sha2 = "0.10"
+similar = { version = "3.2.0", default-features = false, features = ["text"] }
 strsim = "0.11"
 tempfile = "3"
 tokio = { version = "1", features = ["io-std", "rt"] }

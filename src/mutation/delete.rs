@@ -26,56 +26,6 @@ pub fn delete_item(
         .find(|item| item.id() == resolved.summary().id())
         .expect("resolved item belongs to corpus");
     let mid = item.mid().expect("validated identity");
-    let targets_item = |target: &str| target == item.id() || target == mid;
-    let mut blockers = Vec::new();
-    for survivor in corpus.items().filter(|other| other.mid() != Some(mid)) {
-        for relation in survivor.relations() {
-            if targets_item(relation.target()) {
-                blockers.push((
-                    relation.source(),
-                    format!(
-                        "item '{}' relation '{}' to '{}'",
-                        survivor.id(),
-                        relation.name(),
-                        relation.target()
-                    ),
-                ));
-            }
-        }
-        for mention in survivor.mentions() {
-            if targets_item(mention.target()) {
-                blockers.push((
-                    mention.source(),
-                    format!(
-                        "item '{}' mention '[[{}]]'",
-                        survivor.id(),
-                        mention.target()
-                    ),
-                ));
-            }
-        }
-    }
-    blockers.sort_by_key(|(source, _)| (source.path(), source.span().start_byte()));
-    if !blockers.is_empty() {
-        let locations = blockers
-            .into_iter()
-            .map(|(source, message)| {
-                format!(
-                    "{}:{} (bytes {}..{}): {message}",
-                    source.path().display(),
-                    source.span().start_line(),
-                    source.span().start_byte(),
-                    source.span().end_byte()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        return invalid(format!(
-            "cannot delete item '{}' with MID {mid}; remove surviving incoming references first:\n{locations}",
-            item.id()
-        ));
-    }
-
     let path = item.source().path().to_path_buf();
     let document = corpus
         .documents()
@@ -99,6 +49,11 @@ pub fn delete_item(
     let candidate = format!("{before}{after}");
     let projected =
         corpus.with_replacements(&BTreeMap::from([(path.clone(), candidate.clone())]), schema)?;
+    super::references::preflight(&corpus, &projected, None, None).map_err(|error| {
+        Error::InvalidMutation {
+            message: format!("cannot delete item '{}' with MID {mid}; {error}", item.id()),
+        }
+    })?;
     require_valid_corpus(&projected, schema)?;
     // A valid projection alone does not guarantee that Markdown still recognizes
     // every surviving item and mention exactly as before.

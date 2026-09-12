@@ -296,7 +296,7 @@ fn duplicate_explicit_anchors_are_ambiguous_without_changing_generated_numbering
 }
 
 #[test]
-fn narrative_mentions_now_prevent_delete_and_rename_from_leaving_broken_references() {
+fn narrative_mentions_block_deletion_and_are_rewritten_by_rename() {
     let fixture = TempDir::new().unwrap();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let source = item("Body.");
@@ -310,8 +310,6 @@ fn narrative_mentions_now_prevent_delete_and_rename_from_leaving_broken_referenc
             .diagnostics()
             .is_empty()
     );
-    // Full reference-aware mutation handling is MARA-53. The existing candidate
-    // validation must already reject a broken narrative reference without writes.
     for args in [
         vec!["item", "delete", "REQ-ONE"],
         vec!["item", "rename", "REQ-ONE", "REQ-TWO"],
@@ -323,13 +321,25 @@ fn narrative_mentions_now_prevent_delete_and_rename_from_leaving_broken_referenc
                 "--format",
                 "json",
             ])
-            .args(args)
+            .args(&args)
             .output()
             .unwrap();
+        if args[1] == "rename" {
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+            assert_eq!(
+                fs::read_to_string(fixture.path().join("narrative.mara.md")).unwrap(),
+                "Narrative [[REQ-TWO]].\n"
+            );
+            continue;
+        }
         assert!(!output.status.success());
         let message = String::from_utf8(output.stdout).unwrap();
         assert!(message.contains("narrative.mara.md:1"), "{message}");
-        assert!(message.contains("missing item 'REQ-ONE'"), "{message}");
+        assert!(message.contains("untouched link 'REQ-ONE'"), "{message}");
         assert_eq!(
             fs::read_to_string(fixture.path().join("item.mara.md")).unwrap(),
             source

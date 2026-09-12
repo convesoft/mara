@@ -232,8 +232,9 @@ new missing required bodies or other invalid state.
 resolved by exact MID or human ID. Require a valid complete project before
 editing and a valid complete surviving corpus before publication.
 
-Refuse deletion when any surviving item's typed relation or supported body wiki
-mention resolves to the selected MID or human ID. Report every blocking
+Refuse deletion when any surviving typed relation or supported wiki mention in
+an item body or narrative resolves to the selected MID or human ID. Markdown
+links must retain their destinations under [[DES-DOCUMENT-STRUCTURE]]. Report every blocking
 occurrence with its source path, one-based line, and byte span. References
 inside the selected item, including self-references, disappear with it and do
 not block deletion. Supported mentions follow [[DES-DOCUMENT-FORMAT]].
@@ -268,11 +269,11 @@ selected identities and lists each source item, relation name or mention,
 path, one-based line, and end-exclusive UTF-8 byte span. Authors must remove or
 redirect those references explicitly before retrying.
 
-Narrative mentions also participate in complete-corpus validation. If deletion
-would leave one unresolved, candidate validation reports its source path and
-line and rejects the operation before writing. Narrative references are not yet
-included in the item-level blocker enumeration above; the planned reference-aware
-mutation preflight follows [[DES-DOCUMENT-STRUCTURE]].
+Candidate-source preflight also checks narrative mentions and Markdown links,
+including links to sections or blocks inside the deleted item and generated
+anchors shifted by its removal. Report affected reference paths, one-based lines,
+and byte spans before writing. References removed with the item do not survive.
+Destination preservation follows [[DES-DOCUMENT-STRUCTURE]].
 
 Remove the parser's complete item span, including the closing line terminator
 when present. If removal joins an empty line before the block with an empty
@@ -300,8 +301,9 @@ item resolved by exact MID or human ID. Require a valid complete project,
 a replacement matching the ID grammar and selected flavour prefix, and
 project-wide uniqueness. Preserve the MID and flavour.
 
-Rewrite only the opener ID and schema-defined typed-relation or supported body
-wiki-mention targets authored with the old human ID, including self-references.
+Rewrite only the opener ID and schema-defined typed-relation or supported
+wiki-mention targets in item bodies and narrative authored with the old human ID,
+including self-references.
 Supported mentions follow [[DES-DOCUMENT-FORMAT]]. Preserve MID-authored targets,
 labels, other metadata values, unrelated prose, code and raw contexts, metadata
 order, whitespace, Markdown layout, existing line endings, and file permissions.
@@ -331,18 +333,19 @@ changed document paths in lexical order, empty for an unchanged ID.
 
 Hold the project mutation lock and validate the full corpus before resolution
 and replacement-ID checks. Plan byte patches from the selected item's opener,
-schema-defined relation metadata spans, and parser-recognized item-body mention
-spans.
+schema-defined relation metadata spans, and parser-recognized mention spans in
+both item bodies and narrative Markdown.
 Check each opener, metadata scalar, and mention against its parsed preimage;
 replace only the human-ID token. Reject overlapping or mismatched patches and
 apply them in reverse byte order per file without rendering Markdown.
 Labelled wiki syntax is not introduced; unsupported syntax remains literal.
 
-Narrative human-ID mentions are not yet rewritten. If the candidate leaves one
-unresolved, complete-corpus validation reports its source path and line and
-rejects the rename before writing. Narrative MID mentions remain valid because
-the MID is unchanged. Planned narrative rewriting and link-preservation checks
-follow [[DES-DOCUMENT-STRUCTURE]].
+Rewrite narrative human-ID mentions with the same parsed-token patches. Preserve
+MID-authored mentions and literal examples in code, escapes, or raw contexts.
+Candidate-source preflight checks unchanged Markdown links under
+[[DES-DOCUMENT-STRUCTURE]], including generated anchors changed by a rewritten
+mention inside a heading. Reject such impacts rather than repairing Markdown
+links automatically.
 
 Reparse all changed documents and validate the complete projected corpus.
 Verify the same item MIDs, expected human IDs, flavours, and document paths,

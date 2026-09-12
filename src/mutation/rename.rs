@@ -93,19 +93,17 @@ fn rename_with_hook(
                     span.start_byte() + prefix.len() + value.len() - value.trim_start().len();
                 patches.push(start..start + old_id.len());
             }
-            for mention in current
-                .mentions()
-                .iter()
-                .filter(|mention| mention.target() == old_id)
-            {
-                let span = mention.source().span();
-                check_preimage(
-                    source,
-                    span.start_byte()..span.end_byte(),
-                    &format!("[[{old_id}]]"),
-                )?;
-                patches.push(span.start_byte() + 2..span.end_byte() - 2);
-            }
+        }
+        for mention in document.references().iter().filter(|reference| {
+            reference.kind() == crate::ReferenceKind::Item && reference.target() == old_id
+        }) {
+            let span = mention.source().span();
+            check_preimage(
+                source,
+                span.start_byte()..span.end_byte(),
+                &format!("[[{old_id}]]"),
+            )?;
+            patches.push(span.start_byte() + 2..span.end_byte() - 2);
         }
         if patches.is_empty() {
             continue;
@@ -116,6 +114,7 @@ fn rename_with_hook(
         );
     }
     let projected = corpus.with_replacements(&candidates, schema)?;
+    super::references::preflight(&corpus, &projected, Some((old_id, new_id)), None)?;
     require_valid(&projected, schema)?;
     verify_identities_and_references(&corpus, &projected, &result)?;
     result.paths = candidates.keys().cloned().collect();
