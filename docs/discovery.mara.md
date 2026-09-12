@@ -439,8 +439,10 @@ merely moving a usage into another definition context grants no exemption.
 Replacing an anchored paragraph's text, including all characters, preserves its
 destination when it remains in the same structural position. Partial text overlap,
 including shared punctuation, does not exempt rewritten blocks from this check.
-An intact original block surviving elsewhere must not be mistaken for that replacement. An intact
-pre-existing block moving into the deleted target's position is a different
+Even at the same position, reject a replacement when mapped non-whitespace
+content from the original target survives outside the candidate block. An intact
+original block surviving elsewhere must not be mistaken for that replacement.
+An intact pre-existing block moving into the deleted target's position is a different
 destination, not a rewrite of the target. A unique heading still requires source
 correspondence and checks for original direct
 content surviving elsewhere; renaming a section and adding another with its old

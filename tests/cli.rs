@@ -457,6 +457,18 @@ fn reference_review_rejects_punctuation_only_correspondence_across_slots() {
 }
 
 #[test]
+fn reference_review_rejects_same_slot_when_old_text_survives_elsewhere() {
+    let body = "<a name=\"stable\"></a>\n\nAAA";
+    for (replacement, succeeds) in [
+        ("<a name=\"stable\"></a>\n\nBBB\n\nAAAX", false),
+        ("<a name=\"stable\"></a>\n\nAAAX\n\nBBB", true),
+        ("<a name=\"stable\"></a>\n\nBBB", true),
+    ] {
+        reference_body_update("[ref](#stable)\n\n", body, replacement, succeeds);
+    }
+}
+
+#[test]
 fn reference_review_protects_anchors_on_duplicate_blocks() {
     let body = "<a name=\"stable\"></a>\n\nFirst.\n\nFirst.";
     reference_body_update(

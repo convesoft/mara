@@ -228,6 +228,7 @@ fn same_destination(
     {
         return candidate.source() == new.source();
     }
+    let mut rewritten_same_slot = false;
     // An anchored block may be rewritten completely. Once an intact original
     // elsewhere (including duplicate matches) has been ruled out, the same slot
     // in a corresponding container identifies that edited block without requiring
@@ -257,7 +258,12 @@ fn same_destination(
             .position(|node| node.source() == new.source());
         // A failed structural match must not fall through to incidental shared
         // characters (such as punctuation) as evidence of block identity.
-        return old_slot.is_some() && old_slot == new_slot;
+        if old_slot.is_none() || old_slot != new_slot {
+            return false;
+        }
+        // Position allows a complete rewrite, but any retained old content must
+        // still pass the correspondence check below before accepting this target.
+        rewritten_same_slot = true;
     }
     let mut correspondence_source = old.source();
     let mut destination_source = new.source();
@@ -324,9 +330,10 @@ fn same_destination(
             destination_source = candidate.source();
         }
     }
-    // Edited blocks need retained content, not a retained first byte. All mapped
-    // non-whitespace content must remain inside the same candidate destination.
-    let mut retained_content = false;
+    // Check retained content rather than only the first byte. Even when structure
+    // allows a complete rewrite, all mapped non-whitespace content must remain
+    // inside the same candidate destination.
+    let mut retained_content = rewritten_same_slot;
     for part in &map.before.parts {
         if part.path != correspondence_source.path() {
             continue;
