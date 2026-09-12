@@ -199,7 +199,7 @@ fn same_destination(
     // An intact, unique structural node survives a reorder even when a character
     // diff represents all of it as deletion/insertion. Require uniqueness in both
     // snapshots so identical blocks or duplicate headings do not confer identity.
-    let matches_content = |node: DiscoveryNode<'_, '_>, source: &Source| {
+    let matches_content = |node: DiscoveryNode<'_, '_>, source: &Source, content: &str| {
         let same_kind = match (old.kind(), node.kind()) {
             (DiscoveryNodeKind::Section { .. }, DiscoveryNodeKind::Section { .. }) => true,
             (DiscoveryNodeKind::MarkdownBlock(a), DiscoveryNodeKind::MarkdownBlock(b)) => {
@@ -211,17 +211,17 @@ fn same_destination(
             && source
                 .local(node.source().path(), node.source().span().start_byte())
                 .is_some()
-            && source.content(node.source()).trim() == old_content.trim()
+            && source.content(node.source()).trim() == content.trim()
     };
     let mut retained = new_graph
         .nodes()
-        .filter(|node| matches_content(*node, &map.after));
+        .filter(|node| matches_content(*node, &map.after, &old_content));
     let first_retained = retained.next();
     if let Some(candidate) = first_retained
         && retained.next().is_none()
         && old_graph
             .nodes()
-            .filter(|node| matches_content(*node, &map.before))
+            .filter(|node| matches_content(*node, &map.before, &old_content))
             .take(2)
             .count()
             == 1
@@ -237,6 +237,14 @@ fn same_destination(
         && let (Some(old_parent), Some(new_parent)) = (old.parent(), new.parent())
         && same_destination(old_parent, new_parent, maps, old_graph, new_graph)
     {
+        // A surviving sibling can occupy the deleted target's slot. Its intact
+        // content establishes a different origin, even when the old target has
+        // no characters left for the diff to track.
+        if old_graph.nodes().any(|node| {
+            node.source() != old.source() && matches_content(node, &map.before, &new_content)
+        }) {
+            return false;
+        }
         let old_slot = old_parent
             .children()
             .iter()

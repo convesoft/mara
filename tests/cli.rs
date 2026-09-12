@@ -452,6 +452,26 @@ fn reference_review_protects_anchors_on_duplicate_blocks() {
 }
 
 #[test]
+fn reference_review_rejects_siblings_taking_an_anchored_blocks_slot() {
+    for (original, sibling) in [("A", "B"), ("First.", "Second.")] {
+        let body = format!("<a name=\"stable\"></a>\n\n{original}\n\n{sibling}");
+        reference_body_update(
+            "[ref](#stable)\n\n",
+            &body,
+            &format!("<a name=\"stable\"></a>\n\n{sibling}"),
+            false,
+        );
+        // Rewriting the target completely is still allowed when the sibling stays put.
+        reference_body_update(
+            "[ref](#stable)\n\n",
+            &body,
+            &format!("<a name=\"stable\"></a>\n\nReplacement\n\n{sibling}"),
+            true,
+        );
+    }
+}
+
+#[test]
 fn reference_review_allows_section_extent_changes() {
     let nested = "# Alpha\n\nAlpha text.\n\n## Beta\n\nBeta text.";
     let siblings = "# Alpha\n\nAlpha text.\n\n# Beta\n\nBeta text.";

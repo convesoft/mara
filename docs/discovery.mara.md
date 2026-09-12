@@ -438,8 +438,10 @@ their reference-style destination definition. Validate such edited destinations;
 merely moving a usage into another definition context grants no exemption.
 Replacing an anchored paragraph's text, including all characters, preserves its
 destination when it remains in the same structural position; an intact original
-block surviving elsewhere must not be mistaken for that replacement. A unique
-heading still requires source correspondence and checks for original direct
+block surviving elsewhere must not be mistaken for that replacement. An intact
+pre-existing block moving into the deleted target's position is a different
+destination, not a rewrite of the target. A unique heading still requires source
+correspondence and checks for original direct
 content surviving elsewhere; renaming a section and adding another with its old
 heading must not retarget an unchanged link. Promoting or demoting subsections
 may change a surviving section's extent without changing its destination.
