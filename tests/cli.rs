@@ -434,6 +434,29 @@ fn reference_review_allows_complete_anchored_paragraph_replacement() {
 }
 
 #[test]
+fn reference_review_rejects_punctuation_only_correspondence_across_slots() {
+    let body = "<a name=\"stable\"></a>\n\nAAA.";
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "Inserted\n\n<a name=\"stable\"></a>\n\nBBB.",
+        false,
+    );
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "<a name=\"stable\"></a>\n\nBBB.",
+        true,
+    );
+    reference_body_update(
+        "[ref](#stable)\n\n",
+        body,
+        "Inserted\n\n<a name=\"stable\"></a>\n\nAAA.",
+        true,
+    );
+}
+
+#[test]
 fn reference_review_protects_anchors_on_duplicate_blocks() {
     let body = "<a name=\"stable\"></a>\n\nFirst.\n\nFirst.";
     reference_body_update(

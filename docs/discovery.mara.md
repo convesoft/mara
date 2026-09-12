@@ -437,8 +437,9 @@ Unchanged link usages remain protected unless the body update explicitly changes
 their reference-style destination definition. Validate such edited destinations;
 merely moving a usage into another definition context grants no exemption.
 Replacing an anchored paragraph's text, including all characters, preserves its
-destination when it remains in the same structural position; an intact original
-block surviving elsewhere must not be mistaken for that replacement. An intact
+destination when it remains in the same structural position. Partial text overlap,
+including shared punctuation, does not exempt rewritten blocks from this check.
+An intact original block surviving elsewhere must not be mistaken for that replacement. An intact
 pre-existing block moving into the deleted target's position is a different
 destination, not a rewrite of the target. A unique heading still requires source
 correspondence and checks for original direct

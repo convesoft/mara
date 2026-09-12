@@ -232,11 +232,13 @@ fn same_destination(
     // elsewhere (including duplicate matches) has been ruled out, the same slot
     // in a corresponding container identifies that edited block without requiring
     // any shared characters.
-    if matches!(old.kind(), DiscoveryNodeKind::MarkdownBlock(_))
-        && first_retained.is_none()
-        && let (Some(old_parent), Some(new_parent)) = (old.parent(), new.parent())
-        && same_destination(old_parent, new_parent, maps, old_graph, new_graph)
-    {
+    if matches!(old.kind(), DiscoveryNodeKind::MarkdownBlock(_)) && first_retained.is_none() {
+        let (Some(old_parent), Some(new_parent)) = (old.parent(), new.parent()) else {
+            return false;
+        };
+        if !same_destination(old_parent, new_parent, maps, old_graph, new_graph) {
+            return false;
+        }
         // A surviving sibling can occupy the deleted target's slot. Its intact
         // content establishes a different origin, even when the old target has
         // no characters left for the diff to track.
@@ -253,9 +255,9 @@ fn same_destination(
             .children()
             .iter()
             .position(|node| node.source() == new.source());
-        if old_slot.is_some() && old_slot == new_slot {
-            return true;
-        }
+        // A failed structural match must not fall through to incidental shared
+        // characters (such as punctuation) as evidence of block identity.
+        return old_slot.is_some() && old_slot == new_slot;
     }
     let mut correspondence_source = old.source();
     let mut destination_source = new.source();
