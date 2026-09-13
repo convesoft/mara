@@ -30,7 +30,7 @@ Each call returns direct neighbours only, with bounded results and explicit
 continuation. There is no `hops` parameter, recursive expansion, automatic path
 assembly, or claim that returned neighbours form a complete trace. Actors may
 request another node's direct neighbours themselves. Richer graph analysis and
-traceability remain future 0.3/0.4 scope.
+traceability remain provisional 0.3 scope.
 
 Verify a narrative search hit leading through a mention to an item and through
 that item's typed relation to another item, as successive calls. Verify the
@@ -271,7 +271,7 @@ The 0.1 item-only contract remains unchanged. The POC's narrative-span and
 derived-mention concepts are useful precedent. The private backend is decided
 separately in [[ADR-PETGRAPH-DISCOVERY]]; the POC's multi-hop traversal and
 broader traceability contracts are not adopted here. Richer graph analysis and
-code traceability remain provisional 0.3/0.4 work.
+code traceability remain provisional 0.3 work.
 :::
 
 :::mara decision ADR-PETGRAPH-DISCOVERY
