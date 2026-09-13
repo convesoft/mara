@@ -52,14 +52,14 @@ evidence and priorities change; detailed behavior becomes canonical in
 See [retrieval scope and contracts](docs/retrieval.mara.md) for implementation
 boundaries, verification expectations, and the accepted narrative boundary.
 
-### 0.1.0 — Stable single-project workflow (in preparation)
+### 0.1.0 — Stable single-project workflow (published)
 
 - Retain the published alpha.3 runtime and formats, reconcile documentation,
   and verify stable release artifacts through one release PR.
 - Follow the [stable scope and readiness contract](docs/release-0.1.mara.md).
   Separate beta/RC publications are not required by the revised release path.
 
-## 0.2.0 — Guided authoring
+## 0.2.0 — Guided authoring (release preparation)
 
 - Prioritize bundled template files, an optional engineering template, and
   project-defined flavour selection guidance together.
@@ -74,22 +74,26 @@ See [accepted outcomes and designs](docs/guided-authoring.mara.md) before
 ticket planning. This scope retains one project and schema for package-local
 documents in a monorepo and does not expand the 0.1 stabilization sequence.
 
-## 0.3.0 — Knowledge change review (provisional)
-
-- Compare items and documents across Git revisions, distinguishing content and
-  relation changes from moves and human-ID renames.
-- Follow item history through immutable identity.
-- Identify related knowledge that may need review and explain its connection
-  to a change; these are review candidates, not proven inconsistencies.
-- Combine diffs, history, and relation context in a bounded review workflow.
-
-## 0.4.0 — Traceability and evolution (provisional)
+## 0.3.0 — Traceability and evolution (provisional)
 
 - Add project-configured traceability rules driven by demonstrated checks.
+- Design current-state rule syntax so later transition checks can extend it
+  without changing the meaning of existing rules.
 - Support deliberate schema migrations for observed vocabulary changes.
 - Generate useful specification and traceability-matrix views from the corpus.
 - Add typed external links when a concrete workflow needs them.
 - Evaluate a code-traceability pilot for one demonstrated language and workflow.
+
+## 0.4.0 — Knowledge change review (provisional)
+
+- Compare items and documents across Git revisions, distinguishing content and
+  relation changes from moves and human-ID renames.
+- Follow item history through immutable identity.
+- Add project-defined lifecycle transition checks using previous and current
+  item states once change comparison is available.
+- Identify related knowledge that may need review and explain its connection
+  to a change; these are review candidates, not proven inconsistencies.
+- Combine diffs, history, and relation context in a bounded review workflow.
 
 The 0.3 and 0.4 groupings are planning directions; define their detailed
 contracts from usage before scheduling implementation.

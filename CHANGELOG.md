@@ -1,6 +1,40 @@
 # Changelog
 
 All notable changes to Mara are generated from Conventional Commit history.
+## [0.2.0]
+
+### Breaking changes and migration
+
+Schema format 2 requires flavour selection guidance. Migrate existing schemas
+in place, preserving custom vocabulary and item identities; do not reinitialize.
+CLI and MCP discovery now use `search`, `get`, and `related` for items and
+narrative, replacing their item-prefixed forms and changing response shapes.
+Use the matching executable and skill, refresh MCP tools, and discard old cursors.
+Follow the [0.2 migration guide](https://github.com/convesoft/mara/blob/v0.2.0/docs/migration-0.2.mara.md)
+for schema examples, command/response mapping, and reference validation changes.
+
+### Added
+
+- Parse Mara items as Markdown containers
+- Derive document structure and direct containment
+- Resolve Markdown links, anchors, and mentions
+- Add discovery handles and shared node summaries
+- Search items and narrative through unified discovery
+- Read every discovery node through unified get
+- Explore direct connections through unified related
+- Protect references across item mutations
+
+### Fixed
+
+- Align 0.2 CLI and MCP onboarding
+
+### Maintenance
+
+- Release 0.2.0
+
+### Tests
+
+- Verify the packaged 0.2 workflow
 ## [0.2.0-alpha.0]
 
 ### Added

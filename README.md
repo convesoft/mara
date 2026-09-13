@@ -5,14 +5,14 @@ designs, decisions, and other durable facts stable identities, types, relations,
 validation, and deterministic retrieval. A CLI and stdio MCP server share the
 same operations, including discovery of narrative outside items.
 
-This checkout documents the 0.2 interface: schema format 2 with flavour
+Mara 0.2.0 provides schema format 2 with flavour
 selection guidance, an engineering template, and unified `search`, `get`, and
 `related`. Start with the [0.2 migration guide](docs/migration-0.2.mara.md) for
 an existing project. The [0.1.0 documentation](https://github.com/convesoft/mara/tree/v0.1.0)
 describes the older released interface; use documentation and skill from the
 same revision as your executable.
 
-## Run the current checkout
+## Run Mara
 
 Build the implementation described here with the pinned Rust toolchain:
 
@@ -28,12 +28,11 @@ an older published prerelease includes; check its help and matching release
 notes before using the 0.2 workflow.
 
 Published npm packages contain prebuilt native binaries and use no install
-scripts or Rust toolchain. To use one, replace `<version>` with the exact
-published version selected for your project:
+scripts or Rust toolchain. After 0.2.0 is published, run the matching version:
 
 ```bash
-npx -y '@convesoft/mara@<version>' --version
-npx -y '@convesoft/mara@<version>' --help
+npx -y '@convesoft/mara@0.2.0' --version
+npx -y '@convesoft/mara@0.2.0' --help
 ```
 
 Keep that exact pin in CLI and MCP launchers. Supported hosts are x64 and
