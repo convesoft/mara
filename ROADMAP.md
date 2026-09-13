@@ -77,6 +77,8 @@ documents in a monorepo and does not expand the 0.1 stabilization sequence.
 ## 0.3.0 — Traceability and evolution (provisional)
 
 - Add project-configured traceability rules driven by demonstrated checks.
+- Design current-state rule syntax so later transition checks can extend it
+  without changing the meaning of existing rules.
 - Support deliberate schema migrations for observed vocabulary changes.
 - Generate useful specification and traceability-matrix views from the corpus.
 - Add typed external links when a concrete workflow needs them.
@@ -87,6 +89,8 @@ documents in a monorepo and does not expand the 0.1 stabilization sequence.
 - Compare items and documents across Git revisions, distinguishing content and
   relation changes from moves and human-ID renames.
 - Follow item history through immutable identity.
+- Add project-defined lifecycle transition checks using previous and current
+  item states once change comparison is available.
 - Identify related knowledge that may need review and explain its connection
   to a change; these are review candidates, not proven inconsistencies.
 - Combine diffs, history, and relation context in a bounded review workflow.
