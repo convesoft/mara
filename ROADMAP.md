@@ -52,14 +52,14 @@ evidence and priorities change; detailed behavior becomes canonical in
 See [retrieval scope and contracts](docs/retrieval.mara.md) for implementation
 boundaries, verification expectations, and the accepted narrative boundary.
 
-### 0.1.0 — Stable single-project workflow (in preparation)
+### 0.1.0 — Stable single-project workflow (published)
 
 - Retain the published alpha.3 runtime and formats, reconcile documentation,
   and verify stable release artifacts through one release PR.
 - Follow the [stable scope and readiness contract](docs/release-0.1.mara.md).
   Separate beta/RC publications are not required by the revised release path.
 
-## 0.2.0 — Guided authoring
+## 0.2.0 — Guided authoring (release preparation)
 
 - Prioritize bundled template files, an optional engineering template, and
   project-defined flavour selection guidance together.
