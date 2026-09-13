@@ -74,7 +74,15 @@ See [accepted outcomes and designs](docs/guided-authoring.mara.md) before
 ticket planning. This scope retains one project and schema for package-local
 documents in a monorepo and does not expand the 0.1 stabilization sequence.
 
-## 0.3.0 — Knowledge change review (provisional)
+## 0.3.0 — Traceability and evolution (provisional)
+
+- Add project-configured traceability rules driven by demonstrated checks.
+- Support deliberate schema migrations for observed vocabulary changes.
+- Generate useful specification and traceability-matrix views from the corpus.
+- Add typed external links when a concrete workflow needs them.
+- Evaluate a code-traceability pilot for one demonstrated language and workflow.
+
+## 0.4.0 — Knowledge change review (provisional)
 
 - Compare items and documents across Git revisions, distinguishing content and
   relation changes from moves and human-ID renames.
@@ -82,14 +90,6 @@ documents in a monorepo and does not expand the 0.1 stabilization sequence.
 - Identify related knowledge that may need review and explain its connection
   to a change; these are review candidates, not proven inconsistencies.
 - Combine diffs, history, and relation context in a bounded review workflow.
-
-## 0.4.0 — Traceability and evolution (provisional)
-
-- Add project-configured traceability rules driven by demonstrated checks.
-- Support deliberate schema migrations for observed vocabulary changes.
-- Generate useful specification and traceability-matrix views from the corpus.
-- Add typed external links when a concrete workflow needs them.
-- Evaluate a code-traceability pilot for one demonstrated language and workflow.
 
 The 0.3 and 0.4 groupings are planning directions; define their detailed
 contracts from usage before scheduling implementation.
