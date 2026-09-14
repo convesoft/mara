@@ -318,6 +318,14 @@ the canonical name. Symmetric connections use their canonical label and
 external neighbours contain only `kind:"external"` and `address`. They are
 terminal: `get` and `related` do not accept them as source references.
 
+Human-facing renderers follow [[REQ-INVERSE-RELATION-AUTHORING]]. From
+`VER-A`, display `verifies → REQ-B`; from `REQ-B`, display
+`verified_by → VER-A`, without an incoming prefix. If `verifies` has no
+inverse alias, the latter falls back to `incoming verifies → VER-A`.
+Render the chosen endpoint's label without rewriting canonical `relation` or
+`direction` in structured results. This presentation rule does not rewrite
+verbatim authored source shown in an excerpt or specification.
+
 Canonical and alias relation filters select the same relation kind. Direction
 filters always use the canonical edge relative to the selected item; an alias
 filter does not reverse the explicit direction. Thus the last request in the

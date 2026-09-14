@@ -72,10 +72,17 @@ the same directed relationship when that alias is declared.
 Resolve endpoint constraints after interpreting the alias. Schema inspection,
 structured relation operations, and relation filtering must recognize declared
 aliases consistently. Reject ambiguous declarations instead of guessing a name's
-meaning. Navigation exposes the canonical meaning and the endpoint-facing label.
+meaning. Every human-facing relationship view uses the name appropriate to
+its displayed endpoint, including CLI navigation, matrices, generated
+specifications and diagnostics. At an incoming endpoint, display the declared
+inverse alias without an incoming prefix; use incoming plus the canonical name
+only when no inverse alias exists. Structured results retain canonical relation
+and direction alongside the endpoint-facing label.
 
 Verify equivalent authoring and querying from both ends, rejection of reversed
 invalid endpoint flavours, and one semantic count when both forms are present.
+Verify endpoint-facing labels across these views with and without an inverse
+alias, while structured canonical relation and direction remain unchanged.
 :::
 
 :::mara requirement REQ-SYMMETRIC-RELATIONS
