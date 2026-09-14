@@ -71,7 +71,7 @@ release. Prereleases use the npm `next` tag; stable releases use `latest`.
 :title: Keep public project and release guidance discoverable
 
 The repository root must provide a concise README, dual-license texts, current
-roadmap through 0.3.0 and Later, security reporting guidance, and generated
+roadmap through 0.4.0 and Later, security reporting guidance, and generated
 changelog. These conventional files must link to canonical Mara contracts
 instead of duplicating their detailed meaning.
 :::

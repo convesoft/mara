@@ -10,7 +10,8 @@ under [the discovery contract](discovery.mara.md).
 
 Prioritize bundled templates and flavour guidance together, then useful
 engineering relations and unified discovery. Diagnostic codes and severity are
-deferred beyond 0.2 until a concrete consumer workflow demonstrates a need.
+outside 0.2; the [planned 0.3 traceability contract](traceability.mara.md)
+introduces them for project-defined validation policy.
 
 This scope uses one Mara project and schema, including documents inside package
 directories. It does not require workspace aggregation, template inheritance,
