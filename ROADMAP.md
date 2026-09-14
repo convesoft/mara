@@ -74,15 +74,22 @@ See [accepted outcomes and designs](docs/guided-authoring.mara.md) before
 ticket planning. This scope retains one project and schema for package-local
 documents in a monorepo and does not expand the 0.1 stabilization sequence.
 
-## 0.3.0 — Traceability and evolution (provisional)
+## 0.3.0 — Traceability and evolution (requirements planning)
 
-- Add project-configured traceability rules driven by demonstrated checks.
-- Design current-state rule syntax so later transition checks can extend it
-  without changing the meaning of existing rules.
+- Enrich relations with inverse authoring, symmetry, typed inline references,
+  cardinality and optional cycle constraints.
+- Add project-defined current-state lifecycle and traceability rules, with
+  qualifying coverage, bounded chains, and diagnostic codes and severity.
+- Keep the rule model extensible to 0.4 transition checks without changing
+  existing current-state meanings.
 - Support deliberate schema migrations for observed vocabulary changes.
 - Generate useful specification and traceability-matrix views from the corpus.
-- Add typed external links when a concrete workflow needs them.
+- Add typed external references without importing remote lifecycle or status.
 - Evaluate a code-traceability pilot for one demonstrated language and workflow.
+
+See [planned requirements and settled design boundaries](docs/traceability.mara.md)
+and [the research comparison](docs/traceability-research.mara.md). Resolve the
+listed interface and pilot decisions before scheduling their implementation.
 
 ## 0.4.0 — Knowledge change review (provisional)
 
@@ -95,12 +102,11 @@ documents in a monorepo and does not expand the 0.1 stabilization sequence.
   to a change; these are review candidates, not proven inconsistencies.
 - Combine diffs, history, and relation context in a bounded review workflow.
 
-The 0.3 and 0.4 groupings are planning directions; define their detailed
-contracts from usage before scheduling implementation.
+The 0.4 grouping remains provisional. Its transition and freshness contracts
+will build on 0.3 and concrete revision-comparison workflows.
 
 ## Later
 
-- Diagnostic codes and severity when a concrete consumer workflow needs them.
 - Multi-project aggregation, nested project boundaries, and cross-project
   relations when independent corpora need a shared operation.
 - Remote template packs and configuration composition when bundled seeds and
