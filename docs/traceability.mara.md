@@ -12,9 +12,10 @@ generated views. One project and its schema remain the evaluation boundary.
 No mandatory engineering lifecycle, complete trace chain, or placeholder items
 are imposed on projects that have not declared those expectations.
 
-Requirements below own observable outcomes. Design items record only settled
-invariants; the open interface decisions at the end must be resolved before
-implementing their affected contracts. CLI and MCP follow
+Requirements below own observable outcomes. The accepted
+[relationship contracts](relations-0.3.mara.md) settle authoring, mutation and
+their format boundaries; the remaining interface decisions at the end must be
+resolved before implementing their affected contracts. CLI and MCP follow
 [[REQ-SURFACE-PARITY]] throughout.
 
 ## Scenarios
@@ -109,8 +110,10 @@ mutations must account for every supported authored form without leaving stale
 references or silently removing unrelated prose.
 
 Verify metadata/inline equivalence, literal examples, and reference-safe edits.
-Exact inline spelling and prose-preserving removal behavior require the syntax
-and mutation design described in the implementation decisions below.
+Inline spelling follows [[DES-RELATION-AUTHORING]]. Relationship removal
+preserves surrounding prose and demotes inline assertions to ordinary navigation;
+explicit occurrence removal reports whether other assertions still establish
+the edge. The mutation contract and examples are in [[DES-RELATION-MUTATION]].
 :::
 
 :::mara requirement REQ-TRACE-COVERAGE
@@ -315,6 +318,7 @@ operations and whether they require automation remain a bounded design choice.
 :satisfies: REQ-INVERSE-RELATION-AUTHORING
 :satisfies: REQ-SYMMETRIC-RELATIONS
 :satisfies: REQ-TYPED-INLINE-RELATIONS
+:satisfies: REQ-TYPED-EXTERNAL-TARGETS
 
 Extend the disposable graph of [[ADR-PETGRAPH-DISCOVERY]] with a distinction
 between semantic relationships and authored occurrences. Internal endpoint
@@ -333,10 +337,14 @@ Bare mentions and structural connections retain their own meaning. An external
 target is explicitly distinguished from an internal item, without a fabricated
 MID or lifecycle. Graph storage remains a derived in-memory projection.
 
-This design establishes semantic normalization, not the mutation protocol.
-The interface design must settle duplicate-add behavior and whether removal
-targets one occurrence or the whole semantic relationship; a successful
-removal must state what remains.
+External endpoint identity is its exact address under [[DES-RELATION-AUTHORING]].
+A directed internal-to-external edge is identified by canonical relation,
+source MID and external address. It has no fabricated external MID.
+
+Authoring declarations and spelling follow [[DES-RELATION-AUTHORING]].
+Duplicate add and whole-edge/occurrence removal follow [[DES-RELATION-MUTATION]];
+results and bounded occurrence inspection follow [[DES-RELATION-INTERFACES]].
+Format and client migration follow [[DES-RELATION-COMPATIBILITY]].
 :::
 
 :::mara design DES-DECLARATIVE-TRACE-RULES
@@ -407,6 +415,18 @@ Run the supported migration workflow on a customized copy and compare MIDs,
 unrelated content and links before/after. Keep code-pilot verification with its
 eventual language/workflow design. These are future acceptance procedures;
 this item records no claim that 0.3 functionality is implemented or passing.
+
+For relationship authoring, use the declarations in [[DES-RELATION-AUTHORING]]
+and requests in [[DES-RELATION-INTERFACES]]. Establish one edge through metadata,
+inverse metadata and inline source; inspect three occurrences and one semantic
+edge. Reject a duplicate add without changing bytes. Run both removal examples
+in [[DES-RELATION-MUTATION]] from the same initial fixture and compare exact
+source text, counts and edge presence on CLI and MCP. Repeat with a symmetric
+pair and an external address. Check stale occurrence rejection, alias collision,
+invalid endpoint flavours, literal typed examples, rename and a move/removal
+blocked by a surviving Markdown anchor link. Exercise occurrence continuation
+with more than 20 assertions, and the customized migration examples in
+[[DES-RELATION-COMPATIBILITY]].
 :::
 
 ## Code-traceability pilot
@@ -428,9 +448,8 @@ can claim readiness:
 
 | Design area | Remaining choice and required example |
 |---|---|
-| Authoring and mutation | Exact alias/symmetry declarations, typed inline spelling and external-target representation; duplicate add and occurrence-versus-relationship removal, including preservation of surrounding prose. |
 | Rules and diagnostics | Small operator vocabulary, missing-field/empty-set semantics, composition with cardinality/cycle constraints, bounds, diagnostic codes and severity policy. Show approved-requirement, accepted-design and mitigated-risk examples plus a future transition without changing existing rule meaning. |
-| Views and migration | Minimum selection/output contracts and CLI/MCP entry points; supported vocabulary changes and manual versus automated migration. Decide persisted/protocol format compatibility explicitly. |
+| Views and migration | Minimum view selection/output contracts and CLI/MCP entry points; further vocabulary migration operations and manual versus automated application. Relationship format compatibility and the deliberate migration baseline are settled in [relationship contracts](relations-0.3.mara.md). |
 | Code pilot | First language, repository workflow and file/symbol scope, then whether the result is suitable to ship. |
 
 Optional engineering-template lifecycle examples may demonstrate these rules;

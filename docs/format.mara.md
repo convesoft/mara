@@ -4,9 +4,10 @@ This file defines the document syntax, including narrative mentions introduced
 in 0.2. See [discovery](discovery.mara.md) for derived structure, link resolution,
 and unified discovery interfaces.
 
-This is the 0.2 syntax baseline. Planned inverse authoring and typed inline
-relations are specified as outcomes in [traceability](traceability.mara.md);
-their concrete syntax has not yet replaced this contract.
+This is the 0.2 syntax baseline. Accepted 0.3 inverse authoring, typed inline
+syntax and migration boundaries are specified in
+[relationship contracts](relations-0.3.mara.md). They have not yet replaced
+this shipped contract.
 
 :::mara design DES-DOCUMENT-FORMAT
 :mid: 01M1PXP2KG381MM1VNN6XC7S4M
