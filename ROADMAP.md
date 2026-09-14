@@ -59,7 +59,7 @@ boundaries, verification expectations, and the accepted narrative boundary.
 - Follow the [stable scope and readiness contract](docs/release-0.1.mara.md).
   Separate beta/RC publications are not required by the revised release path.
 
-## 0.2.0 — Guided authoring (release preparation)
+## 0.2.0 — Guided authoring (published)
 
 - Prioritize bundled template files, an optional engineering template, and
   project-defined flavour selection guidance together.

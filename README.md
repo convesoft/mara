@@ -28,7 +28,7 @@ an older published prerelease includes; check its help and matching release
 notes before using the 0.2 workflow.
 
 Published npm packages contain prebuilt native binaries and use no install
-scripts or Rust toolchain. After 0.2.0 is published, run the matching version:
+scripts or Rust toolchain. Run the stable 0.2.0 version:
 
 ```bash
 npx -y '@convesoft/mara@0.2.0' --version
