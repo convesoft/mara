@@ -13,8 +13,9 @@ No mandatory engineering lifecycle, complete trace chain, or placeholder items
 are imposed on projects that have not declared those expectations.
 
 Requirements below own observable outcomes. The accepted
-[relationship contracts](relations-0.3.mara.md) settle authoring, mutation and
-their format boundaries; the remaining interface decisions at the end must be
+[relationship contracts](relations-0.3.mara.md) settle authoring and mutation;
+[rule and view contracts](rules-0.3.mara.md) settle policy, diagnostics, generated
+views and their format boundaries. Remaining decisions at the end must be
 resolved before implementing their affected contracts. CLI and MCP follow
 [[REQ-SURFACE-PARITY]] throughout.
 
@@ -372,11 +373,13 @@ obligation, an unmet obligation and unavailable evaluation caused by invalid
 prerequisites or bounds. A partial evaluation is never a successful full check.
 Views and validation reuse these semantics.
 
-Keep syntax declarative and project-owned. Do not introduce arbitrary code
-execution or a general workflow engine. The persisted grammar, operator set,
-missing-field behavior, diagnostics and public response shape require worked
-examples before implementation. This item does not adopt JSON Schema, Python
-expressions, a particular YAML spelling, or a new format-version number.
+Concrete grammar and worked examples are in [[DES-TRACE-RULE-GRAMMAR]].
+Structural graph policies compose under [[DES-TRACE-GRAPH-CONSTRAINTS]].
+Bounds and diagnostics follow [[DES-TRACE-DIAGNOSTIC-INTERFACE]]; matrices and
+specifications follow [[DES-TRACE-VIEW-INTERFACES]]. Compatibility, including
+the future transition exercise, follows [[DES-TRACE-CONTRACT-COMPATIBILITY]].
+Keep syntax declarative and project-owned; no arbitrary code execution or
+general workflow engine is introduced.
 :::
 
 :::mara decision ADR-CURRENT-STATE-BEFORE-TRANSITIONS
@@ -437,6 +440,30 @@ invalid endpoint flavours, literal typed examples, rename and a move/removal
 blocked by a surviving Markdown anchor link. Exercise occurrence continuation
 with more than 20 assertions, and the customized migration examples in
 [[DES-RELATION-COMPATIBILITY]].
+
+For rules and views, use [[DES-TRACE-RULE-GRAMMAR]]'s fixture table and nested
+evidence check through validation and matrix requests. Repeat the uncovered
+approved requirement with warning severity, with its path hidden, and with
+an explicit work limit. Assert state, counts, validity, diagnostic code and
+source/configuration locations against [[DES-TRACE-DIAGNOSTIC-INTERFACE]].
+Test empty every with/without minimum, missing versus blank fields, a passing
+any with a failing alternative, and an unavailable prerequisite.
+
+Verify structural and conditional count failures independently under
+[[DES-TRACE-GRAPH-CONSTRAINTS]], including an alias-authored cycle, a self-loop
+and a permitted cycle. Exhaust an 8-step chain's work budget and reject a
+9-step definition; output continuation must not resume evaluation or alter
+validity. Follow output cursors to completion and reject them after a source
+change or changed max_work.
+
+Generate a path-selected specification containing narrative and an item-only
+selection without it; verify source links relative to the project root,
+relationship labels, outside-selection neighbours and content reconstruction
+across pages. Regenerate unchanged for identical output, then after an item
+edit for updated content. Compare canonical source bytes before/after generation.
+Use [[DES-TRACE-CONTRACT-COMPATIBILITY]] to inspect the customized schema
+migration and future transition exercise; the future syntax must be rejected
+by 0.3. These procedures remain implementation acceptance, not executed evidence.
 :::
 
 ## Code-traceability pilot
@@ -458,8 +485,7 @@ can claim readiness:
 
 | Design area | Remaining choice and required example |
 |---|---|
-| Rules and diagnostics | Small operator vocabulary, missing-field/empty-set semantics, composition with cardinality/cycle constraints, bounds, diagnostic codes and severity policy. Show approved-requirement, accepted-design and mitigated-risk examples plus a future transition without changing existing rule meaning. |
-| Views and migration | Minimum view selection/output contracts and CLI/MCP entry points; further vocabulary migration operations and manual versus automated application. Relationship format compatibility and the deliberate migration baseline are settled in [relationship contracts](relations-0.3.mara.md). |
+| Further migration operations | Supported vocabulary transformations and manual versus automated application beyond the deliberate migration baseline. Format boundaries and policy adoption are settled in [relationship contracts](relations-0.3.mara.md) and [rule and view contracts](rules-0.3.mara.md). |
 | Code pilot | First language, repository workflow and file/symbol scope, then whether the result is suitable to ship. |
 
 Optional engineering-template lifecycle examples may demonstrate these rules;

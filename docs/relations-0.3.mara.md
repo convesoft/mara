@@ -457,9 +457,10 @@ explicitly review its meaning and occurrences before adopting the alias;
 migration must never merge them merely because their names appear reciprocal.
 
 An invalid candidate leaves the recoverable baseline available and must not be
-reported as a completed migration. Automation, further vocabulary migration
-operations and lifecycle/rule grammar remain under [[REQ-SCHEMA-EVOLUTION]];
-this contract does not introduce a migration command. The repository's active
+reported as a completed migration. Automation and further vocabulary migration operations remain under
+[[REQ-SCHEMA-EVOLUTION]]. Rule grammar, validation/view formats and policy
+adoption follow [[DES-TRACE-CONTRACT-COMPATIBILITY]]; this relationship
+contract does not introduce a migration command. The repository's active
 schema and executable must not advance to these formats during this design-only
 change.
 :::
