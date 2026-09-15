@@ -426,7 +426,10 @@ this item records no claim that 0.3 functionality is implemented or passing.
 For relationship authoring, use the declarations in [[DES-RELATION-AUTHORING]]
 and requests in [[DES-RELATION-INTERFACES]]. Establish one edge through metadata,
 inverse metadata and inline source; inspect three occurrences and one semantic
-edge. Reject a duplicate add without changing bytes. Run both removal examples
+edge. Check directed and symmetric self-edges with omitted direction and each
+explicit direction filter against [[DES-RELATION-INTERFACES]], including a
+one-connection page limit and continuation without repeated self-edges.
+Reject a duplicate add without changing bytes. Run both removal examples
 in [[DES-RELATION-MUTATION]] from the same initial fixture and compare exact
 source text, counts and edge presence on CLI and MCP. Repeat with a symmetric
 pair and an external address. Check stale occurrence rejection, alias collision,

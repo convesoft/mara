@@ -332,8 +332,23 @@ filter does not reverse the explicit direction. Thus the last request in the
 table returns the incoming `verifies` edge labelled `verified_by`.
 Omitting direction includes incoming, outgoing and symmetric connections;
 `direction:"symmetric"` selects symmetric only, and incoming/outgoing exclude
-symmetric edges. A directed self-edge is returned once per requested orientation;
-a symmetric self-edge once. Neither changes its one-edge semantic count.
+symmetric edges.
+
+A directed self-edge has one connection, with this deterministic orientation:
+
+| Direction filter | Result |
+|---|---|
+| Omitted | Once as `outgoing`, with the canonical label. |
+| `outgoing` | Once as `outgoing`, with the canonical label. |
+| `incoming` | Once as `incoming`, with the inverse alias when declared, otherwise the canonical label. |
+| `symmetric` | Excluded. |
+
+A symmetric self-edge appears once as `symmetric` when direction is omitted or
+`symmetric`, and is excluded by incoming/outgoing filters. Deduplicate semantic
+schema edges and choose self-edge orientation before sorting and pagination.
+Each included self-edge consumes one connection slot and cannot reappear in
+another orientation on a later page. This presentation choice does not change
+its one-edge semantic count.
 
 Neighbour-flavour filters exclude external endpoints. Existing item-list and
 search relation filters also resolve aliases to canonical kinds, preserving
