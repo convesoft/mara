@@ -373,7 +373,7 @@ obligation, an unmet obligation and unavailable evaluation caused by invalid
 prerequisites or bounds. A partial evaluation is never a successful full check.
 Views and validation reuse these semantics.
 
-Concrete grammar and worked examples are in [[DES-TRACE-RULE-GRAMMAR]].
+The native Turtle/CEL binding and worked examples are in [[DES-TRACE-RULE-GRAMMAR]].
 Structural graph policies compose under [[DES-TRACE-GRAPH-CONSTRAINTS]].
 Bounds and diagnostics follow [[DES-TRACE-DIAGNOSTIC-INTERFACE]]; matrices and
 specifications follow [[DES-TRACE-VIEW-INTERFACES]]. Compatibility, including
@@ -447,7 +447,7 @@ approved requirement with warning severity, with its path hidden, and with
 an explicit work limit. Assert state, counts, validity, diagnostic code and
 source/configuration locations against [[DES-TRACE-DIAGNOSTIC-INTERFACE]].
 Test empty every with/without minimum, missing versus blank fields, a passing
-any with a failing alternative, and an unavailable prerequisite.
+SHACL alternative with a failing alternative, and an unavailable prerequisite.
 
 Verify structural and conditional count failures independently under
 [[DES-TRACE-GRAPH-CONSTRAINTS]], including an alias-authored cycle, a self-loop
@@ -464,6 +464,17 @@ edit for updated content. Compare canonical source bytes before/after generation
 Use [[DES-TRACE-CONTRACT-COMPATIBILITY]] to inspect the customized schema
 migration and future transition exercise; the future syntax must be rejected
 by 0.3. These procedures remain implementation acceptance, not executed evidence.
+
+Load the documented Turtle/CEL examples from explicit configured rule files.
+Verify project-format/binding-version errors, missing files, malformed Turtle,
+unsupported executable predicates and an unknown named shape. Confirm standard
+CEL presence guards, surfaced missing-field errors, Boolean error masking
+inside one expression and an independent target error that prevents a full
+pass. Preserve actual Turtle/CEL source spans after lowering, including escaped
+multiline strings and blank-node shapes. Change a rule source between pages
+and reject the old cursor. Exercise native request-check files through CLI/MCP
+without enabling them as project policy. Verify the budget inside both engines,
+not merely by counting calls into them.
 :::
 
 ## Code-traceability pilot

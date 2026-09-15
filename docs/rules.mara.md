@@ -7,206 +7,264 @@ results, not checks executed by the 0.2 binary. The active schema and executable
 remain unchanged. Project examples require the illustrated vocabulary; they
 do not add lifecycle policy to bundled templates or existing projects.
 
-[[EVD-SHACL-CEL-SPIKE]] evaluates SHACL with CEL as an alternative language
-foundation. It does not yet replace the grammar below: persisted syntax and
-a bounded Rust integration remain unresolved for that alternative.
+The accepted language foundation is native SHACL with CEL expressions, supported
+by [[EVD-SHACL-CEL-SPIKE]]. The contracts below replace the earlier unshipped
+custom YAML predicates; loading the binding and enforcing all bounds remain
+implementation work.
 
 :::mara design DES-TRACE-RULE-GRAMMAR
 :mid: 01M2JNZMJ0VT20GWH4HF6DBBC5
-:title: Declare current-state predicates and qualified relationship obligations
+:title: Bind native SHACL shapes and CEL predicates to project items
 :satisfies: REQ-CURRENT-STATE-RULES
 :satisfies: REQ-TRACE-COVERAGE
 :satisfies: REQ-BOUNDED-TRACE-CHAINS
 
-Schema format 3 adds an optional top-level `rules` mapping, defaulting to
-empty. Each key is a unique project-owned rule name using lowercase snake case;
-it is stable configuration identity, not an item ID or MID. A rule contains
-`select`, optional `when`, required `require`, and optional `severity`
-(`error` by default, or `warning`). Its context is always the current snapshot.
-Reject unknown keys/operators and duplicate YAML mapping keys.
+Adopt CEL expressions for local predicates and SHACL shapes for relationship
+obligations. This replaces the unshipped Mara-specific YAML predicate grammar;
+the former `field`, `all`, `any`, `related`, `qualifies` and `every`
+mappings are not a second supported language. [[EVD-SHACL-CEL-SPIKE]] verifies
+a native Rust integration using cel 0.14.5 and shacl 0.3.21.
 
-## Selection and applicability
+## Native source files and identity
 
-`select` requires a nonempty `flavours` list of declared flavours. Optional
-`paths` selects document paths/subtrees using the existing retrieval path
-grammar. Omitted filters add no restriction; supplied lists must be nonempty. OR within a category, AND
-between categories. Unknown vocabulary is a configuration error;
-an empty result from valid filters is not an error. Persisted rules do not
-select mutable item IDs; exact ID/MID selection remains a view-request filter.
+Store rules in UTF-8 Turtle (`.ttl`) with CEL expressions as string literals.
+Project configuration references explicit project-relative files; no rule bodies
+are embedded in schema YAML. The planned configuration addition is:
 
-`when` is a local predicate, defaulting to true. It cannot traverse relations.
-Selection mismatch or false applicability means `not_applicable`, imposing
-no obligation. A missing optional status therefore does not activate a rule
-whose condition is `status == approved`. Make status universally required in
-the flavour declaration if that is the project's intention.
+```toml
+[rules]
+format_version = 1
+files = ["rules/traceability.ttl"]
+```
 
-## Predicate grammar
+[[DES-TRACE-CONTRACT-COMPATIBILITY]] defines the enclosing project format.
+Absent `rules` or an empty file list means no conditional rules. Resolve paths
+from the project root, require existing regular `.ttl` files within that root,
+reject duplicates and do not expand globs. Combine the listed files into one
+shapes graph, preserving every source occurrence. File order is not override
+precedence. Conflicting single-valued parameters are `rule_invalid`; repeated
+identical RDF triples have one meaning. Loading an enabled file must not silently
+fail or use cached rules from another snapshot.
 
-A predicate is exactly one of the following mappings. `when` permits only
-field predicates and local `all`/`any` compositions; `require`, `qualifies`
-and `every` also permit `related`.
+Only Turtle is supported initially. Do not fetch imports, remote contexts,
+schemas or namespace IRIs. A namespace is an identifier, not a download request.
+References between named shapes resolve within the combined graph; blank nodes
+are file-local. Require absolute shape IRIs or an explicit absolute `@base`
+so a checkout's filesystem location cannot change rule identity.
 
-| Shape | Meaning |
+An enabled rule is a named `sh:NodeShape` with `sh:targetClass` naming one or
+more declared flavour classes. Multiple targets select their union. Shapes
+without targets are reusable obligations, not independently executed rules.
+The expanded root shape IRI is the rule's identity; prefix labels and filenames
+are not identity. Persisted `sh:targetNode`, implicit class targets and other
+target mechanisms are outside this profile. Exact item selection belongs in
+requests. Unknown flavours, relation vocabulary and unsupported constraints
+must be rejected rather than ignored.
+
+## Mara binding to the standard languages
+
+Use `m: <urn:mara:rules:1:>`, `f: <urn:mara:flavour:>` and
+`r: <urn:mara:relation:>` for the adapter, flavour and canonical relation
+namespaces. These namespaces are part of the version-1 binding.
+
+Project each internal item as `urn:mara:mid:MID`, with `rdf:type` for its
+declared flavour. Project each canonical relation once, using its canonical
+name as the predicate local part. Normalize inverse authoring first; SHACL
+inverse paths choose incoming traversal. Symmetric edges expose both directions
+but a self-edge appears once. Retain source occurrences outside the RDF set.
+Flavour and relation names are encoded as UTF-8 percent-escaped IRI suffixes
+when needed; do not normalize case or substitute alias names.
+
+External endpoints remain distinct terminal nodes keyed by the exact normalized
+address from [[DES-CANONICAL-TRACE-RELATIONS]], using
+`urn:mara:external:` plus its percent-encoded address. They have no item flavour
+or CEL field context. Count them where the relation permits; do not traverse
+through them or interpret their URI as fetched RDF.
+
+The host binding adds only these source properties:
+
+| Property | Allowed location and meaning |
 |---|---|
-| `{field: NAME, exists: true}` | At least one authored value is present. |
-| `{field: NAME, exists: false}` | No authored value is present. |
-| `{field: NAME, equals: VALUE}` | At least one present value equals VALUE. |
-| `{field: NAME, in: [VALUE, ...]}` | At least one present value equals a member of the nonempty list. |
-| `{field: NAME, nonblank: true}` | At least one present string value has a non-whitespace character. |
-| `{all: [PREDICATE, ...]}` | Every predicate passes. |
-| `{any: [PREDICATE, ...]}` | At least one predicate passes. |
-| `{related: RELATION_CHECK}` | Evaluate the selected relationships as below. |
+| `m:when` | At most one CEL string on an enabled rule root. False means not applicable; omitted means true. |
+| `m:cel` | At most one CEL string on an internal-item node shape. It is an obligation, conjunctive with that shape's SHACL constraints. |
+| `m:paths` | Zero or more path/subtree strings on an enabled rule root, using existing retrieval path rules. OR within paths, AND with flavour targets. Omitted means all project paths. |
 
-Lists for `all` and `any` must be nonempty. A field predicate has exactly
-one operator. Field names refer only to schema-declared custom fields, not
-title, ID, MID or relations. Each field must be declared on every possible
-internal flavour in that predicate's scope. Narrow `select.flavours` or
-`target.flavours` when needed. Wrong literal types or enum values are
-configuration errors, even when no item currently matches.
+These properties are Mara extensions, not standard SHACL/CEL vocabulary.
+A generic SHACL validator may ignore them; it cannot validate an authored Mara
+rule file correctly without the adapter. Reject unknown executable vocabulary,
+SPARQL/JavaScript constraints, external code, recursive shape references and
+unbounded property paths in this initial profile.
 
-Compare parsed schema scalar types: booleans and numbers by value, strings
-and enums exactly and case-sensitively after ordinary metadata trimming.
-Do not coerce strings to numbers. `nonblank` is allowed only for string fields.
-For repeatable fields, the operators above test existence or any qualifying
-value; they do not require every repeated value to match. A missing field
-fails `equals`, `in` and `nonblank`; a present empty string passes
-`exists:true` and `equals:""`, but fails `nonblank:true`.
-An invalid authored value is an unavailable prerequisite, not a missing value.
-No negation, regex, arithmetic, scripts, interpolation or user functions are
-part of this grammar.
+CEL receives `node`, a map of schema-declared custom fields only. Scalars
+retain schema meaning: strings/enums are CEL strings, booleans are bools,
+integers are signed CEL ints and floating values are doubles. Repeatable fields
+are lists in authored order; absent optional fields have no map key. An authored
+empty string remains present. IDs, titles and relations are not implicit
+custom fields. Unsupported numeric values are invalid inputs, never coerced.
 
-## Relationship checks and chains
+Use standard CEL syntax, operators, collection macros and Boolean/error
+semantics, without user-defined functions, I/O, clock or network bindings.
+Expressions must produce bool. Validate syntax and available declarations
+before running item checks; dynamic map lookups still follow CEL runtime
+semantics. Invalid authored metadata prevents evaluating the affected item;
+it is not represented as absence. Schema enums constrain authored values:
+a comparison to another string is legal CEL and can simply evaluate false.
 
-`RELATION_CHECK` contains:
+For optional fields, write explicit guards:
 
-| Key | Contract |
+```cel
+has(node.status) && node.status == "approved"
+```
+
+An unguarded absent map key is an evaluation error, not implicit false.
+Within one expression, CEL can determine a Boolean result despite another
+operand's error, for example a true alternative. Do not rewrite CEL's
+operators to the former YAML composition semantics. Across independently
+required expression/shape checks, retain evaluation failures separately so
+another qualifying target cannot hide them.
+
+## Relationship shapes and evaluation
+
+The initial SHACL profile supports flavour classes, predicate and inverse
+relation paths, `sh:property`, `sh:node`, `sh:minCount`, `sh:maxCount`,
+`sh:qualifiedValueShape`, qualified minimum/maximum, `sh:in`, and
+`sh:and`/`sh:or`/`sh:not`. `sh:name`, `sh:description`,
+`sh:message` and `sh:severity` provide annotations. Compound traversal is
+expressed with nested shapes, not arbitrary path expansion. The binding's
+SHACL subset is explicit; it is not a claim to implement all SHACL features.
+
+A property shape's selected set is the distinct endpoints of its path.
+Flavour/status restrictions belong in the qualifying node shape. Thus
+`selected_count` includes nonqualifying endpoints; `qualifying_count`
+includes only those satisfying the complete qualifier. Use `sh:node` when
+every selected endpoint must conform. An empty set satisfies `sh:node`;
+an explicit minimum requires existence. Counts apply at the immediate hop,
+not to all downstream paths. Two verifications sharing evidence remain two
+first-hop endpoints.
+
+Only schema-compatible relations and internal CEL contexts are valid. An
+external-capable path may use plain counts; CEL qualification must be scoped
+to a declared internal flavour before the adapter evaluates it. Flavour
+mismatch makes the node nonqualifying without binding nonexistent item fields.
+Unconstrained graph cycles do not change finite nested-shape semantics.
+[[DES-TRACE-DIAGNOSTIC-INTERFACE]] defines depth and work limits.
+
+Root severity is `sh:Violation` by default, mapped to error; explicit
+`sh:Warning` maps to warning. The root owns the policy severity of its
+reusable obligations. Nested severity overrides and other severities are
+rejected initially. SHACL conformance and Mara validity are distinct:
+a complete warning-only failure remains valid in Mara.
+
+The adapter may materialize each CEL-qualified MID set as `sh:in` before
+native SHACL execution, as tested in [[EVD-SHACL-CEL-SPIKE]]. The set is
+request-local generated data, never persisted policy. Preserve a separate
+error ledger and authored-shape/source mapping through lowering. Evaluate
+only contexts selected by root scope and explicit relationship obligations;
+unrelated items must not generate CEL errors for an inapplicable rule.
+
+## Worked native rules
+
+This complete Turtle example assumes optional project-defined statuses, an
+optional string owner, and the directed relations shown by the paths.
+
+```turtle
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix m: <urn:mara:rules:1:> .
+@prefix f: <urn:mara:flavour:> .
+@prefix r: <urn:mara:relation:> .
+@prefix rule: <urn:example:rules:> .
+
+rule:approved_requirement a sh:NodeShape ;
+    sh:targetClass f:requirement ;
+    m:when """has(node.status) && node.status == "approved" """ ;
+    m:cel """has(node.owner) && node.owner.matches(r'(?s).*\\S.*')""" ;
+    sh:property rule:verification_count .
+
+rule:verification_count a sh:PropertyShape ;
+    sh:path [ sh:inversePath r:verifies ] ;
+    sh:qualifiedValueShape rule:approved_verification ;
+    sh:qualifiedMinCount 1 .
+
+rule:approved_verification a sh:NodeShape ;
+    sh:class f:verification ;
+    m:cel """has(node.status) && node.status == "approved" """ .
+
+rule:accepted_design a sh:NodeShape ;
+    sh:targetClass f:design ;
+    m:when """has(node.status) && node.status == "accepted" """ ;
+    sh:property [
+        sh:path r:satisfies ;
+        sh:qualifiedValueShape [ sh:class f:requirement ] ;
+        sh:qualifiedMinCount 1
+    ] .
+
+rule:mitigated_risk a sh:NodeShape ;
+    sh:targetClass f:risk ;
+    m:when """has(node.status) && node.status == "mitigated" """ ;
+    sh:property [
+        sh:path [ sh:inversePath r:mitigates ] ;
+        sh:qualifiedValueShape [ sh:class f:design ] ;
+        sh:qualifiedMinCount 1
+    ] .
+```
+
+| Fixture | Required outcome |
 |---|---|
-| `relation` | Required one schema relation name or inverse alias. Builtins are not policy edges. |
-| `direction` | Required `outgoing`, `incoming` or `symmetric`, relative to the item and canonical relation. |
-| `target` | Required selector with `kind: item` or `kind: external`; item selectors may add nonempty `flavours`. |
-| `qualifies` | Optional endpoint predicate, default true. |
-| `count` | Optional mapping with `minimum` and/or `maximum` nonnegative integers; minimum cannot exceed maximum. |
-| `every` | Optional predicate that must pass for every selected endpoint. |
+| Approved requirement, owner present, only a draft verification | Failed: qualifying count 0, selected count 1. |
+| Add an approved verification and repeat its authored edge | Passed: qualifying count 1, selected count 2. |
+| Add `sh:node rule:approved_verification` to verification_count | Failed because of the draft; qualified minimum still passes. |
+| No verification and only `sh:node`, with no minimum | Passed. |
+| No verification and minimum one | Failed minimum. |
+| Approved requirement with blank/missing owner | Failed local obligation. |
+| Draft requirement or absent optional status | Not applicable under the guarded condition. |
+| Accepted design without a satisfies edge | Failed; one requirement edge satisfies the minimum. |
+| Mitigated risk without incoming mitigation | Failed; one design mitigation satisfies the minimum. |
 
-At least one of `count` and `every` is required. An omitted count bound is
-unconstrained. Resolve aliases without reversing the explicit direction,
-matching relationship navigation. Require symmetric direction exactly for a
-symmetric declaration. Reject impossible orientation/target-kind/flavour
-combinations against the declaration. External targets are outgoing only;
-`target.kind:external` prohibits `qualifies`, `every`, fields and further
-steps. External checks can count explicit addresses only.
+To require passing evidence for each qualifying verification, add these triples
+to the same file:
 
-First select semantic edges by relation, orientation and target selector.
-Count the selected edges whose endpoint satisfies `qualifies`, including
-one per edge even when several authored occurrences assert it. `every`
-examines all selected edges, including those rejected by `qualifies`.
-A flavour/kind excluded by `target` is outside this obligation, not a
-non-qualifying target. Counts and `every` must both pass when both are present.
+```turtle
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix m: <urn:mara:rules:1:> .
+@prefix f: <urn:mara:flavour:> .
+@prefix r: <urn:mara:relation:> .
+@prefix rule: <urn:example:rules:> .
 
-An empty selected set has qualifying count zero and satisfies `every`.
-Require `count: {minimum: 1}` as well when presence is mandatory.
-For one relation at one item each distinct endpoint contributes one semantic
-edge. Directed and symmetric self-edges count once in their selected direction.
-Different relation kinds never substitute for the named kind.
+rule:approved_verification sh:property [
+    sh:path [ sh:inversePath r:evidences ] ;
+    sh:qualifiedValueShape [
+        sh:class f:evidence ;
+        m:cel """has(node.outcome) && node.outcome == "passed" """
+    ] ;
+    sh:qualifiedMinCount 1
+] .
+```
 
-Nested `related` predicates in `qualifies` or `every` form explicit chains.
-Each hop is evaluated at the previous endpoint; a parent count counts its
-immediate qualifying edges, not all downstream paths or terminal endpoints.
-For example, a requirement's two verifications with the same evidence still
-count as two first-hop verification edges. Nesting preserves whether downstream
-coverage is required for some or every first-hop verification.
-Never expand unspecified relations or recursively apply other named rules.
+An approved verification without passing evidence does not qualify at the first
+hop. Adding passing evidence closes that gap. A draft verification remains
+nonqualifying even with evidence. These checks inspect recorded assertions;
+they do not execute verification or establish evidence trustworthiness/freshness.
 
 ## Evaluation states
 
-Report `not_applicable`, `passed`, `failed` or `unavailable` for each
-item/rule pair. Applicable obligations expose the same states except
-`not_applicable`. Evaluate independently discoverable obligations even when
-a sibling fails. If any prerequisite/child evaluation is unavailable, the
-containing predicate and applicable rule are unavailable, including `any`
-with another passing child; retain known failures in its explanation.
-Otherwise use ordinary all/any logic.
+Retain `not_applicable`, `passed`, `failed` and `unavailable` at the
+item/rule boundary. Invalid source, unresolved identities, invalid definitions
+and exhausted bounds must not become zero counts or false applicability.
+Continue independent checks whose prerequisites are available. Any unavailable
+required child makes the containing shape/rule unavailable, including a
+SHACL alternative with another passing child. This is Mara completeness
+reporting; ordinary Boolean evaluation inside a single CEL expression remains
+standard CEL.
 
-Invalid source, unresolved identities, invalid rule definitions or exhausted
-evaluation bounds must never become zero counts or false applicability.
-Continue independent checks whose prerequisites remain available. Policy
-severity changes reporting/validity, not selection or predicate truth.
 Ordinary source edits and structured mutations are evaluated identically;
-policy failures do not create a new mutation gate.
+policy failure does not introduce a new mutation gate. Rust library integration
+is tested, but loading this persisted binding, precise source mapping and
+enforcing whole-engine work accounting remain implementation obligations.
 
-## Worked current-state rules
-
-These schema excerpts assume optional enum statuses with the illustrated
-values, an optional string `owner` on requirements, and directed relations
-`verifies: verification -> requirement`, `satisfies: design -> requirement`,
-`mitigates: design -> risk`, and `evidences: evidence -> verification`.
-
-```yaml
-rules:
-  approved_requirement:
-    select: {flavours: [requirement]}
-    when: {field: status, equals: approved}
-    require:
-      all:
-        - {field: owner, nonblank: true}
-        - related:
-            relation: verifies
-            direction: incoming
-            target: {kind: item, flavours: [verification]}
-            qualifies: {field: status, equals: approved}
-            count: {minimum: 1}
-  accepted_design:
-    select: {flavours: [design]}
-    when: {field: status, equals: accepted}
-    require:
-      related:
-        relation: satisfies
-        direction: outgoing
-        target: {kind: item, flavours: [requirement]}
-        count: {minimum: 1}
-  mitigated_risk:
-    select: {flavours: [risk]}
-    when: {field: status, equals: mitigated}
-    require:
-      related:
-        relation: mitigates
-        direction: incoming
-        target: {kind: item, flavours: [design]}
-        count: {minimum: 1}
-```
-
-| Fixture | Expected rule result |
-|---|---|
-| Approved requirement, owner present, only a draft verification | Failed: qualifying count 0, selected count 1. |
-| Add an approved verification; retain the draft and repeat the approved edge inline | Passed: qualifying count 1, selected count 2. |
-| Add `every: {field: status, equals: approved}` to that relationship check | Failed: the draft violates every; count still passes. |
-| No verification, with only the every check and no count | Passed: every over an empty set. |
-| No verification, with every plus minimum 1 | Failed: minimum count, not every. |
-| Approved requirement with blank/missing owner | Failed: local nonblank obligation. |
-| Draft requirement or requirement without optional status | Not applicable; no coverage obligation. |
-| Accepted design without a satisfies edge | Failed; add one requirement edge to pass. |
-| Mitigated risk without incoming mitigation | Failed; add one design mitigation to pass. |
-
-To require at least one approved verification with recorded passing evidence,
-replace the first example's `qualifies` predicate with:
-
-```yaml
-all:
-  - {field: status, equals: approved}
-  - related:
-      relation: evidences
-      direction: incoming
-      target: {kind: item, flavours: [evidence]}
-      qualifies: {field: outcome, equals: passed}
-      count: {minimum: 1}
-```
-
-Declare evidence's optional enum `outcome` with `passed` among its values.
-An approved verification without evidence fails the nested minimum, so it
-does not qualify at the first hop. Adding a passing evidence item fixes that
-gap. A draft verification with passing evidence still fails the status check.
-This checks recorded assertions; it does not execute a verification or prove
-that the evidence is trustworthy or fresh.
+References: [SHACL](https://www.w3.org/TR/shacl/),
+[Turtle](https://www.w3.org/TR/turtle/),
+[CEL language](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md)
+and [CEL Policy](https://github.com/cel-expr/cel-policy).
 :::
 
 :::mara design DES-TRACE-GRAPH-CONSTRAINTS
@@ -235,8 +293,8 @@ relations:
 ```
 
 `cardinality` maps eligible directions to mappings containing `minimum`
-and/or `maximum`, with optional `severity` defaulting to error. Count bounds
-follow the rule grammar; require at least one bound. Directed declarations
+and/or `maximum`, with optional `severity` defaulting to error. Bounds are nonnegative integers, minimum cannot exceed maximum, and at least
+one bound is required. Directed declarations
 permit incoming/outgoing; symmetric declarations permit symmetric only.
 External-capable relations can constrain outgoing counts, including internal
 and external targets. Incoming counts apply only to declared internal target
@@ -269,6 +327,11 @@ accepted-design rule needs only one and passes. A conditional approved-target
 count ignores draft targets; structural cardinality counts them. Duplicate
 metadata/inline/alias assertions of one edge change neither count.
 Cycle prohibition does not change finite explicit-chain semantics.
+
+These remain structural relation declarations, not conditional-expression
+syntax. They introduce no alternative predicate language. Cardinality may
+lower to SHACL counts, while acyclicity retains the finite graph pass and
+witness contract above; adopting SHACL does not enable unbounded rule paths.
 :::
 
 :::mara design DES-TRACE-DIAGNOSTIC-INTERFACE
@@ -285,23 +348,32 @@ They do not change relationship mutation errors in [[DES-RELATION-INTERFACES]].
 ## Work, output and continuation
 
 Accept `max_work` (CLI `--max-work`), integer 1–1,000,000, default 100,000.
-One logical work unit is charged for each item/selection test, predicate
-invocation at an item, semantic-edge examination by a relationship check,
-and vertex/edge visit by a graph-constraint pass. Schema validation charges
-one unit per visited declaration, field constraint or rule predicate node;
-specification generation charges one per emitted source node/edge before
-content fragmentation. Charge logical visits even when cached; count duplicate assertions only during normalization, not as
-extra semantic edges. Sort items by path/start byte, rules by name, child
-predicates in authored order, and edges by canonical relation and endpoint
-identity before evaluation. This fixes the evaluated prefix independently of
-hash iteration or memoization. Loading/parsing source is not covered by this
-evaluation budget and must retain existing read/error behavior.
+Charge one logical unit for each item/selection test, SHACL constraint
+invocation at a node, SHACL value/list membership comparison, semantic-edge
+examination, graph-policy vertex/edge
+visit and evaluated CEL AST node (including each comprehension iteration).
+String/collection builtins additionally charge their input byte/element counts;
+charge before the operation. Schema validation charges each visited declaration,
+SHACL constraint and CEL AST node. Specification generation charges each source
+node/edge before fragmentation. Charge logical visits even when cached.
+Counts alone at the CEL/SHACL invocation boundary are insufficient: enforce
+the budget inside both evaluators or report the operation unavailable. Do not
+claim budget compliance from the successful library experiment alone.
 
-Allow at most eight nested relationship steps and predicate depth 32
-(count the root as depth 1, including all/any and related endpoint predicates).
-Reject deeper definitions as invalid configuration, not partially valid rules.
-Finite nesting terminates even when unconstrained graphs contain cycles;
-graph cycle checks visit a finite normalized graph, not arbitrary paths.
+Sort items by path/start byte, rules by expanded shape IRI, and relation edges
+by canonical kind and endpoint identity. Order independent SHACL obligations
+by source path/start byte; for repeated identical triples use the earliest
+source location. RDF list members preserve list order. Blank-node labels from
+a parser are not stable ordering keys. CEL uses its standard evaluation rules;
+pin the evaluator/cost-model revision in the snapshot and charge the executed
+AST, not speculative branches. Parallel scheduling must not change the
+observable evaluated prefix. Loading/parsing source is outside this logical
+evaluation budget and retains existing read/error behavior.
+
+Allow at most eight nested relationship steps, SHACL shape-reference depth 32
+and CEL AST depth 32 (root depth 1). Reject deeper definitions, recursive shape
+references and unbounded paths as invalid configuration. Graph cycle policies
+visit the finite normalized graph.
 
 Before a work unit would exceed the limit, stop evaluation and report
 `evaluation_limit` with limit and used units, set `evaluation_complete:false` and `valid:false`. Unvisited
@@ -315,7 +387,7 @@ Output pagination is separate from evaluation. All page-based interfaces use
 including envelope and cursor, excluding transport framing. `has_more` and
 `next_cursor` describe remaining output of this evaluation, not remaining
 evaluation work. Repeat unchanged inputs and limits with the cursor; reject
-schema/corpus/project/options changes as `stale_cursor`. Re-evaluation may
+schema/corpus/project/rule-source/options changes as `stale_cursor`. Re-evaluation may
 reconstruct the same deterministic result; a server need not persist a job.
 
 A higher `max_work` requires a fresh request without the old cursor.
@@ -358,27 +430,34 @@ Warnings are visible but do not invalidate an otherwise complete result.
 Each diagnostic contains `code`, `severity`, `scope`
 (project/schema/document/item), `message`, and a `location`. Location
 contains project-relative `path` and optional one-based `line`, UTF-8
-`start_byte`/`end_byte` and JSON Pointer `pointer` for configuration.
+`start_byte`/`end_byte` and JSON Pointer `pointer` for TOML/YAML configuration when applicable.
+Turtle locations use actual source spans, not invented JSON pointers.
+CEL expression spans map through Turtle string escapes back to authored bytes.
 Only available coordinates are populated; never invent line numbers.
 Retain legacy `path` and `line` fields as aliases of location coordinates.
 An external configured schema path remains absolute.
 
 Item diagnostics add `item:{id,mid}` when unambiguous; configuration/rule
-diagnostics add `rule` when known. Rule failures add `obligation`, the
-JSON Pointer within the rule, and `details` identifying
-`kind:field|minimum|maximum|every|all|any`. Count details include
+diagnostics add `rule`, the expanded root shape IRI, when known.
+Rule failures add `obligation:{shape,component,source}`: shape is its expanded
+IRI or a snapshot-bound opaque reference for a blank node; component is the
+SHACL component IRI or `urn:mara:rules:1:cel`; source is the native definition's
+location. `details.kind` is `cel|class|minimum|maximum|every|and|or|not|in`.
+CEL details identify the authored expression and result/error, not a fabricated
+list of custom field operators. Count details include
 `selected_count`, `qualifying_count` and the violated bound.
 Relationship explanations retain canonical relation, direction and
 endpoint-facing label, plus item/edge references. Locations of all assertions
 remain inspectable via relation get, not an unbounded inline list.
 
 Emit one `rule_failed` per failed item/rule pair, pointing to the first
-unsatisfied leaf in predicate order that contributes to the root failure.
-Do not emit failures for unsuccessful alternatives of a passing any.
+unsatisfied leaf in the obligation order above that contributes to the root failure.
+Do not emit failures for unsuccessful alternatives of a passing SHACL or.
 The matrix exposes the remaining check results, including all failed
-alternatives when any fails. Unavailable rules produce
-`evaluation_unavailable` referencing their prerequisite diagnostics instead
-of a fabricated policy failure. An exhausted request emits one global
+alternatives when SHACL or fails. Unavailable rules produce
+`evaluation_unavailable` referencing their prerequisite diagnostics or the surfaced CEL error instead
+of a fabricated policy failure. Standard CEL Boolean results are not themselves
+unavailable merely because an unneeded operand could fail. An exhausted request emits one global
 `evaluation_limit`, not one diagnostic for every unvisited item.
 
 ## Validation response and entry points
@@ -401,12 +480,13 @@ the latter counts produced diagnostics hidden by paths, not unseen checks or
 records deferred to later pages. Project/schema diagnostics remain visible.
 Item validation checks the selected item in full corpus context, including
 its incident constraints and cycles, with prerequisite errors that affect it.
-Schema validation checks configuration, rule typing and graph declarations,
-not item predicates.
+Schema validation also loads the configured Turtle sources, checks the supported
+SHACL/binding profile, CEL syntax/declarations and graph policies, not runtime
+item predicates. Dynamic CEL accesses are checked when evaluated.
 
 Sort diagnostics by scope (project, schema, document, item), path, start byte
 (or line when byte is absent; missing coordinates first), item MID, rule,
-obligation pointer and code, with message as final deterministic tie-breaker.
+obligation source/shape/component and code, with message as final deterministic tie-breaker.
 No page boundary changes summary, validity or evaluation completeness.
 
 | CLI | MCP |
@@ -460,21 +540,33 @@ for evaluation and are identified as outside the root selection.
 
 | CLI after `mara` | MCP |
 |---|---|
-| `trace matrix --flavour requirement --rule approved_requirement` | `trace_matrix {flavours:["requirement"], rules:["approved_requirement"]}` |
-| `trace matrix --id REQ-A --check '{"related":{"relation":"verifies","direction":"incoming","target":{"kind":"item"},"count":{"minimum":1}}}'` | `trace_matrix {ids:["REQ-A"], check:{related:{relation:"verifies",direction:"incoming",target:{kind:"item"},count:{minimum:1}}}}` |
+| `trace matrix --flavour requirement --rule urn:example:rules:approved_requirement` | `trace_matrix {flavours:["requirement"], rules:["urn:example:rules:approved_requirement"]}` |
+| `trace matrix --id REQ-A --check-file rules/coverage.ttl --shape urn:example:rules:coverage` | `trace_matrix {ids:["REQ-A"], check:{files:["rules/coverage.ttl"], shape:"urn:example:rules:coverage"}}` |
 | `trace specification --path docs/` | `trace_specification {paths:["docs/"]}` |
 | `trace specification --flavour requirement --field status=approved` | `trace_specification {flavours:["requirement"], fields:[{key:"status",value:"approved"}]}` |
 
 Both accept `--all`, repeatable `--id`, `--flavour`, `--field`,
 `--path`, and `--limit`, `--cursor`, `--max-work`.
 Matrix additionally requires either repeatable `--rule` / nonempty `rules`,
-or one `--check` / `check`, never both. A check is one relationship predicate
-using the rule grammar, optionally with explicit nested steps. It applies
-unconditionally to roots; validate its typing against every selected flavour.
-It is a request-local observation, not a new project validation policy.
+or a request-local check, never both. Rule values are exact expanded root shape
+IRIs from enabled sources; unknown IRIs are errors. Prefix abbreviations are
+source syntax, not request aliases.
+
+For a check, CLI accepts repeatable `--check-file` and one `--shape`;
+MCP accepts `check:{files:[...],shape:IRI}`. Load those native Turtle sources
+using the rule-file contract and require the designated named node shape.
+Apply it unconditionally to the request's selected roots; reject root targets,
+`m:when` and `m:paths` on the designated check, and do not execute other
+targeted shapes from the supplied files. Its referenced obligations and CEL
+expressions follow the same typing, profile and work limits as persisted rules.
+The files define reusable constraints, not a saved view: selection stays in
+the request. They impose no project-validation policy unless separately enabled
+in project configuration.
+
 Named rules retain their own selection and applicability, intersected with
-view roots; unknown names are errors. Distinguish request checks from schema
-rule names in output; they cannot shadow a persisted rule.
+view roots. Output distinguishes persisted-rule and request-check identity;
+a request check cannot override a persisted rule. The former JSON `related`
+check object is withdrawn with the custom predicate grammar.
 
 CLI default text renders Markdown for these two commands only;
 `--format json` returns the structured result. MCP returns the same JSON
@@ -501,15 +593,16 @@ force an unbounded nested row:
 | Record kind | Required meaning |
 |---|---|
 | `result` | `root` item descriptor, `evaluation` rule/check identity, and overall `state`. |
-| `check` | `reference`, `root`, `evaluation`, `obligation` predicate JSON Pointer, `context`, `parent` check reference (null at root), `state`, and `condition` predicate; relationship checks add `counts` and `every`. |
+| `check` | `reference`, `root`, `evaluation`, `obligation` shape/component/source descriptor, `context`, `parent` check reference (null at root), `state`, and `condition` predicate; relationship checks add `counts` and `every`. |
 | `edge` | `check` reference, canonical `edge`, endpoint-facing `label`, `direction`, `endpoint`, `qualification`, `every`, and `occurrence_count`. |
 | `issue` | `diagnostic` preventing complete evaluation. |
 
-`evaluation` is `{kind:"rule",name:"approved_requirement"}` or
-`{kind:"check"}`. `root` and item endpoints use discovery item descriptors;
+`evaluation` is `{kind:"rule",shape:"urn:example:rules:approved_requirement"}`
+or `{kind:"check",shape:"urn:example:rules:coverage"}`. `root` and item endpoints use discovery item descriptors;
 external endpoints use the relationship contract's external descriptor.
-Every record carries `kind`. `condition` contains only the local operator and
-its scalar parameters; nested predicates have their own check records.
+Every record carries `kind`. `condition` identifies the SHACL component and its parameters, or the CEL
+source expression. Nested shape obligations have their own check records;
+do not expand CEL's internal AST into a new public predicate language.
 A check's `counts` contains `selected`,
 `qualifying`, `minimum` and `maximum`; omitted bounds and unavailable totals
 are null. `every` and `qualification` use the predicate states or null when
@@ -520,20 +613,20 @@ check; at most eight hops. `check` references are snapshot-bound opaque
 identifiers, not durable item identities. They connect records across pages.
 Counts belong to the immediate check: include selected and qualifying totals,
 declared minimum/maximum, and every state where present. Counts are null
-when unavailable, not misleading zeros. Leaf field checks name the field
-and expected operator/value; source navigation supplies full authored values.
+when unavailable, not misleading zeros. CEL checks retain expression source and result/error; source navigation supplies
+authored field values without pretending arbitrary CEL has a field/operator pair.
 
 Emit one result for each root/rule pair, including not-applicable roots.
-Only applicable rules have check records. Emit check records in predicate
-preorder; relationship edge records follow their owning check in canonical
+Only applicable rules have check records. Emit check records in deterministic shape-obligation
+preorder under [[DES-TRACE-DIAGNOSTIC-INTERFACE]]; relationship edge records follow their owning check in canonical
 endpoint order, each followed by its nested checks. Emit failed alternatives
-for explanation even when the parent any passes; distinguish child state
+for explanation even when the parent SHACL or passes; distinguish child state
 from root state. Never enumerate arbitrary paths. A target with several
 authored assertions has one edge record, with all occurrences inspectable
 through `relation get` as specified in the relationship contract.
 
-Order roots by path/start byte, rules by name (one request check has no
-rule-name ordering), and preserve the evaluation ordering within each result.
+Order roots by path/start byte, rules by expanded IRI (one request check has no
+persisted-rule ordering), and preserve the evaluation ordering within each result.
 Unavailable roots/steps remain explicit; do not silently omit them when
 bounds are reached. After work exhaustion, one terminal issue record states
 the first unevaluated root/rule and that the remaining selected suffix is
@@ -553,7 +646,7 @@ entry per evaluation identity, with `selected`, `not_applicable`, `passed`,
 pagination; report lower bounds when evaluation is incomplete.
 For a complete rule, applicable denominator is passed + failed.
 Request checks have a separate summary and impose no project validity.
-The grammar's fixture table is also the expected matrix-state table.
+The rule design's fixture table is also the expected matrix-state table.
 
 ## Specification records and source navigation
 
@@ -612,9 +705,10 @@ do not advance the active schema or executable during contract authoring.
 
 | Surface | Compatibility boundary |
 |---|---|
-| Schema | Keep the planned format 3; add optional rules, relation cardinality and acyclic policies. Absent policies impose no obligations. |
+| Schema | Keep the planned format 3 for vocabulary/relationships and structural cardinality/acyclic declarations. Conditional rules are native Turtle files, not a top-level YAML rules mapping. Absent policies impose no obligations. |
 | Documents | No new marker or metadata syntax. Status and other rule inputs are ordinary project-defined fields. |
-| Project configuration | Remains format 1; no saved views or work-limit settings are introduced. |
+| Project configuration | Continue accepting format 1 for projects without rule sources. Enabling native rules requires format 2 and the optional rules table in DES-TRACE-RULE-GRAMMAR; reject unknown/unsupported versions. No saved views or persisted work limits. |
+| Rule binding | Start format_version 1 inside the rules table. It selects the supported Turtle/SHACL profile, CEL binding and urn:mara:rules:1: vocabulary. This is independent of W3C or crate release numbers. |
 | Validation JSON | Start format_version 1 for project/item/schema validation and operation errors, replacing unversioned results. Explicit completeness, codes, severities, counts and continuation require client updates. |
 | Trace JSON | Start a separate format_version 1 family for matrix/specification results and errors. |
 | Discovery/relationship JSON | Retain the independently planned versions in the relationship compatibility contract. |
@@ -628,10 +722,12 @@ cursors on upgrade; MIDs and existing item/source references retain their
 documented identity rules.
 
 Migrate custom format-2 schemas using the recoverable workflow in the
-relationship compatibility contract. With no rules or graph policies, the
-rule extension adds no migration beyond that baseline. To adopt policy,
-deliberately declare any needed custom fields, add the intended rules and
-constraints, and compare validation output before and after. Do not populate
+relationship compatibility contract. Without native rules, no project-config
+migration is required beyond the relationship baseline. To enable rules, declare any needed custom fields,
+create and review Turtle sources with embedded CEL, change project
+`format_version` to 2, and add `[rules]` with binding version 1 and explicit
+file paths. Preserve existing project/content configuration. Validate source
+loading and compare policy output before and after. Do not populate
 statuses, owners, evidence, or links automatically.
 
 Example: a customized schema with optional requirement status migrates to 3
@@ -639,8 +735,12 @@ without making drafts invalid. Adding the approved-requirement rule then
 reports missing owners/approved verifications only for approved requirements.
 Changing its severity to warning preserves predicate results while allowing
 a complete project with only those failures to remain valid.
-An unknown status literal or rule field is a configuration error; restore the
-checkpoint or correct the declaration, never report a completed migration.
+Malformed Turtle, unsupported bindings and invalid CEL definitions prevent
+successful adoption. A valid string comparison to a non-enum value can be false
+under standard CEL; invalid authored enum values remain field errors.
+Missing-field expressions need explicit `has` guards; do not translate absence
+to false outside the expression. Restore the checkpoint or correct failed
+declarations, never report a completed migration.
 Preserve all IDs/MIDs and unrelated source bytes. New migration automation and
 broader vocabulary transformations remain separate implementation/design work.
 
@@ -650,31 +750,35 @@ Current-state rules always inspect the supplied current snapshot, even when
 run after a direct Markdown edit. They do not imply that an item moved through
 allowed states, had prior approval, or has fresh evidence.
 
-A future, explicitly versioned sibling namespace can add previous/current
-context without changing a rules entry. The following is a compatibility
-sketch only, rejected as an unknown key by schema format 3:
+Future transition policy needs a separately versioned binding that explicitly
+introduces previous/current context. The following CEL is an illustrative
+future condition, not an executable current-state definition:
 
-```yaml
-transition_rules:
-  approve_requirement:
-    select: {flavours: [requirement]}
-    when:
-      all:
-        - previous: {field: status, equals: draft}
-        - current: {field: status, equals: approved}
-    require:
-      current: {field: owner, nonblank: true}
+```cel
+has(previous.status) && previous.status == "draft" &&
+has(current.status) && current.status == "approved"
 ```
+
+Its future obligation could inspect `has(current.owner)` and a nonblank
+owner expression. The current binding declares only `node`; `previous`
+and `current` are rejected as undeclared variables. Do not add a competing
+YAML transition grammar or silently rebind current-state expressions.
 
 A future comparator would pair the same MID in two explicit revisions;
 renaming its human ID would not create a different identity. For a draft to
-approved pair the sketch requires current owner; unchanged approved to
-approved does not activate this transition rule, while the existing
+approved pair the future obligation requires current owner; unchanged
+approved to approved does not activate this transition rule, while the existing
 approved_requirement current-state rule still activates.
 Missing previous/current items, added/deleted items, baseline provenance and
 evidence freshness need a later contract. Do not interpret a missing previous
 snapshot as a successful transition or add executable transition support in
 0.3. This exercise follows [[ADR-CURRENT-STATE-BEFORE-TRANSITIONS]].
+
+The earlier custom YAML rule/check syntax was never shipped. Remove it from
+the accepted design rather than supporting or automatically migrating it.
+Existing item documents, MIDs and active format-2 schema files remain unchanged
+during this documentation-only adoption. A future expansion of the binding's
+SHACL features or CEL environment needs an explicit compatibility decision.
 :::
 
 :::mara decision ADR-DECLARATIVE-TRACE-BASELINE
@@ -686,13 +790,23 @@ snapshot as a successful transition or add executable transition support in
 :justifies: DES-TRACE-VIEW-INTERFACES
 :justifies: DES-TRACE-CONTRACT-COMPATIBILITY
 
-Adopt the schema-3 grammar, explicit graph policies, diagnostic interface and
-request-selected views in this document.
+Adopt CEL local expressions and SHACL relationship shapes with embedded CEL
+strings in native Turtle files, explicitly referenced from project configuration.
+Replace the unshipped custom YAML predicate grammar. Keep the graph policies,
+diagnostic interface and request-selected views in this document.
 
-Missing values fail comparisons; explicit absence checks express the opposite
-intention without making missing lifecycle data accidentally satisfy a value
-test. Every over an empty related set passes; minimum counts express existence
-separately. Combining them supports both optional-but-qualified and mandatory
+Native source formats avoid maintaining another expression syntax or translating
+SHACL into YAML. Keep expressions beside their constraints instead of adding
+separate CEL-file references. [[EVD-SHACL-CEL-SPIKE]] provides the native Rust
+feasibility evidence. The versioned Mara adapter owns item projection,
+applicability, source mapping and completion reporting; generic SHACL engines
+cannot be assumed to honor its CEL properties.
+
+Use standard CEL semantics. Guard optional fields explicitly with `has`;
+unguarded missing map entries are errors, and ordinary CEL Boolean operators
+retain their standard error behavior. Do not add a compatibility interpreter
+to preserve the old implicit-false comparisons. Every over an empty related set
+passes; minimum counts express existence separately. Combining them supports both optional-but-qualified and mandatory
 coverage without overloading one operator.
 
 Rules default to error and may be warnings. Invalid prerequisites and work
@@ -700,7 +814,8 @@ limits remain errors because treating an unperformed check as a policy warning
 could claim a full pass. Keep complete evaluation distinct from output
 pagination so small responses cannot hide incomplete analysis.
 
-Use one project-owned schema and the existing validation entry points.
+Keep one project-owned vocabulary schema, explicitly enabled native rule
+sources and the existing validation entry points.
 Explicit matrix/specification requests with JSON and Markdown meet the current
 workflow without saved-view state or a general query/workflow engine.
 Use bounded steps, logical work and output pages rather than unbounded graph

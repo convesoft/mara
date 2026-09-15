@@ -120,16 +120,30 @@ mapped to the failing verification's source. This proves the materialized-set
 bridge, not a custom CEL callback inside the native SHACL engine. The invocation
 limit still does not measure work inside CEL or SHACL.
 
+## Native authoring example check
+
+After adopting the binding in [[DES-TRACE-RULE-GRAMMAR]], parsed both documented
+Turtle examples and the TOML configuration excerpt. Executed all five distinct
+embedded CEL expressions and checked blank/whitespace/nonblank owner values.
+A fixture-specific lowering of those exact examples passed five cases through
+Rust CEL and native SHACL: three missing obligations, three satisfied
+obligations, missing/present second-hop evidence and a draft requirement
+excluded by applicability. Synthetic RDF fixture nodes were used for this
+example check; the earlier integration test retains the real Mara MID/source
+fixture. This is not an implementation of the complete profile loader.
+
 ## Consequence for the design
 
 Combining SHACL relationship shapes with CEL local predicates is feasible.
 The native materialized-set bridge is a viable Rust integration; neither
-experiment establishes a portable standard SHACL-CEL language. Before replacing
-the current grammar, define the persisted syntax, typed field bindings and
-missing-value behavior, and demonstrate enforceable evaluation work limits.
+experiment establishes a portable standard SHACL-CEL language. Adoption and
+the persisted binding now follow [[ADR-DECLARATIVE-TRACE-BASELINE]]
+and [[DES-TRACE-RULE-GRAMMAR]]. Enforceable evaluation work limits remain
+implementation work.
 CEL Boolean error masking and SHACL severity/conformance also need explicit
-mapping to [[DES-TRACE-DIAGNOSTIC-INTERFACE]]. This experiment does not
-supersede [[ADR-DECLARATIVE-TRACE-BASELINE]] or add product dependencies.
+mapping to [[DES-TRACE-DIAGNOSTIC-INTERFACE]]. The experiment itself adds no
+product dependencies; the later adoption decision
+does not turn these isolated checks into implemented Mara behavior.
 
 Primary references: [SHACL](https://www.w3.org/TR/shacl/),
 [CEL language definition](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md),
