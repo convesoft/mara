@@ -152,3 +152,74 @@ Primary references: [SHACL](https://www.w3.org/TR/shacl/),
 [shacl_validation 0.2.12](https://crates.io/crates/shacl_validation/0.2.12) and
 [shacl 0.3.21](https://docs.rs/shacl/0.3.21/shacl/).
 :::
+
+:::mara evidence EVD-SHACL-CORE-SPIKE
+:mid: 01M2K1GKBD333CXJNF0FD47DBQ
+:title: SHACL Core expresses current rule examples without CEL
+
+Executed on 2026-09-15 with shacl 0.3.21 and rudof_rdf 0.3.21 in an
+isolated Rust package. Its normal dependency tree contains no CEL crate.
+Eight standard Rust tests passed with default features disabled, then the
+same eight passed with the SPARQL feature enabled. One test establishes
+unsupported Advanced Features behavior; it does not claim target support.
+Both standalone binaries produced matching behavioral results.
+
+## Fixture and native checks
+
+Mara 0.2.0 created and validated six temporary engineering items with generated
+MIDs and real source locations. The harness projected flavours, selected
+string fields and relationships into RDF. Field/edge variants were assembled
+in memory, not authored through a new Mara rule implementation.
+Turtle files used only SHACL Core, without CEL literals or Mara rule properties.
+
+| Check | Observed result |
+|---|---|
+| Approved requirement, accepted design and mitigated risk with missing required links | Three failures; adding the required qualifying links passed. |
+| Draft verification only versus approved verification present | Qualified minimum failed versus passed. |
+| Duplicate projected verification triple with minimum two | Failed; duplicate did not inflate the count. |
+| Required owner absent, empty or whitespace-only | Failed using minimum count, string datatype and pattern. |
+| Requirement status draft or absent | Conditional implication conformed; it did not emit a distinct not-applicable state. |
+| Every target approved; draft target present | Failed; empty set passed unless a separate minimum required presence. |
+| Approved verification requires passing evidence | Missing evidence failed; adding passing evidence passed. |
+| Warning-level unmet minimum | Native conformance remained false; Mara severity/validity mapping is still needed. |
+
+Conditional policy used `sh:or` of a negated status shape and the obligation
+shape. Local conditions used `sh:hasValue`; nonblank strings used
+`sh:minCount`, `sh:datatype` and `sh:pattern`. Qualified counts, inverse
+paths and nested shapes expressed the relationship obligations.
+Failure focus nodes mapped to real Mara item source locations; this did not
+verify leaf-level explanations or exact rule-source spans.
+
+## Applicability and target limitation
+
+Evaluating a separate ordinary Core status shape returned false for draft or
+missing status and true for approved status. Therefore an adapter can derive
+applicability using the same SHACL engine, without a second expression language.
+The experiment does not define how a persisted rule identifies that condition.
+
+A `sh:SPARQLTarget` selecting an approved requirement with a missing required
+owner yielded zero parsed targeted shapes and a conforming empty report.
+Replacing it with `sh:targetClass` produced the expected failure. This happened
+both with and without the crate's SPARQL feature. Source inspection of the
+published target enum/parser found only Core target forms. Enabling
+SHACL-SPARQL constraints does not establish SHACL Advanced Features target
+support. A Mara loader must reject unsupported targets instead of trusting
+that empty report.
+
+## Design consequence
+
+The worked obligations in [[DES-TRACE-RULE-GRAMMAR]] do not demonstrate a need
+for CEL. SHACL Core is sufficient for their validation truth conditions;
+[[EVD-SHACL-CEL-SPIKE]] established combination feasibility, not necessity.
+A SHACL-only binding would need field-to-RDF projection and an explicit way
+to identify applicability, plus the existing invalid-prerequisite, diagnostics,
+source mapping and work-budget contracts. This test does not prove complete
+bounded evaluation or implement [[VER-TRACEABILITY-WORKFLOW]].
+
+This evidence recommends simplifying to SHACL Core; it does not itself replace
+the accepted CEL binding in [[ADR-DECLARATIVE-TRACE-BASELINE]].
+
+Sources: [SHACL Core](https://www.w3.org/TR/shacl/),
+[SHACL Advanced Features targets](https://www.w3.org/TR/shacl-af/#SPARQLTarget)
+and [shacl 0.3.21](https://docs.rs/shacl/0.3.21/shacl/).
+:::
