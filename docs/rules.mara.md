@@ -1,11 +1,15 @@
-# Rules, diagnostics and trace views in 0.3
+# Rules, diagnostics and trace views
 
 Contracts for the planned 0.3 implementation, extending
 [traceability](traceability.mara.md) and the accepted
-[relationship contracts](relations-0.3.mara.md). Examples describe intended
+[relationship contracts](relations.mara.md). Examples describe intended
 results, not checks executed by the 0.2 binary. The active schema and executable
 remain unchanged. Project examples require the illustrated vocabulary; they
 do not add lifecycle policy to bundled templates or existing projects.
+
+[[EVD-SHACL-CEL-SPIKE]] evaluates SHACL with CEL as an alternative language
+foundation. It does not yet replace the grammar below: persisted syntax and
+a bounded Rust integration remain unresolved for that alternative.
 
 :::mara design DES-TRACE-RULE-GRAMMAR
 :mid: 01M2JNZMJ0VT20GWH4HF6DBBC5

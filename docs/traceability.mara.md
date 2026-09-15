@@ -13,8 +13,8 @@ No mandatory engineering lifecycle, complete trace chain, or placeholder items
 are imposed on projects that have not declared those expectations.
 
 Requirements below own observable outcomes. The accepted
-[relationship contracts](relations-0.3.mara.md) settle authoring and mutation;
-[rule and view contracts](rules-0.3.mara.md) settle policy, diagnostics, generated
+[relationship contracts](relations.mara.md) settle authoring and mutation;
+[rule and view contracts](rules.mara.md) settle policy, diagnostics, generated
 views and their format boundaries. Remaining decisions at the end must be
 resolved before implementing their affected contracts. CLI and MCP follow
 [[REQ-SURFACE-PARITY]] throughout.
@@ -485,7 +485,7 @@ can claim readiness:
 
 | Design area | Remaining choice and required example |
 |---|---|
-| Further migration operations | Supported vocabulary transformations and manual versus automated application beyond the deliberate migration baseline. Format boundaries and policy adoption are settled in [relationship contracts](relations-0.3.mara.md) and [rule and view contracts](rules-0.3.mara.md). |
+| Further migration operations | Supported vocabulary transformations and manual versus automated application beyond the deliberate migration baseline. Format boundaries and policy adoption are settled in [relationship contracts](relations.mara.md) and [rule and view contracts](rules.mara.md). |
 | Code pilot | First language, repository workflow and file/symbol scope, then whether the result is suitable to ship. |
 
 Optional engineering-template lifecycle examples may demonstrate these rules;

@@ -1,4 +1,4 @@
-# Relationship authoring and mutation in 0.3
+# Relationship authoring and mutation
 
 Accepted contracts for the planned 0.3 implementation. These extend
 [traceability](traceability.mara.md); they do not describe capabilities shipped
