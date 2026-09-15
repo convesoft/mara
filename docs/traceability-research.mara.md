@@ -51,9 +51,10 @@ upstream rule language, graph persistence layer, or lifecycle is adopted here.
 
 Executed on 2026-09-15 outside the product repository, using Mara 0.2.0,
 Python 3.14.7, pySHACL 0.40.1, RDFLib 7.6.0 and Rust crate cel 0.14.5.
-Eight Python unittest tests passed. This establishes reference-engine
-feasibility for [[DES-TRACE-RULE-GRAMMAR]], not a production backend choice
-or completion of [[VER-TRACEABILITY-WORKFLOW]].
+Eight Python unittest tests passed. A follow-up on the same date also passed
+six native Rust tests with shacl 0.3.21 and cel 0.14.5, described below.
+These establish integration feasibility for [[DES-TRACE-RULE-GRAMMAR]], not a
+production backend choice or completion of [[VER-TRACEABILITY-WORKFLOW]].
 
 ## Bridge and observed results
 
@@ -92,16 +93,40 @@ does not prove the accepted graph/CEL work budget, cancellation or memory bounds
 A separate native Rust probe using shacl_validation 0.2.12 and shacl_rdf 0.2.9
 failed before execution. Fresh dependency resolution mixed incompatible
 `iri_s::IriS` and `rudof_iri::IriS` types. Pinning rudof_rdf, prefixmap and
-sparql_service to 0.2.9 still failed through mie 0.2.20. No native SHACL runtime
-result or Rust-only integration is claimed.
+sparql_service to 0.2.9 still failed through mie 0.2.20. This failure applies
+only to that older dependency combination; the newer crate succeeded below.
+
+## Native Rust follow-up
+
+The unified shacl 0.3.21 crate and rudof_rdf 0.3.21, both with default features
+disabled, compiled alongside cel 0.14.5 without dependency patches. Six standard
+Rust tests passed. The standalone binary also ran successfully with
+`cargo run --locked`; both engines execute in the same process without Python
+or SPARQL callbacks.
+
+The harness uses the real Mara fixture's exported metadata, generated MIDs and
+source locations. For each selected verification, CEL evaluates the local
+predicate. The accepted MID set becomes a standard SHACL `sh:in` constraint;
+SHACL's native engine then evaluates inverse paths, qualified counts,
+all-target checks and nested evidence obligations. CEL errors remain in a
+separate ledger and prevent a complete pass.
+
+The tests cover the same behavioral cases in the table: passing and failing
+qualified counts, duplicate RDF assertions, every/empty semantics, second-hop
+evidence, division-by-zero with another qualifying target, invalid/non-Boolean/
+missing-field predicates, and an invocation limit. SHACL's reported focus node
+and source shape mapped to the requirement's actual source; the CEL error
+mapped to the failing verification's source. This proves the materialized-set
+bridge, not a custom CEL callback inside the native SHACL engine. The invocation
+limit still does not measure work inside CEL or SHACL.
 
 ## Consequence for the design
 
 Combining SHACL relationship shapes with CEL local predicates is feasible.
-The tested custom-function bridge requires a host extension; it is not a
-portable standard SHACL-CEL language. Before replacing the current grammar,
-define the persisted syntax, typed field bindings and missing-value behavior,
-and demonstrate a compatible Rust engine with enforceable work limits.
+The native materialized-set bridge is a viable Rust integration; neither
+experiment establishes a portable standard SHACL-CEL language. Before replacing
+the current grammar, define the persisted syntax, typed field bindings and
+missing-value behavior, and demonstrate enforceable evaluation work limits.
 CEL Boolean error masking and SHACL severity/conformance also need explicit
 mapping to [[DES-TRACE-DIAGNOSTIC-INTERFACE]]. This experiment does not
 supersede [[ADR-DECLARATIVE-TRACE-BASELINE]] or add product dependencies.
@@ -110,5 +135,6 @@ Primary references: [SHACL](https://www.w3.org/TR/shacl/),
 [CEL language definition](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md),
 [pySHACL](https://github.com/RDFLib/pySHACL),
 [cel-rust](https://github.com/cel-rust/cel-rust) and
-[shacl_validation 0.2.12](https://crates.io/crates/shacl_validation/0.2.12).
+[shacl_validation 0.2.12](https://crates.io/crates/shacl_validation/0.2.12) and
+[shacl 0.3.21](https://docs.rs/shacl/0.3.21/shacl/).
 :::
