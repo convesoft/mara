@@ -88,7 +88,7 @@ error. That false could otherwise be treated as a nonqualifying target and
 hidden by another qualifying target. Preserve evaluation failures separately
 from ordinary predicate failures; do not infer Mara validity from the SHACL
 conformance flag alone. The callback budget test counts invocations only: it
-does not prove the accepted graph/CEL work budget, cancellation or memory bounds.
+does not prove the then-proposed graph/CEL work budget, cancellation or memory bounds.
 
 A separate native Rust probe using shacl_validation 0.2.12 and shacl_rdf 0.2.9
 failed before execution. Fresh dependency resolution mixed incompatible
@@ -122,7 +122,7 @@ limit still does not measure work inside CEL or SHACL.
 
 ## Native authoring example check
 
-After adopting the binding in [[DES-TRACE-RULE-GRAMMAR]], parsed both documented
+For the earlier hybrid binding at commit `033ebf5`, parsed both documented
 Turtle examples and the TOML configuration excerpt. Executed all five distinct
 embedded CEL expressions and checked blank/whitespace/nonblank owner values.
 A fixture-specific lowering of those exact examples passed five cases through
@@ -134,16 +134,12 @@ fixture. This is not an implementation of the complete profile loader.
 
 ## Consequence for the design
 
-Combining SHACL relationship shapes with CEL local predicates is feasible.
-The native materialized-set bridge is a viable Rust integration; neither
-experiment establishes a portable standard SHACL-CEL language. Adoption and
-the persisted binding now follow [[ADR-DECLARATIVE-TRACE-BASELINE]]
-and [[DES-TRACE-RULE-GRAMMAR]]. Enforceable evaluation work limits remain
-implementation work.
-CEL Boolean error masking and SHACL severity/conformance also need explicit
-mapping to [[DES-TRACE-DIAGNOSTIC-INTERFACE]]. The experiment itself adds no
-product dependencies; the later adoption decision
-does not turn these isolated checks into implemented Mara behavior.
+The experiments establish combination feasibility, not a need for two
+languages or a portable standard SHACL-CEL binding. The hybrid examples above
+describe the earlier design, now superseded by [[ADR-DECLARATIVE-TRACE-BASELINE]]
+after [[EVD-SHACL-CORE-SPIKE]]. Keep these results as evidence for a possible
+future integration. Neither experiment implements the persisted loader,
+whole-engine work budget or public Mara rule interfaces.
 
 Primary references: [SHACL](https://www.w3.org/TR/shacl/),
 [CEL language definition](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md),
@@ -195,7 +191,8 @@ verify leaf-level explanations or exact rule-source spans.
 Evaluating a separate ordinary Core status shape returned false for draft or
 missing status and true for approved status. Therefore an adapter can derive
 applicability using the same SHACL engine, without a second expression language.
-The experiment does not define how a persisted rule identifies that condition.
+The later binding in [[DES-TRACE-RULE-GRAMMAR]] identifies that condition
+with a named shape reference.
 
 A `sh:SPARQLTarget` selecting an approved requirement with a missing required
 owner yielded zero parsed targeted shapes and a conforming empty report.
@@ -211,13 +208,39 @@ that empty report.
 The worked obligations in [[DES-TRACE-RULE-GRAMMAR]] do not demonstrate a need
 for CEL. SHACL Core is sufficient for their validation truth conditions;
 [[EVD-SHACL-CEL-SPIKE]] established combination feasibility, not necessity.
-A SHACL-only binding would need field-to-RDF projection and an explicit way
-to identify applicability, plus the existing invalid-prerequisite, diagnostics,
-source mapping and work-budget contracts. This test does not prove complete
-bounded evaluation or implement [[VER-TRACEABILITY-WORKFLOW]].
+[[ADR-DECLARATIVE-TRACE-BASELINE]] adopts SHACL Core; the binding now specifies
+field-to-RDF projection and applicability references while retaining the
+invalid-prerequisite, diagnostic, source mapping and work-budget contracts.
+This test does not prove complete bounded evaluation or implement
+[[VER-TRACEABILITY-WORKFLOW]].
 
-This evidence recommends simplifying to SHACL Core; it does not itself replace
-the accepted CEL binding in [[ADR-DECLARATIVE-TRACE-BASELINE]].
+## Adopted examples and alternative formats
+
+After the SHACL-only binding update, extracted both Turtle examples from
+[[DES-TRACE-RULE-GRAMMAR]] and ran them with the native validator. Three added
+Rust tests passed, bringing the default-feature-disabled suite to eleven.
+The exact examples passed missing/satisfied lifecycle links, missing/present
+nested evidence and absent/empty/whitespace owner cases. A fixture-specific
+targeting step separately evaluated the named condition and obligation shapes:
+approved was applicable with a failed missing obligation; draft and absent
+status were not applicable. This verifies the shapes, not a product loader
+for `m:whenShape` or general source mapping.
+
+The third added test encoded one required-owner shape in Turtle, JSON-LD
+(with an inline context), and RDF/XML. With shacl/rudof_rdf 0.3.21 each parsed
+one targeted shape, failed missing owner and passed a present owner. These
+are verified library alternatives, not newly enabled Mara source formats.
+The current binding remains Turtle until an authoring-format change is accepted.
+
+SHACL describes an RDF graph, so Turtle is not mandatory in the standard.
+[SHACL Compact Syntax](https://w3c.github.io/shacl/shacl-compact-syntax/)
+offers a human-oriented `.shaclc` notation for a subset of Core.
+[Apache Jena](https://jena.apache.org/documentation/shacl/#shacl-compact-syntax)
+supports reading/writing it, with documented subset and information-loss limits.
+The tested Rust RDF format/parser API has no SHACLC input variant. Adopting it
+would require a separate parser and verification that Mara's selection metadata,
+supported shapes and source locations survive the conversion; it is not a
+drop-in extension change. No compact-syntax integration was tested here.
 
 Sources: [SHACL Core](https://www.w3.org/TR/shacl/),
 [SHACL Advanced Features targets](https://www.w3.org/TR/shacl-af/#SPARQLTarget)

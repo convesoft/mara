@@ -373,7 +373,7 @@ obligation, an unmet obligation and unavailable evaluation caused by invalid
 prerequisites or bounds. A partial evaluation is never a successful full check.
 Views and validation reuse these semantics.
 
-The native Turtle/CEL binding and worked examples are in [[DES-TRACE-RULE-GRAMMAR]].
+The native SHACL Core binding and worked examples are in [[DES-TRACE-RULE-GRAMMAR]].
 Structural graph policies compose under [[DES-TRACE-GRAPH-CONSTRAINTS]].
 Bounds and diagnostics follow [[DES-TRACE-DIAGNOSTIC-INTERFACE]]; matrices and
 specifications follow [[DES-TRACE-VIEW-INTERFACES]]. Compatibility, including
@@ -465,16 +465,19 @@ Use [[DES-TRACE-CONTRACT-COMPATIBILITY]] to inspect the customized schema
 migration and future transition exercise; the future syntax must be rejected
 by 0.3. These procedures remain implementation acceptance, not executed evidence.
 
-Load the documented Turtle/CEL examples from explicit configured rule files.
+Load the documented Turtle examples from explicit configured rule files.
 Verify project-format/binding-version errors, missing files, malformed Turtle,
-unsupported executable predicates and an unknown named shape. Confirm standard
-CEL presence guards, surfaced missing-field errors, Boolean error masking
-inside one expression and an independent target error that prevents a full
-pass. Preserve actual Turtle/CEL source spans after lowering, including escaped
-multiline strings and blank-node shapes. Change a rule source between pages
-and reject the old cursor. Exercise native request-check files through CLI/MCP
-without enabling them as project policy. Verify the budget inside both engines,
-not merely by counting calls into them.
+unsupported executable predicates and an unknown named shape. Confirm typed
+field projection, absent versus empty values, and RDF deduplication of repeated
+values. Exercise condition-shape applicability for approved, draft, absent and
+invalid status; only the first evaluates obligations, while invalid source is
+unavailable. An independent endpoint engine error must prevent a full pass
+even when another endpoint qualifies. Preserve actual Turtle source spans,
+including escaped strings and blank-node shapes. Change a rule source between
+pages and reject the old cursor. Exercise native request-check files through
+CLI/MCP without enabling them as project policy. Verify the budget inside
+SHACL evaluation, including applicability and pattern work, not merely by
+counting calls into the engine.
 :::
 
 ## Code-traceability pilot
