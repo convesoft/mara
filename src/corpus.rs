@@ -1172,8 +1172,8 @@ fn project_document(
                 })
                 .collect::<Vec<_>>();
             let mut inline_diagnostics = Vec::new();
-            for token in &parsed.mentions {
-                let Some((name, target)) = token.target.split_once(':') else { continue };
+            for token in parsed.mentions.iter().filter(|token| token.typed) {
+                let (name, target) = token.target.split_once(':').unwrap_or(("", ""));
                 let source_location = location(&path, &line_starts, token.source.start, token.source.end);
                 if !crate::is_snake_name(name)
                     || (!crate::is_item_id(target) && !crate::is_mid(target))
@@ -1201,7 +1201,7 @@ fn project_document(
             let mentions = parsed
                 .mentions
                 .into_iter()
-                .filter(|mention| !mention.target.contains(':'))
+                .filter(|mention| !mention.typed)
                 .map(|mention| Mention {
                     target: mention.target,
                     source: location(

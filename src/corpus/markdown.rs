@@ -76,6 +76,8 @@ pub(super) struct ParsedMetadataEntry {
 #[derive(Debug, Clone)]
 pub(super) struct ParsedMention {
     pub(super) target: String,
+    // Includes malformed typed candidates whose colon starts on a later line.
+    pub(super) typed: bool,
     pub(super) source: Range<usize>,
 }
 
@@ -181,6 +183,7 @@ impl From<MaraInlineDelimiterNode> for KindData {
 #[derive(Debug)]
 struct MaraMentionNode {
     target: String,
+    typed: bool,
     source: Range<usize>,
 }
 
@@ -296,18 +299,50 @@ impl MaraInlineParser {
                 .unwrap_or(line.len())
         });
         let target = std::str::from_utf8(&line[2..end]).ok()?;
-        if !target.contains(':')
-            && (closing.is_none() || (!is_item_id(target) && !crate::is_mid(target)))
-        {
+        let typed =
+            target.contains(':') || (closing.is_none() && has_typed_continuation(reader, target));
+        if !typed && (closing.is_none() || (!is_item_id(target) && !crate::is_mid(target))) {
             return None;
         }
         let length = closing.map_or(end, |closing| closing + 2);
         reader.advance(length);
         Some(arena.new_node(MaraMentionNode {
             target: target.to_owned(),
+            typed,
             source: segment.start()..segment.start() + length,
         }))
     }
+}
+
+/// Look ahead within this Markdown block, leaving all subsequent bytes for the
+/// normal parser. A split relation name is invalid, but still needs a diagnostic
+/// at its opening. Stop at literal contexts, bracket boundaries or item delimiters.
+fn has_typed_continuation(reader: &mut text::BlockReader, prefix: &str) -> bool {
+    let boundary = |byte: u8| matches!(byte, b'[' | b']' | b'`' | b'\\' | b'<' | b'>');
+    if prefix.bytes().any(boundary) {
+        return false;
+    }
+    let (line, position) = reader.position();
+    let typed = (|| {
+        reader.advance_line();
+        while let Some((content, segment)) = reader.peek_line_bytes() {
+            if delimiter(reader.source(), segment).is_some() {
+                return false;
+            }
+            for byte in content.iter().copied() {
+                if byte == b':' {
+                    return true;
+                }
+                if boundary(byte) {
+                    return false;
+                }
+            }
+            reader.advance_line();
+        }
+        false
+    })();
+    reader.set_position(line, position);
+    typed
 }
 
 impl InlineParser for MaraInlineParser {
@@ -372,7 +407,7 @@ fn populate_mentions(document: &mut ParsedDocument, mentions: Vec<ParsedMention>
         mentions
             .into_iter()
             .filter(|mention| {
-                !mention.target.contains(':')
+                !mention.typed
                     && document.items.iter().all(|item| {
                         !item.source.contains(&mention.source.start)
                             || (item.metadata_valid
@@ -421,6 +456,7 @@ fn collect_extensions(
             let node = rushdown::as_extension_data!(arena, node_ref, MaraMentionNode);
             mentions.push(ParsedMention {
                 target: node.target.clone(),
+                typed: node.typed,
                 source: node.source.clone(),
             });
         }
@@ -624,6 +660,7 @@ fn project_item(
             .filter(|mention| mention.source.start >= body_start && mention.source.end <= body_end)
             .map(|mention| ParsedMention {
                 target: mention.target.clone(),
+                typed: mention.typed,
                 source: mention.source.clone(),
             })
             .collect()

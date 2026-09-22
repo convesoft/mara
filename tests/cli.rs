@@ -10484,6 +10484,12 @@ fn typed_inline_relations_validate_contexts_and_malformed_tokens() {
         ),
         ("[[verified_by:VER-A]", "invalid typed inline reference"),
         ("[[verified_by:VER-A\n]]", "invalid typed inline reference"),
+        ("[[verified_by\n:VER-A]]", "invalid typed inline reference"),
+        ("[[\nverified_by:VER-A]]", "invalid typed inline reference"),
+        (
+            "[[verified_by\r\n:VER-A]]",
+            "invalid typed inline reference",
+        ),
         ("[[verified_by:VER-MISSING]]", "missing item"),
         ("[[verifies:VER-A]]", "does not allow source flavour"),
         ("[[verified_by:REQ-B]]", "does not allow target flavour"),
@@ -10511,7 +10517,7 @@ fn typed_inline_relations_validate_contexts_and_malformed_tokens() {
             .find(|d| d.message().contains(message))
             .unwrap();
         let span = diagnostic.source().span();
-        let first_line = token.split('\n').next().unwrap();
+        let first_line = token.lines().next().unwrap();
         let end = first_line
             .find("]]")
             .map_or(first_line.len(), |end| end + 2);
@@ -10528,6 +10534,57 @@ fn typed_inline_relations_validate_contexts_and_malformed_tokens() {
                 .mentions()
                 .is_empty()
         );
+    }
+}
+
+#[test]
+fn typed_inline_continuations_preserve_literal_contexts_and_item_boundaries() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    let path = root.join("a.mara.md");
+    let original = fs::read_to_string(&path).unwrap();
+    let next = fs::read_to_string(root.join("b.mara.md"))
+        .unwrap()
+        .replace("Preserved prose.", "[[verified_by:VER-A]]");
+    fs::remove_file(root.join("b.mara.md")).unwrap();
+    let project = resolve_project(Some(root), root).unwrap();
+    let schema = mara::load_schema(&project).unwrap();
+    for (body, valid) in [
+        ("[[verified_by", true),
+        ("`[[verified_by\n:VER-A]]`", true),
+        ("\\[[verified_by\n:VER-A]]", true),
+        ("<!-- [[verified_by\n:VER-A]] -->", true),
+        ("[[untyped\n]]\nText: untyped.", true),
+        ("[[untyped\n`code: text`", true),
+        ("> [[verified_by\n> :VER-A]]", false),
+        ("- [[verified_by\n  :VER-A]]", false),
+    ] {
+        let source = format!(
+            "[[verified_by\n:VER-A]]\n\n{}{next}",
+            original.replace("Preserved prose.", body),
+        );
+        fs::write(&path, &source).unwrap();
+        let result = validation_with_parity(root, &[]);
+        assert_eq!(result["valid"], valid, "{body}: {result}");
+        let corpus = mara::load_corpus(&project, &schema).unwrap();
+        assert_eq!(corpus.items().count(), 3, "{body}");
+        let diagnostics = mara::validate_corpus(&corpus, &schema);
+        assert_eq!(diagnostics.len(), usize::from(!valid), "{body}");
+        if let Some(diagnostic) = diagnostics.first() {
+            assert!(
+                diagnostic
+                    .message()
+                    .contains("invalid typed inline reference")
+            );
+            let span = diagnostic.source().span();
+            assert_eq!(&source[span.start_byte()..span.end_byte()], "[[verified_by");
+        }
+        let edge = relation_tool(
+            root,
+            "relation_get",
+            json!({"source":"REQ-B","relation":"verified_by","target":"VER-A"}),
+        );
+        assert_eq!(edge["occurrence_count"], 1, "{body}: {edge}");
     }
 }
 
@@ -10568,7 +10625,12 @@ fn typed_inline_relations_follow_item_mutations_through_cli_and_mcp() {
         );
         let written = fs::read(&a_path).unwrap();
         // Both forms of rejected body publication leave the prior corpus intact.
-        for invalid in ["[[unknown:VER-A]]", "[[verified_by:VER-MISSING]]"] {
+        for invalid in [
+            "[[unknown:VER-A]]",
+            "[[verified_by:VER-MISSING]]",
+            "[[verified_by\n:VER-A]]",
+            "[[\nverified_by:VER-A]]",
+        ] {
             invoke(
                 &["item", "update", "REQ-A", "--body", invalid],
                 "item_update",
