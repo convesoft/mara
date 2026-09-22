@@ -163,7 +163,14 @@ pub fn create_item(
                 (target.id(), target.flavour())
             };
             validate_relation_endpoints(schema, &edge.relation, &request.flavour, target_flavour)?;
-            if !edges.insert((edge.relation.clone(), target_id.to_owned())) {
+            let (canonical, _, inverse) = schema
+                .resolve_relation(&edge.relation)
+                .expect("validated relation");
+            if !edges.insert((
+                canonical.to_owned(),
+                inverse && target_id != request.id,
+                target_id.to_owned(),
+            )) {
                 return invalid(format!(
                     "item '{}' already has relation '{}' to '{}'",
                     request.id, edge.relation, edge.target
@@ -272,6 +279,26 @@ pub fn create_item(
                 })
     {
         return invalid(diagnostic.message());
+    }
+    for initial in &request.relations {
+        let edge = crate::relations::resolve_edge(
+            &candidate_corpus,
+            schema,
+            &request.id,
+            &initial.relation,
+            &initial.target,
+        )
+        .map_err(|error| Error::InvalidMutation {
+            message: error.to_string(),
+        })?;
+        let count = crate::relations::occurrences(project, &candidate_corpus, schema, &edge)
+            .map_err(|error| Error::InvalidMutation {
+                message: error.to_string(),
+            })?
+            .len();
+        if count > 1 {
+            return invalid("initial relation already has an equivalent assertion in the project");
+        }
     }
     atomic_replace(&absolute, &candidate, existed)?;
     Ok(ItemCreation {
@@ -612,62 +639,22 @@ fn mutate_relation(
     )?;
 
     let path = source_item.source().path().to_path_buf();
-    let document = corpus
-        .documents()
-        .iter()
-        .find(|document| document.path() == path)
-        .expect("a corpus item belongs to a corpus document");
-    let authored = source_item
-        .relations()
-        .iter()
-        .filter(|existing| {
-            existing.name() == relation_name
-                && resolve_item(&corpus, existing.target(), "target")
-                    .is_ok_and(|item| same_item_identity(item, target_item))
-        })
-        .collect::<Vec<_>>();
-    let candidate = match kind {
-        MutationKind::Add if !authored.is_empty() => {
-            return invalid(format!(
-                "item '{source_id}' already has relation '{relation_name}' to '{target_id}'"
-            ));
-        }
-        MutationKind::Add => {
-            let insertion = source_item
-                .metadata()
-                .last()
-                .expect("every parsed item has title metadata")
-                .source()
-                .span()
-                .end_byte();
-            let newline = newline_style(document.source());
-            let entry = format!("{newline}:{relation_name}: {}", target_item.id());
-            let mut candidate = document.source().to_owned();
-            candidate.insert_str(insertion, &entry);
-            candidate
-        }
-        MutationKind::Remove if authored.is_empty() => {
-            return invalid(format!(
-                "item '{source_id}' has no relation '{relation_name}' to '{target_id}'"
-            ));
-        }
-        MutationKind::Remove => {
-            let mut candidate = document.source().to_owned();
-            let mut spans = authored
-                .iter()
-                .map(|existing| existing.source().span())
-                .collect::<Vec<_>>();
-            spans.sort_by_key(|span| span.start_byte());
-            for span in spans.into_iter().rev() {
-                let end = full_line_end(&candidate, span.end_byte());
-                candidate.replace_range(span.start_byte()..end, "");
-            }
-            candidate
-        }
-    };
-
-    parse_document_source(&path, &candidate, schema)?;
-    atomic_replace(&project.root().join(&path), &candidate, true)?;
+    // The public Rust helper shares the same semantic mutation as CLI and MCP.
+    drop(_lock);
+    mutate_semantic_relation(
+        project,
+        schema,
+        &crate::RelationParams {
+            source: source_id.to_owned(),
+            relation: relation_name.to_owned(),
+            target: target_id.to_owned(),
+        },
+        matches!(kind, MutationKind::Add),
+        None,
+    )
+    .map_err(|error| Error::InvalidMutation {
+        message: error.to_string(),
+    })?;
     Ok(RelationMutation {
         source: source_item.id().to_owned(),
         source_mid: source_item.mid().map(ToOwned::to_owned),
@@ -678,18 +665,182 @@ fn mutate_relation(
     })
 }
 
+pub(crate) fn mutate_semantic_relation(
+    project: &Project,
+    schema: &Schema,
+    params: &crate::RelationParams,
+    add: bool,
+    occurrence: Option<&str>,
+) -> Result<crate::RelationMutationResult, crate::RelationError> {
+    use crate::{RelationAction, RelationError};
+    let _lock = MutationLock::acquire(project)?;
+    let corpus = load_corpus(project, schema)?;
+    ensure_unambiguous_item_identities(&corpus, "mutate relations")?;
+    let edge = crate::relations::resolve_edge(
+        &corpus,
+        schema,
+        &params.source,
+        &params.relation,
+        &params.target,
+    )?;
+    let authored = crate::relations::occurrences(project, &corpus, schema, &edge)?;
+    if add && !authored.is_empty() {
+        return Err(RelationError::new(
+            "relation_exists",
+            format!(
+                "item already has relation; inspect with relation get {} {} {} ({} occurrences)",
+                params.source,
+                params.relation,
+                params.target,
+                authored.len()
+            ),
+        )
+        .on_edge(&edge, authored.len()));
+    }
+    // Validate selectors even when their previous edge no longer exists.
+    if let Some(token) = occurrence {
+        let snapshot = crate::query::page::fingerprint(
+            &corpus,
+            schema,
+            &("relation-occurrences-v1", project.root()),
+        )?;
+        let prefix = format!("occ-1-{snapshot}-");
+        if !token
+            .strip_prefix(&prefix)
+            .is_some_and(|tail| tail.len() == 16 && tail.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            return Err(RelationError::new(
+                "stale_occurrence",
+                "invalid or stale occurrence; inspect the relation again",
+            )
+            .on_edge(&edge, authored.len()));
+        }
+        if !authored.iter().any(|entry| entry.reference == token) {
+            return Err(RelationError::new(
+                "occurrence_mismatch",
+                "occurrence does not belong to the requested edge",
+            )
+            .on_edge(&edge, authored.len()));
+        }
+    }
+    if !add && authored.is_empty() {
+        return Err(
+            RelationError::new("relation_not_found", "relation does not exist").on_edge(&edge, 0),
+        );
+    }
+    let mut candidates = BTreeMap::new();
+    let changed;
+    if add {
+        let source = resolve_item(&corpus, &params.source, "source")?;
+        let target = resolve_item(&corpus, &params.target, "target")?;
+        let document = corpus
+            .documents()
+            .iter()
+            .find(|d| d.path() == source.source().path())
+            .unwrap();
+        let insertion = source
+            .metadata()
+            .last()
+            .expect("title metadata")
+            .source()
+            .span()
+            .end_byte();
+        let mut candidate = document.source().to_owned();
+        candidate.insert_str(
+            insertion,
+            &format!(
+                "{}:{}: {}",
+                newline_style(document.source()),
+                params.relation,
+                target.id()
+            ),
+        );
+        candidates.insert(document.path().to_path_buf(), candidate);
+        changed = 1;
+    } else {
+        let selected = authored
+            .iter()
+            .filter(|entry| occurrence.is_none_or(|token| token == entry.reference))
+            .collect::<Vec<_>>();
+        changed = selected.len();
+        for entry in selected.into_iter().rev() {
+            let path = entry.source.path();
+            let candidate = candidates.entry(path.to_path_buf()).or_insert_with(|| {
+                corpus
+                    .documents()
+                    .iter()
+                    .find(|d| d.path() == path)
+                    .unwrap()
+                    .source()
+                    .to_owned()
+            });
+            let end = full_line_end(candidate, entry.source.end_byte());
+            candidate.replace_range(entry.source.start_byte()..end, "");
+        }
+    }
+    let projected = corpus.with_replacements(&candidates, schema)?;
+    references::preflight(&corpus, &projected, None, None)?;
+    let changes = corpus
+        .documents()
+        .iter()
+        .filter_map(|document| {
+            candidates.get(document.path()).map(|after| {
+                transaction::Change::new(
+                    project,
+                    document.path().to_path_buf(),
+                    Some(document.source().to_owned()),
+                    after.clone(),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    transaction::commit(project, changes, || {
+        if crate::resolve_project(Some(project.root()), project.root())? != *project
+            || crate::load_schema(project)? != *schema
+            || load_corpus(project, schema)? != corpus
+        {
+            return invalid("project changed since relationship preflight; retry the operation");
+        }
+        Ok(())
+    })?;
+    let remaining = if add { 1 } else { authored.len() - changed };
+    Ok(crate::RelationMutationResult {
+        format_version: 1,
+        action: if add {
+            RelationAction::Added
+        } else {
+            RelationAction::Removed
+        },
+        scope: if occurrence.is_some() {
+            "occurrence"
+        } else {
+            "relationship"
+        }
+        .into(),
+        edge,
+        changed_occurrences: changed,
+        remaining_occurrences: remaining,
+        edge_exists: remaining > 0,
+    })
+}
+
 fn validate_relation_endpoints(
     schema: &Schema,
     relation_name: &str,
     source_flavour: &str,
     target_flavour: &str,
 ) -> Result<(), Error> {
-    let definition = schema
-        .relations
-        .get(relation_name)
-        .ok_or_else(|| Error::InvalidMutation {
-            message: format!("unknown relation '{relation_name}'"),
-        })?;
+    let (_, definition, inverse) =
+        schema
+            .resolve_relation(relation_name)
+            .ok_or_else(|| Error::InvalidMutation {
+                message: format!("unknown relation '{relation_name}'"),
+            })?;
+    let (source_flavour, target_flavour) = if inverse {
+        (target_flavour, source_flavour)
+    } else {
+        (source_flavour, target_flavour)
+    };
     if !definition
         .source
         .iter()
@@ -824,13 +975,6 @@ fn resolve_item<'a>(corpus: &'a Corpus, id: &str, endpoint: &str) -> Result<&'a 
         [] => invalid(format!("relation {endpoint} item '{id}' was not found")),
         _ if by_mid => invalid(format!("relation {endpoint} item MID '{id}' is ambiguous")),
         _ => invalid(format!("relation {endpoint} item '{id}' is ambiguous")),
-    }
-}
-
-fn same_item_identity(left: &Item, right: &Item) -> bool {
-    match (left.mid(), right.mid()) {
-        (Some(left_mid), Some(right_mid)) => left_mid == right_mid,
-        _ => left.id() == right.id(),
     }
 }
 

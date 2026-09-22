@@ -194,11 +194,11 @@ pub fn get(
             }
         }
     };
-    let fingerprint = fingerprint(corpus, schema, &("discovery-get-v1", reference))?;
+    let fingerprint = fingerprint(corpus, schema, &("discovery-get-v2", reference))?;
     let start = Position::read(cursor, &fingerprint, &item)?;
     let mut next = start;
     let mut result = GetResult {
-        format_version: 1,
+        format_version: 2,
         node: node.summary(),
         content: String::new(),
         content_range: TextRange::new(start.content, start.content, item.content.len()),

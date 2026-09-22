@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Corpus, Diagnostic, FieldFilter, FlavourDefinition, GetResult, InitialRelation,
     ItemCollectionResult, ItemCreationRequest, ItemFilters, Project, RelatedFilters, RelatedResult,
-    RelationDefinition, RelationDirection, Schema, SearchResult, Template, add_relation,
-    backfill_mids, create_item, get, initialize_project, list_items, load_corpus,
-    load_corpus_for_validation, load_corpus_syntax_for_validation, load_schema,
-    load_schema_for_validation, related, remove_relation, resolve_project,
-    resolve_project_for_validation, search, validate_corpus, validate_corpus_independent,
+    RelationDefinition, RelationDirection, Schema, SearchResult, Template, backfill_mids,
+    create_item, get, initialize_project, list_items, load_corpus, load_corpus_for_validation,
+    load_corpus_syntax_for_validation, load_schema, load_schema_for_validation, related,
+    resolve_project, resolve_project_for_validation, search, validate_corpus,
+    validate_corpus_independent,
 };
 
 #[derive(Debug, Clone)]
@@ -124,12 +124,15 @@ impl OperationContext {
                 Ok(SchemaGetResult::Flavour { name, definition })
             }
             (Some(SchemaKind::Relation), Some(name)) => {
-                let definition = schema
-                    .relations()
-                    .get(&name)
-                    .ok_or_else(|| format!("unknown relation '{name}'"))?
-                    .clone();
-                Ok(SchemaGetResult::Relation { name, definition })
+                let (canonical, definition, inverse) = schema
+                    .resolve_relation(&name)
+                    .ok_or_else(|| format!("unknown relation '{name}'"))?;
+                Ok(SchemaGetResult::Relation {
+                    name: canonical.to_owned(),
+                    requested_name: name,
+                    inverse,
+                    definition: definition.clone(),
+                })
             }
             _ => Err("schema get requires both KIND and NAME, or neither".into()),
         }
@@ -139,7 +142,16 @@ impl OperationContext {
         let (_, schema) = self.load_project()?;
         let declarations = match kind {
             SchemaKind::Flavour => declaration_summaries(schema.flavours()),
-            SchemaKind::Relation => declaration_summaries(schema.relations()),
+            SchemaKind::Relation => schema
+                .relations()
+                .iter()
+                .map(|(name, definition)| DeclarationSummary {
+                    name: name.clone(),
+                    description: definition.description.clone(),
+                    inverse: definition.inverse.clone(),
+                    symmetric: Some(definition.symmetric),
+                })
+                .collect(),
         };
         Ok(SchemaListResult { kind, declarations })
     }
@@ -264,15 +276,52 @@ impl OperationContext {
         related(&corpus, &schema, &params.reference, &filters).map_err(|error| error.to_string())
     }
 
-    pub fn relation_add(&self, params: RelationParams) -> Result<RelationMutationResult, String> {
-        self.mutate_relation(RelationAction::Added, params)
+    pub fn relation_get(
+        &self,
+        params: RelationParams,
+        limit: Option<usize>,
+        cursor: Option<String>,
+    ) -> Result<crate::RelationInspection, crate::RelationError> {
+        let (project, schema) = self.load_project()?;
+        let corpus = load_corpus(&project, &schema)?;
+        crate::relations::inspect(
+            &project,
+            &corpus,
+            &schema,
+            &params,
+            limit,
+            cursor.as_deref(),
+        )
+    }
+
+    pub fn relation_add(
+        &self,
+        params: RelationParams,
+    ) -> Result<RelationMutationResult, crate::RelationError> {
+        let (project, schema) = self.load_project()?;
+        crate::mutation::mutate_semantic_relation(&project, &schema, &params, true, None)
     }
 
     pub fn relation_remove(
         &self,
         params: RelationParams,
-    ) -> Result<RelationMutationResult, String> {
-        self.mutate_relation(RelationAction::Removed, params)
+    ) -> Result<RelationMutationResult, crate::RelationError> {
+        self.relation_remove_occurrence(params, None)
+    }
+
+    pub fn relation_remove_occurrence(
+        &self,
+        params: RelationParams,
+        occurrence: Option<String>,
+    ) -> Result<RelationMutationResult, crate::RelationError> {
+        let (project, schema) = self.load_project()?;
+        crate::mutation::mutate_semantic_relation(
+            &project,
+            &schema,
+            &params,
+            false,
+            occurrence.as_deref(),
+        )
     }
 
     fn load_project(&self) -> Result<(Project, Schema), String> {
@@ -286,40 +335,6 @@ impl OperationContext {
         let (project, schema) = self.load_project()?;
         let corpus = load_corpus(&project, &schema).map_err(|error| error.to_string())?;
         Ok((corpus, schema))
-    }
-
-    fn mutate_relation(
-        &self,
-        action: RelationAction,
-        params: RelationParams,
-    ) -> Result<RelationMutationResult, String> {
-        let (project, schema) = self.load_project()?;
-        let mutation = match action {
-            RelationAction::Added => add_relation(
-                &project,
-                &schema,
-                &params.source,
-                &params.relation,
-                &params.target,
-            ),
-            RelationAction::Removed => remove_relation(
-                &project,
-                &schema,
-                &params.source,
-                &params.relation,
-                &params.target,
-            ),
-        }
-        .map_err(|error| error.to_string())?;
-        Ok(RelationMutationResult {
-            action,
-            source: mutation.source().to_owned(),
-            source_mid: mutation.source_mid().map(ToOwned::to_owned),
-            relation: mutation.relation().to_owned(),
-            target: mutation.target().to_owned(),
-            target_mid: mutation.target_mid().map(ToOwned::to_owned),
-            path: mutation.path().to_path_buf(),
-        })
     }
 
     fn validate(&self, selected_item: Option<&str>) -> Result<ValidationResult, String> {
@@ -462,6 +477,8 @@ pub enum SchemaGetResult {
     },
     Relation {
         name: String,
+        requested_name: String,
+        inverse: bool,
         definition: RelationDefinition,
     },
 }
@@ -470,6 +487,10 @@ pub enum SchemaGetResult {
 pub struct DeclarationSummary {
     pub name: String,
     pub description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub inverse: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symmetric: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -510,6 +531,8 @@ fn declaration_summaries<T: DescribedDeclaration>(
         .map(|(name, definition)| DeclarationSummary {
             name: name.clone(),
             description: definition.description().to_owned(),
+            inverse: None,
+            symmetric: None,
         })
         .collect()
 }
@@ -709,15 +732,13 @@ impl RelationAction {
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct RelationMutationResult {
+    pub format_version: u8,
     pub action: RelationAction,
-    pub source: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_mid: Option<String>,
-    pub relation: String,
-    pub target: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target_mid: Option<String>,
-    pub path: PathBuf,
+    pub scope: String,
+    pub edge: crate::RelationEdge,
+    pub changed_occurrences: usize,
+    pub remaining_occurrences: usize,
+    pub edge_exists: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, JsonSchema)]

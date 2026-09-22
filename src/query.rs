@@ -14,7 +14,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::{Corpus, Item, Schema, SourceLocation};
 
 mod get;
-mod page;
+pub(crate) mod page;
 mod related;
 mod search;
 pub use get::{EntryRange, GetResult, MetadataFragment, TextRange, get};
@@ -267,6 +267,7 @@ impl ItemFilters {
 pub enum RelationDirection {
     Incoming,
     Outgoing,
+    Symmetric,
 }
 
 impl RelationDirection {
@@ -274,6 +275,7 @@ impl RelationDirection {
         match self {
             Self::Incoming => "incoming",
             Self::Outgoing => "outgoing",
+            Self::Symmetric => "symmetric",
         }
     }
 }
@@ -579,9 +581,11 @@ fn filtered_items<'a>(
         })
         .filter(|item| {
             matches_name_filter(&filters.relations, |name| {
-                item.relations()
-                    .iter()
-                    .any(|relation| relation.name() == name)
+                item.relations().iter().any(|relation| {
+                    schema
+                        .resolve_relation(name)
+                        .is_some_and(|(canonical, _, _)| relation.canonical == canonical)
+                })
             })
         })
         .filter(|item| matches_fields(item, &fields));
@@ -609,7 +613,7 @@ fn validate_flavours(schema: &Schema, names: &[String]) -> Result<(), QueryError
 fn validate_relations(schema: &Schema, names: &[String]) -> Result<(), QueryError> {
     if let Some(name) = names
         .iter()
-        .find(|name| !schema.relations().contains_key(name.as_str()))
+        .find(|name| schema.resolve_relation(name).is_none())
     {
         return Err(QueryError::UnknownRelation { name: name.clone() });
     }
@@ -761,7 +765,7 @@ fn matches_name_filter(names: &[String], predicate: impl Fn(&str) -> bool) -> bo
     names.is_empty() || names.iter().any(|name| predicate(name))
 }
 
-fn resolve_item<'a>(corpus: &'a Corpus, id: &str) -> Result<&'a Item, QueryError> {
+pub(crate) fn resolve_item<'a>(corpus: &'a Corpus, id: &str) -> Result<&'a Item, QueryError> {
     let by_mid = crate::is_mid(id);
     let mut matches = corpus.items().filter(|item| {
         if by_mid {

@@ -15,7 +15,7 @@ use tempfile::TempDir;
 
 fn collection_nodes(page: &Value) -> Vec<Value> {
     if page.get("format_version").is_some() {
-        assert_eq!(page["format_version"], 1);
+        assert_eq!(page["format_version"], 2);
         page["results"]
             .as_array()
             .unwrap()
@@ -598,12 +598,12 @@ fn schema_guidance_rejects_invalid_declarations_through_cli_and_mcp() {
     let fixture = TempDir::new().unwrap();
     assert!(mara(fixture.path(), &["project", "init"]).status.success());
     let path = fixture.path().join(".mara/schema.yaml");
-    let valid = "format_version: 2\nflavours:\n  note:\n    description: A project note.\n    use_when: [Record useful context.]\n    avoid_when: []\n    distinguish_from: {}\n    id_prefix: NOTE-\n    body: optional\nrelations: {}\n";
+    let valid = "format_version: 3\nflavours:\n  note:\n    description: A project note.\n    use_when: [Record useful context.]\n    avoid_when: []\n    distinguish_from: {}\n    id_prefix: NOTE-\n    body: optional\nrelations: {}\n";
     fs::write(&path, valid).unwrap();
     let accepted = mara(fixture.path(), &["schema", "validate"]);
     assert!(accepted.status.success(), "{}", stderr(&accepted));
     let cases = [
-        ("format_version: 2", "format_version: 1", "migrate"),
+        ("format_version: 3", "format_version: 1", "migrate"),
         ("    description: A project note.\n", "", "description"),
         (
             "description: A project note.",
@@ -747,7 +747,7 @@ fn format_two_templates_initialize_and_inspect_equally_through_cli_and_mcp() {
             cli,
             mcp_response(&responses, 3)["result"]["structuredContent"]
         );
-        assert_eq!(cli["schema"]["format_version"], 2);
+        assert_eq!(cli["schema"]["format_version"], 3);
         let flavours = cli["schema"]["flavours"].as_object().unwrap();
         assert_eq!(flavours.len(), flavour_count);
         for declaration in flavours.values() {
@@ -1035,7 +1035,8 @@ fn documented_schema_migration_preserves_custom_declarations_and_item_identities
         .map(|part| part.split("```").next().unwrap())
         .collect();
     let before = examples[0];
-    let after = examples[1];
+    let migrated = examples[1].replace("format_version: 2", "format_version: 3");
+    let after = migrated.as_str();
     let old: Value = serde_saphyr::from_str(before).unwrap();
     let new: Value = serde_saphyr::from_str(after).unwrap();
     assert_eq!(old["relations"], new["relations"]);
@@ -1091,7 +1092,7 @@ fn documented_schema_migration_preserves_custom_declarations_and_item_identities
     );
     fs::write(
         &schema,
-        before.replace("format_version: 1", "format_version: 2"),
+        before.replace("format_version: 1", "format_version: 3"),
     )
     .unwrap();
     let missing_guidance = mara(fixture.path(), &["schema", "validate"]);
@@ -1276,6 +1277,11 @@ fn related_pages_continue_in_order_with_filters_and_cli_mcp_parity() {
 #[test]
 fn related_pages_reject_changed_inputs_and_invalid_continuation() {
     let fixture = retrieval_fixture();
+    assert!(
+        mara(fixture.path(), &["project", "mid", "backfill"])
+            .status
+            .success()
+    );
     let first = mara(
         fixture.path(),
         &["--format", "json", "related", "REQ-ALPHA", "--limit", "1"],
@@ -1405,6 +1411,11 @@ fn related_pages_bound_escaped_unicode_titles_and_preserve_every_entry() {
     let title = "界\"\\".repeat(200);
     let source = (0..100).map(|i| format!(":::mara design DES-BUDGET-{i}\n:title: {title}\n:satisfies: REQ-ALPHA\n\nBody.\n:::\n\n")).collect::<String>();
     fs::write(fixture.path().join("docs/budget.mara.md"), source).unwrap();
+    assert!(
+        mara(fixture.path(), &["project", "mid", "backfill"])
+            .status
+            .success()
+    );
     let mut cursor: Option<String> = None;
     let mut ids = Vec::new();
     let mut pages = 0;
@@ -1471,7 +1482,7 @@ fn related_pages_bound_escaped_unicode_titles_and_preserve_every_entry() {
     assert!(stdout(&human).contains("page\thas_more=true\tnext_cursor="));
     let full = mara(fixture.path(), &["--format", "json", "get", "DES-BUDGET-0"]);
     let full: Value = serde_json::from_slice(&full.stdout).unwrap();
-    assert_eq!(full["metadata"][0]["value"], title);
+    assert_eq!(full["metadata"][1]["value"], title);
 }
 
 #[test]
@@ -1485,6 +1496,11 @@ fn related_pages_fail_on_an_oversized_entry_without_skipping_it() {
         ),
     )
     .unwrap();
+    assert!(
+        mara(fixture.path(), &["project", "mid", "backfill"])
+            .status
+            .success()
+    );
     let args = [
         "--format",
         "json",
@@ -2494,7 +2510,7 @@ fn empty_template_creates_no_project_flavours() {
     assert!(output.status.success(), "{}", stderr(&output));
     assert_eq!(
         fs::read_to_string(fixture.path().join(".mara/schema.yaml")).unwrap(),
-        "format_version: 2\nflavours: {}\nrelations: {}\n"
+        "format_version: 3\nflavours: {}\nrelations: {}\n"
     );
 }
 
@@ -3698,7 +3714,7 @@ fn project_validation_uses_properties_unaffected_by_a_flavour_decode_error() {
     assert!(init.status.success(), "{}", stderr(&init));
     fs::write(
         fixture.path().join(".mara/schema.yaml"),
-        r#"format_version: 2
+        r#"format_version: 3
 flavours:
   requirement:
     description: An independently verifiable obligation.
@@ -3750,7 +3766,7 @@ fn project_validation_uses_flavours_when_the_relations_section_is_malformed() {
     assert!(init.status.success(), "{}", stderr(&init));
     fs::write(
         fixture.path().join(".mara/schema.yaml"),
-        r#"format_version: 2
+        r#"format_version: 3
 flavours:
   requirement:
     description: An independently verifiable obligation.
@@ -4308,7 +4324,7 @@ fn project_validation_does_not_invent_a_schema_version_after_decode_failure() {
     assert!(init.status.success(), "{}", stderr(&init));
     let schema_file = fixture.path().join(".mara/schema.yaml");
     let schema = fs::read_to_string(&schema_file).unwrap();
-    fs::write(&schema_file, schema.replacen("format_version: 2\n", "", 1)).unwrap();
+    fs::write(&schema_file, schema.replacen("format_version: 3\n", "", 1)).unwrap();
 
     let validate = mara(fixture.path(), &["project", "validate"]);
 
@@ -4343,7 +4359,7 @@ fn real_cli_discovers_and_inspects_the_effective_minimal_schema() {
     let complete = mara(&nested, &["schema", "get"]);
     assert!(complete.status.success(), "{}", stderr(&complete));
     let complete = stdout(&complete);
-    assert!(complete.contains("format_version: 2"));
+    assert!(complete.contains("format_version: 3"));
     assert!(complete.contains("requirement:"));
     assert!(complete.contains("satisfies:"));
 
@@ -4390,7 +4406,7 @@ fn schema_commands_load_the_schema_configured_by_the_selected_project() {
     .unwrap();
     fs::write(
         selected.join(".mara/custom.yaml"),
-        r#"format_version: 2
+        r#"format_version: 3
 flavours:
   note:
     description: A concise project note.
@@ -6320,13 +6336,18 @@ fn typo_tolerant_search_preserves_exact_matches_filters_excerpts_and_pages() {
 #[test]
 fn item_related_returns_filtered_direct_neighbours_with_relation_and_direction() {
     let fixture = retrieval_fixture();
+    assert!(
+        mara(fixture.path(), &["project", "mid", "backfill"])
+            .status
+            .success()
+    );
 
     let related = mara(fixture.path(), &["related", "REQ-ALPHA"]);
     assert!(related.status.success(), "{}", stderr(&related));
     let human = stdout(&related);
-    assert!(human.contains("outgoing\tderives_from\tSCN-BASE\titem\tBase scenario"));
+    assert!(human.contains("derives_from → SCN-BASE\tBase scenario"));
     assert!(human.contains("incoming\tcontained_by\t"));
-    assert!(human.contains("evidence=docs/a.mara.md:10-10"));
+    assert!(human.contains("occurrences=1"));
 
     let incoming = mara(
         fixture.path(),
@@ -6342,10 +6363,10 @@ fn item_related_returns_filtered_direct_neighbours_with_relation_and_direction()
         ],
     );
     assert!(incoming.status.success(), "{}", stderr(&incoming));
-    assert_eq!(
-        stdout(&incoming),
-        "incoming\tsatisfies\tDES-ALPHA\titem\tAlpha design\tdocs/b.mara.md:9\tevidence=docs/b.mara.md:11-11\treference=DES-ALPHA\npage\thas_more=false\n"
-    );
+    assert!(stdout(&incoming).starts_with(
+        "incoming satisfies → DES-ALPHA\tAlpha design\tdocs/b.mara.md:10\toccurrences=1\treference="
+    ));
+    assert!(stdout(&incoming).ends_with("page\thas_more=false\n"));
 
     let no_match = mara(
         fixture.path(),
@@ -6646,6 +6667,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
             "related",
             "item_validate",
             "relation_add",
+            "relation_get",
             "relation_remove",
         ])
     );
@@ -6777,7 +6799,7 @@ fn every_command_help_describes_commands_arguments_and_options() {
         }
     }
     // Root, six command groups, nineteen project operations, and the MCP server.
-    assert_eq!(visited.len(), 27);
+    assert_eq!(visited.len(), 28);
 }
 
 #[test]
@@ -6812,7 +6834,7 @@ fn mcp_tools_list_exposes_parameter_guidance() {
     let tools = mcp_response(&responses, 2)["result"]["tools"]
         .as_array()
         .unwrap();
-    assert_eq!(tools.len(), 19);
+    assert_eq!(tools.len(), 20);
     for tool in tools {
         assert!(
             tool["description"]
@@ -6919,7 +6941,7 @@ fn mcp_tools_list_exposes_parameter_guidance() {
                 ),
                 "direction" => (
                     "--direction",
-                    &["relative to", "includes both", "outgoing first"],
+                    &["relative to", "symmetric", "outgoing first"],
                 ),
                 "query" => (
                     "<QUERY>",
@@ -7304,7 +7326,7 @@ fn primary_workflows_run_end_to_end_against_real_source_files() {
     assert!(stdout(&fetched).contains("Mara retrieves bounded knowledge"));
     let neighbours = mara(fixture.path(), &["related", "REQ-DOGFOOD"]);
     assert!(neighbours.status.success(), "{}", stderr(&neighbours));
-    assert!(stdout(&neighbours).contains("outgoing\tderives_from\tSCN-DOGFOOD"));
+    assert!(stdout(&neighbours).contains("derives_from → SCN-DOGFOOD"));
 }
 
 #[test]
@@ -9396,7 +9418,7 @@ fn unified_search_owns_blocks_ranks_mixed_hits_and_pages_with_mcp_parity() {
         let output = mara(fixture.path(), &args);
         assert!(output.status.success(), "{}", stderr(&output));
         let page: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(page["format_version"], 1);
+        assert_eq!(page["format_version"], 2);
         assert!(page.get("items").is_none());
         let responses = mcp_exchange(
             fixture.path(),
@@ -9819,7 +9841,7 @@ fn unified_get_reads_search_results_and_parent_documents_with_cli_mcp_parity() {
         };
         let mut content = String::new();
         for page in &pages {
-            assert_eq!(page["format_version"], 1);
+            assert_eq!(page["format_version"], 2);
             assert_eq!(&page["node"], node);
             assert_eq!(page["content_range"]["start_byte"], content.len());
             content.push_str(page["content"].as_str().unwrap());
@@ -9925,7 +9947,15 @@ fn related_cli_mcp(root: &Path, reference: &str, filters: &[(&str, &str)]) -> Va
         args.extend([*flag, *value]);
         match *flag {
             "--limit" => params["limit"] = json!(value.parse::<usize>().unwrap()),
-            "--relation" => params["relations"] = json!([value]),
+            "--relation" => {
+                if params.get("relations").is_none() {
+                    params["relations"] = json!([]);
+                }
+                params["relations"]
+                    .as_array_mut()
+                    .unwrap()
+                    .push(json!(value));
+            }
             "--flavour" => params["flavours"] = json!([value]),
             flag => params[flag.trim_start_matches("--")] = json!(value),
         }
@@ -9934,7 +9964,7 @@ fn related_cli_mcp(root: &Path, reference: &str, filters: &[(&str, &str)]) -> Va
     assert!(output.status.success(), "{}", stdout(&output));
     let page: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert!(serde_json::to_vec(&page).unwrap().len() <= 65_536);
-    assert_eq!(page["format_version"], 1);
+    assert_eq!(page["format_version"], 2);
     let responses = mcp_exchange(
         root,
         &[
@@ -10018,7 +10048,7 @@ fn unified_related_navigates_mentions_relations_and_structure_with_exact_evidenc
             && back["neighbour"]["reference"] == reference
             && back["source"] == edge["source"]));
     }
-    // Separate typed and mention connections to the same target; self-edges retain both directions.
+    // Separate typed and mention connections; a directed self-edge appears once.
     let target_edges = edges
         .iter()
         .filter(|edge| edge["neighbour"]["id"] == "REQ-TARGET")
@@ -10031,11 +10061,14 @@ fn unified_related_navigates_mentions_relations_and_structure_with_exact_evidenc
             .collect::<BTreeSet<_>>(),
         BTreeSet::from(["depends_on", "mentions"])
     );
-    for direction in ["incoming", "outgoing"] {
-        assert!(edges.iter().any(|edge| edge["neighbour"]["id"] == "REQ-HUB"
-            && edge["direction"] == direction
-            && edge["relation"] == "depends_on"));
-    }
+    assert!(edges.iter().any(|edge| edge["neighbour"]["id"] == "REQ-HUB"
+        && edge["direction"] == "outgoing"
+        && edge["relation"] == "depends_on"));
+    assert!(
+        !edges.iter().any(|edge| edge["neighbour"]["id"] == "REQ-HUB"
+            && edge["direction"] == "incoming"
+            && edge["relation"] == "depends_on")
+    );
     let target = target_edges[0]["neighbour"]["reference"].as_str().unwrap();
     let target_page = related_cli_mcp(
         fixture.path(),
@@ -10090,6 +10123,11 @@ fn unified_related_navigates_mentions_relations_and_structure_with_exact_evidenc
 #[test]
 fn unified_related_qualifies_collisions_against_vocabulary_and_rejects_old_interface() {
     let fixture = retrieval_fixture();
+    assert!(
+        mara(fixture.path(), &["project", "mid", "backfill"])
+            .status
+            .success()
+    );
     let path = fixture.path().join(".mara/schema.yaml");
     let schema = fs::read_to_string(&path).unwrap();
     fs::write(&path, format!("{schema}\n  contains:\n    description: Authored containment\n    source: [requirement]\n    target: [scenario]\n  mentions:\n    description: Authored mention\n    source: [requirement]\n    target: [scenario]\n")).unwrap();
@@ -10190,4 +10228,446 @@ fn unified_related_rejects_oversized_requested_node_even_without_connections() {
     assert!(!output.status.success());
     assert!(stderr(&output).contains("65536-byte"));
     assert!(output.stderr.len() < 1024);
+}
+
+fn relation_tool(root: &Path, name: &str, params: Value) -> Value {
+    let responses = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, name, params),
+        ],
+    );
+    let response = &mcp_response(&responses, 2)["result"];
+    assert!(
+        response.get("structuredContent").is_some(),
+        "{responses:#?}"
+    );
+    let value = response["structuredContent"].clone();
+    assert_eq!(response["isError"], value.get("error").is_some());
+    value
+}
+
+fn relation_fixture() -> TempDir {
+    let fixture = TempDir::new().unwrap();
+    assert!(
+        mara(
+            fixture.path(),
+            &["project", "init", "--template", "engineering"]
+        )
+        .status
+        .success()
+    );
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file)
+        .unwrap()
+        .replace("  verifies:\n", "  verifies:\n    inverse: verified_by\n")
+        + "\n  associated_with:\n    description: An association.\n    source: [requirement, design]\n    target: [design, requirement]\n    symmetric: true\n  follows:\n    description: A directed dependency.\n    source: [requirement]\n    target: [requirement]\n    inverse: followed_by\n";
+    fs::write(schema_file, schema).unwrap();
+    for (flavour, id, file) in [
+        ("requirement", "REQ-A", "a.mara.md"),
+        ("verification", "VER-A", "v.mara.md"),
+        ("requirement", "REQ-B", "b.mara.md"),
+    ] {
+        let output = mara(
+            fixture.path(),
+            &[
+                "item",
+                "create",
+                flavour,
+                id,
+                file,
+                "--title",
+                id,
+                "--body",
+                "Preserved prose.",
+            ],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+    }
+    fixture
+}
+
+#[test]
+fn inverse_and_symmetric_relationships_have_one_identity_through_cli_and_mcp() {
+    for use_mcp in [false, true] {
+        let fixture = relation_fixture();
+        let root = fixture.path();
+        let invoke = |operation: &str,
+                      source: &str,
+                      name: &str,
+                      target: &str,
+                      extra: Option<(&str, &str)>| {
+            if use_mcp {
+                let mut params = json!({"source":source,"relation":name,"target":target});
+                if let Some((key, value)) = extra {
+                    params[key] = json!(value);
+                }
+                relation_tool(root, &format!("relation_{operation}"), params)
+            } else {
+                let mut args = vec![
+                    "--format", "json", "relation", operation, source, name, target,
+                ];
+                let flag;
+                if let Some((key, value)) = extra {
+                    flag = format!("--{key}");
+                    args.extend([&flag, value]);
+                }
+                let output = mara(root, &args);
+                let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(
+                    output.status.success(),
+                    value.get("error").is_none(),
+                    "{value}"
+                );
+                value
+            }
+        };
+        let added = invoke("add", "REQ-A", "verified_by", "VER-A", None);
+        assert_eq!(added["edge"]["source"]["id"], "VER-A");
+        assert_eq!(added["changed_occurrences"], 1);
+        let a_path = root.join("a.mara.md");
+        let a = fs::read_to_string(&a_path).unwrap();
+        assert!(a.contains(":verified_by: VER-A"));
+        let v_path = root.join("v.mara.md");
+        let v = fs::read_to_string(&v_path).unwrap();
+        // Direct source may intentionally repeat equivalent ID/MID assertions.
+        let mid = added["edge"]["target"]["mid"].as_str().unwrap();
+        fs::write(
+            &v_path,
+            v.replace("\n\n", &format!("\n:verifies: REQ-A\n:verifies: {mid}\n\n")),
+        )
+        .unwrap();
+        let before = fs::read(&v_path).unwrap();
+        let duplicate = invoke("add", "VER-A", "verifies", "REQ-A", None);
+        assert_eq!(duplicate["error"]["code"], "relation_exists");
+        assert_eq!(duplicate["occurrence_count"], 3);
+        assert_eq!(fs::read(&v_path).unwrap(), before);
+        let inspected = invoke("get", "REQ-A", "verified_by", "VER-A", None);
+        assert_eq!(inspected["occurrence_count"], 3);
+        assert_eq!(inspected["edge"], added["edge"]);
+        for occurrence in inspected["occurrences"].as_array().unwrap() {
+            let source = &occurrence["source"];
+            let text = fs::read_to_string(root.join(source["path"].as_str().unwrap())).unwrap();
+            assert_eq!(
+                &text[source["start_byte"].as_u64().unwrap() as usize
+                    ..source["end_byte"].as_u64().unwrap() as usize],
+                format!(
+                    ":{}: {}",
+                    occurrence["relation"].as_str().unwrap(),
+                    occurrence["target"].as_str().unwrap()
+                )
+            );
+        }
+        let selected = related_cli_mcp(
+            root,
+            "REQ-A",
+            &[("--relation", "verified_by"), ("--direction", "incoming")],
+        );
+        assert_eq!(selected["connections"].as_array().unwrap().len(), 1);
+        assert_eq!(selected["connections"][0]["relation"], "verifies");
+        assert_eq!(selected["connections"][0]["label"], "verified_by");
+        assert_eq!(selected["connections"][0]["occurrence_count"], 3);
+        assert!(selected["connections"][0].get("source").is_none());
+        let human = mara(root, &["related", "REQ-A", "--relation", "verified_by"]);
+        assert!(stdout(&human).starts_with("verified_by → VER-A"));
+        let wrong = invoke("add", "REQ-A", "verifies", "VER-A", None);
+        assert_eq!(wrong["error"]["code"], "invalid_endpoint");
+        let selector = inspected["occurrences"][0]["reference"].as_str().unwrap();
+        let removed = invoke(
+            "remove",
+            "VER-A",
+            "verifies",
+            "REQ-A",
+            Some(("occurrence", selector)),
+        );
+        assert_eq!(removed["scope"], "occurrence");
+        assert_eq!(removed["remaining_occurrences"], 2);
+        assert_eq!(
+            invoke(
+                "remove",
+                "VER-A",
+                "verifies",
+                "REQ-A",
+                Some(("occurrence", selector))
+            )["error"]["code"],
+            "stale_occurrence"
+        );
+        let removed = invoke("remove", "REQ-A", "verified_by", "VER-A", None);
+        assert_eq!(removed["changed_occurrences"], 2);
+        assert_eq!(removed["edge_exists"], false);
+        assert_eq!(fs::read_to_string(&v_path).unwrap(), v);
+        assert_eq!(
+            fs::read_to_string(&a_path).unwrap(),
+            a.replace(":verified_by: VER-A\n", "")
+        );
+        assert_eq!(
+            invoke("get", "VER-A", "verifies", "REQ-A", None)["error"]["code"],
+            "relation_not_found"
+        );
+        let symmetric = invoke("add", "REQ-B", "associated_with", "REQ-A", None);
+        assert_eq!(symmetric["edge"]["symmetric"], true);
+        assert!(
+            symmetric["edge"]["source"]["mid"].as_str()
+                < symmetric["edge"]["target"]["mid"].as_str()
+        );
+        assert_eq!(
+            invoke("add", "REQ-A", "associated_with", "REQ-B", None)["error"]["code"],
+            "relation_exists"
+        );
+        invoke("add", "REQ-A", "follows", "REQ-B", None);
+        let a = fs::read_to_string(&a_path).unwrap();
+        fs::write(&a_path, a.replace("\n\n", "\n:associated_with: REQ-B\n\n")).unwrap();
+        for id in ["REQ-A", "REQ-B"] {
+            let page = related_cli_mcp(root, id, &[("--direction", "symmetric")]);
+            assert_eq!(page["connections"].as_array().unwrap().len(), 1);
+            assert_eq!(page["connections"][0]["occurrence_count"], 2);
+            assert_eq!(page["connections"][0]["edge"], symmetric["edge"]);
+        }
+        assert_eq!(
+            invoke("remove", "REQ-A", "associated_with", "REQ-B", None)["changed_occurrences"],
+            2
+        );
+        assert_eq!(
+            invoke("get", "REQ-A", "follows", "REQ-B", None)["occurrence_count"],
+            1
+        );
+        assert!(mara(root, &["project", "validate"]).status.success());
+    }
+}
+
+#[test]
+fn relationship_self_edges_and_occurrence_pages_are_deduplicated_before_pagination() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    for name in ["follows", "associated_with"] {
+        assert!(
+            mara(root, &["relation", "add", "REQ-A", name, "REQ-A"])
+                .status
+                .success()
+        );
+    }
+    let path = root.join("a.mara.md");
+    let original = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        original.replace(
+            ":follows: REQ-A",
+            ":followed_by: REQ-A\n".repeat(25).trim_end(),
+        ),
+    )
+    .unwrap();
+    for (filter, expected) in [
+        (None, vec!["outgoing", "symmetric"]),
+        (Some("incoming"), vec!["incoming"]),
+        (Some("outgoing"), vec!["outgoing"]),
+        (Some("symmetric"), vec!["symmetric"]),
+    ] {
+        let mut cursor = None::<String>;
+        let mut directions = Vec::new();
+        loop {
+            let mut filters = vec![
+                ("--limit", "1"),
+                ("--relation", "follows"),
+                ("--relation", "associated_with"),
+            ];
+            if let Some(filter) = filter {
+                filters.push(("--direction", filter));
+            }
+            if let Some(cursor) = &cursor {
+                filters.push(("--cursor", cursor));
+            }
+            let page = related_cli_mcp(root, "REQ-A", &filters);
+            directions.extend(
+                page["connections"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|c| c["direction"].as_str().unwrap().to_owned()),
+            );
+            cursor = page["next_cursor"].as_str().map(str::to_owned);
+            if cursor.is_none() {
+                break;
+            }
+            assert!(directions.len() < 3);
+        }
+        assert_eq!(directions, expected);
+    }
+    let first = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"follows","target":"REQ-A"}),
+    );
+    assert_eq!(first["occurrence_count"], 25);
+    assert_eq!(first["occurrences"].as_array().unwrap().len(), 20);
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let second = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"follows","target":"REQ-A","cursor":cursor}),
+    );
+    assert_eq!(second["occurrences"].as_array().unwrap().len(), 5);
+    assert_eq!(second["has_more"], false);
+    let selector = first["occurrences"][0]["reference"].as_str().unwrap();
+    let mismatch = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":"REQ-A","relation":"associated_with","target":"REQ-A","occurrence":selector}),
+    );
+    assert_eq!(mismatch["error"]["code"], "occurrence_mismatch");
+    fs::write(&path, original).unwrap();
+    let stale = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"follows","target":"REQ-A","cursor":cursor}),
+    );
+    assert!(stale.get("error").is_some());
+}
+
+#[test]
+fn relationship_schema_alias_inspection_and_invalid_declarations_have_surface_parity() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    let output = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "schema",
+            "get",
+            "relation",
+            "verified_by",
+        ],
+    );
+    let inspected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(inspected["name"], "verifies");
+    assert_eq!(inspected["requested_name"], "verified_by");
+    assert_eq!(inspected["inverse"], true);
+    let responses = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "schema_get",
+                json!({"kind":"relation","name":"verified_by"}),
+            ),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        inspected
+    );
+    let schema_path = root.join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_path).unwrap();
+    for candidate in [
+        schema.replace("inverse: verified_by", "inverse: verifies"),
+        schema.replace("inverse: verified_by", "inverse: follows"),
+        schema.replace("inverse: verified_by", "inverse: followed_by"),
+        schema.replace("inverse: verified_by", "inverse: title"),
+        schema.replace("inverse: verified_by", "inverse: NotSnake"),
+        schema.replace("symmetric: true", "symmetric: true\n    inverse: associated_from"),
+        schema.replace("target: [design, requirement]", "target: [requirement]"),
+        schema.replace("target: [design, requirement]", "target: []"),
+        schema.replace("    id_prefix: REQ-\n    body: required\n    fields: {}", "    id_prefix: REQ-\n    body: required\n    fields:\n      verified_by:\n        type: string"),
+    ] {
+        assert_ne!(candidate, schema);
+        fs::write(&schema_path, candidate).unwrap();
+        let result = validation_with_parity(root, &[]);
+        assert_eq!(result["valid"], false, "{result}");
+    }
+    // Old declarations keep their meaning after an explicit version-only migration.
+    fs::write(
+        &schema_path,
+        schema.replace("format_version: 3", "format_version: 2"),
+    )
+    .unwrap();
+    let bytes = fs::read(root.join("a.mara.md")).unwrap();
+    let error = mara(root, &["schema", "validate"]);
+    assert!(!error.status.success());
+    assert!(stderr(&error).contains("explicit migration"));
+    assert!(stderr(&error).contains("docs/relations.mara.md"));
+    fs::write(&schema_path, schema).unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    assert_eq!(fs::read(root.join("a.mara.md")).unwrap(), bytes);
+}
+
+#[test]
+fn relationship_alias_filters_initial_edges_and_identity_edits_preserve_occurrences() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    let created = mara(
+        root,
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-C",
+            "c.mara.md",
+            "--title",
+            "New",
+            "--body",
+            "New requirement.",
+            "--relation",
+            "verified_by=VER-A",
+        ],
+    );
+    assert!(created.status.success(), "{}", stderr(&created));
+    for command in [
+        vec!["--format", "json", "item", "list"],
+        vec!["--format", "json", "search", ""],
+    ] {
+        let mut canonical = command.clone();
+        canonical.extend(["--relation", "verifies"]);
+        let mut alias = command;
+        alias.extend(["--relation", "verified_by"]);
+        let a = mara(root, &canonical);
+        let b = mara(root, &alias);
+        assert!(a.status.success() && b.status.success());
+        assert_eq!(a.stdout, b.stdout);
+        assert!(stdout(&a).contains("REQ-C"));
+    }
+    let duplicate = mara(
+        root,
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-D",
+            "d.mara.md",
+            "--title",
+            "Duplicate",
+            "--body",
+            "Body.",
+            "--relation",
+            "follows=REQ-D",
+            "--relation",
+            "followed_by=REQ-D",
+        ],
+    );
+    assert!(!duplicate.status.success());
+    assert!(!root.join("d.mara.md").exists());
+    let delete = mara(root, &["item", "delete", "VER-A"]);
+    assert!(!delete.status.success());
+    let renamed = mara(root, &["item", "rename", "VER-A", "VER-B"]);
+    assert!(renamed.status.success(), "{}", stderr(&renamed));
+    assert!(
+        fs::read_to_string(root.join("c.mara.md"))
+            .unwrap()
+            .contains(":verified_by: VER-B")
+    );
+    let moved = mara(root, &["item", "move", "REQ-C", "moved.mara.md"]);
+    assert!(moved.status.success(), "{}", stderr(&moved));
+    let inspected = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"VER-B","relation":"verifies","target":"REQ-C"}),
+    );
+    assert_eq!(
+        inspected["occurrences"][0]["source"]["path"],
+        "moved.mara.md"
+    );
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
 }

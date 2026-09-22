@@ -127,7 +127,7 @@ const result = id => {
 };
 assert.equal(result(1).serverInfo.version, version);
 const schema = result(2).structuredContent.schema;
-assert.equal(schema.format_version, 2);
+assert.equal(schema.format_version, 3);
 assert.equal(Object.keys(schema.flavours).length, 11);
 assert.deepEqual(schema.relations.verifies.target, ["requirement", "design"]);
 assert.ok(result(3).structuredContent.mid);
@@ -188,7 +188,7 @@ for (const [name, property] of [["search", "excerpts"], ["get", "id"], ["get", "
 // Follow a narrative mention to an item, then its verification, using only discovery references.
 writeFileSync(path.join(project, "context.mara.md"), "# Access context\n\nStart access here: [[REQ-ACCESS]].\n\n[Checks](knowledge.mara.md).\n");
 const search = parity(["search", "access"], "search", { query: "access" });
-assert.equal(search.format_version, 1);
+assert.equal(search.format_version, 2);
 assert.equal(search.has_more, false);
 assert.deepEqual(new Set(search.results.map(hit => hit.node.kind)), new Set(["item", "section", "block"]));
 const narrative = search.results.find(hit => hit.node.kind === "block").node;
@@ -270,7 +270,7 @@ while (reference) {
   do {
     const page = parity(["get", reference, ...(cursor ? ["--cursor", cursor] : [])], "get", { reference, ...(cursor ? { cursor } : {}) });
     node = page.node;
-    assert.equal(page.format_version, 1);
+    assert.equal(page.format_version, 2);
     assert.ok(Buffer.byteLength(JSON.stringify(page)) <= 65536);
     assert.equal(page.content_range.start_byte, Buffer.byteLength(content));
     content += page.content;
@@ -318,7 +318,8 @@ console.log("PASS stale search/get/related cursors and structural handles reject
 // staging its format-1 state. This fixture does not require an old executable.
 const examples = [...readFileSync("docs/migration-0.2.mara.md", "utf8").matchAll(/```yaml\n([\s\S]*?)```/g)].map(match => match[1]);
 assert.equal(examples.length, 2);
-const [before, after] = examples;
+const [before, previous] = examples;
+const after = previous.replace("format_version: 2", "format_version: 3");
 project = path.join(path.dirname(engineering), "customized");
 mkdirSync(project);
 cli(["project", "init", "--template", "empty"]);
@@ -333,11 +334,11 @@ const originalConfig = readFileSync(path.join(project, ".mara/project.toml"));
 writeFileSync(schemaPath, before);
 rejects(["schema", "validate"], "schema_validate", {}, /migrate/);
 assert.equal(readFileSync(schemaPath, "utf8"), before);
-writeFileSync(schemaPath, before.replace("format_version: 1", "format_version: 2"));
+writeFileSync(schemaPath, before.replace("format_version: 1", "format_version: 3"));
 rejects(["schema", "validate"], "schema_validate", {}, /use_when/);
 // Migrate in place by changing the version and adding guidance only.
 const guidance = after.slice(after.indexOf("    use_when:"), after.indexOf("    id_prefix:"));
-const migrated = before.replace("format_version: 1", "format_version: 2").replace("    id_prefix:", guidance + "    id_prefix:");
+const migrated = before.replace("format_version: 1", "format_version: 3").replace("    id_prefix:", guidance + "    id_prefix:");
 assert.equal(migrated, after);
 writeFileSync(schemaPath, migrated);
 assert.deepEqual(parity(["schema", "get"], "schema_get", {}), originalSchema);
