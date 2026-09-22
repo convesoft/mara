@@ -214,7 +214,12 @@ pub(crate) fn occurrences(
             {
                 result.push(RelationOccurrence {
                     reference: format!("occ-1-{snapshot}-{index:016x}"),
-                    kind: "metadata".into(),
+                    kind: if relation.inline {
+                        "inline"
+                    } else {
+                        "metadata"
+                    }
+                    .into(),
                     source: relation.source().into(),
                     author: RelationEndpoint::new(item)?,
                     relation: relation.name().to_owned(),

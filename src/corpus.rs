@@ -125,6 +125,7 @@ pub struct Item {
     body: String,
     body_blocks: Vec<MarkdownBlock>,
     relations: Vec<Relation>,
+    inline_diagnostics: Vec<Diagnostic>,
     mentions: Vec<Mention>,
     source: SourceLocation,
     body_source: SourceLocation,
@@ -268,6 +269,7 @@ pub struct Relation {
     pub(crate) canonical: String,
     pub(crate) inverse: bool,
     pub(crate) symmetric: bool,
+    pub(crate) inline: bool,
     target: String,
     source: SourceLocation,
 }
@@ -540,6 +542,29 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 if !schema.relation_is_valid(canonical) {
                     continue;
                 }
+                let authors = if inverse {
+                    &definition.target
+                } else {
+                    &definition.source
+                };
+                if relation.inline
+                    && (if inverse {
+                        schema.relation_target_is_valid(canonical)
+                    } else {
+                        schema.relation_source_is_valid(canonical)
+                    })
+                    && !authors.iter().any(|flavour| flavour == item.flavour())
+                {
+                    diagnostic(
+                        &mut diagnostics,
+                        relation.source(),
+                        format!(
+                            "relation '{}' does not allow source flavour '{}'",
+                            relation.name(),
+                            item.flavour()
+                        ),
+                    );
+                }
                 match resolve_indexed_item(&ids, &mids, relation.target()) {
                     IndexedItem::One(target) => {
                         let endpoints = if inverse {
@@ -605,7 +630,10 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
 }
 
 pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = corpus
+        .items()
+        .flat_map(|item| item.inline_diagnostics.clone())
+        .collect::<Vec<_>>();
     let ids = item_index(corpus);
     let mid_targets = mid_index(corpus);
 
@@ -1120,7 +1148,7 @@ fn project_document(
                     source: location(&path, &line_starts, entry.source.start, entry.source.end),
                 })
                 .collect::<Vec<_>>();
-            let relations = metadata
+            let mut relations = metadata
                 .iter()
                 .filter_map(|entry| {
                     let schema = schema?;
@@ -1137,14 +1165,43 @@ fn project_document(
                         canonical: canonical.to_owned(),
                         inverse,
                         symmetric: definition.symmetric,
+                        inline: false,
                         target: entry.value.clone(),
                         source: entry.source.clone(),
                     })
                 })
-                .collect();
+                .collect::<Vec<_>>();
+            let mut inline_diagnostics = Vec::new();
+            for token in parsed.mentions.iter().filter(|token| token.typed) {
+                let (name, target) = token.target.split_once(':').unwrap_or(("", ""));
+                let source_location = location(&path, &line_starts, token.source.start, token.source.end);
+                if !crate::is_snake_name(name)
+                    || (!crate::is_item_id(target) && !crate::is_mid(target))
+                    || source[token.source.clone()] != format!("[[{}]]", token.target)
+                {
+                    diagnostic(&mut inline_diagnostics, &source_location,
+                        "invalid typed inline reference; expected [[relation:ID]] or [[relation:MID]] without whitespace or markup".into());
+                    continue;
+                }
+                let Some(schema) = schema else { continue };
+                let Some((canonical, definition, inverse)) = schema.resolve_relation(name) else {
+                    diagnostic(&mut inline_diagnostics, &source_location, format!("unknown inline relation '{name}'"));
+                    continue;
+                };
+                relations.push(Relation {
+                    name: name.to_owned(),
+                    canonical: canonical.to_owned(),
+                    inverse,
+                    symmetric: definition.symmetric,
+                    inline: true,
+                    target: target.to_owned(),
+                    source: source_location,
+                });
+            }
             let mentions = parsed
                 .mentions
                 .into_iter()
+                .filter(|mention| !mention.typed)
                 .map(|mention| Mention {
                     target: mention.target,
                     source: location(
@@ -1171,6 +1228,7 @@ fn project_document(
                     .map(|block| project_block(&path, &line_starts, block))
                     .collect(),
                 relations,
+                inline_diagnostics,
                 mentions,
                 source: location(&path, &line_starts, parsed.source.start, parsed.source.end),
                 body_source: location(&path, &line_starts, parsed.body.start, parsed.body.end),

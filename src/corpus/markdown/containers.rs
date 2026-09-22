@@ -197,6 +197,12 @@ fn markdown_tree(
             .iter()
             .filter(|reference| reference.kind == crate::ReferenceKind::Item)
             .map(|reference| (reference.source.start, reference.source.end))
+            .chain(
+                items
+                    .iter()
+                    .flat_map(|item| item.mentions.iter())
+                    .map(|token| (token.source.start, token.source.end)),
+            )
             .collect::<HashMap<_, _>>(),
     );
     let link_ends = Rc::new(RefCell::new(HashMap::new()));

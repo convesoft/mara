@@ -264,19 +264,18 @@ pub fn create_item(
             diagnostic.message()
         ));
     }
-    if !request.relations.is_empty()
-        && let Some(diagnostic) =
-            validate_corpus(&candidate_corpus, schema)
-                .into_iter()
-                .find(|diagnostic| {
-                    (diagnostic.applies_to_item(&request.id)
-                        || (diagnostic.source().path() == created.source().path()
-                            && diagnostic.source().span().start_byte()
-                                >= created.source().span().start_byte()
-                            && diagnostic.source().span().end_byte()
-                                <= created.source().span().end_byte()))
-                        && !(!complete && diagnostic.is_missing_body())
-                })
+    if let Some(diagnostic) =
+        validate_corpus(&candidate_corpus, schema)
+            .into_iter()
+            .find(|diagnostic| {
+                (diagnostic.applies_to_item(&request.id)
+                    || (diagnostic.source().path() == created.source().path()
+                        && diagnostic.source().span().start_byte()
+                            >= created.source().span().start_byte()
+                        && diagnostic.source().span().end_byte()
+                            <= created.source().span().end_byte()))
+                    && !(!complete && diagnostic.is_missing_body())
+            })
     {
         return invalid(diagnostic.message());
     }
@@ -774,8 +773,15 @@ pub(crate) fn mutate_semantic_relation(
                     .source()
                     .to_owned()
             });
-            let end = full_line_end(candidate, entry.source.end_byte());
-            candidate.replace_range(entry.source.start_byte()..end, "");
+            if entry.kind == "inline" {
+                candidate.replace_range(
+                    entry.source.start_byte()..entry.source.end_byte(),
+                    &format!("[[{}]]", entry.target),
+                );
+            } else {
+                let end = full_line_end(candidate, entry.source.end_byte());
+                candidate.replace_range(entry.source.start_byte()..end, "");
+            }
         }
     }
     let projected = corpus.with_replacements(&candidates, schema)?;

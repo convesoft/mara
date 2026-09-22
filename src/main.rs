@@ -262,7 +262,7 @@ enum ItemCommand {
             help = "Initial schema-declared outgoing relation, created atomically with the item (repeatable). TARGET is an exact human ID or canonical MID (uppercase 26-character ULID); the new ID may target itself. Duplicate edges are rejected; omission adds none. Later edits use relation add/remove")]
         relations: Vec<InitialRelation>,
 
-        /// Body text, or - to read stdin; an omitted, empty, or whitespace-only required body creates an incomplete scaffold.
+        /// Body text, or - to read stdin; supports [[relation:ID]] and [[relation:MID]] assertions. An omitted, empty, or whitespace-only required body creates an incomplete scaffold.
         #[arg(long)]
         body: Option<String>,
 
@@ -308,7 +308,7 @@ enum RelationCommand {
         /// Target item's exact human ID or canonical MID (uppercase 26-character ULID).
         target: String,
     },
-    /// Remove all assertions of an existing semantic relation; rejects a missing edge.
+    /// Remove all assertions of an existing semantic relation, demoting inline tokens to bare mentions; rejects a missing edge.
     Remove {
         /// Source item's exact human ID or canonical MID (uppercase 26-character ULID).
         source: String,

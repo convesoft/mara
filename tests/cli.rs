@@ -10290,6 +10290,711 @@ fn relation_fixture() -> TempDir {
 }
 
 #[test]
+fn typed_inline_relations_normalize_and_preserve_prose_through_cli_and_mcp() {
+    for use_mcp in [false, true] {
+        let fixture = relation_fixture();
+        let root = fixture.path();
+        let invoke = |operation: &str, extra: Option<(&str, &str)>| {
+            if use_mcp {
+                let mut params =
+                    json!({"source":"REQ-A","relation":"verified_by","target":"VER-A"});
+                if let Some((key, value)) = extra {
+                    params[key] = json!(value);
+                }
+                relation_tool(root, &format!("relation_{operation}"), params)
+            } else {
+                let mut args = vec![
+                    "--format",
+                    "json",
+                    "relation",
+                    operation,
+                    "REQ-A",
+                    "verified_by",
+                    "VER-A",
+                ];
+                let flag;
+                if let Some((key, value)) = extra {
+                    flag = format!("--{key}");
+                    args.extend([&flag, value]);
+                }
+                let output = mara(root, &args);
+                let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(
+                    output.status.success(),
+                    value.get("error").is_none(),
+                    "{value}"
+                );
+                value
+            }
+        };
+        let added = invoke("add", None);
+        let a_path = root.join("a.mara.md");
+        let v_path = root.join("v.mara.md");
+        let a = fs::read_to_string(&a_path).unwrap().replace(
+            "Preserved prose.",
+            "Zażółć: [[verified_by:VER-A]]; see [[VER-A]].\n\n> Nested [[verified_by:VER-A]].\n\n`[[verified_by:VER-A]]` and \\[[verified_by:VER-A]].",
+        );
+        let mid = added["edge"]["target"]["mid"].as_str().unwrap();
+        let v = fs::read_to_string(&v_path)
+            .unwrap()
+            .replace("Preserved prose.", &format!("- Check [[verifies:{mid}]]."));
+        fs::write(&a_path, &a).unwrap();
+        fs::write(&v_path, &v).unwrap();
+        let inspected = invoke("get", None);
+        assert_eq!(inspected["occurrence_count"], 4);
+        assert_eq!(inspected["edge"], added["edge"]);
+        let occurrences = inspected["occurrences"].as_array().unwrap();
+        assert_eq!(
+            occurrences.iter().filter(|o| o["kind"] == "inline").count(),
+            3
+        );
+        for occurrence in occurrences {
+            let source = &occurrence["source"];
+            let text = fs::read_to_string(root.join(source["path"].as_str().unwrap())).unwrap();
+            let name = occurrence["relation"].as_str().unwrap();
+            let target = occurrence["target"].as_str().unwrap();
+            let expected = if occurrence["kind"] == "inline" {
+                format!("[[{name}:{target}]]")
+            } else {
+                format!(":{name}: {target}")
+            };
+            let start = source["start_byte"].as_u64().unwrap() as usize;
+            let end = source["end_byte"].as_u64().unwrap() as usize;
+            assert_eq!(&text[start..end], expected);
+            assert_eq!(
+                source["start_line"],
+                text[..start].bytes().filter(|b| *b == b'\n').count() + 1
+            );
+        }
+        for (id, name, direction) in [
+            ("REQ-A", "verified_by", "incoming"),
+            ("VER-A", "verifies", "outgoing"),
+        ] {
+            let page = related_cli_mcp(
+                root,
+                id,
+                &[("--relation", name), ("--direction", direction)],
+            );
+            assert_eq!(page["connections"].as_array().unwrap().len(), 1);
+            assert_eq!(page["connections"][0]["occurrence_count"], 4);
+        }
+        let duplicate = invoke("add", None);
+        assert_eq!(duplicate["error"]["code"], "relation_exists");
+        assert_eq!(duplicate["occurrence_count"], 4);
+        let selector = occurrences[1]["reference"].as_str().unwrap();
+        let removed = invoke("remove", Some(("occurrence", selector)));
+        assert_eq!(removed["changed_occurrences"], 1);
+        assert_eq!(removed["remaining_occurrences"], 3);
+        assert_eq!(removed["edge_exists"], true);
+        assert_eq!(
+            fs::read_to_string(&a_path).unwrap(),
+            a.replacen("[[verified_by:VER-A]]", "[[VER-A]]", 1)
+        );
+        assert_eq!(
+            invoke("remove", Some(("occurrence", selector)))["error"]["code"],
+            "stale_occurrence"
+        );
+        let removed = invoke("remove", None);
+        assert_eq!(removed["changed_occurrences"], 3);
+        assert_eq!(removed["edge_exists"], false);
+        assert_eq!(
+            fs::read_to_string(&a_path).unwrap(),
+            a.replace(":verified_by: VER-A\n", "").replacen(
+                "[[verified_by:VER-A]]",
+                "[[VER-A]]",
+                2
+            )
+        );
+        assert_eq!(
+            fs::read_to_string(&v_path).unwrap(),
+            v.replace(&format!("[[verifies:{mid}]]"), &format!("[[{mid}]]"))
+        );
+        assert_eq!(invoke("get", None)["error"]["code"], "relation_not_found");
+        assert!(
+            mara(root, &["--format", "json", "project", "validate"])
+                .status
+                .success()
+        );
+        // Demotion retains a mention, which still blocks target deletion.
+        assert!(!mara(root, &["item", "delete", "VER-A"]).status.success());
+    }
+}
+
+#[test]
+fn typed_inline_relations_preserve_leading_link_labels_through_cli_and_mcp() {
+    for use_mcp in [false, true] {
+        let fixture = relation_fixture();
+        let root = fixture.path();
+        let body = "[[[verifies:REQ-A]]](b.mara.md) and [[[verifies:REQ-A]]][check].\n\n[check]: b.mara.md";
+        if use_mcp {
+            relation_tool(
+                root,
+                "item_create",
+                json!({"flavour":"verification","id":"VER-LINK","file":"links.mara.md","title":"Linked check","body":body}),
+            );
+        } else {
+            let output = mara(
+                root,
+                &[
+                    "item",
+                    "create",
+                    "verification",
+                    "VER-LINK",
+                    "links.mara.md",
+                    "--title",
+                    "Linked check",
+                    "--body",
+                    body,
+                ],
+            );
+            assert!(output.status.success(), "{}", stderr(&output));
+        }
+        let inspected = relation_tool(
+            root,
+            "relation_get",
+            json!({"source":"VER-LINK","relation":"verifies","target":"REQ-A"}),
+        );
+        assert_eq!(inspected["occurrence_count"], 2);
+        let path = root.join("links.mara.md");
+        let original = fs::read_to_string(&path).unwrap();
+        for occurrence in inspected["occurrences"].as_array().unwrap() {
+            let source = &occurrence["source"];
+            assert_eq!(occurrence["kind"], "inline");
+            assert_eq!(
+                &original[source["start_byte"].as_u64().unwrap() as usize
+                    ..source["end_byte"].as_u64().unwrap() as usize],
+                "[[verifies:REQ-A]]"
+            );
+        }
+        if use_mcp {
+            relation_tool(
+                root,
+                "item_rename",
+                json!({"reference":"REQ-A","new_id":"REQ-NEW"}),
+            );
+        } else {
+            let output = mara(root, &["item", "rename", "REQ-A", "REQ-NEW"]);
+            assert!(output.status.success(), "{}", stderr(&output));
+        }
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            original.replace("verifies:REQ-A", "verifies:REQ-NEW")
+        );
+        let project = resolve_project(Some(root), root).unwrap();
+        let schema = mara::load_schema(&project).unwrap();
+        // Both the inline destination and reference-style link remain recognized,
+        // before and after demotion to bare mentions.
+        for demoted in [false, true] {
+            if demoted {
+                if use_mcp {
+                    relation_tool(
+                        root,
+                        "relation_remove",
+                        json!({"source":"VER-LINK","relation":"verifies","target":"REQ-NEW"}),
+                    );
+                } else {
+                    let output = mara(
+                        root,
+                        &["relation", "remove", "VER-LINK", "verifies", "REQ-NEW"],
+                    );
+                    assert!(output.status.success(), "{}", stderr(&output));
+                }
+                assert_eq!(
+                    fs::read_to_string(&path).unwrap(),
+                    original.replace("verifies:REQ-A", "REQ-NEW")
+                );
+            }
+            assert_eq!(validation_with_parity(root, &[])["valid"], true);
+            let corpus = mara::load_corpus(&project, &schema).unwrap();
+            let document = corpus
+                .documents()
+                .iter()
+                .find(|d| d.path() == Path::new("links.mara.md"))
+                .unwrap();
+            let links = document
+                .references()
+                .iter()
+                .filter(|r| r.kind() == mara::ReferenceKind::MarkdownLink)
+                .collect::<Vec<_>>();
+            assert_eq!(links.len(), 2);
+            for (link, spelling) in links.iter().zip([
+                "[[[verifies:REQ-NEW]]](b.mara.md)",
+                "[[[verifies:REQ-NEW]]][check]",
+            ]) {
+                assert_eq!(link.target(), "b.mara.md");
+                let span = link.source().span();
+                let expected = if demoted {
+                    spelling.replace("verifies:", "")
+                } else {
+                    spelling.to_owned()
+                };
+                assert_eq!(
+                    &document.source()[span.start_byte()..span.end_byte()],
+                    expected
+                );
+            }
+            let item = &document.items()[0];
+            assert_eq!(item.relations().len(), if demoted { 0 } else { 2 });
+            assert_eq!(item.mentions().len(), if demoted { 2 } else { 0 });
+        }
+    }
+}
+
+#[test]
+fn typed_inline_relations_validate_contexts_and_malformed_tokens() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    let path = root.join("a.mara.md");
+    let original = fs::read_to_string(&path).unwrap();
+    let literals = r#"`[[unknown:REQ-MISSING]]`
+
+    [[unknown:REQ-MISSING]]
+
+```markdown
+[[unknown:REQ-MISSING]]
+```
+
+<!-- [[unknown:REQ-MISSING]] -->
+
+<script>[[unknown:REQ-MISSING]]</script>
+
+\[[unknown:REQ-MISSING]]
+"#;
+    let body = format!(
+        "{literals}\n# Check [[verified_by:VER-A]]\n\n> - Nested [[verified_by:VER-A]]\n\n[[verified_by:VER-A]](#not-a-link) [[verified_by:VER-A]][suffix]\n\n[suffix]: https://example.com\n"
+    );
+    fs::write(
+        &path,
+        format!(
+            "[[unknown:REQ-MISSING]]\n\n{}",
+            original.replace("Preserved prose.", &body)
+        ),
+    )
+    .unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let edge = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"VER-A","relation":"verifies","target":"REQ-A"}),
+    );
+    assert_eq!(edge["occurrence_count"], 4);
+    let project = resolve_project(Some(root), root).unwrap();
+    let schema = mara::load_schema(&project).unwrap();
+    let corpus = mara::load_corpus(&project, &schema).unwrap();
+    let item = corpus.items().find(|item| item.id() == "REQ-A").unwrap();
+    assert!(item.mentions().is_empty());
+    assert!(
+        corpus
+            .documents()
+            .iter()
+            .flat_map(|d| d.references())
+            .all(|r| r.kind() != mara::ReferenceKind::Item)
+    );
+    for (token, message) in [
+        ("[[unknown:VER-A]]", "unknown inline relation"),
+        ("[[verified_by:]]", "invalid typed inline reference"),
+        ("[[verified_by: VER-A]]", "invalid typed inline reference"),
+        (
+            "[[verified_by:VER-A|label]]",
+            "invalid typed inline reference",
+        ),
+        (
+            "[[verified_by:[[VER-A]]]]",
+            "invalid typed inline reference",
+        ),
+        ("[[verified_by:VER-A]", "invalid typed inline reference"),
+        ("[[verified_by:VER-A\n]]", "invalid typed inline reference"),
+        ("[[verified_by\n:VER-A]]", "invalid typed inline reference"),
+        ("[[\nverified_by:VER-A]]", "invalid typed inline reference"),
+        (
+            "[[verified_by\r\n:VER-A]]",
+            "invalid typed inline reference",
+        ),
+        ("[[verified_by:VER-MISSING]]", "missing item"),
+        ("[[verifies:VER-A]]", "does not allow source flavour"),
+        ("[[verified_by:REQ-B]]", "does not allow target flavour"),
+        (
+            "[[verified_by:external:https://example.com]]",
+            "invalid typed inline reference",
+        ),
+    ] {
+        let source = original.replace("Preserved prose.", &format!("Zażółć {token}"));
+        fs::write(&path, &source).unwrap();
+        let result = validation_with_parity(root, &[]);
+        assert_eq!(result["valid"], false, "{token}: {result}");
+        assert!(
+            result["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["message"].as_str().unwrap().contains(message)),
+            "{token}: {result}"
+        );
+        let corpus = mara::load_corpus(&project, &schema).unwrap();
+        let diagnostics = mara::validate_corpus(&corpus, &schema);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|d| d.message().contains(message))
+            .unwrap();
+        let span = diagnostic.source().span();
+        let first_line = token.lines().next().unwrap();
+        let end = first_line
+            .find("]]")
+            .map_or(first_line.len(), |end| end + 2);
+        assert_eq!(
+            &source[span.start_byte()..span.end_byte()],
+            &first_line[..end]
+        );
+        assert_eq!(diagnostic.source().path(), Path::new("a.mara.md"));
+        assert!(
+            corpus
+                .items()
+                .find(|i| i.id() == "REQ-A")
+                .unwrap()
+                .mentions()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn typed_inline_continuations_preserve_literal_contexts_and_item_boundaries() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    let path = root.join("a.mara.md");
+    let original = fs::read_to_string(&path).unwrap();
+    let next = fs::read_to_string(root.join("b.mara.md"))
+        .unwrap()
+        .replace("Preserved prose.", "[[verified_by:VER-A]]");
+    fs::remove_file(root.join("b.mara.md")).unwrap();
+    let project = resolve_project(Some(root), root).unwrap();
+    let schema = mara::load_schema(&project).unwrap();
+    for (body, valid) in [
+        ("[[verified_by", true),
+        ("`[[verified_by\n:VER-A]]`", true),
+        ("\\[[verified_by\n:VER-A]]", true),
+        ("<!-- [[verified_by\n:VER-A]] -->", true),
+        ("[[untyped\n]]\nText: untyped.", true),
+        ("[[untyped\n`code: text`", true),
+        ("> [[verified_by\n> :VER-A]]", false),
+        ("- [[verified_by\n  :VER-A]]", false),
+    ] {
+        let source = format!(
+            "[[verified_by\n:VER-A]]\n\n{}{next}",
+            original.replace("Preserved prose.", body),
+        );
+        fs::write(&path, &source).unwrap();
+        let result = validation_with_parity(root, &[]);
+        assert_eq!(result["valid"], valid, "{body}: {result}");
+        let corpus = mara::load_corpus(&project, &schema).unwrap();
+        assert_eq!(corpus.items().count(), 3, "{body}");
+        let diagnostics = mara::validate_corpus(&corpus, &schema);
+        assert_eq!(diagnostics.len(), usize::from(!valid), "{body}");
+        if let Some(diagnostic) = diagnostics.first() {
+            assert!(
+                diagnostic
+                    .message()
+                    .contains("invalid typed inline reference")
+            );
+            let span = diagnostic.source().span();
+            assert_eq!(&source[span.start_byte()..span.end_byte()], "[[verified_by");
+        }
+        let edge = relation_tool(
+            root,
+            "relation_get",
+            json!({"source":"REQ-B","relation":"verified_by","target":"VER-A"}),
+        );
+        assert_eq!(edge["occurrence_count"], 1, "{body}: {edge}");
+    }
+}
+
+#[test]
+fn typed_inline_relations_follow_item_mutations_through_cli_and_mcp() {
+    for use_mcp in [false, true] {
+        let fixture = relation_fixture();
+        let root = fixture.path();
+        let invoke = |args: &[&str], name: &str, mut params: Value, success: bool| {
+            if use_mcp {
+                if name != "item_create" {
+                    let id = params.as_object_mut().unwrap().remove("id").unwrap();
+                    params["reference"] = id;
+                }
+                let responses = mcp_exchange(
+                    root,
+                    &[
+                        mcp_initialize(1),
+                        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                        mcp_call(2, name, params),
+                    ],
+                );
+                let result = &mcp_response(&responses, 2)["result"];
+                assert_eq!(result["isError"], !success, "{result}");
+            } else {
+                let output = mara(root, args);
+                assert_eq!(output.status.success(), success, "{}", stderr(&output));
+            }
+        };
+        let a_path = root.join("a.mara.md");
+        let original = fs::read_to_string(&a_path).unwrap();
+        let body = "Checked [[verified_by:VER-A]]. Again [[verified_by:VER-A]].";
+        invoke(
+            &["item", "update", "REQ-A", "--body", body],
+            "item_update",
+            json!({"id":"REQ-A","body":body}),
+            true,
+        );
+        let written = fs::read(&a_path).unwrap();
+        // Both forms of rejected body publication leave the prior corpus intact.
+        for invalid in [
+            "[[unknown:VER-A]]",
+            "[[verified_by:VER-MISSING]]",
+            "[[verified_by\n:VER-A]]",
+            "[[\nverified_by:VER-A]]",
+        ] {
+            invoke(
+                &["item", "update", "REQ-A", "--body", invalid],
+                "item_update",
+                json!({"id":"REQ-A","body":invalid}),
+                false,
+            );
+            assert_eq!(fs::read(&a_path).unwrap(), written);
+            invoke(
+                &[
+                    "item",
+                    "create",
+                    "requirement",
+                    "REQ-C",
+                    "c.mara.md",
+                    "--title",
+                    "C",
+                    "--body",
+                    invalid,
+                ],
+                "item_create",
+                json!({"flavour":"requirement","id":"REQ-C","file":"c.mara.md","title":"C","body":invalid}),
+                false,
+            );
+            assert!(!root.join("c.mara.md").exists());
+        }
+        // Initial metadata cannot duplicate an inline assertion, including aliases.
+        invoke(
+            &[
+                "item",
+                "create",
+                "requirement",
+                "REQ-C",
+                "c.mara.md",
+                "--title",
+                "C",
+                "--body",
+                body,
+                "--relation",
+                "verified_by=VER-A",
+            ],
+            "item_create",
+            json!({"flavour":"requirement","id":"REQ-C","file":"c.mara.md","title":"C","body":body,"relations":[{"relation":"verified_by","target":"VER-A"}]}),
+            false,
+        );
+        assert!(!root.join("c.mara.md").exists());
+        // Repeated inline assertions alone are intentional and valid.
+        invoke(
+            &[
+                "item",
+                "create",
+                "requirement",
+                "REQ-C",
+                "c.mara.md",
+                "--title",
+                "C",
+                "--body",
+                body,
+            ],
+            "item_create",
+            json!({"flavour":"requirement","id":"REQ-C","file":"c.mara.md","title":"C","body":body}),
+            true,
+        );
+        invoke(
+            &["item", "delete", "REQ-C"],
+            "item_delete",
+            json!({"id":"REQ-C"}),
+            true,
+        );
+        // Preserve metadata, alias, canonical, MID and literal spellings on rename.
+        let inspected = relation_tool(
+            root,
+            "relation_get",
+            json!({"source":"VER-A","relation":"verifies","target":"REQ-A"}),
+        );
+        let mid = inspected["edge"]["source"]["mid"].as_str().unwrap();
+        let a = original.replace("\n\n", "\n:verified_by: VER-A\n\n").replace("Preserved prose.", &format!("{body} MID [[verified_by:{mid}]]. `[[verified_by:VER-A]]`. \\[[verified_by:VER-A]].\n\n[[associated_with:REQ-B]]"));
+        fs::write(&a_path, &a).unwrap();
+        let v_path = root.join("v.mara.md");
+        let v = fs::read_to_string(&v_path)
+            .unwrap()
+            .replace("Preserved prose.", "Canonical [[verifies:REQ-A]].");
+        fs::write(&v_path, &v).unwrap();
+        let b_path = root.join("b.mara.md");
+        let b = fs::read_to_string(&b_path)
+            .unwrap()
+            .replace("Preserved prose.", "Symmetric [[associated_with:REQ-A]].");
+        fs::write(&b_path, &b).unwrap();
+        invoke(
+            &["item", "rename", "VER-A", "VER-NEW"],
+            "item_rename",
+            json!({"id":"VER-A","new_id":"VER-NEW"}),
+            true,
+        );
+        let renamed_a = a
+            .replace(":verified_by: VER-A", ":verified_by: VER-NEW")
+            .replacen("[[verified_by:VER-A]]", "[[verified_by:VER-NEW]]", 2);
+        assert_eq!(fs::read_to_string(&a_path).unwrap(), renamed_a);
+        invoke(
+            &["item", "rename", "REQ-A", "REQ-NEW"],
+            "item_rename",
+            json!({"id":"REQ-A","new_id":"REQ-NEW"}),
+            true,
+        );
+        assert_eq!(
+            fs::read_to_string(&v_path).unwrap(),
+            v.replace("verification VER-A", "verification VER-NEW")
+                .replace("[[verifies:REQ-A]]", "[[verifies:REQ-NEW]]")
+        );
+        assert_eq!(
+            fs::read_to_string(&b_path).unwrap(),
+            b.replace("[[associated_with:REQ-A]]", "[[associated_with:REQ-NEW]]")
+        );
+        invoke(
+            &["item", "move", "REQ-NEW", "moved.mara.md"],
+            "item_move",
+            json!({"id":"REQ-NEW","file":"moved.mara.md"}),
+            true,
+        );
+        let inspected = relation_tool(
+            root,
+            "relation_get",
+            json!({"source":"VER-NEW","relation":"verifies","target":"REQ-NEW"}),
+        );
+        assert_eq!(inspected["occurrence_count"], 5);
+        assert!(
+            inspected["occurrences"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|o| o["source"]["path"] == "moved.mara.md" && o["kind"] == "inline")
+        );
+        let snapshot =
+            ["moved.mara.md", "v.mara.md", "b.mara.md"].map(|p| fs::read(root.join(p)).unwrap());
+        invoke(
+            &["item", "delete", "VER-NEW"],
+            "item_delete",
+            json!({"id":"VER-NEW"}),
+            false,
+        );
+        invoke(
+            &["item", "delete", "REQ-NEW"],
+            "item_delete",
+            json!({"id":"REQ-NEW"}),
+            false,
+        );
+        assert_eq!(
+            snapshot,
+            ["moved.mara.md", "v.mara.md", "b.mara.md"].map(|p| fs::read(root.join(p)).unwrap())
+        );
+        // An explicit body edit may make a typed token literal.
+        let literal = "`[[verifies:REQ-NEW]]`";
+        invoke(
+            &["item", "update", "VER-NEW", "--body", literal],
+            "item_update",
+            json!({"id":"VER-NEW","body":literal}),
+            true,
+        );
+        assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    }
+}
+
+#[test]
+fn typed_inline_mutations_reject_broken_heading_links_without_writes() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    let path = root.join("a.mara.md");
+    let source = fs::read_to_string(&path)
+        .unwrap()
+        .replace("Preserved prose.", "# Checked [[verified_by:VER-A]]");
+    fs::write(&path, &source).unwrap();
+    fs::write(
+        root.join("links.mara.md"),
+        "[check](a.mara.md#checked-verified_byver-a)\n",
+    )
+    .unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let v = fs::read(root.join("v.mara.md")).unwrap();
+    let inspected = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"verified_by","target":"VER-A"}),
+    );
+    let selector = inspected["occurrences"][0]["reference"].as_str().unwrap();
+    for (args, tool, params) in [
+        (
+            vec!["relation", "remove", "REQ-A", "verified_by", "VER-A"],
+            "relation_remove",
+            json!({"source":"REQ-A","relation":"verified_by","target":"VER-A"}),
+        ),
+        (
+            vec![
+                "relation",
+                "remove",
+                "REQ-A",
+                "verified_by",
+                "VER-A",
+                "--occurrence",
+                selector,
+            ],
+            "relation_remove",
+            json!({"source":"REQ-A","relation":"verified_by","target":"VER-A","occurrence":selector}),
+        ),
+        (
+            vec!["item", "rename", "VER-A", "VER-NEW"],
+            "item_rename",
+            json!({"reference":"VER-A","new_id":"VER-NEW"}),
+        ),
+        (
+            vec!["item", "move", "REQ-A", "moved.mara.md"],
+            "item_move",
+            json!({"reference":"REQ-A","file":"moved.mara.md"}),
+        ),
+    ] {
+        let output = mara(root, &args);
+        assert!(!output.status.success(), "{args:?}");
+        assert!(
+            stderr(&output).contains("would break or change destination"),
+            "{}",
+            stderr(&output)
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        let responses = mcp_exchange(
+            root,
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                mcp_call(2, tool, params),
+            ],
+        );
+        let result = &mcp_response(&responses, 2)["result"];
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(
+            result
+                .to_string()
+                .contains("would break or change destination"),
+            "{result}"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        assert_eq!(fs::read(root.join("v.mara.md")).unwrap(), v);
+        assert!(!root.join("moved.mara.md").exists());
+    }
+}
+
+#[test]
 fn inverse_alias_preserves_custom_fields_on_ineligible_author_flavours() {
     let fixture = relation_fixture();
     let root = fixture.path();
@@ -10517,10 +11222,15 @@ fn relationship_self_edges_and_occurrence_pages_are_deduplicated_before_paginati
     let original = fs::read_to_string(&path).unwrap();
     fs::write(
         &path,
-        original.replace(
-            ":follows: REQ-A",
-            ":followed_by: REQ-A\n".repeat(25).trim_end(),
-        ),
+        original
+            .replace(
+                ":follows: REQ-A",
+                ":followed_by: REQ-A\n".repeat(20).trim_end(),
+            )
+            .replace(
+                "Preserved prose.",
+                &"Self [[followed_by:REQ-A]].\n".repeat(5),
+            ),
     )
     .unwrap();
     for (filter, expected) in [
@@ -10573,6 +11283,13 @@ fn relationship_self_edges_and_occurrence_pages_are_deduplicated_before_paginati
         json!({"source":"REQ-A","relation":"follows","target":"REQ-A","cursor":cursor}),
     );
     assert_eq!(second["occurrences"].as_array().unwrap().len(), 5);
+    assert!(
+        second["occurrences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|o| o["kind"] == "inline")
+    );
     assert_eq!(second["has_more"], false);
     let selector = first["occurrences"][0]["reference"].as_str().unwrap();
     let mismatch = relation_tool(

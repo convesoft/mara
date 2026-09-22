@@ -11,8 +11,9 @@ for structured results. The same operation selection, authoring, continuation,
 and validation rules apply to both surfaces.
 
 This skill targets the current 0.3 development interface: schema format 3,
-discovery format 2, and relationship format 1. Metadata inverse aliases and
-symmetric edges are implemented; typed inline and external targets are not yet supported. Use the skill shipped with the selected executable or
+discovery format 2, and relationship format 1. Internal typed inline relationships,
+metadata inverse aliases and symmetric edges are implemented; external targets
+are not yet supported. Use the skill shipped with the selected executable or
 the same source revision. If an older installation exposes a different
 interface, report the mismatch and use its matching guidance; do not silently
 change the version pin or substitute removed commands.
@@ -188,7 +189,7 @@ Builtin connections retain `source`; use `relation_get` for schema locations.
 Symmetric edges are excluded by incoming/outgoing filters. Directed self-edges
 appear once as outgoing when direction is omitted. Different relation kinds
 remain distinct. Item-list/search filters still select items with authored
-metadata assertions; canonical and alias filters select the same kind.
+metadata or inline assertions; canonical and alias filters select the same kind.
 
 `relation_get {source,relation,target,limit?,cursor?}` returns the canonical
 `edge`, total `occurrence_count` and a page of `occurrences`. Each occurrence
@@ -197,13 +198,24 @@ Default limit is 20, maximum 100, with a 65,536-byte budget. Continue unchanged
 until `has_more:false`; re-inspect after source/schema changes.
 
 Add rejects an edge already asserted anywhere, including inverse, symmetric
-and ID/MID equivalents. Direct source may intentionally repeat assertions.
+and inline ID/MID equivalents. Direct source may intentionally repeat assertions.
 `relation_remove {source,relation,target}` removes every occurrence across
 included files. Supply `occurrence` from inspection to remove exactly one.
 Stale or mismatched selectors fail without writes. Results report
-`changed_occurrences`, `remaining_occurrences` and `edge_exists`.
+`changed_occurrences`, `remaining_occurrences` and `edge_exists`. Inline removal
+demotes `[[relation:target]]` to `[[target]]`, preserving surrounding prose and
+the authored ID/MID. The retained mention still blocks deletion of its target.
 
-To migrate format 2, review aliases for collisions and change the schema version
+Author `[[relation:ID]]` or `[[relation:MID]]` in an item body using a canonical
+schema name or inverse alias. No whitespace, labels or nested markup is allowed
+inside the token. These assertions share metadata edge identity and produce no
+builtin mention. Code, raw contexts and escaped openings remain literal; typed
+tokens outside item bodies have no typed meaning. Unknown relations, malformed
+tokens and invalid targets in supported contexts fail validation. Use body
+creation/update to author inline assertions; relation add writes metadata.
+
+To migrate format 2, escape typed-looking literal examples in item bodies,
+review aliases for collisions and change the schema version
 in place to 3. Preserve custom declarations, source bytes and MIDs; existing
 relations remain directed with no alias. Validate schema and project with this
 revision. See `docs/relations.mara.md` for the full release migration contract.
