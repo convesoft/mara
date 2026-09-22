@@ -373,7 +373,8 @@ obligation, an unmet obligation and unavailable evaluation caused by invalid
 prerequisites or bounds. A partial evaluation is never a successful full check.
 Views and validation reuse these semantics.
 
-The native SHACL Core binding and worked examples are in [[DES-TRACE-RULE-GRAMMAR]].
+The YAML authoring profile, generated SHACL bindings and worked examples are
+in [[DES-TRACE-RULE-GRAMMAR]].
 Structural graph policies compose under [[DES-TRACE-GRAPH-CONSTRAINTS]].
 Bounds and diagnostics follow [[DES-TRACE-DIAGNOSTIC-INTERFACE]]; matrices and
 specifications follow [[DES-TRACE-VIEW-INTERFACES]]. Compatibility, including
@@ -465,17 +466,23 @@ Use [[DES-TRACE-CONTRACT-COMPATIBILITY]] to inspect the customized schema
 migration and future transition exercise; the future syntax must be rejected
 by 0.3. These procedures remain implementation acceptance, not executed evidence.
 
-Load the documented Turtle examples from explicit configured rule files.
-Verify project-format/binding-version errors, missing files, malformed Turtle,
+Load the documented YAML examples from explicit configured rule files without
+prefix/context declarations or intermediate Turtle.
+Verify project-format/binding-version errors, missing files, malformed YAML,
 unsupported executable predicates and an unknown named shape. Confirm typed
 field projection, absent versus empty values, and RDF deduplication of repeated
 values. Exercise condition-shape applicability for approved, draft, absent and
 invalid status; only the first evaluates obligations, while invalid source is
 unavailable. An independent endpoint engine error must prevent a full pass
-even when another endpoint qualifies. Preserve actual Turtle source spans,
-including escaped strings and blank-node shapes. Change a rule source between
-pages and reject the old cursor. Exercise native request-check files through
-CLI/MCP without enabling them as project policy. Verify the budget inside
+even when another endpoint qualifies. Preserve actual YAML pointers and source spans,
+including escaped strings, aliases and generated blank-node shapes. Unknown
+constraint keys, duplicate YAML keys, context overrides and unsupported targets
+must fail before conversion. Verify schema-derived bindings with a new flavour
+and a custom field named class, literal values equal to vocabulary names,
+explicit field/schema qualification, and SHACL and/or/in RDF lists. Change
+the schema or a rule source between pages and reject the old cursor. Exercise
+YAML request-check files through CLI/MCP without enabling them as project policy.
+Reject Turtle/JSON-LD source files. Verify the budget inside
 SHACL evaluation, including applicability and pattern work, not merely by
 counting calls into the engine.
 :::

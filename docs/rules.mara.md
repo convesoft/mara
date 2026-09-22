@@ -7,64 +7,125 @@ results, not checks executed by the 0.2 binary. The active schema and executable
 remain unchanged. Project examples require the illustrated vocabulary; they
 do not add lifecycle policy to bundled templates or existing projects.
 
-The accepted language foundation is SHACL Core, supported
-by [[EVD-SHACL-CORE-SPIKE]]. The contracts below replace the earlier unshipped
-custom YAML predicates; loading the binding and enforcing all bounds remain
+The accepted language foundation is SHACL Core, authored in YAML with generated
+bindings and verified by [[EVD-YAML-SHACL-SPIKE]]. The contracts replace the
+earlier unshipped formats; the complete loader and bound enforcement remain
 implementation work.
 
 :::mara design DES-TRACE-RULE-GRAMMAR
 :mid: 01M2JNZMJ0VT20GWH4HF6DBBC5
-:title: Bind native SHACL Core shapes to project items
+:title: Bind YAML-authored SHACL Core shapes to project items
 :satisfies: REQ-CURRENT-STATE-RULES
 :satisfies: REQ-TRACE-COVERAGE
 :satisfies: REQ-BOUNDED-TRACE-CHAINS
 
-Use SHACL Core for local field conditions and relationship obligations.
-This replaces the unshipped custom YAML predicates and hybrid language design.
-[[EVD-SHACL-CORE-SPIKE]] verifies the worked obligations with shacl 0.3.21
-without a second expression evaluator.
+Use SHACL Core for local field conditions and relationship obligations,
+authored only in YAML with Mara-generated bindings. This replaces the unshipped
+Turtle and custom-predicate formats. [[EVD-YAML-SHACL-SPIKE]] verifies native
+Rust YAML → JSON-LD → RDF → SHACL evaluation without a Turtle intermediate.
 
-## Native source files and identity
+## Source files and identity
 
-Store rules in UTF-8 Turtle (`.ttl`) using the supported SHACL Core profile.
-Project configuration references explicit project-relative files; no rule bodies
-are embedded in schema YAML. The planned configuration addition is:
+Store rules in UTF-8 `.yaml` or `.yml` files. Each contains one YAML document:
+a shape mapping or a sequence of shape mappings. Use string keys,
+JSON-compatible scalar values, mappings and sequences. Duplicate mapping keys,
+custom tags, merge keys and cyclic aliases are invalid. Ordinary aliases may
+reuse a value; expanded constraints retain their authored occurrence/source
+mapping. Null is not a missing constraint parameter.
+
+Project configuration references explicit project-relative files; rule bodies
+are separate from vocabulary schema YAML. The planned addition is:
 
 ```toml
 [rules]
 format_version = 1
-files = ["rules/traceability.ttl"]
+files = ["rules/traceability.yaml"]
 ```
 
 [[DES-TRACE-CONTRACT-COMPATIBILITY]] defines the enclosing project format.
 Absent `rules` or an empty file list means no conditional rules. Resolve paths
-from the project root, require existing regular `.ttl` files within that root,
-reject duplicates and do not expand globs. Combine the listed files into one
-shapes graph, preserving every source occurrence. File order is not override
-precedence. Conflicting single-valued parameters are `rule_invalid`; repeated
-identical RDF triples have one meaning. Loading an enabled file must not silently
-fail or use cached rules from another snapshot.
+from the project root, require existing regular YAML files inside that root,
+reject duplicate paths and do not expand globs. Combine definitions into one
+shapes graph, preserving every authored occurrence. File order is not override
+precedence. Repeated named-shape descriptions add constraints; conflicting
+single-valued parameters are `rule_invalid`, while repeated identical RDF
+triples have one meaning. Loading failure must not reuse cached rules from
+another snapshot.
 
-Only Turtle is supported initially. Do not fetch imports, remote contexts,
-schemas or namespace IRIs. A namespace is an identifier, not a download request.
-References between named shapes resolve within the combined graph; blank nodes
-are file-local. Require absolute shape IRIs or an explicit absolute `@base`
-so a checkout's filesystem location cannot change rule identity.
+YAML is the sole rule input. There is no Turtle input, intermediate-file or
+export contract, and no public JSON-LD input. Contexts are generated in memory:
+reject authored `@context`, other raw JSON-LD keywords, context-file references
+and vocabulary overrides. Do not fetch imports, schemas or namespace IRIs.
 
-An enabled rule is a named `sh:NodeShape` with `sh:targetClass` naming one or
-more declared flavour classes. Multiple targets select their union. Shapes
-without targets are reusable obligations, not independently executed rules.
-The expanded root shape IRI is the rule's identity; prefix labels and filenames
-are not identity. Persisted `sh:targetNode`, implicit class targets and other
-target mechanisms are outside this profile. Exact item selection belongs in
-requests. Unknown flavours, relation vocabulary and unsupported constraints
-must be rejected rather than ignored.
+An enabled rule is a named `NodeShape` with `targetClass` naming one or more
+declared flavours. Multiple targets select their union. Targetless shapes are
+reusable obligations/conditions, not independently executed rules. Require
+`id` on enabled roots and named reusable definitions. Use `rule:name`,
+expanded to `urn:mara:rule:name`, or an absolute IRI; reject relative IDs.
+The expanded IRI is identity; it must not depend on filename, checkout path or
+definition order. Unnamed nested shapes have file-local blank-node identity.
 
-## Mara binding to SHACL
+Authored `targetNode`, implicit class targets and other target mechanisms are
+outside this profile. Exact item selection belongs in requests. Only the
+adapter may introduce focus-node targets for an evaluation.
 
-Use `m: <urn:mara:rules:1:>`, `f: <urn:mara:flavour:>`,
-`r: <urn:mara:relation:>` and `p: <urn:mara:field:>` for the adapter,
-flavour, canonical relation and custom field namespaces. These namespaces are part of the version-1 binding.
+## Generated bindings and definition validation
+
+The binding has a fixed versioned SHACL/datatype vocabulary and derives project
+names from the current schema. No user-maintained context or second vocabulary
+registry is required. Convert the parsed YAML to JSON-LD using that context,
+then construct the RDF shapes graph. This is a Mara YAML authoring profile with
+standard SHACL semantics, not a standalone context-free YAML-LD document.
+
+| Authored position | Binding |
+|---|---|
+| `id`, `type` | JSON-LD identity/type; types are `NodeShape` or `PropertyShape`. |
+| Supported constraint keys | Corresponding SHACL properties, retaining their standard parameter meaning. |
+| `targetClass`, `class` | Schema-declared flavour names; a scalar or sequence denotes one or several classes. |
+| `path` | A declared field/canonical relation name, or `{inversePath: relation}`. |
+| `datatype` | `string`, `integer`, `double`, `boolean` map to XML Schema datatypes. |
+| `node`, `not`, `qualifiedValueShape` | One nested shape or named shape reference. |
+| `property` | A sequence of property shapes/references; each contributes an obligation. |
+| `and`, `or` | Sequences of shapes/references, encoded as RDF lists. |
+| `in` | An RDF list of literal values; not several independent in constraints. |
+| `hasValue` | One literal value, using standard JSON-LD scalar conversion. Quote strings that YAML would otherwise parse as another type. |
+| `severity` | `Violation` or `Warning`; omitted root severity is Violation. |
+| `name`, `description`, `message` | String annotations. |
+
+Field names are bound in path-value context, flavour names in class-value
+context, and datatypes in datatype-value context. They cannot replace rule
+keywords or reinterpret literal strings. For example, `path: class` can select
+a custom field while `class: requirement` still constrains the flavour;
+`hasValue: requirement` remains a literal string.
+
+Use unqualified path names only when unambiguous. `field:name` explicitly
+selects a field; `schema:name` selects a canonical schema relation. Preserve the
+existing `schema:`/`builtin:` distinction, without adding built-in discovery
+edges to the rule graph: `builtin:` paths are unsupported in this profile.
+Reject ambiguity rather than choose by lookup order. Existing declaration
+collision restrictions in [[DES-RELATION-AUTHORING]] still apply. Incoming
+traversal uses `inversePath`; relation aliases do not create new RDF predicates.
+
+Generate bindings deterministically from the schema and binding version.
+A schema change invalidates compiled rules and cursors. Adding a field/flavour
+needs only its schema declaration; removing or renaming one referenced by a rule
+produces an error, not a silent omission. Persisted binding versions protect
+constraint meaning from implicit changes on a Mara upgrade.
+
+Validate definitions before conversion/evaluation: allowed keys and locations,
+parameter types, name resolution, shape references, permitted combinations,
+field datatype/endpoint compatibility and the existing recursion/depth limits.
+Unknown keys such as `minCont` are `rule_invalid`, even if an RDF/SHACL library
+would ignore them. Unsupported contexts and executable vocabulary are likewise
+errors. Missing files, invalid definitions or engine errors cannot yield a pass.
+`schema validate` checks the definitions without evaluating item conformance.
+
+## Item projection and applicability
+
+The internal namespaces are `urn:mara:rules:1:` for host selection metadata,
+`urn:mara:flavour:` for flavours, `urn:mara:relation:` for canonical
+relations and `urn:mara:field:` for custom fields. Authors need no prefix
+declarations. These namespaces are part of binding version 1.
 
 Project each internal item as `urn:mara:mid:MID`, with `rdf:type` for its
 declared flavour. Project each canonical relation once, using its canonical
@@ -91,33 +152,30 @@ an authored empty string remains a present literal. IDs, titles and relations
 are not implicit custom fields. Invalid authored metadata makes the affected
 item unavailable; it must not be projected as absence.
 
-The host binding adds only these source properties:
+The host binding adds only these selection properties:
 
 | Property | Allowed location and meaning |
 |---|---|
-| `m:whenShape` | At most one named, targetless `sh:NodeShape` reference on an enabled rule root. Evaluate that Core shape against the selected item first. Conforming means applicable; nonconforming means not applicable; omitted means applicable. |
-| `m:paths` | Zero or more path/subtree strings on an enabled rule root, using existing retrieval path rules. OR within paths, AND with flavour targets. Omitted means all project paths. |
+| `whenShape` | At most one named, targetless NodeShape reference on an enabled root. Conforming means applicable; nonconforming means not applicable; omitted means applicable. |
+| `paths` | Zero or more path/subtree strings on an enabled root, using existing retrieval path rules. OR within paths, AND with flavour targets. Omitted means all project paths. |
 
-These are selection metadata, not another expression language. Applicability
-and obligations both use ordinary SHACL constraints. Condition shapes and
-their dependencies cannot carry host selection properties; cycles are invalid.
-An unavailable condition yields unavailable, never not applicable. A
-nonconforming condition is not a policy failure and produces no `rule_failed`;
-only applicable rules evaluate their obligations.
+Internally these map to `urn:mara:rules:1:whenShape` and
+`urn:mara:rules:1:paths`. Applicability and obligations both use ordinary
+SHACL constraints. Condition shapes and their dependencies cannot carry host
+selection properties; cycles are invalid. An unavailable condition yields
+unavailable, never not applicable. A nonconforming condition produces no
+`rule_failed`; only applicable rules evaluate their obligations.
 
-A generic SHACL validator ignores the host selection properties. The adapter
-must select applicable focus nodes before invoking their obligation shapes;
-running the authored roots directly would incorrectly require obligations of
-inapplicable items. Reject unknown executable vocabulary, SPARQL/JavaScript
-constraints, external code, recursive shape references and unbounded property
-paths in this initial profile.
+A generic SHACL validator ignores host selection metadata. The adapter must
+select applicable focus nodes before invoking obligation shapes. Reject
+SPARQL/JavaScript constraints, external code, recursive references and unbounded
+property paths in this initial profile.
 
-Use `sh:hasValue` for status conditions: absent status does not match.
-Use `sh:minCount 1` for required presence; value constraints such as
-`sh:datatype` or `sh:pattern` alone allow an empty value set.
-Schema enums constrain authored values; a well-formed string condition outside
-the enum can simply never match. Unknown fields or schema-incompatible
-datatypes are invalid rule definitions.
+Use `hasValue` for status conditions: absent status does not match.
+Use `minCount: 1` for required presence; `datatype` and `pattern` alone
+allow an empty value set. Schema enums constrain authored item values; a
+well-formed literal condition outside an enum can simply never match.
+Invalid source metadata is unavailable, not absence.
 
 ## Relationship shapes and evaluation
 
@@ -158,98 +216,93 @@ or exhausted budget must not be mistaken for a nonqualifying endpoint, even
 when another endpoint satisfies the minimum. Evaluate only contexts selected
 by root scope, applicability and explicit relationship obligations.
 
-## Worked native rules
+## Worked YAML rules
 
-This complete Turtle example assumes optional project-defined statuses, an
-optional string owner, and the directed relations shown by the paths.
+This complete file assumes optional project-defined statuses, an optional
+string owner, and the directed schema relations shown by the paths.
 
-```turtle
-@prefix sh: <http://www.w3.org/ns/shacl#> .
-@prefix m: <urn:mara:rules:1:> .
-@prefix p: <urn:mara:field:> .
-@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
-@prefix f: <urn:mara:flavour:> .
-@prefix r: <urn:mara:relation:> .
-@prefix rule: <urn:example:rules:> .
+```yaml
+- id: rule:approved_requirement
+  type: NodeShape
+  targetClass: requirement
+  whenShape: rule:approved_status
+  property:
+    - path: owner
+      minCount: 1
+      datatype: string
+      pattern: '\S'
+    - id: rule:verification_count
+      path: {inversePath: 'schema:verifies'}
+      qualifiedValueShape: rule:approved_verification
+      qualifiedMinCount: 1
 
-rule:approved_requirement a sh:NodeShape ;
-    sh:targetClass f:requirement ;
-    m:whenShape rule:approved_status ;
-    sh:property [
-        sh:path p:owner ; sh:minCount 1 ;
-        sh:datatype xsd:string ; sh:pattern "\\S"
-    ] ;
-    sh:property rule:verification_count .
+- id: rule:approved_status
+  type: NodeShape
+  property:
+    - path: status
+      hasValue: approved
 
-rule:verification_count a sh:PropertyShape ;
-    sh:path [ sh:inversePath r:verifies ] ;
-    sh:qualifiedValueShape rule:approved_verification ;
-    sh:qualifiedMinCount 1 .
+- id: rule:approved_verification
+  type: NodeShape
+  class: verification
+  node: rule:approved_status
 
-rule:approved_verification a sh:NodeShape ;
-    sh:class f:verification ;
-    sh:node rule:approved_status .
+- id: rule:accepted_design
+  type: NodeShape
+  targetClass: design
+  whenShape: rule:accepted_status
+  property:
+    - path: 'schema:satisfies'
+      qualifiedValueShape: {class: requirement}
+      qualifiedMinCount: 1
 
-rule:approved_status a sh:NodeShape ;
-    sh:property [ sh:path p:status ; sh:hasValue "approved" ] .
+- id: rule:accepted_status
+  type: NodeShape
+  property:
+    - path: status
+      hasValue: accepted
 
-rule:accepted_design a sh:NodeShape ;
-    sh:targetClass f:design ;
-    m:whenShape rule:accepted_status ;
-    sh:property [
-        sh:path r:satisfies ;
-        sh:qualifiedValueShape [ sh:class f:requirement ] ;
-        sh:qualifiedMinCount 1
-    ] .
+- id: rule:mitigated_risk
+  type: NodeShape
+  targetClass: risk
+  whenShape: rule:mitigated_status
+  property:
+    - path: {inversePath: 'schema:mitigates'}
+      qualifiedValueShape: {class: design}
+      qualifiedMinCount: 1
 
-rule:accepted_status a sh:NodeShape ;
-    sh:property [ sh:path p:status ; sh:hasValue "accepted" ] .
-
-rule:mitigated_status a sh:NodeShape ;
-    sh:property [ sh:path p:status ; sh:hasValue "mitigated" ] .
-
-rule:mitigated_risk a sh:NodeShape ;
-    sh:targetClass f:risk ;
-    m:whenShape rule:mitigated_status ;
-    sh:property [
-        sh:path [ sh:inversePath r:mitigates ] ;
-        sh:qualifiedValueShape [ sh:class f:design ] ;
-        sh:qualifiedMinCount 1
-    ] .
+- id: rule:mitigated_status
+  type: NodeShape
+  property:
+    - path: status
+      hasValue: mitigated
 ```
 
 | Fixture | Required outcome |
 |---|---|
 | Approved requirement, owner present, only a draft verification | Failed: qualifying count 0, selected count 1. |
 | Add an approved verification and repeat its authored edge | Passed: qualifying count 1, selected count 2. |
-| Add `sh:node rule:approved_verification` to verification_count | Failed because of the draft; qualified minimum still passes. |
-| No verification and only `sh:node`, with no minimum | Passed. |
+| Add `node: rule:approved_verification` to verification_count | Failed because of the draft; qualified minimum still passes. |
+| No verification and only `node`, with no minimum | Passed. |
 | No verification and minimum one | Failed minimum. |
 | Approved requirement with blank/missing owner | Failed local obligation. |
 | Draft requirement or absent optional status | Not applicable because the condition shape does not conform. |
 | Accepted design without a satisfies edge | Failed; one requirement edge satisfies the minimum. |
 | Mitigated risk without incoming mitigation | Failed; one design mitigation satisfies the minimum. |
 
-To require passing evidence for each qualifying verification, add these triples
-to the same file:
+To require passing evidence for each qualifying verification, append this
+definition to the same sequence, or enable it in another configured YAML file:
 
-```turtle
-@prefix sh: <http://www.w3.org/ns/shacl#> .
-@prefix m: <urn:mara:rules:1:> .
-@prefix p: <urn:mara:field:> .
-@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
-@prefix f: <urn:mara:flavour:> .
-@prefix r: <urn:mara:relation:> .
-@prefix rule: <urn:example:rules:> .
-
-rule:approved_verification sh:property [
-    sh:path [ sh:inversePath r:evidences ] ;
-    sh:qualifiedValueShape [
-        sh:class f:evidence ;
-        sh:property [ sh:path p:outcome ; sh:hasValue "passed" ]
-    ] ;
-    sh:qualifiedMinCount 1
-] .
+```yaml
+- id: rule:approved_verification
+  property:
+    - path: {inversePath: 'schema:evidences'}
+      qualifiedValueShape:
+        class: evidence
+        property:
+          - path: outcome
+            hasValue: passed
+      qualifiedMinCount: 1
 ```
 
 An approved verification without passing evidence does not qualify at the first
@@ -273,7 +326,8 @@ is tested, but loading this persisted binding, precise source mapping and
 enforcing whole-engine work accounting remain implementation obligations.
 
 References: [SHACL](https://www.w3.org/TR/shacl/),
-[Turtle](https://www.w3.org/TR/turtle/).
+[JSON-LD contexts](https://www.w3.org/TR/json-ld11/#the-context) and
+[scoped contexts](https://www.w3.org/TR/json-ld11/#scoped-contexts).
 :::
 
 :::mara design DES-TRACE-GRAPH-CONSTRAINTS
@@ -439,7 +493,9 @@ Each diagnostic contains `code`, `severity`, `scope`
 (project/schema/document/item), `message`, and a `location`. Location
 contains project-relative `path` and optional one-based `line`, UTF-8
 `start_byte`/`end_byte` and JSON Pointer `pointer` for TOML/YAML configuration when applicable.
-Turtle locations use actual source spans, not invented JSON pointers.
+YAML rule locations identify the authored key/value span and structural pointer
+when available. Retain those locations through generated JSON-LD/RDF nodes;
+never report a generated context location as the authored rule source.
 Only available coordinates are populated; never invent line numbers.
 Retain legacy `path` and `line` fields as aliases of location coordinates.
 An external configured schema path remains absolute.
@@ -448,7 +504,7 @@ Item diagnostics add `item:{id,mid}` when unambiguous; configuration/rule
 diagnostics add `rule`, the expanded root shape IRI, when known.
 Rule failures add `obligation:{shape,component,source}`: shape is its expanded
 IRI or a snapshot-bound opaque reference for a blank node; component is the
-SHACL component IRI; source is the native definition's location.
+SHACL component IRI; source is the authored YAML definition's location.
 `details.kind` is `class|datatype|has_value|pattern|minimum|maximum|every|and|or|not|in`.
 Local details identify the field path, constraint parameters and observed RDF
 values or their bounded inspection references. Count details include
@@ -487,9 +543,10 @@ the latter counts produced diagnostics hidden by paths, not unseen checks or
 records deferred to later pages. Project/schema diagnostics remain visible.
 Item validation checks the selected item in full corpus context, including
 its incident constraints and cycles, with prerequisite errors that affect it.
-Schema validation also loads the configured Turtle sources, checks the supported
-SHACL/binding profile, field datatype compatibility, condition-shape references
-and graph policies, not runtime item conformance.
+Schema validation also loads the configured YAML sources, checks the supported
+SHACL/binding profile, generated vocabulary resolution, field datatype compatibility,
+condition-shape references and graph policies, not runtime item conformance.
+Unknown constraint keys fail before JSON-LD conversion can omit or reinterpret them.
 
 Sort diagnostics by scope (project, schema, document, item), path, start byte
 (or line when byte is absent; missing coordinates first), item MID, rule,
@@ -547,8 +604,8 @@ for evaluation and are identified as outside the root selection.
 
 | CLI after `mara` | MCP |
 |---|---|
-| `trace matrix --flavour requirement --rule urn:example:rules:approved_requirement` | `trace_matrix {flavours:["requirement"], rules:["urn:example:rules:approved_requirement"]}` |
-| `trace matrix --id REQ-A --check-file rules/coverage.ttl --shape urn:example:rules:coverage` | `trace_matrix {ids:["REQ-A"], check:{files:["rules/coverage.ttl"], shape:"urn:example:rules:coverage"}}` |
+| `trace matrix --flavour requirement --rule urn:mara:rule:approved_requirement` | `trace_matrix {flavours:["requirement"], rules:["urn:mara:rule:approved_requirement"]}` |
+| `trace matrix --id REQ-A --check-file rules/coverage.yaml --shape urn:mara:rule:coverage` | `trace_matrix {ids:["REQ-A"], check:{files:["rules/coverage.yaml"], shape:"urn:mara:rule:coverage"}}` |
 | `trace specification --path docs/` | `trace_specification {paths:["docs/"]}` |
 | `trace specification --flavour requirement --field status=approved` | `trace_specification {flavours:["requirement"], fields:[{key:"status",value:"approved"}]}` |
 
@@ -560,10 +617,10 @@ IRIs from enabled sources; unknown IRIs are errors. Prefix abbreviations are
 source syntax, not request aliases.
 
 For a check, CLI accepts repeatable `--check-file` and one `--shape`;
-MCP accepts `check:{files:[...],shape:IRI}`. Load those native Turtle sources
+MCP accepts `check:{files:[...],shape:IRI}`. Load those YAML sources with the generated bindings
 using the rule-file contract and require the designated named node shape.
 Apply it unconditionally to the request's selected roots; reject root targets,
-`m:whenShape` and `m:paths` on the designated check, and do not execute other
+`whenShape` and `paths` on the designated check, and do not execute other
 targeted shapes from the supplied files. Its referenced obligations follow
 the same field projection, profile and work limits as persisted rules.
 The files define reusable constraints, not a saved view: selection stays in
@@ -573,7 +630,8 @@ in project configuration.
 Named rules retain their own selection and applicability, intersected with
 view roots. Output distinguishes persisted-rule and request-check identity;
 a request check cannot override a persisted rule. The former JSON `related`
-check object is withdrawn with the custom predicate grammar.
+check object is withdrawn with the custom predicate grammar. YAML expresses
+SHACL shapes; it does not reinstate that predicate grammar.
 
 CLI default text renders Markdown for these two commands only;
 `--format json` returns the structured result. MCP returns the same JSON
@@ -604,8 +662,8 @@ force an unbounded nested row:
 | `edge` | `check` reference, canonical `edge`, endpoint-facing `label`, `direction`, `endpoint`, `qualification`, `every`, and `occurrence_count`. |
 | `issue` | `diagnostic` preventing complete evaluation. |
 
-`evaluation` is `{kind:"rule",shape:"urn:example:rules:approved_requirement"}`
-or `{kind:"check",shape:"urn:example:rules:coverage"}`. `root` and item endpoints use discovery item descriptors;
+`evaluation` is `{kind:"rule",shape:"urn:mara:rule:approved_requirement"}`
+or `{kind:"check",shape:"urn:mara:rule:coverage"}`. `root` and item endpoints use discovery item descriptors;
 external endpoints use the relationship contract's external descriptor.
 Every record carries `kind`. `condition` identifies the SHACL component and
 its parameters. Nested shape obligations have their own check records.
@@ -711,10 +769,10 @@ do not advance the active schema or executable during contract authoring.
 
 | Surface | Compatibility boundary |
 |---|---|
-| Schema | Keep the planned format 3 for vocabulary/relationships and structural cardinality/acyclic declarations. Conditional rules are native Turtle files, not a top-level YAML rules mapping. Absent policies impose no obligations. |
+| Schema | Keep the planned format 3 for vocabulary/relationships and structural cardinality/acyclic declarations. Conditional rules are separate YAML shape files, not an embedded rules mapping in the vocabulary schema. Absent policies impose no obligations. |
 | Documents | No new marker or metadata syntax. Status and other rule inputs are ordinary project-defined fields. |
-| Project configuration | Continue accepting format 1 for projects without rule sources. Enabling native rules requires format 2 and the optional rules table in DES-TRACE-RULE-GRAMMAR; reject unknown/unsupported versions. No saved views or persisted work limits. |
-| Rule binding | Start format_version 1 inside the rules table. It selects the supported Turtle/SHACL Core profile, field projection and urn:mara:rules:1: selection vocabulary. This is independent of W3C or crate release numbers. |
+| Project configuration | Continue accepting format 1 for projects without rule sources. Enabling YAML rule sources requires format 2 and the optional rules table in DES-TRACE-RULE-GRAMMAR; reject unknown/unsupported versions. No saved views or persisted work limits. |
+| Rule binding | Start format_version 1 inside the rules table. It selects the supported YAML/SHACL Core profile, generated context and namespaces, field projection and host selection vocabulary. This is independent of W3C or crate release numbers. |
 | Validation JSON | Start format_version 1 for project/item/schema validation and operation errors, replacing unversioned results. Explicit completeness, codes, severities, counts and continuation require client updates. |
 | Trace JSON | Start a separate format_version 1 family for matrix/specification results and errors. |
 | Discovery/relationship JSON | Retain the independently planned versions in the relationship compatibility contract. |
@@ -728,9 +786,9 @@ cursors on upgrade; MIDs and existing item/source references retain their
 documented identity rules.
 
 Migrate custom format-2 schemas using the recoverable workflow in the
-relationship compatibility contract. Without native rules, no project-config
+relationship compatibility contract. Without rule sources, no project-config
 migration is required beyond the relationship baseline. To enable rules, declare any needed custom fields,
-create and review Turtle shapes, change project
+create and review YAML shapes, change project
 `format_version` to 2, and add `[rules]` with binding version 1 and explicit
 file paths. Preserve existing project/content configuration. Validate source
 loading and compare policy output before and after. Do not populate
@@ -741,9 +799,9 @@ without making drafts invalid. Adding the approved-requirement rule then
 reports missing owners/approved verifications only for approved requirements.
 Changing its severity to warning preserves predicate results while allowing
 a complete project with only those failures to remain valid.
-Malformed Turtle, unsupported bindings and invalid shape definitions prevent
+Malformed YAML, unsupported bindings and invalid shape definitions prevent
 successful adoption. Absent optional status does not satisfy a status
-`sh:hasValue` condition; invalid authored enum values remain field errors.
+`hasValue` condition; invalid authored enum values remain field errors.
 Presence constraints are explicit, as specified in [[DES-TRACE-RULE-GRAMMAR]].
 Restore the checkpoint or correct failed declarations, never report a
 completed migration.
@@ -776,11 +834,18 @@ evidence freshness need a later contract. Do not interpret a missing previous
 snapshot as a successful transition or add executable transition support in
 0.3. This exercise follows [[ADR-CURRENT-STATE-BEFORE-TRANSITIONS]].
 
-The earlier custom YAML rule/check syntax was never shipped. Remove it from
-the accepted design rather than supporting or automatically migrating it.
-Existing item documents, MIDs and active format-2 schema files remain unchanged
-during this documentation-only adoption. A future expansion of the binding's
-SHACL profile or projection needs an explicit compatibility decision.
+The earlier custom predicate grammar and Turtle binding were never shipped.
+The YAML shape profile replaces both; it is not a compatibility interpreter
+for the old predicates. Do not add automatic conversion, Turtle input/export
+or JSON-LD input surfaces. There are no authored context files to migrate.
+
+Generated bindings follow the rule-binding version and project schema.
+Changes to field/flavour names require corresponding rule edits; schema changes
+invalidate compiled shapes and cursors. Namespace or implicit coercion changes
+require an explicit compatibility decision. Existing item documents, MIDs and
+active format-2 schema files remain unchanged during this documentation-only
+adoption. A future expansion of SHACL support or projection likewise requires
+a compatibility decision.
 :::
 
 :::mara decision ADR-DECLARATIVE-TRACE-BASELINE
@@ -792,10 +857,22 @@ SHACL profile or projection needs an explicit compatibility decision.
 :justifies: DES-TRACE-VIEW-INTERFACES
 :justifies: DES-TRACE-CONTRACT-COMPATIBILITY
 
-Adopt SHACL Core for local conditions and relationship obligations in native
-Turtle files, explicitly referenced from project configuration. Replace the
-unshipped custom YAML predicates and hybrid binding. Keep the graph policies,
-diagnostic interface and request-selected views in this document.
+Adopt SHACL Core for local conditions and relationship obligations authored
+only in YAML files referenced from project configuration. Mara generates the
+fixed SHACL/datatype and schema-derived project bindings internally; users
+maintain neither prefixes nor context files. The standard JSON-LD-to-RDF path
+supplies the native SHACL engine, without a Turtle intermediate.
+
+This supersedes the unshipped Turtle input and custom predicate grammar.
+YAML improves authoring readability while retaining SHACL constraint semantics;
+the generated context is a versioned adapter, not a separate expression engine.
+There is no Turtle input/export or public JSON-LD format to maintain.
+Other validators would require generated context/RDF, so independent consumption
+of the authored YAML is not an initial capability. [[EVD-YAML-SHACL-SPIKE]]
+verifies native Rust feasibility.
+
+Keep the graph policies, diagnostic interface and request-selected views in
+this document.
 
 [[EVD-SHACL-CORE-SPIKE]] demonstrates the current worked obligations without a
 second expression evaluator. If demonstrated rules exceed SHACL Core's
@@ -817,7 +894,7 @@ limits remain errors because treating an unperformed check as a policy warning
 could claim a full pass. Keep complete evaluation distinct from output
 pagination so small responses cannot hide incomplete analysis.
 
-Keep one project-owned vocabulary schema, explicitly enabled native rule
+Keep one project-owned vocabulary schema, explicitly enabled YAML rule
 sources and the existing validation entry points.
 Explicit matrix/specification requests with JSON and Markdown meet the current
 workflow without saved-view state or a general query/workflow engine.

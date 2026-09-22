@@ -216,7 +216,7 @@ This test does not prove complete bounded evaluation or implement
 
 ## Adopted examples and alternative formats
 
-After the SHACL-only binding update, extracted both Turtle examples from
+At commit `c22cdfb`, extracted both then-documented Turtle examples from
 [[DES-TRACE-RULE-GRAMMAR]] and ran them with the native validator. Three added
 Rust tests passed, bringing the default-feature-disabled suite to eleven.
 The exact examples passed missing/satisfied lifecycle links, missing/present
@@ -230,7 +230,8 @@ The third added test encoded one required-owner shape in Turtle, JSON-LD
 (with an inline context), and RDF/XML. With shacl/rudof_rdf 0.3.21 each parsed
 one targeted shape, failed missing owner and passed a present owner. These
 are verified library alternatives, not newly enabled Mara source formats.
-The current binding remains Turtle until an authoring-format change is accepted.
+Turtle remained the accepted source format at that point. The later adoption
+of YAML and generated bindings is verified in [[EVD-YAML-SHACL-SPIKE]].
 
 SHACL describes an RDF graph, so Turtle is not mandatory in the standard.
 [SHACL Compact Syntax](https://w3c.github.io/shacl/shacl-compact-syntax/)
@@ -245,4 +246,73 @@ drop-in extension change. No compact-syntax integration was tested here.
 Sources: [SHACL Core](https://www.w3.org/TR/shacl/),
 [SHACL Advanced Features targets](https://www.w3.org/TR/shacl-af/#SPARQLTarget)
 and [shacl 0.3.21](https://docs.rs/shacl/0.3.21/shacl/).
+:::
+
+:::mara evidence EVD-YAML-SHACL-SPIKE
+:mid: 01M34V4KT0WQ056H28HG2CBQP6
+:title: Verify YAML rules through generated JSON-LD bindings and native SHACL
+
+Executed on 2026-09-22 in an isolated Rust package using serde-saphyr 1.2.0,
+serde_json 1.0.151, shacl/rudof_rdf 0.3.21 and transitive oxjsonld 0.2.6.
+Eight standard Rust tests passed. The rule/data path used no Turtle parser,
+Turtle intermediate, Python bridge or CEL evaluator.
+
+## Inputs and processing
+
+Mara 0.2.0 created and validated six engineering items in a temporary project:
+requirement, draft/approved verifications, accepted design, mitigated risk and
+passing evidence. The fixture retained their actual MIDs, authored fields,
+relation metadata and source locations. Missing/changed-field and edge variants
+were then assembled in memory; this is not a new Mara authoring implementation.
+
+The experiment parsed the YAML examples in [[DES-TRACE-RULE-GRAMMAR]], validated
+supported keys and names, and generated JSON-LD contexts from the fixture's
+schema. Fixed SHACL/datatype terms were separate from scoped flavour/path
+aliases. JSON-LD list containers preserved logical and literal list semantics.
+Rust parsed that in-memory JSON-LD into the shapes graph; item fields and
+authored relations were separately projected into JSON-LD data and then RDF.
+No rule file contained prefixes, a context declaration or a context-file path.
+
+The adapter evaluated the named condition shape first, then targeted the
+obligation shape only for applicable items. Top-level parse/engine errors
+propagate as errors; the experiment does not prove that failures inside every
+nested engine operation remain visible to the host.
+
+## Observed checks
+
+| Check | Observed result |
+|---|---|
+| Three lifecycle rules with qualifying links and nested passing evidence | All passed; removing evidence failed the requirement, then removing satisfies/mitigates failed all three. |
+| Approved requirement with missing/whitespace owner | Failed. Draft or absent status was not applicable even with missing owner. |
+| Only draft verification; duplicate approved-verification edge; every over draft/empty targets | Qualified minimum failed; duplicate did not satisfy minimum two; every failed for draft and passed for empty without a minimum. |
+| Conjunction, disjunction and literal membership lists | Expected pass/fail, proving RDF-list conversion rather than repeated independent predicates. |
+| New schema flavour and custom field named class | Resolved dynamically; field lookup did not replace SHACL class, and a value equal to a flavour name remained a literal. |
+| Unknown constraint/field/flavour/reference, authored context, duplicate YAML key | Rejected before SHACL execution; the typo identified authored YAML pointer /0/property/0/minCont. |
+| Typed number, integer and boolean fields; invalid numeric input | Preserved declared datatypes (including double 1.0); invalid/nonfinite numeric source failed projection. |
+| Field/relation name overlap | Bare name rejected; field: and schema: selected distinct namespaces. |
+
+Failure focus nodes mapped to real Mara item sources. The standalone run
+reported the three complete-fixture rules passed. The experiment package
+includes Cargo.lock, source, YAML rule inputs, fixture schema/documents, captured
+Mara get results, test output and standalone results.
+
+## Limits and consequence
+
+This verifies native Rust feasibility for YAML with generated bindings.
+It is not the complete persisted-profile loader or the 0.3 CLI/MCP workflow.
+Full profile/schema compatibility checks, all namespace encodings, exact YAML
+line/byte mapping for semantic failures, deterministic explanation ordering and
+whole-engine work-budget enforcement remain implementation acceptance under
+[[VER-TRACEABILITY-WORKFLOW]]. The fixture adapter is not production code.
+
+[[ADR-DECLARATIVE-TRACE-BASELINE]] adopts YAML as the only rule source format,
+with no Turtle input/export contract or user-supplied context. The generated
+context remains internal, versioned and schema-derived. SHACL owns constraint
+semantics; the Mara adapter owns vocabulary resolution, applicability,
+diagnostics and completeness.
+
+References: [JSON-LD contexts](https://www.w3.org/TR/json-ld11/#the-context),
+[scoped contexts](https://www.w3.org/TR/json-ld11/#scoped-contexts),
+[SHACL](https://www.w3.org/TR/shacl/) and
+[shacl 0.3.21](https://docs.rs/shacl/0.3.21/shacl/).
 :::
