@@ -1,10 +1,11 @@
-# Traceability research for 0.3
+# Traceability research
 
 Reviewed official documentation and selected repository sources on 2026-09-13.
 This was a documentation/source comparison, not an installation benchmark or
 verification of each released build. Upstream `main` and documentation may
 describe work newer than a published package. Accepted Mara obligations belong
-in [traceability](traceability.mara.md), not in this comparison.
+in [traceability](traceability.mara.md), not in this comparison. The separately
+dated [[EVD-SHACL-CEL-SPIKE]] records an executed language integration experiment.
 
 ## Meaning and limits
 
@@ -43,3 +44,281 @@ suspect-link review and lifecycle transitions into 0.4.
 These are design conclusions from the comparison, not claims that an upstream
 tool implements Mara's intended alias, symmetry or mutation semantics. No
 upstream rule language, graph persistence layer, or lifecycle is adopted here.
+
+:::mara evidence EVD-SHACL-CEL-SPIKE
+:mid: 01M2JZNCW49RH3Y4M99DEZGC0D
+:title: SHACL and CEL integration experiment
+
+Executed on 2026-09-15 outside the product repository, using Mara 0.2.0,
+Python 3.14.7, pySHACL 0.40.1, RDFLib 7.6.0 and Rust crate cel 0.14.5.
+Eight Python unittest tests passed. A follow-up on the same date also passed
+six native Rust tests with shacl 0.3.21 and cel 0.14.5, described below.
+These establish integration feasibility for [[DES-TRACE-RULE-GRAMMAR]], not a
+production backend choice or completion of [[VER-TRACEABILITY-WORKFLOW]].
+
+## Bridge and observed results
+
+The real Mara CLI created and validated a four-item engineering fixture.
+Items became RDF nodes keyed by generated MIDs. Canonical relationships became
+RDF triples; a separate map retained their owning item source locations.
+SHACL inverse paths selected verifications and evidence. A SHACL-SPARQL
+constraint called a registered RDFLib function, which evaluated a local CEL
+expression through a Rust subprocess. The expression was
+`has(node.status) && node.status == "approved"`.
+
+| Check | Observed result |
+|---|---|
+| Qualified minimum of one; only draft verification linked | Complete failure, mapped to the requirement's actual source and coverage shape. |
+| Draft and approved verifications linked | Pass. |
+| Insert the same projected RDF edge again; require two qualifying targets | Failure; duplicate assertion did not increase the count. |
+| Every target must qualify; one draft target | Failure. |
+| Empty target set with every | Pass without a minimum; failure with minimum one. |
+| Qualifying verification needs passed evidence on a second inverse hop | Failure without evidence; pass with evidence. |
+| Division by zero in one CEL target while another qualifies | Raw SHACL conformance was true; the adapter's separate error ledger returned invalid and incomplete. |
+| Invalid CEL syntax, non-Boolean result, unguarded absent field, or exhausted callback budget | Invalid and incomplete. |
+
+The fixture's Markdown hash was unchanged by validation. Source mapping was
+verified at item granularity; exact relationship occurrence spans, inverse
+authoring and inline relationship parsing were not exercised.
+
+## Integration limits
+
+The error test deliberately returned false to SHACL after recording a CEL
+error. That false could otherwise be treated as a nonqualifying target and
+hidden by another qualifying target. Preserve evaluation failures separately
+from ordinary predicate failures; do not infer Mara validity from the SHACL
+conformance flag alone. The callback budget test counts invocations only: it
+does not prove the then-proposed graph/CEL work budget, cancellation or memory bounds.
+
+A separate native Rust probe using shacl_validation 0.2.12 and shacl_rdf 0.2.9
+failed before execution. Fresh dependency resolution mixed incompatible
+`iri_s::IriS` and `rudof_iri::IriS` types. Pinning rudof_rdf, prefixmap and
+sparql_service to 0.2.9 still failed through mie 0.2.20. This failure applies
+only to that older dependency combination; the newer crate succeeded below.
+
+## Native Rust follow-up
+
+The unified shacl 0.3.21 crate and rudof_rdf 0.3.21, both with default features
+disabled, compiled alongside cel 0.14.5 without dependency patches. Six standard
+Rust tests passed. The standalone binary also ran successfully with
+`cargo run --locked`; both engines execute in the same process without Python
+or SPARQL callbacks.
+
+The harness uses the real Mara fixture's exported metadata, generated MIDs and
+source locations. For each selected verification, CEL evaluates the local
+predicate. The accepted MID set becomes a standard SHACL `sh:in` constraint;
+SHACL's native engine then evaluates inverse paths, qualified counts,
+all-target checks and nested evidence obligations. CEL errors remain in a
+separate ledger and prevent a complete pass.
+
+The tests cover the same behavioral cases in the table: passing and failing
+qualified counts, duplicate RDF assertions, every/empty semantics, second-hop
+evidence, division-by-zero with another qualifying target, invalid/non-Boolean/
+missing-field predicates, and an invocation limit. SHACL's reported focus node
+and source shape mapped to the requirement's actual source; the CEL error
+mapped to the failing verification's source. This proves the materialized-set
+bridge, not a custom CEL callback inside the native SHACL engine. The invocation
+limit still does not measure work inside CEL or SHACL.
+
+## Native authoring example check
+
+For the earlier hybrid binding at commit `033ebf5`, parsed both documented
+Turtle examples and the TOML configuration excerpt. Executed all five distinct
+embedded CEL expressions and checked blank/whitespace/nonblank owner values.
+A fixture-specific lowering of those exact examples passed five cases through
+Rust CEL and native SHACL: three missing obligations, three satisfied
+obligations, missing/present second-hop evidence and a draft requirement
+excluded by applicability. Synthetic RDF fixture nodes were used for this
+example check; the earlier integration test retains the real Mara MID/source
+fixture. This is not an implementation of the complete profile loader.
+
+## Consequence for the design
+
+The experiments establish combination feasibility, not a need for two
+languages or a portable standard SHACL-CEL binding. The hybrid examples above
+describe the earlier design, now superseded by [[ADR-DECLARATIVE-TRACE-BASELINE]]
+after [[EVD-SHACL-CORE-SPIKE]]. Keep these results as evidence for a possible
+future integration. Neither experiment implements the persisted loader,
+whole-engine work budget or public Mara rule interfaces.
+
+Primary references: [SHACL](https://www.w3.org/TR/shacl/),
+[CEL language definition](https://github.com/cel-expr/cel-spec/blob/master/doc/langdef.md),
+[pySHACL](https://github.com/RDFLib/pySHACL),
+[cel-rust](https://github.com/cel-rust/cel-rust) and
+[shacl_validation 0.2.12](https://crates.io/crates/shacl_validation/0.2.12) and
+[shacl 0.3.21](https://docs.rs/shacl/0.3.21/shacl/).
+:::
+
+:::mara evidence EVD-SHACL-CORE-SPIKE
+:mid: 01M2K1GKBD333CXJNF0FD47DBQ
+:title: SHACL Core expresses current rule examples without CEL
+
+Executed on 2026-09-15 with shacl 0.3.21 and rudof_rdf 0.3.21 in an
+isolated Rust package. Its normal dependency tree contains no CEL crate.
+Eight standard Rust tests passed with default features disabled, then the
+same eight passed with the SPARQL feature enabled. One test establishes
+unsupported Advanced Features behavior; it does not claim target support.
+Both standalone binaries produced matching behavioral results.
+
+## Fixture and native checks
+
+Mara 0.2.0 created and validated six temporary engineering items with generated
+MIDs and real source locations. The harness projected flavours, selected
+string fields and relationships into RDF. Field/edge variants were assembled
+in memory, not authored through a new Mara rule implementation.
+Turtle files used only SHACL Core, without CEL literals or Mara rule properties.
+
+| Check | Observed result |
+|---|---|
+| Approved requirement, accepted design and mitigated risk with missing required links | Three failures; adding the required qualifying links passed. |
+| Draft verification only versus approved verification present | Qualified minimum failed versus passed. |
+| Duplicate projected verification triple with minimum two | Failed; duplicate did not inflate the count. |
+| Required owner absent, empty or whitespace-only | Failed using minimum count, string datatype and pattern. |
+| Requirement status draft or absent | Conditional implication conformed; it did not emit a distinct not-applicable state. |
+| Every target approved; draft target present | Failed; empty set passed unless a separate minimum required presence. |
+| Approved verification requires passing evidence | Missing evidence failed; adding passing evidence passed. |
+| Warning-level unmet minimum | Native conformance remained false; Mara severity/validity mapping is still needed. |
+
+Conditional policy used `sh:or` of a negated status shape and the obligation
+shape. Local conditions used `sh:hasValue`; nonblank strings used
+`sh:minCount`, `sh:datatype` and `sh:pattern`. Qualified counts, inverse
+paths and nested shapes expressed the relationship obligations.
+Failure focus nodes mapped to real Mara item source locations; this did not
+verify leaf-level explanations or exact rule-source spans.
+
+## Applicability and target limitation
+
+Evaluating a separate ordinary Core status shape returned false for draft or
+missing status and true for approved status. Therefore an adapter can derive
+applicability using the same SHACL engine, without a second expression language.
+The later binding in [[DES-TRACE-RULE-GRAMMAR]] identifies that condition
+with a named shape reference.
+
+A `sh:SPARQLTarget` selecting an approved requirement with a missing required
+owner yielded zero parsed targeted shapes and a conforming empty report.
+Replacing it with `sh:targetClass` produced the expected failure. This happened
+both with and without the crate's SPARQL feature. Source inspection of the
+published target enum/parser found only Core target forms. Enabling
+SHACL-SPARQL constraints does not establish SHACL Advanced Features target
+support. A Mara loader must reject unsupported targets instead of trusting
+that empty report.
+
+## Design consequence
+
+The worked obligations in [[DES-TRACE-RULE-GRAMMAR]] do not demonstrate a need
+for CEL. SHACL Core is sufficient for their validation truth conditions;
+[[EVD-SHACL-CEL-SPIKE]] established combination feasibility, not necessity.
+[[ADR-DECLARATIVE-TRACE-BASELINE]] adopts SHACL Core; the binding now specifies
+field-to-RDF projection and applicability references while retaining the
+invalid-prerequisite, diagnostic, source mapping and work-budget contracts.
+This test does not prove complete bounded evaluation or implement
+[[VER-TRACEABILITY-WORKFLOW]].
+
+## Adopted examples and alternative formats
+
+At commit `c22cdfb`, extracted both then-documented Turtle examples from
+[[DES-TRACE-RULE-GRAMMAR]] and ran them with the native validator. Three added
+Rust tests passed, bringing the default-feature-disabled suite to eleven.
+The exact examples passed missing/satisfied lifecycle links, missing/present
+nested evidence and absent/empty/whitespace owner cases. A fixture-specific
+targeting step separately evaluated the named condition and obligation shapes:
+approved was applicable with a failed missing obligation; draft and absent
+status were not applicable. This verifies the shapes, not a product loader
+for `m:whenShape` or general source mapping.
+
+The third added test encoded one required-owner shape in Turtle, JSON-LD
+(with an inline context), and RDF/XML. With shacl/rudof_rdf 0.3.21 each parsed
+one targeted shape, failed missing owner and passed a present owner. These
+are verified library alternatives, not newly enabled Mara source formats.
+Turtle remained the accepted source format at that point. The later adoption
+of YAML and generated bindings is verified in [[EVD-YAML-SHACL-SPIKE]].
+
+SHACL describes an RDF graph, so Turtle is not mandatory in the standard.
+[SHACL Compact Syntax](https://w3c.github.io/shacl/shacl-compact-syntax/)
+offers a human-oriented `.shaclc` notation for a subset of Core.
+[Apache Jena](https://jena.apache.org/documentation/shacl/#shacl-compact-syntax)
+supports reading/writing it, with documented subset and information-loss limits.
+The tested Rust RDF format/parser API has no SHACLC input variant. Adopting it
+would require a separate parser and verification that Mara's selection metadata,
+supported shapes and source locations survive the conversion; it is not a
+drop-in extension change. No compact-syntax integration was tested here.
+
+Sources: [SHACL Core](https://www.w3.org/TR/shacl/),
+[SHACL Advanced Features targets](https://www.w3.org/TR/shacl-af/#SPARQLTarget)
+and [shacl 0.3.21](https://docs.rs/shacl/0.3.21/shacl/).
+:::
+
+:::mara evidence EVD-YAML-SHACL-SPIKE
+:mid: 01M34V4KT0WQ056H28HG2CBQP6
+:title: Verify YAML rules through generated JSON-LD bindings and native SHACL
+
+Executed on 2026-09-22 in an isolated Rust package using serde-saphyr 1.2.0,
+serde_json 1.0.151, shacl/rudof_rdf 0.3.21 and transitive oxjsonld 0.2.6.
+Eleven standard Rust tests passed after the numeric-literal review fix.
+The rule/data path used no Turtle parser, Turtle intermediate, Python bridge
+or CEL evaluator.
+
+## Inputs and processing
+
+Mara 0.2.0 created and validated six engineering items in a temporary project:
+requirement, draft/approved verifications, accepted design, mitigated risk and
+passing evidence. The fixture retained their actual MIDs, authored fields,
+relation metadata and source locations. Missing/changed-field and edge variants
+were then assembled in memory; this is not a new Mara authoring implementation.
+
+The experiment parsed the YAML examples in [[DES-TRACE-RULE-GRAMMAR]], validated
+supported keys and names, and generated JSON-LD contexts from the fixture's
+schema. Fixed SHACL/datatype terms were separate from scoped flavour/path
+aliases. JSON-LD list containers preserved logical and literal list semantics.
+Rust parsed that in-memory JSON-LD into the shapes graph; item fields and
+authored relations were separately projected into JSON-LD data and then RDF.
+No rule file contained prefixes, a context declaration or a context-file path.
+Scoped literal contexts also mapped value/datatype to JSON-LD @value/@type;
+shape-level datatype remained a SHACL constraint.
+
+The adapter evaluated the named condition shape first, then targeted the
+obligation shape only for applicable items. Top-level parse/engine errors
+propagate as errors; the experiment does not prove that failures inside every
+nested engine operation remain visible to the host.
+
+## Observed checks
+
+| Check | Observed result |
+|---|---|
+| Three lifecycle rules with qualifying links and nested passing evidence | All passed; removing evidence failed the requirement, then removing satisfies/mitigates failed all three. |
+| Approved requirement with missing/whitespace owner | Failed. Draft or absent status was not applicable even with missing owner. |
+| Only draft verification; duplicate approved-verification edge; every over draft/empty targets | Qualified minimum failed; duplicate did not satisfy minimum two; every failed for draft and passed for empty without a minimum. |
+| Conjunction, disjunction and literal membership lists | Expected pass/fail, proving RDF-list conversion rather than repeated independent predicates. |
+| New schema flavour and custom field named class | Resolved dynamically; field lookup did not replace SHACL class, and a value equal to a flavour name remained a literal. |
+| Unknown constraint/field/flavour/reference, authored context, duplicate YAML key | Rejected before SHACL execution; the typo identified authored YAML pointer /0/property/0/minCont. |
+| Typed number, integer and boolean fields; invalid numeric input | Preserved declared datatypes (including double 1.0); invalid/nonfinite numeric source failed projection. |
+| Typed numeric hasValue/in and applicability | Explicit double literals matched number fields authored as 1 and 1.0; plain integral literals did not. Fractional membership/equality and nonmatches behaved as expected. The typed condition evaluated owner obligations instead of silently skipping them. |
+| Invalid typed literals | Missing/extra keys, unknown datatypes, numeric strings, fractional integers, mismatched booleans, null/containers and raw context keys failed before engine execution in both hasValue and in. |
+| Field/relation name overlap | Bare name rejected; field: and schema: selected distinct namespaces. |
+
+Failure focus nodes mapped to real Mara item sources. The standalone run
+reported the three complete-fixture rules passed. The experiment package
+includes Cargo.lock, source, YAML rule inputs, fixture schema/documents, captured
+Mara get results, test output and standalone results. The numeric YAML example
+in [[DES-TRACE-RULE-GRAMMAR]] is the exact applicability regression fixture.
+
+## Limits and consequence
+
+This verifies native Rust feasibility for YAML with generated bindings.
+It is not the complete persisted-profile loader or the 0.3 CLI/MCP workflow.
+Full profile/schema compatibility checks, all namespace encodings, exact YAML
+line/byte mapping for semantic failures, deterministic explanation ordering and
+whole-engine work-budget enforcement remain implementation acceptance under
+[[VER-TRACEABILITY-WORKFLOW]]. The fixture adapter is not production code.
+
+[[ADR-DECLARATIVE-TRACE-BASELINE]] adopts YAML as the only rule source format,
+with no Turtle input/export contract or user-supplied context. The generated
+context remains internal, versioned and schema-derived. SHACL owns constraint
+semantics; the Mara adapter owns vocabulary resolution, applicability,
+diagnostics and completeness.
+
+References: [JSON-LD contexts](https://www.w3.org/TR/json-ld11/#the-context),
+[scoped contexts](https://www.w3.org/TR/json-ld11/#scoped-contexts),
+[SHACL](https://www.w3.org/TR/shacl/) and
+[shacl 0.3.21](https://docs.rs/shacl/0.3.21/shacl/).
+:::

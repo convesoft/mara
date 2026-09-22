@@ -6,7 +6,7 @@ and unified discovery interfaces.
 
 This is the 0.2 syntax baseline. Accepted 0.3 inverse authoring, typed inline
 syntax and migration boundaries are specified in
-[relationship contracts](relations-0.3.mara.md). They have not yet replaced
+[relationship contracts](relations.mara.md). They have not yet replaced
 this shipped contract.
 
 :::mara design DES-DOCUMENT-FORMAT
