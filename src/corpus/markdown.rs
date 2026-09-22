@@ -286,6 +286,11 @@ impl MaraInlineParser {
         {
             return None;
         }
+        // A Markdown link label may begin with a Mara reference. Let its
+        // enclosing '[' reach the link parser, then recognize the inner token.
+        if line.starts_with(b"[[[") {
+            return None;
+        }
         let closing = line[2..]
             .windows(2)
             .position(|pair| pair == b"]]")

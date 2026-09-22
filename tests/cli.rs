@@ -10421,6 +10421,126 @@ fn typed_inline_relations_normalize_and_preserve_prose_through_cli_and_mcp() {
 }
 
 #[test]
+fn typed_inline_relations_preserve_leading_link_labels_through_cli_and_mcp() {
+    for use_mcp in [false, true] {
+        let fixture = relation_fixture();
+        let root = fixture.path();
+        let body = "[[[verifies:REQ-A]]](b.mara.md) and [[[verifies:REQ-A]]][check].\n\n[check]: b.mara.md";
+        if use_mcp {
+            relation_tool(
+                root,
+                "item_create",
+                json!({"flavour":"verification","id":"VER-LINK","file":"links.mara.md","title":"Linked check","body":body}),
+            );
+        } else {
+            let output = mara(
+                root,
+                &[
+                    "item",
+                    "create",
+                    "verification",
+                    "VER-LINK",
+                    "links.mara.md",
+                    "--title",
+                    "Linked check",
+                    "--body",
+                    body,
+                ],
+            );
+            assert!(output.status.success(), "{}", stderr(&output));
+        }
+        let inspected = relation_tool(
+            root,
+            "relation_get",
+            json!({"source":"VER-LINK","relation":"verifies","target":"REQ-A"}),
+        );
+        assert_eq!(inspected["occurrence_count"], 2);
+        let path = root.join("links.mara.md");
+        let original = fs::read_to_string(&path).unwrap();
+        for occurrence in inspected["occurrences"].as_array().unwrap() {
+            let source = &occurrence["source"];
+            assert_eq!(occurrence["kind"], "inline");
+            assert_eq!(
+                &original[source["start_byte"].as_u64().unwrap() as usize
+                    ..source["end_byte"].as_u64().unwrap() as usize],
+                "[[verifies:REQ-A]]"
+            );
+        }
+        if use_mcp {
+            relation_tool(
+                root,
+                "item_rename",
+                json!({"reference":"REQ-A","new_id":"REQ-NEW"}),
+            );
+        } else {
+            let output = mara(root, &["item", "rename", "REQ-A", "REQ-NEW"]);
+            assert!(output.status.success(), "{}", stderr(&output));
+        }
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            original.replace("verifies:REQ-A", "verifies:REQ-NEW")
+        );
+        let project = resolve_project(Some(root), root).unwrap();
+        let schema = mara::load_schema(&project).unwrap();
+        // Both the inline destination and reference-style link remain recognized,
+        // before and after demotion to bare mentions.
+        for demoted in [false, true] {
+            if demoted {
+                if use_mcp {
+                    relation_tool(
+                        root,
+                        "relation_remove",
+                        json!({"source":"VER-LINK","relation":"verifies","target":"REQ-NEW"}),
+                    );
+                } else {
+                    let output = mara(
+                        root,
+                        &["relation", "remove", "VER-LINK", "verifies", "REQ-NEW"],
+                    );
+                    assert!(output.status.success(), "{}", stderr(&output));
+                }
+                assert_eq!(
+                    fs::read_to_string(&path).unwrap(),
+                    original.replace("verifies:REQ-A", "REQ-NEW")
+                );
+            }
+            assert_eq!(validation_with_parity(root, &[])["valid"], true);
+            let corpus = mara::load_corpus(&project, &schema).unwrap();
+            let document = corpus
+                .documents()
+                .iter()
+                .find(|d| d.path() == Path::new("links.mara.md"))
+                .unwrap();
+            let links = document
+                .references()
+                .iter()
+                .filter(|r| r.kind() == mara::ReferenceKind::MarkdownLink)
+                .collect::<Vec<_>>();
+            assert_eq!(links.len(), 2);
+            for (link, spelling) in links.iter().zip([
+                "[[[verifies:REQ-NEW]]](b.mara.md)",
+                "[[[verifies:REQ-NEW]]][check]",
+            ]) {
+                assert_eq!(link.target(), "b.mara.md");
+                let span = link.source().span();
+                let expected = if demoted {
+                    spelling.replace("verifies:", "")
+                } else {
+                    spelling.to_owned()
+                };
+                assert_eq!(
+                    &document.source()[span.start_byte()..span.end_byte()],
+                    expected
+                );
+            }
+            let item = &document.items()[0];
+            assert_eq!(item.relations().len(), if demoted { 0 } else { 2 });
+            assert_eq!(item.mentions().len(), if demoted { 2 } else { 0 });
+        }
+    }
+}
+
+#[test]
 fn typed_inline_relations_validate_contexts_and_malformed_tokens() {
     let fixture = relation_fixture();
     let root = fixture.path();
