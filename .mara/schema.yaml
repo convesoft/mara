@@ -1,4 +1,4 @@
-format_version: 2
+format_version: 3
 flavours:
   term:
     description: Controlled project vocabulary whose stable meaning prevents ambiguity.

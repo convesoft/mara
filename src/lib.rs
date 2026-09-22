@@ -15,6 +15,10 @@ mod discovery;
 mod mutation;
 mod operations;
 mod query;
+mod relations;
+pub use relations::{
+    RelationEdge, RelationEndpoint, RelationError, RelationInspection, RelationOccurrence,
+};
 
 pub use corpus::{
     Corpus, Diagnostic, Document, DocumentReference, Item, MarkdownBlock, MarkdownBlockKind,
@@ -51,7 +55,7 @@ pub use query::{
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";
 pub const SCHEMA_FILE: &str = ".mara/schema.yaml";
-pub const SCHEMA_FORMAT_VERSION: u32 = 2;
+pub const SCHEMA_FORMAT_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -168,6 +172,20 @@ impl Schema {
 
     pub fn relations(&self) -> &BTreeMap<String, RelationDefinition> {
         &self.relations
+    }
+
+    /// Resolve an authored name without changing the canonical declaration.
+    pub fn resolve_relation(&self, name: &str) -> Option<(&str, &RelationDefinition, bool)> {
+        if let Some((name, definition)) = self.relations.get_key_value(name) {
+            return Some((name, definition, false));
+        }
+        self.relations.iter().find_map(|(canonical, definition)| {
+            (definition.inverse.as_deref() == Some(name)).then_some((
+                canonical.as_str(),
+                definition,
+                true,
+            ))
+        })
     }
 
     fn flavour_for_validation(&self, name: &str) -> Option<&FlavourDefinition> {
@@ -309,6 +327,41 @@ impl Schema {
         }
 
         for (name, relation) in &self.relations {
+            if relation.symmetric
+                && (relation.inverse.is_some()
+                    || relation.source.iter().collect::<HashSet<_>>()
+                        != relation.target.iter().collect::<HashSet<_>>())
+            {
+                errors.push(format!("symmetric relation '{name}' requires equal endpoint flavour sets and no inverse alias"));
+                self.validation.invalid_relations.insert(name.clone());
+            }
+            if let Some(alias) = &relation.inverse {
+                if !is_snake_name(alias)
+                    || is_structural_item_name(alias)
+                    || self.relations.contains_key(alias)
+                    || self
+                        .relations
+                        .values()
+                        .filter(|other| other.inverse.as_ref() == Some(alias))
+                        .count()
+                        > 1
+                {
+                    errors.push(format!(
+                        "relation '{name}' has invalid or conflicting inverse alias '{alias}'"
+                    ));
+                    self.validation.invalid_relations.insert(name.clone());
+                }
+                for target in &relation.target {
+                    if self
+                        .flavours
+                        .get(target)
+                        .is_some_and(|flavour| flavour.fields.contains_key(alias))
+                    {
+                        errors.push(format!("inverse alias '{alias}' conflicts with field '{alias}' on source flavour '{target}'"));
+                        self.validation.invalid_relations.insert(name.clone());
+                    }
+                }
+            }
             if !is_snake_name(name) {
                 errors.push(format!("invalid relation name '{name}'"));
                 self.validation.invalid_relations.insert(name.clone());
@@ -503,6 +556,10 @@ pub struct RelationDefinition {
     target: Vec<String>,
     #[serde(default)]
     same_flavour: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    inverse: Option<String>,
+    #[serde(default)]
+    symmetric: bool,
 }
 
 impl RelationDefinition {
@@ -814,8 +871,8 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
     let format_version_invalid = format_version.is_none();
     let format_version = format_version.unwrap_or_default();
     if !format_version_invalid && format_version != SCHEMA_FORMAT_VERSION {
-        errors.insert(0, if format_version == 1 {
-            "schema format version 1 requires explicit migration: migrate the existing schema to format_version: 2 and add description, use_when, avoid_when, and distinguish_from to every flavour; preserve custom declarations and item identities, do not reinitialize. See https://github.com/convesoft/mara/blob/main/docs/migration-0.2.mara.md".into()
+        errors.insert(0, if matches!(format_version, 1 | 2) {
+            format!("schema format version {format_version} requires explicit migration: migrate the existing schema to format_version: 3; format 1 also requires description, use_when, avoid_when, and distinguish_from on every flavour. Preserve custom declarations and item identities, do not reinitialize. See https://github.com/convesoft/mara/blob/main/docs/relations.mara.md")
         } else {
             format!("unsupported schema format version {format_version}; expected {SCHEMA_FORMAT_VERSION}")
         });

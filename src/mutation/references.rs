@@ -365,16 +365,12 @@ fn same_destination(
 
 fn connections<'graph, 'corpus>(
     graph: &'graph crate::DiscoveryGraph<'corpus>,
+    corpus: &Corpus,
 ) -> BTreeMap<(PathBuf, usize, usize), DiscoveryNode<'graph, 'corpus>> {
-    graph
+    let mut connections = graph
         .nodes()
         .flat_map(|node| node.connections(RelationDirection::Outgoing))
-        .filter(|edge| {
-            matches!(
-                edge.kind,
-                ConnectionKind::Mentions | ConnectionKind::Schema(_)
-            )
-        })
+        .filter(|edge| edge.kind == ConnectionKind::Mentions)
         .map(|edge| {
             (
                 (
@@ -385,7 +381,23 @@ fn connections<'graph, 'corpus>(
                 edge.neighbour,
             )
         })
-        .collect()
+        .collect::<BTreeMap<_, _>>();
+    // Safety checks follow every authored target, including inverse assertions
+    // and repeated assertions that share one semantic graph edge.
+    for relation in corpus.items().flat_map(|item| item.relations()) {
+        if let Ok(target) = graph.resolve(relation.target()) {
+            let source = relation.source();
+            connections.insert(
+                (
+                    source.path().to_path_buf(),
+                    source.span().start_byte(),
+                    source.span().end_byte(),
+                ),
+                target,
+            );
+        }
+    }
+    connections
 }
 
 /// Every byte retained in a surviving link must still resolve to its original
@@ -407,9 +419,9 @@ pub(super) fn preflight(
         .collect::<Vec<_>>();
     let old_graph = before.discovery();
     let new_graph = after.discovery();
-    let new_connections = connections(&new_graph);
+    let new_connections = connections(&new_graph, after);
     let mut impacts = BTreeMap::new();
-    for (location, target) in connections(&old_graph) {
+    for (location, target) in connections(&old_graph, before) {
         let document = before
             .documents()
             .iter()

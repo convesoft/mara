@@ -265,6 +265,9 @@ impl MetadataEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Relation {
     name: String,
+    pub(crate) canonical: String,
+    pub(crate) inverse: bool,
+    pub(crate) symmetric: bool,
     target: String,
     source: SourceLocation,
 }
@@ -472,13 +475,21 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 }
             } else if schema.field_is_declared(item.flavour(), entry.key()) {
                 continue;
-            } else if let Some(relation) = schema.relations.get(entry.key()) {
-                if schema.relation_is_valid(entry.key())
-                    && schema.relation_source_is_valid(entry.key())
-                    && !relation
-                        .source
-                        .iter()
-                        .any(|source| source == item.flavour())
+            } else if let Some((canonical, relation, inverse)) =
+                schema.resolve_relation(entry.key())
+            {
+                let endpoints = if inverse {
+                    &relation.target
+                } else {
+                    &relation.source
+                };
+                if schema.relation_is_valid(canonical)
+                    && (if inverse {
+                        schema.relation_target_is_valid(canonical)
+                    } else {
+                        schema.relation_source_is_valid(canonical)
+                    })
+                    && !endpoints.iter().any(|source| source == item.flavour())
                 {
                     diagnostic(
                         &mut diagnostics,
@@ -524,17 +535,23 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
             }
         }
         for relation in item.relations() {
-            if let Some(definition) = schema.relations.get(relation.name()) {
-                if !schema.relation_is_valid(relation.name()) {
+            if let Some((canonical, definition, inverse)) = schema.resolve_relation(relation.name())
+            {
+                if !schema.relation_is_valid(canonical) {
                     continue;
                 }
                 match resolve_indexed_item(&ids, &mids, relation.target()) {
                     IndexedItem::One(target) => {
-                        if schema.relation_target_is_valid(relation.name())
-                            && !definition
-                                .target
-                                .iter()
-                                .any(|flavour| flavour == target.flavour())
+                        let endpoints = if inverse {
+                            &definition.source
+                        } else {
+                            &definition.target
+                        };
+                        if (if inverse {
+                            schema.relation_source_is_valid(canonical)
+                        } else {
+                            schema.relation_target_is_valid(canonical)
+                        }) && !endpoints.iter().any(|flavour| flavour == target.flavour())
                         {
                             diagnostic(
                                 &mut diagnostics,
@@ -547,7 +564,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             );
                         }
                         if definition.same_flavour
-                            && schema.same_flavour_is_valid(relation.name())
+                            && schema.same_flavour_is_valid(canonical)
                             && target.flavour() != item.flavour()
                         {
                             diagnostic(
@@ -1105,13 +1122,24 @@ fn project_document(
                 .collect::<Vec<_>>();
             let relations = metadata
                 .iter()
-                .filter(|entry| {
-                    schema.is_some_and(|schema| schema.relations().contains_key(&entry.key))
-                })
-                .map(|entry| Relation {
-                    name: entry.key.clone(),
-                    target: entry.value.clone(),
-                    source: entry.source.clone(),
+                .filter_map(|entry| {
+                    let schema = schema?;
+                    if schema
+                        .flavours()
+                        .get(&parsed.flavour)
+                        .is_some_and(|flavour| flavour.fields.contains_key(&entry.key))
+                    {
+                        return None;
+                    }
+                    let (canonical, definition, inverse) = schema.resolve_relation(&entry.key)?;
+                    Some(Relation {
+                        name: entry.key.clone(),
+                        canonical: canonical.to_owned(),
+                        inverse,
+                        symmetric: definition.symmetric,
+                        target: entry.value.clone(),
+                        source: entry.source.clone(),
+                    })
                 })
                 .collect();
             let mentions = parsed

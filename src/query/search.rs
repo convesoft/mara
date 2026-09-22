@@ -29,7 +29,7 @@ pub fn search(
         corpus,
         schema,
         &(
-            "discovery-search-v1",
+            "discovery-search-v2",
             query,
             &filters.flavours,
             &filters.fields,
@@ -49,7 +49,7 @@ pub fn search(
                 return Ok(name.to_owned());
             }
             if matches!(name.as_str(), "contains" | "mentions")
-                && schema.relations().contains_key(name)
+                && schema.resolve_relation(name).is_some()
             {
                 return Err(QueryError::AmbiguousSearchRelationName { name: name.clone() });
             }
@@ -127,7 +127,7 @@ pub fn search(
         ));
     }
     let mut page = SearchResult {
-        format_version: 1,
+        format_version: 2,
         results: Vec::new(),
         has_more: false,
         next_cursor: None,

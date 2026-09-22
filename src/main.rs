@@ -25,7 +25,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "Discovery and reading: mara search <QUERY> discovers items, sections, and Markdown blocks; mara get <REFERENCE> reads any discovery node; mara related <REFERENCE> explores direct connections.\n\nAuthoring: choose a template with mara project init --help, then inspect flavour guidance with mara schema get flavour <NAME> before creating items.\n\nUpgrading to 0.2: https://github.com/convesoft/mara/blob/main/docs/migration-0.2.mara.md"
+    after_help = "Discovery and reading: mara search <QUERY> discovers items, sections, and Markdown blocks; mara get <REFERENCE> reads any discovery node; mara related <REFERENCE> explores direct connections.\n\nAuthoring: choose a template with mara project init --help, then inspect flavour guidance with mara schema get flavour <NAME> before creating items.\n\nRelationship migration: https://github.com/convesoft/mara/blob/main/docs/relations.mara.md"
 )]
 struct Cli {
     #[arg(
@@ -48,7 +48,7 @@ struct Cli {
 enum Command {
     /// Search items and narrative with one source excerpt; exact matches rank first, then ID/title/heading weights. Item filters exclude narrative; ID/MID words and filters stay exact.
     #[command(
-        after_help = "Discovery JSON format_version: 1 returns results: [{node, excerpt}]. Pass node.reference to get or related. Excerpts support selection; use get for complete content. Structural handles identify a document snapshot; search again after that document changes. Search has no node-kind filter."
+        after_help = "Discovery JSON format_version: 2 returns results: [{node, excerpt}]. Pass node.reference to get or related. Excerpts support selection; use get for complete content. Structural handles identify a document snapshot; search again after that document changes. Search has no node-kind filter."
     )]
     Search {
         /// Unicode case-insensitive words to match across items, section headings, and ordinary Markdown blocks; every distinct word must match. An empty string or punctuation-only text matches all search units within the filters.
@@ -66,7 +66,7 @@ enum Command {
 
     /// Read an item, section, Markdown block, or document in bounded consecutive portions.
     #[command(
-        after_help = "Discovery JSON format_version: 1 returns node, content, content_range, metadata, and metadata_range. Items return their parsed body; sections and documents include contained Markdown source. Non-items have empty metadata. Reconstruct content and ordered metadata fragments using byte/index ranges until has_more is false. Get has no limit option and does not enumerate neighbours; use related. Search again if a structural handle is stale."
+        after_help = "Discovery JSON format_version: 2 returns node, content, content_range, metadata, and metadata_range. Items return their parsed body; sections and documents include contained Markdown source. Non-items have empty metadata. Reconstruct content and ordered metadata fragments using byte/index ranges until has_more is false. Get has no limit option and does not enumerate neighbours; use related. Search again if a structural handle is stale."
     )]
     Get {
         /// Exact item ID/MID or a discovery handle returned by search, get, or related.
@@ -80,13 +80,13 @@ enum Command {
 
     /// Explore direct schema relations, mentions, and containment with source evidence; read neighbours with get.
     #[command(
-        after_help = "Discovery JSON format_version: 1 returns node and connections: [{relation, direction, neighbour, source}]. Pass neighbour.reference to get or another related call; each call follows only direct connections. JSON represents containment as contains with direction; human output displays its incoming view as contained_by. Use --relation builtin:contains --direction incoming for the parent, then outgoing on that parent for its children. Search again if a structural handle is stale."
+        after_help = "Discovery JSON format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation get.. Pass neighbour.reference to get or another related call; each call follows only direct connections. JSON represents containment as contains with direction; human output displays its incoming view as contained_by. Use --relation builtin:contains --direction incoming for the parent, then outgoing on that parent for its children. Search again if a structural handle is stale."
     )]
     Related {
         /// Exact item ID/MID or a discovery handle.
         reference: String,
 
-        /// Select edge direction relative to this node; omission includes both, outgoing first.
+        /// Select edge direction relative to this node; omission includes incoming, outgoing and symmetric, outgoing first. Incoming/outgoing exclude symmetric edges.
         #[arg(long, value_enum)]
         direction: Option<CliRelationDirection>,
 
@@ -139,7 +139,7 @@ enum Command {
 enum ProjectCommand {
     /// Initialize a Mara project without overwriting existing content; rejects an existing Mara project.
     #[command(
-        after_help = "All templates create only .mara/project.toml and .mara/schema.yaml, with schema format 2 and flavour guidance; no starter documents or items. Edit the resulting project-owned schema to customize it. For an existing project, migrate its schema in place rather than reinitializing or replacing it with a template. Use schema get to inspect guidance and relation endpoints, then schema validate and project validate."
+        after_help = "All templates create only .mara/project.toml and .mara/schema.yaml, with schema format 3 and flavour guidance; no starter documents or items. Edit the resulting project-owned schema to customize it. For an existing project, migrate its schema in place rather than reinitializing or replacing it with a template. Use schema get to inspect guidance and relation endpoints, then schema validate and project validate."
     )]
     Init {
         /// Destination directory (absolute or relative to the working directory), created if missing. Defaults to the working directory only when --project is also omitted. Cannot combine PATH with --project.
@@ -284,7 +284,22 @@ enum ItemCommand {
 
 #[derive(Debug, Subcommand)]
 enum RelationCommand {
-    /// Add a schema-valid outgoing relation; rejects an existing edge.
+    /// Inspect a semantic edge and its authored source occurrences.
+    Get {
+        /// Item expressing the relation: exact human ID or MID.
+        source: String,
+        /// Canonical relation name or declared inverse alias.
+        relation: String,
+        /// Other endpoint: exact human ID or MID.
+        target: String,
+        /// Maximum occurrences per page, 1 through 100; defaults to 20. The byte budget may return fewer.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Continue with next_cursor and unchanged arguments until has_more is false; restart after source/schema changes; empty strings are invalid.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Add a schema-valid relation; rejects an existing edge.
     Add {
         /// Source item's exact human ID or canonical MID (uppercase 26-character ULID).
         source: String,
@@ -293,7 +308,7 @@ enum RelationCommand {
         /// Target item's exact human ID or canonical MID (uppercase 26-character ULID).
         target: String,
     },
-    /// Remove an authored outgoing relation; rejects a missing edge.
+    /// Remove all assertions of an existing semantic relation; rejects a missing edge.
     Remove {
         /// Source item's exact human ID or canonical MID (uppercase 26-character ULID).
         source: String,
@@ -301,6 +316,9 @@ enum RelationCommand {
         relation: String,
         /// Target item's exact human ID or canonical MID (uppercase 26-character ULID).
         target: String,
+        /// Remove only this snapshot-bound occurrence from relation get.
+        #[arg(long)]
+        occurrence: Option<String>,
     },
 }
 
@@ -369,6 +387,7 @@ impl ItemFilterArgs {
 enum CliRelationDirection {
     Incoming,
     Outgoing,
+    Symmetric,
 }
 
 impl From<CliRelationDirection> for RelationDirection {
@@ -376,6 +395,7 @@ impl From<CliRelationDirection> for RelationDirection {
         match value {
             CliRelationDirection::Incoming => Self::Incoming,
             CliRelationDirection::Outgoing => Self::Outgoing,
+            CliRelationDirection::Symmetric => Self::Symmetric,
         }
     }
 }
@@ -384,7 +404,7 @@ impl From<CliRelationDirection> for RelationDirection {
 enum SchemaCommand {
     /// Get the complete effective schema, or one declaration with flavour selection guidance or relation endpoints.
     #[command(
-        after_help = "Read flavour guidance before authoring: description explains purpose; use_when identifies suitable knowledge; avoid_when excludes unsuitable content; distinguish_from compares confusable flavours. Inspect id_prefix, body, and fields for item constraints, and relation source/target for allowed endpoints. Guidance belongs to the schema, not item --field metadata.\n\nSchema format 2 requires a nonblank description, a nonempty use_when list, an avoid_when list ([] is valid), and a distinguish_from mapping ({} is valid) on every flavour. Entries must be nonblank; distinction targets must be other declared flavours. To migrate format 1, add meaningful guidance in the existing schema and set format_version: 2, preserving custom declarations and item identities. Validate with schema validate and project validate."
+        after_help = "Read flavour guidance before authoring: description explains purpose; use_when identifies suitable knowledge; avoid_when excludes unsuitable content; distinguish_from compares confusable flavours. Inspect id_prefix, body, and fields for item constraints, and relation source/target for allowed endpoints. Guidance belongs to the schema, not item --field metadata.\n\nSchema format 3 requires a nonblank description, a nonempty use_when list, an avoid_when list ([] is valid), and a distinguish_from mapping ({} is valid) on every flavour. Entries must be nonblank; distinction targets must be other declared flavours. To migrate format 1, add meaningful guidance in the existing schema and set format_version: 3, preserving custom declarations and item identities. Validate with schema validate and project validate."
     )]
     Get {
         /// Declaration kind; supply with NAME, or omit both for the complete schema.
@@ -401,7 +421,7 @@ enum SchemaCommand {
         #[arg(value_enum)]
         kind: CliSchemaKind,
     },
-    /// Validate schema format 2, including required flavour guidance, without validating item content; use project validate for the corpus.
+    /// Validate schema format 3, including required flavour guidance, without validating item content; use project validate for the corpus.
     Validate,
 }
 
@@ -805,38 +825,77 @@ fn run(cli: Cli) -> Result<bool, String> {
             })?;
             Ok(true)
         }
-        Command::Relation {
-            command:
-                RelationCommand::Add {
-                    source,
-                    relation,
-                    target,
-                },
-        } => {
-            let result = operations(project)?.relation_add(RelationParams {
+        Command::Relation { command } => match command {
+            RelationCommand::Get {
                 source,
                 relation,
                 target,
-            })?;
-            emit(format, &result, print_relation_mutation)?;
-            Ok(true)
-        }
-        Command::Relation {
-            command:
-                RelationCommand::Remove {
-                    source,
-                    relation,
-                    target,
+                limit,
+                cursor,
+            } => emit_relation(
+                format,
+                operations(project)?.relation_get(
+                    RelationParams {
+                        source,
+                        relation,
+                        target,
+                    },
+                    limit,
+                    cursor,
+                ),
+                |result| {
+                    println!(
+                        "{} {} {}: {} occurrences",
+                        result.edge.source.id(),
+                        result.edge.relation,
+                        result.edge.target.id(),
+                        result.occurrence_count
+                    );
+                    for entry in &result.occurrences {
+                        println!(
+                            "{}:{} {} {} selector={}",
+                            entry.source.path().display(),
+                            entry.source.start_line(),
+                            entry.relation,
+                            entry.target,
+                            entry.reference
+                        );
+                    }
+                    print_page_continuation(result.has_more, result.next_cursor.as_deref());
+                    Ok(())
                 },
-        } => {
-            let result = operations(project)?.relation_remove(RelationParams {
+            ),
+            RelationCommand::Add {
                 source,
                 relation,
                 target,
-            })?;
-            emit(format, &result, print_relation_mutation)?;
-            Ok(true)
-        }
+            } => emit_relation(
+                format,
+                operations(project)?.relation_add(RelationParams {
+                    source,
+                    relation,
+                    target,
+                }),
+                print_relation_mutation,
+            ),
+            RelationCommand::Remove {
+                source,
+                relation,
+                target,
+                occurrence,
+            } => emit_relation(
+                format,
+                operations(project)?.relation_remove_occurrence(
+                    RelationParams {
+                        source,
+                        relation,
+                        target,
+                    },
+                    occurrence,
+                ),
+                print_relation_mutation,
+            ),
+        },
         Command::Schema {
             command: SchemaCommand::Get { kind, name },
         } => {
@@ -1079,42 +1138,89 @@ fn print_item_summary(item: &ItemSummary) {
 
 fn print_related_connections(connections: &[RelatedConnection]) {
     for connection in connections {
-        let relation = match (connection.relation.as_str(), connection.direction) {
-            ("contains", RelationDirection::Incoming) => "contained_by",
-            ("builtin:contains", RelationDirection::Incoming) => "builtin:contained_by",
-            (name, _) => name,
-        };
         let node = &connection.neighbour;
-        println!(
-            "{}\t{}\t{}\t{}\t{}{}\t{}:{}\tevidence={}:{}-{}\treference={}",
-            connection.direction.as_str(),
-            relation,
-            node.id.as_deref().unwrap_or(&node.reference),
-            format!("{:?}", node.kind).to_lowercase(),
-            node.title.as_deref().unwrap_or_default(),
-            if node.title_truncated {
-                " [title truncated]"
+        if let Some(edge) = &connection.edge {
+            let label = connection.label.as_deref().unwrap_or(&edge.relation);
+            let prefix =
+                if connection.direction == RelationDirection::Incoming && label == edge.relation {
+                    "incoming "
+                } else {
+                    ""
+                };
+            println!(
+                "{prefix}{label} → {}\t{}{}\t{}:{}\toccurrences={}\treference={}",
+                node.id.as_deref().unwrap_or(&node.reference),
+                node.title.as_deref().unwrap_or_default(),
+                if node.title_truncated {
+                    " [title truncated]"
+                } else {
+                    ""
+                },
+                node.source.path().display(),
+                node.source.start_line(),
+                connection.occurrence_count.unwrap(),
+                node.reference
+            );
+        } else {
+            let relation = match (connection.relation.as_str(), connection.direction) {
+                ("contains", RelationDirection::Incoming) => "contained_by",
+                ("builtin:contains", RelationDirection::Incoming) => "builtin:contained_by",
+                (name, _) => name,
+            };
+            let source = connection.source.as_ref().expect("builtin source");
+            println!(
+                "{}\t{}\t{}\t{}\t{}{}\t{}:{}\tevidence={}:{}-{}\treference={}",
+                connection.direction.as_str(),
+                relation,
+                node.id.as_deref().unwrap_or(&node.reference),
+                format!("{:?}", node.kind).to_lowercase(),
+                node.title.as_deref().unwrap_or_default(),
+                if node.title_truncated {
+                    " [title truncated]"
+                } else {
+                    ""
+                },
+                node.source.path().display(),
+                node.source.start_line(),
+                source.path().display(),
+                source.start_line(),
+                source.end_line(),
+                node.reference
+            );
+        }
+    }
+}
+
+fn emit_relation<T: Serialize>(
+    format: OutputFormat,
+    result: Result<T, mara::RelationError>,
+    human: impl FnOnce(&T) -> Result<(), String>,
+) -> Result<bool, String> {
+    match result {
+        Ok(result) => {
+            emit(format, &result, human)?;
+            Ok(true)
+        }
+        Err(error) => {
+            if matches!(format, OutputFormat::Json) {
+                write_json(&error)?;
             } else {
-                ""
-            },
-            node.source.path().display(),
-            node.source.start_line(),
-            connection.source.path().display(),
-            connection.source.start_line(),
-            connection.source.end_line(),
-            node.reference
-        );
+                eprintln!("error: {error}");
+            }
+            Ok(false)
+        }
     }
 }
 
 fn print_relation_mutation(result: &RelationMutationResult) -> Result<(), String> {
     println!(
-        "{} relation '{}' from '{}' to '{}' in {}",
+        "{} relation '{}' from '{}' to '{}': {} changed, {} remaining",
         result.action.past_tense(),
-        result.relation,
-        result.source,
-        result.target,
-        result.path.display()
+        result.edge.relation,
+        result.edge.source.id(),
+        result.edge.target.id(),
+        result.changed_occurrences,
+        result.remaining_occurrences
     );
     Ok(())
 }
@@ -1198,13 +1304,29 @@ fn print_schema_get(result: &SchemaGetResult) -> Result<(), String> {
     match result {
         SchemaGetResult::Schema { schema } => print_yaml(schema),
         SchemaGetResult::Flavour { name, definition } => print_named_yaml(name, definition),
-        SchemaGetResult::Relation { name, definition } => print_named_yaml(name, definition),
+        SchemaGetResult::Relation {
+            name, definition, ..
+        } => print_named_yaml(name, definition),
     }
 }
 
 fn print_schema_list(result: &SchemaListResult) -> Result<(), String> {
     for declaration in &result.declarations {
-        println!("{}\t{}", declaration.name, declaration.description);
+        println!(
+            "{}\t{}{}{}",
+            declaration.name,
+            declaration.description,
+            declaration
+                .inverse
+                .as_ref()
+                .map(|alias| format!("\tinverse={alias}"))
+                .unwrap_or_default(),
+            if declaration.symmetric == Some(true) {
+                "\tsymmetric"
+            } else {
+                ""
+            }
+        );
     }
     Ok(())
 }

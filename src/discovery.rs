@@ -45,6 +45,8 @@ pub enum DiscoveryNodeKind<'corpus> {
 struct EdgeData<'corpus> {
     kind: EdgeKind<'corpus>,
     source: SourceLocation,
+    symmetric: bool,
+    occurrence_count: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -75,6 +77,7 @@ pub struct DiscoveryConnection<'graph, 'corpus> {
     pub direction: RelationDirection,
     pub neighbour: DiscoveryNode<'graph, 'corpus>,
     pub source: &'graph SourceLocation,
+    pub occurrence_count: usize,
 }
 
 impl<'corpus> DiscoveryGraph<'corpus> {
@@ -145,6 +148,8 @@ impl<'corpus> DiscoveryGraph<'corpus> {
             EdgeData {
                 kind: EdgeKind::Contains,
                 source,
+                symmetric: false,
+                occurrence_count: 0,
             },
         );
         child
@@ -240,25 +245,35 @@ impl<'corpus> DiscoveryGraph<'corpus> {
                 targets.entry(mid).or_default().push(node);
             }
         }
+        let mut canonical: BTreeMap<(usize, usize, &str), petgraph::graph::EdgeIndex> =
+            BTreeMap::new();
         for (node, item) in items {
-            let connections = item.relations().iter().map(|relation| {
-                (
-                    relation.target(),
-                    EdgeKind::Schema(relation.name()),
-                    relation.source(),
-                )
-            });
-            for (target, kind, source) in connections {
-                // Validation owns diagnostics; never resolve missing or ambiguous identities.
-                if let Some([target]) = targets.get(target).map(Vec::as_slice) {
-                    self.graph.add_edge(
-                        node,
-                        *target,
-                        EdgeData {
-                            kind,
-                            source: source.clone(),
-                        },
-                    );
+            for relation in item.relations() {
+                if let Some([target]) = targets.get(relation.target()).map(Vec::as_slice) {
+                    let (mut from, mut to) = if relation.inverse {
+                        (*target, node)
+                    } else {
+                        (node, *target)
+                    };
+                    if relation.symmetric && from.index() > to.index() {
+                        std::mem::swap(&mut from, &mut to);
+                    }
+                    let key = (from.index(), to.index(), relation.canonical.as_str());
+                    if let Some(&edge) = canonical.get(&key) {
+                        self.graph[edge].occurrence_count += 1;
+                    } else {
+                        let edge = self.graph.add_edge(
+                            from,
+                            to,
+                            EdgeData {
+                                kind: EdgeKind::Schema(&relation.canonical),
+                                source: relation.source().clone(),
+                                symmetric: relation.symmetric,
+                                occurrence_count: 1,
+                            },
+                        );
+                        canonical.insert(key, edge);
+                    }
                 }
             }
         }
@@ -280,48 +295,72 @@ impl<'graph, 'corpus> DiscoveryNode<'graph, 'corpus> {
         self,
         direction: RelationDirection,
     ) -> Vec<DiscoveryConnection<'graph, 'corpus>> {
-        let graph_direction = match direction {
-            RelationDirection::Outgoing => Direction::Outgoing,
-            RelationDirection::Incoming => Direction::Incoming,
-        };
-        let mut edges = self
+        let edges = self
             .graph
             .graph
-            .edges_directed(self.index, graph_direction)
-            .collect::<Vec<_>>();
-        edges.sort_by_key(|edge| {
-            let neighbour = match direction {
-                RelationDirection::Outgoing => edge.target(),
-                RelationDirection::Incoming => edge.source(),
-            };
-            (neighbour.index(), edge.id().index())
-        });
-        edges
-            .into_iter()
-            .map(|edge| {
-                let kind = match (edge.weight().kind, direction) {
-                    (EdgeKind::Contains, RelationDirection::Outgoing) => ConnectionKind::Contains,
-                    (EdgeKind::Contains, RelationDirection::Incoming) => {
-                        ConnectionKind::ContainedBy
-                    }
-                    (EdgeKind::Mentions, _) => ConnectionKind::Mentions,
-                    (EdgeKind::Schema(name), _) => ConnectionKind::Schema(name),
-                };
-                let index = match direction {
-                    RelationDirection::Outgoing => edge.target(),
-                    RelationDirection::Incoming => edge.source(),
-                };
-                DiscoveryConnection {
-                    kind,
-                    direction,
-                    neighbour: DiscoveryNode {
-                        graph: self.graph,
-                        index,
-                    },
-                    source: &edge.weight().source,
+            .edges_directed(self.index, Direction::Outgoing)
+            .chain(
+                self.graph
+                    .graph
+                    .edges_directed(self.index, Direction::Incoming),
+            );
+        let mut seen = std::collections::HashSet::new();
+        let mut connections = Vec::new();
+        for edge in edges {
+            if !seen.insert(edge.id()) {
+                continue;
+            }
+            let data = edge.weight();
+            let index = if data.symmetric {
+                if direction != RelationDirection::Symmetric {
+                    continue;
                 }
-            })
-            .collect()
+                if edge.source() == self.index {
+                    edge.target()
+                } else {
+                    edge.source()
+                }
+            } else {
+                match direction {
+                    RelationDirection::Outgoing if edge.source() == self.index => edge.target(),
+                    RelationDirection::Incoming if edge.target() == self.index => edge.source(),
+                    _ => continue,
+                }
+            };
+            let kind = match (data.kind, direction) {
+                (EdgeKind::Contains, RelationDirection::Outgoing) => ConnectionKind::Contains,
+                (EdgeKind::Contains, _) => ConnectionKind::ContainedBy,
+                (EdgeKind::Mentions, _) => ConnectionKind::Mentions,
+                (EdgeKind::Schema(name), _) => ConnectionKind::Schema(name),
+            };
+            connections.push(DiscoveryConnection {
+                kind,
+                direction,
+                neighbour: DiscoveryNode {
+                    graph: self.graph,
+                    index,
+                },
+                source: &data.source,
+                occurrence_count: data.occurrence_count,
+            });
+        }
+        connections.sort_by(|a, b| {
+            a.neighbour
+                .index
+                .index()
+                .cmp(&b.neighbour.index.index())
+                .then_with(|| match (a.kind, b.kind) {
+                    (ConnectionKind::Schema(a), ConnectionKind::Schema(b)) => a.cmp(b),
+                    (ConnectionKind::Schema(_), _) => std::cmp::Ordering::Less,
+                    (_, ConnectionKind::Schema(_)) => std::cmp::Ordering::Greater,
+                    _ => a
+                        .source
+                        .span()
+                        .start_byte()
+                        .cmp(&b.source.span().start_byte()),
+                })
+        });
+        connections
     }
 
     pub fn parent(self) -> Option<Self> {

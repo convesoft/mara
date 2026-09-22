@@ -4,6 +4,9 @@ Accepted 0.2 direction: search canonical documentation once, then inspect
 direct connections from items, sections, and ordinary Markdown blocks. These contracts
 extend the [guided-authoring scope](guided-authoring.mara.md); they are not
 implemented by the [0.1 retrieval contract](retrieval.mara.md).
+The [relationship contracts](relations.mara.md) supersede the 0.2 schema-edge
+representation and discovery format version for the current checkout.
+Builtin references and structural discovery retain the contracts below.
 
 :::mara requirement REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
 :mid: 01M232S32V718GRMEHSBPY46CQ

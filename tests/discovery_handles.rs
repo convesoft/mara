@@ -150,11 +150,11 @@ fn shared_summaries_preserve_full_sources_and_bounded_context() {
                 assert_eq!(value["kind"], "document");
                 assert!(value.get("title").is_none());
                 if node.source().path() == Path::new("empty.mara.md") {
-                    // Fixed v1 vector, independently calculated from the documented
+                    // Fixed v2 vector, independently calculated from the documented
                     // framing in the implementation; catches accidental encoding drift.
                     assert_eq!(
                         node.reference(),
-                        "mara:node:1:3a162694bbd212454d23e7cfa61fd034096a907ac18b3650525fc3f2d9d2cf3d"
+                        "mara:node:2:ca9332407bddea812b4a80e45a0c111f1aca498182cdc95a8c491f23785a7ec6"
                     );
                 }
             }
@@ -243,7 +243,7 @@ fn handles_survive_unrelated_edits_but_reject_containing_edits_and_moves() {
     }
     for reference in [
         "mara:node:2:unsupported",
-        "mara:node:1:malformed",
+        "mara:node:2:malformed",
         &format!("{root_reference}0"),
     ] {
         assert!(

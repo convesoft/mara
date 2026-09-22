@@ -10,8 +10,9 @@ When MCP is unavailable, use an available Mara CLI invocation with `--format jso
 for structured results. The same operation selection, authoring, continuation,
 and validation rules apply to both surfaces.
 
-This skill targets the 0.2 interface: schema format 2 and unified `search`,
-`get`, and `related`. Use the skill shipped with the selected executable or
+This skill targets the current 0.3 development interface: schema format 3,
+discovery format 2, and relationship format 1. Metadata inverse aliases and
+symmetric edges are implemented; typed inline and external targets are not yet supported. Use the skill shipped with the selected executable or
 the same source revision. If an older installation exposes a different
 interface, report the mismatch and use its matching guidance; do not silently
 change the version pin or substitute removed commands.
@@ -71,12 +72,12 @@ Use the selected project's declarations, including custom flavours. Keep
 supporting narrative as Markdown when it does not need an independent identity;
 search/get/related can still discover, read, and navigate it.
 
-Schema format 2 requires all four guidance keys directly on every flavour:
+Schema format 3 retains all four guidance keys directly on every flavour:
 a nonblank `description`, a nonempty list of nonblank `use_when` entries,
 an `avoid_when` list (`[]` is valid), and a `distinguish_from` mapping (`{}` is
 valid). Distinction targets must be other declared flavours with nonblank
 explanations. When asked to migrate format 1, edit the existing schema in place,
-set `format_version: 2`, and supply meaningful guidance. Preserve custom
+set `format_version: 3`, and supply meaningful guidance. Preserve custom
 flavours, prefixes, fields, relations, document bytes, IDs, and MIDs; do not
 reinitialize or replace the schema with a template. Require `valid:true` from
 both `schema_validate` and `project_validate` (CLI `schema validate` and
@@ -107,6 +108,7 @@ inspect `<command> --help` for positional arguments and options.
 | Change title, custom fields, or body | `item_update` | `item update` |
 | Relocate an item; preserve ID and MID | `item_move` | `item move` |
 | Change human ID and supported references; preserve MID | `item_rename` | `item rename` |
+| Inspect an edge and its source occurrences | `relation_get` | `relation get SOURCE RELATION TARGET` |
 | Add or remove an existing item's typed edge | `relation_add` or `relation_remove` | `relation add`, `relation remove` |
 | Delete an item; resolve reported relation/mention blockers | `item_delete` | `item delete` |
 | Check an item or whole-project integrity | `item_validate` or `project_validate` | `item validate`, `project validate` |
@@ -136,11 +138,12 @@ accept `limit`.
 
 Call `related` with `{"reference":"<selected reference>"}` for direct schema
 relations, mentions, and containment. It returns `node` and
-`connections:[{relation,direction,neighbour,source}]`; pass a selected
+`connections`; pass a selected
 `neighbour.reference` to `get` or another `related` call. Each call follows only
 direct connections; there is no automatic expansion or hops option.
 
-Use `direction:"incoming"` or `"outgoing"`; omission includes both. Related
+Use `direction:"incoming"`, `"outgoing"`, or `"symmetric"`; omission includes all.
+Direction is canonical even when a relation filter uses an inverse alias. Related
 `relations` accepts `schema:name` and `builtin:name`, with short names allowed
 only when unambiguous in the vocabulary. Related `flavours` selects item
 neighbours only. JSON represents containment as `contains` with direction;
@@ -161,8 +164,8 @@ Item MIDs retain durable identity. Search and related default to 20 entries
 and accept `limit` from 1 through 100; related counts connections, including
 different connections to the same neighbour. The byte budget may shorten pages.
 
-Unified discovery responses use `format_version: 1`, independently of schema
-format 2 and the application version. Inspect `node.kind` (item, section, block,
+Unified discovery responses use `format_version: 2`, independently of schema
+format 3 and the application version. Inspect `node.kind` (item, section, block,
 or document); only items have ID/MID/flavour. Item list retains its item-only
 response. On upgrade, discard old cursors and update parsers for the mixed
 `results`, consecutive `content`, and `connections` shapes above.
@@ -172,6 +175,38 @@ CLI retrieval uses the same JSON result fields:
 then `"${mara_cli[@]}" --project /absolute/project --format json get '<reference>'`.
 Use `related '<reference>'` for connections, `--relation builtin:mentions` to
 select explicit mentions, and `--cursor '<next_cursor>'` for continuation.
+
+## Inspect and change relationships
+
+Schema lookup accepts inverse aliases and returns the canonical declaration,
+`requested_name` and `inverse`. Lists show canonical names with aliases and
+symmetry. Alias endpoint validation exchanges source and target first.
+
+`related` returns each semantic schema edge once, with canonical `relation`,
+endpoint-facing `label`, `direction`, `neighbour`, `edge` and `occurrence_count`.
+Builtin connections retain `source`; use `relation_get` for schema locations.
+Symmetric edges are excluded by incoming/outgoing filters. Directed self-edges
+appear once as outgoing when direction is omitted. Different relation kinds
+remain distinct. Item-list/search filters still select items with authored
+metadata assertions; canonical and alias filters select the same kind.
+
+`relation_get {source,relation,target,limit?,cursor?}` returns the canonical
+`edge`, total `occurrence_count` and a page of `occurrences`. Each occurrence
+retains its author, spelling, source location and opaque `reference` selector.
+Default limit is 20, maximum 100, with a 65,536-byte budget. Continue unchanged
+until `has_more:false`; re-inspect after source/schema changes.
+
+Add rejects an edge already asserted anywhere, including inverse, symmetric
+and ID/MID equivalents. Direct source may intentionally repeat assertions.
+`relation_remove {source,relation,target}` removes every occurrence across
+included files. Supply `occurrence` from inspection to remove exactly one.
+Stale or mismatched selectors fail without writes. Results report
+`changed_occurrences`, `remaining_occurrences` and `edge_exists`.
+
+To migrate format 2, review aliases for collisions and change the schema version
+in place to 3. Preserve custom declarations, source bytes and MIDs; existing
+relations remain directed with no alias. Validate schema and project with this
+revision. See `docs/relations.mara.md` for the full release migration contract.
 
 ## Preserve authored references
 
@@ -204,7 +239,7 @@ The shared `:key: value` source syntax does not make these interchangeable:
 - **Typed relations:** `justifies` and `satisfies` are relations, not custom
   fields. `fields:[{"key":"justifies","value":"REQ-EXAMPLE"}]` is invalid.
   Use creation `relations` or explicit relation operations; inspect allowed
-  source/target flavours first. Incoming backlinks are derived, never authored.
+  source/target flavours first. Use canonical names or declared inverse aliases; reverse navigation is derived.
 
 CLI equivalents are `--title`, repeatable `--field KEY=VALUE`, update
 `--clear-field KEY`, and creation `--relation NAME=TARGET`. Never pass a relation

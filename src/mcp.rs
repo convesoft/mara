@@ -4,9 +4,9 @@ use mara::{
     FieldValue, GetParams, GetResult, InitialRelation, ItemCollectionResult, ItemCreateParams,
     ItemCreationResult, ItemFilterParams, ItemMove, ItemMoveParams, ItemUpdate, ItemUpdateParams,
     OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, RelatedParams,
-    RelatedResult, RelationDirection, RelationMutationResult, RelationParams, SchemaGetResult,
-    SchemaKind, SchemaListResult, SchemaValidationResult, SearchParams, Template,
-    TransactionRollbackResult, ValidationResult,
+    RelatedResult, RelationDirection, RelationParams, SchemaGetResult, SchemaKind,
+    SchemaListResult, SchemaValidationResult, SearchParams, Template, TransactionRollbackResult,
+    ValidationResult,
 };
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -216,7 +216,7 @@ struct ItemFilterToolParams {
     /// Exact schema-declared custom-field key/value filters; excludes title/MID and typed relations. Key and scalar text value match exactly, without trimming; an empty value matches an empty field value. OR within one key, AND across keys and other filter categories. Omitted or [] adds no restriction.
     #[serde(default)]
     fields: Vec<FieldValue>,
-    /// Exact authored outgoing relation names, combined with OR and intersected with other filters. Omitted or [] adds no restriction.
+    /// Exact authored relation name or inverse aliass, combined with OR and intersected with other filters. Omitted or [] adds no restriction.
     #[serde(default)]
     relations: Vec<String>,
     /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, .., empty path elements, . or ./; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
@@ -303,7 +303,7 @@ struct RelatedToolParams {
     project: Option<PathBuf>,
     /// Exact item ID/MID or a discovery handle returned by search, get, or related.
     reference: String,
-    /// Edge direction relative to the selected node: incoming or outgoing. Omitted or null includes both, outgoing first.
+    /// Edge direction relative to the selected node: incoming, outgoing or symmetric. Omitted or null includes all, outgoing first. Incoming/outgoing exclude symmetric edges.
     #[serde(default)]
     direction: Option<RelationDirection>,
     /// Relation names (schema:name or builtin:name; shorthand only when unambiguous), combined with OR and intersected with the neighbour flavour filter. Omitted or [] includes all.
@@ -344,7 +344,7 @@ struct RelationToolParams {
     project: Option<PathBuf>,
     /// Source item's exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     source: String,
-    /// Schema-declared outgoing relation name; discover names with schema_list(kind="relation").
+    /// Schema-declared relation name or inverse alias; discover names with schema_list(kind="relation").
     relation: String,
     /// Target item's exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     target: String,
@@ -371,7 +371,7 @@ impl MaraMcp {
 
     #[tool(
         name = "project_init",
-        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project. Templates create only .mara/project.toml and .mara/schema.yaml with schema format 2 and flavour guidance, no starter documents or items. Customize the project-owned schema; migrate existing schemas in place instead of reinitializing. Inspect guidance and relation endpoints with schema_get, then run schema_validate and project_validate."
+        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project. Templates create only .mara/project.toml and .mara/schema.yaml with schema format 3 and flavour guidance, no starter documents or items. Customize the project-owned schema; migrate existing schemas in place instead of reinitializing. Inspect guidance and relation endpoints with schema_get, then run schema_validate and project_validate."
     )]
     fn project_init(
         &self,
@@ -436,7 +436,7 @@ impl MaraMcp {
 
     #[tool(
         name = "schema_validate",
-        description = "Validate schema format 2 without validating item content. Every flavour requires a nonblank description, nonempty use_when list, avoid_when list ([] is valid), and distinguish_from mapping ({} is valid). Entries must be nonblank; distinction targets must be other declared flavours. Migrate format 1 explicitly in the existing schema, preserving custom declarations and item identities; no automatic upgrade. Then run project_validate for the corpus."
+        description = "Validate schema format 3 without validating item content. Every flavour requires a nonblank description, nonempty use_when list, avoid_when list ([] is valid), and distinguish_from mapping ({} is valid). Entries must be nonblank; distinction targets must be other declared flavours. Migrate format 1 explicitly in the existing schema, preserving custom declarations and item identities; no automatic upgrade. Then run project_validate for the corpus."
     )]
     fn schema_validate(
         &self,
@@ -536,7 +536,7 @@ impl MaraMcp {
 
     #[tool(
         name = "get",
-        description = "Read an item, section, Markdown block, or document in bounded consecutive portions. Discovery format_version: 1 returns node, content, content_range, metadata, and metadata_range. Sections and documents include contained source; items return their parsed body, then ordered metadata fragments; non-items have empty metadata. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged reference until has_more is false; restart after source/schema changes. Search again if a structural handle is stale. Enumerate neighbours with related; get has no limit."
+        description = "Read an item, section, Markdown block, or document in bounded consecutive portions. Discovery format_version: 2 returns node, content, content_range, metadata, and metadata_range. Sections and documents include contained source; items return their parsed body, then ordered metadata fragments; non-items have empty metadata. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged reference until has_more is false; restart after source/schema changes. Search again if a structural handle is stale. Enumerate neighbours with related; get has no limit."
     )]
     fn get(
         &self,
@@ -564,7 +564,7 @@ impl MaraMcp {
 
     #[tool(
         name = "search",
-        description = "Search every distinct query word with typo tolerance, ranked by relevance before pagination. Exact matches rank first; ID/title/heading matches carry more weight. ID/MID field words and all filters stay exact. Search items, section headings, and outermost Markdown blocks. Discovery format_version: 1 returns results: [{node, excerpt}]. One bounded source excerpt is automatic; item filters exclude narrative, and there is no node-kind filter. Pass node.reference to get for complete content or related for direct connections. Follow next_cursor with unchanged inputs; restart after source/schema changes. Structural handles identify a document snapshot; search again after that document changes."
+        description = "Search every distinct query word with typo tolerance, ranked by relevance before pagination. Exact matches rank first; ID/title/heading matches carry more weight. ID/MID field words and all filters stay exact. Search items, section headings, and outermost Markdown blocks. Discovery format_version: 2 returns results: [{node, excerpt}]. One bounded source excerpt is automatic; item filters exclude narrative, and there is no node-kind filter. Pass node.reference to get for complete content or related for direct connections. Follow next_cursor with unchanged inputs; restart after source/schema changes. Structural handles identify a document snapshot; search again after that document changes."
     )]
     fn search(
         &self,
@@ -576,7 +576,7 @@ impl MaraMcp {
 
     #[tool(
         name = "related",
-        description = "Explore direct schema relations, mentions, and containment from any node. Discovery format_version: 1 returns node and connections: [{relation, direction, neighbour, source}]. Counts connections, not unique neighbours; traversal is caller-controlled. Pass neighbour.reference to get or another related call. JSON uses contains with direction; its incoming view is displayed as contained_by in human CLI output. Select builtin:contains and incoming for the parent, then outgoing on that parent for its children. Continue with next_cursor and unchanged reference/options; restart after source/schema changes. Search again if a structural handle is stale."
+        description = "Explore direct schema relations, mentions, and containment from any node. Discovery format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation get.. Counts connections, not unique neighbours; traversal is caller-controlled. Pass neighbour.reference to get or another related call. JSON uses contains with direction; its incoming view is displayed as contained_by in human CLI output. Select builtin:contains and incoming for the parent, then outgoing on that parent for its children. Continue with next_cursor and unchanged reference/options; restart after source/schema changes. Search again if a structural handle is stale."
     )]
     fn related(
         &self,
@@ -599,34 +599,90 @@ impl MaraMcp {
             .map(Json)
     }
 
-    #[tool(
-        name = "relation_add",
-        description = "Add one schema-valid authored outgoing relation to its source item; rejects an existing edge."
-    )]
+    #[tool(name = "relation_get", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationInspection>(), description = "Inspect a semantic relationship and its authored occurrences. Alias and canonical names resolve the same edge. Follow next_cursor with unchanged arguments; selectors and cursors expire when project source or schema changes.")]
+    fn relation_get(
+        &self,
+        Parameters(params): Parameters<RelationGetToolParams>,
+    ) -> rmcp::model::CallToolResult {
+        let (project, relation) = params.edge.into_parts();
+        relation_result(
+            self.for_project(project)
+                .map_err(mara::RelationError::from)
+                .and_then(|context| context.relation_get(relation, params.limit, params.cursor)),
+        )
+    }
+
+    #[tool(name = "relation_add", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Add one metadata assertion using a canonical name or inverse alias. Reject an existing semantic edge, including reverse symmetric assertions. Returns relationship format 1.")]
     fn relation_add(
         &self,
         Parameters(params): Parameters<RelationToolParams>,
-    ) -> Result<Json<RelationMutationResult>, String> {
+    ) -> rmcp::model::CallToolResult {
         let (project, params) = params.into_parts();
-        self.for_project(project)?.relation_add(params).map(Json)
+        relation_result(
+            self.for_project(project)
+                .map_err(mara::RelationError::from)
+                .and_then(|context| context.relation_add(params)),
+        )
     }
 
-    #[tool(
-        name = "relation_remove",
-        description = "Remove one existing authored outgoing relation from its source item; rejects a missing edge."
-    )]
+    #[tool(name = "relation_remove", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Remove all assertions of a semantic relationship across included documents, or exactly one snapshot-bound occurrence. Reject missing edges and stale or mismatched selectors. Returns relationship format 1.")]
     fn relation_remove(
         &self,
-        Parameters(params): Parameters<RelationToolParams>,
-    ) -> Result<Json<RelationMutationResult>, String> {
-        let (project, params) = params.into_parts();
-        self.for_project(project)?.relation_remove(params).map(Json)
+        Parameters(params): Parameters<RelationRemoveToolParams>,
+    ) -> rmcp::model::CallToolResult {
+        let (project, relation) = params.edge.into_parts();
+        relation_result(
+            self.for_project(project)
+                .map_err(mara::RelationError::from)
+                .and_then(|context| {
+                    context.relation_remove_occurrence(relation, params.occurrence)
+                }),
+        )
     }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RelationGetToolParams {
+    #[serde(flatten)]
+    edge: RelationToolParams,
+    /// Maximum occurrences per page, 1 through 100; omitted or null defaults to 20. The byte budget may return fewer.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Opaque next_cursor from inspection; repeat unchanged arguments until has_more is false. Restart after source/schema changes; empty strings are invalid. Omit or null on the first page.
+    #[serde(default)]
+    cursor: Option<String>,
+}
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RelationRemoveToolParams {
+    #[serde(flatten)]
+    edge: RelationToolParams,
+    /// Opaque selector returned by relation_get; omitted or null removes the whole relationship.
+    #[serde(default)]
+    occurrence: Option<String>,
+}
+fn relation_result<T: serde::Serialize>(
+    result: Result<T, mara::RelationError>,
+) -> rmcp::model::CallToolResult {
+    let (value, failed) = match result {
+        Ok(value) => (
+            serde_json::to_value(value).expect("serializable relationship result"),
+            false,
+        ),
+        Err(error) => (
+            serde_json::to_value(error).expect("serializable relationship error"),
+            true,
+        ),
+    };
+    let mut response = rmcp::model::CallToolResult::structured(value);
+    response.is_error = Some(failed);
+    response
 }
 
 #[tool_handler(
     name = "mara",
-    instructions = "Structured Mara operations. Pass an absolute project path, or omit it for execution-directory discovery (project_init requires an explicit destination only when the server is unbound). When the server starts with --project, omit request-level project selection, including for project_init; overrides are rejected. Discovery and reading: search, get, and related cover items and narrative; item tools author, list, or validate items only. Before authoring, inspect schema_get flavour selection guidance and relation endpoints. Schema format 2 requires description, use_when, avoid_when, and distinguish_from for each flavour. Upgrade guidance: https://github.com/convesoft/mara/blob/main/docs/migration-0.2.mara.md"
+    instructions = "Structured Mara operations. Pass an absolute project path, or omit it for execution-directory discovery (project_init requires an explicit destination only when the server is unbound). When the server starts with --project, omit request-level project selection, including for project_init; overrides are rejected. Discovery and reading: search, get, and related cover items and narrative; item tools author, list, or validate items only. Before authoring, inspect schema_get flavour selection guidance and relation endpoints. Schema format 3 requires description, use_when, avoid_when, and distinguish_from for each flavour. Upgrade guidance: https://github.com/convesoft/mara/blob/main/docs/relations.mara.md"
 )]
 impl ServerHandler for MaraMcp {}
 

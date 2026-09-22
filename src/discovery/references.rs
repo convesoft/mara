@@ -96,6 +96,8 @@ impl<'corpus> DiscoveryGraph<'corpus> {
                             target,
                             EdgeData {
                                 kind: EdgeKind::Mentions,
+                                symmetric: false,
+                                occurrence_count: 0,
                                 source: reference.source().clone(),
                             },
                         );

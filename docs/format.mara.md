@@ -4,10 +4,10 @@ This file defines the document syntax, including narrative mentions introduced
 in 0.2. See [discovery](discovery.mara.md) for derived structure, link resolution,
 and unified discovery interfaces.
 
-This is the 0.2 syntax baseline. Accepted 0.3 inverse authoring, typed inline
-syntax and migration boundaries are specified in
-[relationship contracts](relations.mara.md). They have not yet replaced
-this shipped contract.
+Item delimiters and bare mentions retain the 0.2 syntax. Schema format 3 adds
+metadata inverse aliases and symmetric relations under
+[relationship contracts](relations.mara.md), which also distinguishes current
+support from planned typed inline syntax and external targets.
 
 :::mara design DES-DOCUMENT-FORMAT
 :mid: 01M1PXP2KG381MM1VNN6XC7S4M
@@ -78,8 +78,10 @@ Failures preserve user data and produce actionable diagnostics.
 - Typed relations are metadata entries whose key names the relation and whose
   value is one target handle. Repeat the key for multiple targets.
 - Use only relation names whose meaning is defined by the project corpus.
-- Relations resolve target handles to MIDs internally once machine identity
-  exists. Inverses and backlinks are derived and are not authored a second time.
+- Relations resolve target handles to MIDs. A declared inverse alias may author
+  the same edge from its opposite endpoint; symmetric declarations have no
+  semantic direction. Repeated assertions retain source occurrences but count
+  as one edge. Reverse navigation never generates a second stored assertion.
 - Inline references are mentions; typed relations are authored in metadata.
 
 ## In-memory projection

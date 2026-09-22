@@ -1,9 +1,13 @@
 # Relationship authoring and mutation
 
-Accepted contracts for the planned 0.3 implementation. These extend
-[traceability](traceability.mara.md); they do not describe capabilities shipped
-in 0.2. The executable and this repository's active schema remain unchanged.
-Examples use a project declaring the illustrated flavours and relations.
+Accepted 0.3 contracts extending [traceability](traceability.mara.md).
+The current checkout implements metadata inverse aliases and symmetric relations,
+semantic navigation, bounded occurrence inspection, and whole-edge or selected
+metadata removal. Schema format 3, discovery format 2 and relationship format 1
+are active. Existing declarations remain directed unless explicitly changed.
+Typed inline relationships and external targets remain planned; their examples
+below are not executable yet. Published 0.2 uses the previous formats.
+Examples require a project declaring the illustrated flavours and relations.
 
 :::mara design DES-RELATION-AUTHORING
 :mid: 01M2GC27RD21J5BRYB0438RSEE
@@ -460,9 +464,9 @@ An invalid candidate leaves the recoverable baseline available and must not be
 reported as a completed migration. Automation and further vocabulary migration operations remain under
 [[REQ-SCHEMA-EVOLUTION]]. Rule grammar, validation/view formats and policy
 adoption follow [[DES-TRACE-CONTRACT-COMPATIBILITY]]; this relationship
-contract does not introduce a migration command. The repository's active
-schema and executable must not advance to these formats during this design-only
-change.
+contract does not introduce a migration command. The current implementation
+adopts the formats for internal metadata relationships; inline and external
+support follow separately. Do not treat this increment as complete 0.3 support.
 :::
 
 :::mara decision ADR-RELATION-ASSERTION-REMOVAL

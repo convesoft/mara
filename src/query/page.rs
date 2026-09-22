@@ -2,7 +2,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use super::*;
 
-pub(super) const PAGE_BYTES: usize = 65_536;
+pub(crate) const PAGE_BYTES: usize = 65_536;
 const TITLE_CHARS: usize = 256;
 const EXCERPT_CHARS: usize = 240;
 const EXCERPT_COUNT: usize = 3;
@@ -31,7 +31,7 @@ pub struct SearchExcerpt {
     pub partial: bool,
 }
 
-pub(super) fn filtered_page(
+pub(crate) fn filtered_page(
     corpus: &Corpus,
     schema: &Schema,
     filters: &ItemFilters,
@@ -99,7 +99,7 @@ pub(super) fn filtered_page(
     Ok(page)
 }
 
-pub(super) fn related_page(
+pub(crate) fn related_page(
     corpus: &Corpus,
     schema: &Schema,
     id: &str,
@@ -152,7 +152,7 @@ pub(super) fn related_page(
     Ok(page)
 }
 
-pub(super) fn page_limit(limit: Option<usize>) -> Result<usize, QueryError> {
+pub(crate) fn page_limit(limit: Option<usize>) -> Result<usize, QueryError> {
     let limit = limit.unwrap_or(20);
     if !(1..=100).contains(&limit) {
         return Err(page_error("page limit must be 1 through 100"));
@@ -160,14 +160,14 @@ pub(super) fn page_limit(limit: Option<usize>) -> Result<usize, QueryError> {
     Ok(limit)
 }
 
-pub(super) fn truncate_title(summary: &mut ItemSummary) {
+pub(crate) fn truncate_title(summary: &mut ItemSummary) {
     if let Some((end, _)) = summary.title.char_indices().nth(TITLE_CHARS) {
         summary.title.truncate(end);
         summary.title_truncated = true;
     }
 }
 
-pub(super) fn page_error(message: &str) -> QueryError {
+pub(crate) fn page_error(message: &str) -> QueryError {
     QueryError::InvalidPage {
         message: message.to_owned(),
     }
@@ -182,7 +182,7 @@ fn set_continuation(
     (page.has_more, page.next_cursor) = continuation(start, page.items.len(), total, fingerprint);
 }
 
-pub(super) fn continuation(
+pub(crate) fn continuation(
     start: usize,
     count: usize,
     total: usize,
@@ -196,7 +196,7 @@ pub(super) fn continuation(
     )
 }
 
-pub(super) fn fingerprint(
+pub(crate) fn fingerprint(
     corpus: &Corpus,
     schema: &Schema,
     request: &impl Serialize,
@@ -215,7 +215,7 @@ pub(super) fn fingerprint(
     Ok(format!("{:016x}", hash.finish()))
 }
 
-pub(super) fn cursor_position(
+pub(crate) fn cursor_position(
     cursor: Option<&str>,
     fingerprint: &str,
 ) -> Result<usize, QueryError> {
@@ -244,7 +244,7 @@ pub(super) fn cursor_position(
     usize::from_str_radix(position, 16).map_err(|_| invalid())
 }
 
-pub(super) fn excerpts(source: &str, item: &Item, terms: &BTreeSet<String>) -> Vec<SearchExcerpt> {
+pub(crate) fn excerpts(source: &str, item: &Item, terms: &BTreeSet<String>) -> Vec<SearchExcerpt> {
     if terms.is_empty() {
         return Vec::new();
     }
@@ -310,7 +310,7 @@ pub(super) fn excerpts(source: &str, item: &Item, terms: &BTreeSet<String>) -> V
     fragments
 }
 
-pub(super) fn line_at(source: &str, byte: usize) -> usize {
+pub(crate) fn line_at(source: &str, byte: usize) -> usize {
     source.as_bytes()[..byte]
         .iter()
         .filter(|b| **b == b'\n')
@@ -318,7 +318,7 @@ pub(super) fn line_at(source: &str, byte: usize) -> usize {
         + 1
 }
 
-pub(super) fn matching_spans(
+pub(crate) fn matching_spans(
     value: &str,
     terms: &BTreeSet<String>,
     fuzzy: bool,

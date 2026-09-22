@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use super::{DiscoveryGraph, DiscoveryNode, DiscoveryNodeKind};
 use crate::{Corpus, ItemSource, MarkdownBlockKind, QueryError};
 
-const HANDLE_PREFIX: &str = "mara:node:1:";
+const HANDLE_PREFIX: &str = "mara:node:2:";
 const TITLE_CHARS: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]

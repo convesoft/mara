@@ -5,12 +5,12 @@ designs, decisions, and other durable facts stable identities, types, relations,
 validation, and deterministic retrieval. A CLI and stdio MCP server share the
 same operations, including discovery of narrative outside items.
 
-Mara 0.2.0 provides schema format 2 with flavour
-selection guidance, an engineering template, and unified `search`, `get`, and
-`related`. Start with the [0.2 migration guide](docs/migration-0.2.mara.md) for
-an existing project. The [0.1.0 documentation](https://github.com/convesoft/mara/tree/v0.1.0)
-describes the older released interface; use documentation and skill from the
-same revision as your executable.
+This checkout adds metadata inverse aliases, symmetric relationships, and
+occurrence inspection to the unified `search`, `get`, and `related` workflow.
+It requires schema format 3 and emits discovery format 2. Follow the
+[relationship migration contract](docs/relations.mara.md) for existing projects.
+Published 0.2.0 still uses schema format 2 and discovery format 1; use its
+[documentation](https://github.com/convesoft/mara/tree/v0.2.0) and matching skill.
 
 ## Run Mara
 
