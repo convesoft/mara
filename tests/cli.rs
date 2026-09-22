@@ -10290,6 +10290,71 @@ fn relation_fixture() -> TempDir {
 }
 
 #[test]
+fn inverse_alias_preserves_custom_fields_on_ineligible_author_flavours() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_path)
+        .unwrap()
+        .replace("    inverse: verified_by\n", "")
+        .replace(
+            "    id_prefix: VER-\n    body: required\n    fields: {}",
+            "    id_prefix: VER-\n    body: required\n    fields:\n      verified_by:\n        type: string",
+        );
+    fs::write(&schema_path, &schema).unwrap();
+    let updated = mara(
+        root,
+        &["item", "update", "VER-A", "--field", "verified_by=Alice"],
+    );
+    assert!(updated.status.success(), "{}", stderr(&updated));
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let original = fs::read(root.join("v.mara.md")).unwrap();
+
+    // The alias is authored by requirements/designs, so it may coexist with
+    // a verification's custom field without changing that field's meaning.
+    fs::write(
+        &schema_path,
+        schema.replace("  verifies:\n", "  verifies:\n    inverse: verified_by\n"),
+    )
+    .unwrap();
+    assert!(mara(root, &["schema", "validate"]).status.success());
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let empty = related_cli_mcp(root, "VER-A", &[("--relation", "verifies")]);
+    assert!(empty["connections"].as_array().unwrap().is_empty());
+    for command in [vec!["item", "list"], vec!["search", ""]] {
+        let mut args = vec!["--format", "json"];
+        args.extend(command);
+        args.extend(["--relation", "verified_by"]);
+        let output = mara(root, &args);
+        assert!(output.status.success(), "{}", stdout(&output));
+        let page: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(collection_nodes(&page).is_empty());
+    }
+
+    let added = relation_tool(
+        root,
+        "relation_add",
+        json!({"source":"REQ-A","relation":"verified_by","target":"VER-A"}),
+    );
+    assert_eq!(added["remaining_occurrences"], 1);
+    for (id, direction) in [("VER-A", "outgoing"), ("REQ-A", "incoming")] {
+        let page = related_cli_mcp(root, id, &[("--relation", "verified_by")]);
+        assert_eq!(page["connections"].as_array().unwrap().len(), 1);
+        assert_eq!(page["connections"][0]["direction"], direction);
+        assert_eq!(page["connections"][0]["occurrence_count"], 1);
+    }
+    let removed = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":"VER-A","relation":"verifies","target":"REQ-A"}),
+    );
+    assert_eq!(removed["changed_occurrences"], 1);
+    assert_eq!(removed["edge_exists"], false);
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    assert_eq!(fs::read(root.join("v.mara.md")).unwrap(), original);
+}
+
+#[test]
 fn inverse_and_symmetric_relationships_have_one_identity_through_cli_and_mcp() {
     for use_mcp in [false, true] {
         let fixture = relation_fixture();

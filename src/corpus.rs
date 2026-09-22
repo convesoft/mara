@@ -1123,7 +1123,15 @@ fn project_document(
             let relations = metadata
                 .iter()
                 .filter_map(|entry| {
-                    let (canonical, definition, inverse) = schema?.resolve_relation(&entry.key)?;
+                    let schema = schema?;
+                    if schema
+                        .flavours()
+                        .get(&parsed.flavour)
+                        .is_some_and(|flavour| flavour.fields.contains_key(&entry.key))
+                    {
+                        return None;
+                    }
+                    let (canonical, definition, inverse) = schema.resolve_relation(&entry.key)?;
                     Some(Relation {
                         name: entry.key.clone(),
                         canonical: canonical.to_owned(),
