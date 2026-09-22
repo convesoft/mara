@@ -5,8 +5,9 @@ designs, decisions, and other durable facts stable identities, types, relations,
 validation, and deterministic retrieval. A CLI and stdio MCP server share the
 same operations, including discovery of narrative outside items.
 
-This checkout adds metadata inverse aliases, symmetric relationships, and
-occurrence inspection to the unified `search`, `get`, and `related` workflow.
+This checkout adds typed inline relationships, metadata inverse aliases,
+symmetric relationships, and occurrence inspection to the unified `search`,
+`get`, and `related` workflow.
 It requires schema format 3 and emits discovery format 2. Follow the
 [relationship migration contract](docs/relations.mara.md) for existing projects.
 Published 0.2.0 still uses schema format 2 and discovery format 1; use its

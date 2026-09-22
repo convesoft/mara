@@ -81,6 +81,15 @@ fn rename_with_hook(
                 .filter(|rel| rel.target() == old_id)
             {
                 let span = relation.source().span();
+                if relation.inline {
+                    check_preimage(
+                        source,
+                        span.start_byte()..span.end_byte(),
+                        &format!("[[{}:{old_id}]]", relation.name()),
+                    )?;
+                    patches.push(span.end_byte() - 2 - old_id.len()..span.end_byte() - 2);
+                    continue;
+                }
                 let line = &source[span.start_byte()..span.end_byte()];
                 let prefix = format!(":{}:", relation.name());
                 let Some(value) = line.strip_prefix(&prefix) else {

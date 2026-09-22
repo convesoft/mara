@@ -283,12 +283,25 @@ impl MaraInlineParser {
         {
             return None;
         }
-        let closing = line[2..].windows(2).position(|pair| pair == b"]]")? + 2;
-        let target = std::str::from_utf8(&line[2..closing]).ok()?;
-        if !is_item_id(target) && !crate::is_mid(target) {
+        let closing = line[2..]
+            .windows(2)
+            .position(|pair| pair == b"]]")
+            .map(|i| i + 2);
+        // Retain typed-looking malformed tokens for source-located validation.
+        // Bare mentions keep their existing exact grammar. Never cross a line
+        // boundary to consume prose or an item delimiter while seeking closure.
+        let end = closing.unwrap_or_else(|| {
+            line.iter()
+                .position(|b| matches!(b, b'\r' | b'\n'))
+                .unwrap_or(line.len())
+        });
+        let target = std::str::from_utf8(&line[2..end]).ok()?;
+        if !target.contains(':')
+            && (closing.is_none() || (!is_item_id(target) && !crate::is_mid(target)))
+        {
             return None;
         }
-        let length = closing + 2;
+        let length = closing.map_or(end, |closing| closing + 2);
         reader.advance(length);
         Some(arena.new_node(MaraMentionNode {
             target: target.to_owned(),
@@ -359,13 +372,14 @@ fn populate_mentions(document: &mut ParsedDocument, mentions: Vec<ParsedMention>
         mentions
             .into_iter()
             .filter(|mention| {
-                document.items.iter().all(|item| {
-                    !item.source.contains(&mention.source.start)
-                        || (item.metadata_valid
-                            && item.body_valid
-                            && mention.source.start >= item.body.start
-                            && mention.source.end <= item.body.end)
-                })
+                !mention.target.contains(':')
+                    && document.items.iter().all(|item| {
+                        !item.source.contains(&mention.source.start)
+                            || (item.metadata_valid
+                                && item.body_valid
+                                && mention.source.start >= item.body.start
+                                && mention.source.end <= item.body.end)
+                    })
             })
             .map(|mention| ParsedReference {
                 kind: super::ReferenceKind::Item,

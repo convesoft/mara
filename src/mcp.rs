@@ -96,7 +96,7 @@ struct ItemCreateToolParams {
     /// Initial schema-declared outgoing typed relations, created atomically with the item. Targets are exact human IDs or canonical MIDs; the new ID may target itself. Duplicate edges are rejected. Omitted or [] adds none; use relation_add/relation_remove for later edits.
     #[serde(default)]
     relations: Vec<InitialRelation>,
-    /// Literal Markdown body (- is literal; no stdin). An omitted, null, empty, or whitespace-only required body creates an incomplete scaffold.
+    /// Literal Markdown body (- is literal; no stdin). Supports [[relation:ID]] and [[relation:MID]] typed assertions. An omitted, null, empty, or whitespace-only required body creates an incomplete scaffold.
     #[serde(default)]
     body: Option<String>,
     /// Insert before this one-based destination line; valid range is 1 through line_count + 1 (end of file). Omitted or null appends. Insertion inside another item is rejected.
@@ -139,7 +139,7 @@ struct ItemUpdateToolParams {
     /// Remove all values of named optional custom fields; cannot also set those keys in fields. Excludes title/MID and typed relations. Omitted or [] clears nothing; an absent optional field is a no-op.
     #[serde(default)]
     clear_fields: Vec<String>,
-    /// Replacement literal Markdown body (- is literal). Omitted or null leaves it unchanged; an empty string clears an optional body. Empty or whitespace-only replacement of a required body is rejected.
+    /// Replacement literal Markdown body (- is literal), including [[relation:ID]] or [[relation:MID]] typed assertions. Omitted or null leaves it unchanged; an empty string clears an optional body. Empty or whitespace-only replacement of a required body is rejected.
     #[serde(default)]
     body: Option<String>,
 }
@@ -612,7 +612,7 @@ impl MaraMcp {
         )
     }
 
-    #[tool(name = "relation_add", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Add one metadata assertion using a canonical name or inverse alias. Reject an existing semantic edge, including reverse symmetric assertions. Returns relationship format 1.")]
+    #[tool(name = "relation_add", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Add one metadata assertion using a canonical name or inverse alias. Reject an existing semantic edge, including inline and reverse symmetric assertions. Returns relationship format 1.")]
     fn relation_add(
         &self,
         Parameters(params): Parameters<RelationToolParams>,
@@ -625,7 +625,7 @@ impl MaraMcp {
         )
     }
 
-    #[tool(name = "relation_remove", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Remove all assertions of a semantic relationship across included documents, or exactly one snapshot-bound occurrence. Reject missing edges and stale or mismatched selectors. Returns relationship format 1.")]
+    #[tool(name = "relation_remove", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Remove all assertions of a semantic relationship across included documents, or exactly one snapshot-bound occurrence. Demote inline assertions to bare mentions, preserving their target spelling and surrounding prose. Reject missing edges and stale or mismatched selectors. Returns relationship format 1.")]
     fn relation_remove(
         &self,
         Parameters(params): Parameters<RelationRemoveToolParams>,

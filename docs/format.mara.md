@@ -5,9 +5,9 @@ in 0.2. See [discovery](discovery.mara.md) for derived structure, link resolutio
 and unified discovery interfaces.
 
 Item delimiters and bare mentions retain the 0.2 syntax. Schema format 3 adds
-metadata inverse aliases and symmetric relations under
+typed inline relationships, metadata inverse aliases and symmetric relations under
 [relationship contracts](relations.mara.md), which also distinguishes current
-support from planned typed inline syntax and external targets.
+support from planned external targets.
 
 :::mara design DES-DOCUMENT-FORMAT
 :mid: 01M1PXP2KG381MM1VNN6XC7S4M
@@ -75,14 +75,16 @@ Failures preserve user data and produce actionable diagnostics.
   narrative outside items, excluding Markdown code and raw contexts; escaped
   openings are literal text. Metadata scalar values are not mention sources.
   Narrative mention support begins in 0.2; 0.1 recognizes item-body mentions only.
-- Typed relations are metadata entries whose key names the relation and whose
-  value is one target handle. Repeat the key for multiple targets.
+- Typed relations use metadata `:relation: target` or item-body
+  `[[relation:target]]` under [[DES-RELATION-AUTHORING]]. Repeat either form
+  for multiple targets.
 - Use only relation names whose meaning is defined by the project corpus.
 - Relations resolve target handles to MIDs. A declared inverse alias may author
   the same edge from its opposite endpoint; symmetric declarations have no
   semantic direction. Repeated assertions retain source occurrences but count
   as one edge. Reverse navigation never generates a second stored assertion.
-- Inline references are mentions; typed relations are authored in metadata.
+- Bare inline references remain mentions. Typed inline tokens produce only a
+  typed occurrence; they do not also produce a mention.
 
 ## In-memory projection
 

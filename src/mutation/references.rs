@@ -432,8 +432,8 @@ pub(super) fn preflight(
                 && reference.source().span().start_byte() == location.1
                 && reference.source().span().end_byte() == location.2
         });
-        let (source, written_target, relation_name) = if let Some(reference) = reference {
-            (reference.source(), reference.target(), None)
+        let (source, written_target, relation_name, inline) = if let Some(reference) = reference {
+            (reference.source(), reference.target(), None, false)
         } else {
             let relation = document
                 .items()
@@ -444,14 +444,25 @@ pub(super) fn preflight(
                         && relation.source().span().end_byte() == location.2
                 })
                 .expect("schema edge has relation evidence");
-            (relation.source(), relation.target(), Some(relation.name()))
+            (
+                relation.source(),
+                relation.target(),
+                Some(relation.name()),
+                relation.inline,
+            )
         };
         let raw = &document.source()[location.1..location.2];
         let expected = if let Some((old, new)) = rename
-            && reference.is_some_and(|reference| {
-                reference.kind() == ReferenceKind::Item && reference.target() == old
-            }) {
-            format!("[[{new}]]")
+            && written_target == old
+            && (inline
+                || reference.is_some_and(|reference| {
+                    reference.kind() == ReferenceKind::Item && reference.target() == old
+                })) {
+            if inline {
+                format!("[[{}:{new}]]", relation_name.unwrap())
+            } else {
+                format!("[[{new}]]")
+            }
         } else {
             raw.to_owned()
         };
@@ -515,7 +526,7 @@ pub(super) fn preflight(
                 // remove a parsed reference while retaining all its raw bytes.
                 // Outside that body, disappearance still needs protection: a
                 // mutation must not silently hide an untouched reference.
-                let explicitly_replaced = reference.is_some()
+                let explicitly_replaced = (reference.is_some() || inline)
                     && edited_body.is_some_and(|body| {
                         body.path() == source.path()
                             && body.span().start_byte() <= location.1
