@@ -254,8 +254,9 @@ and [shacl 0.3.21](https://docs.rs/shacl/0.3.21/shacl/).
 
 Executed on 2026-09-22 in an isolated Rust package using serde-saphyr 1.2.0,
 serde_json 1.0.151, shacl/rudof_rdf 0.3.21 and transitive oxjsonld 0.2.6.
-Eight standard Rust tests passed. The rule/data path used no Turtle parser,
-Turtle intermediate, Python bridge or CEL evaluator.
+Eleven standard Rust tests passed after the numeric-literal review fix.
+The rule/data path used no Turtle parser, Turtle intermediate, Python bridge
+or CEL evaluator.
 
 ## Inputs and processing
 
@@ -272,6 +273,8 @@ aliases. JSON-LD list containers preserved logical and literal list semantics.
 Rust parsed that in-memory JSON-LD into the shapes graph; item fields and
 authored relations were separately projected into JSON-LD data and then RDF.
 No rule file contained prefixes, a context declaration or a context-file path.
+Scoped literal contexts also mapped value/datatype to JSON-LD @value/@type;
+shape-level datatype remained a SHACL constraint.
 
 The adapter evaluated the named condition shape first, then targeted the
 obligation shape only for applicable items. Top-level parse/engine errors
@@ -289,12 +292,15 @@ nested engine operation remain visible to the host.
 | New schema flavour and custom field named class | Resolved dynamically; field lookup did not replace SHACL class, and a value equal to a flavour name remained a literal. |
 | Unknown constraint/field/flavour/reference, authored context, duplicate YAML key | Rejected before SHACL execution; the typo identified authored YAML pointer /0/property/0/minCont. |
 | Typed number, integer and boolean fields; invalid numeric input | Preserved declared datatypes (including double 1.0); invalid/nonfinite numeric source failed projection. |
+| Typed numeric hasValue/in and applicability | Explicit double literals matched number fields authored as 1 and 1.0; plain integral literals did not. Fractional membership/equality and nonmatches behaved as expected. The typed condition evaluated owner obligations instead of silently skipping them. |
+| Invalid typed literals | Missing/extra keys, unknown datatypes, numeric strings, fractional integers, mismatched booleans, null/containers and raw context keys failed before engine execution in both hasValue and in. |
 | Field/relation name overlap | Bare name rejected; field: and schema: selected distinct namespaces. |
 
 Failure focus nodes mapped to real Mara item sources. The standalone run
 reported the three complete-fixture rules passed. The experiment package
 includes Cargo.lock, source, YAML rule inputs, fixture schema/documents, captured
-Mara get results, test output and standalone results.
+Mara get results, test output and standalone results. The numeric YAML example
+in [[DES-TRACE-RULE-GRAMMAR]] is the exact applicability regression fixture.
 
 ## Limits and consequence
 

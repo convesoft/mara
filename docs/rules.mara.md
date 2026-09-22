@@ -87,8 +87,8 @@ standard SHACL semantics, not a standalone context-free YAML-LD document.
 | `node`, `not`, `qualifiedValueShape` | One nested shape or named shape reference. |
 | `property` | A sequence of property shapes/references; each contributes an obligation. |
 | `and`, `or` | Sequences of shapes/references, encoded as RDF lists. |
-| `in` | An RDF list of literal values; not several independent in constraints. |
-| `hasValue` | One literal value, using standard JSON-LD scalar conversion. Quote strings that YAML would otherwise parse as another type. |
+| `in` | An RDF list of scalar or typed literal values as defined below; not several independent in constraints. |
+| `hasValue` | One scalar or typed literal value as defined below. |
 | `severity` | `Violation` or `Warning`; omitted root severity is Violation. |
 | `name`, `description`, `message` | String annotations. |
 
@@ -97,6 +97,57 @@ context, and datatypes in datatype-value context. They cannot replace rule
 keywords or reinterpret literal strings. For example, `path: class` can select
 a custom field while `class: requirement` still constrains the flavour;
 `hasValue: requirement` remains a literal string.
+
+### Literal values
+
+Plain scalars retain [standard JSON-LD conversion](https://www.w3.org/TR/json-ld11-api/#object-to-rdf-conversion):
+strings become `xsd:string` and booleans `xsd:boolean`. Numbers with a nonzero
+fractional part or absolute value at least 10^21 become `xsd:double`;
+other numbers, including YAML `1.0`, become `xsd:integer`.
+Quote strings that YAML would otherwise parse as another type. SHACL
+`hasValue` and `in` compare RDF terms, not cross-datatype numeric values;
+a neighbouring `datatype` constraint does not coerce their literals.
+
+In `hasValue` or each `in` entry, use `{value: 1, datatype: double}`
+to match an integral-valued schema `number` field. A typed literal has exactly
+`value` and `datatype`: `string` requires a string, `boolean` a boolean,
+`integer` an integer scalar, and `double` a finite numeric scalar.
+Reject missing/extra keys, unknown datatypes, null, containers and mismatched
+scalar types as `rule_invalid`; do not parse numeric strings or truncate
+fractions. Inside this literal position only, the generated context aliases
+`value` to JSON-LD `@value` and `datatype` to `@type`. On shapes,
+`datatype` remains the SHACL constraint. Raw JSON-LD keywords remain forbidden.
+
+Typed numeric literals and projected fields use the same JSON-LD RDF
+conversion and canonical numeric lexical form. Thus explicit double values
+`1` and `1.0` denote the same RDF term as a schema `number` field
+authored as either `1` or `1.0`. This is explicit literal typing, not
+schema-dependent coercion of plain scalars. For example, assuming an optional
+`number` field `score` and an optional string field `owner`:
+
+```yaml
+- id: rule:score_requires_owner
+  type: NodeShape
+  targetClass: requirement
+  whenShape: rule:score_one
+  property:
+    - path: owner
+      minCount: 1
+
+- id: rule:score_one
+  type: NodeShape
+  property:
+    - path: score
+      hasValue: {value: 1, datatype: double}
+```
+
+For score `1` or `1.0`, the condition applies: a missing owner fails
+the obligation and a present owner passes. Score `2` is not applicable.
+Likewise, `in: [{value: 1, datatype: double}, {value: 2.5, datatype: double}]`
+admits those two values of a `number` field. Plain `hasValue: 1` or
+`hasValue: 1.0` does not match that field; use the typed spelling above.
+
+### Path resolution
 
 Use unqualified path names only when unambiguous. `field:name` explicitly
 selects a field; `schema:name` selects a canonical schema relation. Preserve the

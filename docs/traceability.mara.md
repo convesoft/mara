@@ -471,8 +471,12 @@ prefix/context declarations or intermediate Turtle.
 Verify project-format/binding-version errors, missing files, malformed YAML,
 unsupported executable predicates and an unknown named shape. Confirm typed
 field projection, absent versus empty values, and RDF deduplication of repeated
-values. Exercise condition-shape applicability for approved, draft, absent and
-invalid status; only the first evaluates obligations, while invalid source is
+values. Exercise the numeric example in [[DES-TRACE-RULE-GRAMMAR]] with
+score 1 and 1.0: a typed double condition must apply, so a missing owner fails
+and a present owner passes. Check typed hasValue/in matches and nonmatches,
+plain integral literals retaining integer semantics, and malformed typed
+literals rejected before evaluation. Exercise condition-shape applicability
+for approved, draft, absent and invalid status; only the first evaluates obligations, while invalid source is
 unavailable. An independent endpoint engine error must prevent a full pass
 even when another endpoint qualifies. Preserve actual YAML pointers and source spans,
 including escaped strings, aliases and generated blank-node shapes. Unknown
