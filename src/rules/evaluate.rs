@@ -216,7 +216,10 @@ impl Rules {
                     },
                     ValidationScope::Item,
                     DiagnosticLocation::source(item.source()),
-                    format!("rule {root} failed: {key}"),
+                    obligation.value["message"]
+                        .as_str()
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| format!("rule {root} failed: {key}")),
                 );
                 diagnostic.item = Some(DiagnosticItem {
                     id: item.id().into(),

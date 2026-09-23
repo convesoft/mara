@@ -12014,6 +12014,50 @@ fn rule_fixture() -> TempDir {
 }
 
 #[test]
+fn current_state_rules_report_authored_messages_with_a_generated_fallback() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let message = "Assign an owner before approval — see the team policy.";
+    for property in [false, true] {
+        for authored in [true, false] {
+            let mut obligation = if property {
+                json!({"path":"owner", "maxCount":0})
+            } else {
+                json!({"class":"verification"})
+            };
+            if authored {
+                obligation["message"] = json!(message);
+            }
+            let mut rule = if property {
+                json!({"property":[obligation]})
+            } else {
+                obligation
+            };
+            rule["id"] = json!("rule:message");
+            rule["targetClass"] = json!("requirement");
+            fs::write(
+                root.join("rules.yaml"),
+                serde_saphyr::to_string(&rule).unwrap(),
+            )
+            .unwrap();
+            let result = validation_with_parity(root, &[]);
+            assert_eq!(result["evaluation_complete"], true, "{result:#}");
+            assert_eq!(result["summary"]["errors"], 1, "{result:#}");
+            let diagnostic = &result["diagnostics"][0];
+            assert_eq!(diagnostic["code"], "rule_failed");
+            let key = if property { "maxCount" } else { "class" };
+            let fallback = format!("rule urn:mara:rule:message failed: {key}");
+            assert_eq!(
+                diagnostic["message"],
+                if authored { message } else { &fallback }
+            );
+            let human = mara(root, &["project", "validate"]);
+            assert!(stderr(&human).contains(diagnostic["message"].as_str().unwrap()));
+        }
+    }
+}
+
+#[test]
 fn current_state_rules_apply_property_classes_after_path_selection() {
     let fixture = rule_fixture();
     let root = fixture.path();

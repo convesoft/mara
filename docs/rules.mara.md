@@ -574,7 +574,9 @@ present on the reported obligation. Assertion locations remain inspectable
 through relation get.
 
 Emit one `rule_failed` per failed item/rule pair using a stable reported
-violation. It may identify a composite `node`, `and`, `or` or `not` constraint;
+violation. Use the reported obligation shape's authored `message` when present;
+otherwise generate a message identifying the root rule and failed constraint.
+It may identify a composite `node`, `and`, `or` or `not` constraint;
 there is no requirement to expose the deepest failing leaf, every rejected
 endpoint or every alternative. Do not emit failures from unsuccessful
 alternatives of a passing rule. Do not parse native message text to obtain
