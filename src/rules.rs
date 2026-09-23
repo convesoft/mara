@@ -548,7 +548,9 @@ impl Rules {
             return Ok(());
         };
         let classes = strings(&s.value["class"]);
-        let context = if classes.is_empty() {
+        // A property shape constrains the values selected by its path, not
+        // the incoming focus nodes whose flavours determine path compatibility.
+        let context = if classes.is_empty() || s.value.get("path").is_some() {
             flavours.to_vec()
         } else {
             flavours
@@ -604,6 +606,9 @@ impl Rules {
                         .cloned()
                         .collect();
                 }
+            }
+            if !classes.is_empty() {
+                children.retain(|f| classes.contains(f));
             }
         }
         for key in [

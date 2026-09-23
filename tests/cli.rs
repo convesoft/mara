@@ -12014,6 +12014,140 @@ fn rule_fixture() -> TempDir {
 }
 
 #[test]
+fn current_state_rules_apply_property_classes_after_path_selection() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["flavours"]["design"]["fields"]["design_only"] = json!({"type":"string"});
+    schema["relations"]["associated_with"] = json!({
+        "description": "An association.", "source": ["requirement"],
+        "target": ["design", "risk"]
+    });
+    fs::write(schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    assert!(
+        mara(
+            root,
+            &["item", "update", "DES-A", "--field", "design_only=ready"]
+        )
+        .status
+        .success()
+    );
+    for (source, relation, target) in [
+        ("DES-A", "satisfies", "REQ-A"),
+        ("REQ-A", "associated_with", "DES-A"),
+    ] {
+        assert!(
+            mara(root, &["relation", "add", source, relation, target])
+                .status
+                .success()
+        );
+    }
+    for (target, path, class) in [
+        ("requirement", "satisfies", "design"),
+        ("design", "{inversePath: satisfies}", "requirement"),
+        ("requirement", "design_only", "design"),
+    ] {
+        fs::write(root.join("rules.yaml"), format!(
+            "id: rule:invalid_path\ntargetClass: {target}\nproperty: [{{path: {path}, class: {class}, minCount: 1}}]\n"
+        )).unwrap();
+        let invalid =
+            diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(invalid["valid"], false, "{path}: {invalid:#}");
+        assert_eq!(
+            invalid["diagnostics"][0]["code"], "rule_invalid",
+            "{invalid:#}"
+        );
+        assert_eq!(
+            invalid["diagnostics"][0]["location"]["pointer"],
+            "/property/0/path"
+        );
+    }
+    // PropertyShape class narrows selected endpoints for nested field checks.
+    for path in ["{inversePath: satisfies}", "associated_with"] {
+        fs::write(root.join("rules.yaml"), format!(
+            "id: rule:design_field\ntargetClass: requirement\nproperty:\n  - path: {path}\n    class: design\n    minCount: 1\n    property: [{{path: design_only, hasValue: ready}}]\n"
+        )).unwrap();
+        let valid = validation_with_parity(root, &[]);
+        assert_eq!(valid["valid"], true, "{path}: {valid:#}");
+        assert!(
+            mara(
+                root,
+                &["item", "update", "DES-A", "--field", "design_only=draft"]
+            )
+            .status
+            .success()
+        );
+        let failed = validation_with_parity(root, &[]);
+        assert_eq!(failed["evaluation_complete"], true, "{failed:#}");
+        assert_eq!(
+            failed["diagnostics"][0]["code"], "rule_failed",
+            "{failed:#}"
+        );
+        assert!(
+            mara(
+                root,
+                &["item", "update", "DES-A", "--field", "design_only=ready"]
+            )
+            .status
+            .success()
+        );
+    }
+}
+
+#[test]
+fn current_state_rules_resolve_reserved_prefix_names_to_projected_values() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["flavours"]["requirement"]["fields"]["field"] = json!({"type":"string"});
+    schema["relations"]["schema"] = json!({
+        "description": "A relation with a reserved prefix name.",
+        "source": ["requirement"], "target": ["design"]
+    });
+    fs::write(schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    assert!(
+        mara(
+            root,
+            &["item", "update", "REQ-A", "--field", "field=present"]
+        )
+        .status
+        .success()
+    );
+    assert!(
+        mara(root, &["relation", "add", "REQ-A", "schema", "DES-A"])
+            .status
+            .success()
+    );
+    for (target, path) in [
+        ("requirement", "field"),
+        ("requirement", "field:field"),
+        ("requirement", "schema"),
+        ("requirement", "schema:schema"),
+        ("design", "{inversePath: schema}"),
+        ("design", "{inversePath: 'schema:schema'}"),
+    ] {
+        for (minimum, expected) in [(1, true), (2, false)] {
+            fs::write(root.join("rules.yaml"), format!(
+                "id: rule:prefix\ntargetClass: {target}\nproperty: [{{path: {path}, minCount: {minimum}}}]\n"
+            )).unwrap();
+            let result = validation_with_parity(root, &[]);
+            assert_eq!(result["evaluation_complete"], true, "{path}: {result:#}");
+            assert_eq!(result["valid"], expected, "{path}: {result:#}");
+            if !expected {
+                assert_eq!(
+                    result["diagnostics"][0]["code"], "rule_failed",
+                    "{result:#}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn current_state_rules_narrow_same_flavour_paths_in_both_directions() {
     let fixture = rule_fixture();
     let root = fixture.path();
