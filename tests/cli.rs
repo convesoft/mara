@@ -11489,6 +11489,73 @@ fn diagnostic_parity(root: &Path, args: &[&str], tool: &str, params: Value) -> V
 }
 
 #[test]
+fn diagnostic_completeness_tracks_unavailable_item_source_checks() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    let malformed = ":::mara requirement REQ-BAD\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: Bad metadata\n:bad metadata\n\n[[REQ-UNREADABLE]]\n:::\n";
+    fs::write(root.join("bad.mara.md"), malformed).unwrap();
+    fs::write(root.join("other.mara.md"), ":::mara requirement REQ-OTHER\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: Other\n\n[[REQ-MISSING]]\n:::\n").unwrap();
+
+    let project = diagnostic_parity(
+        root,
+        &["project", "validate"],
+        "project_validate",
+        json!({}),
+    );
+    assert_eq!(project["valid"], false);
+    assert_eq!(project["evaluation_complete"], false);
+    assert_eq!(project["summary"]["counts_exact"], false);
+    // Known item identities still permit independent missing-reference checks.
+    assert_eq!(project["summary"]["errors"], 2);
+    assert!(
+        project["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "reference_unresolved")
+    );
+
+    for handle in ["REQ-BAD", "01ARZ3NDEKTSV4RRFFQ69G5F00"] {
+        let item = diagnostic_parity(
+            root,
+            &["item", "validate", handle],
+            "item_validate",
+            json!({"id":handle}),
+        );
+        assert_eq!(item["evaluation_complete"], false);
+        assert_eq!(item["summary"]["counts_exact"], false);
+        assert_eq!(item["summary"]["errors"], 1);
+        assert_eq!(item["diagnostics"][0]["code"], "source_invalid");
+    }
+    let hidden = diagnostic_parity(
+        root,
+        &["project", "validate", "--path", "absent/"],
+        "project_validate",
+        json!({"paths":["absent/"]}),
+    );
+    assert_eq!(hidden["diagnostics"], json!([]));
+    assert_eq!(hidden["evaluation_complete"], false);
+    assert_eq!(hidden["summary"], project["summary"]);
+
+    // A different item's fully evaluated failure is still exact.
+    let other = diagnostic_parity(
+        root,
+        &["item", "validate", "REQ-OTHER"],
+        "item_validate",
+        json!({"id":"REQ-OTHER"}),
+    );
+    assert_eq!(other["valid"], false);
+    assert_eq!(other["evaluation_complete"], true);
+    assert_eq!(other["summary"]["counts_exact"], true);
+    assert_eq!(other["diagnostics"][0]["code"], "reference_unresolved");
+    assert_eq!(
+        fs::read_to_string(root.join("bad.mara.md")).unwrap(),
+        malformed
+    );
+}
+
+#[test]
 fn diagnostic_codes_locations_and_hidden_failures_have_surface_parity() {
     let fixture = TempDir::new().unwrap();
     assert!(mara(fixture.path(), &["project", "init"]).status.success());

@@ -187,6 +187,11 @@ impl Item {
     fn body_is_valid(&self) -> bool {
         self.body_valid
     }
+
+    /// Recovery can retain an item's identity while leaving some checks unavailable.
+    pub(crate) fn validation_source_is_complete(&self) -> bool {
+        self.metadata_is_valid() && self.body_is_valid()
+    }
 }
 
 /// A Markdown block retained in a document or item. Its source is canonical; this

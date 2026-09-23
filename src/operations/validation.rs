@@ -329,6 +329,16 @@ impl OperationContext {
                 hash_file(&mut snapshot, &project.root().join(path));
             }
             result.evaluation_complete &= corpus.is_complete();
+            result.evaluation_complete &= corpus
+                .items()
+                .filter(|item| {
+                    result
+                        .target
+                        .id
+                        .as_deref()
+                        .is_none_or(|id| matches_handle(item, id))
+                })
+                .all(crate::Item::validation_source_is_complete);
             if !work.exhausted {
                 source_diagnostics.extend(match &schema {
                     Some(schema) => {
