@@ -284,7 +284,7 @@ impl OperationContext {
         snapshot.update(b"validation-1-complete-evaluation-1");
         hash_file(&mut snapshot, &project.root().join(crate::PROJECT_FILE));
         hash_file(&mut snapshot, project.schema_path());
-        snapshot.update(b"yaml-shacl-binding-1-registry-0.3.21-adapter-6");
+        snapshot.update(b"yaml-shacl-binding-1-registry-0.3.21-adapter-7");
         let rules = schema
             .as_ref()
             .map(|schema| crate::rules::Rules::load(&project, schema));

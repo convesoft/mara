@@ -12014,6 +12014,117 @@ fn rule_fixture() -> TempDir {
 }
 
 #[test]
+fn current_state_rules_reject_disjoint_relation_endpoint_classes() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    for (target, path, class) in [
+        ("design", json!("satisfies"), "design"),
+        (
+            "requirement",
+            json!({"inversePath":"satisfies"}),
+            "requirement",
+        ),
+    ] {
+        for key in ["class", "node", "qualifiedValueShape"] {
+            let mut property = json!({"path":path});
+            property[key] = if key == "class" {
+                json!(class)
+            } else {
+                json!({"class":class})
+            };
+            if key == "qualifiedValueShape" {
+                property["qualifiedMinCount"] = json!(1);
+            }
+            let rule = json!({"id":"rule:disjoint", "targetClass":target, "property":[property]});
+            fs::write(
+                root.join("rules.yaml"),
+                serde_saphyr::to_string(&rule).unwrap(),
+            )
+            .unwrap();
+            let invalid =
+                diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+            assert_eq!(invalid["valid"], false, "{target}/{key}: {invalid:#}");
+            assert_eq!(
+                invalid["diagnostics"][0]["code"], "rule_invalid",
+                "{invalid:#}"
+            );
+            let pointer = if key == "class" {
+                "/property/0/class".into()
+            } else {
+                format!("/property/0/{key}/class")
+            };
+            assert_eq!(invalid["diagnostics"][0]["location"]["pointer"], pointer);
+        }
+    }
+    // A qualifier may select a proper subset of a relation's endpoint flavours.
+    fs::write(root.join("rules.yaml"),
+        "id: rule:subset\ntargetClass: verification\nproperty: [{path: verifies, qualifiedValueShape: {class: requirement}, qualifiedMinCount: 0}]\n"
+    ).unwrap();
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+}
+
+#[test]
+fn current_state_rules_reject_literal_constraints_on_relation_endpoints() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    for (target, path) in [
+        ("design", json!("satisfies")),
+        ("requirement", json!({"inversePath":"satisfies"})),
+    ] {
+        for key in ["hasValue", "in"] {
+            for nested in [false, true] {
+                let mut constraint = json!({});
+                constraint[key] = if key == "in" {
+                    json!(["REQ-A"])
+                } else {
+                    json!("REQ-A")
+                };
+                let mut property = if nested {
+                    json!({"node":constraint})
+                } else {
+                    constraint
+                };
+                property["path"] = path.clone();
+                let rule = json!({"id":"rule:literal_relation", "targetClass":target, "property":[property]});
+                fs::write(
+                    root.join("rules.yaml"),
+                    serde_saphyr::to_string(&rule).unwrap(),
+                )
+                .unwrap();
+                let invalid =
+                    diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+                assert_eq!(
+                    invalid["valid"], false,
+                    "{target}/{key}/{nested}: {invalid:#}"
+                );
+                assert_eq!(
+                    invalid["diagnostics"][0]["code"], "rule_invalid",
+                    "{invalid:#}"
+                );
+                let pointer = if nested {
+                    format!("/property/0/node/{key}")
+                } else {
+                    format!("/property/0/{key}")
+                };
+                assert_eq!(invalid["diagnostics"][0]["location"]["pointer"], pointer);
+            }
+        }
+    }
+    // The same constraints remain valid on literal fields of related items.
+    fs::write(root.join("rules.yaml"),
+        "id: rule:related_value\ntargetClass: design\nproperty:\n  - path: satisfies\n    minCount: 1\n    node:\n      property: [{path: owner, hasValue: Alice, in: [Alice, Bob]}]\n"
+    ).unwrap();
+    assert!(
+        mara(root, &["relation", "add", "DES-A", "satisfies", "REQ-A"])
+            .status
+            .success()
+    );
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+}
+
+#[test]
 fn current_state_rules_reject_node_constraints_on_literal_values() {
     let fixture = rule_fixture();
     let root = fixture.path();

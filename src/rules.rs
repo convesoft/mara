@@ -32,6 +32,7 @@ struct Shape {
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum ValueKind {
     Nodes,
+    RelationEndpoints,
     Literals(Vec<&'static str>),
 }
 pub(crate) struct Rules {
@@ -602,7 +603,7 @@ impl Rules {
                     child_kind = ValueKind::Literals(datatypes);
                     children.clear();
                 } else if let Some(relation) = resolved.strip_prefix(REL) {
-                    child_kind = ValueKind::Nodes;
+                    child_kind = ValueKind::RelationEndpoints;
                     let r = &schema.relations[relation];
                     let (from, to) = if path.is_object() {
                         (&r.target, &r.source)
@@ -632,9 +633,30 @@ impl Rules {
                 "flavour class constraints require item nodes, not literal field values".into(),
             ));
         }
+        if !classes.is_empty()
+            && matches!(child_kind, ValueKind::RelationEndpoints)
+            && children.is_empty()
+        {
+            return Err((
+                s.location("class"),
+                "flavour class is incompatible with the relation endpoint flavours".into(),
+            ));
+        }
+        if matches!(child_kind, ValueKind::Nodes | ValueKind::RelationEndpoints) {
+            for key in ["hasValue", "in"] {
+                if s.value.get(key).is_some() {
+                    return Err((
+                        s.location(key),
+                        format!("{key} constraints require literal field values"),
+                    ));
+                }
+            }
+        }
         if let Some(datatype) = s.value["datatype"].as_str() {
             let error = match &child_kind {
-                ValueKind::Nodes => Some("datatype constraints require literal field values"),
+                ValueKind::Nodes | ValueKind::RelationEndpoints => {
+                    Some("datatype constraints require literal field values")
+                }
                 ValueKind::Literals(types) if types.iter().any(|t| datatype != *t) => {
                     Some("field datatype is incompatible with its schema declaration")
                 }
