@@ -11894,6 +11894,61 @@ fn diagnostic_work_limits_and_operation_errors_are_distinct_from_policy_failure(
 }
 
 #[test]
+fn diagnostic_repeated_enum_comparisons_respect_work_budget() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    let schema_path = root.join(".mara/schema.yaml");
+    let values = (0..200).map(|n| format!("value{n:04}")).collect::<Vec<_>>();
+    let schema = fs::read_to_string(&schema_path).unwrap().replace(
+        "    id_prefix: REQ-\n    body: required\n    fields: {}",
+        &format!("    id_prefix: REQ-\n    body: required\n    fields:\n      status:\n        type: enum\n        repeatable: true\n        values: [{}]", values.join(", ")),
+    );
+    fs::write(&schema_path, schema).unwrap();
+    // Each occurrence matches only the final allowed value.
+    let source = format!(
+        ":::mara requirement REQ-ENUM\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: Enum\n{}\nBody.\n:::\n",
+        ":status: value0199\n".repeat(100)
+    );
+    fs::write(root.join("enum.mara.md"), &source).unwrap();
+    for (args, tool, params) in [
+        (vec!["project", "validate"], "project_validate", json!({})),
+        (
+            vec!["item", "validate", "REQ-ENUM"],
+            "item_validate",
+            json!({"id":"REQ-ENUM"}),
+        ),
+    ] {
+        let limited = diagnostic_parity(root, &args, tool, params.clone());
+        assert_eq!(limited["evaluation_complete"], false);
+        assert_eq!(limited["valid"], false);
+        assert_eq!(limited["summary"]["counts_exact"], false);
+        assert!(
+            limited["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["code"] == "evaluation_limit")
+        );
+        assert!(limited["work"]["used"].as_u64().unwrap() <= 100_000);
+        let mut args = args;
+        args.extend(["--max-work", "1000000"]);
+        let mut params = params;
+        params["max_work"] = json!(1_000_000);
+        let complete = diagnostic_parity(root, &args, tool, params);
+        assert_eq!(complete["valid"], true);
+        assert_eq!(complete["evaluation_complete"], true);
+        assert_eq!(complete["summary"]["counts_exact"], true);
+        // Reserve each comparison and both string inputs.
+        assert!(complete["work"]["used"].as_u64().unwrap() >= 100 * 200 * (1 + 9 + 9));
+    }
+    assert_eq!(
+        fs::read_to_string(root.join("enum.mara.md")).unwrap(),
+        source
+    );
+}
+
+#[test]
 fn diagnostic_schema_read_failures_are_operation_errors() {
     let fixture = TempDir::new().unwrap();
     assert!(mara(fixture.path(), &["project", "init"]).status.success());

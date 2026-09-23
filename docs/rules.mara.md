@@ -471,10 +471,12 @@ warnings. Shared warning/error aggregation and CLI status handling are tested
 at the result boundary. End-to-end policy warning evidence must come from the
 real policy evaluators when implemented.
 
-Structural cost revision 1 reserves logical input work before each declaration,
+Structural cost revision 2 reserves logical input work before each declaration,
 identity-index, item-validation and reference-discovery pass. It includes
 visited records and scalar/collection input sizes; repeated passes are charged
-again. The work ledger is deterministic and is included in continuation
+again. Enum membership reserves every allowed-value comparison and both string
+inputs for each field occurrence, including repeated values. The work ledger
+is deterministic and is included in continuation
 identity. Source loading/parsing and response formatting are outside this
 budget. This baseline does not establish SHACL or graph-policy budget compliance;
 those evaluators must add the per-operation accounting below.

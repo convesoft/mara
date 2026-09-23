@@ -855,11 +855,29 @@ fn item_validation_cost(item: &Item, schema: Option<&Schema>) -> usize {
     if let Some(schema) = schema
         && let Some(flavour) = schema.flavour_for_validation(item.flavour())
     {
+        let mut occurrences = BTreeMap::<&str, (usize, usize)>::new();
+        for entry in item.metadata() {
+            let (count, bytes) = occurrences.entry(entry.key()).or_default();
+            *count = count.saturating_add(1);
+            *bytes = bytes.saturating_add(entry.value().len());
+        }
         for (name, field) in &flavour.fields {
             cost = cost.saturating_add(name.len()).saturating_add(1);
             if let Some(values) = &field.values {
+                let mut allowed_cost = 0usize;
                 for value in values {
-                    cost = cost.saturating_add(value.len()).saturating_add(1);
+                    allowed_cost = allowed_cost.saturating_add(value.len()).saturating_add(1);
+                }
+                cost = cost.saturating_add(allowed_cost);
+                if field.field_type == FieldType::Enum {
+                    // Reserve every possible membership comparison and both
+                    // string inputs before validation. Aggregate once per field
+                    // so estimating the cost does not repeat the same scans.
+                    let (count, bytes) =
+                        occurrences.get(name.as_str()).copied().unwrap_or_default();
+                    cost = cost
+                        .saturating_add(allowed_cost.saturating_mul(count))
+                        .saturating_add(bytes.saturating_mul(values.len()));
                 }
             }
         }

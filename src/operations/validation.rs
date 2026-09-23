@@ -294,7 +294,7 @@ impl OperationContext {
         };
         result.evaluation_complete = result.diagnostics.is_empty() && schema.is_some();
         let mut snapshot = Sha256::new();
-        snapshot.update(b"validation-1-structural-cost-1");
+        snapshot.update(b"validation-1-structural-cost-2");
         hash_file(&mut snapshot, &project.root().join(crate::PROJECT_FILE));
         hash_file(&mut snapshot, project.schema_path());
         if let Some(schema) = &schema
