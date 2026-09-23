@@ -11556,6 +11556,62 @@ fn diagnostic_completeness_tracks_unavailable_item_source_checks() {
 }
 
 #[test]
+fn diagnostic_completeness_accounts_for_invalid_titles() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    let file = root.join("title.mara.md");
+    for title in ["", ":title: \n", ":title: First\n:title: Second\n"] {
+        let source = format!(
+            ":::mara requirement REQ-TITLE\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n{title}\n[missing](absent.mara.md)\n:::\n"
+        );
+        fs::write(&file, &source).unwrap();
+        let project = diagnostic_parity(
+            root,
+            &["project", "validate"],
+            "project_validate",
+            json!({}),
+        );
+        assert_eq!(project["evaluation_complete"], false, "title: {title:?}");
+        assert_eq!(project["summary"]["counts_exact"], false);
+        assert_eq!(project["summary"]["errors"], 1);
+        assert_eq!(project["diagnostics"][0]["code"], "field_invalid");
+        for id in ["REQ-TITLE", "01ARZ3NDEKTSV4RRFFQ69G5F00"] {
+            let item = diagnostic_parity(
+                root,
+                &["item", "validate", id],
+                "item_validate",
+                json!({"id":id}),
+            );
+            assert_eq!(item["evaluation_complete"], false);
+            assert_eq!(item["summary"], project["summary"]);
+        }
+        let hidden = diagnostic_parity(
+            root,
+            &["project", "validate", "--path", "other/"],
+            "project_validate",
+            json!({"paths":["other/"]}),
+        );
+        assert_eq!(hidden["diagnostics"], json!([]));
+        assert_eq!(hidden["evaluation_complete"], false);
+        assert_eq!(hidden["summary"], project["summary"]);
+        assert_eq!(fs::read_to_string(&file).unwrap(), source);
+    }
+    // Repairing the prerequisite enables the previously skipped reference check.
+    fs::write(&file, ":::mara requirement REQ-TITLE\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: Repaired\n\n[missing](absent.mara.md)\n:::\n").unwrap();
+    let repaired = diagnostic_parity(
+        root,
+        &["project", "validate"],
+        "project_validate",
+        json!({}),
+    );
+    assert_eq!(repaired["evaluation_complete"], true);
+    assert_eq!(repaired["summary"]["counts_exact"], true);
+    assert_eq!(repaired["summary"]["errors"], 1);
+    assert_eq!(repaired["diagnostics"][0]["code"], "reference_unresolved");
+}
+
+#[test]
 fn diagnostic_codes_locations_and_hidden_failures_have_surface_parity() {
     let fixture = TempDir::new().unwrap();
     assert!(mara(fixture.path(), &["project", "init"]).status.success());

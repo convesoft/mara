@@ -131,6 +131,7 @@ pub struct Item {
     source: SourceLocation,
     body_source: SourceLocation,
     metadata_valid: bool,
+    title_valid: bool,
     body_valid: bool,
 }
 
@@ -190,7 +191,7 @@ impl Item {
 
     /// Recovery can retain an item's identity while leaving some checks unavailable.
     pub(crate) fn validation_source_is_complete(&self) -> bool {
-        self.metadata_is_valid() && self.body_is_valid()
+        self.metadata_is_valid() && self.title_valid && self.body_is_valid()
     }
 }
 
@@ -1379,6 +1380,7 @@ fn project_document(
                 source: location(&path, &line_starts, parsed.source.start, parsed.source.end),
                 body_source: location(&path, &line_starts, parsed.body.start, parsed.body.end),
                 metadata_valid: parsed.metadata_valid,
+                title_valid: parsed.title_valid,
                 body_valid: parsed.body_valid,
             }
         })
