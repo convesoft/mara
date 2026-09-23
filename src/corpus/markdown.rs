@@ -83,6 +83,7 @@ pub(super) struct ParsedMention {
 
 #[derive(Debug)]
 pub(super) struct ParseError {
+    pub(super) code: crate::DiagnosticCode,
     pub(super) line: usize,
     pub(super) source: Range<usize>,
     pub(super) item_ids: Vec<String>,
@@ -572,6 +573,7 @@ fn project_item(
     let opener_line = line_at(lines, delimiter.source.start);
     let (flavour, id) = opener(opener_line.text).ok_or_else(|| {
         vec![ParseError {
+            code: crate::DiagnosticCode::SourceInvalid,
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
             item_ids: opener_item_ids(opener_line.text),
@@ -580,6 +582,7 @@ fn project_item(
     })?;
     if !is_snake_name(flavour) {
         return Err(vec![ParseError {
+            code: crate::DiagnosticCode::SourceInvalid,
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
             item_ids: opener_item_ids(opener_line.text),
@@ -588,6 +591,7 @@ fn project_item(
     }
     if !is_item_id(id) {
         return Err(vec![ParseError {
+            code: crate::DiagnosticCode::IdentityInvalid,
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
             item_ids: Vec::new(),
@@ -616,6 +620,7 @@ fn project_item(
         || (metadata_valid && title_entries.is_empty());
     if title_is_invalid {
         errors.push(ParseError {
+            code: crate::DiagnosticCode::FieldInvalid,
             line: opener_line.number,
             source: opener_line.start..opener_line.end,
             item_ids: vec![id.to_owned()],
@@ -631,6 +636,7 @@ fn project_item(
     let (body_end, source_end, structure_complete) = loop {
         let Some(next) = delimiters.get(*delimiter_index) else {
             errors.push(ParseError {
+                code: crate::DiagnosticCode::SourceInvalid,
                 line: opener_line.number,
                 source: opener_line.start..opener_line.end,
                 item_ids: vec![id.to_owned()],
@@ -709,6 +715,7 @@ fn nested_item_error(
         item_ids.push(nested_id.to_owned());
     }
     ParseError {
+        code: crate::DiagnosticCode::SourceInvalid,
         line: nested.number,
         source: nested.start..nested.end,
         item_ids,
@@ -733,6 +740,7 @@ fn parse_metadata(
             return Err(MetadataParseError {
                 metadata,
                 error: ParseError {
+                    code: crate::DiagnosticCode::SourceInvalid,
                     line: line.number,
                     source: line.start..line.end,
                     item_ids: Vec::new(),
@@ -744,6 +752,7 @@ fn parse_metadata(
             return Err(MetadataParseError {
                 metadata,
                 error: ParseError {
+                    code: crate::DiagnosticCode::SourceInvalid,
                     line: line.number,
                     source: line.start..line.end,
                     item_ids: Vec::new(),
@@ -755,6 +764,7 @@ fn parse_metadata(
             return Err(MetadataParseError {
                 metadata,
                 error: ParseError {
+                    code: crate::DiagnosticCode::SourceInvalid,
                     line: line.number,
                     source: line.start..line.end,
                     item_ids: Vec::new(),
@@ -773,6 +783,7 @@ fn parse_metadata(
         return Err(MetadataParseError {
             metadata,
             error: ParseError {
+                code: crate::DiagnosticCode::SourceInvalid,
                 line: opener_line.number,
                 source: opener_line.start..opener_line.end,
                 item_ids: Vec::new(),

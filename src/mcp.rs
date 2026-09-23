@@ -5,8 +5,7 @@ use mara::{
     ItemCreationResult, ItemFilterParams, ItemMove, ItemMoveParams, ItemUpdate, ItemUpdateParams,
     OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, RelatedParams,
     RelatedResult, RelationDirection, RelationParams, SchemaGetResult, SchemaKind,
-    SchemaListResult, SchemaValidationResult, SearchParams, Template, TransactionRollbackResult,
-    ValidationResult,
+    SchemaListResult, SearchParams, Template, TransactionRollbackResult, ValidationResult,
 };
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -39,6 +38,17 @@ struct ProjectValidateParams {
     /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, .., empty path elements, . or ./; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"]. Selects reported diagnostics only; validity still covers the whole project.
     #[serde(default)]
     paths: Vec<PathBuf>,
+    #[serde(flatten)]
+    options: mara::ValidationOptions,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SchemaValidateParams {
+    /// Absolute project root; omit when the server is bound with --project.
+    project: Option<PathBuf>,
+    #[serde(flatten)]
+    options: mara::ValidationOptions,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -189,6 +199,8 @@ struct ItemIdToolParams {
     project: Option<PathBuf>,
     /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     id: String,
+    #[serde(flatten)]
+    options: mara::ValidationOptions,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -384,15 +396,20 @@ impl MaraMcp {
 
     #[tool(
         name = "project_validate",
-        description = "Validate the complete configured Mara project. Optional paths select reported diagnostics only; project/schema diagnostics always appear. Validity still covers the whole project, including omitted diagnostics counted in selection.omitted_diagnostics."
+        output_schema = rmcp::handler::server::common::schema_for_type::<ValidationResult>(),
+        description = "Validate the complete configured Mara project. Optional paths select reported diagnostics only; project/schema diagnostics always appear. Validity still covers the whole project, including omitted diagnostics counted in selection.omitted_diagnostics. Validation format 1 reports stable codes/severity, full-target summary and evaluation_complete. Follow next_cursor with unchanged options; valid:false is a successful tool result, and warnings alone remain valid. Invalid arguments, stale cursors, I/O and output limits return structured operation errors."
     )]
     fn project_validate(
         &self,
         Parameters(params): Parameters<ProjectValidateParams>,
-    ) -> Result<Json<ValidationResult>, String> {
-        self.for_project(params.project)?
-            .project_validate(&params.paths)
-            .map(Json)
+    ) -> rmcp::model::CallToolResult {
+        validation_result(
+            self.for_project(params.project)
+                .map_err(mara::ValidationError::invalid_argument)
+                .and_then(|context| {
+                    context.project_validate_with_options(&params.paths, &params.options)
+                }),
+        )
     }
 
     #[tool(
@@ -436,15 +453,18 @@ impl MaraMcp {
 
     #[tool(
         name = "schema_validate",
-        description = "Validate schema format 3 without validating item content. Every flavour requires a nonblank description, nonempty use_when list, avoid_when list ([] is valid), and distinguish_from mapping ({} is valid). Entries must be nonblank; distinction targets must be other declared flavours. Migrate format 1 explicitly in the existing schema, preserving custom declarations and item identities; no automatic upgrade. Then run project_validate for the corpus."
+        output_schema = rmcp::handler::server::common::schema_for_type::<ValidationResult>(),
+        description = "Validate schema format 3 without validating item content. Every flavour requires a nonblank description, nonempty use_when list, avoid_when list ([] is valid), and distinguish_from mapping ({} is valid). Entries must be nonblank; distinction targets must be other declared flavours. Migrate format 1 explicitly in the existing schema, preserving custom declarations and item identities; no automatic upgrade. Then run project_validate for the corpus. Returns the common validation format 1 envelope, including null declaration counts if the schema cannot load. Follow next_cursor with unchanged options; invalid schemas return valid:false without a tool error."
     )]
     fn schema_validate(
         &self,
-        Parameters(params): Parameters<ProjectParams>,
-    ) -> Result<Json<SchemaValidationResult>, String> {
-        self.for_project(params.project)?
-            .schema_validate()
-            .map(Json)
+        Parameters(params): Parameters<SchemaValidateParams>,
+    ) -> rmcp::model::CallToolResult {
+        validation_result(
+            self.for_project(params.project)
+                .map_err(mara::ValidationError::invalid_argument)
+                .and_then(|context| context.schema_validate_with_options(&params.options)),
+        )
     }
 
     #[tool(
@@ -588,15 +608,20 @@ impl MaraMcp {
 
     #[tool(
         name = "item_validate",
-        description = "Validate one item and return all independently discoverable diagnostics that apply to it."
+        output_schema = rmcp::handler::server::common::schema_for_type::<ValidationResult>(),
+        description = "Validate one item in full corpus context. Validation format 1 reports codes/severity, summary and evaluation_complete before output pagination. Follow next_cursor with unchanged options. A complete warning-only result is valid; invalid/incomplete results have valid:false without a tool error."
     )]
     fn item_validate(
         &self,
         Parameters(params): Parameters<ItemIdToolParams>,
-    ) -> Result<Json<ValidationResult>, String> {
-        self.for_project(params.project)?
-            .item_validate(&params.id)
-            .map(Json)
+    ) -> rmcp::model::CallToolResult {
+        validation_result(
+            self.for_project(params.project)
+                .map_err(mara::ValidationError::invalid_argument)
+                .and_then(|context| {
+                    context.item_validate_with_options(&params.id, &params.options)
+                }),
+        )
     }
 
     #[tool(name = "relation_get", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationInspection>(), description = "Inspect a semantic relationship and its authored occurrences. Alias and canonical names resolve the same edge. Follow next_cursor with unchanged arguments; selectors and cursors expire when project source or schema changes.")]
@@ -662,6 +687,21 @@ struct RelationRemoveToolParams {
     #[serde(default)]
     occurrence: Option<String>,
 }
+fn validation_result(
+    result: Result<ValidationResult, mara::ValidationError>,
+) -> rmcp::model::CallToolResult {
+    let (value, failed) = match result {
+        Ok(result) => (
+            serde_json::to_value(result).expect("serializable validation result"),
+            false,
+        ),
+        Err(error) => (error.envelope(), true),
+    };
+    let mut response = rmcp::model::CallToolResult::structured(value);
+    response.is_error = Some(failed);
+    response
+}
+
 fn relation_result<T: serde::Serialize>(
     result: Result<T, mara::RelationError>,
 ) -> rmcp::model::CallToolResult {

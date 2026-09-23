@@ -11,7 +11,13 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 mod corpus;
+mod diagnostics;
 mod discovery;
+pub use diagnostics::{
+    ConfigurationDiagnostic, DiagnosticCode, DiagnosticItem, DiagnosticLocation,
+    DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
+    ValidationWork,
+};
 mod mutation;
 mod operations;
 mod query;
@@ -78,12 +84,12 @@ pub struct Project {
 #[derive(Debug)]
 pub struct ProjectValidation {
     project: Project,
-    errors: Vec<String>,
+    errors: Vec<ConfigurationDiagnostic>,
     schema_available: bool,
 }
 
 impl ProjectValidation {
-    pub fn into_parts(self) -> (Project, Vec<String>, bool) {
+    pub fn into_parts(self) -> (Project, Vec<ConfigurationDiagnostic>, bool) {
         (self.project, self.errors, self.schema_available)
     }
 }
@@ -141,7 +147,7 @@ struct RecoveredFlavour {
     body_valid: bool,
     fields_valid: bool,
     invalid_fields: Vec<String>,
-    errors: Vec<String>,
+    errors: Vec<ConfigurationDiagnostic>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -251,7 +257,10 @@ impl Schema {
         !self.validation.invalid_same_flavour.contains(relation)
     }
 
-    fn validation_errors(&mut self) -> Vec<String> {
+    fn validation_errors(
+        &mut self,
+        work: &mut diagnostics::WorkBudget,
+    ) -> Vec<ConfigurationDiagnostic> {
         let recovered = std::mem::take(&mut self.validation);
         self.validation = SchemaValidationState {
             flavours_section_invalid: recovered.flavours_section_invalid,
@@ -267,32 +276,49 @@ impl Schema {
         };
         let mut errors = Vec::new();
         for (name, flavour) in &self.flavours {
+            if !work.charge(
+                1 + serde_json::to_vec(flavour)
+                    .expect("schema serializes")
+                    .len(),
+            ) {
+                break;
+            }
             if !is_snake_name(name) {
-                errors.push(format!("invalid flavour name '{name}'"));
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["flavours", name],
+                    format!("invalid flavour name '{name}'"),
+                ));
                 self.validation.invalid_flavours.insert(name.clone());
             }
             if !self.validation.invalid_flavour_descriptions.contains(name)
                 && flavour.description.trim().is_empty()
             {
-                errors.push(format!("flavour '{name}' description must not be empty"));
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["flavours", name, "description"],
+                    format!("flavour '{name}' description must not be empty"),
+                ));
             }
             for target in flavour.distinguish_from.keys() {
                 if target == name {
-                    errors.push(format!(
-                        "flavour '{name}' distinguish_from must not reference itself"
+                    errors.push(ConfigurationDiagnostic::schema(
+                        &["flavours", name, "distinguish_from", target],
+                        format!("flavour '{name}' distinguish_from must not reference itself"),
                     ));
                 } else if !self.flavour_is_declared(target) {
-                    errors.push(format!(
+                    errors.push(ConfigurationDiagnostic::schema(&["flavours", name, "distinguish_from", target], format!(
                         "flavour '{name}' distinguish_from references unknown flavour '{target}'"
-                    ));
+                    )));
                 }
             }
             if !self.validation.invalid_id_prefixes.contains(name)
                 && !is_id_prefix(&flavour.id_prefix)
             {
-                errors.push(format!(
-                    "flavour '{name}' has invalid ID prefix '{}'",
-                    flavour.id_prefix
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["flavours", name, "id_prefix"],
+                    format!(
+                        "flavour '{name}' has invalid ID prefix '{}'",
+                        flavour.id_prefix
+                    ),
                 ));
                 self.validation.invalid_id_prefixes.insert(name.clone());
             }
@@ -300,14 +326,18 @@ impl Schema {
             for (field_name, field) in &flavour.fields {
                 let mut field_is_valid = true;
                 if is_structural_item_name(field_name) {
-                    errors.push(format!(
-                        "flavour '{name}' field '{field_name}' is reserved for item structure"
+                    errors.push(ConfigurationDiagnostic::schema(
+                        &["flavours", name, "fields", field_name],
+                        format!(
+                            "flavour '{name}' field '{field_name}' is reserved for item structure"
+                        ),
                     ));
                     field_is_valid = false;
                 }
                 if !is_snake_name(field_name) {
-                    errors.push(format!(
-                        "flavour '{name}' has invalid field name '{field_name}'"
+                    errors.push(ConfigurationDiagnostic::schema(
+                        &["flavours", name, "fields", field_name],
+                        format!("flavour '{name}' has invalid field name '{field_name}'"),
                     ));
                     field_is_valid = false;
                 }
@@ -327,12 +357,19 @@ impl Schema {
         }
 
         for (name, relation) in &self.relations {
+            if !work.charge(
+                1 + serde_json::to_vec(relation)
+                    .expect("schema serializes")
+                    .len(),
+            ) {
+                break;
+            }
             if relation.symmetric
                 && (relation.inverse.is_some()
                     || relation.source.iter().collect::<HashSet<_>>()
                         != relation.target.iter().collect::<HashSet<_>>())
             {
-                errors.push(format!("symmetric relation '{name}' requires equal endpoint flavour sets and no inverse alias"));
+                errors.push(ConfigurationDiagnostic::schema(&["relations", name], format!("symmetric relation '{name}' requires equal endpoint flavour sets and no inverse alias")));
                 self.validation.invalid_relations.insert(name.clone());
             }
             if let Some(alias) = &relation.inverse {
@@ -346,8 +383,11 @@ impl Schema {
                         .count()
                         > 1
                 {
-                    errors.push(format!(
-                        "relation '{name}' has invalid or conflicting inverse alias '{alias}'"
+                    errors.push(ConfigurationDiagnostic::schema(
+                        &["relations", name],
+                        format!(
+                            "relation '{name}' has invalid or conflicting inverse alias '{alias}'"
+                        ),
                     ));
                     self.validation.invalid_relations.insert(name.clone());
                 }
@@ -357,21 +397,30 @@ impl Schema {
                         .get(target)
                         .is_some_and(|flavour| flavour.fields.contains_key(alias))
                     {
-                        errors.push(format!("inverse alias '{alias}' conflicts with field '{alias}' on source flavour '{target}'"));
+                        errors.push(ConfigurationDiagnostic::schema(&["relations", name], format!("inverse alias '{alias}' conflicts with field '{alias}' on source flavour '{target}'")));
                         self.validation.invalid_relations.insert(name.clone());
                     }
                 }
             }
             if !is_snake_name(name) {
-                errors.push(format!("invalid relation name '{name}'"));
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["relations", name],
+                    format!("invalid relation name '{name}'"),
+                ));
                 self.validation.invalid_relations.insert(name.clone());
             }
             if is_structural_item_name(name) {
-                errors.push(format!("relation '{name}' is reserved for item structure"));
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["relations", name],
+                    format!("relation '{name}' is reserved for item structure"),
+                ));
                 self.validation.invalid_relations.insert(name.clone());
             }
             if relation.description.trim().is_empty() {
-                errors.push(format!("relation '{name}' description must not be empty"));
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["relations", name],
+                    format!("relation '{name}' description must not be empty"),
+                ));
             }
             if !self.validation.flavours_section_invalid {
                 errors.extend(endpoint_errors(
@@ -419,9 +468,9 @@ impl Schema {
                     .get(source)
                     .is_some_and(|flavour| flavour.fields.contains_key(name))
                 {
-                    errors.push(format!(
+                    errors.push(ConfigurationDiagnostic::schema(&["relations", name], format!(
                         "relation '{name}' conflicts with field '{name}' on source flavour '{source}'"
-                    ));
+                    )));
                     self.validation.invalid_relations.insert(name.clone());
                 }
             }
@@ -431,9 +480,9 @@ impl Schema {
                     .iter()
                     .any(|source| relation.target.contains(source))
             {
-                errors.push(format!(
+                errors.push(ConfigurationDiagnostic::schema(&["relations", name], format!(
                     "relation '{name}' requires a shared source and target flavour when same_flavour is true"
-                ));
+                )));
                 self.validation.invalid_same_flavour.insert(name.clone());
             }
         }
@@ -498,40 +547,40 @@ pub struct FieldDefinition {
 }
 
 impl FieldDefinition {
-    fn validation_errors(&self, flavour: &str, field: &str) -> Vec<String> {
+    fn validation_errors(&self, flavour: &str, field: &str) -> Vec<ConfigurationDiagnostic> {
         let mut errors = Vec::new();
         match (self.field_type, &self.values) {
-            (FieldType::Enum, Some(values)) if values.is_empty() => errors.push(format!(
+            (FieldType::Enum, Some(values)) if values.is_empty() => errors.push(ConfigurationDiagnostic::schema(&["flavours", flavour, "fields", field, "values"], format!(
                 "flavour '{flavour}' enum field '{field}' must declare at least one value"
-            )),
+            ))),
             (FieldType::Enum, Some(values)) => {
                 let mut unique = HashSet::new();
                 let mut reported_surrounding_whitespace = false;
                 for value in values {
                     if value.trim() != value && !reported_surrounding_whitespace {
-                        errors.push(format!(
+                        errors.push(ConfigurationDiagnostic::schema(&["flavours", flavour, "fields", field, "values"], format!(
                             "flavour '{flavour}' enum field '{field}' values must not have surrounding whitespace"
-                        ));
+                        )));
                         reported_surrounding_whitespace = true;
                     }
                     if value.is_empty() {
-                        errors.push(format!(
+                        errors.push(ConfigurationDiagnostic::schema(&["flavours", flavour, "fields", field, "values"], format!(
                             "flavour '{flavour}' enum field '{field}' contains an empty value"
-                        ));
+                        )));
                     }
                     if !unique.insert(value) {
-                        errors.push(format!(
+                        errors.push(ConfigurationDiagnostic::schema(&["flavours", flavour, "fields", field, "values"], format!(
                             "flavour '{flavour}' enum field '{field}' contains duplicate value '{value}'"
-                        ));
+                        )));
                     }
                 }
             }
-            (FieldType::Enum, None) => errors.push(format!(
+            (FieldType::Enum, None) => errors.push(ConfigurationDiagnostic::schema(&["flavours", flavour, "fields", field, "values"], format!(
                 "flavour '{flavour}' enum field '{field}' must declare values"
-            )),
-            (_, Some(_)) => errors.push(format!(
+            ))),
+            (_, Some(_)) => errors.push(ConfigurationDiagnostic::schema(&["flavours", flavour, "fields", field, "values"], format!(
                 "flavour '{flavour}' field '{field}' may declare values only when its type is enum"
-            )),
+            ))),
             (_, None) => {}
         }
         errors
@@ -839,23 +888,55 @@ pub fn load_schema(project: &Project) -> Result<Schema, Error> {
     if let Some(message) = errors.into_iter().next() {
         return Err(Error::InvalidSchema {
             path: project.schema_path().to_path_buf(),
-            message,
+            message: message.message,
         });
     }
     Ok(schema)
 }
 
-pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<String>), Error> {
+pub fn load_schema_for_validation(
+    project: &Project,
+) -> Result<(Schema, Vec<ConfigurationDiagnostic>), Error> {
+    load_schema_for_validation_bounded(project, &mut diagnostics::WorkBudget::new(usize::MAX))
+}
+
+fn load_schema_for_validation_bounded(
+    project: &Project,
+    work: &mut diagnostics::WorkBudget,
+) -> Result<(Schema, Vec<ConfigurationDiagnostic>), Error> {
     let source = fs::read_to_string(project.schema_path()).map_err(|source| Error::Io {
         action: "read project schema",
         path: project.schema_path().to_path_buf(),
         source,
     })?;
-    let configuration: SchemaFileForValidation =
-        serde_saphyr::from_str(&source).map_err(|source| Error::InvalidSchema {
-            path: project.schema_path().to_path_buf(),
-            message: source.to_string(),
-        })?;
+    let configuration: SchemaFileForValidation = match serde_saphyr::from_str(&source) {
+        Ok(configuration) => configuration,
+        Err(error) => {
+            let mut diagnostic = ConfigurationDiagnostic::schema(&[], error.to_string());
+            if let Some(location) = error.location() {
+                diagnostic.line = usize::try_from(location.line())
+                    .ok()
+                    .filter(|line| *line > 0);
+                diagnostic.start_byte = location
+                    .span()
+                    .byte_offset()
+                    .and_then(|n| usize::try_from(n).ok());
+                diagnostic.end_byte = diagnostic
+                    .start_byte
+                    .zip(location.span().byte_len())
+                    .and_then(|(start, len)| start.checked_add(usize::try_from(len).ok()?));
+            }
+            return Ok((
+                Schema {
+                    format_version: 0,
+                    flavours: BTreeMap::new(),
+                    relations: BTreeMap::new(),
+                    validation: SchemaValidationState::default(),
+                },
+                vec![diagnostic],
+            ));
+        }
+    };
     let SchemaFileForValidation {
         format_version,
         flavours,
@@ -864,18 +945,23 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
     } = configuration;
     let mut errors = unknown
         .keys()
-        .map(|key| format!("unknown schema configuration key '{key}'"))
+        .map(|key| {
+            ConfigurationDiagnostic::schema(
+                &[key],
+                format!("unknown schema configuration key '{key}'"),
+            )
+        })
         .collect::<Vec<_>>();
     let format_version =
         decode_schema_configuration_value(format_version, "format_version", &mut errors);
     let format_version_invalid = format_version.is_none();
     let format_version = format_version.unwrap_or_default();
     if !format_version_invalid && format_version != SCHEMA_FORMAT_VERSION {
-        errors.insert(0, if matches!(format_version, 1 | 2) {
+        errors.insert(0, ConfigurationDiagnostic::new(DiagnosticCode::FormatUnsupported, "/format_version".into(), if matches!(format_version, 1 | 2) {
             format!("schema format version {format_version} requires explicit migration: migrate the existing schema to format_version: 3; format 1 also requires description, use_when, avoid_when, and distinguish_from on every flavour. Preserve custom declarations and item identities, do not reinitialize. See https://github.com/convesoft/mara/blob/main/docs/relations.mara.md")
         } else {
-            format!("unsupported schema format version {format_version}; expected {SCHEMA_FORMAT_VERSION}")
-        });
+            format!("unsupported schema format version {format_version}; expected {SCHEMA_FORMAT_VERSION}; migrate the existing schema explicitly; see https://github.com/convesoft/mara/blob/main/docs/relations.mara.md")
+        }));
     }
     let flavour_values: Option<BTreeMap<String, SchemaValue>> =
         decode_schema_configuration_value(flavours, "flavours", &mut errors);
@@ -886,6 +972,13 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
     };
     let mut flavours = BTreeMap::new();
     for (name, value) in flavour_values.unwrap_or_default() {
+        if !work.charge(
+            1 + serde_json::to_vec(&value)
+                .expect("schema value serializes")
+                .len(),
+        ) {
+            break;
+        }
         match recover_flavour(&name, &value) {
             Ok(recovered) => {
                 errors.extend(recovered.errors);
@@ -910,7 +1003,10 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
                 flavours.insert(name, recovered.definition);
             }
             Err(message) => {
-                errors.push(format!("flavour '{name}' is invalid: {message}"));
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["flavours", &name],
+                    format!("flavour '{name}' is invalid: {message}"),
+                ));
                 validation.invalid_flavours.insert(name);
             }
         }
@@ -921,12 +1017,22 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
     validation.relations_section_invalid = relations_section_invalid;
     let mut relations = BTreeMap::new();
     for (name, value) in relation_values.unwrap_or_default() {
+        if !work.charge(
+            1 + serde_json::to_vec(&value)
+                .expect("schema value serializes")
+                .len(),
+        ) {
+            break;
+        }
         match decode_schema_declaration(&value) {
             Ok(relation) => {
                 relations.insert(name, relation);
             }
             Err(message) => {
-                errors.push(format!("relation '{name}' is invalid: {message}"));
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["relations", &name],
+                    format!("relation '{name}' is invalid: {message}"),
+                ));
                 validation.invalid_relations.insert(name);
             }
         }
@@ -937,7 +1043,7 @@ pub fn load_schema_for_validation(project: &Project) -> Result<(Schema, Vec<Stri
         relations,
         validation,
     };
-    errors.extend(schema.validation_errors());
+    errors.extend(schema.validation_errors(work));
     Ok((schema, errors))
 }
 
@@ -946,7 +1052,12 @@ fn recover_flavour(name: &str, value: &SchemaValue) -> Result<RecoveredFlavour, 
     let mut errors = configuration
         .unknown
         .keys()
-        .map(|key| format!("flavour '{name}' is invalid: unknown configuration key '{key}'"))
+        .map(|key| {
+            ConfigurationDiagnostic::schema(
+                &["flavours", name, key],
+                format!("flavour '{name}' is invalid: unknown configuration key '{key}'"),
+            )
+        })
         .collect::<Vec<_>>();
     let description =
         decode_flavour_property(name, "description", configuration.description, &mut errors);
@@ -961,16 +1072,18 @@ fn recover_flavour(name: &str, value: &SchemaValue) -> Result<RecoveredFlavour, 
         &mut errors,
     );
     if use_when.as_ref().is_some_and(Vec::is_empty) {
-        errors.push(format!(
-            "flavour '{name}' use_when must contain at least one nonblank string"
+        errors.push(ConfigurationDiagnostic::schema(
+            &["flavours", name, "use_when"],
+            format!("flavour '{name}' use_when must contain at least one nonblank string"),
         ));
     }
     for (property, entries) in [("use_when", &use_when), ("avoid_when", &avoid_when)] {
         if let Some(entries) = entries {
             for (index, entry) in entries.iter().enumerate() {
                 if entry.trim().is_empty() {
-                    errors.push(format!(
-                        "flavour '{name}' {property}[{index}] must be a nonblank string"
+                    errors.push(ConfigurationDiagnostic::schema(
+                        &["flavours", name, property, &index.to_string()],
+                        format!("flavour '{name}' {property}[{index}] must be a nonblank string"),
                     ));
                 }
             }
@@ -979,21 +1092,22 @@ fn recover_flavour(name: &str, value: &SchemaValue) -> Result<RecoveredFlavour, 
     if let Some(entries) = &distinguish_from {
         for (target, explanation) in entries {
             if explanation.trim().is_empty() {
-                errors.push(format!(
+                errors.push(ConfigurationDiagnostic::schema(&["flavours", name, "distinguish_from", target], format!(
                     "flavour '{name}' distinguish_from '{target}' must have a nonblank explanation"
-                ));
+                )));
             }
         }
     }
     let id_prefix =
         decode_flavour_property(name, "id_prefix", configuration.id_prefix, &mut errors);
     let body = decode_flavour_property(name, "body", configuration.body, &mut errors);
-    let field_values = match configuration.fields {
+    let field_values: Option<BTreeMap<String, SchemaValue>> = match configuration.fields {
         Some(value) => match decode_schema_declaration(&value) {
             Ok(fields) => Some(fields),
             Err(error) => {
-                errors.push(format!(
-                    "flavour '{name}' is invalid: property 'fields': {error}"
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["flavours", name, "fields"],
+                    format!("flavour '{name}' is invalid: property 'fields': {error}"),
                 ));
                 None
             }
@@ -1009,8 +1123,9 @@ fn recover_flavour(name: &str, value: &SchemaValue) -> Result<RecoveredFlavour, 
                 fields.insert(field_name, field);
             }
             Err(error) => {
-                errors.push(format!(
-                    "flavour '{name}' field '{field_name}' is invalid: {error}"
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["flavours", name, "fields", &field_name],
+                    format!("flavour '{name}' field '{field_name}' is invalid: {error}"),
                 ));
                 invalid_fields.push(field_name);
             }
@@ -1039,7 +1154,7 @@ fn decode_flavour_property<T>(
     flavour: &str,
     property: &str,
     value: Option<SchemaValue>,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ConfigurationDiagnostic>,
 ) -> Option<T>
 where
     T: DeserializeOwned,
@@ -1048,15 +1163,17 @@ where
         Some(value) => match serde_json::to_value(&value).and_then(serde_json::from_value) {
             Ok(value) => Some(value),
             Err(error) => {
-                errors.push(format!(
-                    "flavour '{flavour}' is invalid: property '{property}': {error}"
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["flavours", flavour, property],
+                    format!("flavour '{flavour}' is invalid: property '{property}': {error}"),
                 ));
                 None
             }
         },
         None => {
-            errors.push(format!(
-                "flavour '{flavour}' is invalid: property '{property}' is required"
+            errors.push(ConfigurationDiagnostic::schema(
+                &["flavours", flavour, property],
+                format!("flavour '{flavour}' is invalid: property '{property}' is required"),
             ));
             None
         }
@@ -1066,7 +1183,7 @@ where
 fn decode_schema_configuration_value<T>(
     value: Option<SchemaValue>,
     path: &str,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ConfigurationDiagnostic>,
 ) -> Option<T>
 where
     T: DeserializeOwned,
@@ -1075,14 +1192,18 @@ where
         Some(value) => match decode_schema_declaration(&value) {
             Ok(value) => Some(value),
             Err(error) => {
-                errors.push(format!(
-                    "invalid schema configuration value '{path}': {error}"
+                errors.push(ConfigurationDiagnostic::schema(
+                    &[path],
+                    format!("invalid schema configuration value '{path}': {error}"),
                 ));
                 None
             }
         },
         None => {
-            errors.push(format!("schema configuration key '{path}' is required"));
+            errors.push(ConfigurationDiagnostic::schema(
+                &[path],
+                format!("schema configuration key '{path}' is required"),
+            ));
             None
         }
     }
@@ -1102,7 +1223,7 @@ fn load_project_root(root: &Path) -> Result<Project, Error> {
     if let Some(message) = errors.into_iter().next() {
         return Err(Error::InvalidProject {
             path: project.root().join(PROJECT_FILE),
-            message,
+            message: message.message,
         });
     }
     Ok(project)
@@ -1127,11 +1248,34 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         path: project_path.clone(),
         source,
     })?;
-    let mut configuration: toml::Table =
-        toml::from_str(&source).map_err(|source| Error::InvalidProject {
-            path: project_path.clone(),
-            message: source.to_string(),
-        })?;
+    let mut configuration: toml::Table = match toml::from_str(&source) {
+        Ok(configuration) => configuration,
+        Err(error) => {
+            let mut diagnostic = ConfigurationDiagnostic::project(&[], error.to_string());
+            if let Some(span) = error.span() {
+                diagnostic.line = Some(
+                    source.as_bytes()[..span.start.min(source.len())]
+                        .iter()
+                        .filter(|byte| **byte == b'\n')
+                        .count()
+                        + 1,
+                );
+                diagnostic.start_byte = Some(span.start);
+                diagnostic.end_byte = Some(span.end);
+            }
+            return Ok(ProjectValidation {
+                project: Project {
+                    schema_path: root.join(SCHEMA_FILE),
+                    root,
+                    name: String::new(),
+                    content_patterns: vec![],
+                    content_discovery_complete: false,
+                },
+                errors: vec![diagnostic],
+                schema_available: false,
+            });
+        }
+    };
 
     let mut errors = Vec::new();
     let format_version: Option<u32> = take_project_value(
@@ -1164,18 +1308,28 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
     unknown_project_keys(&configuration, "", &mut errors);
 
     if format_version.is_some_and(|version| version != 1) {
-        errors.push(format!(
-            "unsupported project format version {}",
-            format_version.expect("format version is present")
+        errors.push(ConfigurationDiagnostic::new(
+            DiagnosticCode::FormatUnsupported,
+            diagnostics::pointer(&["format_version"]),
+            format!(
+                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. This implementation supports format 1 without rule sources",
+                format_version.expect("format version is present")
+            ),
         ));
     }
     if name.as_deref().is_some_and(|name| name.trim().is_empty()) {
-        errors.push("project.name must not be empty".into());
+        errors.push(ConfigurationDiagnostic::project(
+            &["project", "name"],
+            "project.name must not be empty".into(),
+        ));
     }
     let configured_schema = schema.as_deref().map(Path::new);
     let schema_is_relative = configured_schema.is_some_and(is_project_relative);
     if configured_schema.is_some() && !schema_is_relative {
-        errors.push("project.schema must be a project-relative path".into());
+        errors.push(ConfigurationDiagnostic::project(
+            &["project", "schema"],
+            "project.schema must be a project-relative path".into(),
+        ));
     }
     let mut content_discovery_complete = include_values.is_some();
     let mut include: Vec<String> = Vec::new();
@@ -1184,8 +1338,11 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         match decoded {
             Ok(pattern) => include.push(pattern),
             Err(error) => {
-                errors.push(format!(
-                    "invalid project configuration value 'content.include[{index}]': {error}"
+                errors.push(ConfigurationDiagnostic::project(
+                    &["content", "include", &index.to_string()],
+                    format!(
+                        "invalid project configuration value 'content.include[{index}]': {error}"
+                    ),
                 ));
                 content_discovery_complete = false;
             }
@@ -1195,7 +1352,10 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         .iter()
         .any(|pattern| !is_project_relative(Path::new(pattern)));
     if has_non_relative_content {
-        errors.push("content.include entries must be project-relative patterns".into());
+        errors.push(ConfigurationDiagnostic::project(
+            &["content", "include"],
+            "content.include entries must be project-relative patterns".into(),
+        ));
     }
 
     let mut content_patterns = Vec::new();
@@ -1212,8 +1372,9 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         {
             Ok(_) => true,
             Err(error) => {
-                errors.push(format!(
-                    "invalid content.include pattern '{pattern}': {error}"
+                errors.push(ConfigurationDiagnostic::project(
+                    &["content", "include"],
+                    format!("invalid content.include pattern '{pattern}': {error}"),
                 ));
                 false
             }
@@ -1233,9 +1394,9 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         };
     let schema_available = schema_is_relative && schema_path.is_file();
     if schema_is_relative && !schema_available {
-        errors.push(format!(
-            "schema file does not exist at {}",
-            schema_path.display()
+        errors.push(ConfigurationDiagnostic::project(
+            &["project", "schema"],
+            format!("schema file does not exist at {}", schema_path.display()),
         ));
     }
 
@@ -1256,19 +1417,25 @@ fn take_project_table(
     configuration: &mut toml::Table,
     key: &str,
     path: &str,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ConfigurationDiagnostic>,
 ) -> Option<toml::Table> {
     match configuration.remove(key) {
         Some(toml::Value::Table(table)) => Some(table),
         Some(value) => {
-            errors.push(format!(
-                "invalid project configuration value '{path}': expected a table, found {}",
-                value.type_str()
+            errors.push(ConfigurationDiagnostic::project(
+                &path.split('.').collect::<Vec<_>>(),
+                format!(
+                    "invalid project configuration value '{path}': expected a table, found {}",
+                    value.type_str()
+                ),
             ));
             None
         }
         None => {
-            errors.push(format!("project configuration key '{path}' is required"));
+            errors.push(ConfigurationDiagnostic::project(
+                &path.split('.').collect::<Vec<_>>(),
+                format!("project configuration key '{path}' is required"),
+            ));
             None
         }
     }
@@ -1278,7 +1445,7 @@ fn take_project_value<T>(
     configuration: &mut toml::Table,
     key: &str,
     path: &str,
-    errors: &mut Vec<String>,
+    errors: &mut Vec<ConfigurationDiagnostic>,
 ) -> Option<T>
 where
     T: DeserializeOwned,
@@ -1287,27 +1454,42 @@ where
         Some(value) => match value.try_into() {
             Ok(value) => Some(value),
             Err(error) => {
-                errors.push(format!(
-                    "invalid project configuration value '{path}': {error}"
+                errors.push(ConfigurationDiagnostic::project(
+                    &path.split('.').collect::<Vec<_>>(),
+                    format!("invalid project configuration value '{path}': {error}"),
                 ));
                 None
             }
         },
         None => {
-            errors.push(format!("project configuration key '{path}' is required"));
+            errors.push(ConfigurationDiagnostic::project(
+                &path.split('.').collect::<Vec<_>>(),
+                format!("project configuration key '{path}' is required"),
+            ));
             None
         }
     }
 }
 
-fn unknown_project_keys(configuration: &toml::Table, prefix: &str, errors: &mut Vec<String>) {
+fn unknown_project_keys(
+    configuration: &toml::Table,
+    prefix: &str,
+    errors: &mut Vec<ConfigurationDiagnostic>,
+) {
     errors.extend(configuration.keys().map(|key| {
         let path = if prefix.is_empty() {
             key.clone()
         } else {
             format!("{prefix}.{key}")
         };
-        format!("unknown project configuration key '{path}'")
+        ConfigurationDiagnostic::project(
+            &if prefix.is_empty() {
+                vec![key.as_str()]
+            } else {
+                vec![prefix, key.as_str()]
+            },
+            format!("unknown project configuration key '{path}'"),
+        )
     }));
 }
 
@@ -1401,24 +1583,27 @@ fn endpoint_errors(
     flavours: &[String],
     declarations: &BTreeMap<String, FlavourDefinition>,
     invalid_declarations: &HashSet<String>,
-) -> Vec<String> {
+) -> Vec<ConfigurationDiagnostic> {
     let mut errors = Vec::new();
     if flavours.is_empty() {
-        errors.push(format!(
-            "relation '{relation}' {endpoint} must declare at least one flavour"
+        errors.push(ConfigurationDiagnostic::schema(
+            &["relations", relation, endpoint],
+            format!("relation '{relation}' {endpoint} must declare at least one flavour"),
         ));
         return errors;
     }
     let mut unique = HashSet::new();
     for flavour in flavours {
         if !declarations.contains_key(flavour) && !invalid_declarations.contains(flavour) {
-            errors.push(format!(
-                "relation '{relation}' {endpoint} references unknown flavour '{flavour}'"
+            errors.push(ConfigurationDiagnostic::schema(
+                &["relations", relation, endpoint],
+                format!("relation '{relation}' {endpoint} references unknown flavour '{flavour}'"),
             ));
         }
         if !unique.insert(flavour) {
-            errors.push(format!(
-                "relation '{relation}' {endpoint} repeats flavour '{flavour}'"
+            errors.push(ConfigurationDiagnostic::schema(
+                &["relations", relation, endpoint],
+                format!("relation '{relation}' {endpoint} repeats flavour '{flavour}'"),
             ));
         }
     }

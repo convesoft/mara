@@ -13,8 +13,8 @@ use mara::{
     ItemCreateParams, ItemFilterParams, ItemMoveParams, ItemSummary, ItemUpdateParams,
     OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, RelatedConnection,
     RelatedParams, RelationDirection, RelationMutationResult, RelationParams, SchemaGetResult,
-    SchemaKind, SchemaListResult, SchemaValidationResult, SearchParams, Template, ValidationResult,
-    ValidationScope, ValidationTargetKind, project_initialize,
+    SchemaKind, SchemaListResult, SearchParams, Template, ValidationResult, ValidationTargetKind,
+    project_initialize,
 };
 use serde::Serialize;
 
@@ -42,6 +42,28 @@ struct Cli {
 
     #[command(subcommand)]
     command: Command,
+}
+
+#[derive(Debug, Args)]
+struct ValidationArgs {
+    /// Maximum diagnostics per page, 1 through 100 (default 20); the serialized byte budget (65536 bytes) may return fewer.
+    #[arg(long)]
+    limit: Option<usize>,
+    /// Opaque next_cursor; continue until has_more is false and repeat unchanged target, paths, limit and max_work. Omit to start or restart after source/schema/configuration changes. Empty strings are invalid.
+    #[arg(long)]
+    cursor: Option<String>,
+    /// Logical evaluation budget, 1 through 1000000 (default 100000). A higher budget requires a fresh request without a cursor.
+    #[arg(long)]
+    max_work: Option<usize>,
+}
+impl From<ValidationArgs> for mara::ValidationOptions {
+    fn from(value: ValidationArgs) -> Self {
+        Self {
+            limit: value.limit,
+            cursor: value.cursor,
+            max_work: value.max_work,
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -157,6 +179,8 @@ enum ProjectCommand {
             help = "Show diagnostics for an exact document or directory subtree (project-relative, repeatable OR); no globs, absolute paths, .., empty paths, . or ./; omit --path for the whole project. Project/schema errors always appear; validity and exit status still cover the whole project"
         )]
         paths: Vec<PathBuf>,
+        #[command(flatten)]
+        options: ValidationArgs,
     },
     /// Recover a pending multi-file mutation.
     Transaction {
@@ -279,6 +303,8 @@ enum ItemCommand {
     Validate {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
         id: String,
+        #[command(flatten)]
+        options: ValidationArgs,
     },
 }
 
@@ -422,7 +448,10 @@ enum SchemaCommand {
         kind: CliSchemaKind,
     },
     /// Validate schema format 3, including required flavour guidance, without validating item content; use project validate for the corpus.
-    Validate,
+    Validate {
+        #[command(flatten)]
+        options: ValidationArgs,
+    },
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -563,10 +592,11 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(true)
         }
         Command::Project {
-            command: ProjectCommand::Validate { paths },
+            command: ProjectCommand::Validate { paths, options },
         } => {
-            let result = operations(project)?.project_validate(&paths)?;
-            emit_validation(format, &result)
+            let result =
+                operations(project)?.project_validate_with_options(&paths, &options.into());
+            emit_validation(format, result)
         }
         Command::Project {
             command:
@@ -733,10 +763,10 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(true)
         }
         Command::Item {
-            command: ItemCommand::Validate { id },
+            command: ItemCommand::Validate { id, options },
         } => {
-            let result = operations(project)?.item_validate(&id)?;
-            emit_validation(format, &result)
+            let result = operations(project)?.item_validate_with_options(&id, &options.into());
+            emit_validation(format, result)
         }
         Command::Get { reference, cursor } => {
             let result = operations(project)?.get(GetParams { reference, cursor })?;
@@ -911,11 +941,10 @@ fn run(cli: Cli) -> Result<bool, String> {
             Ok(true)
         }
         Command::Schema {
-            command: SchemaCommand::Validate,
+            command: SchemaCommand::Validate { options },
         } => {
-            let result = operations(project)?.schema_validate()?;
-            emit(format, &result, print_schema_validation)?;
-            Ok(true)
+            let result = operations(project)?.schema_validate_with_options(&options.into());
+            emit_validation(format, result)
         }
     }
 }
@@ -1225,78 +1254,87 @@ fn print_relation_mutation(result: &RelationMutationResult) -> Result<(), String
     Ok(())
 }
 
-fn emit_validation(format: OutputFormat, result: &ValidationResult) -> Result<bool, String> {
-    emit(format, result, print_validation)?;
-    Ok(result.valid)
+fn emit_validation(
+    format: OutputFormat,
+    result: Result<ValidationResult, mara::ValidationError>,
+) -> Result<bool, String> {
+    match result {
+        Ok(result) => {
+            emit(format, &result, print_validation)?;
+            Ok(result.valid)
+        }
+        Err(error) => {
+            if matches!(format, OutputFormat::Json) {
+                write_json(&error.envelope())?;
+            } else {
+                eprintln!("error: {error}");
+            }
+            Ok(false)
+        }
+    }
 }
 
 fn print_validation(result: &ValidationResult) -> Result<(), String> {
-    if result.valid {
-        match result.target.kind {
-            ValidationTargetKind::Project => {
-                println!("valid project at {}", result.project.display());
-            }
-            ValidationTargetKind::Item => {
-                println!(
-                    "valid item '{}'",
-                    result
-                        .target
-                        .id
-                        .as_deref()
-                        .expect("item validation has an item ID")
-                );
-            }
-        }
-        return Ok(());
-    }
     for diagnostic in &result.diagnostics {
-        match diagnostic.scope {
-            ValidationScope::Project => eprintln!(
-                "error: invalid Mara project at {}: {}",
-                diagnostic
-                    .path
-                    .as_deref()
-                    .expect("project diagnostic has a path")
-                    .display(),
-                diagnostic.message
-            ),
-            ValidationScope::Schema => eprintln!(
-                "error: invalid Mara schema at {}: {}",
-                diagnostic
-                    .path
-                    .as_deref()
-                    .expect("schema diagnostic has a path")
-                    .display(),
-                diagnostic.message
-            ),
-            ValidationScope::Item => eprintln!("error: {}", diagnostic.message),
-            ValidationScope::Document => eprintln!(
-                "{}:{}: error: {}",
-                diagnostic
-                    .path
-                    .as_deref()
-                    .expect("document diagnostic has a path")
-                    .display(),
-                diagnostic.line.expect("document diagnostic has a line"),
-                diagnostic.message
-            ),
-        }
+        let location = diagnostic
+            .location
+            .path
+            .as_ref()
+            .map(|p| {
+                let line = diagnostic
+                    .location
+                    .line
+                    .map(|n| format!(":{n}"))
+                    .unwrap_or_default();
+                format!("{}{line}: ", p.display())
+            })
+            .unwrap_or_default();
+        let code = serde_json::to_value(diagnostic.code).expect("diagnostic code");
+        eprintln!(
+            "{location}{}: {} [{}]",
+            diagnostic.severity,
+            diagnostic.message,
+            code.as_str().unwrap()
+        );
     }
     let omitted = result
         .selection
         .as_ref()
-        .map_or(0, |selection| selection.omitted_diagnostics);
+        .map_or(0, |s| s.omitted_diagnostics);
     if omitted > 0 {
+        eprintln!("{omitted} diagnostics outside the selection omitted");
+    }
+    if result.has_more {
         eprintln!(
-            "error: {omitted} diagnostic{} outside the selection omitted",
-            if omitted == 1 { "" } else { "s" }
+            "more diagnostics; repeat with --cursor {} and unchanged options",
+            result.next_cursor.as_deref().unwrap()
         );
     }
-    let count = result.diagnostics.len() + omitted;
-    eprintln!(
-        "error: validation failed with {count} diagnostic{}",
-        if count == 1 { "" } else { "s" }
-    );
+    if result.valid {
+        match result.target.kind {
+            ValidationTargetKind::Project => {
+                println!("valid project at {}", result.project.display())
+            }
+            ValidationTargetKind::Item => {
+                println!("valid item '{}'", result.target.id.as_deref().unwrap())
+            }
+            ValidationTargetKind::Schema => println!(
+                "valid schema at {} ({} flavours, {} relations)",
+                result.path.as_ref().unwrap().display(),
+                result.flavours.flatten().unwrap(),
+                result.relations.flatten().unwrap()
+            ),
+        }
+    } else {
+        let count = result.summary.errors + result.summary.warnings;
+        eprintln!(
+            "error: validation failed with {count} diagnostic{}",
+            if count == 1 { "" } else { "s" }
+        );
+    }
+    if !result.evaluation_complete {
+        eprintln!("evaluation incomplete; diagnostic counts are lower bounds");
+    }
     Ok(())
 }
 
@@ -1331,16 +1369,6 @@ fn print_schema_list(result: &SchemaListResult) -> Result<(), String> {
     Ok(())
 }
 
-fn print_schema_validation(result: &SchemaValidationResult) -> Result<(), String> {
-    println!(
-        "valid schema at {} ({} flavours, {} relations)",
-        result.path.display(),
-        result.flavours,
-        result.relations
-    );
-    Ok(())
-}
-
 fn print_named_yaml<T: Serialize>(name: &str, definition: &T) -> Result<(), String> {
     let declarations = BTreeMap::from([(name, definition)]);
     print_yaml(&declarations)
@@ -1363,5 +1391,89 @@ fn read_body(body: Option<String>) -> Result<Option<String>, String> {
             Ok(Some(body))
         }
         _ => Ok(body),
+    }
+}
+
+#[cfg(test)]
+mod validation_tests {
+    use super::*;
+    use mara::{
+        DiagnosticCode, DiagnosticLocation, Severity, ValidationDiagnostic, ValidationScope,
+    };
+
+    #[test]
+    fn validation_renderer_uses_shared_policy_validity_for_exit_status() {
+        // This tests the shared policy, not a configured rule evaluator (MARA-63/64).
+        let directory = tempfile::tempdir().unwrap();
+        mara::initialize_project(directory.path(), Template::Empty).unwrap();
+        let operations =
+            OperationContext::from_environment(Some(directory.path().to_owned())).unwrap();
+        let mut result = operations.project_validate(&[]).unwrap();
+        let mut diagnostic = ValidationDiagnostic::new(
+            DiagnosticCode::RuleFailed,
+            Severity::Warning,
+            ValidationScope::Item,
+            DiagnosticLocation::default(),
+            "required verification is absent",
+        );
+        diagnostic.rule = Some("urn:mara:rule:verification".into());
+        diagnostic.obligation = Some(mara::DiagnosticObligation {
+            shape: "urn:mara:rule:verification_count".into(),
+            component: "http://www.w3.org/ns/shacl#MinCountConstraintComponent".into(),
+            source: DiagnosticLocation {
+                path: Some("rules/coverage.yaml".into()),
+                pointer: Some("/0/property/0/minCount".into()),
+                ..Default::default()
+            },
+        });
+        diagnostic.details = Some(
+            serde_json::json!({"kind":"minimum","selected_count":0,"qualifying_count":0,"min":1}),
+        );
+        result.diagnostics.push(diagnostic);
+        result.summarize();
+        assert!(result.valid);
+        assert_eq!(result.summary.warnings, 1);
+        assert_eq!(result.summary.errors, 0);
+        assert!(emit_validation(OutputFormat::Json, Ok(result.clone())).unwrap());
+        assert!(emit_validation(OutputFormat::Human, Ok(result.clone())).unwrap());
+        let encoded = serde_json::to_value(&result).unwrap();
+        assert_eq!(
+            encoded["diagnostics"][0]["rule"],
+            "urn:mara:rule:verification"
+        );
+        assert_eq!(
+            encoded["diagnostics"][0]["obligation"]["source"]["pointer"],
+            "/0/property/0/minCount"
+        );
+        result.diagnostics[0].severity = Severity::Error;
+        result.summarize();
+        assert!(!emit_validation(OutputFormat::Json, Ok(result.clone())).unwrap());
+        assert_eq!(result.summary.errors, 1);
+        assert_eq!(result.summary.warnings, 0);
+        result.diagnostics[0].severity = Severity::Warning;
+        result.evaluation_complete = false;
+        result.summarize();
+        assert!(!result.valid);
+        assert!(!result.summary.counts_exact);
+        for code in [
+            DiagnosticCode::ProjectInvalid,
+            DiagnosticCode::SchemaInvalid,
+            DiagnosticCode::FormatUnsupported,
+            DiagnosticCode::SourceInvalid,
+            DiagnosticCode::IdentityInvalid,
+            DiagnosticCode::FieldInvalid,
+            DiagnosticCode::ReferenceUnresolved,
+            DiagnosticCode::RelationInvalid,
+            DiagnosticCode::RuleInvalid,
+            DiagnosticCode::EvaluationUnavailable,
+            DiagnosticCode::EvaluationLimit,
+        ] {
+            result.diagnostics[0].code = code;
+            result.diagnostics[0].severity = Severity::Warning;
+            result.evaluation_complete = true;
+            result.summarize();
+            assert_eq!(result.diagnostics[0].severity, Severity::Error);
+            assert!(!result.valid);
+        }
     }
 }

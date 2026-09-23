@@ -308,12 +308,9 @@ fn validate_update(
                 diagnostic.message()
             ));
         }
-        warnings.push(crate::ValidationDiagnostic {
-            scope: crate::ValidationScope::Item,
-            path: Some(diagnostic.source().path().to_path_buf()),
-            line: Some(diagnostic.source().span().start_line()),
-            message: diagnostic.message().to_owned(),
-        });
+        let mut warning = crate::ValidationDiagnostic::from_source(&diagnostic);
+        warning.scope = crate::ValidationScope::Item;
+        warnings.push(warning);
     }
     Ok(warnings)
 }

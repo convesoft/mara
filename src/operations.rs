@@ -8,9 +8,8 @@ use crate::{
     ItemCollectionResult, ItemCreationRequest, ItemFilters, Project, RelatedFilters, RelatedResult,
     RelationDefinition, RelationDirection, Schema, SearchResult, Template, backfill_mids,
     create_item, get, initialize_project, list_items, load_corpus, load_corpus_for_validation,
-    load_corpus_syntax_for_validation, load_schema, load_schema_for_validation, related,
-    resolve_project, resolve_project_for_validation, search, validate_corpus,
-    validate_corpus_independent,
+    load_corpus_syntax_for_validation, load_schema, related, resolve_project,
+    resolve_project_for_validation, search,
 };
 
 #[derive(Debug, Clone)]
@@ -62,27 +61,6 @@ impl OperationContext {
         )
     }
 
-    pub fn project_validate(&self, paths: &[PathBuf]) -> Result<ValidationResult, String> {
-        let paths = crate::query::normalized_paths(paths).map_err(|error| error.to_string())?;
-        let mut result = self.validate(None)?;
-        if !paths.is_empty() {
-            let total = result.diagnostics.len();
-            // Selection changes reporting only; validity was computed over the full corpus.
-            result.diagnostics.retain(|diagnostic| {
-                !matches!(diagnostic.scope, ValidationScope::Document)
-                    || diagnostic
-                        .path
-                        .as_ref()
-                        .is_none_or(|source| paths.iter().any(|path| source.starts_with(path)))
-            });
-            result.selection = Some(ValidationSelection {
-                paths,
-                omitted_diagnostics: total - result.diagnostics.len(),
-            });
-        }
-        Ok(result)
-    }
-
     pub fn project_mid_backfill(&self) -> Result<ProjectMidBackfillResult, String> {
         let (project, schema) = self.load_project()?;
         let result = backfill_mids(&project, &schema).map_err(|error| error.to_string())?;
@@ -99,10 +77,6 @@ impl OperationContext {
                 })
                 .collect(),
         })
-    }
-
-    pub fn item_validate(&self, id: &str) -> Result<ValidationResult, String> {
-        self.validate(Some(id))
     }
 
     pub fn schema_get(
@@ -154,16 +128,6 @@ impl OperationContext {
                 .collect(),
         };
         Ok(SchemaListResult { kind, declarations })
-    }
-
-    pub fn schema_validate(&self) -> Result<SchemaValidationResult, String> {
-        let (project, schema) = self.load_project()?;
-        Ok(SchemaValidationResult {
-            valid: true,
-            path: project.schema_path().to_path_buf(),
-            flavours: schema.flavours().len(),
-            relations: schema.relations().len(),
-        })
     }
 
     pub fn item_create(&self, request: ItemCreateParams) -> Result<ItemCreationResult, String> {
@@ -336,82 +300,6 @@ impl OperationContext {
         let corpus = load_corpus(&project, &schema).map_err(|error| error.to_string())?;
         Ok((corpus, schema))
     }
-
-    fn validate(&self, selected_item: Option<&str>) -> Result<ValidationResult, String> {
-        let context = self.load_validation_context()?;
-        Ok(collect_validation_result(context, selected_item))
-    }
-
-    fn load_validation_context(&self) -> Result<ValidationContext, String> {
-        let project_validation =
-            resolve_project_for_validation(self.selected.as_deref(), &self.current_directory)
-                .map_err(|error| error.to_string())?;
-        let (project, project_errors, schema_available) = project_validation.into_parts();
-        let project_diagnostics = project_errors
-            .into_iter()
-            .map(|message| ValidationDiagnostic {
-                scope: ValidationScope::Project,
-                path: Some(project.root().join(crate::PROJECT_FILE)),
-                line: None,
-                message,
-            })
-            .collect();
-        let (schema, schema_diagnostics, corpus, diagnostics) = if schema_available {
-            match load_schema_for_validation(&project) {
-                Ok((schema, errors)) if schema.format_version() == crate::SCHEMA_FORMAT_VERSION => {
-                    let schema_diagnostics = errors
-                        .into_iter()
-                        .map(|message| ValidationDiagnostic {
-                            scope: ValidationScope::Schema,
-                            path: Some(project.schema_path().to_path_buf()),
-                            line: None,
-                            message,
-                        })
-                        .collect();
-                    let (corpus, diagnostics) = load_corpus_for_validation(&project, &schema)
-                        .map_err(|error| error.to_string())?;
-                    (Some(schema), schema_diagnostics, corpus, diagnostics)
-                }
-                Ok((_, errors)) => {
-                    let schema_diagnostics = errors
-                        .into_iter()
-                        .map(|message| ValidationDiagnostic {
-                            scope: ValidationScope::Schema,
-                            path: Some(project.schema_path().to_path_buf()),
-                            line: None,
-                            message,
-                        })
-                        .collect();
-                    let (corpus, diagnostics) = load_corpus_syntax_for_validation(&project)
-                        .map_err(|error| error.to_string())?;
-                    (None, schema_diagnostics, corpus, diagnostics)
-                }
-                Err(error) => {
-                    let schema_diagnostic = ValidationDiagnostic {
-                        scope: ValidationScope::Schema,
-                        path: Some(project.schema_path().to_path_buf()),
-                        line: None,
-                        message: error.to_string(),
-                    };
-                    let (corpus, diagnostics) = load_corpus_syntax_for_validation(&project)
-                        .map_err(|error| error.to_string())?;
-                    (None, vec![schema_diagnostic], corpus, diagnostics)
-                }
-            }
-        } else {
-            let (corpus, diagnostics) =
-                load_corpus_syntax_for_validation(&project).map_err(|error| error.to_string())?;
-            (None, Vec::new(), corpus, diagnostics)
-        };
-        Ok(ValidationContext {
-            project,
-            corpus,
-            schema,
-            diagnostics,
-            project_diagnostics,
-            schema_diagnostics,
-        })
-    }
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -499,13 +387,7 @@ pub struct SchemaListResult {
     pub declarations: Vec<DeclarationSummary>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct SchemaValidationResult {
-    pub valid: bool,
-    pub path: PathBuf,
-    pub flavours: usize,
-    pub relations: usize,
-}
+pub type SchemaValidationResult = ValidationResult;
 
 trait DescribedDeclaration {
     fn description(&self) -> &str;
@@ -741,161 +623,8 @@ pub struct RelationMutationResult {
     pub edge_exists: bool,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum ValidationTargetKind {
-    Project,
-    Item,
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ValidationTarget {
-    pub kind: ValidationTargetKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum ValidationScope {
-    Project,
-    Schema,
-    Item,
-    Document,
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ValidationDiagnostic {
-    pub scope: ValidationScope,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<usize>,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ValidationResult {
-    /// Validity of the target; project validity includes diagnostics omitted by path selection.
-    pub valid: bool,
-    pub project: PathBuf,
-    pub target: ValidationTarget,
-    pub diagnostics: Vec<ValidationDiagnostic>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub selection: Option<ValidationSelection>,
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ValidationSelection {
-    /// Normalized project-relative paths selecting diagnostics, not validation context.
-    pub paths: Vec<PathBuf>,
-    /// Diagnostics outside the selection, still included in whole-project validity.
-    pub omitted_diagnostics: usize,
-}
-
-struct ValidationContext {
-    project: Project,
-    corpus: Corpus,
-    schema: Option<Schema>,
-    diagnostics: Vec<Diagnostic>,
-    project_diagnostics: Vec<ValidationDiagnostic>,
-    schema_diagnostics: Vec<ValidationDiagnostic>,
-}
-
-fn collect_validation_result(
-    mut context: ValidationContext,
-    selected: Option<&str>,
-) -> ValidationResult {
-    match &context.schema {
-        Some(schema) => context
-            .diagnostics
-            .extend(validate_corpus(&context.corpus, schema)),
-        None => context
-            .diagnostics
-            .extend(validate_corpus_independent(&context.corpus)),
-    }
-    let selected_item_missing = selected.is_some_and(|id| {
-        context.corpus.is_complete()
-            && !context
-                .corpus
-                .items()
-                .any(|item| item_matches_handle(item, id))
-            && !context
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.applies_to_item(id))
-    });
-    let selected_item_context_incomplete = selected.is_some() && !context.corpus.is_complete();
-    let selected_diagnostics = context
-        .diagnostics
-        .into_iter()
-        .filter(|diagnostic| {
-            selected.is_none_or(|id| {
-                diagnostic.applies_to_item(id)
-                    || context
-                        .corpus
-                        .items()
-                        .filter(|item| item_matches_handle(item, id))
-                        .any(|item| {
-                            diagnostic.source().span().start_byte()
-                                >= item.source().span().start_byte()
-                                && diagnostic.source().span().end_byte()
-                                    <= item.source().span().end_byte()
-                                && diagnostic.source().path() == item.source().path()
-                        })
-            })
-        })
-        .map(|diagnostic| ValidationDiagnostic {
-            scope: ValidationScope::Document,
-            path: Some(diagnostic.source().path().to_path_buf()),
-            line: Some(diagnostic.source().span().start_line()),
-            message: diagnostic.message().to_owned(),
-        });
-    let mut diagnostics = context.project_diagnostics;
-    diagnostics.extend(context.schema_diagnostics);
-    if selected_item_context_incomplete {
-        diagnostics.push(ValidationDiagnostic {
-            scope: ValidationScope::Item,
-            path: None,
-            line: None,
-            message: format!(
-                "item '{}' could not be fully validated because the project corpus is incomplete",
-                selected.expect("incomplete selected-item validation has an item ID")
-            ),
-        });
-    }
-    if selected_item_missing {
-        diagnostics.push(ValidationDiagnostic {
-            scope: ValidationScope::Item,
-            path: None,
-            line: None,
-            message: format!(
-                "item '{}' was not found",
-                selected.expect("missing selected item has an item ID")
-            ),
-        });
-    }
-    diagnostics.extend(selected_diagnostics);
-    ValidationResult {
-        valid: diagnostics.is_empty(),
-        project: context.project.root().to_path_buf(),
-        target: ValidationTarget {
-            kind: if selected.is_some() {
-                ValidationTargetKind::Item
-            } else {
-                ValidationTargetKind::Project
-            },
-            id: selected.map(str::to_owned),
-        },
-        diagnostics,
-        selection: None,
-    }
-}
-
-fn item_matches_handle(item: &crate::Item, handle: &str) -> bool {
-    if crate::is_mid(handle) {
-        item.mid() == Some(handle)
-    } else {
-        item.id() == handle
-    }
-}
+mod validation;
+pub use validation::{
+    ValidationDiagnostic, ValidationResult, ValidationScope, ValidationSelection, ValidationTarget,
+    ValidationTargetKind,
+};

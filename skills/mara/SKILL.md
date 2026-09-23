@@ -11,7 +11,7 @@ for structured results. The same operation selection, authoring, continuation,
 and validation rules apply to both surfaces.
 
 This skill targets the current 0.3 development interface: schema format 3,
-discovery format 2, and relationship format 1. Internal typed inline relationships,
+discovery format 2, relationship format 1, and validation format 1. Internal typed inline relationships,
 metadata inverse aliases and symmetric edges are implemented; external targets
 are not yet supported. Use the skill shipped with the selected executable or
 the same source revision. If an older installation exposes a different
@@ -113,6 +113,25 @@ inspect `<command> --help` for positional arguments and options.
 | Add or remove an existing item's typed edge | `relation_add` or `relation_remove` | `relation add`, `relation remove` |
 | Delete an item; resolve reported relation/mention blockers | `item_delete` | `item delete` |
 | Check an item or whole-project integrity | `item_validate` or `project_validate` | `item validate`, `project validate` |
+
+Validation (`project_validate`, `item_validate`, `schema_validate`) returns
+`valid`, `evaluation_complete`, `work`, `summary`, `diagnostics`, and output
+continuation. Match diagnostic `code` and `severity`, not message text.
+Warnings do not invalidate a complete result; configuration/source failures
+remain errors. Configured policy evaluators are not yet implemented.
+Invalid schemas now return the common envelope with `valid:false`, not an MCP
+tool error. Counts are null when the schema cannot load. Diagnostic `path` and
+`line` alias `location`; project-owned configuration paths are relative and
+unavailable coordinates are omitted.
+
+All three validation operations accept `limit` (1–100, default 20), `cursor`,
+and `max_work` (1–1,000,000, default 100,000); CLI uses `--limit`, `--cursor`,
+and `--max-work`. Continue unchanged inputs until `has_more:false`; summary
+and validity cover the full target before pagination and reporting paths.
+`evaluation_limit` means incomplete evaluation: restart without a cursor and
+raise the work budget within the maximum. Invalid arguments, stale cursors,
+I/O preventing a result, and oversized indivisible output return
+`{format_version:1,error:{code,message}}` with MCP `isError:true`.
 
 Use mutations only when the user has asked to change project knowledge. Choose
 the structured mutation for the semantic change. An invalid-argument error calls

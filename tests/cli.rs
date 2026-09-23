@@ -688,7 +688,8 @@ fn schema_guidance_rejects_invalid_declarations_through_cli_and_mcp() {
             ],
         );
         let result = &mcp_response(&responses, 2)["result"];
-        assert_eq!(result["isError"], true, "{result}");
+        assert_eq!(result["isError"], false, "{result}");
+        assert_eq!(result["structuredContent"]["valid"], false);
         assert!(result.to_string().contains(expected), "{result}");
         assert_eq!(
             mcp_response(&responses, 3)["result"]["structuredContent"]["valid"],
@@ -1759,7 +1760,7 @@ fn directory_validation_filters_reporting_with_full_project_status_and_context()
         .unwrap();
     }
     let full = validation_with_parity(&package, &[]);
-    assert!(full.get("selection").is_none());
+    assert!(full["selection"].is_null());
     assert_eq!(full["diagnostics"].as_array().unwrap().len(), 4);
     let expected: Vec<_> = full["diagnostics"]
         .as_array()
@@ -1843,8 +1844,8 @@ fn directory_validation_preserves_configuration_and_incomplete_context_failures(
     assert_eq!(diagnostics.len(), 2);
     assert_eq!(diagnostics[0]["scope"], "project");
     assert_eq!(diagnostics[1]["scope"], "schema");
-    assert_eq!(diagnostics[0]["path"], json!(config));
-    assert_eq!(diagnostics[1]["path"], json!(schema));
+    assert_eq!(diagnostics[0]["path"], ".mara/project.toml");
+    assert_eq!(diagnostics[1]["path"], ".mara/schema.yaml");
 
     fs::write(config, original_config).unwrap();
     fs::write(schema, original_schema).unwrap();
@@ -3363,7 +3364,7 @@ fn project_validation_continues_after_invalid_utf8() {
     assert!(!validate.status.success());
     let errors = stderr(&validate);
     for expected in [
-        "first.mara.md:1: error: could not read Mara document",
+        "first.mara.md: error: could not read Mara document",
         "second.mara.md:1: error: item opener must be",
         "validation failed with 2 diagnostics",
     ] {
@@ -3391,7 +3392,7 @@ fn item_validation_fails_when_an_included_document_is_unreadable() {
     assert!(!validate.status.success());
     let errors = stderr(&validate);
     assert!(
-        errors.contains("bad.mara.md:1: error: could not read Mara document"),
+        errors.contains("bad.mara.md: error: could not read Mara document"),
         "{errors}"
     );
     assert!(
@@ -7332,7 +7333,17 @@ fn primary_workflows_run_end_to_end_against_real_source_files() {
 #[test]
 fn dogfooded_repository_validates_and_retrieves_equivalently_through_cli_and_mcp() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let cli_validation = mara(repository, &["--format", "json", "project", "validate"]);
+    let cli_validation = mara(
+        repository,
+        &[
+            "--format",
+            "json",
+            "project",
+            "validate",
+            "--max-work",
+            "1000000",
+        ],
+    );
     assert!(
         cli_validation.status.success(),
         "{}",
@@ -7387,7 +7398,7 @@ fn dogfooded_repository_validates_and_retrieves_equivalently_through_cli_and_mcp
         &[
             mcp_initialize(1),
             json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
-            mcp_call(2, "project_validate", json!({})),
+            mcp_call(2, "project_validate", json!({"max_work":1000000})),
             mcp_call(
                 3,
                 "search",
@@ -11452,4 +11463,314 @@ fn relationship_alias_filters_initial_edges_and_identity_edits_preserve_occurren
         "moved.mara.md"
     );
     assert_eq!(validation_with_parity(root, &[])["valid"], true);
+}
+
+// Exercise the real CLI and stdio server for the validation result family.
+fn diagnostic_parity(root: &Path, args: &[&str], tool: &str, params: Value) -> Value {
+    let mut cli_args = vec!["--format", "json"];
+    cli_args.extend_from_slice(args);
+    let cli = mara(root, &cli_args);
+    let value: Value = serde_json::from_slice(&cli.stdout)
+        .unwrap_or_else(|error| panic!("{error}: {}", stderr(&cli)));
+    let replies = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, tool, params),
+        ],
+    );
+    let mcp = &mcp_response(&replies, 2)["result"];
+    assert_eq!(value, mcp["structuredContent"]);
+    assert_eq!(mcp["isError"], value.get("error").is_some());
+    assert_eq!(cli.status.success(), value["valid"] == true);
+    assert_eq!(value["format_version"], 1);
+    value
+}
+
+#[test]
+fn diagnostic_codes_locations_and_hidden_failures_have_surface_parity() {
+    let fixture = TempDir::new().unwrap();
+    assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    let source = ":::mara requirement WRONG-PREFIX\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: Café\n:unknown: value\n:justifies: REQ-MISSING\n\n[[missing_relation:REQ-MISSING]] [[REQ-MISSING]]\n:::\n";
+    fs::write(fixture.path().join("bad.mara.md"), source).unwrap();
+    let result = diagnostic_parity(
+        fixture.path(),
+        &["project", "validate"],
+        "project_validate",
+        json!({}),
+    );
+    let diagnostics = result["diagnostics"].as_array().unwrap();
+    for code in [
+        "identity_invalid",
+        "field_invalid",
+        "relation_invalid",
+        "reference_unresolved",
+    ] {
+        assert!(
+            diagnostics.iter().any(|d| d["code"] == code),
+            "missing {code}: {result}"
+        );
+    }
+    for diagnostic in diagnostics {
+        assert_eq!(diagnostic["severity"], "error");
+        assert_eq!(diagnostic["path"], diagnostic["location"]["path"]);
+        assert_eq!(diagnostic["line"], diagnostic["location"]["line"]);
+        assert_eq!(diagnostic["item"]["id"], "WRONG-PREFIX");
+        let start = diagnostic["location"]["start_byte"].as_u64().unwrap() as usize;
+        let end = diagnostic["location"]["end_byte"].as_u64().unwrap() as usize;
+        assert!(source.is_char_boundary(start) && source.is_char_boundary(end));
+        assert_eq!(
+            diagnostic["line"].as_u64().unwrap() as usize,
+            source[..start].bytes().filter(|b| *b == b'\n').count() + 1
+        );
+    }
+    let hidden = diagnostic_parity(
+        fixture.path(),
+        &["project", "validate", "--path", "unrelated/"],
+        "project_validate",
+        json!({"paths":["unrelated/"]}),
+    );
+    assert_eq!(hidden["diagnostics"], json!([]));
+    assert_eq!(hidden["valid"], false);
+    assert_eq!(hidden["summary"], result["summary"]);
+    assert_eq!(
+        hidden["selection"]["omitted_diagnostics"],
+        diagnostics.len()
+    );
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("bad.mara.md")).unwrap(),
+        source
+    );
+}
+
+#[test]
+fn diagnostic_pages_preserve_summary_and_reject_changed_snapshots_or_options() {
+    let fixture = TempDir::new().unwrap();
+    assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    let source = ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:extra: x\n\n[[REQ-MISSING]]\n:::\n";
+    let file = fixture.path().join("a.mara.md");
+    fs::write(&file, source).unwrap();
+    let first = diagnostic_parity(
+        fixture.path(),
+        &["project", "validate", "--limit", "1"],
+        "project_validate",
+        json!({"limit":1}),
+    );
+    assert_eq!(first["has_more"], true);
+    assert_eq!(first["summary"]["errors"], 2);
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let next = diagnostic_parity(
+        fixture.path(),
+        &["project", "validate", "--limit", "1", "--cursor", cursor],
+        "project_validate",
+        json!({"limit":1,"cursor":cursor}),
+    );
+    assert_eq!(next["has_more"], false);
+    assert_eq!(next["summary"], first["summary"]);
+    assert_eq!(next["work"], first["work"]);
+    assert_ne!(next["diagnostics"], first["diagnostics"]);
+    let item = diagnostic_parity(
+        fixture.path(),
+        &["item", "validate", "REQ-A", "--limit", "1"],
+        "item_validate",
+        json!({"id":"REQ-A","limit":1}),
+    );
+    assert_eq!(item["summary"], first["summary"]);
+    assert_eq!(item["has_more"], true);
+    for (args, params) in [
+        (
+            vec!["project", "validate", "--limit", "2", "--cursor", cursor],
+            json!({"limit":2,"cursor":cursor}),
+        ),
+        (
+            vec![
+                "project",
+                "validate",
+                "--limit",
+                "1",
+                "--max-work",
+                "99999",
+                "--cursor",
+                cursor,
+            ],
+            json!({"limit":1,"max_work":99999,"cursor":cursor}),
+        ),
+    ] {
+        assert_eq!(
+            diagnostic_parity(fixture.path(), &args, "project_validate", params)["error"]["code"],
+            "stale_cursor"
+        );
+    }
+    // Even a semantically irrelevant edit invalidates continuation.
+    fs::write(&file, format!("{source}\n<!-- changed -->\n")).unwrap();
+    assert_eq!(
+        diagnostic_parity(
+            fixture.path(),
+            &["project", "validate", "--limit", "1", "--cursor", cursor],
+            "project_validate",
+            json!({"limit":1,"cursor":cursor})
+        )["error"]["code"],
+        "stale_cursor"
+    );
+    fs::write(&file, source).unwrap();
+    let schema = fixture.path().join(".mara/schema.yaml");
+    let schema_source = fs::read_to_string(&schema).unwrap();
+    fs::write(schema, format!("{schema_source}\n# changed\n")).unwrap();
+    assert_eq!(
+        diagnostic_parity(
+            fixture.path(),
+            &["project", "validate", "--limit", "1", "--cursor", cursor],
+            "project_validate",
+            json!({"limit":1,"cursor":cursor})
+        )["error"]["code"],
+        "stale_cursor"
+    );
+}
+
+#[test]
+fn diagnostic_configuration_failures_keep_typed_locations_and_schema_envelope() {
+    let fixture = TempDir::new().unwrap();
+    assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    let schema = fixture.path().join(".mara/schema.yaml");
+    let original = fs::read_to_string(&schema).unwrap();
+    fs::write(
+        &schema,
+        original.replacen("format_version: 3", "format_version: 2", 1),
+    )
+    .unwrap();
+    let unsupported = diagnostic_parity(
+        fixture.path(),
+        &["schema", "validate"],
+        "schema_validate",
+        json!({}),
+    );
+    assert_eq!(unsupported["target"]["kind"], "schema");
+    assert_eq!(unsupported["diagnostics"][0]["code"], "format_unsupported");
+    assert_eq!(
+        unsupported["diagnostics"][0]["location"]["pointer"],
+        "/format_version"
+    );
+    assert!(unsupported["flavours"].is_null());
+    fs::write(&schema, "format_version: 3\nflavours: [\n").unwrap();
+    let malformed = diagnostic_parity(
+        fixture.path(),
+        &["schema", "validate"],
+        "schema_validate",
+        json!({}),
+    );
+    assert_eq!(malformed["diagnostics"][0]["code"], "schema_invalid");
+    assert!(
+        malformed["diagnostics"][0]["location"]["line"]
+            .as_u64()
+            .is_some()
+    );
+    assert_eq!(malformed["evaluation_complete"], false);
+    assert_eq!(malformed["summary"]["counts_exact"], false);
+    fs::write(&schema, &original).unwrap();
+    let config = fixture.path().join(".mara/project.toml");
+    fs::write(config, "format_version = [\n").unwrap();
+    let malformed = diagnostic_parity(
+        fixture.path(),
+        &["project", "validate"],
+        "project_validate",
+        json!({}),
+    );
+    assert_eq!(malformed["diagnostics"][0]["code"], "project_invalid");
+    assert!(
+        malformed["diagnostics"][0]["location"]["line"]
+            .as_u64()
+            .is_some()
+    );
+    assert_eq!(malformed["evaluation_complete"], false);
+}
+
+#[test]
+fn diagnostic_work_limits_and_operation_errors_are_distinct_from_policy_failure() {
+    let fixture = TempDir::new().unwrap();
+    assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    for (command, tool) in [
+        ("project", "project_validate"),
+        ("schema", "schema_validate"),
+    ] {
+        let limited = diagnostic_parity(
+            fixture.path(),
+            &[command, "validate", "--max-work", "1"],
+            tool,
+            json!({"max_work":1}),
+        );
+        assert_eq!(limited["valid"], false);
+        assert_eq!(limited["evaluation_complete"], false);
+        assert_eq!(limited["summary"]["counts_exact"], false);
+        assert_eq!(
+            limited["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|d| d["code"] == "evaluation_limit")
+                .count(),
+            1
+        );
+        assert!(limited["work"]["used"].as_u64().unwrap() <= 1);
+        let complete = diagnostic_parity(fixture.path(), &[command, "validate"], tool, json!({}));
+        assert_eq!(complete["valid"], true);
+        assert_eq!(complete["evaluation_complete"], true);
+        for (flag, value, params) in [
+            ("--max-work", "0", json!({"max_work":0})),
+            ("--max-work", "1000001", json!({"max_work":1000001})),
+            ("--limit", "0", json!({"limit":0})),
+            ("--cursor", "", json!({"cursor":""})),
+        ] {
+            assert_eq!(
+                diagnostic_parity(
+                    fixture.path(),
+                    &[command, "validate", flag, value],
+                    tool,
+                    params
+                )["error"]["code"],
+                "invalid_argument"
+            );
+        }
+    }
+    fs::write(fixture.path().join("bad.mara.md"), [0xff]).unwrap();
+    let unreadable = diagnostic_parity(
+        fixture.path(),
+        &["project", "validate"],
+        "project_validate",
+        json!({}),
+    );
+    assert_eq!(unreadable["diagnostics"][0]["code"], "source_invalid");
+    assert!(
+        unreadable["diagnostics"][0]["location"]
+            .get("line")
+            .is_none()
+    );
+    assert_eq!(unreadable["evaluation_complete"], false);
+    fs::remove_file(fixture.path().join(".mara/project.toml")).unwrap();
+    let root = fixture.path().to_str().unwrap();
+    assert_eq!(
+        diagnostic_parity(
+            fixture.path(),
+            &["--project", root, "project", "validate"],
+            "project_validate",
+            json!({"project":root})
+        )["error"]["code"],
+        "io_error"
+    );
+}
+
+#[test]
+fn diagnostic_output_budget_never_silently_discards_an_oversized_record() {
+    let fixture = TempDir::new().unwrap();
+    assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    let huge = "x".repeat(70_000);
+    fs::write(fixture.path().join("huge.mara.md"), format!(":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:{huge}: value\n\nBody.\n:::\n")).unwrap();
+    let result = diagnostic_parity(
+        fixture.path(),
+        &["project", "validate", "--max-work", "1000000"],
+        "project_validate",
+        json!({"max_work":1000000}),
+    );
+    assert_eq!(result["error"]["code"], "output_limit");
+    assert!(serde_json::to_vec(&result).unwrap().len() <= 65_536);
 }

@@ -3,8 +3,9 @@
 Contracts for the planned 0.3 implementation, extending
 [traceability](traceability.mara.md) and the accepted
 [relationship contracts](relations.mara.md). Examples describe intended
-results, not checks executed by the 0.2 binary. The active schema and executable
-remain unchanged. Project examples require the illustrated vocabulary; they
+policy results, not checks executed by the 0.2 binary. The development executable
+implements the diagnostic foundation in [[DES-TRACE-DIAGNOSTIC-INTERFACE]].
+Project examples require the illustrated vocabulary; they
 do not add lifecycle policy to bundled templates or existing projects.
 
 The accepted language foundation is SHACL Core, authored in YAML with generated
@@ -459,6 +460,25 @@ witness contract above; adopting SHACL does not enable unbounded rule paths.
 Validation and trace evaluation share these limits and diagnostic semantics.
 They do not change relationship mutation errors in [[DES-RELATION-INTERFACES]].
 
+## Implemented foundation
+
+Project, item and schema validation implement this diagnostic envelope for
+existing configuration, source, identity, field, reference and relationship
+checks. Rule identity, obligation and detail fields are available to policy
+producers. Structural cardinality/cycle policies and configured YAML rules
+remain separate implementation work; no current configuration enables policy
+warnings. Shared warning/error aggregation and CLI status handling are tested
+at the result boundary. End-to-end policy warning evidence must come from the
+real policy evaluators when implemented.
+
+Structural cost revision 1 reserves logical input work before each declaration,
+identity-index, item-validation and reference-discovery pass. It includes
+visited records and scalar/collection input sizes; repeated passes are charged
+again. The work ledger is deterministic and is included in continuation
+identity. Source loading/parsing and response formatting are outside this
+budget. This baseline does not establish SHACL or graph-policy budget compliance;
+those evaluators must add the per-operation accounting below.
+
 ## Work, output and continuation
 
 Accept `max_work` (CLI `--max-work`), integer 1–1,000,000, default 100,000.
@@ -829,12 +849,33 @@ do not advance the active schema or executable during contract authoring.
 | Discovery/relationship JSON | Retain the independently planned versions in the relationship compatibility contract. |
 | MCP | Reflect matching domain inputs/results in tool schemas; leave transport negotiation independent. |
 
+The diagnostic foundation is implemented; rule loading, graph policies and
+trace views remain planned. Existing project format 1 and schema format 3
+require no additional persisted migration to use the diagnostic envelope.
+
 Validation clients must read severity, evaluation_complete, valid and
 continuation, rather than equating a nonempty diagnostic list with failure or
 one page with complete reporting. Location path normalization and schema
 validation's common envelope are explicit migration changes. Discard old
 cursors on upgrade; MIDs and existing item/source references retain their
 documented identity rules.
+
+For validation format 1, replace unversioned schema-success/error handling with
+the common result: invalid schemas return `valid:false` and diagnostics, with
+MCP `isError:false`. Declaration counts are null when the schema cannot load.
+Diagnostic `path`/`line` alias `location` coordinates; configuration paths inside
+the project become relative and unavailable coordinates are omitted. Match
+`code` instead of message text. Read `summary` for full-target counts and follow
+`next_cursor` with unchanged options until `has_more:false`; a filtered or later
+page may be empty while the target remains invalid. Discard all old cursors.
+
+Validation defaults to 20 diagnostics and `max_work:100000`. If evaluation
+hits its budget, restart without a cursor and explicitly increase `max_work`,
+up to 1000000. Mara's own corpus check uses this maximum. Output paths only
+select reporting and never reduce the validation target. Read the structured
+operation-error envelope for invalid arguments, stale cursors, I/O preventing a
+result or oversized indivisible output. These errors are separate from
+completed operations with invalid/incomplete validation results.
 
 Migrate custom format-2 schemas using the recoverable workflow in the
 relationship compatibility contract. Without rule sources, no project-config
