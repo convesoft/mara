@@ -686,8 +686,8 @@ fn run(cli: Cli) -> Result<bool, String> {
                 for warning in &result.warnings {
                     eprintln!(
                         "warning: {}:{}: {}",
-                        warning.path.as_ref().expect("item warning path").display(),
-                        warning.line.expect("item warning line"),
+                        warning.path.display(),
+                        warning.line,
                         warning.message
                     );
                 }

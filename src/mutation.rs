@@ -16,7 +16,7 @@ pub use delete::{ItemDeletion, delete_item};
 pub use rename::{ItemRename, rename_item};
 use transaction::MutationLock;
 pub use transaction::{TransactionRollback, rollback_transaction};
-pub use update::{ItemUpdate, update_item};
+pub use update::{ItemUpdate, ItemUpdateWarning, update_item};
 
 use crate::{
     BodyRequirement, Corpus, Error, FieldDefinition, FieldType, Item, Project, Schema,

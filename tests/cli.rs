@@ -8219,6 +8219,17 @@ fn item_update_allows_continued_drafting_and_completes_scaffolds() {
     let cli: Value = serde_json::from_slice(&cli.stdout).unwrap();
     assert_eq!(cli["warnings"].as_array().unwrap().len(), 1);
     assert_eq!(cli["warnings"][0]["path"], "draft.mara.md");
+    assert_eq!(
+        cli["warnings"][0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        vec!["line", "message", "path", "scope"]
+    );
+    assert_eq!(cli["warnings"][0]["scope"], "item");
+    assert!(cli["warnings"][0]["line"].as_u64().unwrap() > 0);
     let responses = mcp_exchange(
         fixture.path(),
         &[
@@ -11880,6 +11891,34 @@ fn diagnostic_work_limits_and_operation_errors_are_distinct_from_policy_failure(
         )["error"]["code"],
         "io_error"
     );
+}
+
+#[test]
+fn diagnostic_schema_read_failures_are_operation_errors() {
+    let fixture = TempDir::new().unwrap();
+    assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    // The file exists during resolution but cannot be read as text. This
+    // exercises the schema read failure without permission or race assumptions.
+    fs::write(fixture.path().join(".mara/schema.yaml"), [0xff]).unwrap();
+    for (args, tool, params) in [
+        (vec!["project", "validate"], "project_validate", json!({})),
+        (vec!["schema", "validate"], "schema_validate", json!({})),
+        (
+            vec!["item", "validate", "REQ-A"],
+            "item_validate",
+            json!({"id":"REQ-A"}),
+        ),
+    ] {
+        let result = diagnostic_parity(fixture.path(), &args, tool, params);
+        assert_eq!(result["error"]["code"], "io_error");
+        assert!(
+            result["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("read project schema")
+        );
+        assert!(result.get("valid").is_none());
+    }
 }
 
 #[test]

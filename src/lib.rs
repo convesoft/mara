@@ -38,9 +38,9 @@ pub use discovery::{
 };
 pub use mutation::{
     BackfilledMid, BackfilledMids, InitialRelation, ItemCreation, ItemCreationRequest,
-    ItemDeletion, ItemLocation, ItemMove, ItemRename, ItemUpdate, RelationMutation,
-    TransactionRollback, add_relation, backfill_mids, create_item, delete_item, move_item,
-    remove_relation, rename_item, rollback_transaction, update_item,
+    ItemDeletion, ItemLocation, ItemMove, ItemRename, ItemUpdate, ItemUpdateWarning,
+    RelationMutation, TransactionRollback, add_relation, backfill_mids, create_item, delete_item,
+    move_item, remove_relation, rename_item, rollback_transaction, update_item,
 };
 pub use operations::{
     DeclarationSummary, FieldValue, GetParams, ItemCreateParams, ItemCreationResult,

@@ -287,16 +287,7 @@ impl OperationContext {
                         None
                     }
                 }
-                Err(error) => {
-                    result.diagnostics.push(ValidationDiagnostic::new(
-                        DiagnosticCode::SchemaInvalid,
-                        Severity::Error,
-                        ValidationScope::Schema,
-                        DiagnosticLocation::file(project.root(), project.schema_path()),
-                        error.to_string(),
-                    ));
-                    None
-                }
+                Err(error) => return Err(operation_error(error)),
             }
         } else {
             None
