@@ -12014,6 +12014,78 @@ fn rule_fixture() -> TempDir {
 }
 
 #[test]
+fn current_state_rules_reject_datatypes_on_relation_endpoints() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    for (target, path) in [
+        ("design", json!("satisfies")),
+        ("requirement", json!({"inversePath":"satisfies"})),
+    ] {
+        for key in ["datatype", "node", "qualifiedValueShape"] {
+            let mut property = json!({"path":path});
+            property[key] = if key == "datatype" {
+                json!("string")
+            } else {
+                json!({"datatype":"string"})
+            };
+            if key == "qualifiedValueShape" {
+                property["qualifiedMinCount"] = json!(0);
+            }
+            let rule = json!({"id":"rule:relation_type", "targetClass":target,
+                "property":[property]});
+            fs::write(
+                root.join("rules.yaml"),
+                serde_saphyr::to_string(&rule).unwrap(),
+            )
+            .unwrap();
+            let result =
+                diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+            assert_eq!(result["valid"], false, "{target}/{key}: {result:#}");
+            assert_eq!(
+                result["diagnostics"][0]["code"], "rule_invalid",
+                "{result:#}"
+            );
+            let pointer = if key == "datatype" {
+                "/property/0/datatype".into()
+            } else {
+                format!("/property/0/{key}/datatype")
+            };
+            assert_eq!(result["diagnostics"][0]["location"]["pointer"], pointer);
+        }
+    }
+    // Reusing a valid literal constraint on a relation must still be rejected.
+    let rules = json!([
+        {"id":"rule:shared_type", "targetClass":"design", "property":[
+            {"path":"owner", "node":"rule:text"},
+            {"path":"satisfies", "node":"rule:text"}
+        ]},
+        {"id":"rule:text", "and":[{"datatype":"string"}]}
+    ]);
+    fs::write(
+        root.join("rules.yaml"),
+        serde_saphyr::to_string(&rules).unwrap(),
+    )
+    .unwrap();
+    let invalid = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(invalid["valid"], false, "{invalid:#}");
+    assert_eq!(
+        invalid["diagnostics"][0]["location"]["pointer"],
+        "/1/and/0/datatype"
+    );
+    // A relation's endpoint can instead constrain one of its literal fields.
+    fs::write(root.join("rules.yaml"),
+        "id: rule:related_owner\ntargetClass: design\nproperty:\n  - path: satisfies\n    minCount: 1\n    node:\n      class: requirement\n      property: [{path: owner, datatype: string, minCount: 1}]\n"
+    ).unwrap();
+    assert!(
+        mara(root, &["relation", "add", "DES-A", "satisfies", "REQ-A"])
+            .status
+            .success()
+    );
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+}
+
+#[test]
 fn current_state_rules_preserve_field_types_in_nested_value_shapes() {
     let fixture = rule_fixture();
     let root = fixture.path();

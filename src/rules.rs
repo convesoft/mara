@@ -29,6 +29,11 @@ struct Shape {
     source: DiagnosticLocation,
     locations: BTreeMap<String, DiagnosticLocation>,
 }
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum ValueKind {
+    Nodes,
+    Literals(Vec<&'static str>),
+}
 pub(crate) struct Rules {
     shapes: BTreeMap<String, Shape>,
     roots: Vec<String>,
@@ -160,9 +165,13 @@ impl Rules {
             }
             for root in rules.roots.clone() {
                 let flavours = strings(&rules.shapes[&root].value["targetClass"]);
-                if let Err((loc, message)) =
-                    rules.compatible(&root, &flavours, &[], schema, &mut BTreeSet::new())
-                {
+                if let Err((loc, message)) = rules.compatible(
+                    &root,
+                    &flavours,
+                    &ValueKind::Nodes,
+                    schema,
+                    &mut BTreeSet::new(),
+                ) {
                     rules.invalid(loc, message);
                 }
             }
@@ -538,11 +547,11 @@ impl Rules {
         &self,
         id: &str,
         flavours: &[String],
-        datatypes: &[&'static str],
+        value_kind: &ValueKind,
         schema: &Schema,
-        visited: &mut BTreeSet<(String, Vec<String>, Vec<&'static str>)>,
+        visited: &mut BTreeSet<(String, Vec<String>, ValueKind)>,
     ) -> Result<(), (DiagnosticLocation, String)> {
-        if !visited.insert((id.into(), flavours.to_vec(), datatypes.to_vec())) {
+        if !visited.insert((id.into(), flavours.to_vec(), value_kind.clone())) {
             return Ok(());
         }
         let Some(s) = self.shapes.get(id) else {
@@ -561,7 +570,7 @@ impl Rules {
                 .collect()
         };
         let mut children = context.clone();
-        let mut child_datatypes = datatypes.to_vec();
+        let mut child_kind = value_kind.clone();
         if let Some(path) = s.value.get("path") {
             let name = path
                 .as_str()
@@ -580,12 +589,14 @@ impl Rules {
                             format!("field {field} is not declared for every selected flavour"),
                         ));
                     }
-                    child_datatypes = defs.iter().map(|d| datatype_name(d.field_type)).collect();
-                    child_datatypes.sort_unstable();
-                    child_datatypes.dedup();
+                    let mut datatypes: Vec<_> =
+                        defs.iter().map(|d| datatype_name(d.field_type)).collect();
+                    datatypes.sort_unstable();
+                    datatypes.dedup();
+                    child_kind = ValueKind::Literals(datatypes);
                     children.clear();
                 } else if let Some(relation) = resolved.strip_prefix(REL) {
-                    child_datatypes.clear();
+                    child_kind = ValueKind::Nodes;
                     let r = &schema.relations[relation];
                     let (from, to) = if path.is_object() {
                         (&r.target, &r.source)
@@ -609,13 +620,17 @@ impl Rules {
                 children.retain(|f| classes.contains(f));
             }
         }
-        if let Some(datatype) = s.value["datatype"].as_str()
-            && child_datatypes.iter().any(|t| datatype != *t)
-        {
-            return Err((
-                s.location("datatype"),
-                "field datatype is incompatible with its schema declaration".into(),
-            ));
+        if let Some(datatype) = s.value["datatype"].as_str() {
+            let error = match &child_kind {
+                ValueKind::Nodes => Some("datatype constraints require literal field values"),
+                ValueKind::Literals(types) if types.iter().any(|t| datatype != *t) => {
+                    Some("field datatype is incompatible with its schema declaration")
+                }
+                ValueKind::Literals(_) => None,
+            };
+            if let Some(message) = error {
+                return Err((s.location("datatype"), message.into()));
+            }
         }
         for key in [
             "whenShape",
@@ -635,9 +650,9 @@ impl Rules {
                         &children
                     },
                     if key == "whenShape" {
-                        datatypes
+                        value_kind
                     } else {
-                        &child_datatypes
+                        &child_kind
                     },
                     schema,
                     visited,
