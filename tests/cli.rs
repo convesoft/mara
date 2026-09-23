@@ -12014,6 +12014,67 @@ fn rule_fixture() -> TempDir {
 }
 
 #[test]
+fn current_state_rules_reject_node_constraints_on_literal_values() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    for (property, pointer) in [
+        (
+            json!({"path":"owner", "class":"requirement"}),
+            "/property/0/class",
+        ),
+        (
+            json!({"path":"score", "class":"requirement"}),
+            "/property/0/class",
+        ),
+        (
+            json!({"path":"owner", "node":{"class":"requirement"}}),
+            "/property/0/node/class",
+        ),
+        (
+            json!({"path":"owner", "qualifiedValueShape":{"class":"requirement"}, "qualifiedMinCount":0}),
+            "/property/0/qualifiedValueShape/class",
+        ),
+        (
+            json!({"path":"owner", "property":[{"path":"owner", "minCount":1}]}),
+            "/property/0/property/0/path",
+        ),
+        (
+            json!({"path":"owner", "node":{"property":[{"path":"satisfies", "minCount":1}]}}),
+            "/property/0/node/property/0/path",
+        ),
+        (
+            json!({"path":"owner", "node":{"property":[{"path":{"inversePath":"satisfies"}, "minCount":1}]}}),
+            "/property/0/node/property/0/path",
+        ),
+        (
+            json!({"path":"owner", "node":{"and":[{"class":"requirement"}]}}),
+            "/property/0/node/and/0/class",
+        ),
+    ] {
+        let rule = json!({"id":"rule:literal_endpoint", "targetClass":"requirement",
+            "property":[property]});
+        fs::write(
+            root.join("rules.yaml"),
+            serde_saphyr::to_string(&rule).unwrap(),
+        )
+        .unwrap();
+        let result = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(result["valid"], false, "{pointer}: {result:#}");
+        assert_eq!(
+            result["diagnostics"][0]["code"], "rule_invalid",
+            "{result:#}"
+        );
+        assert_eq!(result["diagnostics"][0]["location"]["pointer"], pointer);
+    }
+    // Literal constraints remain valid, including behind logical and node shapes.
+    fs::write(root.join("rules.yaml"),
+        "id: rule:literal_endpoint\ntargetClass: requirement\nproperty: [{path: owner, node: {and: [{datatype: string}, {hasValue: Alice}]}}]\n"
+    ).unwrap();
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+}
+
+#[test]
 fn current_state_rules_reject_datatypes_on_relation_endpoints() {
     let fixture = rule_fixture();
     let root = fixture.path();

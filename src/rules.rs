@@ -572,6 +572,12 @@ impl Rules {
         let mut children = context.clone();
         let mut child_kind = value_kind.clone();
         if let Some(path) = s.value.get("path") {
+            if matches!(value_kind, ValueKind::Literals(_)) {
+                return Err((
+                    s.location("path"),
+                    "field and relation paths require item nodes, not literal field values".into(),
+                ));
+            }
             let name = path
                 .as_str()
                 .or_else(|| path["inversePath"].as_str())
@@ -619,6 +625,12 @@ impl Rules {
             if !classes.is_empty() {
                 children.retain(|f| classes.contains(f));
             }
+        }
+        if !classes.is_empty() && matches!(child_kind, ValueKind::Literals(_)) {
+            return Err((
+                s.location("class"),
+                "flavour class constraints require item nodes, not literal field values".into(),
+            ));
         }
         if let Some(datatype) = s.value["datatype"].as_str() {
             let error = match &child_kind {
