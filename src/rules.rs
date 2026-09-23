@@ -161,7 +161,7 @@ impl Rules {
             for root in rules.roots.clone() {
                 let flavours = strings(&rules.shapes[&root].value["targetClass"]);
                 if let Err((loc, message)) =
-                    rules.compatible(&root, &flavours, schema, &mut BTreeSet::new())
+                    rules.compatible(&root, &flavours, &[], schema, &mut BTreeSet::new())
                 {
                     rules.invalid(loc, message);
                 }
@@ -538,10 +538,11 @@ impl Rules {
         &self,
         id: &str,
         flavours: &[String],
+        datatypes: &[&'static str],
         schema: &Schema,
-        visited: &mut BTreeSet<(String, Vec<String>)>,
+        visited: &mut BTreeSet<(String, Vec<String>, Vec<&'static str>)>,
     ) -> Result<(), (DiagnosticLocation, String)> {
-        if !visited.insert((id.into(), flavours.to_vec())) {
+        if !visited.insert((id.into(), flavours.to_vec(), datatypes.to_vec())) {
             return Ok(());
         }
         let Some(s) = self.shapes.get(id) else {
@@ -560,6 +561,7 @@ impl Rules {
                 .collect()
         };
         let mut children = context.clone();
+        let mut child_datatypes = datatypes.to_vec();
         if let Some(path) = s.value.get("path") {
             let name = path
                 .as_str()
@@ -578,16 +580,12 @@ impl Rules {
                             format!("field {field} is not declared for every selected flavour"),
                         ));
                     }
-                    if let Some(datatype) = s.value["datatype"].as_str()
-                        && defs.iter().any(|d| datatype != datatype_name(d.field_type))
-                    {
-                        return Err((
-                            s.location("datatype"),
-                            "field datatype is incompatible with its schema declaration".into(),
-                        ));
-                    }
+                    child_datatypes = defs.iter().map(|d| datatype_name(d.field_type)).collect();
+                    child_datatypes.sort_unstable();
+                    child_datatypes.dedup();
                     children.clear();
                 } else if let Some(relation) = resolved.strip_prefix(REL) {
+                    child_datatypes.clear();
                     let r = &schema.relations[relation];
                     let (from, to) = if path.is_object() {
                         (&r.target, &r.source)
@@ -611,6 +609,14 @@ impl Rules {
                 children.retain(|f| classes.contains(f));
             }
         }
+        if let Some(datatype) = s.value["datatype"].as_str()
+            && child_datatypes.iter().any(|t| datatype != *t)
+        {
+            return Err((
+                s.location("datatype"),
+                "field datatype is incompatible with its schema declaration".into(),
+            ));
+        }
         for key in [
             "whenShape",
             "node",
@@ -627,6 +633,11 @@ impl Rules {
                         &context
                     } else {
                         &children
+                    },
+                    if key == "whenShape" {
+                        datatypes
+                    } else {
+                        &child_datatypes
                     },
                     schema,
                     visited,

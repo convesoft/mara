@@ -12014,6 +12014,91 @@ fn rule_fixture() -> TempDir {
 }
 
 #[test]
+fn current_state_rules_preserve_field_types_in_nested_value_shapes() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    assert!(
+        mara(root, &["item", "update", "REQ-A", "--field", "score=1"])
+            .status
+            .success()
+    );
+    for (field, datatype) in [
+        ("owner", "string"),
+        ("status", "string"),
+        ("score", "double"),
+    ] {
+        for key in ["node", "qualifiedValueShape"] {
+            for (constraint_type, valid) in [("integer", false), (datatype, true)] {
+                let mut property = json!({"path":field});
+                property[key] = json!({"datatype":constraint_type});
+                if key == "qualifiedValueShape" {
+                    property["qualifiedMinCount"] = json!(0);
+                }
+                let rule = json!({"id":"rule:nested_type", "targetClass":"requirement",
+                    "property":[property]});
+                fs::write(
+                    root.join("rules.yaml"),
+                    serde_saphyr::to_string(&rule).unwrap(),
+                )
+                .unwrap();
+                let result =
+                    diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+                assert_eq!(result["valid"], valid, "{field}/{key}: {result:#}");
+                if valid {
+                    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+                } else {
+                    assert_eq!(
+                        result["diagnostics"][0]["code"], "rule_invalid",
+                        "{result:#}"
+                    );
+                    assert_eq!(
+                        result["diagnostics"][0]["location"]["pointer"],
+                        format!("/property/0/{key}/datatype")
+                    );
+                }
+            }
+        }
+    }
+    // The same reusable shape must be checked separately for each field type,
+    // even through an additional logical/nested shape layer.
+    for (second_field, valid) in [("status", true), ("score", false)] {
+        let rules = json!([
+            {"id":"rule:shared", "targetClass":"requirement", "property":[
+                {"path":"owner", "node":"rule:text"},
+                {"path":second_field, "node":"rule:text"}
+            ]},
+            {"id":"rule:text", "and":[{"node":{"datatype":"string"}}]}
+        ]);
+        fs::write(
+            root.join("rules.yaml"),
+            serde_saphyr::to_string(&rules).unwrap(),
+        )
+        .unwrap();
+        let result = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(result["valid"], valid, "{second_field}: {result:#}");
+        if !valid {
+            assert_eq!(
+                result["diagnostics"][0]["code"], "rule_invalid",
+                "{result:#}"
+            );
+            assert_eq!(
+                result["diagnostics"][0]["location"]["pointer"],
+                "/1/and/0/node/datatype"
+            );
+        }
+    }
+    fs::write(root.join("rules.yaml"),
+        "id: rule:value\ntargetClass: requirement\nproperty: [{path: owner, node: {datatype: string, hasValue: Bob}}]\n"
+    ).unwrap();
+    let failed = validation_with_parity(root, &[]);
+    assert_eq!(failed["evaluation_complete"], true, "{failed:#}");
+    assert_eq!(
+        failed["diagnostics"][0]["code"], "rule_failed",
+        "{failed:#}"
+    );
+}
+
+#[test]
 fn current_state_rules_report_authored_messages_with_a_generated_fallback() {
     let fixture = rule_fixture();
     let root = fixture.path();
