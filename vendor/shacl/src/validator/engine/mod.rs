@@ -1,0 +1,135 @@
+mod focus_nodes_ops;
+mod native;
+#[cfg(feature = "sparql")]
+mod sparql;
+mod validate;
+mod value_nodes_ops;
+
+use crate::ir::{IRComponent, IRPropertyShape, IRSchema, IRShape, ShapeLabelIdx};
+use crate::types::Target;
+use rudof_iri::IriS;
+use rudof_rdf::rdf_core::term::Object;
+use rudof_rdf::rdf_core::{NeighsRDF, SHACLPath};
+#[cfg(feature = "sparql")]
+use std::collections::HashSet;
+
+use crate::error::ValidationError;
+use crate::validator::RecursionSemantics;
+use crate::validator::nodes::{FocusNodes, ValueNodes};
+use crate::validator::report::ValidationOutcome;
+pub use native::NativeEngine;
+#[cfg(feature = "sparql")]
+use rudof_rdf::rdf_core::query::QueryRDF;
+#[cfg(feature = "sparql")]
+pub use sparql::SparqlEngine;
+pub use validate::Validate;
+
+pub trait Engine<S: NeighsRDF>: Send {
+    /// Pre-builds internal indexes from the data graph for faster target resolution
+    ///
+    /// This should be called **once** before the validation loop starts
+    fn build_indexes(&mut self, _store: &S) -> Result<(), ValidationError> {
+        Ok(())
+    }
+
+    /// Creates a new engine instance that shares pre-built indexes and cache.
+    ///
+    /// This is used by the parallel validator to cheaply spin up per-shape
+    /// engines without rebuilding expensive indexes for every thread.
+    fn fork(&self) -> Box<dyn Engine<S>>;
+
+    fn evaluate(
+        &mut self,
+        store: &S,
+        shape: &IRShape,
+        component: &IRComponent,
+        value_nodes: &ValueNodes<S>,
+        source_shape: Option<&IRShape>,
+        maybe_path: Option<&SHACLPath>,
+        shapes_graph: &IRSchema,
+    ) -> Result<ValidationOutcome, ValidationError>;
+
+    fn focus_nodes(&self, store: &S, targets: &[Target]) -> Result<FocusNodes<S>, ValidationError> {
+        let targets_iter: Vec<_> = targets
+            .iter()
+            .flat_map(|target| match target {
+                Target::Node(n) => self.target_node(store, n),
+                Target::Class(c) => self.target_class(store, c),
+                Target::SubjectsOf(p) => self.target_subject_of(store, p),
+                Target::ObjectsOf(p) => self.target_object_of(store, p),
+                Target::ImplicitClass(n) => self.implicit_target_class(store, n),
+                Target::WrongNode(_) => todo!(),
+                Target::WrongClass(_) => todo!(),
+                Target::WrongSubjectsOf(_) => todo!(),
+                Target::WrongObjectsOf(_) => todo!(),
+                Target::WrongImplicitClass(_) => todo!(),
+            })
+            .flatten()
+            .collect();
+
+        Ok(FocusNodes::from_iter(targets_iter))
+    }
+
+    /// If s is a shape in a shapes graph SG and s has value t for sh:targetNode
+    /// in SG then { t } is a target from any data graph for s in SG.
+    fn target_node(&self, store: &S, node: &Object) -> Result<FocusNodes<S>, ValidationError>;
+
+    fn target_class(&self, store: &S, class: &Object) -> Result<FocusNodes<S>, ValidationError>;
+
+    fn target_subject_of(&self, store: &S, predicate: &IriS) -> Result<FocusNodes<S>, ValidationError>;
+
+    fn target_object_of(&self, store: &S, predicate: &IriS) -> Result<FocusNodes<S>, ValidationError>;
+
+    fn implicit_target_class(&self, store: &S, shape: &Object) -> Result<FocusNodes<S>, ValidationError>;
+
+    fn path(&self, store: &S, shape: &IRPropertyShape, focus_node: &S::Term) -> Result<FocusNodes<S>, ValidationError> {
+        crate::validator::bounded::path(&focus_node.to_string(), shape.path())?;
+        let nodes = store.objects_for_shacl_path(focus_node, shape.path())?;
+        Ok(FocusNodes::new(nodes))
+    }
+
+    fn record_validation(&mut self, node: Object, shape_idx: ShapeLabelIdx, outcome: ValidationOutcome);
+
+    fn has_validated(&self, node: &Object, shape_idx: ShapeLabelIdx) -> bool;
+
+    /// Returns the cached validation outcome for a given `(node, shape_idx)` pair, if any.
+    ///
+    /// Returns an owned [`ValidationOutcome`] so that implementations backed by concurrent
+    /// data structures can return data without tying the lifetime to an internal lock guard.
+    fn get_cached_outcome(&self, node: &Object, shape_idx: ShapeLabelIdx) -> Option<ValidationOutcome>;
+
+    /// Which fixpoint semantics to assume when a recursive shape reference
+    /// (a cycle) is encountered during validation.
+    fn recursion_semantics(&self) -> RecursionSemantics;
+
+    /// Whether `(node, shape_idx)` is currently being validated further up
+    /// this engine's own call stack — i.e. a nested reference back to it
+    /// would be a cyclic (recursive) shape reference. Unlike
+    /// [`Self::has_validated`], this is per-engine, in-progress state, not
+    /// the shared, finished-results cache.
+    fn is_in_chain(&self, node: &Object, shape_idx: ShapeLabelIdx) -> bool;
+
+    /// Marks `(node, shape_idx)` as currently being validated, so a nested
+    /// call that reaches it again can be detected via [`Self::is_in_chain`].
+    fn chain_enter(&mut self, node: Object, shape_idx: ShapeLabelIdx);
+
+    /// Un-marks `(node, shape_idx)` once its validation has finished.
+    fn chain_exit(&mut self, node: &Object, shape_idx: ShapeLabelIdx);
+}
+
+#[cfg(feature = "sparql")]
+fn select<S: QueryRDF>(store: &S, query: &str, index: &str) -> Result<HashSet<S::Term>, ValidationError> {
+    let mut out = HashSet::new();
+
+    let query = store
+        .query_select(query)
+        .map_err(ValidationError::select_query_error::<S>)?;
+
+    for sol in query.iter() {
+        if let Some(sol) = sol.find_solution(index) {
+            out.insert(sol.to_owned());
+        }
+    }
+
+    Ok(out)
+}

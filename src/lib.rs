@@ -22,6 +22,7 @@ mod mutation;
 mod operations;
 mod query;
 mod relations;
+mod rules;
 pub use relations::{
     RelationEdge, RelationEndpoint, RelationError, RelationInspection, RelationOccurrence,
 };
@@ -79,6 +80,7 @@ pub struct Project {
     schema_path: PathBuf,
     content_patterns: Vec<String>,
     content_discovery_complete: bool,
+    rule_files: Vec<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -1270,6 +1272,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
                     name: String::new(),
                     content_patterns: vec![],
                     content_discovery_complete: false,
+                    rule_files: vec![],
                 },
                 errors: vec![diagnostic],
                 schema_available: false,
@@ -1305,14 +1308,44 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
             }
             None => None,
         };
+    let mut rule_files = Vec::new();
+    if configuration.contains_key("rules") {
+        if format_version != Some(2) {
+            errors.push(ConfigurationDiagnostic::project(
+                &["rules"],
+                "rule sources require project format 2".into(),
+            ));
+        }
+        if let Some(mut rules) =
+            take_project_table(&mut configuration, "rules", "rules", &mut errors)
+        {
+            let version: Option<u32> = take_project_value(
+                &mut rules,
+                "format_version",
+                "rules.format_version",
+                &mut errors,
+            );
+            if version != Some(1) {
+                errors.push(ConfigurationDiagnostic::new(
+                    DiagnosticCode::FormatUnsupported,
+                    diagnostics::pointer(&["rules", "format_version"]),
+                    "unsupported rule binding; expected 1".into(),
+                ));
+            }
+            let files: Option<Vec<PathBuf>> =
+                take_project_value(&mut rules, "files", "rules.files", &mut errors);
+            rule_files = files.unwrap_or_default();
+            unknown_project_keys(&rules, "rules", &mut errors);
+        }
+    }
     unknown_project_keys(&configuration, "", &mut errors);
 
-    if format_version.is_some_and(|version| version != 1) {
+    if format_version.is_some_and(|version| version != 1 && version != 2) {
         errors.push(ConfigurationDiagnostic::new(
             DiagnosticCode::FormatUnsupported,
             diagnostics::pointer(&["format_version"]),
             format!(
-                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. This implementation supports format 1 without rule sources",
+                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. Supported formats are 1 (without rules) and 2",
                 format_version.expect("format version is present")
             ),
         ));
@@ -1407,6 +1440,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
             schema_path,
             content_patterns,
             content_discovery_complete,
+            rule_files,
         },
         errors,
         schema_available,

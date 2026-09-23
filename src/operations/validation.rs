@@ -297,6 +297,19 @@ impl OperationContext {
         snapshot.update(b"validation-1-structural-cost-2");
         hash_file(&mut snapshot, &project.root().join(crate::PROJECT_FILE));
         hash_file(&mut snapshot, project.schema_path());
+        snapshot.update(b"yaml-shacl-binding-1-patch-1-cost-1");
+        let rules = schema
+            .as_ref()
+            .map(|schema| crate::rules::Rules::load(&project, schema, &mut work));
+        if let Some(rules) = &rules {
+            for path in &rules.files {
+                hash_file(&mut snapshot, path);
+            }
+            if !rules.diagnostics.is_empty() {
+                result.evaluation_complete = false;
+            }
+            result.diagnostics.extend(rules.diagnostics.clone());
+        }
         if let Some(schema) = &schema
             && schema_only
         {
@@ -337,6 +350,15 @@ impl OperationContext {
                     }
                     None => crate::corpus::validate_corpus_independent_bounded(&corpus, &mut work),
                 });
+            }
+            if let (Some(rules), Some(schema)) = (&rules, &schema)
+                && rules.diagnostics.is_empty()
+                && !result
+                    .diagnostics
+                    .iter()
+                    .any(|d| matches!(d.scope, ValidationScope::Project | ValidationScope::Schema))
+            {
+                rules.evaluate(&corpus, schema, &source_diagnostics, &mut result, &mut work);
             }
             collect_source_diagnostics(&corpus, source_diagnostics, &mut result);
         }

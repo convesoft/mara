@@ -118,7 +118,12 @@ Validation (`project_validate`, `item_validate`, `schema_validate`) returns
 `valid`, `evaluation_complete`, `work`, `summary`, `diagnostics`, and output
 continuation. Match diagnostic `code` and `severity`, not message text.
 Warnings do not invalidate a complete result; configuration/source failures
-remain errors. Configured policy evaluators are not yet implemented.
+remain errors. Current-state rules load from explicit YAML files enabled by
+project format 2 and `[rules]` with `format_version = 1` and `files = [...]`.
+Run `schema_validate` to check definitions, then `project_validate` or
+`item_validate` to evaluate policy. Status/owner fields are project-defined;
+templates and existing projects gain no policies automatically. Policy failures
+do not block structured edits. Structural graph policies and trace views remain planned.
 Invalid schemas now return the common envelope with `valid:false`, not an MCP
 tool error. Counts are null when the schema cannot load. Diagnostic `path` and
 `line` alias `location`; project-owned configuration paths are relative and

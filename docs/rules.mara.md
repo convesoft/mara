@@ -1,17 +1,17 @@
 # Rules, diagnostics and trace views
 
-Contracts for the planned 0.3 implementation, extending
+Contracts for the 0.3 implementation, extending
 [traceability](traceability.mara.md) and the accepted
-[relationship contracts](relations.mara.md). Examples describe intended
-policy results, not checks executed by the 0.2 binary. The development executable
-implements the diagnostic foundation in [[DES-TRACE-DIAGNOSTIC-INTERFACE]].
+[relationship contracts](relations.mara.md). The development executable
+implements YAML current-state rules and [[DES-TRACE-DIAGNOSTIC-INTERFACE]];
+the published 0.2 binary does not execute these policies.
 Project examples require the illustrated vocabulary; they
 do not add lifecycle policy to bundled templates or existing projects.
 
 The accepted language foundation is SHACL Core, authored in YAML with generated
 bindings and verified by [[EVD-YAML-SHACL-SPIKE]]. The contracts replace the
-earlier unshipped formats; the complete loader and bound enforcement remain
-implementation work.
+earlier unshipped formats. [[ADR-BOUNDED-SHACL-DEPENDENCY]] records the
+native execution boundary; structural graph policies and trace views remain planned.
 
 :::mara design DES-TRACE-RULE-GRAMMAR
 :mid: 01M2JNZMJ0VT20GWH4HF6DBBC5
@@ -35,7 +35,7 @@ reuse a value; expanded constraints retain their authored occurrence/source
 mapping. Null is not a missing constraint parameter.
 
 Project configuration references explicit project-relative files; rule bodies
-are separate from vocabulary schema YAML. The planned addition is:
+are separate from vocabulary schema YAML. Enable sources with project format 2:
 
 ```toml
 [rules]
@@ -373,9 +373,18 @@ SHACL alternative with another passing child. This is Mara completeness
 reporting; ordinary constraint nonconformance still follows SHACL logic.
 
 Ordinary source edits and structured mutations are evaluated identically;
-policy failure does not introduce a new mutation gate. Rust library integration
-is tested, but loading this persisted binding, precise source mapping and
-enforcing whole-engine work accounting remain implementation obligations.
+policy failure does not introduce a new mutation gate. Project, item and schema
+validation load the persisted binding. The native evaluator uses the pinned
+dependency patch in [[ADR-BOUNDED-SHACL-DEPENDENCY]]. Source locations refer
+to authored YAML; generated anonymous shape identifiers are snapshot-bound.
+
+For an opt-in engineering example, copy `examples/engineering-rules.yaml`
+to the project, declare optional enum `status` fields on requirement,
+verification, design and risk, and an optional string `owner` on requirement.
+Use approved/draft for requirement and verification, accepted/draft for design,
+and mitigated/draft for risk; adapt these ordinary schema values to project policy.
+Enable the file through the rules table above and run `schema validate`, then
+`project validate`. Bundled templates and existing projects gain no fields or rules.
 
 References: [SHACL](https://www.w3.org/TR/shacl/),
 [JSON-LD contexts](https://www.w3.org/TR/json-ld11/#the-context) and
@@ -464,12 +473,10 @@ They do not change relationship mutation errors in [[DES-RELATION-INTERFACES]].
 
 Project, item and schema validation implement this diagnostic envelope for
 existing configuration, source, identity, field, reference and relationship
-checks. Rule identity, obligation and detail fields are available to policy
-producers. Structural cardinality/cycle policies and configured YAML rules
-remain separate implementation work; no current configuration enables policy
-warnings. Shared warning/error aggregation and CLI status handling are tested
-at the result boundary. End-to-end policy warning evidence must come from the
-real policy evaluators when implemented.
+checks and configured YAML current-state rules. Real CLI and stdio MCP tests
+exercise warning/error policy, invalid prerequisites, source locations,
+pagination, stale cursors and native pattern-work exhaustion. Structural
+cardinality/cycle policies and trace-view commands remain separate work.
 
 Structural cost revision 2 reserves logical input work before each declaration,
 identity-index, item-validation and reference-discovery pass. It includes
@@ -478,8 +485,14 @@ again. Enum membership reserves every allowed-value comparison and both string
 inputs for each field occurrence, including repeated values. The work ledger
 is deterministic and is included in continuation
 identity. Source loading/parsing and response formatting are outside this
-budget. This baseline does not establish SHACL or graph-policy budget compliance;
-those evaluators must add the per-operation accounting below.
+budget. SHACL cost revision 1 adds definition/selection, projection, native
+shape/constraint visits, value comparisons and path examinations. Primitive
+comparisons reserve all candidate operand bytes before execution, including
+unsuccessful alternatives. Pattern matching reserves Thompson NFA state count
+times input bytes plus one; compilation is part of loading. Native evaluation
+runs synchronously with cache reuse disabled so every logical visit is charged.
+Evaluator patch and cost revisions participate in cursor identity.
+Graph-policy accounting remains separate implementation work.
 
 ## Work, output and continuation
 
@@ -851,9 +864,10 @@ do not advance the active schema or executable during contract authoring.
 | Discovery/relationship JSON | Retain the independently planned versions in the relationship compatibility contract. |
 | MCP | Reflect matching domain inputs/results in tool schemas; leave transport negotiation independent. |
 
-The diagnostic foundation is implemented; rule loading, graph policies and
-trace views remain planned. Existing project format 1 and schema format 3
-require no additional persisted migration to use the diagnostic envelope.
+The diagnostic foundation and YAML current-state rules are implemented;
+structural graph policies and trace views remain planned. Existing project
+format 1 and schema format 3 require no migration to use the diagnostic
+envelope without rules. Rule adoption is explicit through project format 2.
 
 Validation clients must read severity, evaluation_complete, valid and
 continuation, rather than equating a nonempty diagnostic list with failure or
@@ -999,4 +1013,35 @@ continuation reads output rather than silently resuming partial validation.
 Version public result families independently. Add future transition context
 through a separate versioned namespace; silently reinterpreting current-state
 rules would change projects' existing policy after an upgrade.
+:::
+
+:::mara decision ADR-BOUNDED-SHACL-DEPENDENCY
+:mid: 01M37AKP5PVWSECJR2T28VFFRS
+:title: Pin a bounded native SHACL dependency patch
+:justifies: DES-TRACE-RULE-GRAMMAR
+:justifies: DES-TRACE-DIAGNOSTIC-INTERFACE
+
+Keep SHACL Core constraint semantics and the YAML → generated JSON-LD → RDF
+pipeline. Pin `shacl` and `rudof_rdf` to 0.3.21; carry the SHACL source patch
+in `vendor/shacl` instead of introducing a second constraint evaluator or
+weakening completion/work-limit guarantees.
+
+The upstream SHACL package is from rudof commit
+`f84b86d2f59dc5e7ca56aec03b44602dcefbdcba`, package path `shacl`; its MIT and
+Apache licenses are retained. The patch adds opt-in synchronous evaluator
+controls, deterministic obligation/endpoint order, primitive/pattern work
+reservation, unavailable-prerequisite checks, nested error propagation and
+leaf explanation provenance. Native logical alternatives are all evaluated;
+passing alternatives cannot hide unavailable children. Mara invokes a single
+focus shape directly, without the upstream parallel processor.
+
+Mara owns this patch until equivalent upstream capabilities are verified.
+Upgrades must preserve authored YAML locations, warning/error parity,
+qualifying counts, first-failure explanations and deterministic work/cursor
+semantics through real CLI and stdio MCP tests. The lockfile retains compatible
+0.10 hash dependencies for the RDF stack; do not regenerate it without builds.
+
+This is an execution integration boundary, not a new rule language, workflow
+engine or default lifecycle policy. Structural graph policies, external targets,
+trace views and historical transition checks retain their separate scope.
 :::
