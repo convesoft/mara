@@ -12014,6 +12014,108 @@ fn rule_fixture() -> TempDir {
 }
 
 #[test]
+fn current_state_rules_narrow_same_flavour_paths_in_both_directions() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    assert!(
+        mara(
+            root,
+            &["item", "update", "DES-A", "--clear-field", "status"]
+        )
+        .status
+        .success()
+    );
+    assert!(
+        mara(
+            root,
+            &[
+                "item",
+                "create",
+                "requirement",
+                "REQ-B",
+                "items.mara.md",
+                "--title",
+                "Second requirement",
+                "--body",
+                "A related requirement.",
+                "--field",
+                "status=approved"
+            ]
+        )
+        .status
+        .success()
+    );
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["flavours"]["design"]["fields"]
+        .as_object_mut()
+        .unwrap()
+        .remove("status");
+    schema["relations"]["associated_with"] = json!({
+        "description": "An association between items of the same flavour.",
+        "source": ["requirement", "design"], "target": ["requirement", "design"],
+        "same_flavour": true
+    });
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    assert!(
+        mara(
+            root,
+            &["relation", "add", "REQ-A", "associated_with", "REQ-B"]
+        )
+        .status
+        .success()
+    );
+    for (path, endpoint) in [
+        ("associated_with", "REQ-B"),
+        ("{inversePath: associated_with}", "REQ-A"),
+    ] {
+        fs::write(root.join("rules.yaml"), format!(
+            "id: rule:related_status\ntargetClass: requirement\nproperty:\n  - path: {path}\n    node:\n      property: [{{path: status, hasValue: approved}}]\n"
+        )).unwrap();
+        let valid = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(valid["valid"], true, "{valid:#}");
+        let valid = validation_with_parity(root, &[]);
+        assert_eq!(valid["valid"], true, "{valid:#}");
+        assert!(
+            mara(
+                root,
+                &["item", "update", endpoint, "--field", "status=draft"]
+            )
+            .status
+            .success()
+        );
+        let failed = validation_with_parity(root, &[]);
+        assert_eq!(failed["evaluation_complete"], true, "{failed:#}");
+        assert_eq!(failed["summary"]["errors"], 1, "{failed:#}");
+        assert_eq!(
+            failed["diagnostics"][0]["code"], "rule_failed",
+            "{failed:#}"
+        );
+        assert!(
+            mara(
+                root,
+                &["item", "update", endpoint, "--field", "status=approved"]
+            )
+            .status
+            .success()
+        );
+        // Without the restriction, design endpoints are reachable and need status too.
+        schema["relations"]["associated_with"]["same_flavour"] = json!(false);
+        fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+        let invalid =
+            diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(invalid["valid"], false, "{invalid:#}");
+        assert_eq!(
+            invalid["diagnostics"][0]["code"], "rule_invalid",
+            "{invalid:#}"
+        );
+        schema["relations"]["associated_with"]["same_flavour"] = json!(true);
+        fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    }
+}
+
+#[test]
 fn current_state_rules_run_real_lifecycle_and_coverage_through_cli_and_mcp() {
     let fixture = rule_fixture();
     let root = fixture.path();

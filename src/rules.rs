@@ -598,7 +598,11 @@ impl Rules {
                             "relation path is incompatible with the selected flavour".into(),
                         ));
                     }
-                    children = to.clone();
+                    children = to
+                        .iter()
+                        .filter(|f| !r.same_flavour || context.contains(f))
+                        .cloned()
+                        .collect();
                 }
             }
         }
