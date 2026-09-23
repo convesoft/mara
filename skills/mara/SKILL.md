@@ -115,7 +115,7 @@ inspect `<command> --help` for positional arguments and options.
 | Check an item or whole-project integrity | `item_validate` or `project_validate` | `item validate`, `project validate` |
 
 Validation (`project_validate`, `item_validate`, `schema_validate`) returns
-`valid`, `evaluation_complete`, `work`, `summary`, `diagnostics`, and output
+`valid`, `evaluation_complete`, `summary`, `diagnostics`, and output
 continuation. Match diagnostic `code` and `severity`, not message text.
 Warnings do not invalidate a complete result; configuration/source failures
 remain errors. Current-state rules load from explicit YAML files enabled by
@@ -129,12 +129,15 @@ tool error. Counts are null when the schema cannot load. Diagnostic `path` and
 `line` alias `location`; project-owned configuration paths are relative and
 unavailable coordinates are omitted.
 
-All three validation operations accept `limit` (1–100, default 20), `cursor`,
-and `max_work` (1–1,000,000, default 100,000); CLI uses `--limit`, `--cursor`,
-and `--max-work`. Continue unchanged inputs until `has_more:false`; summary
+All three validation operations accept `limit` (1–100, default 20) and `cursor`;
+CLI uses `--limit` and `--cursor`.
+Continue unchanged inputs until `has_more:false`; summary
 and validity cover the full target before pagination and reporting paths.
-`evaluation_limit` means incomplete evaluation: restart without a cursor and
-raise the work budget within the maximum. Invalid arguments, stale cursors,
+With configured rules, invalid corpus prerequisites skip policy evaluation,
+including item-targeted checks. Fix the original diagnostics and run validation
+again. `evaluation_unavailable` never means a policy pass. There is no logical
+work counter; finite shape/path restrictions and output pagination remain.
+Invalid arguments, stale cursors,
 I/O preventing a result, and oversized indivisible output return
 `{format_version:1,error:{code,message}}` with MCP `isError:true`.
 

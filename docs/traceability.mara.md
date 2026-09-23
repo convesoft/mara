@@ -192,7 +192,9 @@ condition as well as status-dependent relationship obligations.
 Evaluate the same rules after direct Markdown edits and structured authoring.
 A rule whose selection or condition does not apply imposes no obligation on
 that item. Invalid configuration or unresolved evaluation prerequisites must
-not be reported as a successful check.
+not be reported as a successful check. Invalid corpus source, identity, field
+or reference prerequisites skip policy evaluation, including item-targeted
+checks; retain the original diagnostics and explicitly report unavailability.
 
 Verify status-conditioned field and relationship checks, a non-applicable
 draft item, and actionable diagnostics for invalid rule definitions. Previous
@@ -210,10 +212,11 @@ and source provenance. Evaluate only the requested chain; unrelated paths do
 not supply coverage. Distinguish immediate coverage from fulfillment of the
 declared downstream obligations.
 
-Traversal terminates on cyclic graphs and has explicit bounds. Incomplete
-evaluation or truncated output must be distinguishable from a complete result;
-hitting a work limit must not produce a false pass. Return actionable evidence
-for an unmet step without requiring enumeration of every distinct simple path.
+Traversal follows finite explicit shape/path depth; recursive shape references
+and unbounded paths are rejected. Incomplete evaluation or truncated output
+must be distinguishable from a complete result. No logical work counter or
+partial execution prefix is required. Return the reported unmet obligation
+without requiring enumeration of every distinct simple path or deepest leaf.
 Result ordering and continuation are deterministic for unchanged inputs.
 
 Verify a missing second-hop obligation, two distinct relation kinds between
@@ -227,8 +230,10 @@ the same endpoints, a cycle, and an explicit bound.
 
 Validation provides stable machine-readable diagnostic codes, severity,
 an actionable message, and the relevant item/source or configuration location.
-Rule failures also identify the rule and explain the unmet obligation and
-relevant relationship chain. Clients must not parse prose to classify failures.
+Rule failures also identify the rule and reported unmet obligation, with
+authored source and available relationship/count details. Composite failures
+need not expose every nested result or the deepest failing leaf. Clients must
+not parse prose to classify failures.
 
 Project-defined rules support warning and error policies. Warnings remain
 visible without making a project invalid; errors affect validity and CLI
@@ -445,17 +450,16 @@ with more than 20 assertions, and the customized migration examples in
 For rules and views, use [[DES-TRACE-RULE-GRAMMAR]]'s fixture table and nested
 evidence check through validation and matrix requests. Repeat the uncovered
 approved requirement with warning severity, with its path hidden, and with
-an explicit work limit. Assert state, counts, validity, diagnostic code and
+invalid corpus prerequisites. Assert state, counts, validity, diagnostic code and
 source/configuration locations against [[DES-TRACE-DIAGNOSTIC-INTERFACE]].
 Test empty every with/without minimum, missing versus blank fields, a passing
 SHACL alternative with a failing alternative, and an unavailable prerequisite.
 
 Verify structural and conditional count failures independently under
 [[DES-TRACE-GRAPH-CONSTRAINTS]], including an alias-authored cycle, a self-loop
-and a permitted cycle. Exhaust an 8-step chain's work budget and reject a
-9-step definition; output continuation must not resume evaluation or alter
-validity. Follow output cursors to completion and reject them after a source
-change or changed max_work.
+and a permitted cycle. Evaluate an 8-step chain and reject a 9-step definition;
+output continuation must not resume evaluation or alter validity. Follow output
+cursors to completion and reject them after a source or request-option change.
 
 Generate a path-selected specification containing narrative and an item-only
 selection without it; verify source links relative to the project root,
@@ -477,8 +481,9 @@ and a present owner passes. Check typed hasValue/in matches and nonmatches,
 plain integral literals retaining integer semantics, and malformed typed
 literals rejected before evaluation. Exercise condition-shape applicability
 for approved, draft, absent and invalid status; only the first evaluates obligations, while invalid source is
-unavailable. An independent endpoint engine error must prevent a full pass
-even when another endpoint qualifies. Preserve actual YAML pointers and source spans,
+unavailable and skips policy evaluation across the corpus. An encountered
+nested engine error must prevent a full pass even if upstream folds it into
+nonconformance. Preserve reported obligation YAML pointers and source spans,
 including escaped strings, aliases and generated blank-node shapes. Unknown
 constraint keys, duplicate YAML keys, context overrides and unsupported targets
 must fail before conversion. Verify schema-derived bindings with a new flavour
@@ -486,9 +491,10 @@ and a custom field named class, literal values equal to vocabulary names,
 explicit field/schema qualification, and SHACL and/or/in RDF lists. Change
 the schema or a rule source between pages and reject the old cursor. Exercise
 YAML request-check files through CLI/MCP without enabling them as project policy.
-Reject Turtle/JSON-LD source files. Verify the budget inside
-SHACL evaluation, including applicability and pattern work, not merely by
-counting calls into the engine.
+Reject Turtle/JSON-LD source files. Verify native pattern matching without a
+logical budget, stable completed diagnostic pages, and absence of max_work/work
+from the CLI/MCP contract. Check that Cargo resolves SHACL from the registry
+without a source patch. Exhaustive internal traces are not acceptance criteria.
 :::
 
 ## Code-traceability pilot

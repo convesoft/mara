@@ -16,7 +16,6 @@ mod discovery;
 pub use diagnostics::{
     ConfigurationDiagnostic, DiagnosticCode, DiagnosticItem, DiagnosticLocation,
     DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
-    ValidationWork,
 };
 mod mutation;
 mod operations;
@@ -259,10 +258,7 @@ impl Schema {
         !self.validation.invalid_same_flavour.contains(relation)
     }
 
-    fn validation_errors(
-        &mut self,
-        work: &mut diagnostics::WorkBudget,
-    ) -> Vec<ConfigurationDiagnostic> {
+    fn validation_errors(&mut self) -> Vec<ConfigurationDiagnostic> {
         let recovered = std::mem::take(&mut self.validation);
         self.validation = SchemaValidationState {
             flavours_section_invalid: recovered.flavours_section_invalid,
@@ -278,13 +274,6 @@ impl Schema {
         };
         let mut errors = Vec::new();
         for (name, flavour) in &self.flavours {
-            if !work.charge(
-                1 + serde_json::to_vec(flavour)
-                    .expect("schema serializes")
-                    .len(),
-            ) {
-                break;
-            }
             if !is_snake_name(name) {
                 errors.push(ConfigurationDiagnostic::schema(
                     &["flavours", name],
@@ -359,13 +348,6 @@ impl Schema {
         }
 
         for (name, relation) in &self.relations {
-            if !work.charge(
-                1 + serde_json::to_vec(relation)
-                    .expect("schema serializes")
-                    .len(),
-            ) {
-                break;
-            }
             if relation.symmetric
                 && (relation.inverse.is_some()
                     || relation.source.iter().collect::<HashSet<_>>()
@@ -899,13 +881,6 @@ pub fn load_schema(project: &Project) -> Result<Schema, Error> {
 pub fn load_schema_for_validation(
     project: &Project,
 ) -> Result<(Schema, Vec<ConfigurationDiagnostic>), Error> {
-    load_schema_for_validation_bounded(project, &mut diagnostics::WorkBudget::new(usize::MAX))
-}
-
-fn load_schema_for_validation_bounded(
-    project: &Project,
-    work: &mut diagnostics::WorkBudget,
-) -> Result<(Schema, Vec<ConfigurationDiagnostic>), Error> {
     let source = fs::read_to_string(project.schema_path()).map_err(|source| Error::Io {
         action: "read project schema",
         path: project.schema_path().to_path_buf(),
@@ -974,13 +949,6 @@ fn load_schema_for_validation_bounded(
     };
     let mut flavours = BTreeMap::new();
     for (name, value) in flavour_values.unwrap_or_default() {
-        if !work.charge(
-            1 + serde_json::to_vec(&value)
-                .expect("schema value serializes")
-                .len(),
-        ) {
-            break;
-        }
         match recover_flavour(&name, &value) {
             Ok(recovered) => {
                 errors.extend(recovered.errors);
@@ -1019,13 +987,6 @@ fn load_schema_for_validation_bounded(
     validation.relations_section_invalid = relations_section_invalid;
     let mut relations = BTreeMap::new();
     for (name, value) in relation_values.unwrap_or_default() {
-        if !work.charge(
-            1 + serde_json::to_vec(&value)
-                .expect("schema value serializes")
-                .len(),
-        ) {
-            break;
-        }
         match decode_schema_declaration(&value) {
             Ok(relation) => {
                 relations.insert(name, relation);
@@ -1045,7 +1006,7 @@ fn load_schema_for_validation_bounded(
         relations,
         validation,
     };
-    errors.extend(schema.validation_errors(work));
+    errors.extend(schema.validation_errors());
     Ok((schema, errors))
 }
 

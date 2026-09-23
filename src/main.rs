@@ -49,19 +49,15 @@ struct ValidationArgs {
     /// Maximum diagnostics per page, 1 through 100 (default 20); the serialized byte budget (65536 bytes) may return fewer.
     #[arg(long)]
     limit: Option<usize>,
-    /// Opaque next_cursor; continue until has_more is false and repeat unchanged target, paths, limit and max_work. Omit to start or restart after source/schema/configuration changes. Empty strings are invalid.
+    /// Opaque next_cursor; continue until has_more is false and repeat unchanged target, paths and limit. Omit to start or restart after source/schema/configuration changes. Empty strings are invalid.
     #[arg(long)]
     cursor: Option<String>,
-    /// Logical evaluation budget, 1 through 1000000 (default 100000). A higher budget requires a fresh request without a cursor.
-    #[arg(long)]
-    max_work: Option<usize>,
 }
 impl From<ValidationArgs> for mara::ValidationOptions {
     fn from(value: ValidationArgs) -> Self {
         Self {
             limit: value.limit,
             cursor: value.cursor,
-            max_work: value.max_work,
         }
     }
 }
@@ -1466,7 +1462,6 @@ mod validation_tests {
             DiagnosticCode::RelationInvalid,
             DiagnosticCode::RuleInvalid,
             DiagnosticCode::EvaluationUnavailable,
-            DiagnosticCode::EvaluationLimit,
         ] {
             result.diagnostics[0].code = code;
             result.diagnostics[0].severity = Severity::Warning;

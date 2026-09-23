@@ -2530,6 +2530,8 @@ dependencies = [
 [[package]]
 name = "shacl"
 version = "0.3.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c576db2e0015704702e757bc204b0a52a340db340a3bb7928b5a1d8ab254721"
 dependencies = [
  "anyhow",
  "dashmap",
@@ -2539,7 +2541,6 @@ dependencies = [
  "petgraph",
  "prefixmap",
  "rayon",
- "regex-automata",
  "rudof_config",
  "rudof_iri",
  "rudof_rdf",

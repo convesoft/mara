@@ -1,8 +1,7 @@
 use super::*;
-use crate::diagnostics::WorkBudget;
 use crate::{
     DiagnosticCode, DiagnosticItem, DiagnosticLocation, DiagnosticObligation, Severity,
-    ValidationError, ValidationOptions, ValidationSummary, ValidationWork,
+    ValidationError, ValidationOptions, ValidationSummary,
 };
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, fs, path::Path};
@@ -99,7 +98,6 @@ pub struct ValidationResult {
     /// Complete evaluation with no errors, before selection and pagination.
     pub valid: bool,
     pub evaluation_complete: bool,
-    pub work: ValidationWork,
     pub diagnostics: Vec<ValidationDiagnostic>,
     pub summary: ValidationSummary,
     pub selection: Option<ValidationSelection>,
@@ -215,15 +213,9 @@ impl OperationContext {
         options: &ValidationOptions,
     ) -> Result<ValidationResult, ValidationError> {
         let limit = options.limit.unwrap_or(20);
-        let max_work = options.max_work.unwrap_or(100_000);
         if !(1..=100).contains(&limit) {
             return Err(ValidationError::invalid_argument(
                 "limit must be 1 through 100",
-            ));
-        }
-        if !(1..=1_000_000).contains(&max_work) {
-            return Err(ValidationError::invalid_argument(
-                "max_work must be 1 through 1000000",
             ));
         }
         if options.cursor.as_deref() == Some("") {
@@ -231,7 +223,6 @@ impl OperationContext {
                 "cursor must not be empty",
             ));
         }
-        let mut work = WorkBudget::new(max_work);
         let (project, project_errors, schema_available) =
             match resolve_project_for_validation(self.selected.as_deref(), &self.current_directory)
             {
@@ -245,10 +236,6 @@ impl OperationContext {
             target,
             valid: false,
             evaluation_complete: true,
-            work: ValidationWork {
-                used: 0,
-                limit: max_work,
-            },
             diagnostics: vec![],
             summary: ValidationSummary {
                 errors: 0,
@@ -271,7 +258,7 @@ impl OperationContext {
             ));
         }
         let schema = if schema_available {
-            match crate::load_schema_for_validation_bounded(&project, &mut work) {
+            match crate::load_schema_for_validation(&project) {
                 Ok((schema, errors)) => {
                     for error in errors {
                         result.diagnostics.push(configuration_diagnostic(
@@ -281,7 +268,7 @@ impl OperationContext {
                             error,
                         ));
                     }
-                    if schema.format_version() == crate::SCHEMA_FORMAT_VERSION && !work.exhausted {
+                    if schema.format_version() == crate::SCHEMA_FORMAT_VERSION {
                         Some(schema)
                     } else {
                         None
@@ -294,13 +281,13 @@ impl OperationContext {
         };
         result.evaluation_complete = result.diagnostics.is_empty() && schema.is_some();
         let mut snapshot = Sha256::new();
-        snapshot.update(b"validation-1-structural-cost-2");
+        snapshot.update(b"validation-1-complete-evaluation-1");
         hash_file(&mut snapshot, &project.root().join(crate::PROJECT_FILE));
         hash_file(&mut snapshot, project.schema_path());
-        snapshot.update(b"yaml-shacl-binding-1-patch-1-cost-1");
+        snapshot.update(b"yaml-shacl-binding-1-registry-0.3.21-adapter-2");
         let rules = schema
             .as_ref()
-            .map(|schema| crate::rules::Rules::load(&project, schema, &mut work));
+            .map(|schema| crate::rules::Rules::load(&project, schema));
         if let Some(rules) = &rules {
             for path in &rules.files {
                 hash_file(&mut snapshot, path);
@@ -343,14 +330,10 @@ impl OperationContext {
                         .is_none_or(|id| matches_handle(item, id))
                 })
                 .all(crate::Item::validation_source_is_complete);
-            if !work.exhausted {
-                source_diagnostics.extend(match &schema {
-                    Some(schema) => {
-                        crate::corpus::validate_corpus_bounded(&corpus, schema, &mut work)
-                    }
-                    None => crate::corpus::validate_corpus_independent_bounded(&corpus, &mut work),
-                });
-            }
+            source_diagnostics.extend(match &schema {
+                Some(schema) => crate::corpus::validate_corpus(&corpus, schema),
+                None => crate::corpus::validate_corpus_independent(&corpus),
+            });
             if let (Some(rules), Some(schema)) = (&rules, &schema)
                 && rules.diagnostics.is_empty()
                 && !result
@@ -358,33 +341,15 @@ impl OperationContext {
                     .iter()
                     .any(|d| matches!(d.scope, ValidationScope::Project | ValidationScope::Schema))
             {
-                rules.evaluate(&corpus, schema, &source_diagnostics, &mut result, &mut work);
+                rules.evaluate(&corpus, schema, &source_diagnostics, &mut result);
             }
             collect_source_diagnostics(&corpus, source_diagnostics, &mut result);
         }
-        if work.exhausted {
-            result.evaluation_complete = false;
-            let mut diagnostic = ValidationDiagnostic::new(
-                DiagnosticCode::EvaluationLimit,
-                Severity::Error,
-                if schema_only {
-                    ValidationScope::Schema
-                } else {
-                    ValidationScope::Project
-                },
-                DiagnosticLocation::default(),
-                "evaluation work limit reached; retry with a higher max_work (maximum 1000000), without a cursor",
-            );
-            diagnostic.details = Some(serde_json::json!({"used":work.used,"limit":work.limit}));
-            result.diagnostics.push(diagnostic);
-        }
-        result.work.used = work.used;
         result.summarize();
         sort_diagnostics(&mut result.diagnostics);
         // Include diagnostics for unreadable sources and options as well as source bytes.
-        snapshot.update(
-            serde_json::to_vec(&(&result, &paths, limit, max_work)).expect("validation serializes"),
-        );
+        snapshot
+            .update(serde_json::to_vec(&(&result, &paths, limit)).expect("validation serializes"));
         let fingerprint = format!("{:x}", snapshot.finalize());
         if !paths.is_empty() {
             let total = result.diagnostics.len();
@@ -465,6 +430,11 @@ fn collect_source_diagnostics(
     diagnostics: Vec<Diagnostic>,
     result: &mut ValidationResult,
 ) {
+    // A configured policy uses the entire corpus. When that prerequisite gate
+    // skips evaluation, retain the actual blockers even for an item request.
+    let corpus_prerequisites = result.diagnostics.iter().any(|d| {
+        d.code == DiagnosticCode::EvaluationUnavailable && d.scope == ValidationScope::Project
+    });
     let selected = result.target.id.as_deref();
     let missing = selected.is_some_and(|id| {
         corpus.is_complete()
@@ -495,12 +465,14 @@ fn collect_source_diagnostics(
         ));
     }
     for diagnostic in diagnostics {
-        if selected.is_some_and(|id| {
-            !diagnostic.applies_to_item(id)
-                && !corpus
-                    .items()
-                    .any(|item| matches_handle(item, id) && contains(item, &diagnostic))
-        }) {
+        if !corpus_prerequisites
+            && selected.is_some_and(|id| {
+                !diagnostic.applies_to_item(id)
+                    && !corpus
+                        .items()
+                        .any(|item| matches_handle(item, id) && contains(item, &diagnostic))
+            })
+        {
             continue;
         }
         let mut entry = ValidationDiagnostic::from_source(&diagnostic);

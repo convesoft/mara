@@ -1,11 +1,12 @@
 //! Project-owned current-state policy. YAML is converted with generated JSON-LD
 //! bindings and evaluated by the pinned native SHACL engine.
 mod bindings;
+mod engine;
 mod evaluate;
 mod yaml;
 use crate::{
     DiagnosticCode, DiagnosticLocation, Project, Schema, Severity, ValidationDiagnostic,
-    ValidationScope, diagnostics::WorkBudget,
+    ValidationScope,
 };
 use rudof_rdf::{rdf_core::RDFFormat, rdf_impl::ReaderMode};
 use serde_json::{Value, json};
@@ -34,18 +35,16 @@ pub(crate) struct Rules {
     pub files: Vec<PathBuf>,
     pub diagnostics: Vec<ValidationDiagnostic>,
     ir: Option<IRSchema>,
-    patterns: BTreeMap<String, usize>,
     source_fingerprints: BTreeMap<PathBuf, String>,
 }
 impl Rules {
-    pub fn load(project: &Project, schema: &Schema, work: &mut WorkBudget) -> Self {
+    pub fn load(project: &Project, schema: &Schema) -> Self {
         let mut rules = Self {
             shapes: BTreeMap::new(),
             roots: vec![],
             files: vec![],
             diagnostics: vec![],
             ir: None,
-            patterns: BTreeMap::new(),
             source_fingerprints: BTreeMap::new(),
         };
         let schema_value = serde_json::to_value(schema).expect("schema serializes");
@@ -109,11 +108,11 @@ impl Rules {
             match value {
                 Value::Array(values) => {
                     for (i, v) in values.into_iter().enumerate() {
-                        rules.add(v, &format!("/{i}"), &spans, &schema_value, true, work);
+                        rules.add(v, &format!("/{i}"), &spans, &schema_value, true);
                     }
                 }
                 Value::Object(_) => {
-                    rules.add(value, "", &spans, &schema_value, true, work);
+                    rules.add(value, "", &spans, &schema_value, true);
                 }
                 _ => rules.invalid(location, "expected a shape mapping or sequence of shapes"),
             }
@@ -139,39 +138,36 @@ impl Rules {
             .filter(|(_, s)| s.value.get("targetClass").is_some())
             .map(|(id, _)| id.clone())
             .collect();
-        if !work.exhausted {
+        {
             for (id, shape) in rules.shapes.clone() {
                 if let Err((key, message)) = rules.check(&id, &shape, &schema_value) {
                     rules.invalid(shape.location(&key), message);
                 }
-                if let Some(pattern) = shape.value["pattern"].as_str() {
-                    match shacl::validator::bounded::pattern_bound(pattern) {
-                        Ok(bound) => {
-                            rules.patterns.insert(pattern.into(), bound);
-                        }
-                        Err(_) => rules.invalid(
-                            shape.location("pattern"),
-                            "invalid or oversized regular expression",
-                        ),
-                    }
+                if let Some(pattern) = shape.value["pattern"].as_str()
+                    && shacl::ir::components::Pattern::new(pattern.into(), None).is_err()
+                {
+                    rules.invalid(
+                        shape.location("pattern"),
+                        "invalid or oversized regular expression",
+                    );
                 }
             }
             // Validate every reusable definition too, including unused cycles.
             for id in rules.shapes.keys().cloned().collect::<Vec<_>>() {
-                if let Err(message) = rules.depth(&id, &mut Vec::new(), 0, &schema_value, work) {
+                if let Err(message) = rules.depth(&id, &mut Vec::new(), 0, &schema_value) {
                     rules.invalid(rules.shapes[&id].source.clone(), message);
                 }
             }
             for root in rules.roots.clone() {
                 let flavours = strings(&rules.shapes[&root].value["targetClass"]);
                 if let Err((loc, message)) =
-                    rules.compatible(&root, &flavours, schema, &mut BTreeSet::new(), work)
+                    rules.compatible(&root, &flavours, schema, &mut BTreeSet::new())
                 {
                     rules.invalid(loc, message);
                 }
             }
         }
-        if rules.diagnostics.is_empty() && !rules.shapes.is_empty() && !work.exhausted {
+        if rules.diagnostics.is_empty() && !rules.shapes.is_empty() {
             let mut graph = Vec::new();
             for shape in rules.shapes.values() {
                 let mut v = shape.value.clone();
@@ -240,12 +236,8 @@ impl Rules {
         spans: &BTreeMap<String, DiagnosticLocation>,
         schema: &Value,
         top: bool,
-        work: &mut WorkBudget,
     ) -> Option<String> {
         let loc = spans.get(pointer).cloned().unwrap_or_default();
-        if !work.charge(1 + v.to_string().len()) {
-            return None;
-        }
         if let Some(s) = v.as_str() {
             if top {
                 self.invalid(loc, "top-level shapes must be mappings with an id");
@@ -300,7 +292,7 @@ impl Rules {
             if let Some(Value::Array(values)) = map.get_mut(key) {
                 for (i, value) in values.iter_mut().enumerate() {
                     let p = format!("{pointer}/{key}/{i}");
-                    if let Some(id) = self.add(value.clone(), &p, spans, schema, false, work) {
+                    if let Some(id) = self.add(value.clone(), &p, spans, schema, false) {
                         *value = json!(id);
                     }
                 }
@@ -314,7 +306,6 @@ impl Rules {
                     spans,
                     schema,
                     false,
-                    work,
                 )
             {
                 *value = json!(id);
@@ -519,11 +510,7 @@ impl Rules {
         stack: &mut Vec<String>,
         hops: usize,
         schema: &Value,
-        work: &mut WorkBudget,
     ) -> Result<(), String> {
-        if !work.charge(1 + id.len()) {
-            return Ok(());
-        }
         if stack.len() >= 32 || stack.iter().any(|s| s == id) {
             return Err("recursive shape reference or depth above 32".into());
         }
@@ -542,7 +529,7 @@ impl Rules {
         }
         stack.push(id.into());
         for child in references(&shape.value) {
-            self.depth(child, stack, hops, schema, work)?;
+            self.depth(child, stack, hops, schema)?;
         }
         stack.pop();
         Ok(())
@@ -553,11 +540,7 @@ impl Rules {
         flavours: &[String],
         schema: &Schema,
         visited: &mut BTreeSet<(String, Vec<String>)>,
-        work: &mut WorkBudget,
     ) -> Result<(), (DiagnosticLocation, String)> {
-        if !work.charge(1 + id.len() + flavours.len()) {
-            return Ok(());
-        }
         if !visited.insert((id.into(), flavours.to_vec())) {
             return Ok(());
         }
@@ -638,7 +621,6 @@ impl Rules {
                     },
                     schema,
                     visited,
-                    work,
                 )?;
             }
         }

@@ -397,32 +397,11 @@ impl Diagnostic {
 }
 
 pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
-    validate_corpus_bounded(
-        corpus,
-        schema,
-        &mut crate::diagnostics::WorkBudget::new(usize::MAX),
-    )
-}
-
-pub(crate) fn validate_corpus_bounded(
-    corpus: &Corpus,
-    schema: &Schema,
-    work: &mut crate::diagnostics::WorkBudget,
-) -> Vec<Diagnostic> {
-    let mut diagnostics = validate_corpus_independent_bounded(corpus, work);
-    if work.exhausted {
-        return diagnostics;
-    }
-    if !charge_identity_index(corpus, work) {
-        return diagnostics;
-    }
+    let mut diagnostics = validate_corpus_independent(corpus);
     let ids = item_index(corpus);
     let mids = mid_index(corpus);
 
     for item in corpus.items() {
-        if !work.charge(item_validation_cost(item, Some(schema))) {
-            break;
-        }
         let Some(flavour) = schema.flavour_for_validation(item.flavour()) else {
             if !schema.flavour_is_declared(item.flavour()) {
                 diagnostic(
@@ -681,31 +660,15 @@ pub(crate) fn validate_corpus_bounded(
 }
 
 pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
-    validate_corpus_independent_bounded(
-        corpus,
-        &mut crate::diagnostics::WorkBudget::new(usize::MAX),
-    )
-}
-
-pub(crate) fn validate_corpus_independent_bounded(
-    corpus: &Corpus,
-    work: &mut crate::diagnostics::WorkBudget,
-) -> Vec<Diagnostic> {
     let mut diagnostics = corpus
         .items()
         .flat_map(|item| item.inline_diagnostics.clone())
         .collect::<Vec<_>>();
-    if !charge_identity_index(corpus, work) {
-        return diagnostics;
-    }
     let ids = item_index(corpus);
     let mid_targets = mid_index(corpus);
 
     for duplicates in ids.values().filter(|items| items.len() > 1) {
         for item in duplicates {
-            if !work.charge(item.id().len() + 1) {
-                break;
-            }
             diagnostic(
                 DiagnosticCode::IdentityInvalid,
                 &mut diagnostics,
@@ -717,9 +680,6 @@ pub(crate) fn validate_corpus_independent_bounded(
 
     for (mid, duplicates) in mid_targets.iter().filter(|(_, items)| items.len() > 1) {
         for item in duplicates {
-            if !work.charge(item.id().len() + 1) {
-                break;
-            }
             if let Some(entry) = mid_entries(item)
                 .into_iter()
                 .find(|entry| entry.value() == *mid)
@@ -735,9 +695,6 @@ pub(crate) fn validate_corpus_independent_bounded(
     }
 
     for item in corpus.items() {
-        if !work.charge(item_validation_cost(item, None)) {
-            break;
-        }
         let mids = mid_entries(item);
         match mids.as_slice() {
             [] => diagnostic_with_kind(
@@ -807,82 +764,9 @@ pub(crate) fn validate_corpus_independent_bounded(
             }
         }
     }
-    // Building reference indexes and resolving links scans document text and nodes.
-    let discovery_cost = corpus.documents().iter().fold(0usize, |cost, document| {
-        cost.saturating_add(document.source().len())
-            .saturating_add(document.references().len())
-            .saturating_add(1)
-    });
-    if work.charge(discovery_cost) {
-        diagnostics.extend_from_slice(corpus.discovery().diagnostics());
-    }
+    diagnostics.extend_from_slice(corpus.discovery().diagnostics());
     sort_diagnostics(&mut diagnostics);
     diagnostics
-}
-
-fn charge_identity_index(corpus: &Corpus, work: &mut crate::diagnostics::WorkBudget) -> bool {
-    for item in corpus.items() {
-        let units = item
-            .metadata()
-            .iter()
-            .fold(item.id().len() + 1, |n, entry| {
-                n.saturating_add(entry.key().len())
-                    .saturating_add(entry.value().len())
-                    .saturating_add(1)
-            });
-        if !work.charge(units) {
-            return false;
-        }
-    }
-    true
-}
-
-fn item_validation_cost(item: &Item, schema: Option<&Schema>) -> usize {
-    let mut cost =
-        item.metadata()
-            .iter()
-            .fold(item.id().len() + item.body().len() + 1, |n, entry| {
-                n.saturating_add(entry.key().len())
-                    .saturating_add(entry.value().len())
-                    .saturating_add(1)
-            });
-    for relation in item.relations() {
-        cost = cost
-            .saturating_add(relation.name().len())
-            .saturating_add(relation.target().len())
-            .saturating_add(1);
-    }
-    if let Some(schema) = schema
-        && let Some(flavour) = schema.flavour_for_validation(item.flavour())
-    {
-        let mut occurrences = BTreeMap::<&str, (usize, usize)>::new();
-        for entry in item.metadata() {
-            let (count, bytes) = occurrences.entry(entry.key()).or_default();
-            *count = count.saturating_add(1);
-            *bytes = bytes.saturating_add(entry.value().len());
-        }
-        for (name, field) in &flavour.fields {
-            cost = cost.saturating_add(name.len()).saturating_add(1);
-            if let Some(values) = &field.values {
-                let mut allowed_cost = 0usize;
-                for value in values {
-                    allowed_cost = allowed_cost.saturating_add(value.len()).saturating_add(1);
-                }
-                cost = cost.saturating_add(allowed_cost);
-                if field.field_type == FieldType::Enum {
-                    // Reserve every possible membership comparison and both
-                    // string inputs before validation. Aggregate once per field
-                    // so estimating the cost does not repeat the same scans.
-                    let (count, bytes) =
-                        occurrences.get(name.as_str()).copied().unwrap_or_default();
-                    cost = cost
-                        .saturating_add(allowed_cost.saturating_mul(count))
-                        .saturating_add(bytes.saturating_mul(values.len()));
-                }
-            }
-        }
-    }
-    cost
 }
 
 fn item_index(corpus: &Corpus) -> BTreeMap<&str, Vec<&Item>> {

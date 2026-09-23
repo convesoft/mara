@@ -1,7 +1,6 @@
 [workspace]
 resolver = "3"
 members = ["."]
-exclude = ["vendor/shacl"]
 
 [workspace.package]
 version = "0.2.0"
@@ -40,6 +39,3 @@ ulid = "1"
 unicode-casefold = "0.2"
 unicode-normalization = "0.1"
 unicode-segmentation = "1.13"
-
-[patch.crates-io]
-shacl = { path = "vendor/shacl" }

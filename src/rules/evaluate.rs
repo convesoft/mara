@@ -1,16 +1,11 @@
+use super::engine::RuleEngine;
 use super::*;
 use crate::{
     Corpus, Diagnostic, DiagnosticItem, DiagnosticObligation, FieldType, Item, ValidationResult,
 };
 use rudof_iri::IriS;
 use rudof_rdf::{rdf_core::term::Object, rdf_impl::OxigraphInMemory};
-use shacl::validator::{
-    RecursionSemantics,
-    bounded::{self, Control},
-    engine::{NativeEngine, Validate},
-    nodes::FocusNodes,
-    report::ValidationOutcome,
-};
+use shacl::validator::{engine::Validate, nodes::FocusNodes};
 
 impl Rules {
     pub fn evaluate(
@@ -19,61 +14,50 @@ impl Rules {
         schema: &Schema,
         prerequisites: &[Diagnostic],
         result: &mut ValidationResult,
-        work: &mut WorkBudget,
     ) {
         let Some(ir) = &self.ir else {
             return;
         };
-        if self.roots.is_empty() || work.exhausted {
+        if self.roots.is_empty() {
             return;
         }
-        let mut control = Control {
-            used: work.used,
-            limit: work.limit,
-            patterns: self.patterns.clone(),
-            ..Default::default()
-        };
+        // Policy uses the complete graph, including for item validation. Reject
+        // invalid prerequisites before projecting them into apparent absence.
+        if !prerequisites.is_empty()
+            || !corpus.is_complete()
+            || corpus.items().any(|i| !i.validation_source_is_complete())
+        {
+            project_unavailable(
+                result,
+                "rule evaluation skipped: fix the corpus source, identity, field or reference diagnostics first",
+            );
+            return;
+        }
         let mut graph = Vec::new();
-        let mut identity: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
+        let mut identity = BTreeMap::new();
         for item in corpus.items() {
-            identity.entry(item.id()).or_default().push(item);
+            identity.insert(item.id(), item);
             if let Some(mid) = item.mid() {
-                identity.entry(mid).or_default().push(item);
+                identity.insert(mid, item);
             }
         }
         for item in corpus.items() {
-            if !work.charge(1) {
-                return;
-            }
             let Some(mid) = item.mid() else {
-                continue;
+                project_unavailable(result, "rule evaluation requires valid item identities");
+                return;
             };
-            let iri = format!("urn:mara:mid:{mid}");
-            let invalid = !corpus.is_complete()
-                || !item.validation_source_is_complete()
-                || prerequisites.iter().any(|d| contains(item, d));
-            if invalid {
-                control.unavailable.insert(iri.clone());
-            }
-            let mut node = json!({"@id":iri,"@type":format!("{FLAVOUR}{}",item.flavour())});
-            if !invalid && let Some(flavour) = schema.flavours.get(item.flavour()) {
+            let mut node = json!({"@id":format!("urn:mara:mid:{mid}"),"@type":format!("{FLAVOUR}{}",item.flavour())});
+            if let Some(flavour) = schema.flavours.get(item.flavour()) {
                 for field in item.metadata() {
                     if let Some(def) = flavour.fields.get(field.key()) {
-                        if !work.charge(1 + field.value().len()) {
+                        let Some(value) = literal(field.value(), def.field_type) else {
+                            project_unavailable(
+                                result,
+                                "rule evaluation requires representable typed field values",
+                            );
                             return;
-                        }
-                        match literal(field.value(), def.field_type) {
-                            Some(value) => {
-                                *control
-                                    .path_work
-                                    .entry((iri.clone(), format!("{FIELD}{}", field.key()), false))
-                                    .or_default() += 1 + field.value().len();
-                                push(&mut node, &format!("{FIELD}{}", field.key()), value)
-                            }
-                            None => {
-                                control.unavailable.insert(iri.clone());
-                            }
-                        }
+                        };
+                        push(&mut node, &format!("{FIELD}{}", field.key()), value);
                     }
                 }
             }
@@ -82,48 +66,25 @@ impl Rules {
         let mut edges = BTreeSet::new();
         for item in corpus.items() {
             for relation in item.relations() {
-                if !work.charge(1 + relation.target().len() + relation.name().len()) {
+                let edge = identity.get(relation.target()).and_then(|target| {
+                    crate::RelationEdge::new(schema, item, relation.name(), target).ok()
+                });
+                let Some(edge) = edge else {
+                    project_unavailable(
+                        result,
+                        "rule evaluation requires resolved, valid relationships",
+                    );
                     return;
-                }
-                let target = identity
-                    .get(relation.target())
-                    .and_then(|v| if v.len() == 1 { Some(v[0]) } else { None });
-                let edge = target
-                    .and_then(|t| crate::RelationEdge::new(schema, item, relation.name(), t).ok());
-                match edge {
-                    Some(edge) => {
-                        let crate::RelationEndpoint::Item { mid: a, .. } = &edge.source;
-                        let crate::RelationEndpoint::Item { mid: b, .. } = &edge.target;
-                        edges.insert((a.clone(), edge.relation.clone(), b.clone()));
-                        if edge.symmetric {
-                            edges.insert((b.clone(), edge.relation, a.clone()));
-                        }
-                    }
-                    None => {
-                        if let Some((name, _, _)) = schema.resolve_relation(relation.name()) {
-                            control.invalid_paths.insert(format!("{REL}{name}"));
-                        }
-                    }
+                };
+                let crate::RelationEndpoint::Item { mid: a, .. } = &edge.source;
+                let crate::RelationEndpoint::Item { mid: b, .. } = &edge.target;
+                edges.insert((a.clone(), edge.relation.clone(), b.clone()));
+                if edge.symmetric {
+                    edges.insert((b.clone(), edge.relation, a.clone()));
                 }
             }
         }
         for (a, relation, b) in &edges {
-            *control
-                .path_work
-                .entry((
-                    format!("urn:mara:mid:{a}"),
-                    format!("{REL}{relation}"),
-                    false,
-                ))
-                .or_default() += 1 + "urn:mara:mid:".len() + b.len();
-            *control
-                .path_work
-                .entry((
-                    format!("urn:mara:mid:{b}"),
-                    format!("{REL}{relation}"),
-                    true,
-                ))
-                .or_default() += 1 + "urn:mara:mid:".len() + a.len();
             graph.push(json!({"@id":format!("urn:mara:mid:{a}"),format!("{REL}{relation}"):[{"@id":format!("urn:mara:mid:{b}")}]}));
         }
         let data = match OxigraphInMemory::from_str(
@@ -134,42 +95,13 @@ impl Rules {
         ) {
             Ok(data) => data,
             Err(_) => {
-                result.evaluation_complete = false;
-                result.diagnostics.push(ValidationDiagnostic::new(
-                    DiagnosticCode::EvaluationUnavailable,
-                    Severity::Error,
-                    ValidationScope::Project,
-                    DiagnosticLocation::default(),
+                project_unavailable(
+                    result,
                     "could not project typed item data for rule evaluation",
-                ));
+                );
                 return;
             }
         };
-        let mut order = Vec::new();
-        for (id, shape) in &self.shapes {
-            order.push((
-                shape.source.path.clone(),
-                shape.source.start_byte,
-                id.clone(),
-                String::new(),
-            ));
-            for (key, location) in &shape.locations {
-                let component = component(key);
-                if !component.is_empty() {
-                    order.push((
-                        location.path.clone(),
-                        location.start_byte,
-                        id.clone(),
-                        component,
-                    ));
-                }
-            }
-        }
-        order.sort();
-        for (rank, (_, _, id, component)) in order.into_iter().enumerate() {
-            control.order.insert((id, component), rank);
-        }
-        control.used = work.used;
         let selected = result.target.id.clone();
         for item in corpus.items().filter(|i| {
             selected
@@ -177,9 +109,6 @@ impl Rules {
                 .is_none_or(|id| i.id() == id || i.mid() == Some(id))
         }) {
             for root in &self.roots {
-                if !work.charge(1) {
-                    return;
-                }
                 let shape = &self.shapes[root];
                 if !strings(&shape.value["targetClass"])
                     .iter()
@@ -197,66 +126,64 @@ impl Rules {
                 if !paths.is_empty() && !paths.iter().any(|p| item.source().path().starts_with(p)) {
                     continue;
                 }
-                let Some(mid) = item.mid() else {
-                    self.unavailable(result, item, root, "selected item has no valid MID");
-                    continue;
-                };
+                let mid = item.mid().expect("validated identity");
                 let focus =
                     Object::iri(IriS::new(&format!("urn:mara:mid:{mid}")).expect("validated MID"));
-                control.used = work.used;
-                control.counts.clear();
-                let ((condition, outcome), returned) = bounded::run(control, || {
-                    let mut engine = NativeEngine::new(RecursionSemantics::default());
-                    let run = |id: &str, engine: &mut NativeEngine| {
-                        let s = ir
-                            .get_shape(&Object::iri(
-                                IriS::new(id).expect("validated shape identity"),
-                            ))
-                            .expect("compiled shape");
-                        s.validate(
-                            &data,
-                            engine,
-                            Some(&FocusNodes::single(focus.clone().into())),
-                            None,
-                            ir,
-                        )
-                    };
-                    let condition = shape.value["whenShape"]
-                        .as_str()
-                        .map(|id| run(id, &mut engine));
-                    let applies = condition
-                        .as_ref()
-                        .is_none_or(|c| c.as_ref().is_ok_and(ValidationOutcome::conforms));
-                    bounded::reset_trace();
-                    let outcome = if applies {
-                        Some(run(root, &mut engine))
-                    } else {
-                        None
-                    };
-                    (condition, outcome)
-                });
-                control = returned;
-                work.used = control.used;
-                work.exhausted = control.exhausted;
-                if work.exhausted {
-                    return;
+                let run = |id: &str, engine: &mut RuleEngine| {
+                    let s = ir
+                        .get_shape(&Object::iri(
+                            IriS::new(id).expect("validated shape identity"),
+                        ))
+                        .expect("compiled shape");
+                    s.validate(
+                        &data,
+                        engine,
+                        Some(&FocusNodes::single(focus.clone().into())),
+                        None,
+                        ir,
+                    )
+                };
+                if let Some(condition) = shape.value["whenShape"].as_str() {
+                    let mut engine = RuleEngine::new();
+                    match run(condition, &mut engine) {
+                        Ok(outcome) if !engine.failed.get() => {
+                            if !outcome.conforms() {
+                                continue;
+                            }
+                        }
+                        _ => {
+                            self.unavailable(
+                                result,
+                                item,
+                                root,
+                                "native SHACL applicability evaluation failed",
+                            );
+                            continue;
+                        }
+                    }
                 }
-                if condition.as_ref().is_some_and(Result::is_err)
-                    || outcome.as_ref().is_some_and(Result::is_err)
-                {
-                    self.unavailable(
-                        result,
-                        item,
-                        root,
-                        "rule prerequisite is invalid or native SHACL evaluation failed",
-                    );
+                let mut engine = RuleEngine::new();
+                let outcome = match run(root, &mut engine) {
+                    Ok(outcome) if !engine.failed.get() => outcome,
+                    _ => {
+                        self.unavailable(
+                            result,
+                            item,
+                            root,
+                            "native SHACL obligation evaluation failed",
+                        );
+                        continue;
+                    }
+                };
+                if outcome.conforms() {
                     continue;
                 }
-                if let Some(Ok(outcome)) = outcome
-                    && !outcome.conforms()
-                {
-                    let mut failures = outcome.violations().iter().collect::<Vec<_>>();
-                    failures.sort_by_key(|f| {
+                // Select a stable reported violation, without claiming an
+                // exhaustive explanation of the engine's internal evaluation.
+                let failure = outcome
+                    .violations()
+                    .iter()
+                    .min_by_key(|f| {
                         let id = f.source().map(ToString::to_string).unwrap_or_default();
                         let component = f.constraint_component().to_string();
                         let loc = self
@@ -268,125 +195,71 @@ impl Rules {
                             loc.as_ref().and_then(|l| l.start_byte),
                             id,
                             component,
+                            f.focus_node().to_string(),
+                            f.value().map(ToString::to_string),
                         )
-                    });
-                    let (failure, mut context) = first_leaf(failures[0], &control, Vec::new());
-                    for entry in &mut context {
-                        let Some(parent) =
-                            entry["shape"].as_str().and_then(|id| self.shapes.get(id))
-                        else {
-                            continue;
-                        };
-                        let path = &parent.value["path"];
-                        let Some(raw) = path.as_str().or_else(|| path["inversePath"].as_str())
-                        else {
-                            continue;
-                        };
-                        let Ok(resolved) =
-                            bindings::resolve_path(raw, &serde_json::to_value(schema).unwrap())
-                        else {
-                            continue;
-                        };
-                        let Some(name) = resolved.strip_prefix(REL) else {
-                            continue;
-                        };
-                        let definition = &schema.relations[name];
-                        let direction = if definition.symmetric {
+                    })
+                    .expect("nonconforming outcome has a violation");
+                let id = failure
+                    .source()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| root.clone());
+                let component = failure.constraint_component().to_string();
+                let key = component_key(&component);
+                let obligation = self.shapes.get(&id).unwrap_or(shape);
+                let mut diagnostic = ValidationDiagnostic::new(
+                    DiagnosticCode::RuleFailed,
+                    if shape.value["severity"] == "Warning" {
+                        Severity::Warning
+                    } else {
+                        Severity::Error
+                    },
+                    ValidationScope::Item,
+                    DiagnosticLocation::source(item.source()),
+                    format!("rule {root} failed: {key}"),
+                );
+                diagnostic.item = Some(DiagnosticItem {
+                    id: item.id().into(),
+                    mid: item.mid().map(str::to_owned),
+                });
+                diagnostic.rule = Some(root.clone());
+                diagnostic.obligation = Some(DiagnosticObligation {
+                    shape: id.clone(),
+                    component: component.clone(),
+                    source: obligation.location(key),
+                });
+                let counts = engine
+                    .counts
+                    .get(&(id, failure.focus_node().to_string(), component));
+                let mut details = json!({"kind":kind(key),"path":obligation.value["path"],"parameter":obligation.value[key],"selected_count":counts.map(|c|c.0),"qualifying_count":counts.and_then(|c|c.1),"focus":failure.focus_node().to_string(),"value":failure.value().map(ToString::to_string)});
+                if let Some(path) = obligation.value.get("path") {
+                    let raw = path
+                        .as_str()
+                        .or_else(|| path["inversePath"].as_str())
+                        .unwrap_or("");
+                    if let Ok(resolved) =
+                        bindings::resolve_path(raw, &serde_json::to_value(schema).unwrap())
+                        && let Some(name) = resolved.strip_prefix(REL)
+                    {
+                        let relation = &schema.relations[name];
+                        let direction = if relation.symmetric {
                             "symmetric"
                         } else if path.is_object() {
                             "incoming"
                         } else {
                             "outgoing"
                         };
-                        let endpoint = |key: &str| {
-                            entry[key]
-                                .as_str()
-                                .and_then(|s| s.strip_prefix("urn:mara:mid:"))
-                                .and_then(|mid| identity.get(mid))
-                                .and_then(|items| items.first().copied())
-                        };
-                        let edge = endpoint("focus").zip(endpoint("value")).and_then(|(a, b)| {
-                            if path.is_object() {
-                                crate::RelationEdge::new(schema, b, name, a).ok()
-                            } else {
-                                crate::RelationEdge::new(schema, a, name, b).ok()
-                            }
-                        });
-                        entry["relation"] = json!(name);
-                        entry["direction"] = json!(direction);
-                        entry["label"] = json!(if direction == "incoming" {
-                            definition.inverse.as_deref().unwrap_or(name)
+                        details["relation"] = json!(name);
+                        details["direction"] = json!(direction);
+                        details["label"] = json!(if direction == "incoming" {
+                            relation.inverse.as_deref().unwrap_or(name)
                         } else {
                             name
                         });
-                        entry["edge"] = json!(edge);
                     }
-                    let id = failure
-                        .source()
-                        .map(ToString::to_string)
-                        .unwrap_or_else(|| root.clone());
-                    let component = failure.constraint_component().to_string();
-                    let key = component_key(&component);
-                    let obligation = self.shapes.get(&id).unwrap_or(shape);
-                    let mut diagnostic = ValidationDiagnostic::new(
-                        DiagnosticCode::RuleFailed,
-                        if shape.value["severity"] == "Warning" {
-                            Severity::Warning
-                        } else {
-                            Severity::Error
-                        },
-                        ValidationScope::Item,
-                        DiagnosticLocation::source(item.source()),
-                        format!("rule {root} failed: {key}"),
-                    );
-                    diagnostic.item = Some(DiagnosticItem {
-                        id: item.id().into(),
-                        mid: item.mid().map(str::to_owned),
-                    });
-                    diagnostic.rule = Some(root.clone());
-                    diagnostic.obligation = Some(DiagnosticObligation {
-                        shape: id.clone(),
-                        component: component.clone(),
-                        source: obligation.location(key),
-                    });
-                    let counts = control
-                        .counts
-                        .get(&(id.clone(), failure.focus_node().to_string()));
-                    let (selected, qualifying) = if let Some((s, q)) = counts {
-                        (Some(*s), Some(*q))
-                    } else {
-                        (None, None)
-                    };
-                    let mut details = json!({"kind":kind(key),"path":obligation.value["path"],"parameter":obligation.value[key],"selected_count":selected,"qualifying_count":qualifying,"focus":failure.focus_node().to_string(),"value":failure.value().map(ToString::to_string),"context":context});
-                    if let Some(path) = obligation.value.get("path") {
-                        let raw = path
-                            .as_str()
-                            .or_else(|| path["inversePath"].as_str())
-                            .unwrap_or("");
-                        if let Ok(resolved) =
-                            bindings::resolve_path(raw, &serde_json::to_value(schema).unwrap())
-                            && let Some(name) = resolved.strip_prefix(REL)
-                        {
-                            let r = &schema.relations[name];
-                            let direction = if r.symmetric {
-                                "symmetric"
-                            } else if path.is_object() {
-                                "incoming"
-                            } else {
-                                "outgoing"
-                            };
-                            details["relation"] = json!(name);
-                            details["direction"] = json!(direction);
-                            details["label"] = json!(if direction == "incoming" {
-                                r.inverse.as_deref().unwrap_or(name)
-                            } else {
-                                name
-                            });
-                        }
-                    }
-                    diagnostic.details = Some(details);
-                    result.diagnostics.push(diagnostic);
                 }
+                diagnostic.details = Some(details);
+                result.diagnostics.push(diagnostic);
             }
         }
     }
@@ -407,10 +280,15 @@ impl Rules {
         result.diagnostics.push(d);
     }
 }
-fn contains(item: &Item, d: &Diagnostic) -> bool {
-    d.source().path() == item.source().path()
-        && d.source().span().start_byte() >= item.source().span().start_byte()
-        && d.source().span().start_byte() < item.source().span().end_byte()
+fn project_unavailable(result: &mut ValidationResult, message: &str) {
+    result.evaluation_complete = false;
+    result.diagnostics.push(ValidationDiagnostic::new(
+        DiagnosticCode::EvaluationUnavailable,
+        Severity::Error,
+        ValidationScope::Project,
+        DiagnosticLocation::default(),
+        message,
+    ));
 }
 fn push(node: &mut Value, key: &str, value: Value) {
     node.as_object_mut()
@@ -487,39 +365,4 @@ fn kind(key: &str) -> &'static str {
         "not" => "not",
         _ => "in",
     }
-}
-
-fn first_leaf(
-    failure: &shacl::validator::report::ValidationResult,
-    control: &Control,
-    mut context: Vec<Value>,
-) -> (shacl::validator::report::ValidationResult, Vec<Value>) {
-    let key = (
-        failure
-            .source()
-            .map(ToString::to_string)
-            .unwrap_or_default(),
-        failure.focus_node().to_string(),
-        failure.constraint_component().to_string(),
-    );
-    if let Some(children) = control.explanations.get(&key).filter(|c| !c.is_empty()) {
-        context.push(json!({"shape":key.0,"focus":key.1,"component":key.2,"path":failure.path().map(ToString::to_string),"value":failure.value().map(ToString::to_string)}));
-        let child = children
-            .iter()
-            .min_by_key(|c| {
-                let key = (
-                    c.source().map(ToString::to_string).unwrap_or_default(),
-                    c.focus_node().to_string(),
-                    c.constraint_component().to_string(),
-                );
-                control
-                    .events
-                    .iter()
-                    .position(|k| k == &key)
-                    .unwrap_or(usize::MAX)
-            })
-            .unwrap();
-        return first_leaf(child, control, context);
-    }
-    (failure.clone(), context)
 }

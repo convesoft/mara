@@ -10,7 +10,7 @@ do not add lifecycle policy to bundled templates or existing projects.
 
 The accepted language foundation is SHACL Core, authored in YAML with generated
 bindings and verified by [[EVD-YAML-SHACL-SPIKE]]. The contracts replace the
-earlier unshipped formats. [[ADR-BOUNDED-SHACL-DEPENDENCY]] records the
+earlier unshipped formats. [[ADR-NATIVE-SHACL-ADAPTER]] records the
 native execution boundary; structural graph policies and trace views remain planned.
 
 :::mara design DES-TRACE-RULE-GRAMMAR
@@ -201,8 +201,11 @@ coercing them. Each repeatable value contributes a triple; RDF has set
 semantics, so order and duplicate occurrences remain in source metadata,
 not field-count semantics. Absent optional fields contribute no triples;
 an authored empty string remains a present literal. IDs, titles and relations
-are not implicit custom fields. Invalid authored metadata makes the affected
-item unavailable; it must not be projected as absence.
+are not implicit custom fields. Invalid source, identities, fields or references prevent policy evaluation for
+the corpus, including item-targeted validation. Report the original diagnostics
+and one project-scoped `evaluation_unavailable`; do not project invalid data as
+absence or infer which unrelated policies could still run. Definition-only
+schema validation does not require a valid item corpus.
 
 The host binding adds only these selection properties:
 
@@ -254,7 +257,7 @@ path may use plain counts; field qualification must include a declared internal
 flavour constraint. External nodes have neither that class nor item fields
 and cannot qualify as internal items.
 Unconstrained graph cycles do not change finite nested-shape semantics.
-[[DES-TRACE-DIAGNOSTIC-INTERFACE]] defines depth and work limits.
+[[DES-TRACE-DIAGNOSTIC-INTERFACE]] defines structural depth and output limits.
 
 Root severity is `sh:Violation` by default, mapped to error; explicit
 `sh:Warning` maps to warning. The root owns the policy severity of its
@@ -262,11 +265,12 @@ reusable obligations. Nested severity overrides and other severities are
 rejected initially. SHACL conformance and Mara validity are distinct:
 a complete warning-only failure remains valid in Mara.
 
-Preserve a separate evaluation-error ledger and authored-shape/source mapping.
-A nonconforming qualifier is ordinary data; an engine error, invalid prerequisite
-or exhausted budget must not be mistaken for a nonqualifying endpoint, even
-when another endpoint satisfies the minimum. Evaluate only contexts selected
-by root scope, applicability and explicit relationship obligations.
+Validate definitions and corpus prerequisites before native evaluation. Keep a
+separate error ledger through the library's public engine/constraint interfaces:
+an error encountered during applicability or obligation evaluation makes that
+item/rule unavailable, even if the engine folds it into nonconformance. Do not
+force evaluation of otherwise skipped logical alternatives solely for tracing.
+An ordinary nonconforming qualifier remains ordinary data.
 
 ## Worked YAML rules
 
@@ -365,18 +369,18 @@ they do not execute verification or establish evidence trustworthiness/freshness
 ## Evaluation states
 
 Retain `not_applicable`, `passed`, `failed` and `unavailable` at the
-item/rule boundary. Invalid source, unresolved identities, invalid definitions
-and exhausted bounds must not become zero counts or false applicability.
-Continue independent checks whose prerequisites are available. Any unavailable
-required child makes the containing shape/rule unavailable, including a
-SHACL alternative with another passing child. This is Mara completeness
-reporting; ordinary constraint nonconformance still follows SHACL logic.
+item/rule boundary. Invalid corpus prerequisites skip policy evaluation as
+specified above. An encountered engine error is unavailable, never a false
+applicability result or a policy failure. Retain structural diagnostics; there
+is no promise to continue independent policies after invalid corpus input.
 
 Ordinary source edits and structured mutations are evaluated identically;
 policy failure does not introduce a new mutation gate. Project, item and schema
-validation load the persisted binding. The native evaluator uses the pinned
-dependency patch in [[ADR-BOUNDED-SHACL-DEPENDENCY]]. Source locations refer
-to authored YAML; generated anonymous shape identifiers are snapshot-bound.
+validation load the persisted binding. Use the unmodified native evaluator
+through [[ADR-NATIVE-SHACL-ADAPTER]]. Source locations refer to authored YAML;
+generated anonymous shape identifiers are snapshot-bound. Evaluation has no
+logical work counter or deterministic partial-prefix contract; finite shape
+and path limits remain in [[DES-TRACE-DIAGNOSTIC-INTERFACE]].
 
 For an opt-in engineering example, copy `examples/engineering-rules.yaml`
 to the project, declare optional enum `status` fields on requirement,
@@ -472,78 +476,48 @@ They do not change relationship mutation errors in [[DES-RELATION-INTERFACES]].
 ## Implemented foundation
 
 Project, item and schema validation implement this diagnostic envelope for
-existing configuration, source, identity, field, reference and relationship
-checks and configured YAML current-state rules. Real CLI and stdio MCP tests
-exercise warning/error policy, invalid prerequisites, source locations,
-pagination, stale cursors and native pattern-work exhaustion. Structural
-cardinality/cycle policies and trace-view commands remain separate work.
+configuration, source, identity, field, reference and relationship checks and
+configured YAML current-state rules. Real CLI and stdio MCP tests cover the
+lifecycle examples, warning/error policy, invalid prerequisites, source
+locations, pagination and stale cursors. Structural graph policies and
+trace-view commands remain separate work.
 
-Structural cost revision 2 reserves logical input work before each declaration,
-identity-index, item-validation and reference-discovery pass. It includes
-visited records and scalar/collection input sizes; repeated passes are charged
-again. Enum membership reserves every allowed-value comparison and both string
-inputs for each field occurrence, including repeated values. The work ledger
-is deterministic and is included in continuation
-identity. Source loading/parsing and response formatting are outside this
-budget. SHACL cost revision 1 adds definition/selection, projection, native
-shape/constraint visits, value comparisons and path examinations. Primitive
-comparisons reserve all candidate operand bytes before execution, including
-unsuccessful alternatives. Pattern matching reserves Thompson NFA state count
-times input bytes plus one; compilation is part of loading. Native evaluation
-runs synchronously with cache reuse disabled so every logical visit is charged.
-Evaluator patch and cost revisions participate in cursor identity.
-Graph-policy accounting remains separate implementation work.
+## Evaluation, output and continuation
 
-## Work, output and continuation
-
-Accept `max_work` (CLI `--max-work`), integer 1–1,000,000, default 100,000.
-Charge one logical unit for each item/selection test, SHACL constraint
-invocation at a node, SHACL value/list membership comparison, semantic-edge
-examination and graph-policy vertex/edge visit. String/collection operations
-additionally charge their input byte/element counts before the operation;
-pattern matching also requires bounded engine work, not just an input-length
-charge. Schema validation charges each visited declaration and SHACL constraint.
-Specification generation charges each source node/edge before fragmentation.
-Charge logical visits even when cached. Applicability uses the same budget.
-Counts alone at the SHACL invocation boundary are insufficient: enforce the
-budget inside evaluation or report the operation unavailable. Do not
-claim budget compliance from the successful library experiment alone.
-
-Sort items by path/start byte, rules by expanded shape IRI, and relation edges
-by canonical kind and endpoint identity. Order independent SHACL obligations
-by source path/start byte; for repeated identical triples use the earliest
-source location. RDF list members preserve list order. Blank-node labels from
-a parser are not stable ordering keys. Pin the evaluator/cost-model revision
-in the snapshot. Parallel scheduling must not change the
-observable evaluated prefix. Loading/parsing source is outside this logical
-evaluation budget and retains existing read/error behavior.
+Validation evaluates the requested target without a configurable logical work
+budget. There is no `max_work`, work counter, evaluation-prefix promise or
+wall-clock timeout guarantee. Evaluation does not modify source files.
 
 Allow at most eight nested relationship steps and SHACL shape-reference
-depth 32 (root depth 1, including applicability dependencies). Reject deeper definitions, recursive shape
-references and unbounded paths as invalid configuration. Graph cycle policies
-visit the finite normalized graph.
+depth 32 (root depth 1, including applicability dependencies). Reject deeper
+definitions, recursive shape references and unbounded paths as invalid
+configuration. These finite structural limits do not promise a runtime bound.
 
-Before a work unit would exceed the limit, stop evaluation and report
-`evaluation_limit` with limit and used units, set `evaluation_complete:false` and `valid:false`. Unvisited
-checks are unavailable, never passed. Invalid prerequisites similarly make
-affected checks unavailable and prevent a full pass; retain independent
-diagnostics. A finite failed policy check is complete, not unavailable.
-The evaluation limit itself is always an error, even for warning-only rules.
+Invalid definitions prevent policy evaluation. Invalid corpus prerequisites
+skip all policy evaluation, including for item validation, with the original
+structural diagnostics and one project-scoped `evaluation_unavailable`.
+Do not compute policy over a partial graph. A native error encountered during
+applicability or obligation evaluation makes that item/rule unavailable.
+Unavailable evaluation sets `evaluation_complete:false` and `valid:false`;
+a finite failed policy check is complete. Unavailability remains an error even
+for warning-only rules. No exhaustive traversal of skipped alternatives or
+independent-policy recovery is required.
+
+Sort completed output deterministically; internal evaluator traversal,
+parallelism and cache reuse are not public contracts. Select one reported
+violation per failed item/rule pair using authored source location, shape,
+component, focus and value. Pin adapter/evaluator revisions in cursor identity.
 
 Output pagination is separate from evaluation. All page-based interfaces use
 `limit` 1–100 (default 20) and a 65,536-byte serialized domain-response budget,
 including envelope and cursor, excluding transport framing. `has_more` and
-`next_cursor` describe remaining output of this evaluation, not remaining
-evaluation work. Repeat unchanged inputs and limits with the cursor; reject
-schema/corpus/project/rule-source/options changes as `stale_cursor`. Re-evaluation may
-reconstruct the same deterministic result; a server need not persist a job.
-
-A higher `max_work` requires a fresh request without the old cursor.
-At the maximum, report the unresolved limit; do not suggest an output-path
-filter as a way to validate less of the project. Output bounds never silently
-drop a record. Split long content as specified by the view contract; if an
-indivisible identity/location or diagnostic cannot fit alone, return
-`output_limit` naming the source/configuration to shorten.
+`next_cursor` describe remaining output, not remaining computation. Repeat
+unchanged inputs and options with the cursor; source/schema/project/rule-source
+or option changes are `stale_cursor`. Re-evaluation may reconstruct the result;
+a server need not persist a job. Reporting paths do not reduce evaluation.
+Output bounds never silently drop a record. Split long content as specified in
+the view contract; if an indivisible identity/location or diagnostic cannot fit,
+return `output_limit` naming the source/configuration to shorten.
 
 ## Diagnostic vocabulary and severity
 
@@ -565,7 +539,6 @@ message strings. These are stable categories; detail fields refine them.
 | `relation_cardinality` | Structural minimum/maximum failed; constraint's severity. |
 | `relation_cycle` | Prohibited cycle component; constraint's severity. |
 | `evaluation_unavailable` | A required check lacks valid prerequisites; error. |
-| `evaluation_limit` | Work budget exhausted; error. |
 
 For invalid rule vocabulary use `rule_invalid`, rather than also reporting
 `schema_invalid` for the same defect. Invalid rule values in authored items
@@ -592,35 +565,35 @@ Rule failures add `obligation:{shape,component,source}`: shape is its expanded
 IRI or a snapshot-bound opaque reference for a blank node; component is the
 SHACL component IRI; source is the authored YAML definition's location.
 `details.kind` is `class|datatype|has_value|pattern|minimum|maximum|every|and|or|not|in`.
-Local details identify the field path, constraint parameters and observed RDF
-values or their bounded inspection references. Count details include
-`selected_count`, `qualifying_count` and the violated bound.
-Relationship explanations retain canonical relation, direction and
-endpoint-facing label, plus item/edge references. Locations of all assertions
-remain inspectable via relation get, not an unbounded inline list.
+Local details identify the reported field path, constraint parameters and
+reported value when available. Count details contain `selected_count`,
+`qualifying_count` and the violated bound; counts unavailable from completed
+native outcomes are null, never inferred from missing outcomes. Relationship
+checks retain canonical relation, direction and endpoint-facing label when
+present on the reported obligation. Assertion locations remain inspectable
+through relation get.
 
-Emit one `rule_failed` per failed item/rule pair, pointing to the first
-unsatisfied leaf in the obligation order above that contributes to the root failure.
-Do not emit failures for unsuccessful alternatives of a passing SHACL or.
-The matrix exposes the remaining check results, including all failed
-alternatives when SHACL or fails. Unavailable rules produce
-`evaluation_unavailable` referencing their prerequisite diagnostics or a
-sanitized engine error instead of a fabricated policy failure.
-An exhausted request emits one global
-`evaluation_limit`, not one diagnostic for every unvisited item.
+Emit one `rule_failed` per failed item/rule pair using a stable reported
+violation. It may identify a composite `node`, `and`, `or` or `not` constraint;
+there is no requirement to expose the deepest failing leaf, every rejected
+endpoint or every alternative. Do not emit failures from unsuccessful
+alternatives of a passing rule. Do not parse native message text to obtain
+structured counts or classifications. Unavailable evaluation emits
+`evaluation_unavailable` with an actionable prerequisite message or sanitized
+engine-failure message instead of a fabricated policy result.
 
 ## Validation response and entry points
 
 CLI JSON and MCP return validation `format_version:1` with
-`project`, `target`, `valid`, `evaluation_complete`, `work:{used,limit}`,
+`project`, `target`, `valid`, `evaluation_complete`,
 `diagnostics`, `summary`, `selection`, `has_more` and `next_cursor`.
 `target.kind` is project/item/schema; item targets retain `id`.
 Schema results retain `path`, `flavours` and `relations` when the schema is
 available; counts are null if it cannot be loaded.
 `summary` contains `errors`, `warnings` and `counts_exact`.
 Counts describe the entire validation target before reporting selection and
-pagination. They are lower bounds with `counts_exact:false` if prerequisites
-or a work bound prevent complete evaluation.
+pagination. They are lower bounds with `counts_exact:false` when prerequisites
+or an encountered engine error prevent complete evaluation.
 
 `valid` is true only with complete evaluation and zero errors. A page with no
 diagnostics can therefore have `valid:false`. `selection.paths` and
@@ -628,7 +601,8 @@ diagnostics can therefore have `valid:false`. `selection.paths` and
 the latter counts produced diagnostics hidden by paths, not unseen checks or
 records deferred to later pages. Project/schema diagnostics remain visible.
 Item validation checks the selected item in full corpus context, including
-its incident constraints and cycles, with prerequisite errors that affect it.
+its incident constraints and cycles. With configured rules, any invalid corpus
+prerequisite prevents policy evaluation even outside the selected item.
 Schema validation also loads the configured YAML sources, checks the supported
 SHACL/binding profile, generated vocabulary resolution, field datatype compatibility,
 condition-shape references and graph policies, not runtime item conformance.
@@ -641,11 +615,11 @@ No page boundary changes summary, validity or evaluation completeness.
 
 | CLI | MCP |
 |---|---|
-| `project validate --path docs/ --limit 20 --max-work 100000` | `project_validate {paths:["docs/"], limit:20, max_work:100000}` |
+| `project validate --path docs/ --limit 20` | `project_validate {paths:["docs/"], limit:20}` |
 | `item validate REQ-A --limit 20` | `item_validate {id:"REQ-A", limit:20}` |
 | `schema validate --limit 20` | `schema_validate {limit:20}` |
 
-All three accept cursor and max_work; only project validate accepts reporting
+All three accept cursor; only project validate accepts reporting
 paths. Project selection follows existing CLI/MCP conventions. CLI
 `--format json` returns the domain result; default text renders it.
 CLI exits 0 for valid, 1 for an invalid/incomplete validation result;
@@ -673,7 +647,7 @@ but those totals, validity and exit status remain unchanged.
 
 Trace views are disposable, read-only projections of one loaded project.
 They share rule semantics with [[DES-TRACE-RULE-GRAMMAR]], graph identity with
-[[DES-CANONICAL-TRACE-RELATIONS]], and work/output bounds with
+[[DES-CANONICAL-TRACE-RELATIONS]], and structural/output bounds with
 [[DES-TRACE-DIAGNOSTIC-INTERFACE]]. Do not create saved view definitions or
 modify canonical files. Each request carries its selection.
 
@@ -696,7 +670,7 @@ for evaluation and are identified as outside the root selection.
 | `trace specification --flavour requirement --field status=approved` | `trace_specification {flavours:["requirement"], fields:[{key:"status",value:"approved"}]}` |
 
 Both accept `--all`, repeatable `--id`, `--flavour`, `--field`,
-`--path`, and `--limit`, `--cursor`, `--max-work`.
+`--path`, and `--limit`, `--cursor`.
 Matrix additionally requires either repeatable `--rule` / nonempty `rules`,
 or a request-local check, never both. Rule values are exact expanded root shape
 IRIs from enabled sources; unknown IRIs are errors. Prefix abbreviations are
@@ -708,7 +682,7 @@ using the rule-file contract and require the designated named node shape.
 Apply it unconditionally to the request's selected roots; reject root targets,
 `whenShape` and `paths` on the designated check, and do not execute other
 targeted shapes from the supplied files. Its referenced obligations follow
-the same field projection, profile and work limits as persisted rules.
+the same field projection, profile and structural limits as persisted rules.
 The files define reusable constraints, not a saved view: selection stays in
 the request. They impose no project-validation policy unless separately enabled
 in project configuration.
@@ -729,7 +703,7 @@ Changing render mode is a changed request and requires a fresh cursor.
 No CSV, HTML or PDF contract is introduced.
 
 A view has `format_version:1`, `kind:matrix|specification`, normalized
-`selection`, `evaluation_complete`, `work`, `records`, `has_more` and
+`selection`, `evaluation_complete`, `records`, `has_more` and
 `next_cursor`. Records of kind `issue` use validation diagnostic shapes for
 problems preventing a complete view. It does not claim whole-project validity.
 Known policy failures are data in a complete matrix: CLI exits 0 and MCP
@@ -752,7 +726,9 @@ force an unbounded nested row:
 or `{kind:"check",shape:"urn:mara:rule:coverage"}`. `root` and item endpoints use discovery item descriptors;
 external endpoints use the relationship contract's external descriptor.
 Every record carries `kind`. `condition` identifies the SHACL component and
-its parameters. Nested shape obligations have their own check records.
+its parameters. Nested shape obligations have check records when explicitly
+evaluated or available from public native outcomes; internal evaluator traces
+are not required.
 A check's `counts` contains `selected`,
 `qualifying`, `minimum` and `maximum`; omitted bounds and unavailable totals
 are null. `every` and `qualification` use the predicate states or null when
@@ -767,28 +743,24 @@ when unavailable, not misleading zeros. Local checks retain field paths,
 constraint parameters and bounded value/source inspection references.
 
 Emit one result for each root/rule pair, including not-applicable roots.
-Only applicable rules have check records. Emit check records in deterministic shape-obligation
-preorder under [[DES-TRACE-DIAGNOSTIC-INTERFACE]]; relationship edge records follow their owning check in canonical
-endpoint order, each followed by its nested checks. Emit failed alternatives
-for explanation even when the parent SHACL or passes; distinguish child state
-from root state. Never enumerate arbitrary paths. A target with several
-authored assertions has one edge record, with all occurrences inspectable
-through `relation get` as specified in the relationship contract.
+Only applicable, evaluated rules have check records. Order reported checks by
+authored source location/shape/component and edges by canonical endpoint.
+Do not require exhaustive nested traces, rejected endpoints or alternatives
+skipped by the native engine. Additional checks may invoke public validation
+APIs explicitly; views must not require a dependency fork. Unknown counts,
+qualification or nested detail remain null/absent rather than invented.
+A target with several authored assertions has one edge record; occurrences
+remain inspectable through `relation get`.
 
-Order roots by path/start byte, rules by expanded IRI (one request check has no
-persisted-rule ordering), and preserve the evaluation ordering within each result.
-Unavailable roots/steps remain explicit; do not silently omit them when
-bounds are reached. After work exhaustion, one terminal issue record states
-the first unevaluated root/rule and that the remaining selected suffix is
-unavailable; do not manufacture millions of placeholder rows.
+Order roots by path/start byte and rules by expanded IRI. Invalid corpus
+prerequisites produce an issue explaining skipped evaluation. There is no
+partially evaluated prefix or work-exhaustion suffix to reconstruct.
 
-Markdown groups this stream as source-linked root/rule results and check
-tables. Show count gaps, rejected targets and the first missing downstream
-step using endpoint-facing relation labels. A draft verification is visibly
-non-qualifying even when an approved verification makes the root pass.
-A second-hop gap identifies its verification and evidence obligation.
-External edges display their address and terminal kind, never an invented
-item status or source location.
+Markdown groups available results as source-linked root/rule results and check
+tables. Show available count gaps and reported obligations with endpoint-facing
+relation labels. Composite failures may identify the owning shape rather than
+a downstream leaf. External edges display their address and terminal kind,
+never an invented item status or source location.
 
 Do not calculate a global percentage. Matrix results add `summaries`, one
 entry per evaluation identity, with `selected`, `not_applicable`, `passed`,
@@ -857,7 +829,7 @@ do not advance the active schema or executable during contract authoring.
 |---|---|
 | Schema | Keep the planned format 3 for vocabulary/relationships and structural cardinality/acyclic declarations. Conditional rules are separate YAML shape files, not an embedded rules mapping in the vocabulary schema. Absent policies impose no obligations. |
 | Documents | No new marker or metadata syntax. Status and other rule inputs are ordinary project-defined fields. |
-| Project configuration | Continue accepting format 1 for projects without rule sources. Enabling YAML rule sources requires format 2 and the optional rules table in DES-TRACE-RULE-GRAMMAR; reject unknown/unsupported versions. No saved views or persisted work limits. |
+| Project configuration | Continue accepting format 1 for projects without rule sources. Enabling YAML rule sources requires format 2 and the optional rules table in DES-TRACE-RULE-GRAMMAR; reject unknown/unsupported versions. No saved views. |
 | Rule binding | Start format_version 1 inside the rules table. It selects the supported YAML/SHACL Core profile, generated context and namespaces, field projection and host selection vocabulary. This is independent of W3C or crate release numbers. |
 | Validation JSON | Start format_version 1 for project/item/schema validation and operation errors, replacing unversioned results. Explicit completeness, codes, severities, counts and continuation require client updates. |
 | Trace JSON | Start a separate format_version 1 family for matrix/specification results and errors. |
@@ -885,13 +857,19 @@ the project become relative and unavailable coordinates are omitted. Match
 `next_cursor` with unchanged options until `has_more:false`; a filtered or later
 page may be empty while the target remains invalid. Discard all old cursors.
 
-Validation defaults to 20 diagnostics and `max_work:100000`. If evaluation
-hits its budget, restart without a cursor and explicitly increase `max_work`,
-up to 1000000. Mara's own corpus check uses this maximum. Output paths only
-select reporting and never reduce the validation target. Read the structured
-operation-error envelope for invalid arguments, stale cursors, I/O preventing a
-result or oversized indivisible output. These errors are separate from
-completed operations with invalid/incomplete validation results.
+Validation defaults to 20 diagnostics per page. The unshipped development
+`max_work` option, `work` response field and `evaluation_limit` diagnostic are
+removed; validation format 1 remains the planned 0.3 interface. Discard all
+previous development cursors. Output paths only select reporting and never
+reduce the validation target. Read the structured operation-error envelope for
+invalid arguments, stale cursors, I/O preventing a result or oversized
+indivisible output. These errors are separate from completed operations with
+invalid/incomplete validation results.
+
+Rules use the unmodified pinned SHACL library with a public-API adapter.
+Invalid corpus input now skips all policy evaluation; complete nested traces
+and a deepest-failing-leaf diagnostic are not promised. Existing authored YAML
+and binding version 1 keep their field, condition and relationship semantics.
 
 Migrate custom format-2 schemas using the recoverable workflow in the
 relationship compatibility contract. Without rule sources, no project-config
@@ -997,51 +975,56 @@ Absent fields contribute no RDF values. Presence requires an explicit minimum;
 every over an empty related set passes. Combining every and a minimum supports
 both optional-but-qualified and mandatory coverage.
 
-Rules default to error and may be warnings. Invalid prerequisites and work
-limits remain errors because treating an unperformed check as a policy warning
-could claim a full pass. Keep complete evaluation distinct from output
-pagination so small responses cannot hide incomplete analysis.
+Rules default to error and may be warnings. Invalid prerequisites and
+encountered engine failures remain errors: an unperformed check cannot claim
+a full pass. Invalid corpus input skips policy evaluation. Keep complete
+evaluation distinct from output pagination.
 
 Keep one project-owned vocabulary schema, explicitly enabled YAML rule
 sources and the existing validation entry points.
 Explicit matrix/specification requests with JSON and Markdown meet the current
 workflow without saved-view state or a general query/workflow engine.
-Use bounded steps, logical work and output pages rather than unbounded graph
-expansion. Permit a fresh higher-budget request within a fixed ceiling;
-continuation reads output rather than silently resuming partial validation.
+Use finite relationship/shape depth and output pages. Omit logical work
+accounting and deterministic partial execution; continuation reads output.
+[[ADR-NATIVE-SHACL-ADAPTER]] keeps native evaluation in an unmodified dependency
+and limits explanations to information available through its public APIs.
 
 Version public result families independently. Add future transition context
 through a separate versioned namespace; silently reinterpreting current-state
 rules would change projects' existing policy after an upgrade.
 :::
 
-:::mara decision ADR-BOUNDED-SHACL-DEPENDENCY
+:::mara decision ADR-NATIVE-SHACL-ADAPTER
 :mid: 01M37AKP5PVWSECJR2T28VFFRS
-:title: Pin a bounded native SHACL dependency patch
+:title: Use unmodified native SHACL through a public adapter
 :justifies: DES-TRACE-RULE-GRAMMAR
 :justifies: DES-TRACE-DIAGNOSTIC-INTERFACE
 
-Keep SHACL Core constraint semantics and the YAML → generated JSON-LD → RDF
-pipeline. Pin `shacl` and `rudof_rdf` to 0.3.21; carry the SHACL source patch
-in `vendor/shacl` instead of introducing a second constraint evaluator or
-weakening completion/work-limit guarantees.
+Use the unmodified crates.io `shacl` 0.3.21 evaluator with `rudof_rdf` and
+`rudof_iri` pinned to the same release. Keep YAML → generated JSON-LD → RDF →
+SHACL; do not vendor a fork or introduce a second constraint evaluator.
 
-The upstream SHACL package is from rudof commit
-`f84b86d2f59dc5e7ca56aec03b44602dcefbdcba`, package path `shacl`; its MIT and
-Apache licenses are retained. The patch adds opt-in synchronous evaluator
-controls, deterministic obligation/endpoint order, primitive/pattern work
-reservation, unavailable-prerequisite checks, nested error propagation and
-leaf explanation provenance. Native logical alternatives are all evaluated;
-passing alternatives cannot hide unavailable children. Mara invokes a single
-focus shape directly, without the upstream parallel processor.
+The former development patch coupled logical work budgets, traversal order,
+prerequisite tracking and nested explanations to evaluator internals. Those
+guarantees cost more dependency maintenance than the current lifecycle and
+coverage workflow requires. Remove `max_work` and internal-order guarantees;
+retain finite shape/path restrictions and deterministic completed output.
 
-Mara owns this patch until equivalent upstream capabilities are verified.
-Upgrades must preserve authored YAML locations, warning/error parity,
-qualifying counts, first-failure explanations and deterministic work/cursor
-semantics through real CLI and stdio MCP tests. The lockfile retains compatible
-0.10 hash dependencies for the RDF stack; do not regenerate it without builds.
+Validate definitions and the corpus before policy evaluation. Invalid corpus
+input skips policy checks with an explicit unavailable result. A small Mara
+adapter delegates supported components to the library's public native validator
+traits and records encountered component/path errors before upstream callers
+can fold them into nonconformance. The adapter owns no constraint algorithms.
+Mara calls shapes synchronously with explicit focus nodes; logical short-circuit
+behavior and native caches remain library-owned.
 
-This is an execution integration boundary, not a new rule language, workflow
-engine or default lifecycle policy. Structural graph policies, external targets,
-trace views and historical transition checks retain their separate scope.
+Diagnostics retain item/rule and authored obligation locations, reported
+constraint/value and available counts. Exact qualifying totals may use completed
+native cached shape outcomes; absent outcomes are unknown. Do not require
+exhaustive alternatives, rejected endpoints or deepest-leaf provenance.
+
+Verify lifecycle/coverage, invalid prerequisites, nested error reporting,
+warning/error parity and stable pagination through the public CLI and stdio
+MCP paths. Pin evaluator/adapter revisions in cursor identity. Changes to
+constraint semantics still require an explicit binding compatibility decision.
 :::

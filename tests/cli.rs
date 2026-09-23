@@ -7333,17 +7333,7 @@ fn primary_workflows_run_end_to_end_against_real_source_files() {
 #[test]
 fn dogfooded_repository_validates_and_retrieves_equivalently_through_cli_and_mcp() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let cli_validation = mara(
-        repository,
-        &[
-            "--format",
-            "json",
-            "project",
-            "validate",
-            "--max-work",
-            "1000000",
-        ],
-    );
+    let cli_validation = mara(repository, &["--format", "json", "project", "validate"]);
     assert!(
         cli_validation.status.success(),
         "{}",
@@ -7398,7 +7388,7 @@ fn dogfooded_repository_validates_and_retrieves_equivalently_through_cli_and_mcp
         &[
             mcp_initialize(1),
             json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
-            mcp_call(2, "project_validate", json!({"max_work":1000000})),
+            mcp_call(2, "project_validate", json!({})),
             mcp_call(
                 3,
                 "search",
@@ -11702,7 +11692,7 @@ fn diagnostic_pages_preserve_summary_and_reject_changed_snapshots_or_options() {
     );
     assert_eq!(next["has_more"], false);
     assert_eq!(next["summary"], first["summary"]);
-    assert_eq!(next["work"], first["work"]);
+    assert!(first.get("work").is_none());
     assert_ne!(next["diagnostics"], first["diagnostics"]);
     let item = diagnostic_parity(
         fixture.path(),
@@ -11712,30 +11702,15 @@ fn diagnostic_pages_preserve_summary_and_reject_changed_snapshots_or_options() {
     );
     assert_eq!(item["summary"], first["summary"]);
     assert_eq!(item["has_more"], true);
-    for (args, params) in [
-        (
-            vec!["project", "validate", "--limit", "2", "--cursor", cursor],
+    assert_eq!(
+        diagnostic_parity(
+            fixture.path(),
+            &["project", "validate", "--limit", "2", "--cursor", cursor],
+            "project_validate",
             json!({"limit":2,"cursor":cursor}),
-        ),
-        (
-            vec![
-                "project",
-                "validate",
-                "--limit",
-                "1",
-                "--max-work",
-                "99999",
-                "--cursor",
-                cursor,
-            ],
-            json!({"limit":1,"max_work":99999,"cursor":cursor}),
-        ),
-    ] {
-        assert_eq!(
-            diagnostic_parity(fixture.path(), &args, "project_validate", params)["error"]["code"],
-            "stale_cursor"
-        );
-    }
+        )["error"]["code"],
+        "stale_cursor"
+    );
     // Even a semantically irrelevant edit invalidates continuation.
     fs::write(&file, format!("{source}\n<!-- changed -->\n")).unwrap();
     assert_eq!(
@@ -11820,38 +11795,39 @@ fn diagnostic_configuration_failures_keep_typed_locations_and_schema_envelope() 
 }
 
 #[test]
-fn diagnostic_work_limits_and_operation_errors_are_distinct_from_policy_failure() {
+fn diagnostic_operation_errors_are_distinct_from_policy_failure() {
     let fixture = TempDir::new().unwrap();
     assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    let tools = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
+        ],
+    );
+    let tools = &mcp_response(&tools, 2)["result"]["tools"];
+    for name in ["project_validate", "item_validate", "schema_validate"] {
+        let tool = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap();
+        assert!(tool["inputSchema"]["properties"].get("max_work").is_none());
+    }
     for (command, tool) in [
         ("project", "project_validate"),
         ("schema", "schema_validate"),
     ] {
-        let limited = diagnostic_parity(
-            fixture.path(),
-            &[command, "validate", "--max-work", "1"],
-            tool,
-            json!({"max_work":1}),
-        );
-        assert_eq!(limited["valid"], false);
-        assert_eq!(limited["evaluation_complete"], false);
-        assert_eq!(limited["summary"]["counts_exact"], false);
-        assert_eq!(
-            limited["diagnostics"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|d| d["code"] == "evaluation_limit")
-                .count(),
-            1
-        );
-        assert!(limited["work"]["used"].as_u64().unwrap() <= 1);
         let complete = diagnostic_parity(fixture.path(), &[command, "validate"], tool, json!({}));
         assert_eq!(complete["valid"], true);
         assert_eq!(complete["evaluation_complete"], true);
+        assert!(complete.get("work").is_none());
+        assert!(
+            !stdout(&mara(fixture.path(), &[command, "validate", "--help"])).contains("--max-work")
+        );
         for (flag, value, params) in [
-            ("--max-work", "0", json!({"max_work":0})),
-            ("--max-work", "1000001", json!({"max_work":1000001})),
             ("--limit", "0", json!({"limit":0})),
             ("--cursor", "", json!({"cursor":""})),
         ] {
@@ -11894,7 +11870,7 @@ fn diagnostic_work_limits_and_operation_errors_are_distinct_from_policy_failure(
 }
 
 #[test]
-fn diagnostic_repeated_enum_comparisons_respect_work_budget() {
+fn diagnostic_repeated_enum_values_complete_without_a_work_budget() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
     assert!(mara(root, &["project", "init"]).status.success());
@@ -11919,28 +11895,11 @@ fn diagnostic_repeated_enum_comparisons_respect_work_budget() {
             json!({"id":"REQ-ENUM"}),
         ),
     ] {
-        let limited = diagnostic_parity(root, &args, tool, params.clone());
-        assert_eq!(limited["evaluation_complete"], false);
-        assert_eq!(limited["valid"], false);
-        assert_eq!(limited["summary"]["counts_exact"], false);
-        assert!(
-            limited["diagnostics"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|d| d["code"] == "evaluation_limit")
-        );
-        assert!(limited["work"]["used"].as_u64().unwrap() <= 100_000);
-        let mut args = args;
-        args.extend(["--max-work", "1000000"]);
-        let mut params = params;
-        params["max_work"] = json!(1_000_000);
         let complete = diagnostic_parity(root, &args, tool, params);
         assert_eq!(complete["valid"], true);
         assert_eq!(complete["evaluation_complete"], true);
         assert_eq!(complete["summary"]["counts_exact"], true);
-        // Reserve each comparison and both string inputs.
-        assert!(complete["work"]["used"].as_u64().unwrap() >= 100 * 200 * (1 + 9 + 9));
+        assert!(complete.get("work").is_none());
     }
     assert_eq!(
         fs::read_to_string(root.join("enum.mara.md")).unwrap(),
@@ -11984,9 +11943,9 @@ fn diagnostic_output_budget_never_silently_discards_an_oversized_record() {
     fs::write(fixture.path().join("huge.mara.md"), format!(":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:{huge}: value\n\nBody.\n:::\n")).unwrap();
     let result = diagnostic_parity(
         fixture.path(),
-        &["project", "validate", "--max-work", "1000000"],
+        &["project", "validate"],
         "project_validate",
-        json!({"max_work":1000000}),
+        json!({}),
     );
     assert_eq!(result["error"]["code"], "output_limit");
     assert!(serde_json::to_vec(&result).unwrap().len() <= 65_536);
@@ -12142,14 +12101,12 @@ fn current_state_rules_run_real_lifecycle_and_coverage_through_cli_and_mcp() {
     .unwrap();
     let every = validation_with_parity(root, &[]);
     assert_eq!(every["summary"]["errors"], 1, "{every:#}");
-    assert_eq!(every["diagnostics"][0]["details"]["kind"], "has_value");
-    assert!(
-        every["diagnostics"][0]["details"]["context"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|c| c["direction"] == "incoming" && c["edge"]["relation"] == "verifies"),
-        "{every:#}"
+    assert_eq!(every["diagnostics"][0]["details"]["kind"], "every");
+    assert_eq!(every["diagnostics"][0]["details"]["direction"], "incoming");
+    assert_eq!(every["diagnostics"][0]["details"]["relation"], "verifies");
+    assert_eq!(
+        every["diagnostics"][0]["obligation"]["source"]["path"],
+        "rules.yaml"
     );
     fs::write(root.join("rules.yaml"), rules).unwrap();
     // Structured edits do not acquire a policy gate; explicit validation evaluates current state.
@@ -12222,7 +12179,7 @@ fn current_state_rules_preserve_warnings_prerequisites_and_continuations() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|d| d["code"] == "evaluation_unavailable" && d["item"]["id"] == "REQ-A")
+            .any(|d| d["code"] == "evaluation_unavailable" && d["scope"] == "project")
     );
     fs::write(&file, source).unwrap();
     // A corrupt qualifying endpoint remains unavailable even with another qualifying endpoint.
@@ -12242,7 +12199,7 @@ fn current_state_rules_preserve_warnings_prerequisites_and_continuations() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|d| d["code"] == "evaluation_unavailable" && d["item"]["id"] == "REQ-A"),
+            .any(|d| d["code"] == "evaluation_unavailable" && d["scope"] == "project"),
         "{invalid:#}"
     );
     // Schema validation loads definitions but never evaluates item conformance.
@@ -12263,7 +12220,7 @@ fn current_state_rules_preserve_warnings_prerequisites_and_continuations() {
 }
 
 #[test]
-fn current_state_rules_literal_semantics_definition_errors_and_engine_budget() {
+fn current_state_rules_literal_semantics_definition_errors_and_patterns() {
     let fixture = rule_fixture();
     let root = fixture.path();
     let numeric = "- id: rule:score_requires_owner\n  type: NodeShape\n  targetClass: requirement\n  whenShape: rule:score_one\n  property: [{path: owner, minCount: 1}]\n- id: rule:score_one\n  type: NodeShape\n  property: [{path: score, hasValue: {value: 1, datatype: double}}]\n";
@@ -12342,28 +12299,10 @@ fn current_state_rules_literal_semantics_definition_errors_and_engine_budget() {
         .status
         .success()
     );
-    let limited = validation_with_parity(root, &[]);
-    assert_eq!(limited["evaluation_complete"], false, "{limited:#}");
-    assert!(
-        limited["diagnostics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|d| d["code"] == "evaluation_limit")
-    );
-    let large = mara(
-        root,
-        &[
-            "--format",
-            "json",
-            "project",
-            "validate",
-            "--max-work",
-            "1000000",
-        ],
-    );
-    let large: Value = serde_json::from_slice(&large.stdout).unwrap();
-    assert_eq!(large["valid"], true, "{large:#}");
+    let complete = validation_with_parity(root, &[]);
+    assert_eq!(complete["valid"], true, "{complete:#}");
+    assert_eq!(complete["evaluation_complete"], true);
+    assert!(complete.get("work").is_none());
 }
 
 #[test]
@@ -12400,7 +12339,7 @@ fn current_state_rules_scope_empty_sets_composition_and_schema_sources() {
         true
     );
     fs::write(&config, &original).unwrap();
-    // A true OR alternative never hides an unavailable required child.
+    // Invalid corpus prerequisites skip policy, regardless of a passing OR alternative.
     let logical = "id: rule:logic\ntargetClass: requirement\nor:\n  - class: requirement\n  - property:\n      - path: {inversePath: verifies}\n        qualifiedValueShape: {class: verification}\n        qualifiedMinCount: 1\n";
     fs::write(root.join("rules.yaml"), logical).unwrap();
     assert_eq!(validation_with_parity(root, &[])["valid"], true);
@@ -12419,6 +12358,21 @@ fn current_state_rules_scope_empty_sets_composition_and_schema_sources() {
         json!({"id":"REQ-A"}),
     );
     assert_eq!(incomplete["evaluation_complete"], false, "{incomplete:#}");
+    assert!(
+        incomplete["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "field_invalid" && d["item"]["id"] == "VER-DRAFT"),
+        "{incomplete:#}"
+    );
+    assert!(
+        incomplete["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|d| d["code"] != "rule_failed")
+    );
     fs::write(&file, &text).unwrap();
     // Only the root path scope selects items, and paths are project relative.
     fs::write(root.join("rules.yaml"),"id: rule:scope\ntargetClass: requirement\npaths: [other/]\nproperty: [{path: owner, maxCount: 0}]\n").unwrap();
