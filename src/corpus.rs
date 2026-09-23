@@ -1,3 +1,4 @@
+use crate::DiagnosticCode;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs, io,
@@ -130,6 +131,7 @@ pub struct Item {
     source: SourceLocation,
     body_source: SourceLocation,
     metadata_valid: bool,
+    title_valid: bool,
     body_valid: bool,
 }
 
@@ -185,6 +187,11 @@ impl Item {
 
     fn body_is_valid(&self) -> bool {
         self.body_valid
+    }
+
+    /// Recovery can retain an item's identity while leaving some checks unavailable.
+    pub(crate) fn validation_source_is_complete(&self) -> bool {
+        self.metadata_is_valid() && self.title_valid && self.body_is_valid()
     }
 }
 
@@ -352,6 +359,8 @@ pub struct Diagnostic {
     item_ids: Vec<String>,
     applies_to_all_items: bool,
     kind: DiagnosticKind,
+    code: DiagnosticCode,
+    coordinates_available: bool,
     message: String,
 }
 
@@ -363,6 +372,12 @@ enum DiagnosticKind {
 }
 
 impl Diagnostic {
+    pub fn code(&self) -> DiagnosticCode {
+        self.code
+    }
+    pub(crate) fn coordinates_available(&self) -> bool {
+        self.coordinates_available
+    }
     pub fn source(&self) -> &SourceLocation {
         &self.source
     }
@@ -382,14 +397,36 @@ impl Diagnostic {
 }
 
 pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
-    let mut diagnostics = validate_corpus_independent(corpus);
+    validate_corpus_bounded(
+        corpus,
+        schema,
+        &mut crate::diagnostics::WorkBudget::new(usize::MAX),
+    )
+}
+
+pub(crate) fn validate_corpus_bounded(
+    corpus: &Corpus,
+    schema: &Schema,
+    work: &mut crate::diagnostics::WorkBudget,
+) -> Vec<Diagnostic> {
+    let mut diagnostics = validate_corpus_independent_bounded(corpus, work);
+    if work.exhausted {
+        return diagnostics;
+    }
+    if !charge_identity_index(corpus, work) {
+        return diagnostics;
+    }
     let ids = item_index(corpus);
     let mids = mid_index(corpus);
 
     for item in corpus.items() {
+        if !work.charge(item_validation_cost(item, Some(schema))) {
+            break;
+        }
         let Some(flavour) = schema.flavour_for_validation(item.flavour()) else {
             if !schema.flavour_is_declared(item.flavour()) {
                 diagnostic(
+                    DiagnosticCode::SourceInvalid,
                     &mut diagnostics,
                     item.source(),
                     format!("unknown flavour '{}'", item.flavour()),
@@ -399,6 +436,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 if schema.relation_is_valid(relation.name()) {
                     match resolve_indexed_item(&ids, &mids, relation.target()) {
                         IndexedItem::Missing if corpus.is_complete() => diagnostic(
+                            DiagnosticCode::ReferenceUnresolved,
                             &mut diagnostics,
                             relation.source(),
                             format!(
@@ -409,6 +447,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                         ),
                         IndexedItem::Missing | IndexedItem::One(_) => {}
                         IndexedItem::Ambiguous => diagnostic(
+                            DiagnosticCode::ReferenceUnresolved,
                             &mut diagnostics,
                             relation.source(),
                             format!(
@@ -424,6 +463,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
         };
         if schema.id_prefix_is_valid(item.flavour()) && !item.id().starts_with(&flavour.id_prefix) {
             diagnostic(
+                DiagnosticCode::IdentityInvalid,
                 &mut diagnostics,
                 item.source(),
                 format!(
@@ -443,6 +483,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 &mut diagnostics,
                 item.body_source(),
                 DiagnosticKind::MissingBody,
+                DiagnosticCode::FieldInvalid,
                 "required body is empty".into(),
             );
         }
@@ -464,6 +505,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                         )
                     {
                         diagnostic(
+                            DiagnosticCode::FieldInvalid,
                             &mut diagnostics,
                             entry.source(),
                             format!(
@@ -494,6 +536,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                     && !endpoints.iter().any(|source| source == item.flavour())
                 {
                     diagnostic(
+                        DiagnosticCode::RelationInvalid,
                         &mut diagnostics,
                         entry.source(),
                         format!(
@@ -505,6 +548,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 }
             } else if schema.relation_is_valid(entry.key()) {
                 diagnostic(
+                    DiagnosticCode::FieldInvalid,
                     &mut diagnostics,
                     entry.source(),
                     format!("unknown metadata field '{}'", entry.key()),
@@ -521,6 +565,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 .unwrap_or_default();
             if item.metadata_is_valid() && field.required && entries.is_empty() {
                 diagnostic(
+                    DiagnosticCode::FieldInvalid,
                     &mut diagnostics,
                     item.source(),
                     format!("required field '{name}' is missing"),
@@ -529,6 +574,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
             if !field.repeatable && entries.len() > 1 {
                 for entry in &entries[1..] {
                     diagnostic(
+                        DiagnosticCode::FieldInvalid,
                         &mut diagnostics,
                         entry.source(),
                         format!("field '{name}' is not repeatable"),
@@ -556,6 +602,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                     && !authors.iter().any(|flavour| flavour == item.flavour())
                 {
                     diagnostic(
+                        DiagnosticCode::RelationInvalid,
                         &mut diagnostics,
                         relation.source(),
                         format!(
@@ -579,6 +626,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                         }) && !endpoints.iter().any(|flavour| flavour == target.flavour())
                         {
                             diagnostic(
+                                DiagnosticCode::RelationInvalid,
                                 &mut diagnostics,
                                 relation.source(),
                                 format!(
@@ -593,6 +641,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             && target.flavour() != item.flavour()
                         {
                             diagnostic(
+                                DiagnosticCode::RelationInvalid,
                                 &mut diagnostics,
                                 relation.source(),
                                 format!(
@@ -603,6 +652,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                         }
                     }
                     IndexedItem::Ambiguous => diagnostic(
+                        DiagnosticCode::ReferenceUnresolved,
                         &mut diagnostics,
                         relation.source(),
                         format!(
@@ -612,6 +662,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                         ),
                     ),
                     IndexedItem::Missing if corpus.is_complete() => diagnostic(
+                        DiagnosticCode::ReferenceUnresolved,
                         &mut diagnostics,
                         relation.source(),
                         format!(
@@ -630,16 +681,33 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
 }
 
 pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
+    validate_corpus_independent_bounded(
+        corpus,
+        &mut crate::diagnostics::WorkBudget::new(usize::MAX),
+    )
+}
+
+pub(crate) fn validate_corpus_independent_bounded(
+    corpus: &Corpus,
+    work: &mut crate::diagnostics::WorkBudget,
+) -> Vec<Diagnostic> {
     let mut diagnostics = corpus
         .items()
         .flat_map(|item| item.inline_diagnostics.clone())
         .collect::<Vec<_>>();
+    if !charge_identity_index(corpus, work) {
+        return diagnostics;
+    }
     let ids = item_index(corpus);
     let mid_targets = mid_index(corpus);
 
     for duplicates in ids.values().filter(|items| items.len() > 1) {
         for item in duplicates {
+            if !work.charge(item.id().len() + 1) {
+                break;
+            }
             diagnostic(
+                DiagnosticCode::IdentityInvalid,
                 &mut diagnostics,
                 item.source(),
                 format!("duplicate item ID '{}'", item.id()),
@@ -649,11 +717,15 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
 
     for (mid, duplicates) in mid_targets.iter().filter(|(_, items)| items.len() > 1) {
         for item in duplicates {
+            if !work.charge(item.id().len() + 1) {
+                break;
+            }
             if let Some(entry) = mid_entries(item)
                 .into_iter()
                 .find(|entry| entry.value() == *mid)
             {
                 diagnostic(
+                    DiagnosticCode::IdentityInvalid,
                     &mut diagnostics,
                     entry.source(),
                     format!("duplicate item MID '{mid}'"),
@@ -663,17 +735,22 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
     }
 
     for item in corpus.items() {
+        if !work.charge(item_validation_cost(item, None)) {
+            break;
+        }
         let mids = mid_entries(item);
         match mids.as_slice() {
             [] => diagnostic_with_kind(
                 &mut diagnostics,
                 item.source(),
                 DiagnosticKind::MissingMid,
+                DiagnosticCode::IdentityInvalid,
                 format!("item '{}' is missing its MID", item.id()),
             ),
             [entry] => {
                 if !crate::is_mid(entry.value()) {
                     diagnostic(
+                        DiagnosticCode::IdentityInvalid,
                         &mut diagnostics,
                         entry.source(),
                         format!("invalid item MID '{}'", entry.value()),
@@ -681,6 +758,7 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
                 }
                 if entry.source().span().start_line() != item.source().span().start_line() + 1 {
                     diagnostic(
+                        DiagnosticCode::IdentityInvalid,
                         &mut diagnostics,
                         entry.source(),
                         format!(
@@ -693,6 +771,7 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
             [first, rest @ ..] => {
                 if !crate::is_mid(first.value()) {
                     diagnostic(
+                        DiagnosticCode::IdentityInvalid,
                         &mut diagnostics,
                         first.source(),
                         format!("invalid item MID '{}'", first.value()),
@@ -700,6 +779,7 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
                 }
                 if first.source().span().start_line() != item.source().span().start_line() + 1 {
                     diagnostic(
+                        DiagnosticCode::IdentityInvalid,
                         &mut diagnostics,
                         first.source(),
                         format!(
@@ -710,12 +790,14 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
                 }
                 for entry in rest {
                     diagnostic(
+                        DiagnosticCode::IdentityInvalid,
                         &mut diagnostics,
                         entry.source(),
                         format!("item '{}' has more than one MID entry", item.id()),
                     );
                     if !crate::is_mid(entry.value()) {
                         diagnostic(
+                            DiagnosticCode::IdentityInvalid,
                             &mut diagnostics,
                             entry.source(),
                             format!("invalid item MID '{}'", entry.value()),
@@ -725,9 +807,82 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
             }
         }
     }
-    diagnostics.extend_from_slice(corpus.discovery().diagnostics());
+    // Building reference indexes and resolving links scans document text and nodes.
+    let discovery_cost = corpus.documents().iter().fold(0usize, |cost, document| {
+        cost.saturating_add(document.source().len())
+            .saturating_add(document.references().len())
+            .saturating_add(1)
+    });
+    if work.charge(discovery_cost) {
+        diagnostics.extend_from_slice(corpus.discovery().diagnostics());
+    }
     sort_diagnostics(&mut diagnostics);
     diagnostics
+}
+
+fn charge_identity_index(corpus: &Corpus, work: &mut crate::diagnostics::WorkBudget) -> bool {
+    for item in corpus.items() {
+        let units = item
+            .metadata()
+            .iter()
+            .fold(item.id().len() + 1, |n, entry| {
+                n.saturating_add(entry.key().len())
+                    .saturating_add(entry.value().len())
+                    .saturating_add(1)
+            });
+        if !work.charge(units) {
+            return false;
+        }
+    }
+    true
+}
+
+fn item_validation_cost(item: &Item, schema: Option<&Schema>) -> usize {
+    let mut cost =
+        item.metadata()
+            .iter()
+            .fold(item.id().len() + item.body().len() + 1, |n, entry| {
+                n.saturating_add(entry.key().len())
+                    .saturating_add(entry.value().len())
+                    .saturating_add(1)
+            });
+    for relation in item.relations() {
+        cost = cost
+            .saturating_add(relation.name().len())
+            .saturating_add(relation.target().len())
+            .saturating_add(1);
+    }
+    if let Some(schema) = schema
+        && let Some(flavour) = schema.flavour_for_validation(item.flavour())
+    {
+        let mut occurrences = BTreeMap::<&str, (usize, usize)>::new();
+        for entry in item.metadata() {
+            let (count, bytes) = occurrences.entry(entry.key()).or_default();
+            *count = count.saturating_add(1);
+            *bytes = bytes.saturating_add(entry.value().len());
+        }
+        for (name, field) in &flavour.fields {
+            cost = cost.saturating_add(name.len()).saturating_add(1);
+            if let Some(values) = &field.values {
+                let mut allowed_cost = 0usize;
+                for value in values {
+                    allowed_cost = allowed_cost.saturating_add(value.len()).saturating_add(1);
+                }
+                cost = cost.saturating_add(allowed_cost);
+                if field.field_type == FieldType::Enum {
+                    // Reserve every possible membership comparison and both
+                    // string inputs before validation. Aggregate once per field
+                    // so estimating the cost does not repeat the same scans.
+                    let (count, bytes) =
+                        occurrences.get(name.as_str()).copied().unwrap_or_default();
+                    cost = cost
+                        .saturating_add(allowed_cost.saturating_mul(count))
+                        .saturating_add(bytes.saturating_mul(values.len()));
+                }
+            }
+        }
+    }
+    cost
 }
 
 fn item_index(corpus: &Corpus) -> BTreeMap<&str, Vec<&Item>> {
@@ -834,6 +989,8 @@ fn load_corpus_for_validation_with_schema(
                     item_ids: Vec::new(),
                     applies_to_all_items: true,
                     kind: DiagnosticKind::Other,
+                    code: DiagnosticCode::SourceInvalid,
+                    coordinates_available: false,
                     message: format!("could not read Mara document: {error}"),
                 });
                 continue;
@@ -856,6 +1013,8 @@ fn load_corpus_for_validation_with_schema(
             item_ids: error.item_ids,
             applies_to_all_items: false,
             kind: DiagnosticKind::Other,
+            code: error.code,
+            coordinates_available: true,
             message: error.message,
         }));
         if retain_document {
@@ -872,17 +1031,19 @@ fn load_corpus_for_validation_with_schema(
 }
 
 pub(crate) fn diagnostic(
+    code: DiagnosticCode,
     diagnostics: &mut Vec<Diagnostic>,
     source: &SourceLocation,
     message: String,
 ) {
-    diagnostic_with_kind(diagnostics, source, DiagnosticKind::Other, message);
+    diagnostic_with_kind(diagnostics, source, DiagnosticKind::Other, code, message);
 }
 
 fn diagnostic_with_kind(
     diagnostics: &mut Vec<Diagnostic>,
     source: &SourceLocation,
     kind: DiagnosticKind,
+    code: DiagnosticCode,
     message: String,
 ) {
     diagnostics.push(Diagnostic {
@@ -890,6 +1051,8 @@ fn diagnostic_with_kind(
         item_ids: Vec::new(),
         applies_to_all_items: false,
         kind,
+        code,
+        coordinates_available: true,
         message,
     });
 }
@@ -993,6 +1156,8 @@ fn discover_for_validation(root: &Path, matcher: &GlobSet) -> (Vec<PathBuf>, Vec
                 item_ids: Vec::new(),
                 applies_to_all_items: true,
                 kind: DiagnosticKind::Other,
+                code: DiagnosticCode::SourceInvalid,
+                coordinates_available: false,
                 message: format!("could not discover Mara documents: {error}"),
             }),
         }
@@ -1179,13 +1344,13 @@ fn project_document(
                     || (!crate::is_item_id(target) && !crate::is_mid(target))
                     || source[token.source.clone()] != format!("[[{}]]", token.target)
                 {
-                    diagnostic(&mut inline_diagnostics, &source_location,
+                    diagnostic(DiagnosticCode::RelationInvalid, &mut inline_diagnostics, &source_location,
                         "invalid typed inline reference; expected [[relation:ID]] or [[relation:MID]] without whitespace or markup".into());
                     continue;
                 }
                 let Some(schema) = schema else { continue };
                 let Some((canonical, definition, inverse)) = schema.resolve_relation(name) else {
-                    diagnostic(&mut inline_diagnostics, &source_location, format!("unknown inline relation '{name}'"));
+                    diagnostic(DiagnosticCode::RelationInvalid, &mut inline_diagnostics, &source_location, format!("unknown inline relation '{name}'"));
                     continue;
                 };
                 relations.push(Relation {
@@ -1233,6 +1398,7 @@ fn project_document(
                 source: location(&path, &line_starts, parsed.source.start, parsed.source.end),
                 body_source: location(&path, &line_starts, parsed.body.start, parsed.body.end),
                 metadata_valid: parsed.metadata_valid,
+                title_valid: parsed.title_valid,
                 body_valid: parsed.body_valid,
             }
         })

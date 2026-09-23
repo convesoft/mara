@@ -9,7 +9,15 @@ pub struct ItemUpdate {
     pub mid: String,
     pub path: std::path::PathBuf,
     pub changed_fields: Vec<String>,
-    pub warnings: Vec<crate::ValidationDiagnostic>,
+    pub warnings: Vec<ItemUpdateWarning>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+pub struct ItemUpdateWarning {
+    pub scope: crate::ValidationScope,
+    pub path: std::path::PathBuf,
+    pub line: usize,
+    pub message: String,
 }
 
 fn replacements(
@@ -285,7 +293,7 @@ fn validate_update(
     schema: &Schema,
     selected: &Item,
     request: &ItemUpdateParams,
-) -> Result<Vec<crate::ValidationDiagnostic>, Error> {
+) -> Result<Vec<ItemUpdateWarning>, Error> {
     let mut warnings = Vec::new();
     for diagnostic in validate_corpus(candidate, schema) {
         // Only an unchanged, already-missing body may remain incomplete. Use a
@@ -308,10 +316,10 @@ fn validate_update(
                 diagnostic.message()
             ));
         }
-        warnings.push(crate::ValidationDiagnostic {
+        warnings.push(ItemUpdateWarning {
             scope: crate::ValidationScope::Item,
-            path: Some(diagnostic.source().path().to_path_buf()),
-            line: Some(diagnostic.source().span().start_line()),
+            path: diagnostic.source().path().to_owned(),
+            line: diagnostic.source().span().start_line(),
             message: diagnostic.message().to_owned(),
         });
     }

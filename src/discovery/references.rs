@@ -67,6 +67,7 @@ impl<'corpus> DiscoveryGraph<'corpus> {
         for ((_, name), targets) in anchors.iter().filter(|(_, targets)| targets.len() > 1) {
             for (_, source) in targets {
                 diagnostic(
+                    crate::DiagnosticCode::ReferenceUnresolved,
                     &mut self.diagnostics,
                     source,
                     format!("ambiguous anchor '{name}'"),
@@ -103,11 +104,13 @@ impl<'corpus> DiscoveryGraph<'corpus> {
                         );
                     }
                     Resolution::Missing(kind) if corpus.is_complete() => diagnostic(
+                        crate::DiagnosticCode::ReferenceUnresolved,
                         &mut self.diagnostics,
                         reference.source(),
                         format!("{kind} '{}'", reference.target()),
                     ),
                     Resolution::Ambiguous(kind) => diagnostic(
+                        crate::DiagnosticCode::ReferenceUnresolved,
                         &mut self.diagnostics,
                         reference.source(),
                         format!("{kind} '{}'", reference.target()),

@@ -204,7 +204,7 @@ edits during publication remain outside that advisory lock.
 Return `{id, mid, path, changed_fields, warnings}`. `path` is project-relative;
 `changed_fields` contains actual changed custom keys and/or `title` and `body`,
 unique and sorted lexically. A request with no effective change succeeds with an
-empty list and no file replacement. `warnings` uses the validation diagnostic
+empty list and no file replacement. `warnings` uses the update warning
 shape `{scope, path, line, message}` for each remaining scaffold body, including
 scaffolds in other documents; locations refer to the resulting corpus. Human
 output labels each as `warning` on stderr. CLI JSON and MCP return the same
