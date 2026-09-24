@@ -334,14 +334,26 @@ impl OperationContext {
                 Some(schema) => crate::corpus::validate_corpus(&corpus, schema),
                 None => crate::corpus::validate_corpus_independent(&corpus),
             });
+            let configuration_valid = result
+                .diagnostics
+                .iter()
+                .all(|d| !matches!(d.scope, ValidationScope::Project | ValidationScope::Schema));
             if let (Some(rules), Some(schema)) = (&rules, &schema)
                 && rules.diagnostics.is_empty()
-                && !result
-                    .diagnostics
-                    .iter()
-                    .any(|d| matches!(d.scope, ValidationScope::Project | ValidationScope::Schema))
+                && configuration_valid
             {
                 rules.evaluate(&corpus, schema, &source_diagnostics, &mut result);
+            }
+            if let Some(schema) = &schema
+                && configuration_valid
+            {
+                crate::graph_constraints::evaluate(
+                    &project,
+                    &corpus,
+                    schema,
+                    &source_diagnostics,
+                    &mut result,
+                );
             }
             collect_source_diagnostics(&corpus, source_diagnostics, &mut result);
         }

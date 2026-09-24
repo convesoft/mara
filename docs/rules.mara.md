@@ -420,6 +420,9 @@ References: [SHACL](https://www.w3.org/TR/shacl/),
 Schema format 3 extends each relation declaration with optional
 `cardinality` and `acyclic`. These are structural policies over semantic
 edges, independent of conditional rules in [[DES-TRACE-RULE-GRAMMAR]].
+Both declarations are active in the current checkout. Run `schema validate`
+to check configuration and `project validate` or `item validate` to evaluate
+the policy through CLI or MCP. No policy applies when these keys are absent.
 
 ```yaml
 relations:

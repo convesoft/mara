@@ -3,7 +3,8 @@
 Accepted 0.3 contracts extending [traceability](traceability.mara.md).
 The current checkout implements internal and external metadata and typed inline
 relationships, inverse aliases, symmetric relations, semantic navigation,
-bounded occurrence inspection, and whole-edge or selected occurrence removal.
+bounded occurrence inspection, whole-edge or selected occurrence removal,
+and structural cardinality and cycle checks declared in the schema.
 Schema format 3, discovery format 2 and relationship format 1 are active.
 Existing declarations remain directed unless explicitly changed. Published 0.2
 uses the previous formats.

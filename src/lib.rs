@@ -18,6 +18,7 @@ pub use diagnostics::{
     DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
 };
 mod external;
+mod graph_constraints;
 mod mutation;
 mod operations;
 mod query;
@@ -349,6 +350,54 @@ impl Schema {
         }
 
         for (name, relation) in &self.relations {
+            if let Some(cardinality) = &relation.cardinality {
+                if cardinality.outgoing.is_none()
+                    && cardinality.incoming.is_none()
+                    && cardinality.symmetric.is_none()
+                {
+                    errors.push(ConfigurationDiagnostic::schema(
+                        &["relations", name, "cardinality"],
+                        format!("relation '{name}' cardinality requires a direction"),
+                    ));
+                }
+                for (direction, bounds) in [
+                    ("outgoing", &cardinality.outgoing),
+                    ("incoming", &cardinality.incoming),
+                    ("symmetric", &cardinality.symmetric),
+                ] {
+                    let Some(bounds) = bounds else { continue };
+                    if (direction == "symmetric") != relation.symmetric
+                        || (direction == "incoming" && relation.target.is_empty())
+                    {
+                        errors.push(ConfigurationDiagnostic::schema(
+                            &["relations", name, "cardinality", direction],
+                            format!("relation '{name}' cannot constrain {direction} cardinality"),
+                        ));
+                    }
+                    if bounds.minimum.is_none() && bounds.maximum.is_none() {
+                        errors.push(ConfigurationDiagnostic::schema(
+                            &["relations", name, "cardinality", direction],
+                            format!("relation '{name}' {direction} cardinality requires minimum or maximum"),
+                        ));
+                    }
+                    if bounds
+                        .minimum
+                        .zip(bounds.maximum)
+                        .is_some_and(|(min, max)| min > max)
+                    {
+                        errors.push(ConfigurationDiagnostic::schema(
+                            &["relations", name, "cardinality", direction],
+                            format!("relation '{name}' {direction} minimum exceeds maximum"),
+                        ));
+                    }
+                }
+            }
+            if relation.acyclic.is_some() && relation.symmetric {
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["relations", name, "acyclic"],
+                    format!("symmetric relation '{name}' cannot prohibit directed cycles"),
+                ));
+            }
             if relation.external
                 && (relation.inverse.is_some() || relation.symmetric || relation.same_flavour)
             {
@@ -605,6 +654,85 @@ pub struct RelationDefinition {
     symmetric: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     external: bool,
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    cardinality: Option<RelationCardinality>,
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    acyclic: Option<AcyclicPolicy>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RelationCardinality {
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    outgoing: Option<CardinalityBounds>,
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    incoming: Option<CardinalityBounds>,
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    symmetric: Option<CardinalityBounds>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CardinalityBounds {
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    minimum: Option<usize>,
+    #[serde(
+        default,
+        deserialize_with = "present_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    maximum: Option<usize>,
+    #[serde(default = "default_error")]
+    severity: Severity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct AcyclicPolicy {
+    #[serde(default = "default_error")]
+    severity: Severity,
+}
+
+fn default_error() -> Severity {
+    Severity::Error
+}
+
+fn present_value<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    if value.is_null() {
+        return Err(serde::de::Error::custom("null is not a valid declaration"));
+    }
+    serde_json::from_value(value)
+        .map(Some)
+        .map_err(serde::de::Error::custom)
 }
 
 impl RelationDefinition {
