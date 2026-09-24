@@ -527,6 +527,9 @@ fn related_matches(
             if !matches_name(&filters.relations, relation.name()) {
                 continue;
             }
+            if crate::external::address(relation.target()).is_some() {
+                continue;
+            }
             let neighbour =
                 resolve_relation_target(corpus, item, relation.name(), relation.target())?;
             if matches_name(&filters.flavours, neighbour.flavour()) {
