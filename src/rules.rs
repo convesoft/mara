@@ -161,10 +161,38 @@ impl Rules {
                 }
             }
             // Validate every reusable definition too, including unused cycles.
-            for id in rules.shapes.keys().cloned().collect::<Vec<_>>() {
-                if let Err(message) = rules.depth(&id, &mut Vec::new(), 0, &schema_value) {
-                    rules.invalid(rules.shapes[&id].source.clone(), message);
+            // A named reusable shape can be outside the root's source subtree.
+            // Record all reachable roots so every offending step keeps its
+            // authored location and an unambiguous root identity.
+            let mut owners: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+            for root in &rules.roots {
+                let mut pending = vec![root.clone()];
+                let mut visited = BTreeSet::new();
+                while let Some(id) = pending.pop() {
+                    if !visited.insert(id.clone()) {
+                        continue;
+                    }
+                    owners.entry(id.clone()).or_default().insert(root.clone());
+                    if let Some(shape) = rules.shapes.get(&id) {
+                        pending.extend(references(&shape.value).into_iter().map(str::to_owned));
+                    }
                 }
+            }
+            let mut depth_errors: BTreeMap<(DiagnosticLocation, String), BTreeSet<String>> =
+                BTreeMap::new();
+            for id in rules.shapes.keys().cloned().collect::<Vec<_>>() {
+                if let Err(error) = rules.depth(&id, &mut Vec::new(), 0, &schema_value) {
+                    let (location, message, offender) = *error;
+                    let roots = depth_errors.entry((location, message)).or_default();
+                    if let Some(known) = owners.get(&offender) {
+                        roots.extend(known.iter().cloned());
+                    }
+                }
+            }
+            for ((location, message), roots) in depth_errors {
+                rules.invalid(location, message);
+                rules.diagnostics.last_mut().unwrap().rule =
+                    (roots.len() == 1).then(|| roots.into_iter().next().unwrap());
             }
             for root in rules.roots.clone() {
                 let flavours = strings(&rules.shapes[&root].value["targetClass"]);
@@ -542,13 +570,17 @@ impl Rules {
         stack: &mut Vec<String>,
         hops: usize,
         schema: &Value,
-    ) -> Result<(), String> {
-        if stack.len() >= 32 || stack.iter().any(|s| s == id) {
-            return Err("recursive shape reference or depth above 32".into());
-        }
+    ) -> Result<(), Box<(DiagnosticLocation, String, String)>> {
         let Some(shape) = self.shapes.get(id) else {
             return Ok(());
         };
+        if stack.len() >= 32 || stack.iter().any(|s| s == id) {
+            return Err(Box::new((
+                shape.source.clone(),
+                "recursive shape reference or depth above 32".into(),
+                id.into(),
+            )));
+        }
         let relation = shape.value.get("path").is_some_and(|v| {
             v.is_object()
                 || v.as_str().is_some_and(|s| {
@@ -557,7 +589,11 @@ impl Rules {
         });
         let hops = hops + usize::from(relation);
         if hops > 8 {
-            return Err("relationship depth exceeds eight".into());
+            return Err(Box::new((
+                shape.location("path"),
+                "relationship depth exceeds eight".into(),
+                id.into(),
+            )));
         }
         stack.push(id.into());
         for child in references(&shape.value) {

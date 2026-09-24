@@ -13280,6 +13280,368 @@ fn current_state_rules_run_real_lifecycle_and_coverage_through_cli_and_mcp() {
 }
 
 #[test]
+fn bounded_trace_chains_distinguish_downstream_coverage_and_relation_kinds() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["flavours"]["evidence"]["fields"] =
+        json!({"status":{"type":"enum","values":["draft","approved"]}});
+    schema["relations"]["reviews"] = json!({
+        "description":"Reviews a requirement without verifying it.",
+        "source":["verification"], "target":["requirement"]
+    });
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    fs::write(
+        root.join("rules.yaml"),
+        "\
+- id: rule:evidenced_requirement
+  targetClass: requirement
+  whenShape: rule:approved_status
+  property:
+    - id: rule:verification_step
+      path: {inversePath: verifies}
+      qualifiedValueShape: rule:evidenced_verification
+      qualifiedMinCount: 1
+- id: rule:approved_status
+  property: [{path: status, hasValue: approved}]
+- id: rule:evidenced_verification
+  class: verification
+  property:
+    - id: rule:evidence_step
+      path: {inversePath: evidences}
+      qualifiedValueShape: rule:approved_evidence
+      qualifiedMinCount: 1
+- id: rule:approved_evidence
+  class: evidence
+  property: [{path: status, hasValue: approved}]
+",
+    )
+    .unwrap();
+
+    // A different canonical kind between the same endpoints cannot satisfy the first step.
+    assert!(
+        mara(
+            root,
+            &["relation", "add", "VER-APPROVED", "reviews", "REQ-A"]
+        )
+        .status
+        .success()
+    );
+    let wrong_kind = diagnostic_parity(
+        root,
+        &["item", "validate", "REQ-A"],
+        "item_validate",
+        json!({"id":"REQ-A"}),
+    );
+    assert_eq!(
+        wrong_kind["diagnostics"][0]["details"]["selected_count"], 0,
+        "{wrong_kind:#}"
+    );
+    assert_eq!(
+        wrong_kind["diagnostics"][0]["details"]["relation"],
+        "verifies"
+    );
+    assert_eq!(
+        wrong_kind["diagnostics"][0]["details"]["direction"],
+        "incoming"
+    );
+    assert_eq!(
+        wrong_kind["diagnostics"][0]["obligation"]["source"]["path"],
+        "rules.yaml"
+    );
+
+    assert!(
+        mara(
+            root,
+            &["relation", "add", "VER-APPROVED", "verifies", "REQ-A"]
+        )
+        .status
+        .success()
+    );
+    let second_hop = diagnostic_parity(
+        root,
+        &["item", "validate", "REQ-A"],
+        "item_validate",
+        json!({"id":"REQ-A"}),
+    );
+    assert_eq!(second_hop["evaluation_complete"], true, "{second_hop:#}");
+    assert_eq!(second_hop["valid"], false);
+    assert_eq!(second_hop["diagnostics"][0]["details"]["selected_count"], 1);
+    assert_eq!(
+        second_hop["diagnostics"][0]["details"]["qualifying_count"],
+        0
+    );
+    for relation in ["reviews", "verifies"] {
+        let edge = relation_tool(
+            root,
+            "relation_get",
+            json!({"source":"VER-APPROVED","relation":relation,"target":"REQ-A"}),
+        );
+        assert_eq!(edge["edge"]["relation"], relation);
+        assert_eq!(edge["occurrence_count"], 1);
+        assert_eq!(edge["occurrences"][0]["source"]["path"], "items.mara.md");
+    }
+
+    let created = mara(
+        root,
+        &[
+            "item",
+            "create",
+            "evidence",
+            "EVD-A",
+            "items.mara.md",
+            "--title",
+            "Execution evidence",
+            "--body",
+            "A recorded result.",
+            "--field",
+            "status=draft",
+        ],
+    );
+    assert!(created.status.success(), "{}", stderr(&created));
+    assert!(
+        mara(
+            root,
+            &["relation", "add", "EVD-A", "evidences", "VER-APPROVED"]
+        )
+        .status
+        .success()
+    );
+    let draft = diagnostic_parity(
+        root,
+        &["item", "validate", "REQ-A"],
+        "item_validate",
+        json!({"id":"REQ-A"}),
+    );
+    assert_eq!(draft["valid"], false);
+    assert_eq!(draft["diagnostics"][0]["details"]["qualifying_count"], 0);
+    assert!(
+        mara(
+            root,
+            &["item", "update", "EVD-A", "--field", "status=approved"]
+        )
+        .status
+        .success()
+    );
+    let passed = diagnostic_parity(
+        root,
+        &["item", "validate", "REQ-A"],
+        "item_validate",
+        json!({"id":"REQ-A"}),
+    );
+    assert_eq!(passed["valid"], true, "{passed:#}");
+}
+
+#[test]
+fn bounded_trace_chains_reject_excess_depth_and_finish_on_cycles() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let created = mara(
+        root,
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-B",
+            "items.mara.md",
+            "--title",
+            "B",
+            "--body",
+            "Another requirement.",
+        ],
+    );
+    assert!(created.status.success(), "{}", stderr(&created));
+
+    let chain = |steps| {
+        let mut shape = json!({"class":"requirement"});
+        for _ in 0..steps {
+            shape = json!({"property":[{"path":"depends_on","minCount":1,"node":shape}]});
+        }
+        shape["id"] = json!("rule:bounded_chain");
+        shape["targetClass"] = json!("requirement");
+        serde_saphyr::to_string(&shape).unwrap()
+    };
+    fs::write(root.join("rules.yaml"), chain(8)).unwrap();
+    let accepted = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(accepted["valid"], true, "{accepted:#}");
+
+    let first = diagnostic_parity(
+        root,
+        &["project", "validate", "--limit", "1"],
+        "project_validate",
+        json!({"limit":1}),
+    );
+    assert_eq!(first["evaluation_complete"], true, "{first:#}");
+    assert_eq!(first["valid"], false);
+    assert_eq!(first["summary"]["errors"], 2);
+    assert_eq!(first["diagnostics"].as_array().unwrap().len(), 1);
+    assert_eq!(first["has_more"], true);
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let second = diagnostic_parity(
+        root,
+        &["project", "validate", "--limit", "1", "--cursor", cursor],
+        "project_validate",
+        json!({"limit":1,"cursor":cursor}),
+    );
+    assert_eq!(second["evaluation_complete"], true);
+    assert_eq!(second["valid"], false);
+    assert_eq!(second["summary"], first["summary"]);
+    assert_eq!(second["has_more"], false);
+    assert_ne!(
+        first["diagnostics"][0]["item"],
+        second["diagnostics"][0]["item"]
+    );
+
+    for (source, target) in [("REQ-A", "REQ-B"), ("REQ-B", "REQ-A")] {
+        assert!(
+            mara(root, &["relation", "add", source, "depends_on", target])
+                .status
+                .success()
+        );
+    }
+    let cyclic = diagnostic_parity(
+        root,
+        &["project", "validate"],
+        "project_validate",
+        json!({}),
+    );
+    assert_eq!(cyclic["valid"], true, "{cyclic:#}");
+    assert_eq!(cyclic["evaluation_complete"], true);
+    let stale = diagnostic_parity(
+        root,
+        &["project", "validate", "--limit", "1", "--cursor", cursor],
+        "project_validate",
+        json!({"limit":1,"cursor":cursor}),
+    );
+    assert_eq!(stale["error"]["code"], "stale_cursor");
+
+    fs::write(root.join("rules.yaml"), chain(9)).unwrap();
+    let excessive = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(excessive["valid"], false);
+    assert_eq!(excessive["diagnostics"][0]["code"], "rule_invalid");
+    assert!(
+        excessive["diagnostics"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("relationship depth")
+    );
+    assert_eq!(
+        excessive["diagnostics"][0]["location"]["path"],
+        "rules.yaml"
+    );
+    assert!(
+        excessive["diagnostics"][0]["location"]["pointer"]
+            .as_str()
+            .unwrap()
+            .ends_with("/path")
+    );
+    let incomplete = diagnostic_parity(
+        root,
+        &["project", "validate"],
+        "project_validate",
+        json!({}),
+    );
+    assert_eq!(incomplete["evaluation_complete"], false);
+    assert_eq!(incomplete["valid"], false);
+
+    let mut reusable: Value = serde_saphyr::from_str(&chain(9)).unwrap();
+    reusable["id"] = json!("rule:shared_path");
+    reusable.as_object_mut().unwrap().remove("targetClass");
+    let named = serde_saphyr::to_string(&json!([
+        {"id":"rule:root","targetClass":"requirement","node":"rule:shared_path"},
+        reusable
+    ]))
+    .unwrap();
+    fs::write(root.join("rules.yaml"), named).unwrap();
+    let named_failure =
+        diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(named_failure["diagnostics"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        named_failure["diagnostics"][0]["rule"],
+        "urn:mara:rule:root"
+    );
+    assert!(
+        named_failure["diagnostics"][0]["location"]["pointer"]
+            .as_str()
+            .unwrap()
+            .starts_with("/1/")
+    );
+    assert!(
+        named_failure["diagnostics"][0]["location"]["pointer"]
+            .as_str()
+            .unwrap()
+            .ends_with("/path")
+    );
+
+    let mut branched: Value = serde_saphyr::from_str(&chain(9)).unwrap();
+    let branch = branched["property"][0].clone();
+    branched["property"] = json!([branch.clone(), branch]);
+    fs::write(
+        root.join("rules.yaml"),
+        serde_saphyr::to_string(&branched).unwrap(),
+    )
+    .unwrap();
+    let branched_failure =
+        diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    let diagnostics = branched_failure["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics.len(), 2, "{branched_failure:#}");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| d["rule"] == "urn:mara:rule:bounded_chain")
+    );
+    assert_ne!(
+        diagnostics[0]["location"]["pointer"],
+        diagnostics[1]["location"]["pointer"]
+    );
+
+    branched["id"] = json!("rule:shared_branches");
+    branched.as_object_mut().unwrap().remove("targetClass");
+    let named_branches = json!([
+        {"id":"rule:branch_root","targetClass":"requirement","node":"rule:shared_branches"},
+        branched
+    ]);
+    fs::write(
+        root.join("rules.yaml"),
+        serde_saphyr::to_string(&named_branches).unwrap(),
+    )
+    .unwrap();
+    let named_branches_failure =
+        diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    let diagnostics = named_branches_failure["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics.len(), 2, "{named_branches_failure:#}");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| d["rule"] == "urn:mara:rule:branch_root")
+    );
+
+    let references = |wrappers| {
+        let mut shape = json!({"class":"requirement"});
+        for _ in 0..wrappers {
+            shape = json!({"node":shape});
+        }
+        shape["id"] = json!("rule:bounded_shapes");
+        shape["targetClass"] = json!("requirement");
+        serde_saphyr::to_string(&shape).unwrap()
+    };
+    fs::write(root.join("rules.yaml"), references(31)).unwrap();
+    let allowed = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(allowed["valid"], true, "{allowed:#}");
+    fs::write(root.join("rules.yaml"), references(32)).unwrap();
+    let too_deep = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(too_deep["diagnostics"][0]["code"], "rule_invalid");
+    assert!(
+        too_deep["diagnostics"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("depth above 32")
+    );
+}
+
+#[test]
 fn structural_relation_policies_validate_normalized_edges_through_cli_and_mcp() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
