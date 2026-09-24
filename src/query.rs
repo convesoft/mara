@@ -19,7 +19,7 @@ mod related;
 mod search;
 pub use get::{EntryRange, GetResult, MetadataFragment, TextRange, get};
 pub use page::{ItemCollectionResult, RelatedItemsResult, SearchExcerpt};
-pub use related::{RelatedConnection, RelatedResult, related};
+pub use related::{RelatedConnection, RelatedNeighbour, RelatedResult, related};
 pub use search::{SearchHit, SearchResult, search};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]

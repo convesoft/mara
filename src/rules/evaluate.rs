@@ -66,9 +66,13 @@ impl Rules {
         let mut edges = BTreeSet::new();
         for item in corpus.items() {
             for relation in item.relations() {
-                let edge = identity.get(relation.target()).and_then(|target| {
-                    crate::RelationEdge::new(schema, item, relation.name(), target).ok()
-                });
+                let edge = if let Some(address) = crate::external::address(relation.target()) {
+                    crate::RelationEdge::external(schema, item, relation.name(), address).ok()
+                } else {
+                    identity.get(relation.target()).and_then(|target| {
+                        crate::RelationEdge::new(schema, item, relation.name(), target).ok()
+                    })
+                };
                 let Some(edge) = edge else {
                     project_unavailable(
                         result,
@@ -76,16 +80,26 @@ impl Rules {
                     );
                     return;
                 };
-                let crate::RelationEndpoint::Item { mid: a, .. } = &edge.source;
-                let crate::RelationEndpoint::Item { mid: b, .. } = &edge.target;
+                let crate::RelationEndpoint::Item { mid: a, .. } = &edge.source else {
+                    unreachable!()
+                };
+                let b = match &edge.target {
+                    crate::RelationEndpoint::Item { mid, .. } => format!("urn:mara:mid:{mid}"),
+                    crate::RelationEndpoint::External { address } => format!(
+                        "urn:mara:external:{}",
+                        url::form_urlencoded::byte_serialize(address.as_bytes())
+                            .collect::<String>()
+                    ),
+                };
+                let a = format!("urn:mara:mid:{a}");
                 edges.insert((a.clone(), edge.relation.clone(), b.clone()));
                 if edge.symmetric {
-                    edges.insert((b.clone(), edge.relation, a.clone()));
+                    edges.insert((b, edge.relation, a));
                 }
             }
         }
         for (a, relation, b) in &edges {
-            graph.push(json!({"@id":format!("urn:mara:mid:{a}"),format!("{REL}{relation}"):[{"@id":format!("urn:mara:mid:{b}")}]}));
+            graph.push(json!({"@id":a,format!("{REL}{relation}"):[{"@id":b}]}));
         }
         let data = match OxigraphInMemory::from_str(
             &json!({"@graph":graph}).to_string(),

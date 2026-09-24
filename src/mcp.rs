@@ -103,7 +103,7 @@ struct ItemCreateToolParams {
     /// Schema-declared custom fields only; excludes structural title/MID metadata and typed relations. Repeat keys only when schema-repeatable. Omitted or [] supplies none; required fields must be supplied. Values are schema-validated scalar text, trimmed, with line breaks rejected; empty values remain present when schema-valid. Use relations for initial edges or relation_add for later edits.
     #[serde(default)]
     fields: Vec<FieldValue>,
-    /// Initial schema-declared outgoing typed relations, created atomically with the item. Targets are exact human IDs or canonical MIDs; the new ID may target itself. Duplicate edges are rejected. Omitted or [] adds none; use relation_add/relation_remove for later edits.
+    /// Initial schema-declared outgoing typed relations, created atomically with the item. Targets are exact human IDs, canonical MIDs, or external:HTTP(S) URLs; the new ID may target itself. Duplicate edges are rejected. Omitted or [] adds none; use relation_add/relation_remove for later edits.
     #[serde(default)]
     relations: Vec<InitialRelation>,
     /// Literal Markdown body (- is literal; no stdin). Supports [[relation:ID]] and [[relation:MID]] typed assertions. An omitted, null, empty, or whitespace-only required body creates an incomplete scaffold.
@@ -358,7 +358,7 @@ struct RelationToolParams {
     source: String,
     /// Schema-declared relation name or inverse alias; discover names with schema_list(kind="relation").
     relation: String,
-    /// Target item's exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
+    /// Target item's exact human ID, canonical MID, or external:HTTP(S) URL.
     target: String,
 }
 
@@ -596,7 +596,7 @@ impl MaraMcp {
 
     #[tool(
         name = "related",
-        description = "Explore direct schema relations, mentions, and containment from any node. Discovery format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation get.. Counts connections, not unique neighbours; traversal is caller-controlled. Pass neighbour.reference to get or another related call. JSON uses contains with direction; its incoming view is displayed as contained_by in human CLI output. Select builtin:contains and incoming for the parent, then outgoing on that parent for its children. Continue with next_cursor and unchanged reference/options; restart after source/schema changes. Search again if a structural handle is stale."
+        description = "Explore direct schema relations, mentions, and containment from any internal node. Discovery format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation_get. Internal neighbours have a reference for get/related; external neighbours have only kind and address and are terminal. Counts connections, not unique neighbours; traversal is caller-controlled. JSON uses contains with direction; its incoming view is displayed as contained_by in human CLI output. Select builtin:contains and incoming for the parent, then outgoing on that parent for its children. Continue with next_cursor and unchanged reference/options; restart after source/schema changes. Search again if a structural handle is stale."
     )]
     fn related(
         &self,
@@ -650,7 +650,7 @@ impl MaraMcp {
         )
     }
 
-    #[tool(name = "relation_remove", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Remove all assertions of a semantic relationship across included documents, or exactly one snapshot-bound occurrence. Demote inline assertions to bare mentions, preserving their target spelling and surrounding prose. Reject missing edges and stale or mismatched selectors. Returns relationship format 1.")]
+    #[tool(name = "relation_remove", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Remove all assertions of a semantic relationship across included documents, or exactly one snapshot-bound occurrence. Demote inline internal assertions to bare mentions and external assertions to Markdown autolinks, preserving surrounding prose. Reject missing edges and stale or mismatched selectors. Returns relationship format 1.")]
     fn relation_remove(
         &self,
         Parameters(params): Parameters<RelationRemoveToolParams>,

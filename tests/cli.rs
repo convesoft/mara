@@ -10627,7 +10627,7 @@ fn typed_inline_relations_validate_contexts_and_malformed_tokens() {
         ("[[verified_by:REQ-B]]", "does not allow target flavour"),
         (
             "[[verified_by:external:https://example.com]]",
-            "invalid typed inline reference",
+            "does not allow this external target",
         ),
     ] {
         let source = original.replace("Preserved prose.", &format!("Zażółć {token}"));
@@ -12011,6 +12011,257 @@ fn rule_fixture() -> TempDir {
     )
     .unwrap();
     fixture
+}
+
+#[test]
+fn external_ticket_obligation_and_navigation_have_cli_mcp_parity() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["relations"]["tracked_by"] = json!({
+        "description":"Local delivery ticket reference.", "source":["requirement"],
+        "target":[], "external":true
+    });
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    fs::write(root.join("rules.yaml"),
+        "- id: rule:approved_ticket\n  targetClass: requirement\n  whenShape: rule:approved\n  property: [{path: tracked_by, minCount: 1}]\n- id: rule:approved\n  property: [{path: status, hasValue: approved}]\n"
+    ).unwrap();
+    let missing = validation_with_parity(root, &[]);
+    assert_eq!(missing["valid"], false, "{missing:#}");
+    assert!(
+        missing["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "rule_failed")
+    );
+    assert!(
+        mara(
+            root,
+            &["item", "update", "REQ-A", "--field", "status=draft"]
+        )
+        .status
+        .success()
+    );
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    assert!(
+        mara(
+            root,
+            &["item", "update", "REQ-A", "--field", "status=approved"]
+        )
+        .status
+        .success()
+    );
+    let target = "external:https://linear.example.invalid/ticket/ENG-7?view=full#notes";
+    let add = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "relation",
+            "add",
+            "REQ-A",
+            "tracked_by",
+            target,
+        ],
+    );
+    assert!(add.status.success(), "{}", stderr(&add));
+    let added: Value = serde_json::from_slice(&add.stdout).unwrap();
+    assert_eq!(
+        added["edge"]["target"],
+        json!({"kind":"external","address":"https://linear.example.invalid/ticket/ENG-7?view=full#notes"})
+    );
+    let inspected = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"tracked_by","target":target}),
+    );
+    assert_eq!(inspected["edge"], added["edge"]);
+    assert_eq!(inspected["occurrence_count"], 1);
+    let related = related_cli_mcp(root, "REQ-A", &[("--relation", "tracked_by")]);
+    assert_eq!(
+        related["connections"][0]["neighbour"],
+        added["edge"]["target"]
+    );
+    assert_eq!(related["connections"][0]["occurrence_count"], 1);
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let remove = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "relation",
+            "remove",
+            "REQ-A",
+            "tracked_by",
+            target,
+        ],
+    );
+    assert!(remove.status.success(), "{}", stderr(&remove));
+    assert_eq!(validation_with_parity(root, &[])["valid"], false);
+    let mcp_added = relation_tool(
+        root,
+        "relation_add",
+        json!({"source":"REQ-A","relation":"tracked_by","target":target}),
+    );
+    assert_eq!(mcp_added["edge"], added["edge"]);
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let mcp_removed = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":"REQ-A","relation":"tracked_by","target":target}),
+    );
+    assert_eq!(mcp_removed["edge"], added["edge"]);
+    assert_eq!(validation_with_parity(root, &[])["valid"], false);
+    fs::write(root.join("rules.yaml"),
+        "id: rule:remote_status\ntargetClass: requirement\nproperty: [{path: tracked_by, node: {property: [{path: status, hasValue: approved}]}}]\n"
+    ).unwrap();
+    let invalid = validation_with_parity(root, &[]);
+    assert_eq!(invalid["valid"], false);
+    assert!(
+        invalid["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "rule_invalid"),
+        "{invalid:#}"
+    );
+}
+
+#[test]
+fn external_authoring_keeps_exact_addresses_and_demotes_inline_links() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_path).unwrap()
+        + "\n  tracked_by:\n    description: An external ticket reference.\n    source: [requirement]\n    target: []\n    external: true\n";
+    fs::write(&schema_path, &schema).unwrap();
+    let path = root.join("a.mara.md");
+    let original = fs::read_to_string(&path).unwrap();
+    let url = "https://example.invalid/Work/ABC-1?x=%5B#Part";
+    let target = format!("external:{url}");
+    let inline = format!("[[tracked_by:{target}]]");
+    fs::write(
+        &path,
+        original.replace("Preserved prose.", &format!("{inline} and {inline}.")),
+    )
+    .unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let inspected = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"tracked_by","target":target}),
+    );
+    assert_eq!(inspected["occurrence_count"], 2);
+    let duplicate = relation_tool(
+        root,
+        "relation_add",
+        json!({"source":"REQ-A","relation":"tracked_by","target":target}),
+    );
+    assert_eq!(duplicate["error"]["code"], "relation_exists");
+    let selector = inspected["occurrences"][0]["reference"].as_str().unwrap();
+    let removed = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":"REQ-A","relation":"tracked_by","target":target,"occurrence":selector}),
+    );
+    assert_eq!(removed["remaining_occurrences"], 1);
+    assert!(
+        fs::read_to_string(&path)
+            .unwrap()
+            .contains(&format!("<{url}> and {inline}"))
+    );
+    let removed = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":"REQ-A","relation":"tracked_by","target":target}),
+    );
+    assert_eq!(removed["remaining_occurrences"], 0);
+    assert!(
+        fs::read_to_string(&path)
+            .unwrap()
+            .contains(&format!("<{url}> and <{url}>"))
+    );
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    for bad in [
+        "external:https://user@example.invalid/x",
+        "external:ftp://example.invalid/x",
+        "external:https://example.invalid/a[b]",
+        "external:https:///missing-host",
+    ] {
+        fs::write(
+            &path,
+            original.replace("Preserved prose.", &format!("[[tracked_by:{bad}]]")),
+        )
+        .unwrap();
+        let result = validation_with_parity(root, &[]);
+        assert_eq!(result["valid"], false, "{bad}: {result:#}");
+        assert!(
+            result["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["code"] == "relation_invalid"),
+            "{bad}: {result:#}"
+        );
+    }
+    fs::write(&path, &original).unwrap();
+    let created = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "item",
+            "create",
+            "requirement",
+            "REQ-EXT",
+            "external.mara.md",
+            "--title",
+            "External",
+            "--body",
+            "Ticket.",
+            "--relation",
+            &format!("tracked_by={target}"),
+        ],
+    );
+    assert!(created.status.success(), "{}", stderr(&created));
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    assert_eq!(
+        relation_tool(
+            root,
+            "relation_get",
+            json!({"source":"REQ-EXT","relation":"tracked_by","target":target})
+        )["occurrence_count"],
+        1
+    );
+}
+
+#[test]
+fn external_declarations_reject_internal_only_relation_modes() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let original = fs::read_to_string(&schema_path).unwrap();
+    for extra in [
+        "inverse: tracked_from",
+        "symmetric: true",
+        "same_flavour: true",
+    ] {
+        fs::write(&schema_path, format!("{original}\n  tracked_by:\n    description: An external ticket.\n    source: [requirement]\n    target: []\n    external: true\n    {extra}\n")).unwrap();
+        let invalid =
+            diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(invalid["valid"], false, "{extra}: {invalid:#}");
+        assert!(
+            invalid["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["message"].as_str().unwrap().contains("external relation")),
+            "{extra}: {invalid:#}"
+        );
+    }
 }
 
 #[test]
