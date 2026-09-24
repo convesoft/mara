@@ -57,9 +57,11 @@ Repository-wide instructions for humans and software agents.
 - Squash merge by default. Use rebase merge only when preserving multiple
   independently useful commits that already follow the commit convention.
 - When the user intends to publish issue work to GitHub or continue its pull
-  request, use the repository [Mara PR flow](.agents/skills/mara-pr-flow/SKILL.md).
-  Delegate PR publication and review monitoring to a Luna subagent; keep
-  implementation and review decisions in the main thread.
+  request, the main thread uses the repository
+  [Mara PR flow](.agents/skills/mara-pr-flow/SKILL.md) and delegates PR
+  operations to the project [PR manager](.codex/agents/mara_pr_manager.toml).
+  The PR manager does not use the main-thread skill. Keep implementation and
+  review decisions in the main thread.
 
 ## Documentation discipline
 
