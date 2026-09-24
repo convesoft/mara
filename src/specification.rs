@@ -12,14 +12,15 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    Corpus, DiagnosticCode, DiagnosticLocation, DiscoveryNodeKind, DiscoveryNodeSummary,
-    FieldFilter, Item, ItemFilters, ItemSource, MetadataFragment, Project, ReferenceKind,
-    RelationEdge, RelationEndpoint, Schema, Severity, TextRange, TraceSelection,
-    ValidationDiagnostic, ValidationError, ValidationScope, query,
+    ConnectionKind, Corpus, DiagnosticCode, DiagnosticLocation, DiscoveryNodeKind,
+    DiscoveryNodeSummary, FieldFilter, Item, ItemFilters, ItemSource, MetadataFragment, Project,
+    ReferenceKind, RelationDirection, RelationEdge, RelationEndpoint, Schema, Severity, TextRange,
+    TraceSelection, ValidationDiagnostic, ValidationError, ValidationScope, query,
 };
 
 const PAGE_BYTES: usize = 65_536;
 const FRAGMENT_BYTES: usize = 4_096;
+type ResolvedReferences = BTreeSet<(PathBuf, usize, usize)>;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -168,6 +169,19 @@ pub(crate) fn generate(
         .filter_map(|item| item.mid())
         .collect::<BTreeSet<_>>();
     let graph = corpus.discovery();
+    let resolved_references = graph
+        .nodes()
+        .flat_map(|node| node.connections(RelationDirection::Outgoing))
+        .filter(|connection| connection.kind == ConnectionKind::Mentions)
+        .map(|connection| {
+            let source = connection.source;
+            (
+                source.path().to_owned(),
+                source.span().start_byte(),
+                source.span().end_byte(),
+            )
+        })
+        .collect::<ResolvedReferences>();
     let nodes = graph
         .nodes()
         .filter_map(|node| match node.kind() {
@@ -353,8 +367,8 @@ pub(crate) fn generate(
         schema,
         &corpus,
         &diagnostics,
+        &resolved_references,
         params,
-        limit,
         &mut result,
     )?;
     Ok(result)
@@ -518,10 +532,11 @@ fn paginate(
     schema: &Schema,
     corpus: &Corpus,
     diagnostics: &[crate::Diagnostic],
+    resolved_references: &ResolvedReferences,
     params: &TraceSpecificationParams,
-    limit: usize,
     result: &mut TraceSpecificationResult,
 ) -> Result<(), ValidationError> {
+    let limit = params.limit.unwrap_or(20);
     let mut hash = Sha256::new();
     hash.update(b"trace-specification-1");
     hash.update(serde_json::to_vec(schema).expect("schema serializes"));
@@ -592,7 +607,7 @@ fn paginate(
             .has_more
             .then(|| format!("1:{fingerprint}:{}", start + result.records.len()));
         if params.render.as_deref() == Some("markdown") {
-            result.markdown = Some(markdown(result, corpus));
+            result.markdown = Some(markdown(result, corpus, resolved_references));
         }
         if serde_json::to_vec(result).expect("result serializes").len() > PAGE_BYTES {
             result.records.pop();
@@ -605,13 +620,13 @@ fn paginate(
             result.has_more = true;
             result.next_cursor = Some(format!("1:{fingerprint}:{}", start + result.records.len()));
             if params.render.as_deref() == Some("markdown") {
-                result.markdown = Some(markdown(result, corpus));
+                result.markdown = Some(markdown(result, corpus, resolved_references));
             }
             break;
         }
     }
     if params.render.as_deref() == Some("markdown") {
-        result.markdown = Some(markdown(result, corpus));
+        result.markdown = Some(markdown(result, corpus, resolved_references));
     }
     if serde_json::to_vec(result).expect("result serializes").len() > PAGE_BYTES {
         return Err(ValidationError::new(
@@ -629,7 +644,11 @@ fn stale_cursor() -> ValidationError {
     )
 }
 
-fn markdown(result: &TraceSpecificationResult, corpus: &Corpus) -> String {
+fn markdown(
+    result: &TraceSpecificationResult,
+    corpus: &Corpus,
+    resolved_references: &ResolvedReferences,
+) -> String {
     let anchors = heading_anchors(corpus);
     let mut out = String::from(
         "# Specification\n\nCanonical links are relative to the project root. Save this page there to follow them.\n\n",
@@ -694,7 +713,13 @@ fn markdown(result: &TraceSpecificationResult, corpus: &Corpus) -> String {
                             ""
                         }
                     ));
-                    let authored = render_references(content, source_range, corpus, &anchors);
+                    let authored = render_references(
+                        content,
+                        source_range,
+                        corpus,
+                        &anchors,
+                        resolved_references,
+                    );
                     out.push_str(&render_fragment(&authored, source_range, corpus));
                     out.push_str("\n\n");
                 }
@@ -871,6 +896,7 @@ fn render_references(
     source: &ItemSource,
     corpus: &Corpus,
     anchors: &HeadingAnchors,
+    resolved_references: &ResolvedReferences,
 ) -> String {
     // Parser reference spans exclude code and escaped literal examples.
     let Some(document) = corpus
@@ -880,6 +906,19 @@ fn render_references(
     else {
         return content.to_owned();
     };
+    let resolved_targets = document
+        .references()
+        .iter()
+        .filter(|reference| {
+            reference.kind() == ReferenceKind::MarkdownLink
+                && resolved_references.contains(&(
+                    source.path().to_owned(),
+                    reference.source().span().start_byte(),
+                    reference.source().span().end_byte(),
+                ))
+        })
+        .map(|reference| reference.target())
+        .collect::<BTreeSet<_>>();
     let mut edits = Vec::<(usize, usize, String)>::new();
     for reference in document.references() {
         let span = reference.source().span();
@@ -908,7 +947,15 @@ fn render_references(
             }
             ReferenceKind::MarkdownLink => {
                 let target = reference.target();
-                rebase_target(target, source.path()).and_then(|rebased| {
+                (!canonical_link(target)
+                    || resolved_references.contains(&(
+                        source.path().to_owned(),
+                        span.start_byte(),
+                        span.end_byte(),
+                    )))
+                .then(|| rebase_target(target, source.path()))
+                .flatten()
+                .and_then(|rebased| {
                     raw.rfind(target)
                         .map(|at| format!("{}{}{}", &raw[..at], rebased, &raw[at + target.len()..]))
                 })
@@ -953,7 +1000,9 @@ fn render_references(
             .strip_prefix('<')
             .and_then(|s| s.strip_suffix('>'))
             .unwrap_or(token);
-        if let Some(rebased) = rebase_target(target, source.path()) {
+        if (!canonical_link(target) || resolved_targets.contains(target))
+            && let Some(rebased) = rebase_target(target, source.path())
+        {
             edits.push((
                 start + target_start + usize::from(token.starts_with('<')),
                 start + target_start + target_end - usize::from(token.ends_with('>')),
@@ -971,6 +1020,12 @@ fn render_references(
         }
     }
     output
+}
+
+fn canonical_link(target: &str) -> bool {
+    let file = target.split_once('#').map_or(target, |(file, _)| file);
+    let file = crate::discovery::percent_decode(file);
+    file.is_empty() || file.ends_with(".mara.md")
 }
 
 fn collect_definitions<'a>(
@@ -1008,12 +1063,17 @@ fn rebase_target(target: &str, path: &Path) -> Option<String> {
     for component in destination.components() {
         match component {
             Component::ParentDir => {
-                normalized.pop();
+                if !normalized.pop() {
+                    return None;
+                }
             }
             Component::CurDir => {}
             Component::Normal(name) => normalized.push(name),
             _ => {}
         }
+    }
+    if normalized.as_os_str().is_empty() {
+        return None;
     }
     let mut rebased = md_target(&normalized);
     if !fragment.is_empty() {

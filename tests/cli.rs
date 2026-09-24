@@ -371,6 +371,46 @@ fn trace_specification_rebases_percent_encoded_source_links_once() {
 }
 
 #[test]
+fn trace_specification_retains_unresolved_source_links() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    fs::create_dir(root.join("docs")).unwrap();
+    fs::write(root.join("outside.mara.md"), "# Outside\n").unwrap();
+    fs::write(root.join("docs/target.mara.md"), "# Target\n").unwrap();
+    fs::write(
+        root.join("docs/source.mara.md"),
+        "# Source\n\n[Valid](target.mara.md#target)\n[Escapes](../../outside.mara.md)\n[Missing](../missing.mara.md#unknown)\n[No anchor](target.mara.md#absent)\n[By reference][missing]\n\n[missing]: ../missing.mara.md#unknown\n",
+    )
+    .unwrap();
+
+    let output = mara(root, &["trace", "specification", "--path", "docs/"]);
+    assert!(!output.status.success());
+    let rendered = stdout(&output);
+    assert!(
+        rendered.contains("[Valid](docs/target.mara.md#target)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[Escapes](../../outside.mara.md)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[Missing](../missing.mara.md#unknown)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[No anchor](target.mara.md#absent)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[missing]: ../missing.mara.md#unknown"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("reference_unresolved"), "{rendered}");
+}
+
+#[test]
 fn trace_specification_keeps_ambiguous_item_mentions_unlinked() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
