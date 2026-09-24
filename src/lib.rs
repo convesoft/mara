@@ -24,6 +24,7 @@ mod operations;
 mod query;
 mod relations;
 mod rules;
+mod specification;
 mod trace;
 pub use relations::{
     RelationEdge, RelationEndpoint, RelationError, RelationInspection, RelationOccurrence,
@@ -61,6 +62,7 @@ pub use query::{
     ResolvedItem, SearchExcerpt, SearchHit, SearchResult, TextRange, get, get_item, list_items,
     related, related_items, search, search_items,
 };
+pub use specification::{SpecificationRecord, TraceSpecificationParams, TraceSpecificationResult};
 pub use trace::{
     TraceCheck, TraceField, TraceMatrixParams, TraceMatrixResult, TraceMatrixSummary,
     TraceSelection,
@@ -761,6 +763,10 @@ impl Project {
 
     pub fn content_patterns(&self) -> &[String] {
         &self.content_patterns
+    }
+
+    pub(crate) fn rule_files(&self) -> &[PathBuf] {
+        &self.rule_files
     }
 
     pub(crate) fn content_discovery_is_complete(&self) -> bool {

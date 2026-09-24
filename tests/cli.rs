@@ -133,6 +133,253 @@ fn mcp_call(id: u64, name: &str, arguments: Value) -> Value {
 }
 
 #[test]
+fn trace_specification_preserves_sources_selection_and_cli_mcp_parity() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    fs::create_dir(root.join("docs")).unwrap();
+    let source = root.join("docs/spec.mara.md");
+    let guide = root.join("guide.mara.md");
+    fs::write(&guide, "# Intro\n\n:::mara requirement REQ-B\n:mid: 01M1PXP2KG381MM1VNN6XC7S4M\n:title: B\n\nTarget.\n:::\n").unwrap();
+    let authored = "# Context\n\nNarrative [Guide](../guide.mara.md#intro). `literal [Guide](../guide.mara.md#intro)`\n\n[Reference][docref].\n\n[docref]: ../guide.mara.md#intro\n\n:::mara requirement REQ-A\n:mid: 01M1PXP2KGVW5ZF2JGP9K4XE9B\n:title: A\n:depends_on: REQ-B\n\nRead [[REQ-B]] and [Guide](../guide.mara.md#intro).\n:::\n";
+    fs::write(&source, authored).unwrap();
+    let before = fs::read(&source).unwrap();
+    let args = [
+        "--format",
+        "json",
+        "trace",
+        "specification",
+        "--path",
+        "docs/",
+        "--limit",
+        "2",
+    ];
+    let first = mara(root, &args);
+    assert!(first.status.success(), "{}", stderr(&first));
+    let first: Value = serde_json::from_str(&stdout(&first)).unwrap();
+    assert_eq!(first["kind"], "specification");
+    assert_eq!(first["narrative_included"], true);
+    assert_eq!(first["has_more"], true);
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let next = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "specification",
+            "--path",
+            "docs/",
+            "--limit",
+            "2",
+            "--cursor",
+            cursor,
+        ],
+    );
+    assert!(next.status.success(), "{}", stderr(&next));
+    let mut page = first.clone();
+    let mut all_records = Vec::new();
+    loop {
+        all_records.extend(page["records"].as_array().unwrap().iter().cloned());
+        if page["has_more"] == false {
+            break;
+        }
+        let next_cursor = page["next_cursor"].as_str().unwrap();
+        let output = mara(
+            root,
+            &[
+                "--format",
+                "json",
+                "trace",
+                "specification",
+                "--path",
+                "docs/",
+                "--limit",
+                "2",
+                "--cursor",
+                next_cursor,
+            ],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        page = serde_json::from_str(&stdout(&output)).unwrap();
+    }
+    let body = all_records
+        .iter()
+        .filter(|record| record["kind"] == "content" && record["node"]["id"] == "REQ-A")
+        .filter_map(|record| record["content"].as_str())
+        .collect::<String>();
+    assert_eq!(
+        body,
+        "Read [[REQ-B]] and [Guide](../guide.mara.md#intro).\n"
+    );
+    assert!(
+        all_records
+            .iter()
+            .any(|record| record["kind"] == "relationship"
+                && record["outside_selection"] == true
+                && record["endpoint"]["id"] == "REQ-B")
+    );
+    let responses = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "trace_specification",
+                json!({"paths":["docs/"],"limit":2}),
+            ),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        first
+    );
+    let text = mara(
+        root,
+        &[
+            "trace",
+            "specification",
+            "--path",
+            "docs/",
+            "--limit",
+            "100",
+        ],
+    );
+    assert!(text.status.success(), "{}", stderr(&text));
+    let rendered = stdout(&text);
+    assert!(
+        rendered.contains("Narrative [Guide](guide.mara.md#intro)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("`literal [Guide](../guide.mara.md#intro)`"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[docref]: guide.mara.md#intro"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[[REQ-B]]](<guide.mara.md#intro>)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[REQ-A](<docs/spec.mara.md#context>)"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("[outside selection]"), "{rendered}");
+    let item_only = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "specification",
+            "--id",
+            "REQ-A",
+        ],
+    );
+    assert!(item_only.status.success(), "{}", stderr(&item_only));
+    let item_only: Value = serde_json::from_str(&stdout(&item_only)).unwrap();
+    assert_eq!(item_only["narrative_included"], false);
+    assert!(!item_only["records"].as_array().unwrap().iter().any(|r| {
+        r["content"]
+            .as_str()
+            .is_some_and(|text| text.contains("Narrative"))
+    }));
+    assert_eq!(fs::read(&source).unwrap(), before);
+    let repeat = mara(root, &args);
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout(&repeat)).unwrap(),
+        first
+    );
+    fs::write(
+        &source,
+        authored.replace("Read [[REQ-B]]", "Read the updated [[REQ-B]]"),
+    )
+    .unwrap();
+    let stale = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "specification",
+            "--path",
+            "docs/",
+            "--limit",
+            "2",
+            "--cursor",
+            cursor,
+        ],
+    );
+    assert!(!stale.status.success());
+    let stale: Value = serde_json::from_str(&stdout(&stale)).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_cursor");
+    let changed = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "specification",
+            "--id",
+            "REQ-A",
+        ],
+    );
+    assert!(stdout(&changed).contains("the updated"));
+}
+
+#[test]
+fn trace_specification_fragments_oversized_content_without_skips() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    let content = "αbc".repeat(20_000);
+    let source = format!(
+        ":::mara requirement REQ-LONG\n:mid: 01M1PXP2KG381MM1VNN6XC7S4M\n:title: Long\n\n{content}\n:::\n"
+    );
+    fs::write(root.join("long.mara.md"), &source).unwrap();
+    let mut cursor = None::<String>;
+    let mut body = String::new();
+    let mut pages = 0;
+    loop {
+        let mut args = vec![
+            "--format",
+            "json",
+            "trace",
+            "specification",
+            "--id",
+            "REQ-LONG",
+        ];
+        if let Some(value) = &cursor {
+            args.extend(["--cursor", value]);
+        }
+        let output = mara(root, &args);
+        assert!(output.status.success(), "{}", stderr(&output));
+        assert!(output.stdout.len() <= 65_537);
+        let page: Value = serde_json::from_str(&stdout(&output)).unwrap();
+        for record in page["records"].as_array().unwrap() {
+            if record["kind"] == "content" {
+                body.push_str(record["content"].as_str().unwrap());
+            }
+        }
+        pages += 1;
+        if page["has_more"] == false {
+            break;
+        }
+        cursor = Some(page["next_cursor"].as_str().unwrap().to_owned());
+    }
+    assert!(pages > 1);
+    assert_eq!(body, format!("{content}\n"));
+    assert_eq!(
+        fs::read_to_string(root.join("long.mara.md")).unwrap(),
+        source
+    );
+}
+
+#[test]
 fn cli_and_mcp_reference_preflight_preserve_files_for_all_item_mutations() {
     for use_mcp in [false, true] {
         let fixture = TempDir::new().unwrap();
@@ -6671,6 +6918,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
             "relation_get",
             "relation_remove",
             "trace_matrix",
+            "trace_specification",
         ])
     );
     for tool in tools {
@@ -6800,8 +7048,8 @@ fn every_command_help_describes_commands_arguments_and_options() {
             }
         }
     }
-    // Root, seven command groups, twenty project operations, and the MCP server.
-    assert_eq!(visited.len(), 30);
+    // Root, seven command groups, twenty-one project operations, and the MCP server.
+    assert_eq!(visited.len(), 31);
 }
 
 #[test]
@@ -6836,7 +7084,7 @@ fn mcp_tools_list_exposes_parameter_guidance() {
     let tools = mcp_response(&responses, 2)["result"]["tools"]
         .as_array()
         .unwrap();
-    assert_eq!(tools.len(), 21);
+    assert_eq!(tools.len(), 22);
     for tool in tools {
         assert!(
             tool["description"]

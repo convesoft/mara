@@ -80,6 +80,58 @@ struct TraceMatrixToolParams {
     render: Option<String>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct TraceSpecificationToolParams {
+    /// Absolute project root; omit when this server is bound with --project.
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Exact human IDs or MIDs; OR within this list and intersected with other item filters.
+    #[serde(default)]
+    ids: Vec<String>,
+    /// Exact schema flavour names; OR within this list and intersected with other filters.
+    #[serde(default)]
+    flavours: Vec<String>,
+    /// Exact schema-declared custom field key/value filters, without trimming. An empty value matches an empty value. Excludes title/MID and typed relations.
+    #[serde(default)]
+    fields: Vec<mara::TraceField>,
+    /// Project-relative document paths or directory subtrees; path-only selection includes narrative.
+    #[serde(default)]
+    paths: Vec<PathBuf>,
+    /// Select the whole corpus, including narrative; cannot be combined with filters.
+    #[serde(default)]
+    all: bool,
+    /// Maximum records per page, 1 through 100 (default 20); byte budget may return fewer.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Opaque next_cursor; keep options unchanged until has_more is false; restart after source/schema changes; empty strings are invalid.
+    #[serde(default)]
+    cursor: Option<String>,
+    /// Set to markdown to include the same rendered page as CLI default text.
+    #[serde(default)]
+    render: Option<String>,
+}
+
+impl TraceSpecificationToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, mara::TraceSpecificationParams) {
+        (
+            self.project,
+            mara::TraceSpecificationParams {
+                selection: mara::TraceSelection {
+                    ids: self.ids,
+                    flavours: self.flavours,
+                    fields: self.fields,
+                    paths: self.paths,
+                    all: self.all,
+                },
+                limit: self.limit,
+                cursor: self.cursor,
+                render: self.render,
+            },
+        )
+    }
+}
+
 impl TraceMatrixToolParams {
     fn into_parts(self) -> (Option<PathBuf>, mara::TraceMatrixParams) {
         (
@@ -439,6 +491,29 @@ impl RelationToolParams {
 impl MaraMcp {
     fn for_project(&self, project: Option<PathBuf>) -> Result<OperationContext, String> {
         self.operations.for_project(project)
+    }
+
+    #[tool(
+        name = "trace_specification",
+        output_schema = rmcp::handler::server::common::schema_for_type::<mara::TraceSpecificationResult>(),
+        description = "Generate a source-linked, bounded specification from an explicit item or document selection. Path-only/all selections include narrative; item filters omit it. Returns authored content, metadata, incident relationships, outside-selection neighbours and source locations. Set render:markdown for the matching readable page; follow next_cursor with unchanged options."
+    )]
+    fn trace_specification(
+        &self,
+        Parameters(params): Parameters<TraceSpecificationToolParams>,
+    ) -> rmcp::model::CallToolResult {
+        let (project, params) = params.into_parts();
+        let result = self
+            .for_project(project)
+            .map_err(mara::ValidationError::invalid_argument)
+            .and_then(|context| context.trace_specification(&params));
+        let (value, failed) = match result {
+            Ok(result) => (serde_json::to_value(result).unwrap(), false),
+            Err(error) => (error.envelope(), true),
+        };
+        let mut response = rmcp::model::CallToolResult::structured(value);
+        response.is_error = Some(failed);
+        response
     }
 
     #[tool(

@@ -160,6 +160,30 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum TraceCommand {
+    /// Generate source-linked authored content and incident relationships without writing files.
+    Specification {
+        /// Exact human ID or MID; repeat for OR and intersect with other filters.
+        #[arg(long = "id")]
+        ids: Vec<String>,
+        /// Exact schema flavour; repeat for OR.
+        #[arg(long = "flavour")]
+        flavours: Vec<String>,
+        /// Exact custom KEY=VALUE filter without trimming; an empty value matches an empty value. Excludes title/MID and typed relations.
+        #[arg(long = "field", value_name = "KEY=VALUE")]
+        fields: Vec<String>,
+        /// Project-relative document or directory subtree.
+        #[arg(long = "path")]
+        paths: Vec<PathBuf>,
+        /// Select the whole corpus; cannot be combined with filters.
+        #[arg(long)]
+        all: bool,
+        /// Maximum records per page, 1 through 100 (default 20); the byte budget may return fewer.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Opaque next_cursor; keep options unchanged until has_more is false; restart after source/schema changes; empty strings are invalid.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
     /// Generate a bounded coverage matrix using enabled rule IRIs or a request-local YAML check.
     Matrix {
         /// Exact human ID or MID for a root item; repeat for OR and intersect with other root filters.
@@ -610,6 +634,58 @@ fn run(cli: Cli) -> Result<bool, String> {
         command,
     } = cli;
     match command {
+        Command::Trace {
+            command:
+                TraceCommand::Specification {
+                    ids,
+                    flavours,
+                    fields,
+                    paths,
+                    all,
+                    limit,
+                    cursor,
+                },
+        } => {
+            let fields = fields
+                .into_iter()
+                .map(|field| {
+                    let (key, value) = field.split_once('=').ok_or_else(|| {
+                        mara::ValidationError::invalid_argument("--field must use KEY=VALUE")
+                    })?;
+                    Ok(mara::TraceField {
+                        key: key.into(),
+                        value: value.into(),
+                    })
+                })
+                .collect::<Result<Vec<_>, mara::ValidationError>>();
+            let fields = match fields {
+                Ok(fields) => fields,
+                Err(error) => return emit_trace_error(format, error),
+            };
+            let params = mara::TraceSpecificationParams {
+                selection: mara::TraceSelection {
+                    ids,
+                    flavours,
+                    fields,
+                    paths,
+                    all,
+                },
+                limit,
+                cursor,
+                render: matches!(format, OutputFormat::Human).then(|| "markdown".into()),
+            };
+            match operations(project)?.trace_specification(&params) {
+                Ok(result) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&result)?
+                    } else {
+                        print!("{}", result.markdown.as_deref().unwrap_or(""))
+                    }
+                    Ok(result.evaluation_complete)
+                }
+                Err(error) => emit_trace_error(format, error),
+            }
+        }
         Command::Trace {
             command:
                 TraceCommand::Matrix {

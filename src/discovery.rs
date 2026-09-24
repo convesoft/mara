@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 mod references;
 mod summary;
 
+pub(crate) use references::heading_anchor;
+
 pub use summary::{DiscoveryContext, DiscoveryKind, DiscoveryNodeSummary};
 
 use petgraph::{

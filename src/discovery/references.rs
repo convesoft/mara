@@ -313,7 +313,7 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8(bytes).unwrap_or_else(|_| text.to_owned())
 }
 
-fn heading_anchor(text: &str) -> String {
+pub(crate) fn heading_anchor(text: &str) -> String {
     text.trim()
         .to_lowercase()
         .chars()

@@ -19,6 +19,18 @@ pub struct OperationContext {
 }
 
 impl OperationContext {
+    pub fn trace_specification(
+        &self,
+        params: &crate::TraceSpecificationParams,
+    ) -> Result<crate::TraceSpecificationResult, crate::ValidationError> {
+        let project = resolve_project(self.selected.as_deref(), &self.current_directory)
+            .map_err(|e| crate::ValidationError::new("io_error", e.to_string()))?;
+        let schema = load_schema(&project).map_err(|e| match e {
+            crate::Error::Io { .. } => crate::ValidationError::new("io_error", e.to_string()),
+            _ => crate::ValidationError::invalid_argument(e.to_string()),
+        })?;
+        crate::specification::generate(&project, &schema, params)
+    }
     pub fn trace_matrix(
         &self,
         params: &crate::TraceMatrixParams,
