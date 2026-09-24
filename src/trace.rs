@@ -563,11 +563,12 @@ fn explain(
         "minimum":shape["qualifiedMinCount"].as_u64().or_else(|| shape["minCount"].as_u64()),
         "maximum":shape["qualifiedMaxCount"].as_u64().or_else(|| shape["maxCount"].as_u64())});
     let condition = json!({"components":shape.as_object().unwrap().iter()
-        .filter(|(key,_)| matches!(key.as_str(),"class"|"datatype"|"hasValue"|
+        .filter(|(key,_)| matches!(key.as_str(),"property"|"class"|"datatype"|"hasValue"|
             "pattern"|"minCount"|"maxCount"|"qualifiedValueShape"|
             "qualifiedMinCount"|"qualifiedMaxCount"|"node"|"in"|"and"|"or"|"not"))
         .map(|(key,value)|(key.clone(),value.clone())).collect::<BTreeMap<_,_>>(),
         "path":path});
+    let components = shape_components(shape);
     let every = every_shape.and_then(|q| {
         matching
             .iter()
@@ -607,7 +608,7 @@ fn explain(
     });
     output.records.push(record(
         json!({"kind":"check","reference":reference,"root":ctx.root,
-        "evaluation":ctx.evaluation,"obligation":{"shape":shape_id,"source":source},
+        "evaluation":ctx.evaluation,"obligation":{"shape":shape_id,"component":components,"source":source},
         "context":context,"parent":parent,"state":state,"condition":condition,
         "counts":count,"every":every,"inspection":inspection,
         "reported":observation.diagnostic.as_ref().filter(|d|
@@ -707,6 +708,39 @@ fn explain(
             }
         }
     }
+}
+
+fn shape_components(shape: &Value) -> Vec<String> {
+    let mut components = shape
+        .as_object()
+        .unwrap()
+        .keys()
+        .filter_map(|key| {
+            let name = match key.as_str() {
+                "property" => "Property",
+                "class" => "Class",
+                "datatype" => "Datatype",
+                "hasValue" => "HasValue",
+                "pattern" => "Pattern",
+                "minCount" => "MinCount",
+                "maxCount" => "MaxCount",
+                "qualifiedValueShape" => "QualifiedValueShape",
+                "qualifiedMinCount" => "QualifiedMinCount",
+                "qualifiedMaxCount" => "QualifiedMaxCount",
+                "node" => "Node",
+                "in" => "In",
+                "and" => "And",
+                "or" => "Or",
+                "not" => "Not",
+                _ => return None,
+            };
+            Some(format!(
+                "http://www.w3.org/ns/shacl#{name}ConstraintComponent"
+            ))
+        })
+        .collect::<Vec<_>>();
+    components.sort();
+    components
 }
 
 fn check_reference(

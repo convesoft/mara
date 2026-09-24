@@ -775,10 +775,14 @@ force an unbounded nested row:
 `evaluation` is `{kind:"rule",shape:"urn:mara:rule:approved_requirement"}`
 or `{kind:"check",shape:"urn:mara:rule:coverage"}`. `root` and item endpoints use discovery item descriptors;
 external endpoints use the relationship contract's external descriptor.
-Every record carries `kind`. `condition` identifies the SHACL component and
-its parameters. Nested shape obligations have check records when explicitly
-evaluated or available from public native outcomes; internal evaluator traces
-are not required.
+Every record carries `kind`. A check's `obligation.component` is a sorted array
+of SHACL constraint-component IRIs for its authored shape (empty for a shape
+with no constraints). Its `state` is the whole-shape outcome; it does not
+claim a separate outcome for each component. `condition.components` retains
+the authored parameters keyed by their SHACL names. A diagnostic's singular
+component can be matched against this array. Nested shape obligations have
+check records when explicitly evaluated or available from public native
+outcomes; internal evaluator traces are not required.
 A check's `counts` contains `selected`,
 `qualifying`, `minimum` and `maximum`; omitted bounds and unavailable totals
 are null. `every` and `qualification` use the predicate states or null when

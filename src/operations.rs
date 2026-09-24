@@ -25,8 +25,10 @@ impl OperationContext {
     ) -> Result<crate::TraceMatrixResult, crate::ValidationError> {
         let project = resolve_project(self.selected.as_deref(), &self.current_directory)
             .map_err(|e| crate::ValidationError::new("io_error", e.to_string()))?;
-        let schema = load_schema(&project)
-            .map_err(|e| crate::ValidationError::invalid_argument(e.to_string()))?;
+        let schema = load_schema(&project).map_err(|e| match e {
+            crate::Error::Io { .. } => crate::ValidationError::new("io_error", e.to_string()),
+            _ => crate::ValidationError::invalid_argument(e.to_string()),
+        })?;
         crate::trace::matrix(&project, &schema, params)
     }
     pub fn from_environment(selected: Option<PathBuf>) -> Result<Self, String> {

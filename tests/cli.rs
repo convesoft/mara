@@ -12084,6 +12084,18 @@ fn trace_matrix_reports_rule_states_edges_and_cli_mcp_parity() {
     assert_eq!(result["summaries"][0]["failed"], 1);
     assert_eq!(result["summaries"][0]["not_applicable"], 1);
     let records = result["records"].as_array().unwrap();
+    assert!(records.iter().any(|r| r["kind"] == "check"
+        && r["obligation"]["shape"] == "urn:mara:rule:coverage"
+        && r["obligation"]["component"]
+            == json!(["http://www.w3.org/ns/shacl#PropertyConstraintComponent"])));
+    assert!(records.iter().any(|r| {
+        r["kind"] == "check"
+            && r["reported"]["obligation"]["component"].is_string()
+            && r["obligation"]["component"]
+                .as_array()
+                .unwrap()
+                .contains(&r["reported"]["obligation"]["component"])
+    }));
     assert!(
         records.iter().any(|r| r["kind"] == "edge"
             && r["endpoint"]["id"] == "VER-DRAFT"
@@ -12095,6 +12107,11 @@ fn trace_matrix_reports_rule_states_edges_and_cli_mcp_parity() {
         records.iter().any(|r| r["kind"] == "check"
             && r["obligation"]["shape"] == "urn:mara:rule:approved_verification"
             && r["state"] == "failed"
+            && r["obligation"]["component"]
+                == json!([
+                    "http://www.w3.org/ns/shacl#ClassConstraintComponent",
+                    "http://www.w3.org/ns/shacl#NodeConstraintComponent"
+                ])
             && r["inspection"].is_null()),
         "{result:#}"
     );
@@ -12106,6 +12123,8 @@ fn trace_matrix_reports_rule_states_edges_and_cli_mcp_parity() {
             && r["inspection"]["item"].is_string()
             && r["inspection"]["value"] == "draft"
             && r["inspection"]["value_count"] == 1
+            && r["obligation"]["component"]
+                == json!(["http://www.w3.org/ns/shacl#HasValueConstraintComponent"])
             && r["inspection"]["source"]["line"].is_number()),
         "{result:#}"
     );
@@ -12176,6 +12195,43 @@ fn trace_matrix_reports_rule_states_edges_and_cli_mcp_parity() {
                 && r["outside_selection"] == false),
         "{all:#}"
     );
+}
+
+#[test]
+fn trace_matrix_reports_schema_read_failure_as_io_error_on_cli_and_mcp() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    fs::remove_file(root.join(".mara/schema.yaml")).unwrap();
+    let cli = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--all",
+            "--rule",
+            "urn:mara:rule:coverage",
+        ],
+    );
+    assert!(!cli.status.success());
+    let result: Value = serde_json::from_str(&stdout(&cli)).unwrap();
+    assert_eq!(result["error"]["code"], "io_error");
+    let responses = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "trace_matrix",
+                json!({"all":true,"rules":["urn:mara:rule:coverage"]}),
+            ),
+        ],
+    );
+    let mcp = &mcp_response(&responses, 2)["result"];
+    assert_eq!(mcp["structuredContent"]["error"]["code"], "io_error");
+    assert_eq!(mcp["isError"], true);
 }
 
 #[test]
