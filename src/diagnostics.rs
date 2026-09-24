@@ -20,7 +20,6 @@ pub enum DiagnosticCode {
     RelationCardinality,
     RelationCycle,
     EvaluationUnavailable,
-    EvaluationLimit,
 }
 
 impl DiagnosticCode {
@@ -136,41 +135,8 @@ pub(crate) fn pointer(parts: &[&str]) -> String {
 pub struct ValidationOptions {
     /// Maximum diagnostics per page, 1 through 100; default 20. The serialized byte budget (65536 bytes) may return fewer.
     pub limit: Option<usize>,
-    /// Opaque next_cursor; continue until has_more is false and repeat unchanged project, target, paths, limit and max_work. Omit to start or restart after source/schema/configuration changes; empty strings are invalid.
+    /// Opaque next_cursor; continue until has_more is false and repeat unchanged project, target, paths and limit. Omit to start or restart after source/schema/configuration changes; empty strings are invalid.
     pub cursor: Option<String>,
-    /// Logical evaluation budget, 1 through 1,000,000; default 100,000. A higher budget requires a fresh request.
-    pub max_work: Option<usize>,
-}
-
-#[derive(Debug, Clone, Serialize, JsonSchema)]
-pub struct ValidationWork {
-    pub used: usize,
-    pub limit: usize,
-}
-
-/// Deterministic logical budget; charge before examining a unit of work.
-pub(crate) struct WorkBudget {
-    pub used: usize,
-    pub limit: usize,
-    pub exhausted: bool,
-}
-
-impl WorkBudget {
-    pub fn new(limit: usize) -> Self {
-        Self {
-            used: 0,
-            limit,
-            exhausted: false,
-        }
-    }
-    pub fn charge(&mut self, units: usize) -> bool {
-        if self.exhausted || units > self.limit.saturating_sub(self.used) {
-            self.exhausted = true;
-            return false;
-        }
-        self.used += units;
-        true
-    }
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]

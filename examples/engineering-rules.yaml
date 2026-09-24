@@ -1,0 +1,54 @@
+- id: rule:approved_requirement
+  type: NodeShape
+  targetClass: requirement
+  whenShape: rule:approved_status
+  property:
+    - path: owner
+      minCount: 1
+      datatype: string
+      pattern: '\S'
+    - id: rule:verification_count
+      path: {inversePath: 'schema:verifies'}
+      qualifiedValueShape: rule:approved_verification
+      qualifiedMinCount: 1
+
+- id: rule:approved_status
+  type: NodeShape
+  property:
+    - path: status
+      hasValue: approved
+
+- id: rule:approved_verification
+  type: NodeShape
+  class: verification
+  node: rule:approved_status
+
+- id: rule:accepted_design
+  type: NodeShape
+  targetClass: design
+  whenShape: rule:accepted_status
+  property:
+    - path: 'schema:satisfies'
+      qualifiedValueShape: {class: requirement}
+      qualifiedMinCount: 1
+
+- id: rule:accepted_status
+  type: NodeShape
+  property:
+    - path: status
+      hasValue: accepted
+
+- id: rule:mitigated_risk
+  type: NodeShape
+  targetClass: risk
+  whenShape: rule:mitigated_status
+  property:
+    - path: {inversePath: 'schema:mitigates'}
+      qualifiedValueShape: {class: design}
+      qualifiedMinCount: 1
+
+- id: rule:mitigated_status
+  type: NodeShape
+  property:
+    - path: status
+      hasValue: mitigated

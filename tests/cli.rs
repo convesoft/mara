@@ -7333,17 +7333,7 @@ fn primary_workflows_run_end_to_end_against_real_source_files() {
 #[test]
 fn dogfooded_repository_validates_and_retrieves_equivalently_through_cli_and_mcp() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let cli_validation = mara(
-        repository,
-        &[
-            "--format",
-            "json",
-            "project",
-            "validate",
-            "--max-work",
-            "1000000",
-        ],
-    );
+    let cli_validation = mara(repository, &["--format", "json", "project", "validate"]);
     assert!(
         cli_validation.status.success(),
         "{}",
@@ -7398,7 +7388,7 @@ fn dogfooded_repository_validates_and_retrieves_equivalently_through_cli_and_mcp
         &[
             mcp_initialize(1),
             json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
-            mcp_call(2, "project_validate", json!({"max_work":1000000})),
+            mcp_call(2, "project_validate", json!({})),
             mcp_call(
                 3,
                 "search",
@@ -11702,7 +11692,7 @@ fn diagnostic_pages_preserve_summary_and_reject_changed_snapshots_or_options() {
     );
     assert_eq!(next["has_more"], false);
     assert_eq!(next["summary"], first["summary"]);
-    assert_eq!(next["work"], first["work"]);
+    assert!(first.get("work").is_none());
     assert_ne!(next["diagnostics"], first["diagnostics"]);
     let item = diagnostic_parity(
         fixture.path(),
@@ -11712,30 +11702,15 @@ fn diagnostic_pages_preserve_summary_and_reject_changed_snapshots_or_options() {
     );
     assert_eq!(item["summary"], first["summary"]);
     assert_eq!(item["has_more"], true);
-    for (args, params) in [
-        (
-            vec!["project", "validate", "--limit", "2", "--cursor", cursor],
+    assert_eq!(
+        diagnostic_parity(
+            fixture.path(),
+            &["project", "validate", "--limit", "2", "--cursor", cursor],
+            "project_validate",
             json!({"limit":2,"cursor":cursor}),
-        ),
-        (
-            vec![
-                "project",
-                "validate",
-                "--limit",
-                "1",
-                "--max-work",
-                "99999",
-                "--cursor",
-                cursor,
-            ],
-            json!({"limit":1,"max_work":99999,"cursor":cursor}),
-        ),
-    ] {
-        assert_eq!(
-            diagnostic_parity(fixture.path(), &args, "project_validate", params)["error"]["code"],
-            "stale_cursor"
-        );
-    }
+        )["error"]["code"],
+        "stale_cursor"
+    );
     // Even a semantically irrelevant edit invalidates continuation.
     fs::write(&file, format!("{source}\n<!-- changed -->\n")).unwrap();
     assert_eq!(
@@ -11820,38 +11795,39 @@ fn diagnostic_configuration_failures_keep_typed_locations_and_schema_envelope() 
 }
 
 #[test]
-fn diagnostic_work_limits_and_operation_errors_are_distinct_from_policy_failure() {
+fn diagnostic_operation_errors_are_distinct_from_policy_failure() {
     let fixture = TempDir::new().unwrap();
     assert!(mara(fixture.path(), &["project", "init"]).status.success());
+    let tools = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
+        ],
+    );
+    let tools = &mcp_response(&tools, 2)["result"]["tools"];
+    for name in ["project_validate", "item_validate", "schema_validate"] {
+        let tool = tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == name)
+            .unwrap();
+        assert!(tool["inputSchema"]["properties"].get("max_work").is_none());
+    }
     for (command, tool) in [
         ("project", "project_validate"),
         ("schema", "schema_validate"),
     ] {
-        let limited = diagnostic_parity(
-            fixture.path(),
-            &[command, "validate", "--max-work", "1"],
-            tool,
-            json!({"max_work":1}),
-        );
-        assert_eq!(limited["valid"], false);
-        assert_eq!(limited["evaluation_complete"], false);
-        assert_eq!(limited["summary"]["counts_exact"], false);
-        assert_eq!(
-            limited["diagnostics"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|d| d["code"] == "evaluation_limit")
-                .count(),
-            1
-        );
-        assert!(limited["work"]["used"].as_u64().unwrap() <= 1);
         let complete = diagnostic_parity(fixture.path(), &[command, "validate"], tool, json!({}));
         assert_eq!(complete["valid"], true);
         assert_eq!(complete["evaluation_complete"], true);
+        assert!(complete.get("work").is_none());
+        assert!(
+            !stdout(&mara(fixture.path(), &[command, "validate", "--help"])).contains("--max-work")
+        );
         for (flag, value, params) in [
-            ("--max-work", "0", json!({"max_work":0})),
-            ("--max-work", "1000001", json!({"max_work":1000001})),
             ("--limit", "0", json!({"limit":0})),
             ("--cursor", "", json!({"cursor":""})),
         ] {
@@ -11894,7 +11870,7 @@ fn diagnostic_work_limits_and_operation_errors_are_distinct_from_policy_failure(
 }
 
 #[test]
-fn diagnostic_repeated_enum_comparisons_respect_work_budget() {
+fn diagnostic_repeated_enum_values_complete_without_a_work_budget() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
     assert!(mara(root, &["project", "init"]).status.success());
@@ -11919,28 +11895,11 @@ fn diagnostic_repeated_enum_comparisons_respect_work_budget() {
             json!({"id":"REQ-ENUM"}),
         ),
     ] {
-        let limited = diagnostic_parity(root, &args, tool, params.clone());
-        assert_eq!(limited["evaluation_complete"], false);
-        assert_eq!(limited["valid"], false);
-        assert_eq!(limited["summary"]["counts_exact"], false);
-        assert!(
-            limited["diagnostics"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|d| d["code"] == "evaluation_limit")
-        );
-        assert!(limited["work"]["used"].as_u64().unwrap() <= 100_000);
-        let mut args = args;
-        args.extend(["--max-work", "1000000"]);
-        let mut params = params;
-        params["max_work"] = json!(1_000_000);
         let complete = diagnostic_parity(root, &args, tool, params);
         assert_eq!(complete["valid"], true);
         assert_eq!(complete["evaluation_complete"], true);
         assert_eq!(complete["summary"]["counts_exact"], true);
-        // Reserve each comparison and both string inputs.
-        assert!(complete["work"]["used"].as_u64().unwrap() >= 100 * 200 * (1 + 9 + 9));
+        assert!(complete.get("work").is_none());
     }
     assert_eq!(
         fs::read_to_string(root.join("enum.mara.md")).unwrap(),
@@ -11984,10 +11943,1306 @@ fn diagnostic_output_budget_never_silently_discards_an_oversized_record() {
     fs::write(fixture.path().join("huge.mara.md"), format!(":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:{huge}: value\n\nBody.\n:::\n")).unwrap();
     let result = diagnostic_parity(
         fixture.path(),
-        &["project", "validate", "--max-work", "1000000"],
+        &["project", "validate"],
         "project_validate",
-        json!({"max_work":1000000}),
+        json!({}),
     );
     assert_eq!(result["error"]["code"], "output_limit");
     assert!(serde_json::to_vec(&result).unwrap().len() <= 65_536);
+}
+
+fn rule_fixture() -> TempDir {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(
+        mara(root, &["project", "init", "--template", "engineering"])
+            .status
+            .success()
+    );
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    for flavour in ["requirement", "verification", "design", "risk"] {
+        schema["flavours"][flavour]["fields"] = json!({"status":{"type":"enum","values":["draft","approved","accepted","mitigated"]},"owner":{"type":"string"},"score":{"type":"number"}});
+    }
+    schema["relations"]["verifies"]["inverse"] = json!("verified_by");
+    fs::write(schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    for (flavour, id, status) in [
+        ("requirement", "REQ-A", "approved"),
+        ("verification", "VER-DRAFT", "draft"),
+        ("verification", "VER-APPROVED", "approved"),
+        ("design", "DES-A", "accepted"),
+        ("risk", "RISK-A", "mitigated"),
+    ] {
+        let out = mara(
+            root,
+            &[
+                "item",
+                "create",
+                flavour,
+                id,
+                "items.mara.md",
+                "--title",
+                id,
+                "--body",
+                "A real item.",
+                "--field",
+                &format!("status={status}"),
+                "--field",
+                "owner=Alice",
+            ],
+        );
+        assert!(out.status.success(), "{}", stderr(&out));
+    }
+    let config_path = root.join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path).unwrap().replacen(
+        "format_version = 1",
+        "format_version = 2",
+        1,
+    );
+    fs::write(
+        config_path,
+        format!("{config}\n[rules]\nformat_version = 1\nfiles = [\"rules.yaml\"]\n"),
+    )
+    .unwrap();
+    fs::write(
+        root.join("rules.yaml"),
+        include_str!("../examples/engineering-rules.yaml"),
+    )
+    .unwrap();
+    fixture
+}
+
+#[test]
+fn non_finite_number_fields_report_the_authored_field_before_rule_projection() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let file = root.join("items.mara.md");
+    let source = fs::read_to_string(&file).unwrap();
+    for value in ["NaN", "inf", "-inf", "1e999"] {
+        fs::write(
+            &file,
+            source.replacen(
+                ":owner: Alice",
+                &format!(":score: {value}\n:owner: Alice"),
+                1,
+            ),
+        )
+        .unwrap();
+        for selection in [None, Some("REQ-A")] {
+            let result = if let Some(id) = selection {
+                diagnostic_parity(
+                    root,
+                    &["item", "validate", id],
+                    "item_validate",
+                    json!({"id":id}),
+                )
+            } else {
+                validation_with_parity(root, &[])
+            };
+            assert_eq!(result["evaluation_complete"], false, "{value}: {result:#}");
+            let diagnostics = result["diagnostics"].as_array().unwrap();
+            let field = diagnostics
+                .iter()
+                .find(|d| d["code"] == "field_invalid" && d["item"]["id"] == "REQ-A")
+                .unwrap_or_else(|| panic!("missing field diagnostic for {value}: {result:#}"));
+            assert_eq!(field["location"]["path"], "items.mara.md");
+            assert!(field["location"]["line"].as_u64().is_some());
+            assert!(field["message"].as_str().unwrap().contains(value));
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|d| d["code"] == "evaluation_unavailable")
+            );
+        }
+    }
+    fs::write(
+        &file,
+        source.replacen(":owner: Alice", ":score: 1e308\n:owner: Alice", 1),
+    )
+    .unwrap();
+    let finite = validation_with_parity(root, &[]);
+    assert_eq!(finite["evaluation_complete"], true, "{finite:#}");
+    assert!(
+        finite["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|d| { d["code"] != "field_invalid" && d["code"] != "evaluation_unavailable" })
+    );
+}
+
+#[test]
+fn rejected_rule_sources_do_not_affect_validation_cursors() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path().join("project");
+    fs::create_dir(&root).unwrap();
+    assert!(mara(&root, &["project", "init"]).status.success());
+    let outside = fixture.path().join("outside.yaml");
+    fs::write(&outside, "id: rule:outside\n").unwrap();
+    let config_path = root.join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path).unwrap().replacen(
+        "format_version = 1",
+        "format_version = 2",
+        1,
+    );
+    fs::write(&config_path,
+        format!("{config}\n[rules]\nformat_version = 1\nfiles = [\"../outside.yaml\", \"missing.yaml\"]\n")
+    ).unwrap();
+    let first = diagnostic_parity(
+        &root,
+        &["schema", "validate", "--limit", "1"],
+        "schema_validate",
+        json!({"limit":1}),
+    );
+    assert_eq!(first["valid"], false, "{first:#}");
+    assert_eq!(first["has_more"], true, "{first:#}");
+    assert_eq!(first["diagnostics"][0]["code"], "rule_invalid");
+    let cursor = first["next_cursor"].as_str().unwrap();
+    fs::write(
+        &outside,
+        "id: rule:changed\nmessage: unrelated external bytes\n",
+    )
+    .unwrap();
+    let continued = diagnostic_parity(
+        &root,
+        &["schema", "validate", "--limit", "1", "--cursor", cursor],
+        "schema_validate",
+        json!({"limit":1,"cursor":cursor}),
+    );
+    assert!(continued.get("error").is_none(), "{continued:#}");
+    assert_eq!(continued["diagnostics"][0]["code"], "rule_invalid");
+    assert_eq!(continued["has_more"], false);
+}
+
+#[test]
+fn unused_class_scoped_shapes_validate_field_compatibility() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    fs::write(
+        root.join("rules.yaml"),
+        "id: rule:unused\nclass: requirement\nproperty: [{path: owner, datatype: boolean}]\n",
+    )
+    .unwrap();
+    let invalid = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(invalid["valid"], false, "{invalid:#}");
+    assert_eq!(invalid["diagnostics"][0]["code"], "rule_invalid");
+    assert_eq!(
+        invalid["diagnostics"][0]["location"]["pointer"],
+        "/property/0/datatype"
+    );
+    fs::write(
+        root.join("rules.yaml"),
+        "id: rule:unused\nclass: requirement\nproperty: [{path: owner, datatype: string}]\n",
+    )
+    .unwrap();
+    let valid = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(valid["valid"], true, "{valid:#}");
+}
+
+#[test]
+fn current_state_rules_require_all_classes_on_relation_endpoints() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    for (target, path) in [
+        ("design", json!("satisfies")),
+        ("verification", json!("verifies")),
+        ("requirement", json!({"inversePath":"satisfies"})),
+    ] {
+        for key in ["class", "node", "qualifiedValueShape"] {
+            let classes = json!(["requirement", "design"]);
+            let mut property = json!({"path":path});
+            property[key] = if key == "class" {
+                classes
+            } else {
+                json!({"class":classes})
+            };
+            if key == "qualifiedValueShape" {
+                property["qualifiedMinCount"] = json!(1);
+            }
+            let rule =
+                json!({"id":"rule:all_classes", "targetClass":target, "property":[property]});
+            fs::write(
+                root.join("rules.yaml"),
+                serde_saphyr::to_string(&rule).unwrap(),
+            )
+            .unwrap();
+            let invalid =
+                diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+            assert_eq!(invalid["valid"], false, "{target}/{key}: {invalid:#}");
+            assert_eq!(
+                invalid["diagnostics"][0]["code"], "rule_invalid",
+                "{invalid:#}"
+            );
+            let pointer = if key == "class" {
+                "/property/0/class".into()
+            } else {
+                format!("/property/0/{key}/class")
+            };
+            assert_eq!(invalid["diagnostics"][0]["location"]["pointer"], pointer);
+        }
+    }
+    assert!(
+        mara(root, &["relation", "add", "DES-A", "satisfies", "REQ-A"])
+            .status
+            .success()
+    );
+    // Repeating one class remains satisfiable after RDF deduplication.
+    fs::write(root.join("rules.yaml"),
+        "id: rule:repeated_class\ntargetClass: design\nproperty: [{path: satisfies, class: [requirement, requirement], minCount: 1}]\n"
+    ).unwrap();
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+    for target in ["REQ-A", "DES-A"] {
+        assert!(
+            mara(
+                root,
+                &["relation", "add", "VER-APPROVED", "verifies", target]
+            )
+            .status
+            .success()
+        );
+    }
+    // Alternative classes use explicit OR; multiple targetClass values select either flavour.
+    fs::write(root.join("rules.yaml"),
+        "- id: rule:alternatives\n  targetClass: verification\n  property:\n    - path: verifies\n      node:\n        or: [{class: requirement}, {class: design}]\n- id: rule:targets\n  targetClass: [requirement, design]\n  property: [{path: owner, minCount: 1}]\n"
+    ).unwrap();
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+}
+
+#[test]
+fn current_state_rules_reject_disjoint_relation_endpoint_classes() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    for (target, path, class) in [
+        ("design", json!("satisfies"), "design"),
+        (
+            "requirement",
+            json!({"inversePath":"satisfies"}),
+            "requirement",
+        ),
+    ] {
+        for key in ["class", "node", "qualifiedValueShape"] {
+            let mut property = json!({"path":path});
+            property[key] = if key == "class" {
+                json!(class)
+            } else {
+                json!({"class":class})
+            };
+            if key == "qualifiedValueShape" {
+                property["qualifiedMinCount"] = json!(1);
+            }
+            let rule = json!({"id":"rule:disjoint", "targetClass":target, "property":[property]});
+            fs::write(
+                root.join("rules.yaml"),
+                serde_saphyr::to_string(&rule).unwrap(),
+            )
+            .unwrap();
+            let invalid =
+                diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+            assert_eq!(invalid["valid"], false, "{target}/{key}: {invalid:#}");
+            assert_eq!(
+                invalid["diagnostics"][0]["code"], "rule_invalid",
+                "{invalid:#}"
+            );
+            let pointer = if key == "class" {
+                "/property/0/class".into()
+            } else {
+                format!("/property/0/{key}/class")
+            };
+            assert_eq!(invalid["diagnostics"][0]["location"]["pointer"], pointer);
+        }
+    }
+    // A qualifier may select a proper subset of a relation's endpoint flavours.
+    fs::write(root.join("rules.yaml"),
+        "id: rule:subset\ntargetClass: verification\nproperty: [{path: verifies, qualifiedValueShape: {class: requirement}, qualifiedMinCount: 0}]\n"
+    ).unwrap();
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+}
+
+#[test]
+fn current_state_rules_reject_literal_constraints_on_relation_endpoints() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    for (target, path) in [
+        ("design", json!("satisfies")),
+        ("requirement", json!({"inversePath":"satisfies"})),
+    ] {
+        for key in ["hasValue", "in"] {
+            for nested in [false, true] {
+                let mut constraint = json!({});
+                constraint[key] = if key == "in" {
+                    json!(["REQ-A"])
+                } else {
+                    json!("REQ-A")
+                };
+                let mut property = if nested {
+                    json!({"node":constraint})
+                } else {
+                    constraint
+                };
+                property["path"] = path.clone();
+                let rule = json!({"id":"rule:literal_relation", "targetClass":target, "property":[property]});
+                fs::write(
+                    root.join("rules.yaml"),
+                    serde_saphyr::to_string(&rule).unwrap(),
+                )
+                .unwrap();
+                let invalid =
+                    diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+                assert_eq!(
+                    invalid["valid"], false,
+                    "{target}/{key}/{nested}: {invalid:#}"
+                );
+                assert_eq!(
+                    invalid["diagnostics"][0]["code"], "rule_invalid",
+                    "{invalid:#}"
+                );
+                let pointer = if nested {
+                    format!("/property/0/node/{key}")
+                } else {
+                    format!("/property/0/{key}")
+                };
+                assert_eq!(invalid["diagnostics"][0]["location"]["pointer"], pointer);
+            }
+        }
+    }
+    // The same constraints remain valid on literal fields of related items.
+    fs::write(root.join("rules.yaml"),
+        "id: rule:related_value\ntargetClass: design\nproperty:\n  - path: satisfies\n    minCount: 1\n    node:\n      property: [{path: owner, hasValue: Alice, in: [Alice, Bob]}]\n"
+    ).unwrap();
+    assert!(
+        mara(root, &["relation", "add", "DES-A", "satisfies", "REQ-A"])
+            .status
+            .success()
+    );
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+}
+
+#[test]
+fn current_state_rules_reject_node_constraints_on_literal_values() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    for (property, pointer) in [
+        (
+            json!({"path":"owner", "class":"requirement"}),
+            "/property/0/class",
+        ),
+        (
+            json!({"path":"score", "class":"requirement"}),
+            "/property/0/class",
+        ),
+        (
+            json!({"path":"owner", "node":{"class":"requirement"}}),
+            "/property/0/node/class",
+        ),
+        (
+            json!({"path":"owner", "qualifiedValueShape":{"class":"requirement"}, "qualifiedMinCount":0}),
+            "/property/0/qualifiedValueShape/class",
+        ),
+        (
+            json!({"path":"owner", "property":[{"path":"owner", "minCount":1}]}),
+            "/property/0/property/0/path",
+        ),
+        (
+            json!({"path":"owner", "node":{"property":[{"path":"satisfies", "minCount":1}]}}),
+            "/property/0/node/property/0/path",
+        ),
+        (
+            json!({"path":"owner", "node":{"property":[{"path":{"inversePath":"satisfies"}, "minCount":1}]}}),
+            "/property/0/node/property/0/path",
+        ),
+        (
+            json!({"path":"owner", "node":{"and":[{"class":"requirement"}]}}),
+            "/property/0/node/and/0/class",
+        ),
+    ] {
+        let rule = json!({"id":"rule:literal_endpoint", "targetClass":"requirement",
+            "property":[property]});
+        fs::write(
+            root.join("rules.yaml"),
+            serde_saphyr::to_string(&rule).unwrap(),
+        )
+        .unwrap();
+        let result = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(result["valid"], false, "{pointer}: {result:#}");
+        assert_eq!(
+            result["diagnostics"][0]["code"], "rule_invalid",
+            "{result:#}"
+        );
+        assert_eq!(result["diagnostics"][0]["location"]["pointer"], pointer);
+    }
+    // Literal constraints remain valid, including behind logical and node shapes.
+    fs::write(root.join("rules.yaml"),
+        "id: rule:literal_endpoint\ntargetClass: requirement\nproperty: [{path: owner, node: {and: [{datatype: string}, {hasValue: Alice}]}}]\n"
+    ).unwrap();
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+}
+
+#[test]
+fn current_state_rules_reject_datatypes_on_relation_endpoints() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    for (target, path) in [
+        ("design", json!("satisfies")),
+        ("requirement", json!({"inversePath":"satisfies"})),
+    ] {
+        for key in ["datatype", "node", "qualifiedValueShape"] {
+            let mut property = json!({"path":path});
+            property[key] = if key == "datatype" {
+                json!("string")
+            } else {
+                json!({"datatype":"string"})
+            };
+            if key == "qualifiedValueShape" {
+                property["qualifiedMinCount"] = json!(0);
+            }
+            let rule = json!({"id":"rule:relation_type", "targetClass":target,
+                "property":[property]});
+            fs::write(
+                root.join("rules.yaml"),
+                serde_saphyr::to_string(&rule).unwrap(),
+            )
+            .unwrap();
+            let result =
+                diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+            assert_eq!(result["valid"], false, "{target}/{key}: {result:#}");
+            assert_eq!(
+                result["diagnostics"][0]["code"], "rule_invalid",
+                "{result:#}"
+            );
+            let pointer = if key == "datatype" {
+                "/property/0/datatype".into()
+            } else {
+                format!("/property/0/{key}/datatype")
+            };
+            assert_eq!(result["diagnostics"][0]["location"]["pointer"], pointer);
+        }
+    }
+    // Reusing a valid literal constraint on a relation must still be rejected.
+    let rules = json!([
+        {"id":"rule:shared_type", "targetClass":"design", "property":[
+            {"path":"owner", "node":"rule:text"},
+            {"path":"satisfies", "node":"rule:text"}
+        ]},
+        {"id":"rule:text", "and":[{"datatype":"string"}]}
+    ]);
+    fs::write(
+        root.join("rules.yaml"),
+        serde_saphyr::to_string(&rules).unwrap(),
+    )
+    .unwrap();
+    let invalid = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(invalid["valid"], false, "{invalid:#}");
+    assert_eq!(
+        invalid["diagnostics"][0]["location"]["pointer"],
+        "/1/and/0/datatype"
+    );
+    // A relation's endpoint can instead constrain one of its literal fields.
+    fs::write(root.join("rules.yaml"),
+        "id: rule:related_owner\ntargetClass: design\nproperty:\n  - path: satisfies\n    minCount: 1\n    node:\n      class: requirement\n      property: [{path: owner, datatype: string, minCount: 1}]\n"
+    ).unwrap();
+    assert!(
+        mara(root, &["relation", "add", "DES-A", "satisfies", "REQ-A"])
+            .status
+            .success()
+    );
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+}
+
+#[test]
+fn current_state_rules_preserve_field_types_in_nested_value_shapes() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    assert!(
+        mara(root, &["item", "update", "REQ-A", "--field", "score=1"])
+            .status
+            .success()
+    );
+    for (field, datatype) in [
+        ("owner", "string"),
+        ("status", "string"),
+        ("score", "double"),
+    ] {
+        for key in ["node", "qualifiedValueShape"] {
+            for (constraint_type, valid) in [("integer", false), (datatype, true)] {
+                let mut property = json!({"path":field});
+                property[key] = json!({"datatype":constraint_type});
+                if key == "qualifiedValueShape" {
+                    property["qualifiedMinCount"] = json!(0);
+                }
+                let rule = json!({"id":"rule:nested_type", "targetClass":"requirement",
+                    "property":[property]});
+                fs::write(
+                    root.join("rules.yaml"),
+                    serde_saphyr::to_string(&rule).unwrap(),
+                )
+                .unwrap();
+                let result =
+                    diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+                assert_eq!(result["valid"], valid, "{field}/{key}: {result:#}");
+                if valid {
+                    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+                } else {
+                    assert_eq!(
+                        result["diagnostics"][0]["code"], "rule_invalid",
+                        "{result:#}"
+                    );
+                    assert_eq!(
+                        result["diagnostics"][0]["location"]["pointer"],
+                        format!("/property/0/{key}/datatype")
+                    );
+                }
+            }
+        }
+    }
+    // The same reusable shape must be checked separately for each field type,
+    // even through an additional logical/nested shape layer.
+    for (second_field, valid) in [("status", true), ("score", false)] {
+        let rules = json!([
+            {"id":"rule:shared", "targetClass":"requirement", "property":[
+                {"path":"owner", "node":"rule:text"},
+                {"path":second_field, "node":"rule:text"}
+            ]},
+            {"id":"rule:text", "and":[{"node":{"datatype":"string"}}]}
+        ]);
+        fs::write(
+            root.join("rules.yaml"),
+            serde_saphyr::to_string(&rules).unwrap(),
+        )
+        .unwrap();
+        let result = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(result["valid"], valid, "{second_field}: {result:#}");
+        if !valid {
+            assert_eq!(
+                result["diagnostics"][0]["code"], "rule_invalid",
+                "{result:#}"
+            );
+            assert_eq!(
+                result["diagnostics"][0]["location"]["pointer"],
+                "/1/and/0/node/datatype"
+            );
+        }
+    }
+    fs::write(root.join("rules.yaml"),
+        "id: rule:value\ntargetClass: requirement\nproperty: [{path: owner, node: {datatype: string, hasValue: Bob}}]\n"
+    ).unwrap();
+    let failed = validation_with_parity(root, &[]);
+    assert_eq!(failed["evaluation_complete"], true, "{failed:#}");
+    assert_eq!(
+        failed["diagnostics"][0]["code"], "rule_failed",
+        "{failed:#}"
+    );
+}
+
+#[test]
+fn current_state_rules_report_authored_messages_with_a_generated_fallback() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let message = "Assign an owner before approval — see the team policy.";
+    for property in [false, true] {
+        for authored in [true, false] {
+            let mut obligation = if property {
+                json!({"path":"owner", "maxCount":0})
+            } else {
+                json!({"class":"verification"})
+            };
+            if authored {
+                obligation["message"] = json!(message);
+            }
+            let mut rule = if property {
+                json!({"property":[obligation]})
+            } else {
+                obligation
+            };
+            rule["id"] = json!("rule:message");
+            rule["targetClass"] = json!("requirement");
+            fs::write(
+                root.join("rules.yaml"),
+                serde_saphyr::to_string(&rule).unwrap(),
+            )
+            .unwrap();
+            let result = validation_with_parity(root, &[]);
+            assert_eq!(result["evaluation_complete"], true, "{result:#}");
+            assert_eq!(result["summary"]["errors"], 1, "{result:#}");
+            let diagnostic = &result["diagnostics"][0];
+            assert_eq!(diagnostic["code"], "rule_failed");
+            let key = if property { "maxCount" } else { "class" };
+            let fallback = format!("rule urn:mara:rule:message failed: {key}");
+            assert_eq!(
+                diagnostic["message"],
+                if authored { message } else { &fallback }
+            );
+            let human = mara(root, &["project", "validate"]);
+            assert!(stderr(&human).contains(diagnostic["message"].as_str().unwrap()));
+        }
+    }
+}
+
+#[test]
+fn current_state_rules_apply_property_classes_after_path_selection() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["flavours"]["design"]["fields"]["design_only"] = json!({"type":"string"});
+    schema["relations"]["associated_with"] = json!({
+        "description": "An association.", "source": ["requirement"],
+        "target": ["design", "risk"]
+    });
+    fs::write(schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    assert!(
+        mara(
+            root,
+            &["item", "update", "DES-A", "--field", "design_only=ready"]
+        )
+        .status
+        .success()
+    );
+    for (source, relation, target) in [
+        ("DES-A", "satisfies", "REQ-A"),
+        ("REQ-A", "associated_with", "DES-A"),
+    ] {
+        assert!(
+            mara(root, &["relation", "add", source, relation, target])
+                .status
+                .success()
+        );
+    }
+    for (target, path, class) in [
+        ("requirement", "satisfies", "design"),
+        ("design", "{inversePath: satisfies}", "requirement"),
+        ("requirement", "design_only", "design"),
+    ] {
+        fs::write(root.join("rules.yaml"), format!(
+            "id: rule:invalid_path\ntargetClass: {target}\nproperty: [{{path: {path}, class: {class}, minCount: 1}}]\n"
+        )).unwrap();
+        let invalid =
+            diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(invalid["valid"], false, "{path}: {invalid:#}");
+        assert_eq!(
+            invalid["diagnostics"][0]["code"], "rule_invalid",
+            "{invalid:#}"
+        );
+        assert_eq!(
+            invalid["diagnostics"][0]["location"]["pointer"],
+            "/property/0/path"
+        );
+    }
+    // PropertyShape class narrows selected endpoints for nested field checks.
+    for path in ["{inversePath: satisfies}", "associated_with"] {
+        fs::write(root.join("rules.yaml"), format!(
+            "id: rule:design_field\ntargetClass: requirement\nproperty:\n  - path: {path}\n    class: design\n    minCount: 1\n    property: [{{path: design_only, hasValue: ready}}]\n"
+        )).unwrap();
+        let valid = validation_with_parity(root, &[]);
+        assert_eq!(valid["valid"], true, "{path}: {valid:#}");
+        assert!(
+            mara(
+                root,
+                &["item", "update", "DES-A", "--field", "design_only=draft"]
+            )
+            .status
+            .success()
+        );
+        let failed = validation_with_parity(root, &[]);
+        assert_eq!(failed["evaluation_complete"], true, "{failed:#}");
+        assert_eq!(
+            failed["diagnostics"][0]["code"], "rule_failed",
+            "{failed:#}"
+        );
+        assert!(
+            mara(
+                root,
+                &["item", "update", "DES-A", "--field", "design_only=ready"]
+            )
+            .status
+            .success()
+        );
+    }
+}
+
+#[test]
+fn current_state_rules_resolve_reserved_prefix_names_to_projected_values() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["flavours"]["requirement"]["fields"]["field"] = json!({"type":"string"});
+    schema["relations"]["schema"] = json!({
+        "description": "A relation with a reserved prefix name.",
+        "source": ["requirement"], "target": ["design"]
+    });
+    fs::write(schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    assert!(
+        mara(
+            root,
+            &["item", "update", "REQ-A", "--field", "field=present"]
+        )
+        .status
+        .success()
+    );
+    assert!(
+        mara(root, &["relation", "add", "REQ-A", "schema", "DES-A"])
+            .status
+            .success()
+    );
+    for (target, path) in [
+        ("requirement", "field"),
+        ("requirement", "field:field"),
+        ("requirement", "schema"),
+        ("requirement", "schema:schema"),
+        ("design", "{inversePath: schema}"),
+        ("design", "{inversePath: 'schema:schema'}"),
+    ] {
+        for (minimum, expected) in [(1, true), (2, false)] {
+            fs::write(root.join("rules.yaml"), format!(
+                "id: rule:prefix\ntargetClass: {target}\nproperty: [{{path: {path}, minCount: {minimum}}}]\n"
+            )).unwrap();
+            let result = validation_with_parity(root, &[]);
+            assert_eq!(result["evaluation_complete"], true, "{path}: {result:#}");
+            assert_eq!(result["valid"], expected, "{path}: {result:#}");
+            if !expected {
+                assert_eq!(
+                    result["diagnostics"][0]["code"], "rule_failed",
+                    "{result:#}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn current_state_rules_narrow_same_flavour_paths_in_both_directions() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    assert!(
+        mara(
+            root,
+            &["item", "update", "DES-A", "--clear-field", "status"]
+        )
+        .status
+        .success()
+    );
+    assert!(
+        mara(
+            root,
+            &[
+                "item",
+                "create",
+                "requirement",
+                "REQ-B",
+                "items.mara.md",
+                "--title",
+                "Second requirement",
+                "--body",
+                "A related requirement.",
+                "--field",
+                "status=approved"
+            ]
+        )
+        .status
+        .success()
+    );
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["flavours"]["design"]["fields"]
+        .as_object_mut()
+        .unwrap()
+        .remove("status");
+    schema["relations"]["associated_with"] = json!({
+        "description": "An association between items of the same flavour.",
+        "source": ["requirement", "design"], "target": ["requirement", "design"],
+        "same_flavour": true
+    });
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    assert!(
+        mara(
+            root,
+            &["relation", "add", "REQ-A", "associated_with", "REQ-B"]
+        )
+        .status
+        .success()
+    );
+    for (path, endpoint) in [
+        ("associated_with", "REQ-B"),
+        ("{inversePath: associated_with}", "REQ-A"),
+    ] {
+        fs::write(root.join("rules.yaml"), format!(
+            "id: rule:related_status\ntargetClass: requirement\nproperty:\n  - path: {path}\n    node:\n      property: [{{path: status, hasValue: approved}}]\n"
+        )).unwrap();
+        let valid = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(valid["valid"], true, "{valid:#}");
+        let valid = validation_with_parity(root, &[]);
+        assert_eq!(valid["valid"], true, "{valid:#}");
+        assert!(
+            mara(
+                root,
+                &["item", "update", endpoint, "--field", "status=draft"]
+            )
+            .status
+            .success()
+        );
+        let failed = validation_with_parity(root, &[]);
+        assert_eq!(failed["evaluation_complete"], true, "{failed:#}");
+        assert_eq!(failed["summary"]["errors"], 1, "{failed:#}");
+        assert_eq!(
+            failed["diagnostics"][0]["code"], "rule_failed",
+            "{failed:#}"
+        );
+        assert!(
+            mara(
+                root,
+                &["item", "update", endpoint, "--field", "status=approved"]
+            )
+            .status
+            .success()
+        );
+        // Without the restriction, design endpoints are reachable and need status too.
+        schema["relations"]["associated_with"]["same_flavour"] = json!(false);
+        fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+        let invalid =
+            diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(invalid["valid"], false, "{invalid:#}");
+        assert_eq!(
+            invalid["diagnostics"][0]["code"], "rule_invalid",
+            "{invalid:#}"
+        );
+        schema["relations"]["associated_with"]["same_flavour"] = json!(true);
+        fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    }
+}
+
+#[test]
+fn current_state_rules_run_real_lifecycle_and_coverage_through_cli_and_mcp() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let failed = validation_with_parity(root, &[]);
+    assert_eq!(failed["evaluation_complete"], true, "{failed:#}");
+    assert_eq!(failed["summary"]["errors"], 3, "{failed:#}");
+    assert!(
+        failed["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|d| d["code"] == "rule_failed")
+    );
+    assert!(
+        mara(root, &["relation", "add", "VER-DRAFT", "verifies", "REQ-A"])
+            .status
+            .success()
+    );
+    let draft = validation_with_parity(root, &[]);
+    let d = draft["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["item"]["id"] == "REQ-A")
+        .unwrap();
+    assert_eq!(d["details"]["selected_count"], 1, "{d:#}");
+    assert_eq!(d["details"]["qualifying_count"], 0);
+    let responses = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "relation_add",
+                json!({"source":"REQ-A","relation":"verified_by","target":"VER-APPROVED"}),
+            ),
+        ],
+    );
+    assert_ne!(
+        mcp_response(&responses, 2)["result"]["isError"],
+        true,
+        "{responses:#?}"
+    );
+    for (source, relation, target) in [
+        ("DES-A", "satisfies", "REQ-A"),
+        ("DES-A", "mitigates", "RISK-A"),
+    ] {
+        assert!(
+            mara(root, &["relation", "add", source, relation, target])
+                .status
+                .success()
+        );
+    }
+    // A direct Markdown duplicate has the same canonical edge as inverse metadata.
+    let file = root.join("items.mara.md");
+    let text = fs::read_to_string(&file).unwrap();
+    fs::write(
+        &file,
+        text.replace(
+            ":title: VER-APPROVED",
+            ":title: VER-APPROVED\n:verifies: REQ-A",
+        ),
+    )
+    .unwrap();
+    let pass = validation_with_parity(root, &[]);
+    assert_eq!(pass["valid"], true, "{pass:#}");
+    let rules = fs::read_to_string(root.join("rules.yaml")).unwrap();
+    fs::write(
+        root.join("rules.yaml"),
+        rules.replace(
+            "qualifiedMinCount: 1",
+            "qualifiedMinCount: 1\n      qualifiedMaxCount: 1",
+        ),
+    )
+    .unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    fs::write(
+        root.join("rules.yaml"),
+        rules.replace(
+            "id: rule:verification_count",
+            "id: rule:verification_count\n      node: rule:approved_verification",
+        ),
+    )
+    .unwrap();
+    let every = validation_with_parity(root, &[]);
+    assert_eq!(every["summary"]["errors"], 1, "{every:#}");
+    assert_eq!(every["diagnostics"][0]["details"]["kind"], "every");
+    assert_eq!(every["diagnostics"][0]["details"]["direction"], "incoming");
+    assert_eq!(every["diagnostics"][0]["details"]["relation"], "verifies");
+    assert_eq!(
+        every["diagnostics"][0]["obligation"]["source"]["path"],
+        "rules.yaml"
+    );
+    fs::write(root.join("rules.yaml"), rules).unwrap();
+    // Structured edits do not acquire a policy gate; explicit validation evaluates current state.
+    assert!(
+        mara(root, &["item", "update", "REQ-A", "--clear-field", "owner"])
+            .status
+            .success()
+    );
+    assert_eq!(validation_with_parity(root, &[])["summary"]["errors"], 1);
+    assert!(
+        mara(
+            root,
+            &["item", "update", "REQ-A", "--field", "status=draft"]
+        )
+        .status
+        .success()
+    );
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+}
+
+#[test]
+fn current_state_rules_preserve_warnings_prerequisites_and_continuations() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let rules = fs::read_to_string(root.join("rules.yaml")).unwrap();
+    fs::write(
+        root.join("rules.yaml"),
+        rules.replace("  targetClass:", "  severity: Warning\n  targetClass:"),
+    )
+    .unwrap();
+    let warning = validation_with_parity(root, &[]);
+    assert_eq!(warning["valid"], true, "{warning:#}");
+    assert_eq!(warning["summary"]["warnings"], 3);
+    let hidden = validation_with_parity(root, &["absent/"]);
+    assert_eq!(hidden["valid"], true);
+    assert_eq!(hidden["summary"], warning["summary"]);
+    assert_eq!(hidden["diagnostics"], json!([]));
+    let first = mara(
+        root,
+        &["--format", "json", "project", "validate", "--limit", "1"],
+    );
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(first["has_more"], true);
+    let cursor = first["next_cursor"].as_str().unwrap();
+    fs::write(
+        root.join("rules.yaml"),
+        format!("{rules}\n# changed snapshot\n"),
+    )
+    .unwrap();
+    let stale = mara(
+        root,
+        &[
+            "--format", "json", "project", "validate", "--limit", "1", "--cursor", cursor,
+        ],
+    );
+    let stale: Value = serde_json::from_slice(&stale.stdout).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_cursor");
+    // Invalid status cannot turn applicability into false or a missing field.
+    let file = root.join("items.mara.md");
+    let source = fs::read_to_string(&file).unwrap();
+    fs::write(
+        &file,
+        source.replace(":status: approved", ":status: invalid"),
+    )
+    .unwrap();
+    let invalid = validation_with_parity(root, &[]);
+    assert_eq!(invalid["evaluation_complete"], false, "{invalid:#}");
+    assert!(
+        invalid["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "evaluation_unavailable" && d["scope"] == "project")
+    );
+    fs::write(&file, source).unwrap();
+    // A corrupt qualifying endpoint remains unavailable even with another qualifying endpoint.
+    for id in ["VER-DRAFT", "VER-APPROVED"] {
+        assert!(
+            mara(root, &["relation", "add", id, "verifies", "REQ-A"])
+                .status
+                .success()
+        );
+    }
+    let source = fs::read_to_string(&file).unwrap();
+    fs::write(&file, source.replace(":status: draft", ":status: invalid")).unwrap();
+    let invalid = validation_with_parity(root, &[]);
+    assert_eq!(invalid["evaluation_complete"], false);
+    assert!(
+        invalid["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "evaluation_unavailable" && d["scope"] == "project"),
+        "{invalid:#}"
+    );
+    // Schema validation loads definitions but never evaluates item conformance.
+    let schema = mara(root, &["--format", "json", "schema", "validate"]);
+    let schema: Value = serde_json::from_slice(&schema.stdout).unwrap();
+    assert_eq!(schema["valid"], true, "{schema:#}");
+    fs::write(root.join("rules.yaml"),"id: rule:oops\ntype: NodeShape\ntargetClass: requirement\nproperty:\n  - path: owner\n    minCont: 1\n").unwrap();
+    let bad = validation_with_parity(root, &[]);
+    let d = bad["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["code"] == "rule_invalid")
+        .unwrap();
+    assert_eq!(d["location"]["pointer"], "/property/0/minCont");
+    assert_eq!(d["rule"], "urn:mara:rule:oops");
+    assert_eq!(d["location"]["line"], 6);
+}
+
+#[test]
+fn current_state_rules_literal_semantics_definition_errors_and_patterns() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let numeric = "- id: rule:score_requires_owner\n  type: NodeShape\n  targetClass: requirement\n  whenShape: rule:score_one\n  property: [{path: owner, minCount: 1}]\n- id: rule:score_one\n  type: NodeShape\n  property: [{path: score, hasValue: {value: 1, datatype: double}}]\n";
+    fs::write(root.join("rules.yaml"), numeric).unwrap();
+    for score in ["1", "1.0"] {
+        assert!(
+            mara(
+                root,
+                &[
+                    "item",
+                    "update",
+                    "REQ-A",
+                    "--field",
+                    &format!("score={score}"),
+                    "--clear-field",
+                    "owner"
+                ]
+            )
+            .status
+            .success()
+        );
+        let v = validation_with_parity(root, &[]);
+        assert_eq!(v["summary"]["errors"], 1, "{v:#}");
+        assert!(
+            mara(root, &["item", "update", "REQ-A", "--field", "owner=Alice"])
+                .status
+                .success()
+        );
+        assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    }
+    fs::write(
+        root.join("rules.yaml"),
+        numeric.replace("{value: 1, datatype: double}", "1.0"),
+    )
+    .unwrap();
+    assert!(
+        mara(root, &["item", "update", "REQ-A", "--clear-field", "owner"])
+            .status
+            .success()
+    );
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    for bad in [
+        "id: rule:a\nid: rule:b\n",
+        "id: rule:a\n@context: {}\n",
+        "id: rule:a\nnode: rule:missing\n",
+        "id: rule:a\nnode: rule:a\n",
+        "id: rule:a\ntargetNode: REQ-A\n",
+        "id: rule:a\nproperty: [{path: owner, minCount: null}]\n",
+        "id: rule:a\nproperty: [{path: owner, hasValue: {value: '1', datatype: double}}]\n",
+        "id: rule:a\n<<: {type: NodeShape}\n",
+    ] {
+        fs::write(root.join("rules.yaml"), bad).unwrap();
+        let v = validation_with_parity(root, &[]);
+        assert_eq!(v["valid"], false, "{bad}: {v:#}");
+        assert!(
+            v["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["code"] == "rule_invalid"),
+            "{v:#}"
+        );
+    }
+    fs::write(root.join("rules.yaml"),"id: rule:pattern\ntype: NodeShape\ntargetClass: requirement\nproperty: [{path: owner, pattern: 'a{100}'}]\n").unwrap();
+    assert!(
+        mara(
+            root,
+            &[
+                "item",
+                "update",
+                "REQ-A",
+                "--field",
+                &format!("owner={}", "a".repeat(2000))
+            ]
+        )
+        .status
+        .success()
+    );
+    let complete = validation_with_parity(root, &[]);
+    assert_eq!(complete["valid"], true, "{complete:#}");
+    assert_eq!(complete["evaluation_complete"], true);
+    assert!(complete.get("work").is_none());
+}
+
+#[test]
+fn current_state_rules_scope_empty_sets_composition_and_schema_sources() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let every = "id: rule:every\ntargetClass: requirement\nproperty:\n  - id: rule:edges\n    path: {inversePath: verifies}\n    node: {class: verification, property: [{path: status, hasValue: approved}]}\n";
+    fs::write(root.join("rules.yaml"), every).unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let item = diagnostic_parity(
+        root,
+        &["item", "validate", "REQ-A"],
+        "item_validate",
+        json!({"id":"REQ-A"}),
+    );
+    assert_eq!(item["valid"], true);
+    // Named PropertyShape descriptions merge across files without redefining path/type.
+    let config = root.join(".mara/project.toml");
+    let original = fs::read_to_string(&config).unwrap();
+    fs::write(
+        &config,
+        original.replace("[\"rules.yaml\"]", "[\"rules.yaml\", \"extra.yml\"]"),
+    )
+    .unwrap();
+    fs::write(root.join("extra.yml"), "id: rule:edges\nminCount: 1\n").unwrap();
+    let failed = validation_with_parity(root, &[]);
+    assert_eq!(failed["summary"]["errors"], 1, "{failed:#}");
+    assert_eq!(
+        failed["diagnostics"][0]["obligation"]["source"]["path"],
+        "extra.yml"
+    );
+    assert_eq!(
+        diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}))["valid"],
+        true
+    );
+    fs::write(&config, &original).unwrap();
+    // Invalid corpus prerequisites skip policy, regardless of a passing OR alternative.
+    let logical = "id: rule:logic\ntargetClass: requirement\nor:\n  - class: requirement\n  - property:\n      - path: {inversePath: verifies}\n        qualifiedValueShape: {class: verification}\n        qualifiedMinCount: 1\n";
+    fs::write(root.join("rules.yaml"), logical).unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    assert!(
+        mara(root, &["relation", "add", "VER-DRAFT", "verifies", "REQ-A"])
+            .status
+            .success()
+    );
+    let file = root.join("items.mara.md");
+    let text = fs::read_to_string(&file).unwrap();
+    fs::write(&file, text.replace(":status: draft", ":status: invalid")).unwrap();
+    let incomplete = diagnostic_parity(
+        root,
+        &["item", "validate", "REQ-A"],
+        "item_validate",
+        json!({"id":"REQ-A"}),
+    );
+    assert_eq!(incomplete["evaluation_complete"], false, "{incomplete:#}");
+    assert!(
+        incomplete["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "field_invalid" && d["item"]["id"] == "VER-DRAFT"),
+        "{incomplete:#}"
+    );
+    assert!(
+        incomplete["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|d| d["code"] != "rule_failed")
+    );
+    fs::write(&file, &text).unwrap();
+    // Only the root path scope selects items, and paths are project relative.
+    fs::write(root.join("rules.yaml"),"id: rule:scope\ntargetClass: requirement\npaths: [other/]\nproperty: [{path: owner, maxCount: 0}]\n").unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    fs::write(root.join("rules.yaml"),"id: rule:scope\ntargetClass: requirement\npaths: [items.mara.md]\nproperty: [{path: owner, maxCount: 0}]\n").unwrap();
+    assert_eq!(validation_with_parity(root, &[])["summary"]["errors"], 1);
+    // Deliberate configuration adoption: existing format 1 cannot enable sources.
+    fs::write(
+        &config,
+        original.replace("format_version = 2", "format_version = 1"),
+    )
+    .unwrap();
+    assert_eq!(
+        diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}))["valid"],
+        false
+    );
+    fs::write(&config, original.replace("[\"rules.yaml\"]", "[]")).unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+}
+
+#[test]
+fn current_state_rules_deduplicate_values_and_reject_unsupported_definitions() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["flavours"]["requirement"]["fields"]["owner"]["repeatable"] = json!(true);
+    schema["flavours"]["requirement"]["fields"]["class"] = json!({"type":"string"});
+    fs::write(schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    let file = root.join("items.mara.md");
+    let text = fs::read_to_string(&file).unwrap();
+    fs::write(
+        &file,
+        text.replacen(
+            ":owner: Alice",
+            ":owner: Alice\n:owner: Alice\n:class: requirement",
+            1,
+        ),
+    )
+    .unwrap();
+    fs::write(root.join("rules.yaml"),"id: rule:fields\ntargetClass: requirement\npaths: ['./items.mara.md']\nand:\n  - property: [{path: owner, minCount: 1, maxCount: 1, in: [Alice, Bob]}]\n  - property: [{path: class, hasValue: requirement}]\nnot: {property: [{path: status, hasValue: draft}]}\n").unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let fields = fs::read_to_string(root.join("rules.yaml")).unwrap();
+    fs::write(
+        root.join("rules.yaml"),
+        fields.replace("minCount: 1", "minCount: 2"),
+    )
+    .unwrap();
+    assert_eq!(validation_with_parity(root, &[])["summary"]["errors"], 1);
+    for bad in [
+        "- rule:reference\n",
+        "id: rule:x\ntargetClass: [requirement, 3]\n",
+        "id: rule:x\ntargetClass: requirement\nproperty: [{path: unknown, minCount: 1}]\n",
+        "id: rule:x\ntargetClass: requirement\nproperty: [{path: owner, datatype: boolean}]\n",
+        "id: rule:x\ntargetClass: requirement\nproperty: [{path: owner, pattern: '['}]\n",
+        "id: rule:x\ntargetClass: requirement\nproperty: [{path: owner, severity: Warning}]\n",
+        "id: rule:x\ntargetClass: requirement\nproperty: [{path: owner, qualifiedMinCount: 1}]\n",
+        "id: rule:x\n---\nid: rule:y\n",
+        "id: rule:x\nnode: !custom {class: requirement}\n",
+    ] {
+        fs::write(root.join("rules.yaml"), bad).unwrap();
+        let v = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(v["valid"], false, "{bad}: {v:#}");
+    }
 }
