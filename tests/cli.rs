@@ -12014,6 +12014,77 @@ fn rule_fixture() -> TempDir {
 }
 
 #[test]
+fn current_state_rules_require_all_classes_on_relation_endpoints() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    for (target, path) in [
+        ("design", json!("satisfies")),
+        ("verification", json!("verifies")),
+        ("requirement", json!({"inversePath":"satisfies"})),
+    ] {
+        for key in ["class", "node", "qualifiedValueShape"] {
+            let classes = json!(["requirement", "design"]);
+            let mut property = json!({"path":path});
+            property[key] = if key == "class" {
+                classes
+            } else {
+                json!({"class":classes})
+            };
+            if key == "qualifiedValueShape" {
+                property["qualifiedMinCount"] = json!(1);
+            }
+            let rule =
+                json!({"id":"rule:all_classes", "targetClass":target, "property":[property]});
+            fs::write(
+                root.join("rules.yaml"),
+                serde_saphyr::to_string(&rule).unwrap(),
+            )
+            .unwrap();
+            let invalid =
+                diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+            assert_eq!(invalid["valid"], false, "{target}/{key}: {invalid:#}");
+            assert_eq!(
+                invalid["diagnostics"][0]["code"], "rule_invalid",
+                "{invalid:#}"
+            );
+            let pointer = if key == "class" {
+                "/property/0/class".into()
+            } else {
+                format!("/property/0/{key}/class")
+            };
+            assert_eq!(invalid["diagnostics"][0]["location"]["pointer"], pointer);
+        }
+    }
+    assert!(
+        mara(root, &["relation", "add", "DES-A", "satisfies", "REQ-A"])
+            .status
+            .success()
+    );
+    // Repeating one class remains satisfiable after RDF deduplication.
+    fs::write(root.join("rules.yaml"),
+        "id: rule:repeated_class\ntargetClass: design\nproperty: [{path: satisfies, class: [requirement, requirement], minCount: 1}]\n"
+    ).unwrap();
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+    for target in ["REQ-A", "DES-A"] {
+        assert!(
+            mara(
+                root,
+                &["relation", "add", "VER-APPROVED", "verifies", target]
+            )
+            .status
+            .success()
+        );
+    }
+    // Alternative classes use explicit OR; multiple targetClass values select either flavour.
+    fs::write(root.join("rules.yaml"),
+        "- id: rule:alternatives\n  targetClass: verification\n  property:\n    - path: verifies\n      node:\n        or: [{class: requirement}, {class: design}]\n- id: rule:targets\n  targetClass: [requirement, design]\n  property: [{path: owner, minCount: 1}]\n"
+    ).unwrap();
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+}
+
+#[test]
 fn current_state_rules_reject_disjoint_relation_endpoint_classes() {
     let fixture = rule_fixture();
     let root = fixture.path();

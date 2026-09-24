@@ -82,7 +82,8 @@ standard SHACL semantics, not a standalone context-free YAML-LD document.
 |---|---|
 | `id`, `type` | JSON-LD identity/type; types are `NodeShape` or `PropertyShape`. |
 | Supported constraint keys | Corresponding SHACL properties, retaining their standard parameter meaning. |
-| `targetClass`, `class` | Schema-declared flavour names; a scalar or sequence denotes one or several classes. |
+| `targetClass` | Schema-declared flavour names; a sequence selects items of any listed flavour. |
+| `class` | Schema-declared flavour names; every listed class must hold on each value. Items have one flavour, so distinct classes cannot jointly match a relation endpoint; use `or` for alternatives. |
 | `path` | A declared field/canonical relation name, or `{inversePath: relation}`. |
 | `datatype` | `string`, `integer`, `double`, `boolean` map to XML Schema datatypes. |
 | `node`, `not`, `qualifiedValueShape` | One nested shape or named shape reference. |

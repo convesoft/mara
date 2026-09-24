@@ -566,7 +566,7 @@ impl Rules {
         } else {
             flavours
                 .iter()
-                .filter(|f| classes.contains(f))
+                .filter(|f| classes.iter().all(|class| class == *f))
                 .cloned()
                 .collect()
         };
@@ -624,7 +624,7 @@ impl Rules {
                 }
             }
             if !classes.is_empty() {
-                children.retain(|f| classes.contains(f));
+                children.retain(|f| classes.iter().all(|class| class == f));
             }
         }
         if !classes.is_empty() && matches!(child_kind, ValueKind::Literals(_)) {
