@@ -12,7 +12,8 @@ do not add lifecycle policy to bundled templates or existing projects.
 The accepted language foundation is SHACL Core, authored in YAML with generated
 bindings and verified by [[EVD-YAML-SHACL-SPIKE]]. The contracts replace the
 earlier unshipped formats. [[ADR-NATIVE-SHACL-ADAPTER]] records the
-native execution boundary; trace views remain planned.
+native execution boundary. The development executable implements matrices;
+generated specifications remain planned.
 
 :::mara design DES-TRACE-RULE-GRAMMAR
 :mid: 01M2JNZMJ0VT20GWH4HF6DBBC5
@@ -523,7 +524,11 @@ configuration, source, identity, field, reference and relationship checks and
 configured YAML current-state rules and structural graph policies. Real CLI
 and stdio MCP tests cover lifecycle and graph examples, warning/error policy,
 invalid prerequisites, source locations, pagination and stale cursors.
-Trace-view commands remain separate work.
+Matrix CLI and stdio MCP tests cover selected root/rule states, qualified and
+external endpoints, and source-linked explanations. CLI tests also cover a
+second-hop gap and bounded continuation. Matrix output is a disposable
+format-1 projection; rule failures remain complete matrix data.
+The specification command remains separate work.
 
 ## Evaluation, output and continuation
 
@@ -763,17 +768,24 @@ force an unbounded nested row:
 | Record kind | Required meaning |
 |---|---|
 | `result` | `root` item descriptor, `evaluation` rule/check identity, and overall `state`. |
-| `check` | `reference`, `root`, `evaluation`, `obligation` shape/component/source descriptor, `context`, `parent` check reference (null at root), `state`, and `condition` predicate; relationship checks add `counts` and `every`. |
-| `edge` | `check` reference, canonical `edge`, endpoint-facing `label`, `direction`, `endpoint`, `qualification`, `every`, and `occurrence_count`. |
+| `check` | `reference`, `root`, `evaluation`, `obligation` shape/component/source descriptor, `context`, `parent` check reference (null at root), `state`, and `condition` predicate; relationship checks add `counts` and `every`; local field checks add `inspection`. |
+| `edge` | `check` reference, canonical `edge`, endpoint-facing `label`, `direction`, `endpoint`, `outside_selection`, `qualification`, `every`, and `occurrence_count`. |
 | `issue` | `diagnostic` preventing complete evaluation. |
 
 `evaluation` is `{kind:"rule",shape:"urn:mara:rule:approved_requirement"}`
 or `{kind:"check",shape:"urn:mara:rule:coverage"}`. `root` and item endpoints use discovery item descriptors;
 external endpoints use the relationship contract's external descriptor.
-Every record carries `kind`. `condition` identifies the SHACL component and
-its parameters. Nested shape obligations have check records when explicitly
-evaluated or available from public native outcomes; internal evaluator traces
-are not required.
+Every record carries `kind`. A check's `obligation.component` is a sorted array
+of SHACL constraint-component IRIs for its authored shape (empty for a shape
+with no constraints). Its `state` is the whole-shape outcome; it does not
+claim a separate outcome for each component. `condition.components` retains
+the authored parameters keyed by their SHACL names. A diagnostic's singular
+component can be matched against this array. Nested shape obligations have
+check records when explicitly evaluated or available from public native
+outcomes; internal evaluator traces are not required.
+`qualifiedValueShape` remains in `condition.components` as a parameter of
+the authored qualified minimum/maximum component; it is not a separate
+constraint component.
 A check's `counts` contains `selected`,
 `qualifying`, `minimum` and `maximum`; omitted bounds and unavailable totals
 are null. `every` and `qualification` use the predicate states or null when
@@ -784,8 +796,16 @@ check; at most eight hops. `check` references are snapshot-bound opaque
 identifiers, not durable item identities. They connect records across pages.
 Counts belong to the immediate check: include selected and qualifying totals,
 declared minimum/maximum, and every state where present. Counts are null
-when unavailable, not misleading zeros. Local checks retain field paths,
-constraint parameters and bounded value/source inspection references.
+when unavailable, not misleading zeros. Qualified literal-field counts use
+the native evaluator's selected and qualifying totals. External endpoints
+retain native qualifier/every outcomes when evaluated; they have no item
+status. An edge's `outside_selection` is true
+when its item endpoint was not selected as a root, or when it is external.
+Local checks retain field paths and constraint parameters. Their `inspection`
+identifies the focus item and field, total authored value count, the first
+authored value (at most 256 characters), whether that value was truncated, and
+its source location. Null value and source mean the field is absent; inspect
+the item for additional values when the count exceeds one.
 
 Emit one result for each root/rule pair, including not-applicable roots.
 Only applicable, evaluated rules have check records. Order reported checks by
@@ -868,7 +888,7 @@ back or synthesizes missing requirements/relations.
 
 The rule/diagnostic/view contracts extend the schema-3 relationship baseline
 in [[DES-RELATION-COMPATIBILITY]]. They set compatibility boundaries for
-implemented validation and planned trace views.
+implemented validation and matrices, and planned specifications.
 
 | Surface | Compatibility boundary |
 |---|---|

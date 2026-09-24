@@ -44,6 +44,66 @@ struct ProjectValidateParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct TraceMatrixToolParams {
+    /// Absolute project root; omit when this server is bound with --project.
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Exact human IDs or MIDs, OR within the list and intersected with other root filters.
+    #[serde(default)]
+    ids: Vec<String>,
+    /// Exact schema flavour names, OR within the list and intersected with other root filters.
+    #[serde(default)]
+    flavours: Vec<String>,
+    /// Exact schema-declared custom field key/value filters, without trimming. An empty value matches an empty value. These exclude title/MID and typed relations.
+    #[serde(default)]
+    fields: Vec<mara::TraceField>,
+    /// Project-relative document paths or directory subtrees selecting root items; no globs, absolute paths, .., empty paths, . or ./.
+    #[serde(default)]
+    paths: Vec<PathBuf>,
+    /// Select all roots explicitly; cannot be combined with ids, flavours, fields or paths.
+    #[serde(default)]
+    all: bool,
+    /// Expanded IRIs of enabled root rules; use this or check, never both.
+    #[serde(default)]
+    rules: Vec<String>,
+    /// Request-local YAML files and one named targetless node shape; separate from persisted rule policy.
+    #[serde(default)]
+    check: Option<mara::TraceCheck>,
+    /// Maximum records per page, 1 through 100 (default 20); the byte budget may return fewer.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Opaque next_cursor; keep options unchanged until has_more is false, restart after source/schema changes; empty strings are invalid.
+    #[serde(default)]
+    cursor: Option<String>,
+    /// Set to markdown to include the same rendered page as the CLI default.
+    #[serde(default)]
+    render: Option<String>,
+}
+
+impl TraceMatrixToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, mara::TraceMatrixParams) {
+        (
+            self.project,
+            mara::TraceMatrixParams {
+                selection: mara::TraceSelection {
+                    ids: self.ids,
+                    flavours: self.flavours,
+                    fields: self.fields,
+                    paths: self.paths,
+                    all: self.all,
+                },
+                rules: self.rules,
+                check: self.check,
+                limit: self.limit,
+                cursor: self.cursor,
+                render: self.render,
+            },
+        )
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct SchemaValidateParams {
     /// Absolute project root; omit when the server is bound with --project.
     project: Option<PathBuf>,
@@ -379,6 +439,29 @@ impl RelationToolParams {
 impl MaraMcp {
     fn for_project(&self, project: Option<PathBuf>) -> Result<OperationContext, String> {
         self.operations.for_project(project)
+    }
+
+    #[tool(
+        name = "trace_matrix",
+        output_schema = rmcp::handler::server::common::schema_for_type::<mara::TraceMatrixResult>(),
+        description = "Generate a bounded traceability matrix for selected items. Supply ids, flavours, fields, paths or all:true and either enabled rule IRIs or check:{files,shape}. Results distinguish passed, failed, not_applicable and unavailable and include source-linked checks and canonical edges. Use render:markdown for a matching Markdown page. Follow next_cursor with unchanged options. Known policy failures are data; incomplete evaluation sets evaluation_complete:false."
+    )]
+    fn trace_matrix(
+        &self,
+        Parameters(params): Parameters<TraceMatrixToolParams>,
+    ) -> rmcp::model::CallToolResult {
+        let (project, params) = params.into_parts();
+        let result = self
+            .for_project(project)
+            .map_err(mara::ValidationError::invalid_argument)
+            .and_then(|context| context.trace_matrix(&params));
+        let (value, failed) = match result {
+            Ok(result) => (serde_json::to_value(result).unwrap(), false),
+            Err(error) => (error.envelope(), true),
+        };
+        let mut response = rmcp::model::CallToolResult::structured(value);
+        response.is_error = Some(failed);
+        response
     }
 
     #[tool(

@@ -24,6 +24,7 @@ mod operations;
 mod query;
 mod relations;
 mod rules;
+mod trace;
 pub use relations::{
     RelationEdge, RelationEndpoint, RelationError, RelationInspection, RelationOccurrence,
 };
@@ -59,6 +60,10 @@ pub use query::{
     RelatedItemsResult, RelatedNeighbour, RelatedResult, RelationDirection, RelationSummary,
     ResolvedItem, SearchExcerpt, SearchHit, SearchResult, TextRange, get, get_item, list_items,
     related, related_items, search, search_items,
+};
+pub use trace::{
+    TraceCheck, TraceField, TraceMatrixParams, TraceMatrixResult, TraceMatrixSummary,
+    TraceSelection,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";

@@ -149,8 +149,50 @@ enum Command {
         #[command(subcommand)]
         command: RelationCommand,
     },
+    /// Render read-only trace views from an explicit item selection.
+    Trace {
+        #[command(subcommand)]
+        command: TraceCommand,
+    },
     /// Start a stdio MCP server, optionally bound with --project.
     Mcp,
+}
+
+#[derive(Debug, Subcommand)]
+enum TraceCommand {
+    /// Generate a bounded coverage matrix using enabled rule IRIs or a request-local YAML check.
+    Matrix {
+        /// Exact human ID or MID for a root item; repeat for OR and intersect with other root filters.
+        #[arg(long = "id")]
+        ids: Vec<String>,
+        /// Exact schema flavour for root items; repeat for OR and intersect with other root filters.
+        #[arg(long = "flavour")]
+        flavours: Vec<String>,
+        /// Exact custom KEY=VALUE root filter without trimming; an empty value matches an empty value. Excludes title/MID and typed relations.
+        #[arg(long = "field", value_name = "KEY=VALUE")]
+        fields: Vec<String>,
+        /// Project-relative document or directory subtree for root items; no globs, absolute paths, .., empty paths, . or ./.
+        #[arg(long = "path")]
+        paths: Vec<PathBuf>,
+        /// Explicitly select all root items; cannot be combined with filters.
+        #[arg(long)]
+        all: bool,
+        /// Expanded IRI of an enabled root rule; repeat for OR. Cannot combine with a request check.
+        #[arg(long = "rule")]
+        rules: Vec<String>,
+        /// Project-relative YAML file for a request-local check; repeat to supply reusable shapes.
+        #[arg(long = "check-file")]
+        check_files: Vec<PathBuf>,
+        /// Expanded IRI of a named targetless node shape from the request check files.
+        #[arg(long)]
+        shape: Option<String>,
+        /// Maximum records per page, 1 through 100 (default 20); the byte budget may return fewer.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Opaque next_cursor; keep options unchanged until has_more is false; restart after source/schema changes; empty strings are invalid.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -568,6 +610,78 @@ fn run(cli: Cli) -> Result<bool, String> {
         command,
     } = cli;
     match command {
+        Command::Trace {
+            command:
+                TraceCommand::Matrix {
+                    ids,
+                    flavours,
+                    fields,
+                    paths,
+                    all,
+                    rules,
+                    check_files,
+                    shape,
+                    limit,
+                    cursor,
+                },
+        } => {
+            let fields = fields
+                .into_iter()
+                .map(|field| {
+                    let (key, value) = field.split_once('=').ok_or_else(|| {
+                        mara::ValidationError::invalid_argument("--field must use KEY=VALUE")
+                    })?;
+                    Ok(mara::TraceField {
+                        key: key.into(),
+                        value: value.into(),
+                    })
+                })
+                .collect::<Result<Vec<_>, mara::ValidationError>>();
+            let fields = match fields {
+                Ok(fields) => fields,
+                Err(error) => return emit_trace_error(format, error),
+            };
+            let check = if check_files.is_empty() && shape.is_none() {
+                None
+            } else {
+                Some(mara::TraceCheck {
+                    files: check_files,
+                    shape: shape.unwrap_or_default(),
+                })
+            };
+            let params = mara::TraceMatrixParams {
+                selection: mara::TraceSelection {
+                    ids,
+                    flavours,
+                    fields,
+                    paths,
+                    all,
+                },
+                rules,
+                check,
+                limit,
+                cursor,
+                render: matches!(format, OutputFormat::Human).then(|| "markdown".into()),
+            };
+            match operations(project)?.trace_matrix(&params) {
+                Ok(result) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&result)?
+                    } else {
+                        print!("{}", result.markdown.as_deref().unwrap_or(""))
+                    }
+                    Ok(result.evaluation_complete)
+                }
+                Err(error) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&error.envelope())?
+                    } else {
+                        eprintln!("error: {error}")
+                    }
+                    Ok(false)
+                }
+            }
+        }
         Command::Mcp => {
             mcp::run(project)?;
             Ok(true)
@@ -943,6 +1057,15 @@ fn run(cli: Cli) -> Result<bool, String> {
             emit_validation(format, result)
         }
     }
+}
+
+fn emit_trace_error(format: OutputFormat, error: mara::ValidationError) -> Result<bool, String> {
+    if matches!(format, OutputFormat::Json) {
+        write_json(&error.envelope())?
+    } else {
+        eprintln!("error: {error}")
+    }
+    Ok(false)
 }
 
 fn operations(selected: Option<PathBuf>) -> Result<OperationContext, String> {
