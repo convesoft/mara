@@ -783,6 +783,9 @@ the authored parameters keyed by their SHACL names. A diagnostic's singular
 component can be matched against this array. Nested shape obligations have
 check records when explicitly evaluated or available from public native
 outcomes; internal evaluator traces are not required.
+`qualifiedValueShape` remains in `condition.components` as a parameter of
+the authored qualified minimum/maximum component; it is not a separate
+constraint component.
 A check's `counts` contains `selected`,
 `qualifying`, `minimum` and `maximum`; omitted bounds and unavailable totals
 are null. `every` and `qualification` use the predicate states or null when

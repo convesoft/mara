@@ -12264,7 +12264,49 @@ fn trace_matrix_uses_native_qualified_literal_counts() {
             .any(|r| r["kind"] == "check"
                 && r["condition"]["path"] == "owner"
                 && r["counts"]["selected"] == 1
-                && r["counts"]["qualifying"] == 1),
+                && r["counts"]["qualifying"] == 1
+                && r["obligation"]["component"]
+                    == json!(["http://www.w3.org/ns/shacl#QualifiedMinCountConstraintComponent"])),
+        "{result:#}"
+    );
+}
+
+#[test]
+fn trace_matrix_does_not_infer_every_for_literal_field_nodes() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    fs::write(
+        root.join("rules.yaml"),
+        "id: rule:owner_a\ntargetClass: requirement\nproperty: [{path: owner, node: {pattern: '^A'}}]\n",
+    ).unwrap();
+    let path = root.join("items.mara.md");
+    let source = fs::read_to_string(&path).unwrap();
+    fs::write(&path, source.replacen(":owner: Alice", ":owner: Bob", 1)).unwrap();
+    let result = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--rule",
+            "urn:mara:rule:owner_a",
+        ],
+    );
+    assert!(result.status.success(), "{}", stderr(&result));
+    let result: Value = serde_json::from_str(&stdout(&result)).unwrap();
+    assert_eq!(result["summaries"][0]["failed"], 1, "{result:#}");
+    assert!(
+        result["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == "check"
+                && r["condition"]["path"] == "owner"
+                && r["inspection"]["value"] == "Bob"
+                && r["every"].is_null()),
         "{result:#}"
     );
 }

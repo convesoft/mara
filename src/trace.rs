@@ -575,7 +575,7 @@ fn explain(
         .map(|(key,value)|(key.clone(),value.clone())).collect::<BTreeMap<_,_>>(),
         "path":path});
     let components = shape_components(shape);
-    let every = every_shape.and_then(|q| {
+    let every = every_shape.filter(|_| relation.is_some()).and_then(|q| {
         matching
             .iter()
             .map(|(_, end)| {
@@ -725,7 +725,6 @@ fn shape_components(shape: &Value) -> Vec<String> {
                 "pattern" => "Pattern",
                 "minCount" => "MinCount",
                 "maxCount" => "MaxCount",
-                "qualifiedValueShape" => "QualifiedValueShape",
                 "qualifiedMinCount" => "QualifiedMinCount",
                 "qualifiedMaxCount" => "QualifiedMaxCount",
                 "node" => "Node",
