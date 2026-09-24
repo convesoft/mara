@@ -12,9 +12,10 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    Corpus, DiscoveryNodeKind, DiscoveryNodeSummary, FieldFilter, Item, ItemFilters, ItemSource,
-    MetadataFragment, Project, ReferenceKind, RelationEdge, RelationEndpoint, Schema, TextRange,
-    TraceSelection, ValidationDiagnostic, ValidationError, query,
+    Corpus, DiagnosticCode, DiagnosticLocation, DiscoveryNodeKind, DiscoveryNodeSummary,
+    FieldFilter, Item, ItemFilters, ItemSource, MetadataFragment, Project, ReferenceKind,
+    RelationEdge, RelationEndpoint, Schema, Severity, TextRange, TraceSelection,
+    ValidationDiagnostic, ValidationError, ValidationScope, query,
 };
 
 const PAGE_BYTES: usize = 65_536;
@@ -139,6 +140,29 @@ pub(crate) fn generate(
     .with_search_options(selection.ids.clone(), false);
     let selected = query::filtered_items(&corpus, schema, &filters, None)
         .map_err(|e| ValidationError::invalid_argument(e.to_string()))?;
+    let relevant_diagnostics = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            if narrative_included {
+                selection.all
+                    || selection
+                        .paths
+                        .iter()
+                        .any(|path| diagnostic.source().path().starts_with(path))
+            } else {
+                selected.iter().any(|item| {
+                    if diagnostic.source().path() != item.source().path() {
+                        return false;
+                    }
+                    let offset = diagnostic.source().span().start_byte();
+                    let span = item.source().span();
+                    (span.start_byte() <= offset && offset < span.end_byte())
+                        || (diagnostic.coordinates_available()
+                            && diagnostic.applies_to_item(item.id()))
+                })
+            }
+        })
+        .collect::<Vec<_>>();
     let selected_mids = selected
         .iter()
         .filter_map(|item| item.mid())
@@ -276,12 +300,43 @@ pub(crate) fn generate(
             );
         }
     }
-    for diagnostic in &diagnostics {
+    for diagnostic in &relevant_diagnostics {
         records.push(SpecificationRecord::Issue {
             diagnostic: json!(ValidationDiagnostic::from_source(diagnostic)),
         });
     }
-    let evaluation_complete = diagnostics.is_empty();
+    if !corpus.is_complete() {
+        for item in &selected {
+            for relation in item.relations() {
+                if crate::external::address(relation.target()).is_some() {
+                    continue;
+                }
+                let matches = corpus
+                    .items()
+                    .filter(|target| {
+                        target.id() == relation.target() || target.mid() == Some(relation.target())
+                    })
+                    .count();
+                if matches != 1 {
+                    records.push(SpecificationRecord::Issue {
+                        diagnostic: json!(ValidationDiagnostic::new(
+                            DiagnosticCode::ReferenceUnresolved,
+                            Severity::Error,
+                            ValidationScope::Item,
+                            DiagnosticLocation::source(relation.source()),
+                            format!(
+                                "relation target '{}' is unavailable in the loaded corpus",
+                                relation.target()
+                            ),
+                        )),
+                    });
+                }
+            }
+        }
+    }
+    let evaluation_complete = !records
+        .iter()
+        .any(|record| matches!(record, SpecificationRecord::Issue { .. }));
     let mut result = TraceSpecificationResult {
         format_version: 1,
         kind: "specification".into(),
@@ -357,6 +412,11 @@ fn add_content(
         let mut part_end = (part_start + FRAGMENT_BYTES).min(original.len());
         while !original.is_char_boundary(part_end) {
             part_end -= 1;
+        }
+        if part_end < original.len()
+            && let Some(newline) = original[part_start..part_end].rfind('\n')
+        {
+            part_end = part_start + newline + 1;
         }
         for span in &reference_spans {
             if span.start_byte() < start || span.end_byte() > end {
@@ -634,7 +694,8 @@ fn markdown(result: &TraceSpecificationResult, corpus: &Corpus) -> String {
                             ""
                         }
                     ));
-                    out.push_str(&render_references(content, source_range, corpus, &anchors));
+                    let authored = render_references(content, source_range, corpus, &anchors);
+                    out.push_str(&render_fragment(&authored, source_range, corpus));
                     out.push_str("\n\n");
                 }
             }
@@ -674,6 +735,93 @@ fn md_target(path: &Path) -> String {
         .replace('>', "%3E")
         .replace('#', "%23")
         .replace('?', "%3F")
+}
+
+fn render_fragment(content: &str, source: &ItemSource, corpus: &Corpus) -> String {
+    let Some(document) = corpus
+        .documents()
+        .iter()
+        .find(|doc| doc.path() == source.path())
+    else {
+        return content.to_owned();
+    };
+    let mut code_blocks = Vec::new();
+    collect_code_blocks(document.blocks(), &mut code_blocks);
+    for item in document.items() {
+        collect_code_blocks(item.body_blocks(), &mut code_blocks);
+    }
+    let mut opening = None;
+    let mut closing = None;
+    for block in code_blocks {
+        let span = block.source().span();
+        let Some((open, close)) = fence_markers(document.source(), span) else {
+            continue;
+        };
+        if span.start_byte() < source.start_byte() && source.start_byte() < span.end_byte() {
+            opening = Some(open);
+        }
+        if span.start_byte() < source.end_byte() && source.end_byte() < span.end_byte() {
+            closing = Some(close);
+        }
+    }
+    let mut rendered = String::new();
+    if let Some(open) = opening {
+        rendered.push_str(&open);
+        rendered.push('\n');
+    }
+    rendered.push_str(content);
+    if let Some(close) = closing {
+        if !rendered.ends_with('\n') {
+            rendered.push('\n');
+        }
+        rendered.push_str(&close);
+        rendered.push('\n');
+    }
+    rendered
+}
+
+fn collect_code_blocks<'a>(
+    blocks: &'a [crate::MarkdownBlock],
+    out: &mut Vec<&'a crate::MarkdownBlock>,
+) {
+    for block in blocks {
+        if block.kind() == crate::MarkdownBlockKind::CodeBlock {
+            out.push(block);
+        }
+        collect_code_blocks(block.children(), out);
+    }
+}
+
+fn fence_markers(source: &str, span: crate::SourceSpan) -> Option<(String, String)> {
+    let first = source[span.start_byte()..span.end_byte()].lines().next()?;
+    let tick = first.find("```");
+    let tilde = first.find("~~~");
+    let start = match (tick, tilde) {
+        (Some(a), Some(b)) => a.min(b),
+        (Some(a), None) | (None, Some(a)) => a,
+        (None, None) => return None,
+    };
+    let prefix = &first[..start];
+    if prefix
+        .rsplit('>')
+        .next()
+        .unwrap_or(prefix)
+        .chars()
+        .filter(|ch| *ch == ' ')
+        .count()
+        > 3
+    {
+        return None;
+    }
+    let marker = first[start..].chars().next()?;
+    let count = first[start..]
+        .chars()
+        .take_while(|ch| *ch == marker)
+        .count();
+    Some((
+        first.to_owned(),
+        format!("{prefix}{}", marker.to_string().repeat(count)),
+    ))
 }
 
 type HeadingAnchors = BTreeMap<PathBuf, Vec<(usize, usize, String)>>;

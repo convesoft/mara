@@ -380,6 +380,145 @@ fn trace_specification_fragments_oversized_content_without_skips() {
 }
 
 #[test]
+fn trace_specification_keeps_source_headers_out_of_long_code_fences() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    let code = "let value = 1;\n".repeat(1_000);
+    let source = format!(
+        ":::mara requirement REQ-CODE\n:mid: 01M1PXP2KG381MM1VNN6XC7S4M\n:title: Code\n\n```rust\n{code}```\n:::\n"
+    );
+    fs::write(root.join("code.mara.md"), &source).unwrap();
+    let mut cursor = None::<String>;
+    let mut source_headers = 0;
+    let mut code_lines = 0;
+    loop {
+        let mut args = vec![
+            "trace",
+            "specification",
+            "--id",
+            "REQ-CODE",
+            "--limit",
+            "100",
+        ];
+        if let Some(value) = &cursor {
+            args.extend(["--cursor", value]);
+        }
+        let output = mara(root, &args);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let rendered = stdout(&output);
+        let mut in_fence = false;
+        for line in rendered.lines() {
+            if line.starts_with("[Source:") {
+                assert!(
+                    !in_fence,
+                    "source header rendered inside code fence: {line}"
+                );
+                source_headers += 1;
+            }
+            if line.starts_with("```") {
+                in_fence = !in_fence;
+            }
+        }
+        assert!(!in_fence);
+        code_lines += rendered.matches("let value = 1;").count();
+        cursor = rendered.lines().find_map(|line| {
+            line.strip_prefix("Continue with `--cursor ")
+                .and_then(|rest| rest.split('`').next())
+                .map(str::to_owned)
+        });
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert!(source_headers > 1);
+    assert_eq!(code_lines, 1_000);
+    assert_eq!(
+        fs::read_to_string(root.join("code.mara.md")).unwrap(),
+        source
+    );
+}
+
+#[test]
+fn trace_specification_ignores_unrelated_invalid_documents() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    fs::write(root.join("good.mara.md"), ":::mara requirement REQ-GOOD\n:mid: 01M1PXP2KG381MM1VNN6XC7S4M\n:title: Good\n\nGood body.\n:::\n").unwrap();
+    fs::write(
+        root.join("bad.mara.md"),
+        ":::mara requirement REQ-BAD\n:mid: 01M1PXP2KGVW5ZF2JGP9K4XE9B\n\nMissing title.\n:::\n",
+    )
+    .unwrap();
+    let selected = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "specification",
+            "--id",
+            "REQ-GOOD",
+        ],
+    );
+    assert!(selected.status.success(), "{}", stderr(&selected));
+    let selected: Value = serde_json::from_str(&stdout(&selected)).unwrap();
+    assert_eq!(selected["evaluation_complete"], true);
+    assert!(
+        !selected["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == "issue")
+    );
+    let responses = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "trace_specification", json!({"ids":["REQ-GOOD"]})),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        selected
+    );
+    let mut good_file = fs::OpenOptions::new()
+        .append(true)
+        .open(root.join("good.mara.md"))
+        .unwrap();
+    good_file.write_all(b"\n:::mara requirement REQ-ALSO-BAD\n:mid: 01M1PXP2KGZXAJ1595RM3RN7AC\n\nMissing title in the selected item's document.\n:::\n").unwrap();
+    let same_document = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "specification",
+            "--id",
+            "REQ-GOOD",
+        ],
+    );
+    assert!(same_document.status.success(), "{}", stderr(&same_document));
+    let same_document: Value = serde_json::from_str(&stdout(&same_document)).unwrap();
+    assert_eq!(same_document["evaluation_complete"], true);
+    let all = mara(
+        root,
+        &["--format", "json", "trace", "specification", "--all"],
+    );
+    assert!(!all.status.success());
+    let all: Value = serde_json::from_str(&stdout(&all)).unwrap();
+    assert_eq!(all["evaluation_complete"], false);
+    assert!(
+        all["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == "issue")
+    );
+}
+
+#[test]
 fn cli_and_mcp_reference_preflight_preserve_files_for_all_item_mutations() {
     for use_mcp in [false, true] {
         let fixture = TempDir::new().unwrap();
