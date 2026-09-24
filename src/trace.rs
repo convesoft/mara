@@ -266,13 +266,7 @@ pub(crate) fn matrix(
     let edges = collect_edges(&corpus, schema)?;
     let snapshot = snapshot_id(project, schema, &corpus, &rules);
     let mut validation = empty_validation(project);
-    let observations = if rules.diagnostics.is_empty()
-        && prerequisites.is_empty()
-        && corpus.is_complete()
-        && selected
-            .iter()
-            .all(|item| item.validation_source_is_complete())
-    {
+    let observations = if rules.diagnostics.is_empty() {
         rules.observe(
             &corpus,
             schema,
@@ -298,10 +292,14 @@ pub(crate) fn matrix(
     {
         records.push(record(json!({"kind":"issue","diagnostic":issue})));
     }
-    if !corpus.is_complete()
-        || selected
+    if (!corpus.is_complete()
+        || corpus
+            .items()
+            .any(|item| !item.validation_source_is_complete()))
+        && !validation
+            .diagnostics
             .iter()
-            .any(|item| !item.validation_source_is_complete())
+            .any(|diagnostic| diagnostic.code == DiagnosticCode::EvaluationUnavailable)
     {
         records.push(record(
             json!({"kind":"issue","diagnostic":unavailable_diagnostic(
@@ -527,31 +525,39 @@ fn explain(
         .unwrap_or_default();
     let qualifier = shape["qualifiedValueShape"].as_str();
     let every_shape = shape["node"].as_str();
+    let native_count = observation
+        .counts
+        .iter()
+        .find_map(|((id, focus_id, component), count)| {
+            let supported = if qualifier.is_some() {
+                component.ends_with("#QualifiedMinCountConstraintComponent")
+                    || component.ends_with("#QualifiedMaxCountConstraintComponent")
+            } else {
+                component.ends_with("#MinCountConstraintComponent")
+                    || component.ends_with("#MaxCountConstraintComponent")
+            };
+            (id == shape_id
+                && focus_id == &format!("urn:mara:mid:{}", focus.mid().unwrap())
+                && supported)
+                .then_some(count)
+        });
+    let selected_count = native_count
+        .map(|count| count.0)
+        .or_else(|| relation.as_ref().map(|_| matching.len()));
     let qualifying = qualifier.and_then(|q| {
-        matching
-            .iter()
-            .map(|(_, end)| {
-                let RelationEndpoint::Item { mid, .. } = end else {
-                    return None;
-                };
-                observation
-                    .states
-                    .get(&(q.to_owned(), mid.clone()))
-                    .map(|value| usize::from(*value))
-            })
-            .sum::<Option<usize>>()
+        native_count.and_then(|count| count.1).or_else(|| {
+            relation.as_ref()?;
+            matching
+                .iter()
+                .map(|(_, endpoint)| {
+                    observation
+                        .states
+                        .get(&(q.to_owned(), endpoint_state_key(endpoint)))
+                        .map(|value| usize::from(*value))
+                })
+                .sum::<Option<usize>>()
+        })
     });
-    let selected_count = if relation.is_some() {
-        Some(matching.len())
-    } else {
-        observation
-            .counts
-            .iter()
-            .find_map(|((id, focus_id, _), count)| {
-                (id == shape_id && focus_id == &format!("urn:mara:mid:{}", focus.mid().unwrap()))
-                    .then_some(count.0)
-            })
-    };
     let qualifying = if qualifier.is_none()
         && (shape.get("minCount").is_some() || shape.get("maxCount").is_some())
     {
@@ -573,12 +579,9 @@ fn explain(
         matching
             .iter()
             .map(|(_, end)| {
-                let RelationEndpoint::Item { mid, .. } = end else {
-                    return None;
-                };
                 observation
                     .states
-                    .get(&(q.to_owned(), mid.clone()))
+                    .get(&(q.to_owned(), endpoint_state_key(end)))
                     .copied()
             })
             .collect::<Option<Vec<_>>>()
@@ -617,19 +620,17 @@ fn explain(
     let local_shape = relation.is_none();
     if let (Some(name), Some(direction), Some(label)) = (relation, direction, label) {
         for (entry, endpoint) in &matching {
-            let qualification = qualifier.and_then(|q| match endpoint {
-                RelationEndpoint::Item { mid, .. } => observation
+            let qualification = qualifier.and_then(|q| {
+                observation
                     .states
-                    .get(&(q.to_owned(), mid.clone()))
-                    .copied(),
-                RelationEndpoint::External { .. } => None,
+                    .get(&(q.to_owned(), endpoint_state_key(endpoint)))
+                    .copied()
             });
-            let every_state = every_shape.and_then(|q| match endpoint {
-                RelationEndpoint::Item { mid, .. } => observation
+            let every_state = every_shape.and_then(|q| {
+                observation
                     .states
-                    .get(&(q.to_owned(), mid.clone()))
-                    .copied(),
-                RelationEndpoint::External { .. } => None,
+                    .get(&(q.to_owned(), endpoint_state_key(endpoint)))
+                    .copied()
             });
             let descriptor = endpoint_descriptor(endpoint, ctx.descriptors);
             let outside_selection = match endpoint {
@@ -826,6 +827,13 @@ fn endpoint_descriptor(
     match endpoint {
         RelationEndpoint::Item { mid, .. } => descriptors[mid].clone(),
         RelationEndpoint::External { address } => json!({"kind":"external","address":address}),
+    }
+}
+
+fn endpoint_state_key(endpoint: &RelationEndpoint) -> String {
+    match endpoint {
+        RelationEndpoint::Item { mid, .. } => mid.clone(),
+        RelationEndpoint::External { address } => format!("external:{address}"),
     }
 }
 

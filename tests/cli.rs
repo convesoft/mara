@@ -12235,6 +12235,162 @@ fn trace_matrix_reports_schema_read_failure_as_io_error_on_cli_and_mcp() {
 }
 
 #[test]
+fn trace_matrix_uses_native_qualified_literal_counts() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    fs::write(root.join("rules.yaml"),
+        "id: rule:owner_a\ntargetClass: requirement\nproperty: [{path: owner, qualifiedValueShape: {pattern: '^A'}, qualifiedMinCount: 1}]\n").unwrap();
+    let result = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--rule",
+            "urn:mara:rule:owner_a",
+        ],
+    );
+    assert!(result.status.success(), "{}", stderr(&result));
+    let result: Value = serde_json::from_str(&stdout(&result)).unwrap();
+    assert_eq!(result["summaries"][0]["passed"], 1, "{result:#}");
+    assert!(
+        result["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == "check"
+                && r["condition"]["path"] == "owner"
+                && r["counts"]["selected"] == 1
+                && r["counts"]["qualifying"] == 1),
+        "{result:#}"
+    );
+}
+
+#[test]
+fn trace_matrix_reports_external_qualifier_outcome() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["relations"]["tracked_by"] = json!({
+        "description":"Local or external verification.","source":["requirement"],
+        "target":["verification"],"external":true
+    });
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    fs::write(root.join("rules.yaml"),
+        "id: rule:tracked\ntargetClass: requirement\nproperty: [{path: tracked_by, qualifiedValueShape: {class: verification}, qualifiedMinCount: 1}]\n").unwrap();
+    assert!(
+        mara(
+            root,
+            &["relation", "add", "REQ-A", "tracked_by", "VER-APPROVED"]
+        )
+        .status
+        .success()
+    );
+    assert!(
+        mara(
+            root,
+            &[
+                "relation",
+                "add",
+                "REQ-A",
+                "tracked_by",
+                "external:https://example.com/ticket/1"
+            ]
+        )
+        .status
+        .success()
+    );
+    let result = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--rule",
+            "urn:mara:rule:tracked",
+        ],
+    );
+    assert!(result.status.success(), "{}", stderr(&result));
+    let result: Value = serde_json::from_str(&stdout(&result)).unwrap();
+    assert_eq!(result["summaries"][0]["passed"], 1, "{result:#}");
+    assert!(
+        result["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == "edge"
+                && r["endpoint"]["kind"] == "external"
+                && r["qualification"] == "failed"),
+        "{result:#}"
+    );
+    assert!(
+        result["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == "edge"
+                && r["endpoint"]["id"] == "VER-APPROVED"
+                && r["qualification"] == "passed"),
+        "{result:#}"
+    );
+}
+
+#[test]
+fn trace_matrix_explains_skipped_evaluation_for_invalid_field() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let path = root.join("items.mara.md");
+    let source = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        source.replacen(":status: approved", ":status: invalid", 1),
+    )
+    .unwrap();
+    let output = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--rule",
+            "urn:mara:rule:approved_requirement",
+        ],
+    );
+    assert!(!output.status.success());
+    let result: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(result["evaluation_complete"], false);
+    assert!(
+        result["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == "issue" && r["diagnostic"]["code"] == "field_invalid"),
+        "{result:#}"
+    );
+    assert!(
+        result["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == "issue"
+                && r["diagnostic"]["code"] == "evaluation_unavailable"
+                && r["diagnostic"]["scope"] == "project"),
+        "{result:#}"
+    );
+}
+
+#[test]
 fn trace_matrix_explains_second_hop_and_continues_without_changing_counts() {
     let fixture = rule_fixture();
     let root = fixture.path();

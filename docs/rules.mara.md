@@ -793,7 +793,10 @@ check; at most eight hops. `check` references are snapshot-bound opaque
 identifiers, not durable item identities. They connect records across pages.
 Counts belong to the immediate check: include selected and qualifying totals,
 declared minimum/maximum, and every state where present. Counts are null
-when unavailable, not misleading zeros. An edge's `outside_selection` is true
+when unavailable, not misleading zeros. Qualified literal-field counts use
+the native evaluator's selected and qualifying totals. External endpoints
+retain native qualifier/every outcomes when evaluated; they have no item
+status. An edge's `outside_selection` is true
 when its item endpoint was not selected as a root, or when it is external.
 Local checks retain field paths and constraint parameters. Their `inspection`
 identifies the focus item and field, total authored value count, the first
