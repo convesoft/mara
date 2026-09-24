@@ -2,10 +2,17 @@ use super::{page::*, *};
 use crate::{ConnectionKind, DiscoveryNodeKind, DiscoveryNodeSummary};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum RelatedNeighbour {
+    Internal(DiscoveryNodeSummary),
+    External { kind: String, address: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct RelatedConnection {
     pub relation: String,
     pub direction: RelationDirection,
-    pub neighbour: DiscoveryNodeSummary,
+    pub neighbour: RelatedNeighbour,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<ItemSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,20 +122,12 @@ pub fn related(
         .filter(|connection| relations.is_empty() || relations.contains(&RelationName::from_kind(connection.kind)))
         .filter(|connection| filters.flavours.is_empty() || matches!(connection.neighbour.kind(), DiscoveryNodeKind::Item(item) if matches_name(&filters.flavours, item.flavour())))
         .collect::<Vec<_>>();
-    if filters.cursor.is_some() && (start == 0 || start >= matches.len()) {
-        return Err(page_error(
-            "invalid continuation position; restart from the first page",
-        ));
-    }
-    let mut page = RelatedResult {
-        format_version: 2,
-        node: node.summary(),
-        connections: Vec::new(),
-        has_more: false,
-        next_cursor: None,
-    };
-    ensure_budget(&page)?;
-    for connection in matches.iter().skip(start).take(limit) {
+    let mut all = Vec::new();
+    let outgoing_count = matches
+        .iter()
+        .filter(|c| c.direction == RelationDirection::Outgoing)
+        .count();
+    for connection in matches.iter() {
         let (edge, label, count) = if let ConnectionKind::Schema(name) = connection.kind {
             let DiscoveryNodeKind::Item(item) = node.kind() else {
                 unreachable!()
@@ -157,24 +156,79 @@ pub fn related(
         } else {
             (None, None, None)
         };
-        page.connections.push(RelatedConnection {
+        all.push(RelatedConnection {
             relation: RelationName::from_kind(connection.kind).display(schema),
             direction: connection.direction,
-            neighbour: connection.neighbour.summary(),
+            neighbour: RelatedNeighbour::Internal(connection.neighbour.summary()),
             source: edge.is_none().then(|| connection.source.into()),
             edge,
             label,
             occurrence_count: count,
         });
+    }
+    if filters
+        .direction
+        .is_none_or(|d| d == RelationDirection::Outgoing)
+        && filters.flavours.is_empty()
+        && let DiscoveryNodeKind::Item(item) = node.kind()
+    {
+        let mut externals = BTreeMap::<(String, String), usize>::new();
+        for relation in item.relations() {
+            let Some(address) = crate::external::address(relation.target()) else {
+                continue;
+            };
+            if !relations.is_empty()
+                && !relations.contains(&RelationName::Schema(&relation.canonical))
+            {
+                continue;
+            }
+            *externals
+                .entry((address.to_owned(), relation.canonical.clone()))
+                .or_default() += 1;
+        }
+        let mut external_connections = Vec::new();
+        for ((address, name), count) in externals {
+            let edge = crate::RelationEdge::external(schema, item, &name, &address)
+                .map_err(|error| page_error(&error.to_string()))?;
+            external_connections.push(RelatedConnection {
+                relation: RelationName::Schema(&name).display(schema),
+                direction: RelationDirection::Outgoing,
+                neighbour: RelatedNeighbour::External {
+                    kind: "external".into(),
+                    address,
+                },
+                source: None,
+                label: Some(name),
+                edge: Some(edge),
+                occurrence_count: Some(count),
+            });
+        }
+        all.splice(outgoing_count..outgoing_count, external_connections);
+    }
+    if filters.cursor.is_some() && (start == 0 || start >= all.len()) {
+        return Err(page_error(
+            "invalid continuation position; restart from the first page",
+        ));
+    }
+    let mut page = RelatedResult {
+        format_version: 2,
+        node: node.summary(),
+        connections: Vec::new(),
+        has_more: false,
+        next_cursor: None,
+    };
+    ensure_budget(&page)?;
+    for connection in all.iter().skip(start).take(limit) {
+        page.connections.push(connection.clone());
         (page.has_more, page.next_cursor) =
-            continuation(start, page.connections.len(), matches.len(), &fingerprint);
+            continuation(start, page.connections.len(), all.len(), &fingerprint);
         if ensure_budget(&page).is_err() {
             page.connections.pop();
             if page.connections.is_empty() {
                 return Err(budget_error());
             }
             (page.has_more, page.next_cursor) =
-                continuation(start, page.connections.len(), matches.len(), &fingerprint);
+                continuation(start, page.connections.len(), all.len(), &fingerprint);
             break;
         }
     }
@@ -224,7 +278,9 @@ fn validate_authored_targets(
             if filters.direction.is_some_and(|d| d != direction) {
                 continue;
             }
-            resolve_relation_target(corpus, author, relation.name(), relation.target())?;
+            if crate::external::address(relation.target()).is_none() {
+                resolve_relation_target(corpus, author, relation.name(), relation.target())?;
+            }
         }
     }
     Ok(())

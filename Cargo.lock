@@ -1290,6 +1290,7 @@ dependencies = [
  "unicode-casefold",
  "unicode-normalization",
  "unicode-segmentation",
+ "url",
 ]
 
 [[package]]

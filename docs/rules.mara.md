@@ -257,6 +257,21 @@ Only schema-compatible relation/field paths are valid. An external-capable
 path may use plain counts; field qualification must include a declared internal
 flavour constraint. External nodes have neither that class nor item fields
 and cannot qualify as internal items.
+For a schema-declared `tracked_by` external relation on `requirement`, this
+local rule requires a reference only when the item's own `status` is `approved`:
+
+```yaml
+- id: rule:approved_ticket
+  targetClass: requirement
+  whenShape: rule:approved_status
+  property: [{path: tracked_by, minCount: 1}]
+- id: rule:approved_status
+  property: [{path: status, hasValue: approved}]
+```
+
+The count proves only that a local address was authored. External endpoints
+have no `status` field to inspect and no remote state is fetched; such a nested
+field path is `rule_invalid`.
 Unconstrained graph cycles do not change finite nested-shape semantics.
 [[DES-TRACE-DIAGNOSTIC-INTERFACE]] defines structural depth and output limits.
 

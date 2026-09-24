@@ -33,6 +33,8 @@ struct Shape {
 enum ValueKind {
     Nodes,
     RelationEndpoints,
+    ExternalEndpoints,
+    MixedEndpoints,
     Literals(Vec<&'static str>),
 }
 pub(crate) struct Rules {
@@ -599,6 +601,17 @@ impl Rules {
                     "field and relation paths require item nodes, not literal field values".into(),
                 ));
             }
+            if classes.is_empty()
+                && matches!(
+                    value_kind,
+                    ValueKind::ExternalEndpoints | ValueKind::MixedEndpoints
+                )
+            {
+                return Err((
+                    s.location("path"),
+                    "external endpoints are terminal; a path requires an internal flavour constraint".into(),
+                ));
+            }
             let name = path
                 .as_str()
                 .or_else(|| path["inversePath"].as_str())
@@ -623,8 +636,16 @@ impl Rules {
                     child_kind = ValueKind::Literals(datatypes);
                     children.clear();
                 } else if let Some(relation) = resolved.strip_prefix(REL) {
-                    child_kind = ValueKind::RelationEndpoints;
                     let r = &schema.relations[relation];
+                    child_kind = if r.external && !path.is_object() {
+                        if r.target.is_empty() {
+                            ValueKind::ExternalEndpoints
+                        } else {
+                            ValueKind::MixedEndpoints
+                        }
+                    } else {
+                        ValueKind::RelationEndpoints
+                    };
                     let (from, to) = if path.is_object() {
                         (&r.target, &r.source)
                     } else {
@@ -654,7 +675,12 @@ impl Rules {
             ));
         }
         if !classes.is_empty()
-            && matches!(child_kind, ValueKind::RelationEndpoints)
+            && matches!(
+                child_kind,
+                ValueKind::RelationEndpoints
+                    | ValueKind::ExternalEndpoints
+                    | ValueKind::MixedEndpoints
+            )
             && children.is_empty()
         {
             return Err((
@@ -662,7 +688,21 @@ impl Rules {
                 "flavour class is incompatible with the relation endpoint flavours".into(),
             ));
         }
-        if matches!(child_kind, ValueKind::Nodes | ValueKind::RelationEndpoints) {
+        if !classes.is_empty()
+            && matches!(
+                child_kind,
+                ValueKind::ExternalEndpoints | ValueKind::MixedEndpoints
+            )
+        {
+            child_kind = ValueKind::RelationEndpoints;
+        }
+        if matches!(
+            child_kind,
+            ValueKind::Nodes
+                | ValueKind::RelationEndpoints
+                | ValueKind::ExternalEndpoints
+                | ValueKind::MixedEndpoints
+        ) {
             for key in ["hasValue", "in"] {
                 if s.value.get(key).is_some() {
                     return Err((
@@ -674,7 +714,10 @@ impl Rules {
         }
         if let Some(datatype) = s.value["datatype"].as_str() {
             let error = match &child_kind {
-                ValueKind::Nodes | ValueKind::RelationEndpoints => {
+                ValueKind::Nodes
+                | ValueKind::RelationEndpoints
+                | ValueKind::ExternalEndpoints
+                | ValueKind::MixedEndpoints => {
                     Some("datatype constraints require literal field values")
                 }
                 ValueKind::Literals(types) if types.iter().any(|t| datatype != *t) => {

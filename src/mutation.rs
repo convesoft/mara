@@ -41,7 +41,7 @@ pub struct ItemCreationRequest {
 pub struct InitialRelation {
     /// Schema-declared outgoing relation name, not a custom field.
     pub relation: String,
-    /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix); the new item's human ID may target itself.
+    /// Exact human ID, canonical MID, or external:HTTP(S) URL; the new item's human ID may target itself.
     pub target: String,
 }
 
@@ -156,13 +156,24 @@ pub fn create_item(
         ensure_unambiguous_item_identities(&corpus, "create an item with relations")?;
         let mut edges = BTreeSet::new();
         for edge in &mut request.relations {
-            let (target_id, target_flavour) = if edge.target == request.id {
-                (request.id.as_str(), request.flavour.as_str())
+            let (target_id, target_flavour) = if crate::external::address(&edge.target).is_some() {
+                (edge.target.as_str(), None)
+            } else if edge.target == request.id {
+                (request.id.as_str(), Some(request.flavour.as_str()))
             } else {
                 let target = resolve_item(&corpus, &edge.target, "target")?;
-                (target.id(), target.flavour())
+                (target.id(), Some(target.flavour()))
             };
-            validate_relation_endpoints(schema, &edge.relation, &request.flavour, target_flavour)?;
+            if let Some(target_flavour) = target_flavour {
+                validate_relation_endpoints(
+                    schema,
+                    &edge.relation,
+                    &request.flavour,
+                    target_flavour,
+                )?;
+            } else {
+                validate_external_relation(schema, &edge.relation, &request.flavour, target_id)?;
+            }
             let (canonical, _, inverse) = schema
                 .resolve_relation(&edge.relation)
                 .expect("validated relation");
@@ -629,13 +640,21 @@ fn mutate_relation(
     let corpus = load_corpus(project, schema)?;
     ensure_unambiguous_item_identities(&corpus, "mutate relations")?;
     let source_item = resolve_item(&corpus, source_id, "source")?;
-    let target_item = resolve_item(&corpus, target_id, "target")?;
-    validate_relation_endpoints(
-        schema,
-        relation_name,
-        source_item.flavour(),
-        target_item.flavour(),
-    )?;
+    let target_item = if crate::external::address(target_id).is_some() {
+        None
+    } else {
+        Some(resolve_item(&corpus, target_id, "target")?)
+    };
+    if let Some(target_item) = target_item {
+        validate_relation_endpoints(
+            schema,
+            relation_name,
+            source_item.flavour(),
+            target_item.flavour(),
+        )?;
+    } else {
+        validate_external_relation(schema, relation_name, source_item.flavour(), target_id)?;
+    }
 
     let path = source_item.source().path().to_path_buf();
     // The public Rust helper shares the same semantic mutation as CLI and MCP.
@@ -658,8 +677,8 @@ fn mutate_relation(
         source: source_item.id().to_owned(),
         source_mid: source_item.mid().map(ToOwned::to_owned),
         relation: relation_name.to_owned(),
-        target: target_item.id().to_owned(),
-        target_mid: target_item.mid().map(ToOwned::to_owned),
+        target: target_item.map_or_else(|| target_id.to_owned(), |item| item.id().to_owned()),
+        target_mid: target_item.and_then(|item| item.mid().map(ToOwned::to_owned)),
         path,
     })
 }
@@ -731,7 +750,11 @@ pub(crate) fn mutate_semantic_relation(
     let changed;
     if add {
         let source = resolve_item(&corpus, &params.source, "source")?;
-        let target = resolve_item(&corpus, &params.target, "target")?;
+        let target = if crate::external::address(&params.target).is_some() {
+            None
+        } else {
+            Some(resolve_item(&corpus, &params.target, "target")?)
+        };
         let document = corpus
             .documents()
             .iter()
@@ -751,7 +774,7 @@ pub(crate) fn mutate_semantic_relation(
                 "{}:{}: {}",
                 newline_style(document.source()),
                 params.relation,
-                target.id()
+                target.map_or(params.target.as_str(), |item| item.id())
             ),
         );
         candidates.insert(document.path().to_path_buf(), candidate);
@@ -776,7 +799,11 @@ pub(crate) fn mutate_semantic_relation(
             if entry.kind == "inline" {
                 candidate.replace_range(
                     entry.source.start_byte()..entry.source.end_byte(),
-                    &format!("[[{}]]", entry.target),
+                    &if let Some(address) = crate::external::address(&entry.target) {
+                        format!("<{address}>")
+                    } else {
+                        format!("[[{}]]", entry.target)
+                    },
                 );
             } else {
                 let end = full_line_end(candidate, entry.source.end_byte());
@@ -873,6 +900,30 @@ fn validate_relation_endpoints(
         ));
     }
 
+    Ok(())
+}
+
+fn validate_external_relation(
+    schema: &Schema,
+    relation_name: &str,
+    source_flavour: &str,
+    target: &str,
+) -> Result<(), Error> {
+    let Some((_, definition, inverse)) = schema.resolve_relation(relation_name) else {
+        return invalid(format!("unknown relation '{relation_name}'"));
+    };
+    let Some(address) = crate::external::address(target) else {
+        return invalid("expected explicit external: target");
+    };
+    if inverse
+        || !definition.external
+        || !definition.source.iter().any(|f| f == source_flavour)
+        || !crate::external::valid_address(address)
+    {
+        return invalid(format!(
+            "relation '{relation_name}' does not allow this external target"
+        ));
+    }
     Ok(())
 }
 

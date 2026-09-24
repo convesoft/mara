@@ -8,6 +8,7 @@ use serde::Serialize;
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum RelationEndpoint {
     Item { id: String, mid: String },
+    External { address: String },
 }
 
 impl RelationEndpoint {
@@ -28,11 +29,13 @@ impl RelationEndpoint {
     pub fn id(&self) -> &str {
         match self {
             Self::Item { id, .. } => id,
+            Self::External { address } => address,
         }
     }
-    fn mid(&self) -> &str {
+    fn mid(&self) -> Option<&str> {
         match self {
-            Self::Item { mid, .. } => mid,
+            Self::Item { mid, .. } => Some(mid),
+            Self::External { .. } => None,
         }
     }
 }
@@ -46,6 +49,34 @@ pub struct RelationEdge {
 }
 
 impl RelationEdge {
+    pub(crate) fn external(
+        schema: &Schema,
+        source: &Item,
+        name: &str,
+        address: &str,
+    ) -> Result<Self, RelationError> {
+        let (canonical, definition, inverse) = schema.resolve_relation(name).ok_or_else(|| {
+            RelationError::new("invalid_relation", format!("unknown relation '{name}'"))
+        })?;
+        if inverse
+            || !definition.external
+            || !definition.source.iter().any(|f| f == source.flavour())
+            || !crate::external::valid_address(address)
+        {
+            return Err(RelationError::new(
+                "invalid_endpoint",
+                format!("relation '{name}' does not allow this external target"),
+            ));
+        }
+        Ok(Self {
+            relation: canonical.into(),
+            symmetric: false,
+            source: RelationEndpoint::new(source)?,
+            target: RelationEndpoint::External {
+                address: address.into(),
+            },
+        })
+    }
     pub(crate) fn new(
         schema: &Schema,
         source: &Item,
@@ -101,10 +132,13 @@ impl RelationEdge {
             (source, target)
         };
         self.relation == relation.canonical
-            && ((Some(self.source.mid()) == a.mid() && Some(self.target.mid()) == b.mid())
-                || (self.symmetric
-                    && Some(self.source.mid()) == b.mid()
-                    && Some(self.target.mid()) == a.mid()))
+            && ((self.source.mid() == a.mid() && self.target.mid() == b.mid())
+                || (self.symmetric && self.source.mid() == b.mid() && self.target.mid() == a.mid()))
+    }
+    pub(crate) fn matches_external(&self, source: &Item, relation: &Relation) -> bool {
+        self.relation == relation.canonical
+            && self.source.mid() == source.mid()
+            && matches!(&self.target, RelationEndpoint::External { address } if crate::external::address(relation.target()) == Some(address.as_str()))
     }
 }
 
@@ -192,6 +226,9 @@ pub(crate) fn resolve_edge(
     let source_item = resolve_item(corpus, source).map_err(|error| {
         RelationError::new("invalid_endpoint", format!("relation source {error}"))
     })?;
+    if let Some(address) = crate::external::address(target) {
+        return RelationEdge::external(schema, source_item, relation, address);
+    }
     let target_item = resolve_item(corpus, target).map_err(|error| {
         RelationError::new("invalid_endpoint", format!("relation target {error}"))
     })?;
@@ -209,9 +246,13 @@ pub(crate) fn occurrences(
     let mut index = 0;
     for item in corpus.items() {
         for relation in item.relations() {
-            if let Ok(target) = resolve_item(corpus, relation.target())
-                && edge.matches(item, relation, target)
-            {
+            let matches = if crate::external::address(relation.target()).is_some() {
+                edge.matches_external(item, relation)
+            } else {
+                resolve_item(corpus, relation.target())
+                    .is_ok_and(|target| edge.matches(item, relation, target))
+            };
+            if matches {
                 result.push(RelationOccurrence {
                     reference: format!("occ-1-{snapshot}-{index:016x}"),
                     kind: if relation.inline {

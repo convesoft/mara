@@ -56,6 +56,12 @@ Repository-wide instructions for humans and software agents.
   that actually exist; use `N/A` where applicable.
 - Squash merge by default. Use rebase merge only when preserving multiple
   independently useful commits that already follow the commit convention.
+- When the user intends to publish issue work to GitHub or continue its pull
+  request, the main thread uses the repository
+  [Mara PR flow](.agents/skills/mara-pr-flow/SKILL.md) and delegates PR
+  operations to the project [PR manager](.codex/agents/mara_pr_manager.toml).
+  The PR manager does not use the main-thread skill. Keep implementation and
+  review decisions in the main thread.
 
 ## Documentation discipline
 
@@ -187,29 +193,6 @@ Repository-wide instructions for humans and software agents.
   review comment; update the canonical Mara documents when meaning changes.
 - Review one bounded batch. Do not enter repeated review-and-fix loops after the
   current contract passes unless a newly found critical issue requires action.
-
-### Review commands
-
-These phrases apply after `@codex` in a GitHub pull-request comment and as direct
-instructions in a Codex task:
-
-- `classify review`: inspect every unresolved Codex finding for the current pull
-  request revision without changing code or external state. Assign stable IDs
-  (`F1`, `F2`, ...) and classify each as `FIX`, `BACKLOG`, or `DISMISS` using the
-  rules above. State the reason and intended outcome briefly.
-- `process classified review`: recheck the latest classification against the
-  current pull-request head; mark stale or already-resolved findings obsolete.
-  Fix and proportionately verify every `FIX`. Create one Linear Backlog issue per
-  independently actionable `BACKLOG` outcome, grouping duplicates or tightly
-  coupled findings; link the pull request or finding, include evident Mara IDs,
-  and leave it unassigned and unscheduled. Take no action on `DISMISS`.
-- After processing, report a complete ledger mapping every finding ID to its fix
-  and verification, created Linear issue, dismissal, obsolete state, or blocker.
-  If an integration or permission is unavailable, report the incomplete action
-  truthfully rather than claiming it succeeded.
-- `fix this` applies the same fix-and-verify behavior to one referenced finding.
-  `backlog this` applies the Delivery coordination rule to one referenced
-  finding without editing the pull-request branch.
 
 ## Tooling and versioning
 

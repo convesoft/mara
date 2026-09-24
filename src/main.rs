@@ -98,7 +98,7 @@ enum Command {
 
     /// Explore direct schema relations, mentions, and containment with source evidence; read neighbours with get.
     #[command(
-        after_help = "Discovery JSON format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation get.. Pass neighbour.reference to get or another related call; each call follows only direct connections. JSON represents containment as contains with direction; human output displays its incoming view as contained_by. Use --relation builtin:contains --direction incoming for the parent, then outgoing on that parent for its children. Search again if a structural handle is stale."
+        after_help = "Discovery JSON format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation get. Internal neighbours have a reference for get/related; external neighbours have only kind and address and are terminal. JSON represents containment as contains with direction; human output displays its incoming view as contained_by. Use --relation builtin:contains --direction incoming for the parent, then outgoing on that parent for its children. Search again if a structural handle is stale."
     )]
     Related {
         /// Exact item ID/MID or a discovery handle.
@@ -279,7 +279,7 @@ enum ItemCommand {
         fields: Vec<CliField>,
 
         #[arg(long = "relation", value_name = "NAME=TARGET", value_parser = parse_initial_relation,
-            help = "Initial schema-declared outgoing relation, created atomically with the item (repeatable). TARGET is an exact human ID or canonical MID (uppercase 26-character ULID); the new ID may target itself. Duplicate edges are rejected; omission adds none. Later edits use relation add/remove")]
+            help = "Initial schema-declared outgoing relation, created atomically with the item (repeatable). TARGET is an exact human ID, canonical MID, or external:HTTP(S) URL; the new ID may target itself. Duplicate edges are rejected; omission adds none. Later edits use relation add/remove")]
         relations: Vec<InitialRelation>,
 
         /// Body text, or - to read stdin; supports [[relation:ID]] and [[relation:MID]] assertions. An omitted, empty, or whitespace-only required body creates an incomplete scaffold.
@@ -312,7 +312,7 @@ enum RelationCommand {
         source: String,
         /// Canonical relation name or declared inverse alias.
         relation: String,
-        /// Other endpoint: exact human ID or MID.
+        /// Other endpoint: exact human ID, MID, or external:HTTP(S) URL.
         target: String,
         /// Maximum occurrences per page, 1 through 100; defaults to 20. The byte budget may return fewer.
         #[arg(long)]
@@ -327,16 +327,16 @@ enum RelationCommand {
         source: String,
         /// Schema-declared relation name; inspect with schema list relation.
         relation: String,
-        /// Target item's exact human ID or canonical MID (uppercase 26-character ULID).
+        /// Target item's exact human ID, canonical MID, or external:HTTP(S) URL.
         target: String,
     },
-    /// Remove all assertions of an existing semantic relation, demoting inline tokens to bare mentions; rejects a missing edge.
+    /// Remove all assertions of an existing semantic relation, demoting inline tokens to mentions or external links; rejects a missing edge.
     Remove {
         /// Source item's exact human ID or canonical MID (uppercase 26-character ULID).
         source: String,
         /// Schema-declared relation name; inspect with schema list relation.
         relation: String,
-        /// Target item's exact human ID or canonical MID (uppercase 26-character ULID).
+        /// Target item's exact human ID, canonical MID, or external:HTTP(S) URL.
         target: String,
         /// Remove only this snapshot-bound occurrence from relation get.
         #[arg(long)]
@@ -874,7 +874,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                         "{} {} {}: {} occurrences",
                         result.edge.source.id(),
                         result.edge.relation,
-                        result.edge.target.id(),
+                        display_relation_target(&result.edge.target),
                         result.occurrence_count
                     );
                     for entry in &result.occurrences {
@@ -1163,7 +1163,18 @@ fn print_item_summary(item: &ItemSummary) {
 
 fn print_related_connections(connections: &[RelatedConnection]) {
     for connection in connections {
-        let node = &connection.neighbour;
+        let node = match &connection.neighbour {
+            mara::RelatedNeighbour::Internal(node) => node,
+            mara::RelatedNeighbour::External { address, .. } => {
+                println!(
+                    "{} → external:{}\toccurrences={}",
+                    connection.label.as_deref().unwrap_or(&connection.relation),
+                    address,
+                    connection.occurrence_count.unwrap_or_default()
+                );
+                continue;
+            }
+        };
         if let Some(edge) = &connection.edge {
             let label = connection.label.as_deref().unwrap_or(&edge.relation);
             let prefix =
@@ -1243,11 +1254,18 @@ fn print_relation_mutation(result: &RelationMutationResult) -> Result<(), String
         result.action.past_tense(),
         result.edge.relation,
         result.edge.source.id(),
-        result.edge.target.id(),
+        display_relation_target(&result.edge.target),
         result.changed_occurrences,
         result.remaining_occurrences
     );
     Ok(())
+}
+
+fn display_relation_target(target: &mara::RelationEndpoint) -> String {
+    match target {
+        mara::RelationEndpoint::Item { id, .. } => id.clone(),
+        mara::RelationEndpoint::External { address } => format!("external:{address}"),
+    }
 }
 
 fn emit_validation(

@@ -17,6 +17,7 @@ pub use diagnostics::{
     ConfigurationDiagnostic, DiagnosticCode, DiagnosticItem, DiagnosticLocation,
     DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
 };
+mod external;
 mod mutation;
 mod operations;
 mod query;
@@ -54,9 +55,9 @@ pub use operations::{
 pub use query::{
     EntryRange, FieldFilter, GetResult, ItemCollectionResult, ItemFilters, ItemSource, ItemSummary,
     MetadataFragment, MetadataValue, QueryError, RelatedConnection, RelatedFilters, RelatedItem,
-    RelatedItemsResult, RelatedResult, RelationDirection, RelationSummary, ResolvedItem,
-    SearchExcerpt, SearchHit, SearchResult, TextRange, get, get_item, list_items, related,
-    related_items, search, search_items,
+    RelatedItemsResult, RelatedNeighbour, RelatedResult, RelationDirection, RelationSummary,
+    ResolvedItem, SearchExcerpt, SearchHit, SearchResult, TextRange, get, get_item, list_items,
+    related, related_items, search, search_items,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";
@@ -348,6 +349,12 @@ impl Schema {
         }
 
         for (name, relation) in &self.relations {
+            if relation.external
+                && (relation.inverse.is_some() || relation.symmetric || relation.same_flavour)
+            {
+                errors.push(ConfigurationDiagnostic::schema(&["relations", name], format!("external relation '{name}' cannot declare inverse, symmetric or same_flavour")));
+                self.validation.invalid_relations.insert(name.clone());
+            }
             if relation.symmetric
                 && (relation.inverse.is_some()
                     || relation.source.iter().collect::<HashSet<_>>()
@@ -426,7 +433,9 @@ impl Schema {
                     .invalid_relation_sources
                     .insert(name.clone());
             }
-            if !self.validation.flavours_section_invalid {
+            if !self.validation.flavours_section_invalid
+                && (!relation.external || !relation.target.is_empty())
+            {
                 errors.extend(endpoint_errors(
                     name,
                     "target",
@@ -436,11 +445,12 @@ impl Schema {
                 ));
             }
             if self.validation.flavours_section_invalid
-                || !endpoints_are_usable(
-                    &relation.target,
-                    &self.flavours,
-                    &self.validation.invalid_flavours,
-                )
+                || (!relation.external || !relation.target.is_empty())
+                    && !endpoints_are_usable(
+                        &relation.target,
+                        &self.flavours,
+                        &self.validation.invalid_flavours,
+                    )
             {
                 self.validation
                     .invalid_relation_targets
@@ -593,6 +603,8 @@ pub struct RelationDefinition {
     inverse: Option<String>,
     #[serde(default)]
     symmetric: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    external: bool,
 }
 
 impl RelationDefinition {

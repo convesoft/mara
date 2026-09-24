@@ -412,6 +412,17 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 );
             }
             for relation in item.relations() {
+                if let Some(address) = crate::external::address(relation.target()) {
+                    if !crate::external::valid_address(address) {
+                        diagnostic(
+                            DiagnosticCode::RelationInvalid,
+                            &mut diagnostics,
+                            relation.source(),
+                            "invalid external target address".into(),
+                        );
+                    }
+                    continue;
+                }
                 if schema.relation_is_valid(relation.name()) {
                     match resolve_indexed_item(&ids, &mids, relation.target()) {
                         IndexedItem::Missing if corpus.is_complete() => diagnostic(
@@ -590,6 +601,20 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                             item.flavour()
                         ),
                     );
+                }
+                if let Some(address) = crate::external::address(relation.target()) {
+                    if !definition.external || !crate::external::valid_address(address) {
+                        diagnostic(
+                            DiagnosticCode::RelationInvalid,
+                            &mut diagnostics,
+                            relation.source(),
+                            format!(
+                                "relation '{}' does not allow this external target",
+                                relation.name()
+                            ),
+                        );
+                    }
+                    continue;
                 }
                 match resolve_indexed_item(&ids, &mids, relation.target()) {
                     IndexedItem::One(target) => {
@@ -1225,11 +1250,11 @@ fn project_document(
                 let (name, target) = token.target.split_once(':').unwrap_or(("", ""));
                 let source_location = location(&path, &line_starts, token.source.start, token.source.end);
                 if !crate::is_snake_name(name)
-                    || (!crate::is_item_id(target) && !crate::is_mid(target))
+                    || (!crate::is_item_id(target) && !crate::is_mid(target) && !target.starts_with("external:"))
                     || source[token.source.clone()] != format!("[[{}]]", token.target)
                 {
                     diagnostic(DiagnosticCode::RelationInvalid, &mut inline_diagnostics, &source_location,
-                        "invalid typed inline reference; expected [[relation:ID]] or [[relation:MID]] without whitespace or markup".into());
+                        "invalid typed inline reference; expected [[relation:ID]], [[relation:MID]] or [[relation:external:URL]] without whitespace or markup".into());
                     continue;
                 }
                 let Some(schema) = schema else { continue };
