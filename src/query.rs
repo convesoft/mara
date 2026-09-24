@@ -568,7 +568,7 @@ fn related_matches(
     Ok(related)
 }
 
-fn filtered_items<'a>(
+pub(crate) fn filtered_items<'a>(
     corpus: &'a Corpus,
     schema: &Schema,
     filters: &ItemFilters,

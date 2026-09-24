@@ -45,8 +45,70 @@ pub(crate) struct Rules {
     ir: Option<IRSchema>,
     source_fingerprints: BTreeMap<PathBuf, String>,
 }
+
+pub(crate) struct RuleObservation {
+    pub mid: String,
+    pub root: String,
+    pub state: &'static str,
+    pub diagnostic: Option<ValidationDiagnostic>,
+    pub counts: BTreeMap<(String, String, String), (usize, Option<usize>)>,
+    pub states: BTreeMap<(String, String), bool>,
+}
 impl Rules {
+    pub(crate) fn root_ids(&self) -> &[String] {
+        &self.roots
+    }
+
+    pub(crate) fn shape(&self, id: &str) -> Option<(&Value, &DiagnosticLocation)> {
+        self.shapes
+            .get(id)
+            .map(|shape| (&shape.value, &shape.source))
+    }
+
+    pub(crate) fn request_check(
+        &mut self,
+        shape: &str,
+        schema: &Schema,
+        flavours: &[String],
+    ) -> Result<String, String> {
+        if self.diagnostics.is_empty() {
+            let selected = expand_id(shape)?;
+            if selected != shape {
+                return Err("request check shape must be an expanded IRI".into());
+            }
+            let Some(definition) = self.shapes.get(&selected) else {
+                return Err(format!("unknown request check shape '{shape}'"));
+            };
+            let value = &definition.value;
+            if value.get("path").is_some()
+                || value.get("targetClass").is_some()
+                || value.get("whenShape").is_some()
+                || value.get("paths").is_some()
+            {
+                return Err(
+                    "request check must be a targetless node shape without whenShape or paths"
+                        .into(),
+                );
+            }
+            self.compatible(
+                &selected,
+                flavours,
+                &ValueKind::Nodes,
+                schema,
+                &mut BTreeSet::new(),
+            )
+            .map_err(|(_, message)| message)?;
+            self.roots = vec![selected.clone()];
+            Ok(selected)
+        } else {
+            Err("invalid request check definition".into())
+        }
+    }
     pub fn load(project: &Project, schema: &Schema) -> Self {
+        Self::load_files(project, schema, project.rule_files.clone())
+    }
+
+    pub(crate) fn load_files(project: &Project, schema: &Schema, files: Vec<PathBuf>) -> Self {
         let mut rules = Self {
             shapes: BTreeMap::new(),
             roots: vec![],
@@ -57,7 +119,7 @@ impl Rules {
         };
         let schema_value = serde_json::to_value(schema).expect("schema serializes");
         let mut seen = BTreeSet::new();
-        let mut files = project.rule_files.clone();
+        let mut files = files;
         files.sort();
         for path in files {
             let location = DiagnosticLocation {

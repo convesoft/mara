@@ -6670,6 +6670,7 @@ fn mcp_exposes_every_project_bound_alpha_operation_with_cli_equivalent_results()
             "relation_add",
             "relation_get",
             "relation_remove",
+            "trace_matrix",
         ])
     );
     for tool in tools {
@@ -6799,8 +6800,8 @@ fn every_command_help_describes_commands_arguments_and_options() {
             }
         }
     }
-    // Root, six command groups, nineteen project operations, and the MCP server.
-    assert_eq!(visited.len(), 28);
+    // Root, seven command groups, twenty project operations, and the MCP server.
+    assert_eq!(visited.len(), 30);
 }
 
 #[test]
@@ -6835,7 +6836,7 @@ fn mcp_tools_list_exposes_parameter_guidance() {
     let tools = mcp_response(&responses, 2)["result"]["tools"]
         .as_array()
         .unwrap();
-    assert_eq!(tools.len(), 20);
+    assert_eq!(tools.len(), 21);
     for tool in tools {
         assert!(
             tool["description"]
@@ -12011,6 +12012,408 @@ fn rule_fixture() -> TempDir {
     )
     .unwrap();
     fixture
+}
+
+#[test]
+fn trace_matrix_reports_rule_states_edges_and_cli_mcp_parity() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    fs::write(
+        root.join("rules.yaml"),
+        "\
+- id: rule:coverage
+  targetClass: requirement
+  whenShape: rule:approved
+  property:
+    - id: rule:verification_step
+      path: {inversePath: verifies}
+      qualifiedValueShape: rule:approved_verification
+      qualifiedMinCount: 1
+- id: rule:approved
+  property: [{path: status, hasValue: approved}]
+- id: rule:approved_verification
+  class: verification
+  node: rule:approved
+",
+    )
+    .unwrap();
+    for (id, status) in [("REQ-MISSING", "approved"), ("REQ-DRAFT", "draft")] {
+        let output = mara(
+            root,
+            &[
+                "item",
+                "create",
+                "requirement",
+                id,
+                "items.mara.md",
+                "--title",
+                id,
+                "--body",
+                "A real requirement.",
+                "--field",
+                &format!("status={status}"),
+            ],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+    }
+    for verification in ["VER-DRAFT", "VER-APPROVED"] {
+        let output = mara(
+            root,
+            &["relation", "add", verification, "verifies", "REQ-A"],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+    }
+    let args = [
+        "--format",
+        "json",
+        "trace",
+        "matrix",
+        "--flavour",
+        "requirement",
+        "--rule",
+        "urn:mara:rule:coverage",
+        "--limit",
+        "100",
+    ];
+    let output = mara(root, &args);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let result: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(result["evaluation_complete"], true, "{result:#}");
+    assert_eq!(result["summaries"][0]["selected"], 3);
+    assert_eq!(result["summaries"][0]["passed"], 1);
+    assert_eq!(result["summaries"][0]["failed"], 1);
+    assert_eq!(result["summaries"][0]["not_applicable"], 1);
+    let records = result["records"].as_array().unwrap();
+    assert!(
+        records.iter().any(|r| r["kind"] == "edge"
+            && r["endpoint"]["id"] == "VER-DRAFT"
+            && r["qualification"] == "failed"),
+        "{result:#}"
+    );
+    assert!(
+        records.iter().any(|r| r["kind"] == "edge"
+            && r["endpoint"]["id"] == "VER-APPROVED"
+            && r["qualification"] == "passed"),
+        "{result:#}"
+    );
+    let responses = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "trace_matrix",
+                json!({"flavours":["requirement"],
+            "rules":["urn:mara:rule:coverage"],"limit":100}),
+            ),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        result
+    );
+    let text = mara(
+        root,
+        &[
+            "trace",
+            "matrix",
+            "--flavour",
+            "requirement",
+            "--rule",
+            "urn:mara:rule:coverage",
+            "--limit",
+            "100",
+        ],
+    );
+    assert!(text.status.success(), "{}", stderr(&text));
+    assert!(stdout(&text).contains("line "));
+    assert!(stdout(&text).contains("qualifying"));
+}
+
+#[test]
+fn trace_matrix_explains_second_hop_and_continues_without_changing_counts() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["flavours"]["evidence"]["fields"] =
+        json!({"status":{"type":"enum","values":["draft","approved"]}});
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    fs::write(
+        root.join("rules.yaml"),
+        "\
+- id: rule:evidenced_requirement
+  targetClass: requirement
+  property:
+    - id: rule:verification_step
+      path: {inversePath: verifies}
+      qualifiedValueShape: rule:evidenced_verification
+      qualifiedMinCount: 1
+- id: rule:evidenced_verification
+  class: verification
+  property:
+    - id: rule:evidence_step
+      path: {inversePath: evidences}
+      qualifiedValueShape: rule:approved_evidence
+      qualifiedMinCount: 1
+- id: rule:approved_evidence
+  class: evidence
+  property: [{path: status, hasValue: approved}]
+",
+    )
+    .unwrap();
+    assert!(
+        mara(
+            root,
+            &["relation", "add", "VER-APPROVED", "verifies", "REQ-A"]
+        )
+        .status
+        .success()
+    );
+    let created = mara(
+        root,
+        &[
+            "item",
+            "create",
+            "evidence",
+            "EVD-A",
+            "items.mara.md",
+            "--title",
+            "Draft evidence",
+            "--body",
+            "A result.",
+            "--field",
+            "status=draft",
+        ],
+    );
+    assert!(created.status.success(), "{}", stderr(&created));
+    assert!(
+        mara(
+            root,
+            &["relation", "add", "EVD-A", "evidences", "VER-APPROVED"]
+        )
+        .status
+        .success()
+    );
+    let first = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--rule",
+            "urn:mara:rule:evidenced_requirement",
+            "--limit",
+            "100",
+        ],
+    );
+    assert!(first.status.success(), "{}", stderr(&first));
+    let result: Value = serde_json::from_str(&stdout(&first)).unwrap();
+    assert_eq!(result["summaries"][0]["failed"], 1, "{result:#}");
+    assert!(
+        result["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == "check"
+                && r["obligation"]["shape"] == "urn:mara:rule:evidence_step"
+                && r["counts"]["selected"] == 1
+                && r["counts"]["qualifying"] == 0),
+        "{result:#}"
+    );
+    assert!(
+        result["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == "edge"
+                && r["endpoint"]["id"] == "EVD-A"
+                && r["qualification"] == "failed"),
+        "{result:#}"
+    );
+    let mut cursor = None;
+    let mut gathered = Vec::new();
+    loop {
+        let mut args = vec![
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--rule",
+            "urn:mara:rule:evidenced_requirement",
+            "--limit",
+            "2",
+        ];
+        if let Some(value) = cursor.as_deref() {
+            args.extend(["--cursor", value]);
+        }
+        let page = mara(root, &args);
+        assert!(page.status.success(), "{}", stderr(&page));
+        let page: Value = serde_json::from_str(&stdout(&page)).unwrap();
+        assert_eq!(page["summaries"], result["summaries"]);
+        gathered.extend(page["records"].as_array().unwrap().iter().cloned());
+        cursor = page["next_cursor"].as_str().map(str::to_owned);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(gathered, result["records"].as_array().unwrap().clone());
+    let repeat = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--rule",
+            "urn:mara:rule:evidenced_requirement",
+            "--limit",
+            "100",
+        ],
+    );
+    assert_eq!(stdout(&repeat), stdout(&first));
+    let initial = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--rule",
+            "urn:mara:rule:evidenced_requirement",
+            "--limit",
+            "2",
+        ],
+    );
+    let initial: Value = serde_json::from_str(&stdout(&initial)).unwrap();
+    let cursor = initial["next_cursor"].as_str().unwrap();
+    let path = root.join("items.mara.md");
+    let mut source = fs::read_to_string(&path).unwrap();
+    source.push('\n');
+    fs::write(&path, source).unwrap();
+    let stale = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--rule",
+            "urn:mara:rule:evidenced_requirement",
+            "--limit",
+            "2",
+            "--cursor",
+            cursor,
+        ],
+    );
+    assert!(!stale.status.success());
+    let error: Value = serde_json::from_str(&stdout(&stale)).unwrap();
+    assert_eq!(error["error"]["code"], "stale_cursor");
+}
+
+#[test]
+fn trace_matrix_request_check_preserves_external_terminal_and_incompleteness() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["relations"]["tracked_by"] = json!({
+        "description":"Local delivery ticket.","source":["requirement"],
+        "target":[],"external":true
+    });
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    fs::write(
+        root.join("check.yaml"),
+        "id: rule:ticket_check\nproperty: [{path: tracked_by, minCount: 1}]\n",
+    )
+    .unwrap();
+    let target = "external:https://example.com/ticket/1";
+    assert!(
+        mara(root, &["relation", "add", "REQ-A", "tracked_by", target])
+            .status
+            .success()
+    );
+    let args = [
+        "--format",
+        "json",
+        "trace",
+        "matrix",
+        "--id",
+        "REQ-A",
+        "--check-file",
+        "check.yaml",
+        "--shape",
+        "urn:mara:rule:ticket_check",
+    ];
+    let output = mara(root, &args);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let result: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(result["summaries"][0]["passed"], 1, "{result:#}");
+    let edge = result["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["kind"] == "edge")
+        .unwrap();
+    assert_eq!(
+        edge["endpoint"],
+        json!({"kind":"external","address":"https://example.com/ticket/1"})
+    );
+    assert_eq!(edge["qualification"], Value::Null);
+    let responses = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "trace_matrix",
+                json!({"ids":["REQ-A"],"check":{
+            "files":["check.yaml"],"shape":"urn:mara:rule:ticket_check"}}),
+            ),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        result
+    );
+
+    let path = root.join("items.mara.md");
+    let source = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        source.replace(
+            ":tracked_by: external:https://example.com/ticket/1",
+            ":tracked_by: external:not-a-url",
+        ),
+    )
+    .unwrap();
+    let invalid = mara(root, &args);
+    assert!(!invalid.status.success());
+    let incomplete: Value = serde_json::from_str(&stdout(&invalid)).unwrap();
+    assert_eq!(incomplete["evaluation_complete"], false, "{incomplete:#}");
+    assert_eq!(incomplete["summaries"][0]["counts_exact"], false);
+    assert!(
+        incomplete["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == "issue")
+    );
 }
 
 #[test]

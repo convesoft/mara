@@ -12,7 +12,8 @@ do not add lifecycle policy to bundled templates or existing projects.
 The accepted language foundation is SHACL Core, authored in YAML with generated
 bindings and verified by [[EVD-YAML-SHACL-SPIKE]]. The contracts replace the
 earlier unshipped formats. [[ADR-NATIVE-SHACL-ADAPTER]] records the
-native execution boundary; trace views remain planned.
+native execution boundary. The development executable implements matrices;
+generated specifications remain planned.
 
 :::mara design DES-TRACE-RULE-GRAMMAR
 :mid: 01M2JNZMJ0VT20GWH4HF6DBBC5
@@ -523,7 +524,11 @@ configuration, source, identity, field, reference and relationship checks and
 configured YAML current-state rules and structural graph policies. Real CLI
 and stdio MCP tests cover lifecycle and graph examples, warning/error policy,
 invalid prerequisites, source locations, pagination and stale cursors.
-Trace-view commands remain separate work.
+Matrix CLI and stdio MCP tests cover selected root/rule states, qualified and
+external endpoints, and source-linked explanations. CLI tests also cover a
+second-hop gap and bounded continuation. Matrix output is a disposable
+format-1 projection; rule failures remain complete matrix data.
+The specification command remains separate work.
 
 ## Evaluation, output and continuation
 
@@ -868,7 +873,7 @@ back or synthesizes missing requirements/relations.
 
 The rule/diagnostic/view contracts extend the schema-3 relationship baseline
 in [[DES-RELATION-COMPATIBILITY]]. They set compatibility boundaries for
-implemented validation and planned trace views.
+implemented validation and matrices, and planned specifications.
 
 | Surface | Compatibility boundary |
 |---|---|
