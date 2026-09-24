@@ -13546,6 +13546,35 @@ fn bounded_trace_chains_reject_excess_depth_and_finish_on_cycles() {
     assert_eq!(incomplete["evaluation_complete"], false);
     assert_eq!(incomplete["valid"], false);
 
+    let mut reusable: Value = serde_saphyr::from_str(&chain(9)).unwrap();
+    reusable["id"] = json!("rule:shared_path");
+    reusable.as_object_mut().unwrap().remove("targetClass");
+    let named = serde_saphyr::to_string(&json!([
+        {"id":"rule:root","targetClass":"requirement","node":"rule:shared_path"},
+        reusable
+    ]))
+    .unwrap();
+    fs::write(root.join("rules.yaml"), named).unwrap();
+    let named_failure =
+        diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(named_failure["diagnostics"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        named_failure["diagnostics"][0]["rule"],
+        "urn:mara:rule:root"
+    );
+    assert!(
+        named_failure["diagnostics"][0]["location"]["pointer"]
+            .as_str()
+            .unwrap()
+            .starts_with("/1/")
+    );
+    assert!(
+        named_failure["diagnostics"][0]["location"]["pointer"]
+            .as_str()
+            .unwrap()
+            .ends_with("/path")
+    );
+
     let references = |wrappers| {
         let mut shape = json!({"class":"requirement"});
         for _ in 0..wrappers {

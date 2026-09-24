@@ -161,12 +161,26 @@ impl Rules {
                 }
             }
             // Validate every reusable definition too, including unused cycles.
+            // A named reusable shape can be outside the root's source subtree;
+            // retain the root reached during traversal while reporting the
+            // authored location of the offending step.
+            let root_ids = rules.roots.iter().cloned().collect::<BTreeSet<_>>();
+            let mut depth_errors: BTreeMap<(DiagnosticLocation, String), BTreeSet<String>> =
+                BTreeMap::new();
             for id in rules.shapes.keys().cloned().collect::<Vec<_>>() {
                 if let Err((location, message)) =
                     rules.depth(&id, &mut Vec::new(), 0, &schema_value)
                 {
-                    rules.invalid(location, message);
+                    let roots = depth_errors.entry((location, message)).or_default();
+                    if root_ids.contains(&id) {
+                        roots.insert(id);
+                    }
                 }
+            }
+            for ((location, message), roots) in depth_errors {
+                rules.invalid(location, message);
+                rules.diagnostics.last_mut().unwrap().rule =
+                    (roots.len() == 1).then(|| roots.into_iter().next().unwrap());
             }
             for root in rules.roots.clone() {
                 let flavours = strings(&rules.shapes[&root].value["targetClass"]);
