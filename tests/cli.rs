@@ -13280,6 +13280,303 @@ fn current_state_rules_run_real_lifecycle_and_coverage_through_cli_and_mcp() {
 }
 
 #[test]
+fn structural_relation_policies_validate_normalized_edges_through_cli_and_mcp() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(
+        mara(root, &["project", "init", "--template", "engineering"])
+            .status
+            .success()
+    );
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["relations"]["verifies"]["inverse"] = json!("verified_by");
+    schema["relations"]["verifies"]["cardinality"] = json!({"outgoing":{"minimum":1,"maximum":1}});
+    schema["relations"]["depends_on"]["inverse"] = json!("depended_on_by");
+    schema["relations"]["depends_on"]["acyclic"] = json!({"severity":"warning"});
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    let items = r#":::mara requirement REQ-A
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: A
+
+A.
+:::
+
+:::mara requirement REQ-B
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: B
+
+B.
+:::
+
+:::mara requirement REQ-C
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02
+:title: C
+
+C.
+:::
+
+:::mara verification VER-A
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F03
+:title: Verification
+
+Checks the requirements.
+:::
+"#;
+    let item_path = root.join("items.mara.md");
+    fs::write(&item_path, items).unwrap();
+    let schema_result =
+        diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(schema_result["valid"], true, "{schema_result:#}");
+    let missing = validation_with_parity(root, &[]);
+    assert_eq!(missing["summary"]["errors"], 1, "{missing:#}");
+    assert_eq!(missing["diagnostics"][0]["code"], "relation_cardinality");
+    assert_eq!(missing["diagnostics"][0]["details"]["actual"], 0);
+
+    let one = items
+        .replace(":title: A", ":title: A\n:verified_by: VER-A")
+        .replace(
+            ":title: Verification",
+            ":title: Verification\n:verifies: REQ-A\n:verifies: REQ-A",
+        );
+    fs::write(&item_path, &one).unwrap();
+    let pass = validation_with_parity(root, &[]);
+    assert_eq!(pass["valid"], true, "{pass:#}");
+    let selected = diagnostic_parity(
+        root,
+        &["item", "validate", "VER-A"],
+        "item_validate",
+        json!({"id":"VER-A"}),
+    );
+    assert_eq!(selected["valid"], true, "{selected:#}");
+
+    let too_many = one.replace(
+        ":verifies: REQ-A\n:verifies: REQ-A",
+        ":verifies: REQ-A\n:verifies: REQ-A\n:verifies: REQ-B",
+    );
+    fs::write(&item_path, &too_many).unwrap();
+    let excess = validation_with_parity(root, &[]);
+    assert_eq!(excess["summary"]["errors"], 1, "{excess:#}");
+    assert_eq!(excess["diagnostics"][0]["details"]["actual"], 2);
+    let hidden = validation_with_parity(root, &["absent/"]);
+    assert_eq!(hidden["diagnostics"], json!([]));
+    assert_eq!(hidden["summary"], excess["summary"]);
+    assert_eq!(hidden["selection"]["omitted_diagnostics"], 1);
+
+    let chain = one
+        .replace(":title: A", ":title: A\n:depends_on: REQ-B")
+        .replace(":title: B", ":title: B\n:depends_on: REQ-C");
+    fs::write(&item_path, &chain).unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let cycle = chain.replace(":title: A", ":title: A\n:depended_on_by: REQ-C");
+    fs::write(&item_path, &cycle).unwrap();
+    let warned = validation_with_parity(root, &[]);
+    assert_eq!(warned["valid"], true, "{warned:#}");
+    assert_eq!(warned["summary"]["warnings"], 1);
+    let diagnostic = &warned["diagnostics"][0];
+    assert_eq!(diagnostic["code"], "relation_cycle");
+    assert_eq!(diagnostic["severity"], "warning");
+    let witness = diagnostic["details"]["witness"].as_array().unwrap();
+    assert_eq!(witness.len(), 3, "{diagnostic:#}");
+    assert_eq!(witness[2]["edge"]["source"]["id"], "REQ-C");
+    assert!(
+        witness
+            .iter()
+            .all(|edge| edge["reference"].as_str().unwrap().starts_with("occ-1-"))
+    );
+    let item_cycle = diagnostic_parity(
+        root,
+        &["item", "validate", "REQ-B"],
+        "item_validate",
+        json!({"id":"REQ-B"}),
+    );
+    assert_eq!(item_cycle["diagnostics"][0]["code"], "relation_cycle");
+    assert_eq!(item_cycle["diagnostics"][0]["item"]["id"], "REQ-B");
+
+    let two_components = cycle.replace(
+        ":title: Verification",
+        ":title: Verification\n:depends_on: VER-A",
+    );
+    fs::write(&item_path, two_components).unwrap();
+    assert_eq!(validation_with_parity(root, &[])["summary"]["warnings"], 2);
+
+    let self_loop = one.replace(":title: C", ":title: C\n:depends_on: REQ-C");
+    fs::write(&item_path, &self_loop).unwrap();
+    let self_result = validation_with_parity(root, &[]);
+    assert_eq!(self_result["summary"]["warnings"], 1);
+    assert_eq!(
+        self_result["diagnostics"][0]["details"]["witness"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let unconstrained = one
+        .replace(":title: A", ":title: A\n:supersedes: REQ-B")
+        .replace(":title: B", ":title: B\n:supersedes: REQ-A");
+    fs::write(&item_path, &unconstrained).unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+
+    fs::write(
+        &item_path,
+        one.replace(
+            ":verifies: REQ-A\n:verifies: REQ-A",
+            ":verifies: REQ-A\n:verifies: REQ-MISSING",
+        ),
+    )
+    .unwrap();
+    let unavailable = validation_with_parity(root, &[]);
+    assert_eq!(unavailable["evaluation_complete"], false);
+    assert!(
+        unavailable["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "reference_unresolved")
+    );
+    assert!(
+        unavailable["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "evaluation_unavailable")
+    );
+    assert!(
+        !unavailable["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "relation_cardinality")
+    );
+    fs::write(&item_path, &one).unwrap();
+
+    schema["relations"]["verifies"]["cardinality"] = json!({"outgoing":{"minimum":2,"maximum":1}});
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    let invalid = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(invalid["valid"], false);
+    assert_eq!(invalid["diagnostics"][0]["code"], "schema_invalid");
+    assert_eq!(
+        invalid["diagnostics"][0]["location"]["pointer"],
+        "/relations/verifies/cardinality/outgoing"
+    );
+    for invalid_policy in [json!(null), json!({"outgoing":null})] {
+        schema["relations"]["verifies"]["cardinality"] = invalid_policy;
+        fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+        let invalid =
+            diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+        assert_eq!(
+            invalid["diagnostics"][0]["code"], "schema_invalid",
+            "{invalid:#}"
+        );
+    }
+    schema["relations"]["verifies"]
+        .as_object_mut()
+        .unwrap()
+        .remove("cardinality");
+    schema["relations"]["depends_on"]["acyclic"] = json!(null);
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    let invalid = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(
+        invalid["diagnostics"][0]["code"], "schema_invalid",
+        "{invalid:#}"
+    );
+}
+
+#[test]
+fn structural_counts_cover_incoming_symmetric_and_external_targets() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(
+        mara(root, &["project", "init", "--template", "engineering"])
+            .status
+            .success()
+    );
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["relations"]["verifies"]["cardinality"] = json!({"incoming":{"maximum":0}});
+    schema["relations"]["associated_with"] = json!({
+        "description":"Undirected association.", "source":["requirement"], "target":["requirement"],
+        "symmetric":true, "cardinality":{"symmetric":{"maximum":1}}
+    });
+    schema["relations"]["tracked_by"] = json!({
+        "description":"External ticket.", "source":["requirement"], "target":[],
+        "external":true, "cardinality":{"outgoing":{"minimum":1,"maximum":1}}
+    });
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    let items = r#":::mara requirement REQ-A
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00
+:title: A
+:associated_with: REQ-B
+:tracked_by: external:https://example.com/ticket/1
+
+A.
+:::
+
+:::mara requirement REQ-B
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01
+:title: B
+:associated_with: REQ-A
+:tracked_by: external:https://example.com/ticket/2
+
+B.
+:::
+
+:::mara verification VER-A
+:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02
+:title: Verification
+:verifies: REQ-A
+
+Checks A.
+:::
+"#;
+    let item_path = root.join("items.mara.md");
+    fs::write(&item_path, items).unwrap();
+    let incoming = validation_with_parity(root, &[]);
+    assert_eq!(incoming["summary"]["errors"], 1, "{incoming:#}");
+    assert_eq!(
+        incoming["diagnostics"][0]["details"]["direction"],
+        "incoming"
+    );
+    assert_eq!(incoming["diagnostics"][0]["item"]["id"], "REQ-A");
+
+    schema["relations"]["verifies"]
+        .as_object_mut()
+        .unwrap()
+        .remove("cardinality");
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    schema["relations"]["associated_with"]["cardinality"] = json!({"symmetric":{"maximum":0}});
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    let symmetric = validation_with_parity(root, &[]);
+    assert_eq!(symmetric["summary"]["errors"], 2, "{symmetric:#}");
+    assert!(
+        symmetric["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|d| d["details"]["actual"] == 1)
+    );
+
+    schema["relations"]["associated_with"]["cardinality"] = json!({"symmetric":{"maximum":1}});
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    fs::write(
+        &item_path,
+        items.replace(":tracked_by: external:https://example.com/ticket/2\n", ""),
+    )
+    .unwrap();
+    let external = validation_with_parity(root, &[]);
+    assert_eq!(external["summary"]["errors"], 1, "{external:#}");
+    assert_eq!(external["diagnostics"][0]["item"]["id"], "REQ-B");
+    assert_eq!(
+        external["diagnostics"][0]["details"]["direction"],
+        "outgoing"
+    );
+}
+
+#[test]
 fn current_state_rules_preserve_warnings_prerequisites_and_continuations() {
     let fixture = rule_fixture();
     let root = fixture.path();

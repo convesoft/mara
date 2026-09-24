@@ -3,7 +3,8 @@
 Contracts for the 0.3 implementation, extending
 [traceability](traceability.mara.md) and the accepted
 [relationship contracts](relations.mara.md). The development executable
-implements YAML current-state rules and [[DES-TRACE-DIAGNOSTIC-INTERFACE]];
+implements YAML current-state rules, structural graph policies, and
+[[DES-TRACE-DIAGNOSTIC-INTERFACE]];
 the published 0.2 binary does not execute these policies.
 Project examples require the illustrated vocabulary; they
 do not add lifecycle policy to bundled templates or existing projects.
@@ -11,7 +12,7 @@ do not add lifecycle policy to bundled templates or existing projects.
 The accepted language foundation is SHACL Core, authored in YAML with generated
 bindings and verified by [[EVD-YAML-SHACL-SPIKE]]. The contracts replace the
 earlier unshipped formats. [[ADR-NATIVE-SHACL-ADAPTER]] records the
-native execution boundary; structural graph policies and trace views remain planned.
+native execution boundary; trace views remain planned.
 
 :::mara design DES-TRACE-RULE-GRAMMAR
 :mid: 01M2JNZMJ0VT20GWH4HF6DBBC5
@@ -420,6 +421,9 @@ References: [SHACL](https://www.w3.org/TR/shacl/),
 Schema format 3 extends each relation declaration with optional
 `cardinality` and `acyclic`. These are structural policies over semantic
 edges, independent of conditional rules in [[DES-TRACE-RULE-GRAMMAR]].
+Both declarations are active in the current checkout. Run `schema validate`
+to check configuration and `project validate` or `item validate` to evaluate
+the policy through CLI or MCP. No policy applies when these keys are absent.
 
 ```yaml
 relations:
@@ -493,10 +497,10 @@ They do not change relationship mutation errors in [[DES-RELATION-INTERFACES]].
 
 Project, item and schema validation implement this diagnostic envelope for
 configuration, source, identity, field, reference and relationship checks and
-configured YAML current-state rules. Real CLI and stdio MCP tests cover the
-lifecycle examples, warning/error policy, invalid prerequisites, source
-locations, pagination and stale cursors. Structural graph policies and
-trace-view commands remain separate work.
+configured YAML current-state rules and structural graph policies. Real CLI
+and stdio MCP tests cover lifecycle and graph examples, warning/error policy,
+invalid prerequisites, source locations, pagination and stale cursors.
+Trace-view commands remain separate work.
 
 ## Evaluation, output and continuation
 
@@ -840,12 +844,12 @@ back or synthesizes missing requirements/relations.
 :satisfies: REQ-CURRENT-STATE-RULES
 
 The rule/diagnostic/view contracts extend the schema-3 relationship baseline
-in [[DES-RELATION-COMPATIBILITY]]. They describe planned 0.3 behavior;
-do not advance the active schema or executable during contract authoring.
+in [[DES-RELATION-COMPATIBILITY]]. They set compatibility boundaries for
+implemented validation and planned trace views.
 
 | Surface | Compatibility boundary |
 |---|---|
-| Schema | Keep the planned format 3 for vocabulary/relationships and structural cardinality/acyclic declarations. Conditional rules are separate YAML shape files, not an embedded rules mapping in the vocabulary schema. Absent policies impose no obligations. |
+| Schema | Format 3 includes vocabulary/relationships and optional structural cardinality/acyclic declarations. Conditional rules are separate YAML shape files, not an embedded rules mapping in the vocabulary schema. Absent policies impose no obligations. |
 | Documents | No new marker or metadata syntax. Status and other rule inputs are ordinary project-defined fields. |
 | Project configuration | Continue accepting format 1 for projects without rule sources. Enabling YAML rule sources requires format 2 and the optional rules table in DES-TRACE-RULE-GRAMMAR; reject unknown/unsupported versions. No saved views. |
 | Rule binding | Start format_version 1 inside the rules table. It selects the supported YAML/SHACL Core profile, generated context and namespaces, field projection and host selection vocabulary. This is independent of W3C or crate release numbers. |
@@ -854,10 +858,9 @@ do not advance the active schema or executable during contract authoring.
 | Discovery/relationship JSON | Retain the independently planned versions in the relationship compatibility contract. |
 | MCP | Reflect matching domain inputs/results in tool schemas; leave transport negotiation independent. |
 
-The diagnostic foundation and YAML current-state rules are implemented;
-structural graph policies and trace views remain planned. Existing project
-format 1 and schema format 3 require no migration to use the diagnostic
-envelope without rules. Rule adoption is explicit through project format 2.
+Existing project format 1 and schema format 3 require no migration to use the
+diagnostic envelope without rules. Rule adoption is explicit through project
+format 2.
 
 Validation clients must read severity, evaluation_complete, valid and
 continuation, rather than equating a nonempty diagnostic list with failure or
@@ -877,7 +880,7 @@ page may be empty while the target remains invalid. Discard all old cursors.
 
 Validation defaults to 20 diagnostics per page. The unshipped development
 `max_work` option, `work` response field and `evaluation_limit` diagnostic are
-removed; validation format 1 remains the planned 0.3 interface. Discard all
+removed; validation format 1 is the development 0.3 interface. Discard all
 previous development cursors. Output paths only select reporting and never
 reduce the validation target. Read the structured operation-error envelope for
 invalid arguments, stale cursors, I/O preventing a result or oversized
