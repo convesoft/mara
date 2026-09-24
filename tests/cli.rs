@@ -12014,6 +12014,74 @@ fn rule_fixture() -> TempDir {
 }
 
 #[test]
+fn rejected_rule_sources_do_not_affect_validation_cursors() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path().join("project");
+    fs::create_dir(&root).unwrap();
+    assert!(mara(&root, &["project", "init"]).status.success());
+    let outside = fixture.path().join("outside.yaml");
+    fs::write(&outside, "id: rule:outside\n").unwrap();
+    let config_path = root.join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path).unwrap().replacen(
+        "format_version = 1",
+        "format_version = 2",
+        1,
+    );
+    fs::write(&config_path,
+        format!("{config}\n[rules]\nformat_version = 1\nfiles = [\"../outside.yaml\", \"missing.yaml\"]\n")
+    ).unwrap();
+    let first = diagnostic_parity(
+        &root,
+        &["schema", "validate", "--limit", "1"],
+        "schema_validate",
+        json!({"limit":1}),
+    );
+    assert_eq!(first["valid"], false, "{first:#}");
+    assert_eq!(first["has_more"], true, "{first:#}");
+    assert_eq!(first["diagnostics"][0]["code"], "rule_invalid");
+    let cursor = first["next_cursor"].as_str().unwrap();
+    fs::write(
+        &outside,
+        "id: rule:changed\nmessage: unrelated external bytes\n",
+    )
+    .unwrap();
+    let continued = diagnostic_parity(
+        &root,
+        &["schema", "validate", "--limit", "1", "--cursor", cursor],
+        "schema_validate",
+        json!({"limit":1,"cursor":cursor}),
+    );
+    assert!(continued.get("error").is_none(), "{continued:#}");
+    assert_eq!(continued["diagnostics"][0]["code"], "rule_invalid");
+    assert_eq!(continued["has_more"], false);
+}
+
+#[test]
+fn unused_class_scoped_shapes_validate_field_compatibility() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    fs::write(
+        root.join("rules.yaml"),
+        "id: rule:unused\nclass: requirement\nproperty: [{path: owner, datatype: boolean}]\n",
+    )
+    .unwrap();
+    let invalid = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(invalid["valid"], false, "{invalid:#}");
+    assert_eq!(invalid["diagnostics"][0]["code"], "rule_invalid");
+    assert_eq!(
+        invalid["diagnostics"][0]["location"]["pointer"],
+        "/property/0/datatype"
+    );
+    fs::write(
+        root.join("rules.yaml"),
+        "id: rule:unused\nclass: requirement\nproperty: [{path: owner, datatype: string}]\n",
+    )
+    .unwrap();
+    let valid = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(valid["valid"], true, "{valid:#}");
+}
+
+#[test]
 fn current_state_rules_require_all_classes_on_relation_endpoints() {
     let fixture = rule_fixture();
     let root = fixture.path();

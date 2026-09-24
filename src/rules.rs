@@ -58,7 +58,6 @@ impl Rules {
         let mut files = project.rule_files.clone();
         files.sort();
         for path in files {
-            rules.files.push(project.root().join(&path));
             let location = DiagnosticLocation {
                 path: Some(path.clone()),
                 ..Default::default()
@@ -97,6 +96,7 @@ impl Rules {
                     continue;
                 }
             };
+            rules.files.push(full);
             {
                 use sha2::{Digest, Sha256};
                 rules.source_fingerprints.insert(
@@ -169,6 +169,26 @@ impl Rules {
                 if let Err((loc, message)) = rules.compatible(
                     &root,
                     &flavours,
+                    &ValueKind::Nodes,
+                    schema,
+                    &mut BTreeSet::new(),
+                ) {
+                    rules.invalid(loc, message);
+                }
+            }
+            let reusable = rules
+                .shapes
+                .iter()
+                .filter(|(_, shape)| {
+                    shape.value.get("targetClass").is_none() && shape.value.get("path").is_none()
+                })
+                .map(|(id, shape)| (id.clone(), strings(&shape.value["class"])))
+                .filter(|(_, classes)| !classes.is_empty())
+                .collect::<Vec<_>>();
+            for (id, classes) in reusable {
+                if let Err((loc, message)) = rules.compatible(
+                    &id,
+                    &classes,
                     &ValueKind::Nodes,
                     schema,
                     &mut BTreeSet::new(),
