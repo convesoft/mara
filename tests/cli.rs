@@ -430,6 +430,74 @@ fn trace_specification_keeps_ambiguous_item_mentions_unlinked() {
 }
 
 #[test]
+fn trace_specification_links_items_to_adjacent_explicit_anchors() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    fs::write(
+        root.join("items.mara.md"),
+        "<a name=\"stable\"></a>\n\n:::mara requirement REQ-A\n:mid: 01M1PXP2KGVW5ZF2JGP9K4XE9B\n:title: A\n\nBody.\n:::\n",
+    )
+    .unwrap();
+
+    let output = mara(root, &["trace", "specification", "--id", "REQ-A"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let rendered = stdout(&output);
+    assert!(
+        rendered.contains("## [REQ-A](<items.mara.md#stable>)"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn trace_specification_external_inspection_request_resolves() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_path).unwrap()
+        + "\n  tracked_by:\n    description: An external ticket reference.\n    source: [requirement]\n    target: []\n    external: true\n";
+    fs::write(schema_path, schema).unwrap();
+    let target = "external:https://example.com/ticket/1";
+    let added = mara(root, &["relation", "add", "REQ-A", "tracked_by", target]);
+    assert!(added.status.success(), "{}", stderr(&added));
+
+    let output = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "specification",
+            "--id",
+            "REQ-A",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let result: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let inspection = result["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|record| {
+            record["kind"] == "relationship" && record["edge"]["relation"] == "tracked_by"
+        })
+        .unwrap()["inspection"]
+        .clone();
+    assert_eq!(inspection["target"], target);
+    let inspected = mara(
+        root,
+        &[
+            "relation",
+            "get",
+            inspection["source"].as_str().unwrap(),
+            inspection["relation"].as_str().unwrap(),
+            inspection["target"].as_str().unwrap(),
+        ],
+    );
+    assert!(inspected.status.success(), "{}", stderr(&inspected));
+}
+
+#[test]
 fn trace_specification_fragments_oversized_content_without_skips() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();

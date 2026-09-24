@@ -296,10 +296,14 @@ pub(crate) fn generate(
                     }
                 };
                 let outside = endpoint_mid(endpoint).is_none_or(|mid| !selected_mids.contains(mid));
+                let inspection_target = match &edge.target {
+                    RelationEndpoint::Item { id, .. } => id.clone(),
+                    RelationEndpoint::External { address } => format!("external:{address}"),
+                };
                 records.push(SpecificationRecord::Relationship {
                     item: node.clone(), edge: edge.clone(), label, direction: direction.into(),
                     endpoint: neighbour, outside_selection: outside, occurrence_count: *count,
-                    inspection: json!({"source":edge.source.id(),"relation":edge.relation,"target":edge.target.id()}),
+                    inspection: json!({"source":edge.source.id(),"relation":edge.relation,"target":inspection_target}),
                 });
             }
         }
@@ -649,7 +653,7 @@ fn markdown(
     corpus: &Corpus,
     resolved_references: &ResolvedReferences,
 ) -> String {
-    let anchors = heading_anchors(corpus);
+    let anchors = source_anchors(corpus);
     let mut out = String::from(
         "# Specification\n\nCanonical links are relative to the project root. Save this page there to follow them.\n\n",
     );
@@ -849,11 +853,11 @@ fn fence_markers(source: &str, span: crate::SourceSpan) -> Option<(String, Strin
     ))
 }
 
-type HeadingAnchors = BTreeMap<PathBuf, Vec<(usize, usize, String)>>;
+type SourceAnchors = BTreeMap<PathBuf, Vec<(usize, usize, String)>>;
 
-fn heading_anchors(corpus: &Corpus) -> HeadingAnchors {
+fn source_anchors(corpus: &Corpus) -> SourceAnchors {
     let graph = corpus.discovery();
-    let mut result = HeadingAnchors::new();
+    let mut result = SourceAnchors::new();
     let mut used = BTreeMap::<PathBuf, BTreeSet<String>>::new();
     for node in graph.nodes() {
         if let DiscoveryNodeKind::Section { heading } = node.kind() {
@@ -873,10 +877,62 @@ fn heading_anchors(corpus: &Corpus) -> HeadingAnchors {
             ));
         }
     }
+    for document in corpus.documents() {
+        let mut counts = BTreeMap::<&str, usize>::new();
+        for anchor in document
+            .references()
+            .iter()
+            .filter(|reference| reference.kind() == ReferenceKind::Anchor)
+        {
+            *counts.entry(anchor.target()).or_default() += 1;
+        }
+        for anchor in document
+            .references()
+            .iter()
+            .filter(|reference| reference.kind() == ReferenceKind::Anchor)
+        {
+            if anchor.target().is_empty()
+                || counts[anchor.target()] != 1
+                || used
+                    .get(document.path())
+                    .is_some_and(|names| names.contains(anchor.target()))
+            {
+                continue;
+            }
+            let span = anchor.source().span();
+            let line_start = document.source()[..span.start_byte()]
+                .rfind('\n')
+                .map_or(0, |offset| offset + 1);
+            if !document.source()[line_start..span.start_byte()]
+                .chars()
+                .all(|ch| ch.is_whitespace() || ch == '>')
+            {
+                continue;
+            }
+            let Some(item) = document
+                .items()
+                .iter()
+                .find(|item| item.source().span().start_byte() >= span.end_byte())
+            else {
+                continue;
+            };
+            let item_span = item.source().span();
+            if document.source()[span.end_byte()..item_span.start_byte()]
+                .chars()
+                .all(|ch| ch.is_whitespace() || ch == '>')
+            {
+                result.entry(document.path().to_owned()).or_default().push((
+                    item_span.start_byte(),
+                    item_span.end_byte(),
+                    md_target(Path::new(anchor.target())),
+                ));
+            }
+        }
+    }
     result
 }
 
-fn source_target(path: &Path, byte: usize, anchors: &HeadingAnchors) -> String {
+fn source_target(path: &Path, byte: usize, anchors: &SourceAnchors) -> String {
     let mut target = md_target(path);
     if let Some((_, _, anchor)) = anchors
         .get(path)
@@ -895,7 +951,7 @@ fn render_references(
     content: &str,
     source: &ItemSource,
     corpus: &Corpus,
-    anchors: &HeadingAnchors,
+    anchors: &SourceAnchors,
     resolved_references: &ResolvedReferences,
 ) -> String {
     // Parser reference spans exclude code and escaped literal examples.
