@@ -1003,18 +1003,32 @@ fn render_references(
             }
             ReferenceKind::MarkdownLink => {
                 let target = reference.target();
-                (!canonical_link(target)
+                let eligible = !canonical_link(target)
                     || resolved_references.contains(&(
                         source.path().to_owned(),
                         span.start_byte(),
                         span.end_byte(),
-                    )))
-                .then(|| rebase_target(target, source.path()))
-                .flatten()
-                .and_then(|rebased| {
-                    raw.rfind(target)
-                        .map(|at| format!("{}{}{}", &raw[..at], rebased, &raw[at + target.len()..]))
-                })
+                    ));
+                eligible
+                    .then(|| {
+                        rebase_target(target, source.path())
+                            .or_else(|| external_destination(target).then(|| target.to_owned()))
+                    })
+                    .flatten()
+                    .and_then(|destination| {
+                        if let Some(label) = reference_label(raw) {
+                            Some(format!("[{label}](<{destination}>)"))
+                        } else {
+                            raw.rfind(target).map(|at| {
+                                format!(
+                                    "{}{}{}",
+                                    &raw[..at],
+                                    destination,
+                                    &raw[at + target.len()..]
+                                )
+                            })
+                        }
+                    })
             }
             ReferenceKind::Anchor => None,
         };
@@ -1079,9 +1093,49 @@ fn render_references(
 }
 
 fn canonical_link(target: &str) -> bool {
+    if external_destination(target) {
+        return false;
+    }
     let file = target.split_once('#').map_or(target, |(file, _)| file);
     let file = crate::discovery::percent_decode(file);
     file.is_empty() || file.ends_with(".mara.md")
+}
+
+fn external_destination(target: &str) -> bool {
+    target.starts_with("//")
+        || target.split_once(':').is_some_and(|(scheme, _)| {
+            scheme.starts_with(|ch: char| ch.is_ascii_alphabetic())
+                && scheme
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '.'))
+        })
+}
+
+fn reference_label(raw: &str) -> Option<&str> {
+    let text = raw.strip_prefix('[')?;
+    let mut depth = 1usize;
+    let mut escaped = false;
+    for (index, ch) in text.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    let suffix = &text[index + 1..];
+                    return (suffix.is_empty()
+                        || (suffix.trim_start().starts_with('[') && suffix.ends_with(']')))
+                    .then_some(&text[..index]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn collect_definitions<'a>(

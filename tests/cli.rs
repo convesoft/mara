@@ -411,6 +411,58 @@ fn trace_specification_retains_unresolved_source_links() {
 }
 
 #[test]
+fn trace_specification_reference_links_work_without_definitions_on_the_page() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    fs::create_dir(root.join("docs")).unwrap();
+    fs::write(root.join("target.mara.md"), "# Target\n").unwrap();
+    fs::write(
+        root.join("docs/refs.mara.md"),
+        "# Guide\n\nRead [the target][target] and [the website][website].\n\n:::mara requirement REQ-A\n:mid: 01M1PXP2KGVW5ZF2JGP9K4XE9B\n:title: A\n\nBody.\n:::\n\n[target]: ../target.mara.md#target\n[website]: https://example.com/info.mara.md\n",
+    )
+    .unwrap();
+
+    let output = mara(
+        root,
+        &["trace", "specification", "--path", "docs/", "--limit", "1"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let rendered = stdout(&output);
+    assert!(rendered.contains("More records: **true**"), "{rendered}");
+    assert!(!rendered.contains("[target]:"), "{rendered}");
+    assert!(
+        rendered.contains("[the target](<target.mara.md#target>)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[the website](<https://example.com/info.mara.md>)"),
+        "{rendered}"
+    );
+    let json_output = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "specification",
+            "--path",
+            "docs/",
+            "--limit",
+            "1",
+        ],
+    );
+    assert!(json_output.status.success(), "{}", stderr(&json_output));
+    let json: Value = serde_json::from_str(&stdout(&json_output)).unwrap();
+    assert!(
+        json["records"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("[the target][target]")
+    );
+}
+
+#[test]
 fn trace_specification_keeps_ambiguous_item_mentions_unlinked() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
