@@ -233,12 +233,12 @@ fn verify_identities_and_references(
             || original
                 .relations()
                 .iter()
-                .map(|rel| (rel.name(), &old_targets[rel.target()]))
+                .map(|rel| (rel.name(), relation_identity(&old_targets, rel.target())))
                 .collect::<Vec<_>>()
                 != candidate
                     .relations()
                     .iter()
-                    .map(|rel| (rel.name(), &new_targets[rel.target()]))
+                    .map(|rel| (rel.name(), relation_identity(&new_targets, rel.target())))
                     .collect::<Vec<_>>()
             || original
                 .mentions()
@@ -255,6 +255,17 @@ fn verify_identities_and_references(
         }
     }
     Ok(())
+}
+
+fn relation_identity<'a>(targets: &'a BTreeMap<String, String>, target: &'a str) -> &'a str {
+    if crate::external::address(target).is_some() {
+        target
+    } else {
+        targets
+            .get(target)
+            .expect("validated internal target")
+            .as_str()
+    }
 }
 
 #[cfg(test)]

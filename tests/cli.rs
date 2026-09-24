@@ -12265,6 +12265,65 @@ fn external_declarations_reject_internal_only_relation_modes() {
 }
 
 #[test]
+fn item_edits_preserve_external_targets() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    fs::write(
+        &schema_path,
+        fs::read_to_string(&schema_path).unwrap()
+            + "\n  tracked_by:\n    description: An external ticket.\n    source: [requirement]\n    target: []\n    external: true\n",
+    )
+    .unwrap();
+    let target = "external:https://example.invalid/ticket/ENG-7?view=full#notes";
+    assert!(
+        mara(root, &["relation", "add", "REQ-A", "tracked_by", target])
+            .status
+            .success()
+    );
+    let project = resolve_project(Some(root), root).unwrap();
+    let schema = mara::load_schema(&project).unwrap();
+    let corpus = mara::load_corpus(&project, &schema).unwrap();
+    let item = mara::get_item(&corpus, "REQ-A").unwrap();
+    assert_eq!(
+        item.outgoing_relations()[0].external_address(),
+        Some(&target["external:".len()..])
+    );
+    assert!(item.outgoing_relations()[0].item().is_none());
+
+    for args in [
+        vec!["item", "update", "REQ-A", "--title", "Updated"],
+        vec!["item", "rename", "REQ-A", "REQ-EXT"],
+        vec!["item", "move", "REQ-EXT", "moved.mara.md"],
+    ] {
+        let result = mara(root, &args);
+        assert!(
+            result.status.success(),
+            "{}: {}",
+            args.join(" "),
+            stderr(&result)
+        );
+        assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    }
+    assert!(
+        fs::read_to_string(root.join("moved.mara.md"))
+            .unwrap()
+            .contains(target)
+    );
+    assert_eq!(
+        relation_tool(
+            root,
+            "relation_get",
+            json!({"source":"REQ-EXT","relation":"tracked_by","target":target})
+        )["occurrence_count"],
+        1
+    );
+    let deleted = mara(root, &["item", "delete", "REQ-EXT"]);
+    assert!(deleted.status.success(), "{}", stderr(&deleted));
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+}
+
+#[test]
 fn non_finite_number_fields_report_the_authored_field_before_rule_projection() {
     let fixture = rule_fixture();
     let root = fixture.path();

@@ -148,7 +148,10 @@ impl MetadataValue {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct RelationSummary {
     relation: String,
-    item: ItemSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    item: Option<ItemSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    external_address: Option<String>,
 }
 
 impl RelationSummary {
@@ -156,8 +159,12 @@ impl RelationSummary {
         &self.relation
     }
 
-    pub const fn item(&self) -> &ItemSummary {
-        &self.item
+    pub fn item(&self) -> Option<&ItemSummary> {
+        self.item.as_ref()
+    }
+
+    pub fn external_address(&self) -> Option<&str> {
+        self.external_address.as_deref()
     }
 }
 
@@ -424,11 +431,22 @@ pub fn get_item(corpus: &Corpus, id: &str) -> Result<ResolvedItem, QueryError> {
         .relations()
         .iter()
         .map(|relation| {
-            Ok(RelationSummary {
-                relation: relation.name().to_owned(),
-                item: resolve_relation_target(corpus, item, relation.name(), relation.target())?
-                    .into(),
-            })
+            if let Some(address) = crate::external::address(relation.target()) {
+                Ok(RelationSummary {
+                    relation: relation.name().to_owned(),
+                    item: None,
+                    external_address: Some(address.to_owned()),
+                })
+            } else {
+                Ok(RelationSummary {
+                    relation: relation.name().to_owned(),
+                    item: Some(
+                        resolve_relation_target(corpus, item, relation.name(), relation.target())?
+                            .into(),
+                    ),
+                    external_address: None,
+                })
+            }
         })
         .collect::<Result<_, QueryError>>()?;
     let mut incoming_relations = Vec::new();
@@ -443,7 +461,8 @@ pub fn get_item(corpus: &Corpus, id: &str) -> Result<ResolvedItem, QueryError> {
             if same_item_identity(target, item) {
                 incoming_relations.push(RelationSummary {
                     relation: relation.name().to_owned(),
-                    item: source.into(),
+                    item: Some(source.into()),
+                    external_address: None,
                 });
             }
         }
