@@ -768,8 +768,8 @@ force an unbounded nested row:
 | Record kind | Required meaning |
 |---|---|
 | `result` | `root` item descriptor, `evaluation` rule/check identity, and overall `state`. |
-| `check` | `reference`, `root`, `evaluation`, `obligation` shape/component/source descriptor, `context`, `parent` check reference (null at root), `state`, and `condition` predicate; relationship checks add `counts` and `every`. |
-| `edge` | `check` reference, canonical `edge`, endpoint-facing `label`, `direction`, `endpoint`, `qualification`, `every`, and `occurrence_count`. |
+| `check` | `reference`, `root`, `evaluation`, `obligation` shape/component/source descriptor, `context`, `parent` check reference (null at root), `state`, and `condition` predicate; relationship checks add `counts` and `every`; local field checks add `inspection`. |
+| `edge` | `check` reference, canonical `edge`, endpoint-facing `label`, `direction`, `endpoint`, `outside_selection`, `qualification`, `every`, and `occurrence_count`. |
 | `issue` | `diagnostic` preventing complete evaluation. |
 
 `evaluation` is `{kind:"rule",shape:"urn:mara:rule:approved_requirement"}`
@@ -789,8 +789,13 @@ check; at most eight hops. `check` references are snapshot-bound opaque
 identifiers, not durable item identities. They connect records across pages.
 Counts belong to the immediate check: include selected and qualifying totals,
 declared minimum/maximum, and every state where present. Counts are null
-when unavailable, not misleading zeros. Local checks retain field paths,
-constraint parameters and bounded value/source inspection references.
+when unavailable, not misleading zeros. An edge's `outside_selection` is true
+when its item endpoint was not selected as a root, or when it is external.
+Local checks retain field paths and constraint parameters. Their `inspection`
+identifies the focus item and field, total authored value count, the first
+authored value (at most 256 characters), whether that value was truncated, and
+its source location. Null value and source mean the field is absent; inspect
+the item for additional values when the count exceeds one.
 
 Emit one result for each root/rule pair, including not-applicable roots.
 Only applicable, evaluated rules have check records. Order reported checks by

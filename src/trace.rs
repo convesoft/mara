@@ -98,6 +98,7 @@ pub enum TraceRecord {
         condition: Value,
         counts: Value,
         every: Option<bool>,
+        inspection: Option<Value>,
         reported: Option<Value>,
     },
     Edge {
@@ -106,6 +107,7 @@ pub enum TraceRecord {
         label: String,
         direction: String,
         endpoint: Value,
+        outside_selection: bool,
         qualification: Option<String>,
         every: Option<String>,
         occurrence_count: usize,
@@ -345,6 +347,7 @@ pub(crate) fn matrix(
                     schema,
                     corpus: &corpus,
                     descriptors: &descriptors,
+                    selected_mids: &selected_mids,
                     edges: &edges,
                     observation,
                     root: root_descriptor,
@@ -463,6 +466,7 @@ struct ExplainContext<'a> {
     schema: &'a Schema,
     corpus: &'a Corpus,
     descriptors: &'a BTreeMap<String, Value>,
+    selected_mids: &'a BTreeSet<String>,
     edges: &'a [EdgeEntry],
     observation: &'a RuleObservation,
     root: &'a Value,
@@ -579,14 +583,37 @@ fn explain(
             .collect::<Option<Vec<_>>>()
             .map(|values| values.iter().all(|v| *v))
     });
+    let inspection = path.and_then(|path| {
+        if relation.is_some() {
+            return None;
+        }
+        let field = path
+            .as_str()?
+            .strip_prefix("field:")
+            .unwrap_or(path.as_str()?);
+        let mut values = focus.metadata().iter().filter(|entry| entry.key() == field);
+        let first = values.next();
+        let value_count = usize::from(first.is_some()) + values.count();
+        let (value, value_truncated) = first.map_or((None, false), |entry| {
+            let excerpt = entry.value().chars().take(256).collect::<String>();
+            let truncated = entry.value().chars().count() > 256;
+            (Some(excerpt), truncated)
+        });
+        Some(
+            json!({"field":field,"item":focus.mid(),"item_id":focus.id(),"value":value,
+            "value_truncated":value_truncated,"value_count":value_count,
+            "source":first.map(|entry|DiagnosticLocation::source(entry.source()))}),
+        )
+    });
     output.records.push(record(
         json!({"kind":"check","reference":reference,"root":ctx.root,
         "evaluation":ctx.evaluation,"obligation":{"shape":shape_id,"source":source},
         "context":context,"parent":parent,"state":state,"condition":condition,
-        "counts":count,"every":every,
+        "counts":count,"every":every,"inspection":inspection,
         "reported":observation.diagnostic.as_ref().filter(|d|
             d.obligation.as_ref().is_some_and(|o|o.shape==shape_id))}),
     ));
+    let local_shape = relation.is_none();
     if let (Some(name), Some(direction), Some(label)) = (relation, direction, label) {
         for (entry, endpoint) in &matching {
             let qualification = qualifier.and_then(|q| match endpoint {
@@ -604,9 +631,14 @@ fn explain(
                 RelationEndpoint::External { .. } => None,
             });
             let descriptor = endpoint_descriptor(endpoint, ctx.descriptors);
+            let outside_selection = match endpoint {
+                RelationEndpoint::Item { mid, .. } => !ctx.selected_mids.contains(mid),
+                RelationEndpoint::External { .. } => true,
+            };
             output.records.push(record(
                 json!({"kind":"edge","check":reference,"edge":entry.edge,
                 "label":label,"direction":direction,"endpoint":descriptor,
+                "outside_selection":outside_selection,
                 "qualification":qualification.map(|v|if v{"passed"}else{"failed"}),
                 "every":every_state.map(|v|if v{"passed"}else{"failed"}),
                 "occurrence_count":entry.occurrences,
@@ -652,6 +684,27 @@ fn explain(
             .contains_key(&(child.to_owned(), focus.mid().unwrap().to_owned()))
         {
             explain(ctx, child, focus, Some(&reference), context, output, depth);
+        }
+    }
+    if local_shape {
+        let nested = shape["node"]
+            .as_str()
+            .into_iter()
+            .chain(["and", "or"].into_iter().flat_map(|key| {
+                shape[key]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+            }))
+            .chain(shape["not"].as_str());
+        for child in nested {
+            if observation
+                .states
+                .contains_key(&(child.to_owned(), focus.mid().unwrap().to_owned()))
+            {
+                explain(ctx, child, focus, Some(&reference), context, output, depth);
+            }
         }
     }
 }
@@ -887,7 +940,48 @@ pub fn markdown(result: &TraceMatrixResult) -> String {
                 let source = &record["obligation"]["source"];
                 let path = source["path"].as_str().unwrap_or("");
                 let line = source["line"].as_u64().unwrap_or(0);
-                out.push_str(&format!("| Check | {} | [{shape}](<{}>) (line {line}) | selected {}, qualifying {}, min {}, max {} |\n",
+                let inspected = &record["inspection"];
+                let detail = if inspected.is_object() {
+                    let value = if inspected["value"].is_null() {
+                        "missing".to_owned()
+                    } else {
+                        format!(
+                            "{}{}",
+                            md_cell(&inspected["value"].to_string()),
+                            if inspected["value_truncated"] == true {
+                                "…"
+                            } else {
+                                ""
+                            }
+                        )
+                    };
+                    let source = &inspected["source"];
+                    let location = if source.is_object() {
+                        format!(
+                            " at [{}](<{}>) (line {})",
+                            md_cell(inspected["item_id"].as_str().unwrap_or("item")),
+                            md_target(source["path"].as_str().unwrap_or("")),
+                            source["line"].as_u64().unwrap_or(0)
+                        )
+                    } else {
+                        String::new()
+                    };
+                    let count = inspected["value_count"].as_u64().unwrap_or(0);
+                    format!(
+                        "; {} = {}{} ({})",
+                        md_cell(inspected["field"].as_str().unwrap_or("?")),
+                        value,
+                        location,
+                        match count {
+                            0 => "0 values".to_owned(),
+                            1 => "1 value".to_owned(),
+                            _ => format!("first of {count} values"),
+                        }
+                    )
+                } else {
+                    String::new()
+                };
+                out.push_str(&format!("| Check | {} | [{shape}](<{}>) (line {line}) | selected {}, qualifying {}, min {}, max {}{detail} |\n",
                     record["state"].as_str().unwrap_or("?"),md_target(path),
                     show(&record["counts"]["selected"]),show(&record["counts"]["qualifying"]),
                     show(&record["counts"]["minimum"]),show(&record["counts"]["maximum"])));
@@ -903,8 +997,13 @@ pub fn markdown(result: &TraceMatrixResult) -> String {
                     format!("[{id}](<{}>)", md_target(path))
                 };
                 out.push_str(&format!(
-                    "| Edge | {} | {dest} | qualification {}, every {}; assertions {} |\n",
+                    "| Edge | {} | {dest}{} | qualification {}, every {}; assertions {} |\n",
                     record["label"].as_str().unwrap_or("?"),
+                    if record["outside_selection"] == true {
+                        " (outside root selection)"
+                    } else {
+                        ""
+                    },
                     show(&record["qualification"]),
                     show(&record["every"]),
                     show(&record["occurrence_count"])
@@ -936,6 +1035,12 @@ fn show(value: &Value) -> String {
             .map(str::to_owned)
             .unwrap_or_else(|| value.to_string())
     }
+}
+fn md_cell(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('|', "\\|")
+        .replace(['\n', '\r'], " ")
 }
 fn md_target(path: &str) -> String {
     path.replace('%', "%25")

@@ -12087,7 +12087,26 @@ fn trace_matrix_reports_rule_states_edges_and_cli_mcp_parity() {
     assert!(
         records.iter().any(|r| r["kind"] == "edge"
             && r["endpoint"]["id"] == "VER-DRAFT"
-            && r["qualification"] == "failed"),
+            && r["qualification"] == "failed"
+            && r["outside_selection"] == true),
+        "{result:#}"
+    );
+    assert!(
+        records.iter().any(|r| r["kind"] == "check"
+            && r["obligation"]["shape"] == "urn:mara:rule:approved_verification"
+            && r["state"] == "failed"
+            && r["inspection"].is_null()),
+        "{result:#}"
+    );
+    assert!(
+        records.iter().any(|r| r["kind"] == "check"
+            && r["state"] == "failed"
+            && r["condition"]["path"] == "status"
+            && r["inspection"]["item_id"] == "VER-DRAFT"
+            && r["inspection"]["item"].is_string()
+            && r["inspection"]["value"] == "draft"
+            && r["inspection"]["value_count"] == 1
+            && r["inspection"]["source"]["line"].is_number()),
         "{result:#}"
     );
     assert!(
@@ -12129,6 +12148,34 @@ fn trace_matrix_reports_rule_states_edges_and_cli_mcp_parity() {
     assert!(text.status.success(), "{}", stderr(&text));
     assert!(stdout(&text).contains("line "));
     assert!(stdout(&text).contains("qualifying"));
+    assert!(stdout(&text).contains("outside root selection"));
+    assert!(stdout(&text).contains("status = \"draft\""));
+    let all = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--all",
+            "--rule",
+            "urn:mara:rule:coverage",
+            "--limit",
+            "100",
+        ],
+    );
+    assert!(all.status.success(), "{}", stderr(&all));
+    let all: Value = serde_json::from_str(&stdout(&all)).unwrap();
+    assert!(
+        all["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["kind"] == "edge"
+                && r["endpoint"]["id"] == "VER-DRAFT"
+                && r["outside_selection"] == false),
+        "{all:#}"
+    );
 }
 
 #[test]
