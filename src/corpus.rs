@@ -945,7 +945,7 @@ fn valid_field_value(kind: FieldType, values: Option<&[String]>, value: &str) ->
     match kind {
         FieldType::String => true,
         FieldType::Integer => value.parse::<i64>().is_ok(),
-        FieldType::Number => value.parse::<f64>().is_ok(),
+        FieldType::Number => value.parse::<f64>().is_ok_and(f64::is_finite),
         FieldType::Boolean => matches!(value, "true" | "false"),
         FieldType::Enum => {
             values.is_some_and(|values| values.iter().any(|candidate| candidate == value))

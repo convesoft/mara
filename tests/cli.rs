@@ -12014,6 +12014,65 @@ fn rule_fixture() -> TempDir {
 }
 
 #[test]
+fn non_finite_number_fields_report_the_authored_field_before_rule_projection() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let file = root.join("items.mara.md");
+    let source = fs::read_to_string(&file).unwrap();
+    for value in ["NaN", "inf", "-inf", "1e999"] {
+        fs::write(
+            &file,
+            source.replacen(
+                ":owner: Alice",
+                &format!(":score: {value}\n:owner: Alice"),
+                1,
+            ),
+        )
+        .unwrap();
+        for selection in [None, Some("REQ-A")] {
+            let result = if let Some(id) = selection {
+                diagnostic_parity(
+                    root,
+                    &["item", "validate", id],
+                    "item_validate",
+                    json!({"id":id}),
+                )
+            } else {
+                validation_with_parity(root, &[])
+            };
+            assert_eq!(result["evaluation_complete"], false, "{value}: {result:#}");
+            let diagnostics = result["diagnostics"].as_array().unwrap();
+            let field = diagnostics
+                .iter()
+                .find(|d| d["code"] == "field_invalid" && d["item"]["id"] == "REQ-A")
+                .unwrap_or_else(|| panic!("missing field diagnostic for {value}: {result:#}"));
+            assert_eq!(field["location"]["path"], "items.mara.md");
+            assert!(field["location"]["line"].as_u64().is_some());
+            assert!(field["message"].as_str().unwrap().contains(value));
+            assert!(
+                diagnostics
+                    .iter()
+                    .any(|d| d["code"] == "evaluation_unavailable")
+            );
+        }
+    }
+    fs::write(
+        &file,
+        source.replacen(":owner: Alice", ":score: 1e308\n:owner: Alice", 1),
+    )
+    .unwrap();
+    let finite = validation_with_parity(root, &[]);
+    assert_eq!(finite["evaluation_complete"], true, "{finite:#}");
+    assert!(
+        finite["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|d| { d["code"] != "field_invalid" && d["code"] != "evaluation_unavailable" })
+    );
+}
+
+#[test]
 fn rejected_rule_sources_do_not_affect_validation_cursors() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path().join("project");
