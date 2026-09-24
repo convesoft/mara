@@ -13575,6 +13575,49 @@ fn bounded_trace_chains_reject_excess_depth_and_finish_on_cycles() {
             .ends_with("/path")
     );
 
+    let mut branched: Value = serde_saphyr::from_str(&chain(9)).unwrap();
+    let branch = branched["property"][0].clone();
+    branched["property"] = json!([branch.clone(), branch]);
+    fs::write(
+        root.join("rules.yaml"),
+        serde_saphyr::to_string(&branched).unwrap(),
+    )
+    .unwrap();
+    let branched_failure =
+        diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    let diagnostics = branched_failure["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics.len(), 2, "{branched_failure:#}");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| d["rule"] == "urn:mara:rule:bounded_chain")
+    );
+    assert_ne!(
+        diagnostics[0]["location"]["pointer"],
+        diagnostics[1]["location"]["pointer"]
+    );
+
+    branched["id"] = json!("rule:shared_branches");
+    branched.as_object_mut().unwrap().remove("targetClass");
+    let named_branches = json!([
+        {"id":"rule:branch_root","targetClass":"requirement","node":"rule:shared_branches"},
+        branched
+    ]);
+    fs::write(
+        root.join("rules.yaml"),
+        serde_saphyr::to_string(&named_branches).unwrap(),
+    )
+    .unwrap();
+    let named_branches_failure =
+        diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    let diagnostics = named_branches_failure["diagnostics"].as_array().unwrap();
+    assert_eq!(diagnostics.len(), 2, "{named_branches_failure:#}");
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| d["rule"] == "urn:mara:rule:branch_root")
+    );
+
     let references = |wrappers| {
         let mut shape = json!({"class":"requirement"});
         for _ in 0..wrappers {
