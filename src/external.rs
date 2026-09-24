@@ -5,11 +5,14 @@ pub(crate) fn address(target: &str) -> Option<&str> {
 }
 
 pub(crate) fn valid_address(address: &str) -> bool {
-    let authority = address
-        .strip_prefix("http://")
-        .or_else(|| address.strip_prefix("https://"))
-        .and_then(|rest| rest.split(['/', '?', '#', '\\']).next());
-    if authority.is_none_or(|authority| authority.is_empty() || authority.contains('@')) {
+    let Some((scheme, rest)) = address.split_once("://") else {
+        return false;
+    };
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return false;
+    }
+    let authority = rest.split(['/', '?', '#', '\\']).next().unwrap_or_default();
+    if authority.is_empty() || authority.contains('@') {
         return false;
     }
     if address
@@ -25,5 +28,4 @@ pub(crate) fn valid_address(address: &str) -> bool {
         && url.has_host()
         && url.username().is_empty()
         && url.password().is_none()
-        && (address.starts_with("http://") || address.starts_with("https://"))
 }

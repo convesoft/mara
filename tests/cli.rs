@@ -12236,6 +12236,41 @@ fn external_authoring_keeps_exact_addresses_and_demotes_inline_links() {
         )["occurrence_count"],
         1
     );
+    let uppercase = "external:HTTPS://example.invalid/Work/ABC-1?x=%5B#Part";
+    let created = mara(
+        root,
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-UPPER",
+            "upper.mara.md",
+            "--title",
+            "Uppercase scheme",
+            "--body",
+            "Ticket.",
+            "--relation",
+            &format!("tracked_by={uppercase}"),
+        ],
+    );
+    assert!(created.status.success(), "{}", stderr(&created));
+    assert!(
+        mara(
+            root,
+            &["relation", "add", "REQ-UPPER", "tracked_by", &target]
+        )
+        .status
+        .success()
+    );
+    let related = related_cli_mcp(root, "REQ-UPPER", &[("--relation", "tracked_by")]);
+    let addresses = related["connections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|edge| edge["neighbour"]["address"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(addresses, [&uppercase["external:".len()..], url]);
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
 }
 
 #[test]
