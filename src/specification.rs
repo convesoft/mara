@@ -986,21 +986,26 @@ fn collect_definitions<'a>(
 }
 
 fn rebase_target(target: &str, path: &Path) -> Option<String> {
-    if target.is_empty()
-        || target.starts_with('#')
-        || target.starts_with('/')
-        || target.contains(':')
-    {
+    if target.is_empty() || target.starts_with("//") {
         return None;
     }
     let (file, fragment) = target.split_once('#').unwrap_or((target, ""));
+    if file.contains(':') {
+        return None;
+    }
+    let file = crate::discovery::percent_decode(file);
+    let destination = if file.is_empty() {
+        path.to_path_buf()
+    } else {
+        let base = if file.starts_with('/') {
+            Path::new("")
+        } else {
+            path.parent().unwrap_or(Path::new(""))
+        };
+        base.join(file.trim_start_matches('/'))
+    };
     let mut normalized = PathBuf::new();
-    for component in path
-        .parent()
-        .unwrap_or(Path::new(""))
-        .join(crate::discovery::percent_decode(file))
-        .components()
-    {
+    for component in destination.components() {
         match component {
             Component::ParentDir => {
                 normalized.pop();

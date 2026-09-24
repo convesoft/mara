@@ -340,7 +340,7 @@ fn trace_specification_rebases_percent_encoded_source_links_once() {
     fs::write(root.join("docs/target file.mara.md"), "# Target\n").unwrap();
     fs::write(
         root.join("docs/source.mara.md"),
-        "# Source\n\n[Target](target%20file.mara.md#target)\n",
+        "# Source\n\n[Target](target%20file.mara.md#target)\n[Local](#source)\n[Root](/docs/target%20file.mara.md#target)\n[External](https://example.com/target)\n[Network](//example.com/target)\n",
     )
     .unwrap();
 
@@ -352,6 +352,22 @@ fn trace_specification_rebases_percent_encoded_source_links_once() {
         "{rendered}"
     );
     assert!(!rendered.contains("target%2520file"), "{rendered}");
+    assert!(
+        rendered.contains("[Local](docs/source.mara.md#source)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[Root](docs/target%20file.mara.md#target)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[External](https://example.com/target)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[Network](//example.com/target)"),
+        "{rendered}"
+    );
 }
 
 #[test]
