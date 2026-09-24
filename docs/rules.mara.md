@@ -258,6 +258,29 @@ Only schema-compatible relation/field paths are valid. An external-capable
 path may use plain counts; field qualification must include a declared internal
 flavour constraint. External nodes have neither that class nor item fields
 and cannot qualify as internal items.
+
+For example, with a declared `evidence.status` field, this two-step rule
+requires a requirement to have a verification with approved evidence:
+
+```yaml
+- id: rule:evidenced_requirement
+  targetClass: requirement
+  property:
+    - path: {inversePath: verifies}
+      qualifiedValueShape:
+        class: verification
+        property:
+          - path: {inversePath: evidences}
+            qualifiedValueShape:
+              class: evidence
+              property: [{path: status, hasValue: approved}]
+            qualifiedMinCount: 1
+      qualifiedMinCount: 1
+```
+
+A verification without approved evidence is selected at the first step but
+does not qualify; an unrelated relation kind cannot satisfy either step.
+
 For a schema-declared `tracked_by` external relation on `requirement`, this
 local rule requires a reference only when the item's own `status` is `approved`:
 

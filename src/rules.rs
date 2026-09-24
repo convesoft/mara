@@ -162,8 +162,10 @@ impl Rules {
             }
             // Validate every reusable definition too, including unused cycles.
             for id in rules.shapes.keys().cloned().collect::<Vec<_>>() {
-                if let Err(message) = rules.depth(&id, &mut Vec::new(), 0, &schema_value) {
-                    rules.invalid(rules.shapes[&id].source.clone(), message);
+                if let Err((location, message)) =
+                    rules.depth(&id, &mut Vec::new(), 0, &schema_value)
+                {
+                    rules.invalid(location, message);
                 }
             }
             for root in rules.roots.clone() {
@@ -542,13 +544,16 @@ impl Rules {
         stack: &mut Vec<String>,
         hops: usize,
         schema: &Value,
-    ) -> Result<(), String> {
-        if stack.len() >= 32 || stack.iter().any(|s| s == id) {
-            return Err("recursive shape reference or depth above 32".into());
-        }
+    ) -> Result<(), (DiagnosticLocation, String)> {
         let Some(shape) = self.shapes.get(id) else {
             return Ok(());
         };
+        if stack.len() >= 32 || stack.iter().any(|s| s == id) {
+            return Err((
+                shape.source.clone(),
+                "recursive shape reference or depth above 32".into(),
+            ));
+        }
         let relation = shape.value.get("path").is_some_and(|v| {
             v.is_object()
                 || v.as_str().is_some_and(|s| {
@@ -557,7 +562,10 @@ impl Rules {
         });
         let hops = hops + usize::from(relation);
         if hops > 8 {
-            return Err("relationship depth exceeds eight".into());
+            return Err((
+                shape.location("path"),
+                "relationship depth exceeds eight".into(),
+            ));
         }
         stack.push(id.into());
         for child in references(&shape.value) {
