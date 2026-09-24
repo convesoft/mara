@@ -170,41 +170,40 @@ pub fn related(
         .direction
         .is_none_or(|d| d == RelationDirection::Outgoing)
         && filters.flavours.is_empty()
+        && let DiscoveryNodeKind::Item(item) = node.kind()
     {
-        if let DiscoveryNodeKind::Item(item) = node.kind() {
-            let mut externals = BTreeMap::<(String, String), usize>::new();
-            for relation in item.relations() {
-                let Some(address) = crate::external::address(relation.target()) else {
-                    continue;
-                };
-                if !relations.is_empty()
-                    && !relations.contains(&RelationName::Schema(&relation.canonical))
-                {
-                    continue;
-                }
-                *externals
-                    .entry((address.to_owned(), relation.canonical.clone()))
-                    .or_default() += 1;
+        let mut externals = BTreeMap::<(String, String), usize>::new();
+        for relation in item.relations() {
+            let Some(address) = crate::external::address(relation.target()) else {
+                continue;
+            };
+            if !relations.is_empty()
+                && !relations.contains(&RelationName::Schema(&relation.canonical))
+            {
+                continue;
             }
-            let mut external_connections = Vec::new();
-            for ((address, name), count) in externals {
-                let edge = crate::RelationEdge::external(schema, item, &name, &address)
-                    .map_err(|error| page_error(&error.to_string()))?;
-                external_connections.push(RelatedConnection {
-                    relation: RelationName::Schema(&name).display(schema),
-                    direction: RelationDirection::Outgoing,
-                    neighbour: RelatedNeighbour::External {
-                        kind: "external".into(),
-                        address,
-                    },
-                    source: None,
-                    label: Some(name),
-                    edge: Some(edge),
-                    occurrence_count: Some(count),
-                });
-            }
-            all.splice(outgoing_count..outgoing_count, external_connections);
+            *externals
+                .entry((address.to_owned(), relation.canonical.clone()))
+                .or_default() += 1;
         }
+        let mut external_connections = Vec::new();
+        for ((address, name), count) in externals {
+            let edge = crate::RelationEdge::external(schema, item, &name, &address)
+                .map_err(|error| page_error(&error.to_string()))?;
+            external_connections.push(RelatedConnection {
+                relation: RelationName::Schema(&name).display(schema),
+                direction: RelationDirection::Outgoing,
+                neighbour: RelatedNeighbour::External {
+                    kind: "external".into(),
+                    address,
+                },
+                source: None,
+                label: Some(name),
+                edge: Some(edge),
+                occurrence_count: Some(count),
+            });
+        }
+        all.splice(outgoing_count..outgoing_count, external_connections);
     }
     if filters.cursor.is_some() && (start == 0 || start >= all.len()) {
         return Err(page_error(

@@ -433,16 +433,16 @@ impl Schema {
                     .invalid_relation_sources
                     .insert(name.clone());
             }
-            if !self.validation.flavours_section_invalid {
-                if !relation.external || !relation.target.is_empty() {
-                    errors.extend(endpoint_errors(
-                        name,
-                        "target",
-                        &relation.target,
-                        &self.flavours,
-                        &self.validation.invalid_flavours,
-                    ));
-                }
+            if !self.validation.flavours_section_invalid
+                && (!relation.external || !relation.target.is_empty())
+            {
+                errors.extend(endpoint_errors(
+                    name,
+                    "target",
+                    &relation.target,
+                    &self.flavours,
+                    &self.validation.invalid_flavours,
+                ));
             }
             if self.validation.flavours_section_invalid
                 || (!relation.external || !relation.target.is_empty())
