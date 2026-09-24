@@ -294,7 +294,7 @@ fn normalize(path: &Path) -> Option<PathBuf> {
     Some(result)
 }
 
-fn percent_decode(text: &str) -> String {
+pub(crate) fn percent_decode(text: &str) -> String {
     let mut bytes = Vec::new();
     let mut input = text.as_bytes().iter().copied().peekable();
     while let Some(byte) = input.next() {

@@ -332,6 +332,48 @@ fn trace_specification_preserves_sources_selection_and_cli_mcp_parity() {
 }
 
 #[test]
+fn trace_specification_rebases_percent_encoded_source_links_once() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    fs::create_dir(root.join("docs")).unwrap();
+    fs::write(root.join("docs/target file.mara.md"), "# Target\n").unwrap();
+    fs::write(
+        root.join("docs/source.mara.md"),
+        "# Source\n\n[Target](target%20file.mara.md#target)\n",
+    )
+    .unwrap();
+
+    let output = mara(root, &["trace", "specification", "--path", "docs/"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let rendered = stdout(&output);
+    assert!(
+        rendered.contains("[Target](docs/target%20file.mara.md#target)"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("target%2520file"), "{rendered}");
+}
+
+#[test]
+fn trace_specification_keeps_ambiguous_item_mentions_unlinked() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    fs::write(
+        root.join("items.mara.md"),
+        ":::mara requirement REQ-DUP\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: First\n\nFirst.\n:::\n\n:::mara requirement REQ-DUP\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: Second\n\nSecond.\n:::\n\n:::mara requirement REQ-SOURCE\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02\n:title: Source\n\nSee [[REQ-DUP]].\n:::\n",
+    )
+    .unwrap();
+
+    let output = mara(root, &["trace", "specification", "--id", "REQ-SOURCE"]);
+    assert!(!output.status.success());
+    let rendered = stdout(&output);
+    assert!(rendered.contains("See [[REQ-DUP]]."), "{rendered}");
+    assert!(!rendered.contains("[[REQ-DUP]]](<"), "{rendered}");
+    assert!(rendered.contains("reference_unresolved"), "{rendered}");
+}
+
+#[test]
 fn trace_specification_fragments_oversized_content_without_skips() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();

@@ -890,21 +890,22 @@ fn render_references(
         let end = span.end_byte() - source.start_byte();
         let raw = &content[start..end];
         let replacement = match reference.kind() {
-            ReferenceKind::Item => corpus
-                .items()
-                .find(|item| {
+            ReferenceKind::Item => {
+                let mut targets = corpus.items().filter(|item| {
                     item.id() == reference.target() || item.mid() == Some(reference.target())
-                })
-                .map(|item| {
-                    format!(
+                });
+                match (targets.next(), targets.next()) {
+                    (Some(item), None) => Some(format!(
                         "[{raw}](<{}>)",
                         source_target(
                             item.source().path(),
                             item.source().span().start_byte(),
                             anchors
                         )
-                    )
-                }),
+                    )),
+                    _ => None,
+                }
+            }
             ReferenceKind::MarkdownLink => {
                 let target = reference.target();
                 rebase_target(target, source.path()).and_then(|rebased| {
@@ -997,7 +998,7 @@ fn rebase_target(target: &str, path: &Path) -> Option<String> {
     for component in path
         .parent()
         .unwrap_or(Path::new(""))
-        .join(file)
+        .join(crate::discovery::percent_decode(file))
         .components()
     {
         match component {

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 mod references;
 mod summary;
 
-pub(crate) use references::heading_anchor;
+pub(crate) use references::{heading_anchor, percent_decode};
 
 pub use summary::{DiscoveryContext, DiscoveryKind, DiscoveryNodeSummary};
 
