@@ -264,7 +264,7 @@ pub(crate) fn matrix(
         })
         .collect::<BTreeMap<_, _>>();
     let edges = collect_edges(&corpus, schema)?;
-    let snapshot = snapshot_id(project, schema, &corpus, &rules);
+    let snapshot = snapshot_id(project, schema, &corpus, &rules, &prerequisites);
     let mut validation = empty_validation(project);
     let observations = if rules.diagnostics.is_empty() {
         rules.observe(
@@ -385,7 +385,7 @@ pub(crate) fn matrix(
         next_cursor: None,
         markdown: None,
     };
-    page(project, schema, &corpus, &rules, params, limit, &mut result)?;
+    page(&snapshot, params, limit, &mut result)?;
     Ok(result)
 }
 
@@ -837,17 +837,14 @@ fn endpoint_state_key(endpoint: &RelationEndpoint) -> String {
 }
 
 fn page(
-    project: &Project,
-    schema: &Schema,
-    corpus: &Corpus,
-    rules: &Rules,
+    snapshot: &str,
     params: &TraceMatrixParams,
     limit: usize,
     result: &mut TraceMatrixResult,
 ) -> Result<(), ValidationError> {
     let mut hash = Sha256::new();
     hash.update(b"trace-matrix-1-adapter-1");
-    hash.update(snapshot_id(project, schema, corpus, rules));
+    hash.update(snapshot);
     hash.update(
         serde_json::to_vec(&(
             &params.selection,
@@ -910,7 +907,13 @@ fn page(
     Ok(())
 }
 
-fn snapshot_id(project: &Project, schema: &Schema, corpus: &Corpus, rules: &Rules) -> String {
+fn snapshot_id(
+    project: &Project,
+    schema: &Schema,
+    corpus: &Corpus,
+    rules: &Rules,
+    prerequisites: &[crate::Diagnostic],
+) -> String {
     let mut hash = Sha256::new();
     hash.update(serde_json::to_vec(schema).expect("schema serializes"));
     for path in [
@@ -933,6 +936,29 @@ fn snapshot_id(project: &Project, schema: &Schema, corpus: &Corpus, rules: &Rule
     for document in corpus.documents() {
         hash.update(document.path().as_os_str().as_encoded_bytes());
         hash.update(document.source().as_bytes());
+    }
+    let retained = corpus
+        .documents()
+        .iter()
+        .map(|document| document.path())
+        .collect::<BTreeSet<_>>();
+    let mut excluded = BTreeSet::new();
+    for diagnostic in prerequisites {
+        hash.update(
+            serde_json::to_vec(&ValidationDiagnostic::from_source(diagnostic))
+                .expect("diagnostic serializes"),
+        );
+        let path = diagnostic.source().path();
+        if !retained.contains(path) {
+            excluded.insert(path);
+        }
+    }
+    for path in excluded {
+        hash.update(b"excluded-source");
+        hash.update(path.as_os_str().as_encoded_bytes());
+        if let Ok(bytes) = fs::read(project.root().join(path)) {
+            hash.update(bytes);
+        }
     }
     format!("{:x}", hash.finalize())
 }

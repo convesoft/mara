@@ -12433,6 +12433,48 @@ fn trace_matrix_explains_skipped_evaluation_for_invalid_field() {
 }
 
 #[test]
+fn trace_matrix_cursor_detects_excluded_source_changes() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let args = [
+        "--format",
+        "json",
+        "trace",
+        "matrix",
+        "--id",
+        "REQ-A",
+        "--rule",
+        "urn:mara:rule:approved_requirement",
+        "--limit",
+        "1",
+    ];
+    let first = mara(root, &args);
+    assert!(first.status.success(), "{}", stderr(&first));
+    let first: Value = serde_json::from_str(&stdout(&first)).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let excluded = root.join("excluded.mara.md");
+    fs::write(&excluded, [0xff]).unwrap();
+    let mut continued = args.to_vec();
+    continued.extend(["--cursor", cursor]);
+    let stale = mara(root, &continued);
+    assert!(!stale.status.success());
+    let stale: Value = serde_json::from_str(&stdout(&stale)).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_cursor");
+
+    let invalid = mara(root, &args);
+    assert!(!invalid.status.success());
+    let invalid: Value = serde_json::from_str(&stdout(&invalid)).unwrap();
+    let cursor = invalid["next_cursor"].as_str().unwrap();
+    fs::write(&excluded, [0xfe]).unwrap();
+    let mut continued = args.to_vec();
+    continued.extend(["--cursor", cursor]);
+    let stale = mara(root, &continued);
+    assert!(!stale.status.success());
+    let stale: Value = serde_json::from_str(&stdout(&stale)).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_cursor");
+}
+
+#[test]
 fn trace_matrix_explains_second_hop_and_continues_without_changing_counts() {
     let fixture = rule_fixture();
     let root = fixture.path();
