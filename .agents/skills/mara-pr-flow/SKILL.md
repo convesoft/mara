@@ -24,6 +24,7 @@ this skill. Keep the main turn active during the review loop.
    reply, dismissal, or backlog outcome. Tell the agent the exact new commit
    SHA and the intended disposition of each finding. The agent handles the
    push, PR replies, and specified conversation resolutions.
-3. Continue the same agent and PR for subsequent reviewed heads. Treat its
-   merge-ready report as evidence to verify against the issue acceptance
-   criteria. Merge only when separately instructed.
+3. Continue the same agent and PR for subsequent reviewed heads. After each
+   push, let it poll every minute for the automatic review; do not request a
+   review manually. Treat its merge-ready report as evidence to verify against
+   the issue acceptance criteria. Merge only when separately instructed.

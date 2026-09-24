@@ -14,11 +14,14 @@ from the main-thread handoff. Confirm the branch HEAD equals that SHA and the
 remote branch can be updated without rewriting history. Push only that branch.
 Reuse the issue's existing PR or open one against main using the repository PR
 template and title convention. Report the PR URL and published head SHA to the
-main thread. Do not edit source,
-commit, amend, rebase, force-push, merge, or change acceptance criteria.
+main thread, which attaches the PR to its task. Do not edit source, commit,
+amend, rebase, force-push, merge, or change acceptance criteria.
 
 For the current head, check the PR head, required CI, Codex review summary,
-review submissions, and unresolved review threads about every 60 seconds.
+review submissions, and unresolved review threads every 60 seconds. Report
+actionable CI failures with their job URL and concrete error to the main
+thread. Send status updates only when the state changes, a finding appears,
+or a review remains pending after 15 minutes; do not report every poll.
 The summary comment contains
 <!-- codex-pull-request-review-summary -->
 and can be edited in place, so reread its current body. An eyes reaction
@@ -27,10 +30,10 @@ no findings counts as a clean review only when its reviewed commit matches
 the current PR head. Check findings as well as the reaction. Silence alone
 is not a pass. A new head needs its own review.
 
-Observe the review trigger on a new commit before requesting another review.
-If no review begins within five minutes, request @codex review once for that
-head. If review has not finished after 15 minutes, report pending status and
-evidence to the main thread; do not claim a clean review.
+After a push, wait for the automatic review of that head. Never request a
+review manually, including with an @codex review comment. If review has not
+finished after 15 minutes, report the pending state once with evidence and
+continue polling every 60 seconds; do not claim a clean review.
 
 Send each new finding to the main thread with its URL, reviewed SHA, and
 conversation identifier. Deduplicate top-level and inline copies. Wait for
