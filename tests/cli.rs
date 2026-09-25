@@ -1320,6 +1320,72 @@ fn manual_03_migration_preserves_custom_knowledge_and_rejects_unrewritten_aliase
 }
 
 #[test]
+fn manual_alias_removal_keeps_canonical_direction_when_both_endpoints_are_eligible() {
+    let fixture = relation_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let original_schema = fs::read_to_string(&schema_path).unwrap();
+    let a_path = root.join("a.mara.md");
+    let b_path = root.join("b.mara.md");
+    let original_a = fs::read_to_string(&a_path).unwrap();
+    let original_b = fs::read_to_string(&b_path).unwrap();
+    let inverse_b = original_b
+        .replace(":title: REQ-B\n", ":title: REQ-B\n:followed_by: REQ-A\n")
+        .replace(
+            "Preserved prose.",
+            "Preserved prose. [[followed_by:REQ-A]].",
+        );
+    fs::write(&b_path, &inverse_b).unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let original_edge = mara(root, &["relation", "get", "REQ-A", "follows", "REQ-B"]);
+    assert!(original_edge.status.success(), "{}", stderr(&original_edge));
+
+    let no_alias_schema = original_schema.replace("    inverse: followed_by\n", "");
+    assert_ne!(no_alias_schema, original_schema);
+    fs::write(&schema_path, &no_alias_schema).unwrap();
+    // This tempting rewrite validates, but asserts the opposite edge.
+    fs::write(&b_path, inverse_b.replace("followed_by", "follows")).unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    assert!(
+        mara(root, &["relation", "get", "REQ-B", "follows", "REQ-A"])
+            .status
+            .success()
+    );
+    assert!(
+        !mara(root, &["relation", "get", "REQ-A", "follows", "REQ-B"])
+            .status
+            .success()
+    );
+
+    // Restore the valid baseline, then move the assertion to its canonical
+    // source before dropping the inverse declaration.
+    fs::write(&schema_path, &original_schema).unwrap();
+    fs::write(&b_path, &inverse_b).unwrap();
+    let migrated_a = original_a.replace(":title: REQ-A\n", ":title: REQ-A\n:follows: REQ-B\n");
+    let migrated_b = inverse_b
+        .replace(":followed_by: REQ-A\n", "")
+        .replace("[[followed_by:REQ-A]]", "[[REQ-A]]");
+    fs::write(&a_path, &migrated_a).unwrap();
+    fs::write(&b_path, &migrated_b).unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    fs::write(&schema_path, &no_alias_schema).unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    assert!(
+        mara(root, &["relation", "get", "REQ-A", "follows", "REQ-B"])
+            .status
+            .success()
+    );
+    assert!(
+        !mara(root, &["relation", "get", "REQ-B", "follows", "REQ-A"])
+            .status
+            .success()
+    );
+    assert_eq!(fs::read_to_string(&a_path).unwrap(), migrated_a);
+    assert_eq!(fs::read_to_string(&b_path).unwrap(), migrated_b);
+    assert!(migrated_b.contains("Preserved prose. [[REQ-A]]."));
+}
+
+#[test]
 fn related_pages_continue_in_order_with_filters_and_cli_mcp_parity() {
     let fixture = retrieval_fixture();
     let mut source = String::from(":::mara requirement REQ-HUB\n:title: Hub\n");

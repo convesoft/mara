@@ -257,7 +257,13 @@ does not undo manual edits. Preserve MIDs and unrelated declarations, fields,
 prose and links. Existing relations remain directed with no alias unless the
 schema explicitly changes. Review newly meaningful typed tokens, alias
 collisions, all authored spellings and YAML rule paths before changing names.
-Do not treat a direction, endpoint or meaning change as a rename.
+When removing an inverse alias, inspect the canonical edge, reauthor it on its
+canonical source if needed, remove inverse metadata, and demote inverse inline
+tokens to bare mentions when preserving prose navigation. Never replace an
+inverse name with the canonical name on the same item: that can reverse a
+directed edge while validation still passes. Verify the canonical endpoints
+after migration. Do not treat a direction, endpoint or meaning change as a
+rename.
 
 ## Inspect trace coverage
 

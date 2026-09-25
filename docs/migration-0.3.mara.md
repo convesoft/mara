@@ -22,7 +22,8 @@ Supported changes within this workflow are:
 |---|---|---|
 | Schema 1 or 2 to 3 | Change the existing schema version; add flavour guidance if starting at 1. | Existing relations remain directed, internal and without aliases unless explicitly changed. |
 | Add an inverse alias | Add `inverse` to one eligible canonical relation. | Existing canonical assertions retain their direction and meaning. |
-| Rename or remove an inverse alias | Change the declaration and every authored metadata or typed-inline occurrence using the old alias. | Do not treat a separately declared reverse relation as an alias. |
+| Rename an inverse alias | Change the declaration and every authored metadata or typed-inline occurrence using the old alias. | The authoring endpoint and canonical edge stay the same. Do not treat a separately declared reverse relation as an alias. |
+| Remove an inverse alias | For each affected edge, ensure a canonical assertion exists on its canonical source. Remove every inverse metadata occurrence and demote inverse inline tokens to bare mentions while preserving prose; then remove `inverse` from the declaration. | Replacing the alias name with the canonical name on the same item reverses a directed edge when both endpoint flavours are eligible; validation alone can miss this. |
 | Rename a canonical relation without changing its meaning | Rename its declaration key and every authored metadata or typed-inline occurrence using that name; update YAML rule `path` and `inversePath`, and clients that name the relation. | Keep endpoint sets, direction, external mode and policy with the same declaration. A new name alone does not change edge meaning. |
 | Opt in to 0.3 policy | Add reviewed schema `cardinality`/`acyclic` constraints or YAML rule files and project rules configuration. | Existing projects gain no policy, statuses, owners, evidence or links automatically. |
 
@@ -50,8 +51,11 @@ arbitrary schema restructuring have no 0.3 migration operation.
    escape item-body examples that would become meaningful
    `[[relation:target]]` assertions. Check inverse names against canonical
    names, aliases, structural keys and eligible custom fields. Inspect every
-   occurrence of a renamed relation in metadata, item bodies and YAML rules;
-   code blocks and narrative text may contain literal examples and require
+   occurrence of a renamed relation in metadata, item bodies and YAML rules.
+   For alias removal, inspect the canonical edge and its occurrences first;
+   migrate assertions before deleting the alias declaration. Recheck canonical
+   source and target after the edit, not just project validity. Code blocks and
+   narrative text may contain literal examples and require
    human review rather than a blind global replacement.
 3. Review the complete diff before accepting it. Only the intended schema,
    project configuration, rules and authored assertions may differ. Compare
@@ -139,10 +143,19 @@ occurrence of the same edge. Further changes have different effects:
 | Change | Before | After | Review consequence |
 |---|---|---|---|
 | Inverse label | `inverse: verified_by`; `REQ-A` has `:verified_by: VER-A` and `[[verified_by:VER-A]]`. | `inverse: checked_by`; both occurrences use `checked_by`. | Same canonical `verifies` edge and direction. |
+| Remove inverse label | `REQ-A` has `:verified_by: VER-A` and `[[verified_by:VER-A]]` for `VER-A → REQ-A`. | Add `:verifies: REQ-A` on `VER-A` if absent; remove the inverse metadata on `REQ-A`, change its inline token to `[[VER-A]]`, then remove `inverse`. | Retains `VER-A → REQ-A` and prose navigation; writing `:verifies: VER-A` on `REQ-A` would reverse the edge when eligible. |
 | Canonical name | `verifies`; `VER-A` has `:verifies: REQ-A`; rule uses `{inversePath: verifies}`. | `checks`; metadata and rule path use `checks`. | Keep endpoint sets and policy; update clients naming the relation. |
 | Canonical direction | `verifies` has `source: [verification]`, `target: [requirement]`; `VER-A` has `:verifies: REQ-A`. | New `checked_by_verification` has `source: [requirement]`, `target: [verification]`; `REQ-A` has `:checked_by_verification: VER-A`. | Review each assertion and rule because the canonical edge direction changes; retain the old declaration until replacement is valid. |
 | Endpoint eligibility | `verifies` targets `[requirement, design]`; `VER-A` has `:verifies: DES-A`. | Target narrows to `[requirement]`; the `DES-A` assertion is removed or deliberately reauthored under a suitable distinct relation. | The old assertion becomes invalid; no alias can make `DES-A` eligible. |
 | Meaning | `verifies` links a verification item to a requirement. | A separate `tracked_by` relation points from `REQ-A` to `external:https://example.com/ticket/7`. | A ticket address has no MID or verification status; renaming `verifies` would falsely reinterpret the old edge. |
+
+The silent reversal is visible when both endpoints are requirements: with
+`follows` from requirement to requirement and inverse `followed_by`, an
+assertion `:followed_by: REQ-A` on `REQ-B` means `REQ-A follows REQ-B`.
+Changing that line in place to `:follows: REQ-A` passes validation but means
+`REQ-B follows REQ-A`. To remove the alias, author `:follows: REQ-B` on
+`REQ-A`, remove the old metadata line on `REQ-B`, and demote an old
+`[[followed_by:REQ-A]]` token there to `[[REQ-A]]` before deleting `inverse`.
 
 ## Persisted and public compatibility
 
