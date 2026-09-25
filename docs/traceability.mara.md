@@ -8,14 +8,14 @@ described in [format](format.mara.md) and [discovery](discovery.mara.md).
 The workflow is to connect knowledge, declare what a project expects, and
 explain missing or invalid obligations. It includes richer graph semantics,
 current-state lifecycle and traceability rules, actionable diagnostics, and
-generated views. One project and its schema remain the evaluation boundary.
+traceability matrices. One project and its schema remain the evaluation boundary.
 No mandatory engineering lifecycle, complete trace chain, or placeholder items
 are imposed on projects that have not declared those expectations.
 
 Requirements below own observable outcomes. The accepted
 [relationship contracts](relations.mara.md) settle authoring and mutation;
-[rule and view contracts](rules.mara.md) settle policy, diagnostics, generated
-views and their format boundaries. Remaining decisions at the end must be
+[rule and matrix contracts](rules.mara.md) settle policy, diagnostics, matrix
+output and its format boundaries. Remaining decisions at the end must be
 resolved before implementing their affected contracts. CLI and MCP follow
 [[REQ-SURFACE-PARITY]] throughout.
 
@@ -48,14 +48,14 @@ pass; unrelated links cannot conceal the gap.
 
 :::mara scenario SCN-READ-TRACE-VIEW
 :mid: 01M2FX4BR2F15YVXCD89RTGDKQ
-:title: Read a specification and its coverage
+:title: Inspect trace coverage in a matrix
 
-An author selects a documented scope and generates a specification or
-traceability matrix. A reader can inspect included knowledge, follow links to
-canonical sources, and see unmet coverage obligations. A requirement linked to
-an external delivery ticket remains distinguishable from one with verification
-evidence. Regenerating the view after source changes reflects current knowledge
-without making the generated output another authoring authority.
+An author selects root items and a declared rule or request-local check for a
+traceability matrix. A reader can inspect coverage states, relationship paths,
+source evidence and unmet obligations. A requirement linked to an external
+delivery ticket remains distinguishable from one with verification evidence.
+Regenerating the matrix after source changes reflects current knowledge without
+making its output another authoring authority.
 :::
 
 ## Requirements
@@ -74,11 +74,11 @@ Resolve endpoint constraints after interpreting the alias. Schema inspection,
 structured relation operations, and relation filtering must recognize declared
 aliases consistently. Reject ambiguous declarations instead of guessing a name's
 meaning. Every human-facing relationship view uses the name appropriate to
-its displayed endpoint, including CLI navigation, matrices, generated
-specifications and diagnostics. At an incoming endpoint, display the declared
-inverse alias without an incoming prefix; use incoming plus the canonical name
-only when no inverse alias exists. Structured results retain canonical relation
-and direction alongside the endpoint-facing label.
+its displayed endpoint, including CLI navigation, matrices and diagnostics.
+At an incoming endpoint, display the declared inverse alias without an incoming
+prefix; use incoming plus the canonical name only when no inverse alias exists.
+Structured results retain canonical relation and direction alongside the
+endpoint-facing label.
 
 Verify equivalent authoring and querying from both ends, rejection of reversed
 invalid endpoint flavours, and one semantic count when both forms are present.
@@ -206,10 +206,10 @@ state and transition enforcement are reserved for 0.4.
 :title: Evaluate explicit relationship chains with bounded explanations
 :derives_from: SCN-CHECK-TRACE-OBLIGATIONS
 
-Rules and trace views may follow explicitly described relationship steps,
-directions and target conditions. Each step retains its relationship meaning
-and source provenance. Evaluate only the requested chain; unrelated paths do
-not supply coverage. Distinguish immediate coverage from fulfillment of the
+Rules and traceability matrices may follow explicitly described relationship
+steps, directions and target conditions. Each step retains its relationship
+meaning and source provenance. Evaluate only the requested chain; unrelated
+paths do not supply coverage. Distinguish immediate coverage from fulfillment of the
 declared downstream obligations.
 
 Traversal follows finite explicit shape/path depth; recursive shape references
@@ -283,23 +283,6 @@ is unspecified. Bounded output must identify incompleteness.
 
 Verify an applicable covered item, an uncovered item, a non-applicable item
 and a second-hop gap using the same semantics as validation.
-:::
-
-:::mara requirement REQ-GENERATED-SPECIFICATION
-:mid: 01M2FX4BTH4413E0YXJK7WDZV2
-:title: Generate source-linked specifications from selected knowledge
-:derives_from: SCN-READ-TRACE-VIEW
-
-Generate a readable specification from an explicit corpus selection. Retain
-the selected content's meaning and its relationship context, identify source
-items and locations, and make omissions imposed by the selection or output
-bounds apparent. Preserve useful narrative context when included in the
-selection without requiring authors to turn narrative into items.
-
-Generation reads canonical sources and produces a disposable output.
-It must not synthesize missing requirements, fabricate trace links or rewrite
-the corpus. Regeneration from unchanged source and options is deterministic.
-Verify source navigation and regeneration after an item change.
 :::
 
 :::mara requirement REQ-SCHEMA-EVOLUTION
@@ -376,14 +359,14 @@ model as other project policy.
 Expose enough explanation to distinguish non-applicability, a satisfied
 obligation, an unmet obligation and unavailable evaluation caused by invalid
 prerequisites or bounds. A partial evaluation is never a successful full check.
-Views and validation reuse these semantics.
+Matrices and validation reuse these semantics.
 
 The YAML authoring profile, generated SHACL bindings and worked examples are
 in [[DES-TRACE-RULE-GRAMMAR]].
 Structural graph policies compose under [[DES-TRACE-GRAPH-CONSTRAINTS]].
-Bounds and diagnostics follow [[DES-TRACE-DIAGNOSTIC-INTERFACE]]; matrices and
-specifications follow [[DES-TRACE-VIEW-INTERFACES]]. Compatibility, including
-the future transition exercise, follows [[DES-TRACE-CONTRACT-COMPATIBILITY]].
+Bounds and diagnostics follow [[DES-TRACE-DIAGNOSTIC-INTERFACE]]; matrices follow
+[[DES-TRACE-VIEW-INTERFACES]]. Compatibility, including the future transition
+exercise, follows [[DES-TRACE-CONTRACT-COMPATIBILITY]].
 Keep syntax declarative and project-owned; no arbitrary code execution or
 general workflow engine is introduced.
 :::
@@ -423,7 +406,7 @@ scenarios in [[SCN-AUTHOR-TRACE-CONNECTION]], [[SCN-CHECK-TRACE-OBLIGATIONS]] an
 
 Use the same fixtures to verify alias/inline normalization, symmetric links,
 declared cardinality and cycle checks, current-state obligations, a second-hop
-gap, external references and generated views. Inspect diagnostics and source
+gap, external references and traceability matrices. Inspect diagnostics and source
 navigation before and after correcting each gap. Exercise warning/error policy
 and bounded output without mistaking incomplete evaluation for a pass.
 
@@ -461,11 +444,6 @@ and a permitted cycle. Evaluate an 8-step chain and reject a 9-step definition;
 output continuation must not resume evaluation or alter validity. Follow output
 cursors to completion and reject them after a source or request-option change.
 
-Generate a path-selected specification containing narrative and an item-only
-selection without it; verify source links relative to the project root,
-relationship labels, outside-selection neighbours and content reconstruction
-across pages. Regenerate unchanged for identical output, then after an item
-edit for updated content. Compare canonical source bytes before/after generation.
 Use [[DES-TRACE-CONTRACT-COMPATIBILITY]] to inspect the customized schema
 migration and future transition exercise; the future syntax must be rejected
 by 0.3. These procedures remain implementation acceptance, not executed evidence.

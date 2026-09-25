@@ -45,6 +45,20 @@ These are design conclusions from the comparison, not claims that an upstream
 tool implements Mara's intended alias, symmetry or mutation semantics. No
 upstream rule language, graph persistence layer, or lifecycle is adopted here.
 
+## Unresolved: generic generated trace view
+
+[OpenFastTrace's full-chain use case](https://github.com/itsallcode/openfasttrace/blob/main/doc/user_guide/use_cases/tracing_the_whole_chain.md)
+addresses coverage across a complete artifact chain;
+[Sphinx-Needs `needflow`](https://sphinx-needs.readthedocs.io/en/stable/directives/needflow.html#root-id)
+can select connected items from a root. Mara's retired specification export
+only selected content by filter and annotated immediate relationships.
+
+A possible future view could choose root items, follow explicit typed
+relationship steps, show branches and source evidence, and optionally evaluate
+a rule. Start with request arguments; consider a saved definition only if
+repeated use warrants it. A rule defines what must hold; a view request defines
+what to inspect. No interface or implementation is accepted yet.
+
 :::mara evidence EVD-SHACL-CEL-SPIKE
 :mid: 01M2JZNCW49RH3Y4M99DEZGC0D
 :title: SHACL and CEL integration experiment

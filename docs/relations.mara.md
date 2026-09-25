@@ -329,7 +329,7 @@ Human-facing renderers follow [[REQ-INVERSE-RELATION-AUTHORING]]. From
 inverse alias, the latter falls back to `incoming verifies → VER-A`.
 Render the chosen endpoint's label without rewriting canonical `relation` or
 `direction` in structured results. This presentation rule does not rewrite
-verbatim authored source shown in an excerpt or specification.
+verbatim authored source shown in an excerpt.
 
 Canonical and alias relation filters select the same relation kind. Direction
 filters always use the canonical edge relative to the selected item; an alias
@@ -467,7 +467,7 @@ reported as a completed migration. Automation and further vocabulary migration o
 adoption follow [[DES-TRACE-CONTRACT-COMPATIBILITY]]; this relationship
 contract does not introduce a migration command. The current implementation
 adopts these relationship formats and external targets. This increment does
-not complete all 0.3 trace views or schema migration work.
+not complete trace-matrix or schema-migration work for 0.3.
 :::
 
 :::mara decision ADR-RELATION-ASSERTION-REMOVAL

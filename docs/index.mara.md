@@ -15,5 +15,5 @@ documents only when a current user workflow requires them.
 - [Migration to 0.2: schema guidance and discovery interface](migration-0.2.mara.md)
 - [Traceability: planned 0.3 requirements and design boundaries](traceability.mara.md)
 - [Relationship authoring and mutation](relations.mara.md)
-- [Rules, diagnostics and trace views](rules.mara.md)
+- [Rules, diagnostics and trace matrices](rules.mara.md)
 - [Traceability research: external systems and design lessons](traceability-research.mara.md)
