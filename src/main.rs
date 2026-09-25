@@ -25,7 +25,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "Discovery and reading: mara search <QUERY> discovers items, sections, and Markdown blocks; mara get <REFERENCE> reads any discovery node; mara related <REFERENCE> explores direct connections.\n\nAuthoring: choose a template with mara project init --help, then inspect flavour guidance with mara schema get flavour <NAME> before creating items.\n\nRelationship migration: https://github.com/convesoft/mara/blob/main/docs/relations.mara.md"
+    after_help = "Discovery and reading: mara search <QUERY> discovers items, sections, and Markdown blocks; mara get <REFERENCE> reads any discovery node; mara related <REFERENCE> explores direct connections.\n\nAuthoring: inspect flavour guidance and relation endpoints with mara schema get before creating items. Validate project-owned rules and graph policies with mara project validate; inspect selected coverage with mara trace matrix --help.\n\n0.3 migration is manual on a Git checkpoint or project copy; review the diff and validate the result. See https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md"
 )]
 struct Cli {
     #[arg(
@@ -160,7 +160,10 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum TraceCommand {
-    /// Generate a bounded coverage matrix using enabled rule IRIs or a request-local YAML check.
+    /// Generate a bounded, read-only coverage matrix using enabled rule IRIs or a request-local YAML check.
+    #[command(
+        after_help = "Select roots with --all or one or more --id, --flavour, --field and --path filters. Use --rule for enabled root rules, or --check-file with --shape for a request-only check; do not mix them. Default output is Markdown; --format json returns trace format 1. Read result states, checks, edges, summaries and evaluation_complete; follow --cursor with unchanged inputs until has_more is false. The view does not change project policy or source files."
+    )]
     Matrix {
         /// Exact human ID or MID for a root item; repeat for OR and intersect with other root filters.
         #[arg(long = "id")]
@@ -199,7 +202,7 @@ enum TraceCommand {
 enum ProjectCommand {
     /// Initialize a Mara project without overwriting existing content; rejects an existing Mara project.
     #[command(
-        after_help = "All templates create only .mara/project.toml and .mara/schema.yaml, with schema format 3 and flavour guidance; no starter documents or items. Edit the resulting project-owned schema to customize it. For an existing project, migrate its schema in place rather than reinitializing or replacing it with a template. Use schema get to inspect guidance and relation endpoints, then schema validate and project validate."
+        after_help = "All templates create only .mara/project.toml and .mara/schema.yaml, with schema format 3 and flavour guidance; no starter documents or items. Edit the resulting project-owned schema to customize it. For an existing project, follow the manual workflow in docs/migration-0.3.mara.md on a recoverable checkpoint; do not reinitialize or replace it with a template. Use schema get to inspect declarations, then schema validate and project validate."
     )]
     Init {
         /// Destination directory (absolute or relative to the working directory), created if missing. Defaults to the working directory only when --project is also omitted. Cannot combine PATH with --project.
@@ -468,7 +471,7 @@ impl From<CliRelationDirection> for RelationDirection {
 enum SchemaCommand {
     /// Get the complete effective schema, or one declaration with flavour selection guidance or relation endpoints.
     #[command(
-        after_help = "Read flavour guidance before authoring: description explains purpose; use_when identifies suitable knowledge; avoid_when excludes unsuitable content; distinguish_from compares confusable flavours. Inspect id_prefix, body, and fields for item constraints, and relation source/target for allowed endpoints. Guidance belongs to the schema, not item --field metadata.\n\nSchema format 3 requires a nonblank description, a nonempty use_when list, an avoid_when list ([] is valid), and a distinguish_from mapping ({} is valid) on every flavour. Entries must be nonblank; distinction targets must be other declared flavours. To migrate format 1, add meaningful guidance in the existing schema and set format_version: 3, preserving custom declarations and item identities. Validate with schema validate and project validate."
+        after_help = "Read flavour guidance before authoring: description explains purpose; use_when identifies suitable knowledge; avoid_when excludes unsuitable content; distinguish_from compares confusable flavours. Inspect id_prefix, body, and fields for item constraints; relation source/target, inverse, symmetric, external, cardinality and acyclic define relationship meaning and policy. Guidance belongs to the schema, not item --field metadata.\n\nSchema format 3 requires description, use_when, avoid_when and distinguish_from on every flavour. Migrate manually in place on a recoverable checkpoint, preserving custom declarations and item identities; follow https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md and validate schema and project."
     )]
     Get {
         /// Declaration kind; supply with NAME, or omit both for the complete schema.
