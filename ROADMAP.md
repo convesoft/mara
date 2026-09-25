@@ -83,7 +83,7 @@ documents in a monorepo and does not expand the 0.1 stabilization sequence.
 - Keep the rule model extensible to 0.4 transition checks without changing
   existing current-state meanings.
 - Support deliberate schema migrations for observed vocabulary changes.
-- Generate useful specification and traceability-matrix views from the corpus.
+- Generate source-linked traceability matrices from the corpus.
 - Add typed external references without importing remote lifecycle or status.
 - Evaluate a code-traceability pilot for one demonstrated language and workflow.
 

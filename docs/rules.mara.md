@@ -1,4 +1,4 @@
-# Rules, diagnostics and trace views
+# Rules, diagnostics and trace matrices
 
 Contracts for the 0.3 implementation, extending
 [traceability](traceability.mara.md) and the accepted
@@ -12,8 +12,7 @@ do not add lifecycle policy to bundled templates or existing projects.
 The accepted language foundation is SHACL Core, authored in YAML with generated
 bindings and verified by [[EVD-YAML-SHACL-SPIKE]]. The contracts replace the
 earlier unshipped formats. [[ADR-NATIVE-SHACL-ADAPTER]] records the
-native execution boundary. The development executable implements matrices;
-generated specifications remain planned.
+native execution boundary. The development executable implements matrices.
 
 :::mara design DES-TRACE-RULE-GRAMMAR
 :mid: 01M2JNZMJ0VT20GWH4HF6DBBC5
@@ -528,7 +527,6 @@ Matrix CLI and stdio MCP tests cover selected root/rule states, qualified and
 external endpoints, and source-linked explanations. CLI tests also cover a
 second-hop gap and bounded continuation. Matrix output is a disposable
 format-1 projection; rule failures remain complete matrix data.
-The specification command remains separate work.
 
 ## Evaluation, output and continuation
 
@@ -689,13 +687,12 @@ but those totals, validity and exit status remain unchanged.
 
 :::mara design DES-TRACE-VIEW-INTERFACES
 :mid: 01M2JP3PJV8WZKNR1WWF0GJMS4
-:title: Generate bounded matrices and specifications from explicit selections
+:title: Generate bounded traceability matrices from explicit selections
 :satisfies: REQ-TRACE-MATRIX
-:satisfies: REQ-GENERATED-SPECIFICATION
 :satisfies: REQ-BOUNDED-TRACE-CHAINS
 :satisfies: REQ-SURFACE-PARITY
 
-Trace views are disposable, read-only projections of one loaded project.
+Trace matrices are disposable, read-only projections of one loaded project.
 They share rule semantics with [[DES-TRACE-RULE-GRAMMAR]], graph identity with
 [[DES-CANONICAL-TRACE-RELATIONS]], and structural/output bounds with
 [[DES-TRACE-DIAGNOSTIC-INTERFACE]]. Do not create saved view definitions or
@@ -703,7 +700,7 @@ modify canonical files. Each request carries its selection.
 
 ## Selection and public operations
 
-Both operations accept optional nonempty `ids`, `flavours`, `fields`
+The matrix operation accepts optional nonempty `ids`, `flavours`, `fields`
 and `paths`, following exact item-retrieval filter semantics and the existing
 path/subtree grammar. Require at least one filter or explicit `all:true`;
 all cannot be combined with filters. Reject unknown vocabulary/IDs and
@@ -716,15 +713,12 @@ for evaluation and are identified as outside the root selection.
 |---|---|
 | `trace matrix --flavour requirement --rule urn:mara:rule:approved_requirement` | `trace_matrix {flavours:["requirement"], rules:["urn:mara:rule:approved_requirement"]}` |
 | `trace matrix --id REQ-A --check-file rules/coverage.yaml --shape urn:mara:rule:coverage` | `trace_matrix {ids:["REQ-A"], check:{files:["rules/coverage.yaml"], shape:"urn:mara:rule:coverage"}}` |
-| `trace specification --path docs/` | `trace_specification {paths:["docs/"]}` |
-| `trace specification --flavour requirement --field status=approved` | `trace_specification {flavours:["requirement"], fields:[{key:"status",value:"approved"}]}` |
 
-Both accept `--all`, repeatable `--id`, `--flavour`, `--field`,
-`--path`, and `--limit`, `--cursor`.
-Matrix additionally requires either repeatable `--rule` / nonempty `rules`,
-or a request-local check, never both. Rule values are exact expanded root shape
-IRIs from enabled sources; unknown IRIs are errors. Prefix abbreviations are
-source syntax, not request aliases.
+The matrix accepts `--all`, repeatable `--id`, `--flavour`, `--field`,
+`--path`, and `--limit`, `--cursor`. It requires either repeatable `--rule` /
+nonempty `rules`, or a request-local check, never both. Rule values are exact
+expanded root shape IRIs from enabled sources; unknown IRIs are errors.
+Prefix abbreviations are source syntax, not request aliases.
 
 For a check, CLI accepts repeatable `--check-file` and one `--shape`;
 MCP accepts `check:{files:[...],shape:IRI}`. Load those YAML sources with the generated bindings
@@ -743,8 +737,8 @@ a request check cannot override a persisted rule. The former JSON `related`
 check object is withdrawn with the custom predicate grammar. YAML expresses
 SHACL shapes; it does not reinstate that predicate grammar.
 
-CLI default text renders Markdown for these two commands only;
-`--format json` returns the structured result. MCP returns the same JSON
+CLI default text renders Markdown for the matrix command; `--format json`
+returns the structured result. MCP returns the same JSON
 domain result and, when `render:"markdown"` is requested, its Markdown
 rendering in a `markdown` field. This field counts against the page budget.
 CLI text uses the same page construction as MCP render markdown, including
@@ -752,7 +746,7 @@ its combined JSON/Markdown budget; CLI JSON matches MCP without render.
 Changing render mode is a changed request and requires a fresh cursor.
 No CSV, HTML or PDF contract is introduced.
 
-A view has `format_version:1`, `kind:matrix|specification`, normalized
+A matrix view has `format_version:1`, `kind:matrix`, normalized
 `selection`, `evaluation_complete`, `records`, `has_more` and
 `next_cursor`. Records of kind `issue` use validation diagnostic shapes for
 problems preventing a complete view. It does not claim whole-project validity.
@@ -834,50 +828,6 @@ pagination; report lower bounds when evaluation is incomplete.
 For a complete rule, applicable denominator is passed + failed.
 Request checks have a separate summary and impose no project validity.
 The rule design's fixture table is also the expected matrix-state table.
-
-## Specification records and source navigation
-
-A path-only or all selection includes matching documents and their narrative.
-An item filter (IDs, flavours or fields) selects item content only; paths then
-restrict those items. Include ancestor heading labels as breadcrumbs, not
-unselected ancestor bodies. State this narrative omission in the selection
-description. Overlapping paths/filters never duplicate an authored source span.
-Order selected documents by path and content by start byte.
-
-Each `content` record contains the existing discovery node descriptor,
-ordered item metadata when applicable, and consecutive original Markdown
-content. Use get's UTF-8 content ranges and ordered metadata fragment ranges
-for oversized nodes, with the same no-skip/no-overlap reconstruction contract.
-Do not return a document span and duplicate all of its nested item bodies.
-Item boundaries inside selected documents retain source identities through
-`item` marker records at their source positions.
-A `relationship` record attaches each selected item's incident semantic edge,
-canonical direction/endpoint-facing label, endpoint descriptor, occurrence
-count and source-inspection request. Emit a shared edge once per selected
-endpoint to preserve each endpoint's context; do not duplicate it per assertion.
-Mark neighbours outside selection and do not recursively include their bodies.
-No coverage or policy pass is implied by these relationship records.
-
-Markdown preserves selected authored prose and renders item identity, metadata,
-source location, and relationship context separately. Preserve code/literal
-examples. Supported internal references link to the original canonical
-destination; no generated destination may retarget a reference.
-Links to canonical files use project-relative paths; save the rendered file
-at the project root for those relative links to resolve. Print that base
-assumption in the document header. Rebase relative Markdown destinations from
-each source document to that root in rendered prose, retaining fragments;
-JSON retains the original source text. External URLs remain unchanged.
-If a reference cannot be resolved, retain its text and report the issue instead
-of fabricating a link. Include source line numbers as visible labels; use
-existing source heading/explicit anchors when present, not invented line anchors.
-
-Every rendered page identifies scope, output continuation and evaluation
-completeness. Content fragments carry a visible continued marker; Markdown
-pages are readable portions, while JSON ranges support exact reconstruction.
-Regeneration from unchanged inputs is byte-deterministic: no generation time,
-random identifiers or current working-directory-dependent content. Changing
-one selected item updates its next generated content; generation never writes
-back or synthesizes missing requirements/relations.
 :::
 
 :::mara design DES-TRACE-CONTRACT-COMPATIBILITY
@@ -888,7 +838,7 @@ back or synthesizes missing requirements/relations.
 
 The rule/diagnostic/view contracts extend the schema-3 relationship baseline
 in [[DES-RELATION-COMPATIBILITY]]. They set compatibility boundaries for
-implemented validation and matrices, and planned specifications.
+implemented validation and matrices.
 
 | Surface | Compatibility boundary |
 |---|---|
@@ -897,7 +847,7 @@ implemented validation and matrices, and planned specifications.
 | Project configuration | Continue accepting format 1 for projects without rule sources. Enabling YAML rule sources requires format 2 and the optional rules table in DES-TRACE-RULE-GRAMMAR; reject unknown/unsupported versions. No saved views. |
 | Rule binding | Start format_version 1 inside the rules table. It selects the supported YAML/SHACL Core profile, generated context and namespaces, field projection and host selection vocabulary. This is independent of W3C or crate release numbers. |
 | Validation JSON | Start format_version 1 for project/item/schema validation and operation errors, replacing unversioned results. Explicit completeness, codes, severities, counts and continuation require client updates. |
-| Trace JSON | Start a separate format_version 1 family for matrix/specification results and errors. |
+| Trace JSON | Start a separate format_version 1 family for matrix results and errors. |
 | Discovery/relationship JSON | Retain the independently planned versions in the relationship compatibility contract. |
 | MCP | Reflect matching domain inputs/results in tool schemas; leave transport negotiation independent. |
 
@@ -1021,7 +971,7 @@ Other validators would require generated context/RDF, so independent consumption
 of the authored YAML is not an initial capability. [[EVD-YAML-SHACL-SPIKE]]
 verifies native Rust feasibility.
 
-Keep the graph policies, diagnostic interface and request-selected views in
+Keep the graph policies, diagnostic interface and request-selected matrices in
 this document.
 
 [[EVD-SHACL-CORE-SPIKE]] demonstrates the current worked obligations without a
@@ -1046,7 +996,7 @@ evaluation distinct from output pagination.
 
 Keep one project-owned vocabulary schema, explicitly enabled YAML rule
 sources and the existing validation entry points.
-Explicit matrix/specification requests with JSON and Markdown meet the current
+Explicit matrix requests with JSON and Markdown meet the current
 workflow without saved-view state or a general query/workflow engine.
 Use finite relationship/shape depth and output pages. Omit logical work
 accounting and deterministic partial execution; continuation reads output.
