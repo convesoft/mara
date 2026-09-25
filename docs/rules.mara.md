@@ -885,8 +885,8 @@ Invalid corpus input now skips all policy evaluation; complete nested traces
 and a deepest-failing-leaf diagnostic are not promised. Existing authored YAML
 and binding version 1 keep their field, condition and relationship semantics.
 
-Migrate custom format-2 schemas using the recoverable workflow in the
-relationship compatibility contract. Without rule sources, no project-config
+Migrate custom format-2 schemas using [[DES-SCHEMA-MIGRATION-WORKFLOW]].
+Without rule sources, no project-config
 migration is required beyond the relationship baseline. To enable rules, declare any needed custom fields,
 create and review YAML shapes, change project
 `format_version` to 2, and add `[rules]` with binding version 1 and explicit
@@ -905,8 +905,8 @@ successful adoption. Absent optional status does not satisfy a status
 Presence constraints are explicit, as specified in [[DES-TRACE-RULE-GRAMMAR]].
 Restore the checkpoint or correct failed declarations, never report a
 completed migration.
-Preserve all IDs/MIDs and unrelated source bytes. New migration automation and
-broader vocabulary transformations remain separate implementation/design work.
+Preserve all IDs/MIDs and unrelated source bytes. Apply the reviewed manual
+workflow in [[DES-SCHEMA-MIGRATION-WORKFLOW]]; no migration command is added.
 
 ## Future transition extension exercise
 

@@ -434,40 +434,12 @@ valid. Relation operation argument names remain `source`, `relation` and
 `target`; the optional occurrence selector and bounded inspection operation
 are additions, while whole-edge removal can now affect several files.
 
-Migration is deliberate and reviewable:
-
-1. Work on a recoverable copy or Git checkpoint. Inventory current custom
-   declarations, item ID/MID pairs and source files.
-2. Review item bodies for tokens newly meaningful as `[[relation:target]]`.
-   Escape literal examples before enabling the grammar. Check proposed aliases
-   against canonical names, metadata and eligible custom fields. Do not
-   automatically reinterpret an existing separately declared reverse relation
-   as an alias.
-3. Change schema `format_version: 2` to `3` in place. Existing declarations
-   without the new keys remain directed and internal with no inverse alias.
-   Add new declarations only when intended; do not add statuses or policy,
-   reinitialize the project, regenerate MIDs or rewrite existing relation
-   direction/meaning.
-4. Review the complete diff, then run schema and project validation with the
-   0.3 executable. Compare identities, custom fields, declarations, prose and
-   links; only reviewed changes may differ. Inspect representative relations
-   and their occurrence counts through CLI and MCP.
-
-A customized schema with `verifies`, custom fields and ordinary internal
-metadata can migrate by changing the version alone if its bodies contain no
-newly meaningful typed tokens. Adding `inverse: verified_by` then allows the
-reverse spelling without rewriting existing assertions. A schema already
-declaring a separate `verified_by` relation must resolve the collision and
-explicitly review its meaning and occurrences before adopting the alias;
-migration must never merge them merely because their names appear reciprocal.
-
-An invalid candidate leaves the recoverable baseline available and must not be
-reported as a completed migration. Automation and further vocabulary migration operations remain under
-[[REQ-SCHEMA-EVOLUTION]]. Rule grammar, validation/view formats and policy
-adoption follow [[DES-TRACE-CONTRACT-COMPATIBILITY]]; this relationship
-contract does not introduce a migration command. The current implementation
-adopts these relationship formats and external targets. This increment does
-not complete trace-matrix or schema-migration work for 0.3.
+Migrate schema format 2 and relation vocabulary with the reviewed manual
+workflow and examples in [[DES-SCHEMA-MIGRATION-WORKFLOW]]. Existing
+declarations without new keys remain directed and internal with no alias;
+neither the schema version nor an alias silently changes an existing edge's
+meaning. Rule grammar, validation/view formats and policy adoption follow
+[[DES-TRACE-CONTRACT-COMPATIBILITY]].
 :::
 
 :::mara decision ADR-RELATION-ASSERTION-REMOVAL

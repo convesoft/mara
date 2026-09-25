@@ -1080,9 +1080,9 @@ pub fn load_schema_for_validation(
     let format_version = format_version.unwrap_or_default();
     if !format_version_invalid && format_version != SCHEMA_FORMAT_VERSION {
         errors.insert(0, ConfigurationDiagnostic::new(DiagnosticCode::FormatUnsupported, "/format_version".into(), if matches!(format_version, 1 | 2) {
-            format!("schema format version {format_version} requires explicit migration: migrate the existing schema to format_version: 3; format 1 also requires description, use_when, avoid_when, and distinguish_from on every flavour. Preserve custom declarations and item identities, do not reinitialize. See https://github.com/convesoft/mara/blob/main/docs/relations.mara.md")
+            format!("schema format version {format_version} requires explicit migration: migrate the existing schema to format_version: 3; format 1 also requires description, use_when, avoid_when, and distinguish_from on every flavour. Preserve custom declarations and item identities, do not reinitialize. See https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md")
         } else {
-            format!("unsupported schema format version {format_version}; expected {SCHEMA_FORMAT_VERSION}; migrate the existing schema explicitly; see https://github.com/convesoft/mara/blob/main/docs/relations.mara.md")
+            format!("unsupported schema format version {format_version}; expected {SCHEMA_FORMAT_VERSION}; migrate the existing schema explicitly; see https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md")
         }));
     }
     let flavour_values: Option<BTreeMap<String, SchemaValue>> =

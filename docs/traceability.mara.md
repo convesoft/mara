@@ -301,9 +301,8 @@ eligibility or meaning. Do not silently reinterpret an existing relationship.
 Any automated migration must provide reviewable proposed changes, recoverable
 application and validation of the result.
 
-Verify the chosen workflow on a customized schema and corpus, including a
-relation vocabulary change and an invalid migration. The supported migration
-operations and whether they require automation remain a bounded design choice.
+Verify the workflow in [[DES-SCHEMA-MIGRATION-WORKFLOW]] on a customized schema
+and corpus, including a relation vocabulary change and an invalid migration.
 :::
 
 ## Settled design boundaries
@@ -341,6 +340,7 @@ Authoring declarations and spelling follow [[DES-RELATION-AUTHORING]].
 Duplicate add and whole-edge/occurrence removal follow [[DES-RELATION-MUTATION]];
 results and bounded occurrence inspection follow [[DES-RELATION-INTERFACES]].
 Format and client migration follow [[DES-RELATION-COMPATIBILITY]].
+Reviewed schema and vocabulary migration follow [[DES-SCHEMA-MIGRATION-WORKFLOW]].
 :::
 
 :::mara design DES-DECLARATIVE-TRACE-RULES
@@ -412,8 +412,7 @@ and bounded output without mistaking incomplete evaluation for a pass.
 
 Run the supported migration workflow on a customized copy and compare MIDs,
 unrelated content and links before/after. Keep code-pilot verification with its
-eventual language/workflow design. These are future acceptance procedures;
-this item records no claim that 0.3 functionality is implemented or passing.
+eventual language/workflow design.
 
 For relationship authoring, use the declarations in [[DES-RELATION-AUTHORING]]
 and requests in [[DES-RELATION-INTERFACES]]. Establish one edge through metadata,
@@ -446,7 +445,7 @@ cursors to completion and reject them after a source or request-option change.
 
 Use [[DES-TRACE-CONTRACT-COMPATIBILITY]] to inspect the customized schema
 migration and future transition exercise; the future syntax must be rejected
-by 0.3. These procedures remain implementation acceptance, not executed evidence.
+by 0.3.
 
 Load the documented YAML examples from explicit configured rule files without
 prefix/context declarations or intermediate Turtle.
@@ -488,13 +487,11 @@ alone cannot establish execution evidence under [[REQ-TRACE-COVERAGE]].
 
 ## Decisions needed before implementation
 
-The outcome requirements are ready for review. These interfaces still need
-concrete examples and a design decision before their implementation tickets
-can claim readiness:
+The remaining interface below needs a concrete example and design decision
+before its implementation ticket can claim readiness:
 
 | Design area | Remaining choice and required example |
 |---|---|
-| Further migration operations | Supported vocabulary transformations and manual versus automated application beyond the deliberate migration baseline. Format boundaries and policy adoption are settled in [relationship contracts](relations.mara.md) and [rule and view contracts](rules.mara.md). |
 | Code pilot | First language, repository workflow and file/symbol scope, then whether the result is suitable to ship. |
 
 Optional engineering-template lifecycle examples may demonstrate these rules;

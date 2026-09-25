@@ -13,6 +13,7 @@ documents only when a current user workflow requires them.
 - [Guided authoring: accepted 0.2 scope and designs](guided-authoring.mara.md)
 - [Unified discovery: accepted 0.2 contracts](discovery.mara.md)
 - [Migration to 0.2: schema guidance and discovery interface](migration-0.2.mara.md)
+- [Migration to 0.3: formats and reviewed vocabulary changes](migration-0.3.mara.md)
 - [Traceability: planned 0.3 requirements and design boundaries](traceability.mara.md)
 - [Relationship authoring and mutation](relations.mara.md)
 - [Rules, diagnostics and trace matrices](rules.mara.md)

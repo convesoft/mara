@@ -444,7 +444,7 @@ impl MaraMcp {
     #[tool(
         name = "trace_matrix",
         output_schema = rmcp::handler::server::common::schema_for_type::<mara::TraceMatrixResult>(),
-        description = "Generate a bounded traceability matrix for selected items. Supply ids, flavours, fields, paths or all:true and either enabled rule IRIs or check:{files,shape}. Results distinguish passed, failed, not_applicable and unavailable and include source-linked checks and canonical edges. Use render:markdown for a matching Markdown page. Follow next_cursor with unchanged options. Known policy failures are data; incomplete evaluation sets evaluation_complete:false."
+        description = "Generate a bounded, read-only traceability matrix. Select roots with ids, flavours, fields, paths or all:true; supply either enabled rule IRIs or a request-local check:{files,shape}, never both. A request check does not enable project policy. Trace format 1 distinguishes passed, failed, not_applicable and unavailable, with source-linked checks, canonical edges and per-evaluation summaries. Use render:markdown for a matching Markdown page. Follow next_cursor with unchanged inputs until has_more:false; restart after source/schema/rule changes. Known policy failures are data; incomplete evaluation sets evaluation_complete:false."
     )]
     fn trace_matrix(
         &self,
@@ -466,7 +466,7 @@ impl MaraMcp {
 
     #[tool(
         name = "project_init",
-        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project. Templates create only .mara/project.toml and .mara/schema.yaml with schema format 3 and flavour guidance, no starter documents or items. Customize the project-owned schema; migrate existing schemas in place instead of reinitializing. Inspect guidance and relation endpoints with schema_get, then run schema_validate and project_validate."
+        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project. Templates create only .mara/project.toml and .mara/schema.yaml with schema format 3 and flavour guidance, no starter documents or items. Customize the project-owned schema; migrate existing projects manually on a recoverable checkpoint instead of reinitializing. See https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md. Inspect declarations with schema_get, then run schema_validate and project_validate."
     )]
     fn project_init(
         &self,
@@ -510,7 +510,7 @@ impl MaraMcp {
 
     #[tool(
         name = "schema_get",
-        description = "Get the complete effective schema, or one named flavour or relation declaration. Before authoring, use description for purpose, use_when for selection criteria, avoid_when for exclusions, and distinguish_from to compare confusable flavours. These are schema guidance, not item fields. Inspect id_prefix, body, and fields for item constraints and relation source/target for allowed endpoints."
+        description = "Get the complete effective schema, or one named flavour or relation declaration. Before authoring, use description, use_when, avoid_when and distinguish_from to choose flavours; these are schema guidance, not item fields. Inspect id_prefix, body and fields for item constraints. Relation source/target, inverse, symmetric and external define endpoints and spelling; cardinality and acyclic are optional graph policies. Migrate existing projects manually and validate the result."
     )]
     fn schema_get(
         &self,
@@ -537,7 +537,7 @@ impl MaraMcp {
     #[tool(
         name = "schema_validate",
         output_schema = rmcp::handler::server::common::schema_for_type::<ValidationResult>(),
-        description = "Validate schema format 3 without validating item content. Every flavour requires a nonblank description, nonempty use_when list, avoid_when list ([] is valid), and distinguish_from mapping ({} is valid). Entries must be nonblank; distinction targets must be other declared flavours. Migrate format 1 explicitly in the existing schema, preserving custom declarations and item identities; no automatic upgrade. Then run project_validate for the corpus. Returns the common validation format 1 envelope, including null declaration counts if the schema cannot load. Follow next_cursor with unchanged options; invalid schemas return valid:false without a tool error."
+        description = "Validate schema format 3 without validating item content. Every flavour requires nonblank description, nonempty use_when, avoid_when ([] is valid), and distinguish_from ({} is valid); entries must be nonblank and distinction targets declared. Migrate existing schemas manually in place, preserving declarations and item identities; see https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md. Then run project_validate for the corpus. Returns validation format 1, with null declaration counts if the schema cannot load. Follow next_cursor with unchanged options; invalid schemas return valid:false without a tool error."
     )]
     fn schema_validate(
         &self,

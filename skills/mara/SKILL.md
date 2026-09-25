@@ -11,9 +11,10 @@ for structured results. The same operation selection, authoring, continuation,
 and validation rules apply to both surfaces.
 
 This skill targets the current 0.3 development interface: schema format 3,
-discovery format 2, relationship format 1, and validation format 1. Internal typed inline relationships,
-metadata inverse aliases and symmetric edges are implemented; external targets
-are not yet supported. Use the skill shipped with the selected executable or
+discovery format 2, relationship format 1, validation format 1, and trace
+format 1. Typed inline relationships, inverse aliases, symmetric edges,
+external targets, graph policies, YAML current-state rules, and matrices are
+implemented. Use the skill shipped with the selected executable or
 the same source revision. If an older installation exposes a different
 interface, report the mismatch and use its matching guidance; do not silently
 change the version pin or substitute removed commands.
@@ -113,6 +114,7 @@ inspect `<command> --help` for positional arguments and options.
 | Add or remove an existing item's typed edge | `relation_add` or `relation_remove` | `relation add`, `relation remove` |
 | Delete an item; resolve reported relation/mention blockers | `item_delete` | `item delete` |
 | Check an item or whole-project integrity | `item_validate` or `project_validate` | `item validate`, `project validate` |
+| Inspect coverage for selected roots | `trace_matrix` | `trace matrix` |
 
 Validation (`project_validate`, `item_validate`, `schema_validate`) returns
 `valid`, `evaluation_complete`, `summary`, `diagnostics`, and output
@@ -122,8 +124,9 @@ remain errors. Current-state rules load from explicit YAML files enabled by
 project format 2 and `[rules]` with `format_version = 1` and `files = [...]`.
 Run `schema_validate` to check definitions, then `project_validate` or
 `item_validate` to evaluate policy. Status/owner fields are project-defined;
-templates and existing projects gain no policies automatically. Policy failures
-do not block structured edits. Structural graph policies and trace views remain planned.
+templates and existing projects gain no policies automatically. Schema relation
+`cardinality` and `acyclic` declarations impose structural graph policies when
+present. Policy failures do not block structured edits.
 Invalid schemas now return the common envelope with `valid:false`, not an MCP
 tool error. Counts are null when the schema cannot load. Diagnostic `path` and
 `line` alias `location`; project-owned configuration paths are relative and
@@ -230,22 +233,53 @@ and inline ID/MID equivalents. Direct source may intentionally repeat assertions
 included files. Supply `occurrence` from inspection to remove exactly one.
 Stale or mismatched selectors fail without writes. Results report
 `changed_occurrences`, `remaining_occurrences` and `edge_exists`. Inline removal
-demotes `[[relation:target]]` to `[[target]]`, preserving surrounding prose and
-the authored ID/MID. The retained mention still blocks deletion of its target.
+demotes internal `[[relation:target]]` to `[[target]]` and external assertions
+to Markdown autolinks, preserving surrounding prose. The retained internal
+mention still blocks deletion of its target.
 
-Author `[[relation:ID]]` or `[[relation:MID]]` in an item body using a canonical
-schema name or inverse alias. No whitespace, labels or nested markup is allowed
+Author `[[relation:ID]]`, `[[relation:MID]]`, or
+`[[relation:external:https://host/path]]` in an item body using a canonical
+schema name or inverse alias. External targets require `external: true` on the
+relation declaration; Mara preserves their authored address and never fetches it.
+No whitespace, labels or nested markup is allowed
 inside the token. These assertions share metadata edge identity and produce no
 builtin mention. Code, raw contexts and escaped openings remain literal; typed
 tokens outside item bodies have no typed meaning. Unknown relations, malformed
 tokens and invalid targets in supported contexts fail validation. Use body
 creation/update to author inline assertions; relation add writes metadata.
 
-To migrate format 2, escape typed-looking literal examples in item bodies,
-review aliases for collisions and change the schema version
-in place to 3. Preserve custom declarations, source bytes and MIDs; existing
-relations remain directed with no alias. Validate schema and project with this
-revision. See `docs/relations.mara.md` for the full release migration contract.
+For a format-1/2 or relation-vocabulary migration, follow
+`docs/migration-0.3.mara.md` with the matching 0.3 executable. The supported
+workflow is manual: save a Git checkpoint or project copy, review the complete
+source diff, then require complete, valid schema and project validation. Mara
+has no schema migration preview/apply command; `project_transaction_rollback`
+does not undo manual edits. Preserve MIDs and unrelated declarations, fields,
+prose and links. Existing relations remain directed with no alias unless the
+schema explicitly changes. Review newly meaningful typed tokens, alias
+collisions, all authored spellings and YAML rule paths before changing names.
+Do not treat a direction, endpoint or meaning change as a rename.
+
+## Inspect trace coverage
+
+Use `trace_matrix` (CLI `trace matrix`) for a read-only view of selected roots.
+Select roots with `ids`, `flavours`, `fields`, `paths`, or `all:true`; pass either
+enabled rule IRIs in `rules` or a request-local `check:{files,shape}`. CLI uses
+repeatable `--id`, `--flavour`, `--field KEY=VALUE`, `--path`, and either
+`--rule` or `--check-file` with `--shape`. Do not mix the two evaluation modes.
+The check files supply shapes for this request only; they do not enable policy
+for project validation. A named rule uses its own applicability and selection
+within the requested roots.
+
+Read each result state (`passed`, `failed`, `not_applicable`, `unavailable`),
+the check and edge records, source locations, and per-evaluation `summaries`.
+An external endpoint is terminal; an edge outside root selection can still
+contribute to a check. Known rule failures are matrix data, while
+`evaluation_complete:false` means the view could not be fully evaluated.
+Continue with unchanged inputs and `next_cursor` until `has_more:false`;
+restart after source, schema, or rule changes. CLI defaults to Markdown for
+this command; `--format json` returns trace format 1. MCP returns JSON and
+accepts `render:"markdown"` for the matching Markdown page. The output is a
+projection, not a saved source of project knowledge.
 
 ## Preserve authored references
 
