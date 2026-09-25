@@ -244,9 +244,12 @@ fn resolve_link(
     {
         return Resolution::SourceOnly;
     }
-    let (path, fragment) = target
+    let (path_and_query, fragment) = target
         .split_once('#')
         .map_or((target, None), |(p, f)| (p, Some(f)));
+    let path = path_and_query
+        .split_once('?')
+        .map_or(path_and_query, |(path, _)| path);
     let path = percent_decode(path);
     // Only canonical Mara documents have a target contract; code and other assets remain links.
     if !path.is_empty() && !path.ends_with(".mara.md") {

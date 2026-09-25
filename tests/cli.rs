@@ -340,7 +340,7 @@ fn trace_specification_rebases_percent_encoded_source_links_once() {
     fs::write(root.join("docs/target file.mara.md"), "# Target\n").unwrap();
     fs::write(
         root.join("docs/source.mara.md"),
-        "# Source\n\n[Target](target%20file.mara.md#target)\n[Local](#source)\n[Root](/docs/target%20file.mara.md#target)\n[Asset](../asset.png?raw=1#preview)\n[By reference][asset]\n\n[asset]: ../asset.png?raw=1#preview\n[External](https://example.com/target)\n[Network](//example.com/target)\n",
+        "# Source\n\n[Target](target%20file.mara.md#target)\n[Queried](target%20file.mara.md?raw=1#target)\n[Local](#source)\n[Root](/docs/target%20file.mara.md#target)\n[Asset](../asset.png?raw=1#preview)\n[By reference][asset]\n\n[asset]: ../asset.png?raw=1#preview\n[External](https://example.com/target)\n[Network](//example.com/target)\n",
     )
     .unwrap();
 
@@ -352,6 +352,10 @@ fn trace_specification_rebases_percent_encoded_source_links_once() {
         "{rendered}"
     );
     assert!(!rendered.contains("target%2520file"), "{rendered}");
+    assert!(
+        rendered.contains("[Queried](docs/target%20file.mara.md?raw=1#target)"),
+        "{rendered}"
+    );
     assert!(
         rendered.contains("[Local](docs/source.mara.md#source)"),
         "{rendered}"
@@ -376,6 +380,27 @@ fn trace_specification_rebases_percent_encoded_source_links_once() {
         rendered.contains("[Network](//example.com/target)"),
         "{rendered}"
     );
+}
+
+#[test]
+fn trace_specification_reports_missing_canonical_link_with_query() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    fs::write(
+        root.join("source.mara.md"),
+        ":::mara requirement REQ-A\n:mid: 01M1PXP2KGVW5ZF2JGP9K4XE9B\n:title: A\n\n[Missing](missing.mara.md?raw=1#section)\n:::\n",
+    )
+    .unwrap();
+
+    let output = mara(root, &["trace", "specification", "--id", "REQ-A"]);
+    assert!(!output.status.success());
+    let rendered = stdout(&output);
+    assert!(
+        rendered.contains("[Missing](missing.mara.md?raw=1#section)"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("reference_unresolved"), "{rendered}");
 }
 
 #[test]
@@ -804,6 +829,90 @@ fn trace_specification_ignores_unrelated_invalid_documents() {
             .iter()
             .any(|r| r["kind"] == "issue")
     );
+}
+
+#[test]
+fn trace_specification_reports_unchecked_references_in_incomplete_corpus() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    fs::write(
+        root.join("bad.mara.md"),
+        ":::mara requirement REQ-BAD trailing\n:title: Bad\n\nUnreadable.\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("selected.mara.md"),
+        ":::mara requirement REQ-SELECTED\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: Selected\n\n[[REQ-MISSING]] and [Missing](missing.mara.md), with [[REQ-SELECTED]] and [Asset](image.png?raw=1).\n:::\n",
+    )
+    .unwrap();
+
+    let output = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "specification",
+            "--id",
+            "REQ-SELECTED",
+        ],
+    );
+    assert!(!output.status.success(), "{}", stdout(&output));
+    let result: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(result["evaluation_complete"], false, "{result:#}");
+    let unavailable = result["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|record| {
+            record["kind"] == "issue" && record["diagnostic"]["code"] == "evaluation_unavailable"
+        })
+        .count();
+    assert_eq!(unavailable, 2, "{result:#}");
+}
+
+#[test]
+fn trace_specification_keeps_duplicate_id_item_sources_distinct() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    fs::create_dir(root.join("docs")).unwrap();
+    fs::write(
+        root.join("docs/first.mara.md"),
+        ":::mara requirement REQ-DUP\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: First\n\nFirst body.\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("docs/second.mara.md"),
+        ":::mara requirement REQ-DUP\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: Second\n\nSecond body.\n:::\n",
+    )
+    .unwrap();
+
+    let output = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "specification",
+            "--path",
+            "docs/",
+        ],
+    );
+    assert!(!output.status.success(), "{}", stdout(&output));
+    let result: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    let items = result["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|record| record["kind"] == "item")
+        .collect::<Vec<_>>();
+    assert_eq!(items.len(), 2, "{result:#}");
+    assert_eq!(items[0]["node"]["title"], "First");
+    assert_eq!(items[0]["node"]["source"]["path"], "docs/first.mara.md");
+    assert_eq!(items[1]["node"]["title"], "Second");
+    assert_eq!(items[1]["node"]["source"]["path"], "docs/second.mara.md");
 }
 
 #[test]

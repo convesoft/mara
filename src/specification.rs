@@ -185,10 +185,17 @@ pub(crate) fn generate(
     let nodes = graph
         .nodes()
         .filter_map(|node| match node.kind() {
-            DiscoveryNodeKind::Item(item) => Some((item.id(), node.summary())),
+            DiscoveryNodeKind::Item(item) => Some((item as *const Item, node.summary())),
             _ => None,
         })
         .collect::<BTreeMap<_, _>>();
+    let mut nodes_by_id = BTreeMap::<&str, Vec<&DiscoveryNodeSummary>>::new();
+    for item in corpus.items() {
+        nodes_by_id
+            .entry(item.id())
+            .or_default()
+            .push(&nodes[&(item as *const Item)]);
+    }
     let documents = graph
         .nodes()
         .filter_map(|node| match node.kind() {
@@ -227,7 +234,7 @@ pub(crate) fn generate(
             {
                 continue;
             }
-            let node = nodes[item.id()].clone();
+            let node = nodes[&(item as *const Item)].clone();
             let breadcrumbs = breadcrumbs(&graph, item);
             records.push(SpecificationRecord::Item {
                 node: node.clone(),
@@ -287,10 +294,12 @@ pub(crate) fn generate(
                     edge.relation.clone()
                 };
                 let neighbour = match endpoint {
-                    RelationEndpoint::Item { id, mid } => nodes
-                        .get(id.as_str())
-                        .map(|n| json!(n))
-                        .unwrap_or_else(|| json!({"kind":"item","id":id,"mid":mid})),
+                    RelationEndpoint::Item { id, mid } => {
+                        match nodes_by_id.get(id.as_str()).map(Vec::as_slice) {
+                            Some([node]) => json!(node),
+                            _ => json!({"kind":"item","id":id,"mid":mid}),
+                        }
+                    }
                     RelationEndpoint::External { address } => {
                         json!({"kind":"external","address":address})
                     }
@@ -349,6 +358,62 @@ pub(crate) fn generate(
                         )),
                     });
                 }
+            }
+        }
+        for document in corpus.documents() {
+            let selected_document = narrative_included
+                && (selection.all
+                    || selection
+                        .paths
+                        .iter()
+                        .any(|path| document.path().starts_with(path)));
+            for reference in document.references() {
+                let source = reference.source();
+                let span = source.span();
+                let selected_item = selected.iter().find(|item| {
+                    item.source().path() == document.path()
+                        && item.source().span().start_byte() <= span.start_byte()
+                        && span.end_byte() <= item.source().span().end_byte()
+                });
+                if !selected_document && selected_item.is_none() {
+                    continue;
+                }
+                if !matches!(reference.kind(), ReferenceKind::Item)
+                    && (reference.kind() != ReferenceKind::MarkdownLink
+                        || !canonical_link(reference.target()))
+                {
+                    continue;
+                }
+                let key = (
+                    document.path().to_owned(),
+                    span.start_byte(),
+                    span.end_byte(),
+                );
+                if resolved_references.contains(&key)
+                    || diagnostics.iter().any(|diagnostic| {
+                        diagnostic.code() == DiagnosticCode::ReferenceUnresolved
+                            && diagnostic.source().path() == document.path()
+                            && diagnostic.source().span() == span
+                    })
+                {
+                    continue;
+                }
+                records.push(SpecificationRecord::Issue {
+                    diagnostic: json!(ValidationDiagnostic::new(
+                        DiagnosticCode::EvaluationUnavailable,
+                        Severity::Error,
+                        if selected_item.is_some() {
+                            ValidationScope::Item
+                        } else {
+                            ValidationScope::Document
+                        },
+                        DiagnosticLocation::source(source),
+                        format!(
+                            "reference '{}' cannot be resolved because the project corpus is incomplete",
+                            reference.target()
+                        ),
+                    )),
+                });
             }
         }
     }
@@ -1120,6 +1185,7 @@ fn canonical_link(target: &str) -> bool {
         return false;
     }
     let file = target.split_once('#').map_or(target, |(file, _)| file);
+    let file = file.split_once('?').map_or(file, |(file, _)| file);
     let file = crate::discovery::percent_decode(file);
     file.is_empty() || file.ends_with(".mara.md")
 }
