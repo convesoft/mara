@@ -867,7 +867,8 @@ destination; no generated destination may retarget a reference.
 Links to canonical files use project-relative paths; save the rendered file
 at the project root for those relative links to resolve. Print that base
 assumption in the document header. Rebase relative Markdown destinations from
-each source document to that root in rendered prose, retaining fragments;
+each source document to that root in rendered prose, retaining query strings
+and fragments;
 JSON retains the original source text. External URLs remain unchanged.
 If a reference cannot be resolved, retain its text and report the issue instead
 of fabricating a link. Include source line numbers as visible labels; use

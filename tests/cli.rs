@@ -340,7 +340,7 @@ fn trace_specification_rebases_percent_encoded_source_links_once() {
     fs::write(root.join("docs/target file.mara.md"), "# Target\n").unwrap();
     fs::write(
         root.join("docs/source.mara.md"),
-        "# Source\n\n[Target](target%20file.mara.md#target)\n[Local](#source)\n[Root](/docs/target%20file.mara.md#target)\n[External](https://example.com/target)\n[Network](//example.com/target)\n",
+        "# Source\n\n[Target](target%20file.mara.md#target)\n[Local](#source)\n[Root](/docs/target%20file.mara.md#target)\n[Asset](../asset.png?raw=1#preview)\n[By reference][asset]\n\n[asset]: ../asset.png?raw=1#preview\n[External](https://example.com/target)\n[Network](//example.com/target)\n",
     )
     .unwrap();
 
@@ -358,6 +358,14 @@ fn trace_specification_rebases_percent_encoded_source_links_once() {
     );
     assert!(
         rendered.contains("[Root](docs/target%20file.mara.md#target)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[Asset](asset.png?raw=1#preview)"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("[asset]: asset.png?raw=1#preview"),
         "{rendered}"
     );
     assert!(

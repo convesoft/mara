@@ -1177,7 +1177,10 @@ fn rebase_target(target: &str, path: &Path) -> Option<String> {
     if target.is_empty() || target.starts_with("//") {
         return None;
     }
-    let (file, fragment) = target.split_once('#').unwrap_or((target, ""));
+    let (file_and_query, fragment) = target.split_once('#').unwrap_or((target, ""));
+    let (file, query) = file_and_query
+        .split_once('?')
+        .map_or((file_and_query, None), |(file, query)| (file, Some(query)));
     if file.contains(':') {
         return None;
     }
@@ -1209,6 +1212,10 @@ fn rebase_target(target: &str, path: &Path) -> Option<String> {
         return None;
     }
     let mut rebased = md_target(&normalized);
+    if let Some(query) = query {
+        rebased.push('?');
+        rebased.push_str(query);
+    }
     if !fragment.is_empty() {
         rebased.push('#');
         rebased.push_str(fragment);
