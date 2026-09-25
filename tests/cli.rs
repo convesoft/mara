@@ -463,6 +463,68 @@ fn trace_specification_reference_links_work_without_definitions_on_the_page() {
 }
 
 #[test]
+fn trace_specification_continuation_pages_identify_their_item() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    fs::write(
+        root.join("items.mara.md"),
+        ":::mara requirement REQ-A\n:mid: 01M1PXP2KGVW5ZF2JGP9K4XE9B\n:title: A\n:depends_on: REQ-B\n\nBody A.\n:::\n\n:::mara requirement REQ-B\n:mid: 01M1PXP2KG381MM1VNN6XC7S4M\n:title: B\n\nBody B.\n:::\n",
+    )
+    .unwrap();
+
+    let mut cursor = None::<String>;
+    let mut pages = Vec::new();
+    loop {
+        let mut args = vec![
+            "trace",
+            "specification",
+            "--flavour",
+            "requirement",
+            "--limit",
+            "1",
+        ];
+        if let Some(value) = &cursor {
+            args.extend(["--cursor", value]);
+        }
+        let output = mara(root, &args);
+        assert!(output.status.success(), "{}", stderr(&output));
+        let rendered = stdout(&output);
+        cursor = rendered.lines().find_map(|line| {
+            line.strip_prefix("Continue with `--cursor ")
+                .and_then(|rest| rest.split('`').next())
+                .map(str::to_owned)
+        });
+        pages.push(rendered);
+        if cursor.is_none() {
+            break;
+        }
+        assert!(pages.len() < 20);
+    }
+
+    assert!(pages.len() > 3);
+    let metadata_page = pages.iter().find(|page| page.contains("- `mid`:")).unwrap();
+    assert!(
+        metadata_page.contains("## [REQ-A](<items.mara.md>)"),
+        "{metadata_page}"
+    );
+    let body_page = pages.iter().find(|page| page.contains("Body A.")).unwrap();
+    assert!(
+        body_page.contains("## [REQ-A](<items.mara.md>)"),
+        "{body_page}"
+    );
+    let relationship_line = pages
+        .iter()
+        .flat_map(|page| page.lines())
+        .find(|line| line.starts_with("- Relationship `depends_on`"))
+        .unwrap();
+    assert!(
+        relationship_line.contains("for [REQ-A](<items.mara.md>)"),
+        "{relationship_line}"
+    );
+}
+
+#[test]
 fn trace_specification_keeps_ambiguous_item_mentions_unlinked() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();

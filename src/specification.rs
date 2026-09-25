@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    ConnectionKind, Corpus, DiagnosticCode, DiagnosticLocation, DiscoveryNodeKind,
+    ConnectionKind, Corpus, DiagnosticCode, DiagnosticLocation, DiscoveryKind, DiscoveryNodeKind,
     DiscoveryNodeSummary, FieldFilter, Item, ItemFilters, ItemSource, MetadataFragment, Project,
     ReferenceKind, RelationDirection, RelationEdge, RelationEndpoint, Schema, Severity, TextRange,
     TraceSelection, ValidationDiagnostic, ValidationError, ValidationScope, query,
@@ -668,27 +668,29 @@ fn markdown(
     if !result.narrative_included {
         out.push_str("Item selection omits document narrative and unselected ancestor bodies; headings appear as breadcrumbs.\n\n");
     }
+    let mut current_item = None::<&str>;
     for record in &result.records {
         match record {
             SpecificationRecord::Item { node, breadcrumbs } => {
-                out.push_str(&format!(
-                    "\n## [{}](<{}>) — {} (line {})\n\n",
-                    node.id.as_deref().unwrap_or("item"),
-                    source_target(node.source.path(), node.source.start_byte(), &anchors),
-                    node.title.as_deref().unwrap_or(""),
-                    node.source.start_line()
-                ));
-                if !breadcrumbs.is_empty() {
-                    out.push_str(&format!("Context: {}\n\n", breadcrumbs.join(" › ")));
-                }
+                render_item_heading(&mut out, node, breadcrumbs, &anchors, false);
+                current_item = Some(&node.reference);
             }
             SpecificationRecord::Content {
+                node,
                 source_range,
                 content,
                 content_range,
                 metadata,
-                ..
+                breadcrumbs,
             } => {
+                if node.kind == DiscoveryKind::Item {
+                    if current_item != Some(node.reference.as_str()) {
+                        render_item_heading(&mut out, node, breadcrumbs, &anchors, true);
+                        current_item = Some(&node.reference);
+                    }
+                } else {
+                    current_item = None;
+                }
                 if !metadata.is_empty() {
                     for entry in metadata {
                         out.push_str(&format!(
@@ -729,6 +731,7 @@ fn markdown(
                 }
             }
             SpecificationRecord::Relationship {
+                item,
                 label,
                 endpoint,
                 outside_selection,
@@ -742,8 +745,8 @@ fn markdown(
                     .unwrap_or("?");
                 let path = endpoint["source"]["path"].as_str();
                 let byte = endpoint["source"]["start_byte"].as_u64().unwrap_or(0) as usize;
-                out.push_str(&format!("- Relationship `{}` → {}{} ({} occurrence{}; inspect with `relation get {} {} {}`)\n",
-                    label, path.map_or_else(|| name.to_owned(), |p| format!("[{name}](<{}>)", source_target(Path::new(p), byte, &anchors))),
+                out.push_str(&format!("- Relationship `{}` for [{}](<{}>) → {}{} ({} occurrence{}; inspect with `relation get {} {} {}`)\n",
+                    label, item.id.as_deref().unwrap_or("item"), source_target(item.source.path(), item.source.start_byte(), &anchors), path.map_or_else(|| name.to_owned(), |p| format!("[{name}](<{}>)", source_target(Path::new(p), byte, &anchors))),
                     if *outside_selection { " [outside selection]" } else { "" }, occurrence_count,
                     if *occurrence_count == 1 { "" } else { "s" }, inspection["source"].as_str().unwrap_or(""),
                     inspection["relation"].as_str().unwrap_or(""), inspection["target"].as_str().unwrap_or("")));
@@ -754,6 +757,26 @@ fn markdown(
         }
     }
     out
+}
+
+fn render_item_heading(
+    out: &mut String,
+    node: &DiscoveryNodeSummary,
+    breadcrumbs: &[String],
+    anchors: &SourceAnchors,
+    continued: bool,
+) {
+    out.push_str(&format!(
+        "\n## [{}](<{}>) — {} (line {}){}\n\n",
+        node.id.as_deref().unwrap_or("item"),
+        source_target(node.source.path(), node.source.start_byte(), anchors),
+        node.title.as_deref().unwrap_or(""),
+        node.source.start_line(),
+        if continued { " — continued" } else { "" }
+    ));
+    if !breadcrumbs.is_empty() {
+        out.push_str(&format!("Context: {}\n\n", breadcrumbs.join(" › ")));
+    }
 }
 
 fn md_target(path: &Path) -> String {
