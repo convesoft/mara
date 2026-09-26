@@ -1,0 +1,10 @@
+[package]
+name = "mara-69-pilot"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+proc-macro2 = { version = "1", features = ["span-locations"] }
+syn = { version = "2", features = ["full"] }
