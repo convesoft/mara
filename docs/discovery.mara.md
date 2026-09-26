@@ -168,3 +168,23 @@ Run `cargo test --locked --test discovery --test discovery_handles --test refere
 
 The real CLI/stdin-stdout MCP workflow searches narrative, pages its direct references, follows an item relation, reads the destination and navigates parent/children. Compare transport responses, retain each occurrence and source span, reject namespace ambiguity and removed interfaces, and reject an oversized mandatory summary without omission. Pass only when all assertions succeed; library projections alone do not establish this workflow. Full search ranking, retrieval pagination and mutation preflight suites remain separate obligations.
 :::
+
+:::mara evidence EVD-DOCUMENT-NAVIGATION
+:mid: 01M3FX66JEF9DCJE2WZS7RZ7VD
+:title: Document navigation checkpoint passes restored suites
+:status: accepted
+:result: passed
+:captured_at: 2026-09-26T22:25:26Z
+:subject_revision: 243c61417343d1422aa5486c9a9849e21e488663
+:evidences: VER-DOCUMENT-NAVIGATION
+:evidences: VER-SOURCE-AND-IDENTITY
+:evidences: VER-PROJECT-BOOTSTRAP
+
+The tested working tree was committed unchanged as `243c61417343d1422aa5486c9a9849e21e488663`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
+
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 89 tests passed (1 Markdown-container unit, 30 corpus, 10 discovery, 5 handles, 9 identity, 3 navigation, 18 bootstrap, 13 references), none failed or ignored. Candidate CLI and stdio MCP exercised the direct-navigation workflow with paged mention occurrences, backlinks, typed relations, parent/child context, destination reads and namespace disambiguation. Reference validation asserted stable classification and transport parity; real edits preserved item identity and invalidated structural handles as specified. Test projects and child processes used fixture-owned Git/configuration and working directories; named self-hosting checks were explicitly read-only.
+
+Candidate schema/project validation and explicit-project MCP validation completed with zero errors or warnings. Selected MCP intent (one requirement), realization and verification (the requirement and structural design) matrices passed, with all pages consumed. Sound baseline runtime behavior was retained; code changes add associations only.
+
+This execution covers the navigation, source/identity and bootstrap methods on this candidate. Full ranking, retrieval bounds and continuation, mutation preflight, and the remaining capability inventory are not claimed complete.
+:::
