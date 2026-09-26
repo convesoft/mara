@@ -103,7 +103,7 @@ for (const args of [
   assert.equal(output.status, 0, output.stderr || output.stdout);
   if (args[0] === "project") {
     assert.deepEqual(readdirSync(project), [".mara"]);
-    assert.deepEqual(readdirSync(path.join(project, ".mara")).sort(), ["engineering-checks.yaml", "engineering-rules.yaml", "project.toml", "schema.yaml"]);
+    assert.deepEqual(readdirSync(path.join(project, ".mara")).sort(), ["engineering-checks.yaml", "engineering-execution.yaml", "engineering-rules.yaml", "project.toml", "schema.yaml"]);
   }
 }
 const call = (id, name, args) => ({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });

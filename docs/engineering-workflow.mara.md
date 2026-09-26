@@ -118,9 +118,11 @@ Investigate relevant failures and inconclusive or conflicting results; the
 existence of another passing record does not settle them. Record exclusions and
 their rationale. A changed candidate requires reassessing which evidence applies.
 
-The bundled execution check for a caller-selected revision awaits matrix-parameter
-integration. Until that is available, inspect the evidence and reports explicitly;
-the current coverage checks do not establish execution success or freshness.
+Assess the selected verifications with the profile's
+[execution check](engineering-template.mara.md#selected-scope-assessments), supplying
+the candidate's concrete `subject_revision` parameter. Inspect the evidence and
+reports alongside the matrix: a matching passing record alone does not resolve
+conflicting results or establish that the tested environment suits production.
 
 ## 6. Establish readiness to deploy
 

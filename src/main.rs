@@ -162,7 +162,7 @@ enum Command {
 enum TraceCommand {
     /// Generate a bounded, read-only coverage matrix using enabled rule IRIs or a request-local YAML check.
     #[command(
-        after_help = "Select roots with --all or one or more --id, --flavour, --field and --path filters. Use --rule for enabled root rules, or --check-file with --shape for a request-only check; do not mix them. Default output is Markdown; --format json returns trace format 1. Read result states, checks, edges, summaries and evaluation_complete; follow --cursor with unchanged inputs until has_more is false. The view does not change project policy or source files."
+        after_help = "Select roots with --all or one or more --id, --flavour, --field and --path filters. Use --rule for enabled root rules, or --check-file with --shape for a request-only check; do not mix them. Example for a check containing hasValue: {parameter: subject_revision}: mara trace matrix --id REQ-A --check-file rules/revision.yaml --shape urn:mara:rule:revision_evidence --param subject_revision=abc123. Parameters are exact text values and may also occur in in lists. Default output is Markdown; --format json returns trace format 1. Read result states, checks, edges, summaries and evaluation_complete; follow --cursor with unchanged inputs until has_more is false. The view does not change project policy or source files."
     )]
     Matrix {
         /// Exact human ID or MID for a root item; repeat for OR and intersect with other root filters.
@@ -189,6 +189,9 @@ enum TraceCommand {
         /// Expanded IRI of a named targetless node shape from the request check files.
         #[arg(long)]
         shape: Option<String>,
+        /// Named text literal for a request check, as NAME=VALUE; repeat for different names.
+        #[arg(long = "param", value_name = "NAME=VALUE")]
+        parameters: Vec<String>,
         /// Maximum records per page, 1 through 100 (default 20); the byte budget may return fewer.
         #[arg(long)]
         limit: Option<usize>,
@@ -202,7 +205,7 @@ enum TraceCommand {
 enum ProjectCommand {
     /// Initialize a Mara project without overwriting existing content; rejects an existing Mara project.
     #[command(
-        after_help = "All templates create .mara/project.toml and .mara/schema.yaml with schema format 3 and flavour guidance. Engineering also installs .mara/engineering-rules.yaml (enabled policy) and .mara/engineering-checks.yaml (request-local checks); no starter documents or items. Edit the resulting project-owned schema to customize it. For an existing project, follow the manual workflow in docs/migration-0.3.mara.md on a recoverable checkpoint; do not reinitialize or replace it with a template. Use schema get to inspect declarations, then schema validate and project validate."
+        after_help = "All templates create .mara/project.toml and .mara/schema.yaml with schema format 3 and flavour guidance. Engineering also installs .mara/engineering-rules.yaml (enabled policy) and .mara/engineering-checks.yaml and .mara/engineering-execution.yaml (request-local checks); no starter documents or items. Edit the resulting project-owned schema to customize it. For an existing project, follow the manual workflow in docs/migration-0.3.mara.md on a recoverable checkpoint; do not reinitialize or replace it with a template. Use schema get to inspect declarations, then schema validate and project validate."
     )]
     Init {
         /// Destination directory (absolute or relative to the working directory), created if missing. Defaults to the working directory only when --project is also omitted. Cannot combine PATH with --project.
@@ -624,6 +627,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                     rules,
                     check_files,
                     shape,
+                    parameters,
                     limit,
                     cursor,
                 },
@@ -644,12 +648,41 @@ fn run(cli: Cli) -> Result<bool, String> {
                 Ok(fields) => fields,
                 Err(error) => return emit_trace_error(format, error),
             };
-            let check = if check_files.is_empty() && shape.is_none() {
+            let mut bindings = std::collections::BTreeMap::new();
+            for parameter in parameters {
+                let Some((name, value)) = parameter.split_once('=') else {
+                    return emit_trace_error(
+                        format,
+                        mara::ValidationError::invalid_argument("--param must use NAME=VALUE"),
+                    );
+                };
+                if bindings
+                    .insert(name.to_owned(), serde_json::json!(value))
+                    .is_some()
+                {
+                    return emit_trace_error(
+                        format,
+                        mara::ValidationError::invalid_argument(format!(
+                            "duplicate check parameter '{name}'"
+                        )),
+                    );
+                }
+            }
+            if check_files.is_empty() && shape.is_none() && !bindings.is_empty() {
+                return emit_trace_error(
+                    format,
+                    mara::ValidationError::invalid_argument(
+                        "--param requires --check-file and --shape",
+                    ),
+                );
+            }
+            let check = if check_files.is_empty() && shape.is_none() && bindings.is_empty() {
                 None
             } else {
                 Some(mara::TraceCheck {
                     files: check_files,
                     shape: shape.unwrap_or_default(),
+                    parameters: bindings,
                 })
             };
             let params = mara::TraceMatrixParams {

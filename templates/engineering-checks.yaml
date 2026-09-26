@@ -1,5 +1,5 @@
 # Request-local checks: select roots explicitly. This file is not enabled policy.
-# Execution for a selected revision is supplied by the matrix-parameter work.
+# Selected-revision execution is in engineering-execution.yaml.
 - id: rule:check_accepted
   property: [{path: status, hasValue: accepted}]
 

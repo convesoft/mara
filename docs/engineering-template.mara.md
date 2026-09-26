@@ -11,10 +11,12 @@ intent through implementation, candidate assessment and production verification.
 
 The optional engineering template installs an editable project profile:
 `.mara/schema.yaml`, enabled `.mara/engineering-rules.yaml`, and request-local
-`.mara/engineering-checks.yaml`, plus project configuration format 2. The
+`.mara/engineering-checks.yaml` and `.mara/engineering-execution.yaml`, plus
+project configuration format 2. The
 [template sources](../templates/engineering-schema.yaml) own exact enum values,
 endpoints and inverse names; [policies](../templates/engineering-rules.yaml)
-and [checks](../templates/engineering-checks.yaml) own executable constraints.
+and [coverage](../templates/engineering-checks.yaml) and
+[execution](../templates/engineering-execution.yaml) checks own executable constraints.
 Existing projects require an explicit reviewed migration; initialization never
 rewrites them. No starter items, language packs or report evidence are copied.
 
@@ -77,6 +79,7 @@ checks do not become always-on project policy.
 | realization | Accepted requirements/designs | Direct code implementation or accepted realizing artifact; a requirement may use one accepted satisfying design with such realization |
 | verification | Accepted requirements/designs | Accepted verification definition or direct code check |
 | validation | Accepted goals/scenarios | Accepted validation method |
+| execution | Accepted verifications | Accepted passing evidence for the requested subject_revision |
 
 Each check asserts its supported root flavour and accepted status. Draft or
 retired roots fail an explicitly requested assessment; select the intended scope
@@ -92,10 +95,22 @@ mara trace matrix --id REQ-EXPORT \
   --shape urn:mara:rule:realization
 ```
 
-Execution assessment is a separate question: whether a selected verification has
-accepted passing evidence for the caller's specified subject revision. Its
-reusable parameterized check depends on the matrix-parameter contract being
-implemented separately. Do not substitute an unrestricted historical pass or
-hardcode a moving revision into the reusable template. A direct code check or
-implementation link never counts as execution evidence.
+Execution uses `.mara/engineering-execution.yaml` separately so the other checks
+need no revision parameter. Select the verifications required for the candidate
+and supply its concrete tested identity using [[DES-TRACE-VIEW-INTERFACES]]:
+
+```sh
+mara trace matrix --id VER-EXPORT \
+  --check-file .mara/engineering-execution.yaml \
+  --shape urn:mara:rule:execution \
+  --param subject_revision=abc123
+```
+
+For a committed Git candidate, the caller may resolve `HEAD` with
+`git rev-parse HEAD` and supply that hash; Mara treats `HEAD` itself as literal
+text. Evidence must record the actual tested revision, including any build or
+working-tree differences. The same YAML applies to every candidate.
+A direct code check or implementation link never counts as execution evidence.
+A pass establishes that at least one qualifying record exists; assess conflicting
+results, environment and authenticity in the release workflow.
 :::

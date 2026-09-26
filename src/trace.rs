@@ -49,6 +49,10 @@ pub struct TraceCheck {
     pub files: Vec<PathBuf>,
     /// Expanded IRI of one named targetless node shape in the supplied files.
     pub shape: String,
+    /// Named text literals for placeholders in this request check.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(with = "BTreeMap<String, String>")]
+    pub parameters: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -168,6 +172,25 @@ pub(crate) fn matrix(
             "supply nonempty rules or one request check, never both",
         ));
     }
+    let bindings = if let Some(check) = &params.check {
+        let mut bindings = BTreeMap::new();
+        for (name, value) in &check.parameters {
+            if !crate::rules::valid_parameter_name(name) {
+                return Err(ValidationError::invalid_argument(format!(
+                    "invalid check parameter name '{name}'"
+                )));
+            }
+            let Some(text) = value.as_str() else {
+                return Err(ValidationError::invalid_argument(format!(
+                    "check parameter '{name}' must be text"
+                )));
+            };
+            bindings.insert(name.clone(), text.to_owned());
+        }
+        Some(bindings)
+    } else {
+        None
+    };
     let limit = params.limit.unwrap_or(20);
     if !(1..=100).contains(&limit) {
         return Err(ValidationError::invalid_argument(
@@ -212,7 +235,8 @@ pub(crate) fn matrix(
         if check.shape.is_empty() {
             return Err(ValidationError::invalid_argument("check shape is required"));
         }
-        Rules::load_files(project, schema, check.files.clone())
+        Rules::load_check_files(project, schema, check.files.clone(), bindings.unwrap())
+            .map_err(ValidationError::invalid_argument)?
     } else {
         Rules::load(project, schema)
     };

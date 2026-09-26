@@ -150,6 +150,9 @@ the obligation and a present owner passes. Score `2` is not applicable.
 Likewise, `in: [{value: 1, datatype: double}, {value: 2.5, datatype: double}]`
 admits those two values of a `number` field. Plain `hasValue: 1` or
 `hasValue: 1.0` does not match that field; use the typed spelling above.
+Request-local matrix checks may use the text parameter placeholder defined in
+[[DES-TRACE-VIEW-INTERFACES]]; enabled project rules and validation never bind
+parameters.
 
 ### Path resolution
 
@@ -724,6 +727,7 @@ for evaluation and are identified as outside the root selection.
 |---|---|
 | `trace matrix --flavour requirement --rule urn:mara:rule:approved_requirement` | `trace_matrix {flavours:["requirement"], rules:["urn:mara:rule:approved_requirement"]}` |
 | `trace matrix --id REQ-A --check-file rules/coverage.yaml --shape urn:mara:rule:coverage` | `trace_matrix {ids:["REQ-A"], check:{files:["rules/coverage.yaml"], shape:"urn:mara:rule:coverage"}}` |
+| `trace matrix --id REQ-A --check-file rules/revision.yaml --shape urn:mara:rule:revision_evidence --param subject_revision=abc123` | `trace_matrix {ids:["REQ-A"], check:{files:["rules/revision.yaml"], shape:"urn:mara:rule:revision_evidence", parameters:{subject_revision:"abc123"}}}` |
 
 The matrix accepts `--all`, repeatable `--id`, `--flavour`, `--field`,
 `--path`, and `--limit`, `--cursor`. It requires either repeatable `--rule` /
@@ -732,7 +736,8 @@ expanded root shape IRIs from enabled sources; unknown IRIs are errors.
 Prefix abbreviations are source syntax, not request aliases.
 
 For a check, CLI accepts repeatable `--check-file` and one `--shape`;
-MCP accepts `check:{files:[...],shape:IRI}`. Load those YAML sources with the generated bindings
+MCP accepts `check:{files:[...],shape:IRI,parameters?:{NAME:VALUE}}`.
+Load those YAML sources with the generated bindings
 using the rule-file contract and require the designated named node shape.
 Apply it unconditionally to the request's selected roots; reject root targets,
 `whenShape` and `paths` on the designated check, and do not execute other
@@ -741,6 +746,35 @@ the same field projection, profile and structural limits as persisted rules.
 The files define reusable constraints, not a saved view: selection stays in
 the request. They impose no project-validation policy unless separately enabled
 in project configuration.
+
+Within a request check's `hasValue` or one `in` entry, exactly
+`{parameter: subject_revision}` names a caller-supplied text literal. A name
+matches `[A-Za-z_][A-Za-z0-9_]*` and is case-sensitive. CLI accepts repeatable
+`--param NAME=VALUE`; MCP accepts `check.parameters` as an object of text
+values. The value is used exactly as supplied, including an empty string; it
+is never parsed as YAML, a number, boolean, datatype, IRI or Git ref. The
+parameter may occur more than once, including in referenced nested shapes;
+each occurrence receives the same value. Ordinary authored literals retain
+their current meaning. Binding happens in memory before shape validation and
+native evaluation, and does not modify the YAML source.
+
+Reject malformed placeholders, invalid names, missing bindings, non-text MCP
+values, repeated CLI names (even with identical values), bindings without a
+placeholder, and `--param` without a request check as `invalid_argument`.
+Every supplied name must be used by the designated check or one of its
+referenced shapes, and every placeholder in the supplied files must be
+supplied.
+Placeholders in enabled project rules remain invalid rule definitions. Check
+explanations report the resolved literal in `condition.components`; a missing
+binding cannot become a literal or a passing check. The binding participates
+in cursor identity, so changing a value requires a fresh matrix request.
+
+A revision check can require an evidence item linked through a verification,
+with `status: accepted`, `result: passed` and `subject_revision` equal to
+`{parameter: subject_revision}`. Evidence stores its actual tested revision;
+the parameter selects matching evidence without executing a test or proving
+the evidence authentic. Such a check is request-local and does not change
+always-on project validation.
 
 Named rules retain their own selection and applicability, intersected with
 view roots. Output distinguishes persisted-rule and request-check identity;

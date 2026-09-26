@@ -66,7 +66,7 @@ struct TraceMatrixToolParams {
     /// Expanded IRIs of enabled root rules; use this or check, never both.
     #[serde(default)]
     rules: Vec<String>,
-    /// Request-local YAML files and one named targetless node shape; separate from persisted rule policy.
+    /// Request-local YAML files, one named targetless node shape, and optional named text parameters for hasValue or in; separate from persisted rule policy.
     #[serde(default)]
     check: Option<mara::TraceCheck>,
     /// Maximum records per page, 1 through 100 (default 20); the byte budget may return fewer.
@@ -444,7 +444,7 @@ impl MaraMcp {
     #[tool(
         name = "trace_matrix",
         output_schema = rmcp::handler::server::common::schema_for_type::<mara::TraceMatrixResult>(),
-        description = "Generate a bounded, read-only traceability matrix. Select roots with ids, flavours, fields, paths or all:true; supply either enabled rule IRIs or a request-local check:{files,shape}, never both. A request check does not enable project policy. Trace format 1 distinguishes passed, failed, not_applicable and unavailable, with source-linked checks, canonical edges and per-evaluation summaries. Use render:markdown for a matching Markdown page. Follow next_cursor with unchanged inputs until has_more:false; restart after source/schema/rule changes. Known policy failures are data; incomplete evaluation sets evaluation_complete:false."
+        description = "Generate a bounded, read-only traceability matrix. Select roots with ids, flavours, fields, paths or all:true; supply either enabled rule IRIs or a request-local check:{files,shape,parameters?}, never both. In check shapes, hasValue:{parameter:subject_revision} or an in-list entry binds exact text from check.parameters:{subject_revision:\"<revision>\"}; missing or unused values are errors. A request check does not enable project policy. Trace format 1 distinguishes passed, failed, not_applicable and unavailable, with source-linked checks, canonical edges and per-evaluation summaries. Use render:markdown for a matching Markdown page. Follow next_cursor with unchanged inputs until has_more:false; restart after source/schema/rule or parameter changes. Known policy failures are data; incomplete evaluation sets evaluation_complete:false."
     )]
     fn trace_matrix(
         &self,
@@ -466,7 +466,7 @@ impl MaraMcp {
 
     #[tool(
         name = "project_init",
-        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project. Templates create .mara/project.toml and .mara/schema.yaml with schema format 3 and flavour guidance. Engineering also installs .mara/engineering-rules.yaml (enabled policy) and .mara/engineering-checks.yaml (request-local checks), with required item status; no starter documents or items. Customize the project-owned schema; migrate existing projects manually on a recoverable checkpoint instead of reinitializing. See https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md. Inspect declarations with schema_get, then run schema_validate and project_validate."
+        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project. Templates create .mara/project.toml and .mara/schema.yaml with schema format 3 and flavour guidance. Engineering also installs .mara/engineering-rules.yaml (enabled policy) and .mara/engineering-checks.yaml and .mara/engineering-execution.yaml (request-local checks), with required item status; no starter documents or items. Customize the project-owned schema; migrate existing projects manually on a recoverable checkpoint instead of reinitializing. See https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md. Inspect declarations with schema_get, then run schema_validate and project_validate."
     )]
     fn project_init(
         &self,

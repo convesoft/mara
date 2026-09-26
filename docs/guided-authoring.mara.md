@@ -76,8 +76,9 @@ as the default and retain `empty`. Initialization preserves
 
 All templates install `.mara/project.toml` and `.mara/schema.yaml`.
 Engineering additionally installs enabled `.mara/engineering-rules.yaml` and
-request-local `.mara/engineering-checks.yaml`. Its configuration uses format 2;
-minimal and empty retain format 1. All schemas use format 3.
+request-local `.mara/engineering-checks.yaml` and `.mara/engineering-execution.yaml`.
+Its configuration uses format 2; minimal and empty retain format 1. All schemas
+use format 3.
 
 Embed template source files in the executable. Generate configuration from the
 destination name and selected template. Preserve all existing destination files;

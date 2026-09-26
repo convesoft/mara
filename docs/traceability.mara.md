@@ -278,6 +278,8 @@ Generate a traceability matrix from selected canonical items and declared
 relationship steps or coverage obligations. Identify the selection and rule
 scope, preserve relation meaning and source navigation, and show gaps and
 non-qualifying targets rather than only successful links.
+Allow a reusable request check to bind a caller-supplied revision to literal
+evidence criteria without editing the check or claiming evidence authenticity.
 
 Distinguish an item outside a rule's applicability from an item that fails it.
 Do not present a global coverage percentage whose denominator or obligation

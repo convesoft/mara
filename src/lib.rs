@@ -962,6 +962,10 @@ pub fn initialize_project(target: impl AsRef<Path>, template: Template) -> Resul
                 ".mara/engineering-checks.yaml",
                 include_str!("../templates/engineering-checks.yaml"),
             ),
+            (
+                ".mara/engineering-execution.yaml",
+                include_str!("../templates/engineering-execution.yaml"),
+            ),
         ]);
     }
     files.push((PROJECT_FILE, &project_source));

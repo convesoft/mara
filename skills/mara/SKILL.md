@@ -53,7 +53,8 @@ the MCP server was started with that root bound by `--project`. Use the default
 Pass the selected name as `template` to `project_init`.
 `engineering` includes engineering flavours, selection guidance, and traceability
 relations. It also installs enabled `.mara/engineering-rules.yaml` and request-local
-`.mara/engineering-checks.yaml`; no starter items are generated. The CLI equivalent
+`.mara/engineering-checks.yaml` and `.mara/engineering-execution.yaml`; no starter
+items are generated. The CLI equivalent
 is `"${mara_cli[@]}" --project /absolute/project --format json project init --template <template>`,
 where `<template>` is the selected `minimal`, `empty`, or `engineering` name.
 Do not create or modify `AGENTS.md` as part of Mara onboarding.
@@ -107,9 +108,11 @@ claim implementation or passing tests.
 
 Use `.mara/engineering-checks.yaml` with shape IRIs `urn:mara:rule:intent`,
 `urn:mara:rule:realization`, `urn:mara:rule:verification` or
-`urn:mara:rule:validation` on appropriate accepted roots. Execution for a selected
-revision requires the separate matrix-parameter contract; historical passing
-evidence and code associations do not establish a current execution result.
+`urn:mara:rule:validation` on appropriate accepted roots. For execution, use
+`.mara/engineering-execution.yaml` with `urn:mara:rule:execution` on accepted
+verifications and bind `subject_revision` to the actual tested identity. This
+requires accepted evidence with `result: passed` at that revision; historical
+passing evidence and code associations do not establish a current execution result.
 
 ## Choose the operation
 
@@ -285,12 +288,58 @@ rename.
 
 Use `trace_matrix` (CLI `trace matrix`) for a read-only view of selected roots.
 Select roots with `ids`, `flavours`, `fields`, `paths`, or `all:true`; pass either
-enabled rule IRIs in `rules` or a request-local `check:{files,shape}`. CLI uses
+enabled rule IRIs in `rules` or a request-local `check:{files,shape,parameters?}`. CLI uses
 repeatable `--id`, `--flavour`, `--field KEY=VALUE`, `--path`, and either
 `--rule` or `--check-file` with `--shape`. Do not mix the two evaluation modes.
 The check files supply shapes for this request only; they do not enable policy
 for project validation. A named rule uses its own applicability and selection
 within the requested roots.
+
+For a reusable revision check, use a targetless root and an evidence shape in
+`rules/revision.yaml` (assuming the project declares these relations, flavours
+and evidence fields):
+
+```yaml
+- id: rule:revision_evidence
+  class: requirement
+  property:
+    - path: status
+      hasValue: accepted
+    - path: {inversePath: verifies}
+      qualifiedValueShape: rule:verified_revision
+      qualifiedMinCount: 1
+- id: rule:verified_revision
+  class: verification
+  property:
+    - path: status
+      hasValue: accepted
+    - path: {inversePath: evidences}
+      qualifiedValueShape: rule:passing_revision
+      qualifiedMinCount: 1
+- id: rule:passing_revision
+  class: evidence
+  property:
+    - path: status
+      hasValue: accepted
+    - path: result
+      hasValue: passed
+    - path: subject_revision
+      hasValue: {parameter: subject_revision}
+```
+
+Pass the concrete revision through CLI or MCP:
+
+```text
+mara trace matrix --id REQ-A --check-file rules/revision.yaml --shape urn:mara:rule:revision_evidence --param subject_revision=abc123
+trace_matrix {ids:["REQ-A"],check:{files:["rules/revision.yaml"],shape:"urn:mara:rule:revision_evidence",parameters:{subject_revision:"abc123"}}}
+```
+
+A placeholder may also be an entry in `in`.
+Values are exact text literals, including empty text; resolve Git refs before
+calling Mara. Missing, invalid, duplicate CLI, and unused bindings are errors.
+Keep the YAML unchanged across revisions. Read the resulting state and resolved
+literal in check explanations; this selects recorded evidence and neither runs
+a test nor proves its authenticity. Parameters do not apply to enabled rules.
 
 Read each result state (`passed`, `failed`, `not_applicable`, `unavailable`),
 the check and edge records, source locations, and per-evaluation `summaries`.
