@@ -1,7 +1,11 @@
 # Mara
 
-The repository is ready for an incremental rebuild. Add canonical knowledge
-here as each capability is reviewed.
+Mara keeps structured project knowledge in readable, Git-tracked Markdown.
+Start with [product intent and workflows](product.mara.md). Accepted items state
+intended behavior; they do not establish implementation or passing execution.
+
+The [baseline review](baseline-review.mara.md) records the rebuild's reviewed
+dispositions and remaining scope.
 
 Use the [Mara skill](../skills/mara/SKILL.md) for authoring and the configured
 [schema](../.mara/schema.yaml) for flavours, fields, and relationships.
