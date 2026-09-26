@@ -6,3 +6,5 @@ capability is reviewed.
 
 Use the [Mara skill](../skills/mara/SKILL.md) for authoring and the configured
 [schema](../.mara/schema.yaml) for flavours, fields, and relationships.
+
+[Prompt for the rebuild thread](rebuild-prompt.mara.md).
