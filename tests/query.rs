@@ -1,6 +1,9 @@
 use std::fs;
 
-use mara::{RelatedFilters, Template, initialize_project, load_corpus, load_schema, related_items};
+use mara::{
+    RelatedFilters, RelationDirection, Template, initialize_project, load_corpus, load_schema,
+    related, related_items,
+};
 use tempfile::TempDir;
 
 #[test]
@@ -88,4 +91,45 @@ fn public_relation_helpers_author_and_remove_item_side_code_links() {
             .to_string()
             .contains("cannot modify code source files")
     );
+}
+
+#[test]
+fn related_orders_incoming_code_before_symmetric_connections() {
+    let fixture = TempDir::new().unwrap();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema_path = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_path).unwrap()
+        + "\n  code_implements:\n    description: Code implements the requirement.\n    source: []\n    target: [requirement]\n    code_source: true\n    inverse: implemented_by_code\n  peer:\n    description: Requirements are peers.\n    source: [requirement]\n    target: [requirement]\n    symmetric: true\n";
+    fs::write(&schema_path, schema).unwrap();
+    let schema = load_schema(&project).unwrap();
+    fs::write(fixture.path().join("a.rs"), "fn run() {}\n").unwrap();
+    fs::write(
+        fixture.path().join("requirements.mara.md"),
+        ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:implemented_by_code: code:a.rs\n:peer: REQ-B\n\nA.\n:::\n\n:::mara requirement REQ-B\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: B\n\nB.\n:::\n\n:::mara requirement REQ-C\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02\n:title: C\n:depends_on: REQ-A\n\nC.\n:::\n",
+    )
+    .unwrap();
+    let corpus = load_corpus(&project, &schema).unwrap();
+    let result = related(&corpus, &schema, "REQ-A", &RelatedFilters::default()).unwrap();
+    let code = result
+        .connections
+        .iter()
+        .position(|connection| {
+            connection.direction == RelationDirection::Incoming
+                && matches!(&connection.neighbour, mara::RelatedNeighbour::Internal(node) if node.reference == "code:a.rs")
+        })
+        .unwrap();
+    let ordinary_incoming = result
+        .connections
+        .iter()
+        .position(|connection| {
+            connection.direction == RelationDirection::Incoming
+                && matches!(&connection.neighbour, mara::RelatedNeighbour::Internal(node) if node.id.as_deref() == Some("REQ-C"))
+        })
+        .unwrap();
+    let symmetric = result
+        .connections
+        .iter()
+        .position(|connection| connection.direction == RelationDirection::Symmetric)
+        .unwrap();
+    assert!(code < ordinary_incoming && ordinary_incoming < symmetric);
 }

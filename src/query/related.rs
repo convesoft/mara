@@ -229,6 +229,7 @@ pub fn related(
         && filters.flavours.is_empty()
         && let DiscoveryNodeKind::Item(item) = node.kind()
     {
+        let mut code_incoming = Vec::new();
         for connection in code_connections(corpus, schema)
             .into_iter()
             .filter(|c| c.item.mid() == item.mid())
@@ -239,7 +240,7 @@ pub fn related(
                 continue;
             }
             let definition = &schema.relations()[&connection.edge.relation];
-            all.push(RelatedConnection {
+            code_incoming.push(RelatedConnection {
                 relation: RelationName::Schema(&connection.edge.relation).display(schema),
                 direction: RelationDirection::Incoming,
                 neighbour: RelatedNeighbour::Internal(connection.code.summary()),
@@ -253,6 +254,39 @@ pub fn related(
                 ),
                 edge: Some(connection.edge),
                 occurrence_count: Some(connection.count),
+            });
+        }
+        let symmetric_start = all
+            .iter()
+            .position(|connection| connection.direction == RelationDirection::Symmetric)
+            .unwrap_or(all.len());
+        all.splice(symmetric_start..symmetric_start, code_incoming);
+        if let Some(incoming_start) = all
+            .iter()
+            .position(|connection| connection.direction == RelationDirection::Incoming)
+        {
+            let symmetric_start = all
+                .iter()
+                .position(|connection| connection.direction == RelationDirection::Symmetric)
+                .unwrap_or(all.len());
+            all[incoming_start..symmetric_start].sort_by(|left, right| {
+                match (&left.neighbour, &right.neighbour) {
+                    (
+                        RelatedNeighbour::Internal(left_node),
+                        RelatedNeighbour::Internal(right_node),
+                    ) => left_node
+                        .source
+                        .path()
+                        .cmp(right_node.source.path())
+                        .then_with(|| {
+                            left_node
+                                .source
+                                .start_byte()
+                                .cmp(&right_node.source.start_byte())
+                        })
+                        .then_with(|| left.relation.cmp(&right.relation)),
+                    _ => std::cmp::Ordering::Equal,
+                }
             });
         }
     }
@@ -329,9 +363,18 @@ fn validate_authored_targets(
             if filters.direction.is_some_and(|d| d != direction) {
                 continue;
             }
-            if crate::external::address(relation.target()).is_none()
-                && !relation.target().starts_with("code:")
-            {
+            if relation.target().starts_with("code:") {
+                if filters.flavours.is_empty() {
+                    corpus.code().resolve(relation.target()).map_err(|error| {
+                        page_error(&format!(
+                            "relation '{}' from '{}' references unavailable code target '{}': {error:?}",
+                            relation.name(),
+                            author.id(),
+                            relation.target()
+                        ))
+                    })?;
+                }
+            } else if crate::external::address(relation.target()).is_none() {
                 resolve_relation_target(corpus, author, relation.name(), relation.target())?;
             }
         }

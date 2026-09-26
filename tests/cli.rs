@@ -11896,6 +11896,13 @@ fn file_only_code_links_accept_binary_targets_and_invalidate_related_cursors() {
         ),
     )
     .unwrap();
+    let related = mara(root, &["related", "REQ-A"]);
+    assert!(!related.status.success());
+    assert!(
+        stderr(&related).contains("code:missing-a.txt"),
+        "{}",
+        stderr(&related)
+    );
     let first = mara(
         root,
         &["--format", "json", "project", "validate", "--limit", "1"],
