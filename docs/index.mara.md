@@ -1,24 +1,8 @@
-# Mara documentation
+# Mara
 
-This directory is the canonical project documentation. Start with the
-[document format](format.mara.md), then use the
-[self-hosting taxonomy](taxonomy.mara.md) when creating items. Add further
-documents only when a current user workflow requires them.
+The repository is ready for an incremental rebuild. Start with the
+[rebuild checklist](../UPGRADE.mara.md). Add canonical knowledge here as each
+capability is reviewed.
 
-- [Repository rebuild handoff](../UPGRADE.mara.md)
-- [First alpha](alpha.mara.md)
-- [Item editing and recovery](editing.mara.md)
-- [Bounded retrieval and planned alpha.3 extensions](retrieval.mara.md)
-- [Distribution and release](distribution.mara.md)
-- [Stable 0.1 scope and release readiness](release-0.1.mara.md)
-- [Engineering template: lifecycle, classification and coverage](engineering-template.mara.md)
-- [Engineering workflow: from intent to verified production](engineering-workflow.mara.md)
-- [Guided authoring: accepted 0.2 scope and designs](guided-authoring.mara.md)
-- [Unified discovery: accepted 0.2 contracts](discovery.mara.md)
-- [Migration to 0.2: schema guidance and discovery interface](migration-0.2.mara.md)
-- [Migration to 0.3: formats and reviewed vocabulary changes](migration-0.3.mara.md)
-- [Traceability: planned 0.3 requirements and design boundaries](traceability.mara.md)
-- [Code traceability](code-traceability.mara.md)
-- [Relationship authoring and mutation](relations.mara.md)
-- [Rules, diagnostics and trace matrices](rules.mara.md)
-- [Traceability research: external systems and design lessons](traceability-research.mara.md)
+Use the [Mara skill](../skills/mara/SKILL.md) for authoring and the configured
+[schema](../.mara/schema.yaml) for flavours, fields, and relationships.

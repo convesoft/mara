@@ -65,9 +65,9 @@ Repository-wide instructions for humans and software agents.
 
 ## Documentation discipline
 
-- Start at [`docs/index.mara.md`](docs/index.mara.md). Follow
-  [`docs/format.mara.md`](docs/format.mara.md) for syntax and
-  [`docs/taxonomy.mara.md`](docs/taxonomy.mara.md) for flavour selection.
+- Start at [`docs/index.mara.md`](docs/index.mara.md). Use the
+  [Mara skill](skills/mara/SKILL.md) for authoring and the configured
+  [schema](.mara/schema.yaml) for flavour selection, fields, and relations.
 - Keep repository-owned documentation, including requirements, definitions,
   architecture, decisions, and specifications, in Git-tracked `*.mara.md`
   files. Tool-required metadata and this instruction file are exceptions, not
@@ -101,8 +101,8 @@ Repository-wide instructions for humans and software agents.
   the vocabulary gap instead of inventing one silently.
 - Add only relations that communicate useful meaning. Never create placeholder
   items or links merely to complete a traceability chain.
-- Initially require only flavour, human ID, and title. Add lifecycle fields,
-  classifications, or validation constraints only for a demonstrated workflow.
+- Follow the configured engineering schema and policies. Start new knowledge
+  in `draft`; add classifications and coverage as it becomes ready for acceptance.
 
 ## Implementation readiness and knowledge maintenance
 
