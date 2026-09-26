@@ -41,3 +41,25 @@ Run `cargo test --locked --test item_list` against real CLI and stdio MCP proces
 
 Compare CLI/MCP domain results and error behavior. Continue every returned cursor to exhaustion with unchanged options and no duplicate/skipped identities. Change document/schema/request, unmarked code, adapter query/configuration and explicit file-only endpoint bytes to require stale-cursor rejection; a missing adapter or malformed document must fail even on a fresh read. Verify CLI help and MCP tools/list expose the restored list surface. Run prior suites as regressions and record the tested revision. Search, get, related, semantic project validation and code navigation remain separate methods.
 :::
+
+:::mara evidence EVD-ITEM-LIST
+:mid: 01M3G0FEJKRZFRTC8P7PZDTQ5Q
+:title: Composed item listing passes real CLI and MCP workflows
+:status: accepted
+:result: passed
+:captured_at: 2026-09-26T23:22:57Z
+:subject_revision: cf08aed2f09226d270635f656c8b5fb8735f5bf9
+:evidences: VER-ITEM-LIST
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+
+The tested implementation was committed as `cf08aed2f09226d270635f656c8b5fb8735f5bf9`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
+
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 93 tests (2 units, 13 code discovery, 31 corpus, 10 item list, 17 bootstrap, 20 schema), none failed or ignored. Listing tests execute real CLI and stdio MCP processes with isolated Git/configuration and direct fixture documents. Compact source order, normalized directory boundaries, declared exact filters/aliases, absent-MID preservation, complete count/byte-limited pages, escaped Unicode titles, oversized errors and stale/invalid cursors pass. Unmarked code, query/configuration and binary file-only changes invalidate cursors; missing adapters and malformed source fail fresh reads. Outside symlink bytes do not influence cursors.
+
+A separate read-only self-hosting comparison traversed all 56 then-current repository items in three pages of at most 25, comparing the candidate and installed baseline JSON exactly, including continuation tokens. Installed full-baseline MCP schema/project validation returned complete and valid with zero diagnostics. Selected intent passed one requirement; realization and verification each passed the requirement and design with all pages consumed. Those authoring checks do not claim candidate graph validation.
+
+This is the restored item-list vertical slice composed from the separately verified document and code dependencies. Search, get, related, semantic project validation, code endpoint navigation, mutations and other baseline capabilities remain pending. The installed authoring binary was not replaced.
+:::
