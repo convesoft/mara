@@ -1,6 +1,34 @@
 # Changelog
 
 All notable changes to Mara are generated from Conventional Commit history.
+## [0.3.0-alpha.0]
+
+### Added
+
+- Support inverse authoring and symmetric relationships
+- Support typed inline relationships
+- Introduce validation diagnostic codes and severity
+- Validate conditional lifecycle and coverage rules
+- Support typed external targets
+- Validate relationship cardinality and cycles
+- Generate traceability matrices
+- Make code traceability language pluggable
+
+### Documentation
+
+- Define relationship authoring and mutation contracts
+- Define SHACL rules and trace-view contracts
+- Retire specification export contract
+- Document manual 0.3 migration workflow
+
+### Fixed
+
+- Locate bounded trace chain limit failures
+
+### Maintenance
+
+- Evaluate code traceability pilot
+- Release 0.3.0-alpha.0
 ## [0.2.0]
 
 ### Breaking changes and migration

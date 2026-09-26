@@ -294,7 +294,7 @@ const rejects = (command, name, args, diagnostic) => {
   assert.notEqual(output.status, 0);
   assert.match(output.stderr + output.stdout, diagnostic);
   const response = mcp(call(2, name, args));
-  assert.ok(response.error || response.result.isError, JSON.stringify(response));
+  assert.ok(response.error || response.result.isError || response.result.structuredContent?.valid === false, JSON.stringify(response));
   assert.match(JSON.stringify(response), diagnostic);
 };
 const searchCursor = parity(["search", "access", "--limit", "1"], "search", { query: "access", limit: 1 }).next_cursor;
