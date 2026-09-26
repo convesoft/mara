@@ -6,5 +6,6 @@
 (trait_item name: (_) @name) @symbol
 (type_item name: (_) @name) @symbol
 (impl_item type: (_) @name) @scope
+(attribute_item) @modifier
 (line_comment) @comment
 (block_comment) @comment

@@ -89,7 +89,12 @@ bindings in `.mara/project.toml` format 3. Each entry maps extensions to a
 project-relative WebAssembly grammar, a Tree-sitter query file, and the native
 selector separator. The query captures declarations with `@symbol` and their
 `@name`, lexical containers that are not direct targets with `@scope` and
-`@name`, and comments with `@comment`. Mara loads and checks these assets
+`@name`, and comments with `@comment`. Optional `@modifier` captures mark
+modifiers that appear as preceding siblings or leading children of a declaration;
+optional `@wrapper` captures mark parent nodes containing a declaration and its
+modifiers. Markers may attach before a captured modifier or wrapper, or between
+a modifier and its declaration. Each pack describes its own attributes,
+decorators, and exports through these captures. Mara loads and checks these assets
 locally at runtime, uses the grammar and query to enumerate symbols and
 comments, and searches only captured comment text for markers. The deepest
 enclosing declaration body or immediately following declaration owns a marker.

@@ -11756,6 +11756,21 @@ fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
     }
     let modified_declarations = [
         (
+            "attribute.rs",
+            "// @mara code_implements REQ-A\n#[test]\nfn run() {}\n",
+            "run",
+        ),
+        (
+            "decorated.py",
+            "# @mara code_implements REQ-A\n@decorator\ndef run(): pass\n",
+            "run",
+        ),
+        (
+            "decorated.ts",
+            "@sealed\n// @mara code_implements REQ-A\nclass Service {}\n",
+            "Service",
+        ),
+        (
             "trait.rs",
             "trait Api {\n    /// @mara code_implements REQ-A\n    fn run(&self);\n}\n",
             "Api::run",
