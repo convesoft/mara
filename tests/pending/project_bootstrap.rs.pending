@@ -155,7 +155,6 @@ fn engineering_init_preserves_existing_policy_and_check_files() {
     }
 }
 
-// @mara implements VER-PROJECT-INSPECTION
 // @mara checks REQ-ENGINEERING-TEMPLATE
 // @mara checks REQ-SCHEMA-DISCOVERY
 #[test]
@@ -186,6 +185,7 @@ fn bundled_templates_initialize_and_inspect_equally_through_cli_and_mcp() {
                     json!({"project":mcp_root,"template":template}),
                 ),
                 mcp_call(3, "schema_get", json!({"project":mcp_root})),
+                mcp_call(4, "project_validate", json!({"project":mcp_root})),
                 mcp_call(
                     5,
                     "project_init",
@@ -194,6 +194,10 @@ fn bundled_templates_initialize_and_inspect_equally_through_cli_and_mcp() {
             ],
         );
         assert_ne!(mcp_response(&responses, 2)["result"]["isError"], true);
+        assert_eq!(
+            mcp_response(&responses, 4)["result"]["structuredContent"]["valid"],
+            true
+        );
         assert_eq!(mcp_response(&responses, 5)["result"]["isError"], true);
         let output = mara(&cli_root, &["--format", "json", "schema", "get"]);
         assert!(output.status.success(), "{}", stderr(&output));
@@ -249,7 +253,7 @@ fn schema_guidance_rejects_invalid_declarations_through_cli_and_mcp() {
     let path = fixture.path().join(".mara/schema.yaml");
     let valid = "format_version: 3\nflavours:\n  note:\n    description: A project note.\n    use_when: [Record useful context.]\n    avoid_when: []\n    distinguish_from: {}\n    id_prefix: NOTE-\n    body: optional\nrelations: {}\n";
     fs::write(&path, valid).unwrap();
-    let accepted = mara(fixture.path(), &["schema", "get"]);
+    let accepted = mara(fixture.path(), &["schema", "validate"]);
     assert!(accepted.status.success(), "{}", stderr(&accepted));
     let cases = [
         ("format_version: 3", "format_version: 1", "migrate"),
@@ -321,24 +325,209 @@ fn schema_guidance_rejects_invalid_declarations_through_cli_and_mcp() {
             "unknown configuration key 'guidance'",
         ),
     ];
-    for (from, to, expected) in cases {
+    for (from, to, _) in cases {
         let source = valid.replace(from, to);
         fs::write(&path, &source).unwrap();
-        let cli = mara(fixture.path(), &["schema", "get"]);
+        let cli = mara(fixture.path(), &["--format", "json", "schema", "validate"]);
         assert!(!cli.status.success(), "accepted {to}");
-        assert!(stderr(&cli).contains(expected), "{}", stderr(&cli));
+        let cli: Value = serde_json::from_slice(&cli.stdout).unwrap();
+        let expected_code = if from == "format_version: 3" {
+            "format_unsupported"
+        } else {
+            "schema_invalid"
+        };
+        assert_eq!(cli["valid"], false);
+        assert!(
+            cli["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["code"] == expected_code && d["severity"] == "error"),
+            "{cli}"
+        );
         let responses = mcp_exchange(
             fixture.path(),
             &[
                 mcp_initialize(1),
                 json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-                mcp_call(2, "schema_get", json!({})),
+                mcp_call(2, "schema_validate", json!({})),
+                mcp_call(3, "project_validate", json!({})),
             ],
         );
         let result = &mcp_response(&responses, 2)["result"];
-        assert_eq!(result["isError"], true, "{result}");
-        assert!(result.to_string().contains(expected), "{result}");
+        assert_eq!(result["isError"], false, "{result}");
+        assert_eq!(result["structuredContent"]["valid"], false);
+        assert_eq!(result["structuredContent"], cli);
+        assert_eq!(
+            mcp_response(&responses, 3)["result"]["structuredContent"]["valid"],
+            false
+        );
         assert_eq!(fs::read_to_string(&path).unwrap(), source);
+    }
+}
+
+// @mara implements VER-PROJECT-BOOTSTRAP
+// @mara checks REQ-ENGINEERING-TEMPLATE
+#[test]
+fn engineering_workflow_creates_connects_and_retrieves_through_cli_and_mcp() {
+    let items = [
+        ("term", "TERM-SERVICE"),
+        ("actor", "ACT-USER"),
+        ("goal", "GOAL-ACCESS"),
+        ("scenario", "SCN-LOGIN"),
+        ("requirement", "REQ-ACCESS"),
+        ("design", "DES-AUTH"),
+        ("decision", "ADR-AUTH"),
+        ("risk", "RISK-LOCKOUT"),
+        ("verification", "VER-LOGIN"),
+        ("evidence", "EVD-LOGIN"),
+        ("artifact", "ART-AUTH"),
+    ];
+    let edges = [
+        ("VER-LOGIN", "verifies", "REQ-ACCESS"),
+        ("VER-LOGIN", "validates", "GOAL-ACCESS"),
+        ("EVD-LOGIN", "evidences", "VER-LOGIN"),
+        ("ART-AUTH", "realizes", "DES-AUTH"),
+        ("RISK-LOCKOUT", "affects", "ACT-USER"),
+        ("ADR-AUTH", "mitigates", "RISK-LOCKOUT"),
+        ("DES-AUTH", "satisfies", "REQ-ACCESS"),
+        ("REQ-ACCESS", "derives_from", "SCN-LOGIN"),
+    ];
+    for use_mcp in [false, true] {
+        let fixture = fixture();
+        // Every MCP mutation uses the real stdio server, followed by a fresh read.
+        let call = |name: &str, args: Value| {
+            let responses = mcp_exchange(
+                fixture.path(),
+                &[
+                    mcp_initialize(1),
+                    json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+                    mcp_call(2, name, args),
+                ],
+            );
+            mcp_response(&responses, 2)["result"].clone()
+        };
+        if use_mcp {
+            let result = call(
+                "project_init",
+                json!({"project":fixture.path(),"template":"engineering"}),
+            );
+            assert_eq!(result["isError"], false, "{result}");
+        } else {
+            let result = mara(
+                fixture.path(),
+                &["project", "init", "--template", "engineering"],
+            );
+            assert!(result.status.success(), "{}", stderr(&result));
+        }
+        for (flavour, id) in items {
+            if use_mcp {
+                let result = call(
+                    "item_create",
+                    json!({
+                        "flavour":flavour,"id":id,"file":"knowledge.mara.md",
+                        "title":id,"body":"Durable engineering knowledge for this workflow.",
+                        "fields":[{"key":"status","value":"draft"}]
+                    }),
+                );
+                assert_eq!(result["isError"], false, "{result}");
+                assert!(is_mid(result["structuredContent"]["mid"].as_str().unwrap()));
+            } else {
+                let result = mara(
+                    fixture.path(),
+                    &[
+                        "item",
+                        "create",
+                        flavour,
+                        id,
+                        "knowledge.mara.md",
+                        "--title",
+                        id,
+                        "--body",
+                        "Durable engineering knowledge for this workflow.",
+                        "--field",
+                        "status=draft",
+                    ],
+                );
+                assert!(result.status.success(), "{}", stderr(&result));
+            }
+        }
+        for (source, relation, target) in edges {
+            if use_mcp {
+                let result = call(
+                    "relation_add",
+                    json!({"source":source,"relation":relation,"target":target}),
+                );
+                assert_eq!(result["isError"], false, "{result}");
+            } else {
+                let result = mara(
+                    fixture.path(),
+                    &["relation", "add", source, relation, target],
+                );
+                assert!(result.status.success(), "{}", stderr(&result));
+            }
+            for (id, direction, neighbour) in
+                [(source, "outgoing", target), (target, "incoming", source)]
+            {
+                let cli = mara(
+                    fixture.path(),
+                    &[
+                        "--format",
+                        "json",
+                        "related",
+                        id,
+                        "--direction",
+                        direction,
+                        "--relation",
+                        relation,
+                    ],
+                );
+                assert!(cli.status.success(), "{}", stderr(&cli));
+                let cli: Value = serde_json::from_slice(&cli.stdout).unwrap();
+                let mcp = call(
+                    "related",
+                    json!({"reference":id,"direction":direction,"relations":[relation]}),
+                );
+                assert_eq!(mcp["isError"], false, "{mcp}");
+                assert_eq!(cli, mcp["structuredContent"]);
+                assert_eq!(cli["has_more"], false);
+                assert!(
+                    cli["connections"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|entry| entry["neighbour"]["id"] == neighbour),
+                    "{cli}"
+                );
+            }
+        }
+        let source_path = fixture.path().join("knowledge.mara.md");
+        let before = fs::read(&source_path).unwrap();
+        for (source, relation, target) in [
+            ("REQ-ACCESS", "verifies", "DES-AUTH"),   // invalid source
+            ("VER-LOGIN", "verifies", "GOAL-ACCESS"), // invalid target
+            ("EVD-LOGIN", "evidences", "REQ-ACCESS"),
+            ("ART-AUTH", "mitigates", "RISK-LOCKOUT"),
+        ] {
+            let cli = mara(
+                fixture.path(),
+                &["relation", "add", source, relation, target],
+            );
+            assert!(!cli.status.success());
+            assert_eq!(fs::read(&source_path).unwrap(), before);
+            let mcp = call(
+                "relation_add",
+                json!({"source":source,"relation":relation,"target":target}),
+            );
+            assert_eq!(mcp["isError"], true, "{mcp}");
+            assert_eq!(fs::read(&source_path).unwrap(), before);
+        }
+        let cli = mara(fixture.path(), &["--format", "json", "project", "validate"]);
+        assert!(cli.status.success(), "{}", stderr(&cli));
+        let cli: Value = serde_json::from_slice(&cli.stdout).unwrap();
+        let mcp = call("project_validate", json!({}));
+        assert_eq!(cli["valid"], true);
+        assert_eq!(cli, mcp["structuredContent"]);
     }
 }
 
@@ -375,13 +564,13 @@ fn mcp_starts_outside_a_project_and_initializes_an_absolute_target() {
         &[
             mcp_initialize(1),
             json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
-            mcp_call(2, "schema_get", json!({ "project": project })),
-            mcp_call(3, "schema_get", json!({ "project": "new-project" })),
+            mcp_call(2, "project_validate", json!({ "project": project })),
+            mcp_call(3, "project_validate", json!({ "project": "new-project" })),
         ],
     );
     assert_eq!(
-        mcp_response(&validated, 2)["result"]["structuredContent"]["kind"],
-        "schema"
+        mcp_response(&validated, 2)["result"]["structuredContent"]["valid"],
+        true
     );
     assert_eq!(mcp_response(&validated, 3)["result"]["isError"], true);
     assert!(
@@ -473,14 +662,14 @@ fn mcp_project_option_after_the_command_binds_the_server() {
         &[
             mcp_initialize(1),
             json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
-            mcp_call(2, "schema_get", json!({})),
-            mcp_call(3, "schema_get", json!({ "project": project })),
+            mcp_call(2, "project_validate", json!({})),
+            mcp_call(3, "project_validate", json!({ "project": project })),
         ],
     );
 
     assert_eq!(
-        mcp_response(&responses, 2)["result"]["structuredContent"]["kind"],
-        "schema"
+        mcp_response(&responses, 2)["result"]["structuredContent"]["valid"],
+        true
     );
     assert_eq!(mcp_response(&responses, 3)["result"]["isError"], true);
     assert!(
@@ -528,6 +717,10 @@ fn real_cli_discovers_and_inspects_the_effective_minimal_schema() {
     assert!(relation.starts_with("satisfies:\n"));
     assert!(relation.contains("source:\n  - design"));
     assert!(relation.contains("target:\n  - requirement"));
+
+    let valid = mara(&nested, &["schema", "validate"]);
+    assert!(valid.status.success(), "{}", stderr(&valid));
+    assert!(stdout(&valid).contains("valid schema"));
 
     for (args, tool, arguments) in [
         (
@@ -640,6 +833,18 @@ relations:
     assert!(note.contains("type: enum"));
     assert!(note.contains("values:\n      - draft\n      - accepted"));
     assert!(!note.contains("values: null"));
+
+    let valid = mara(
+        fixture.path(),
+        &[
+            "--project",
+            selected.to_str().unwrap(),
+            "schema",
+            "validate",
+        ],
+    );
+    assert!(valid.status.success(), "{}", stderr(&valid));
+    assert!(stdout(&valid).contains(".mara/custom.yaml"));
 }
 
 // @mara checks REQ-SCHEMA-DISCOVERY
@@ -654,60 +859,85 @@ fn schema_get_rejects_an_unknown_declaration() {
     assert!(!get.status.success());
     assert!(stderr(&get).contains("unknown flavour 'missing'"));
 }
-// @mara implements VER-PROJECT-INSPECTION
+
+// @mara checks REQ-ENGINEERING-TEMPLATE
 #[test]
-fn bootstrap_advertises_only_its_available_operations() {
+fn engineering_realization_accepts_requirements_and_designs() {
     let fixture = fixture();
-    for (args, present, absent) in [
-        (
-            vec!["--help"],
-            vec!["project", "schema", "mcp"],
-            vec!["search", "trace", "item"],
-        ),
-        (
-            vec!["project", "--help"],
-            vec!["init"],
-            vec!["validate", "mid-backfill"],
-        ),
-        (
-            vec!["schema", "--help"],
-            vec!["get", "list"],
-            vec!["validate"],
-        ),
-    ] {
-        let output = mara(fixture.path(), &args);
-        assert!(output.status.success(), "{}", stderr(&output));
-        let help = stdout(&output);
-        for command in present {
-            assert!(
-                help.lines()
-                    .any(|line| line.starts_with(&format!("  {command} "))),
-                "{help}"
-            );
+    let root = fixture.path();
+    let init = mara(root, &["project", "init", "--template", "engineering"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        root.join("export.mara.md"),
+        include_str!("fixtures/engineering-realization.mara.md"),
+    )
+    .unwrap();
+    let validate = mara(root, &["--format", "json", "project", "validate"]);
+    assert!(validate.status.success(), "{}", stdout(&validate));
+
+    let check = |ids: &[&str], passed: usize| {
+        let mut args = vec![
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--check-file",
+            ".mara/engineering-checks.yaml",
+            "--shape",
+            "urn:mara:rule:realization",
+            "--limit",
+            "100",
+        ];
+        for id in ids {
+            args.extend(["--id", id]);
         }
-        for command in absent {
-            assert!(
-                !help
-                    .lines()
-                    .any(|line| line.starts_with(&format!("  {command} "))),
-                "{help}"
-            );
-        }
-    }
-    let responses = mcp_exchange(
-        fixture.path(),
+        let output = mara(root, &args);
+        assert!(
+            output.status.success(),
+            "{} {}",
+            stderr(&output),
+            stdout(&output)
+        );
+        let cli: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(cli["evaluation_complete"], true);
+        assert_eq!(cli["summaries"][0]["selected"], ids.len());
+        assert_eq!(cli["summaries"][0]["passed"], passed);
+        assert_eq!(cli["summaries"][0]["failed"], ids.len() - passed);
+        let responses = mcp_exchange(
+            root,
+            &[
+                mcp_initialize(1),
+                json!({"jsonrpc":"2.0", "method":"notifications/initialized"}),
+                mcp_call(
+                    2,
+                    "trace_matrix",
+                    json!({"project":root, "ids":ids, "limit":100,
+                "check":{"files":[".mara/engineering-checks.yaml"], "shape":"urn:mara:rule:realization"}}),
+                ),
+            ],
+        );
+        let result = &mcp_response(&responses, 2)["result"];
+        assert_eq!(result["isError"], false);
+        assert_eq!(result["structuredContent"], cli);
+    };
+    check(&["DES-EXPORT"], 0);
+    check(&["REQ-EXPORT", "DES-EXPORT"], 0);
+    fs::write(
+        root.join("implementation.txt"),
+        "Fixture implementation endpoint.\n",
+    )
+    .unwrap();
+    let link = mara(
+        root,
         &[
-            mcp_initialize(1),
-            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
-            mcp_request(2, "tools/list", json!({})),
+            "relation",
+            "add",
+            "DES-EXPORT",
+            "implemented_by",
+            "code:implementation.txt",
         ],
     );
-    let mut names: Vec<_> = mcp_response(&responses, 2)["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|tool| tool["name"].as_str().unwrap())
-        .collect();
-    names.sort();
-    assert_eq!(names, ["project_init", "schema_get", "schema_list"]);
+    assert!(link.status.success(), "{}", stderr(&link));
+    check(&["DES-EXPORT"], 1);
+    check(&["REQ-EXPORT", "DES-EXPORT"], 2);
 }

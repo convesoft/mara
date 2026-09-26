@@ -201,3 +201,24 @@ The new realization regression failed before the template correction with `inval
 
 This is local bootstrap evidence only. Other baseline integration tests and unit modules await their capability reviews. It does not establish complete product, package, release, or production readiness.
 :::
+
+:::mara verification VER-PROJECT-INSPECTION
+:mid: 01M3FXVMC6V323RK02JD4RJ13Y
+:title: Initialize and inspect isolated projects through CLI and MCP
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-PROJECT-INITIALIZATION
+:verifies: REQ-PROJECT-DISCOVERY
+:verifies: REQ-SCHEMA-DISCOVERY
+:verifies: REQ-ENGINEERING-TEMPLATE
+:verifies: REQ-FLAVOUR-AUTHORING-GUIDANCE
+:verifies: DES-OPERATION-PROJECT-CONTEXT
+:verifies: DES-FLAVOUR-AUTHORING-GUIDANCE
+
+Run `cargo test --locked --test project_bootstrap` against the candidate CLI and real stdio MCP server in disposable projects with isolated Git/configuration state. Check current, named and explicit initialization targets; all three bundled templates; existing-file preservation and conflicting-target rejection; nearest and explicit discovery; and absolute per-call selection versus bound-server override rejection.
+
+Compare complete schema, flavour/relation lists and named declarations through both transports. Inspect configured schema paths and authoring guidance, and reject malformed guidance without rewriting source. Inspect CLI help and MCP tools/list: this bootstrap advertises only project initialization and schema get/list.
+
+This method covers initialization and inspection only. It does not execute schema_validate, project_validate, engineering rules, mutations, retrieval or tracing. Links to schema discovery and the engineering template cover these selected obligations, not full requirement completion. The broader VER-PROJECT-BOOTSTRAP remains a separate method pending restoration.
+:::

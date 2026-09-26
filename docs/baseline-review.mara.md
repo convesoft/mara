@@ -44,12 +44,34 @@ candidate-corpus validation, link-preservation preflight and transaction recover
 Source/identity/navigation tests also exercise these operations. Preserving all
 those workflows in the active build would retain unreviewed dependencies.
 
-Pending scope decision: reduce the active implementation to initialization,
-selection and schema inspection while retaining subsequent work for staged
-reintroduction, or explicitly authorize the broader dependency review first.
-Do not silently remove rule checks, code scanning or mutation safety to make a
-smaller candidate appear equivalent. Preserve existing commits, contracts,
-regressions and the verified realization-template fix in either case.
+The user approved the narrow boundary on 2026-09-27. The active candidate now
+contains five source files: project/schema decoding and template publication,
+configuration diagnostics, operation wrappers, CLI dispatch, and stdio MCP.
+Only `project init`, `schema get/list`, and their three MCP tools are advertised.
+The full implementation remains preserved at `198a3aa` and in the original
+baseline. No history is rewritten. Prior reviewed rows above record historical
+work; source/identity/navigation/retrieval are not active in this checkpoint.
+
+### Bootstrap correction review
+
+| Area | Decision and reason |
+|---|---|
+| Project selection and transport | Retain shared OperationContext, nearest-parent discovery and per-call loading. Absolute request paths and bound-server override rejection keep selection unambiguous. Narrow dispatch and help to supported operations; no stub endpoints. |
+| Configuration and schema | Retain strict TOML/YAML decoding, formats and declaration sanity checks because inspection must reject malformed configuration. Keep code-language binding metadata as a plain configuration record; omit scanners, rule loading/evaluation and corpus validation. Declaration checks do not establish implemented graph policy. |
+| Template publication | Retain embedded sources, complete preflight conflict checks, create-new writes and cleanup limited to files created by the attempt. Preserve the verified realization-template fix; executing that rule awaits its capability. |
+| Runtime dependencies | Remove inactive corpus, Markdown, mutation, query, graph, code, rule and trace modules from the build. Retain nine direct runtime dependencies for parsing, matching project patterns and the two transports; tempfile is test-only. Lockfile pruning introduces no dependency version changes. |
+| Initialization tests | Retain current/named/explicit targets, ambiguity, existing-content preservation, empty/minimal/engineering files and policy-file conflicts. These independently exercise selection and publication safeguards. |
+| Context tests | Retain nearest/explicit selection, outside-project MCP startup, absolute request paths, unbound initialization and bound override rejection. Use schema_get instead of project_validate to observe selected context without importing its engine. |
+| Inspection tests | Retain whole-schema, list and named declaration parity, configured schema path, unknown names, and distinct guidance type/content cases. Check malformed guidance through schema_get's operation-error contract; preserve structured validation diagnostic assertions for the later validation capability. |
+| Boundary verification | Add CLI help and MCP tools/list checks so the advertised checkpoint matches executable operations. This is temporary rebuild verification, not a permanent reduction of product scope. |
+| Deferred tests | Preserve the original bootstrap suite, corpus, discovery, handles, identity, references, navigation, retrieval work and helper source under `tests/pending/*.pending`. They do not compile or enter the source association graph. Restore each with its owning review; no obligation is dismissed. The Markdown-container unit test remains in committed source history. |
+
+`VER-PROJECT-INSPECTION` defines the corrected narrow check. Existing evidence and
+`VER-PROJECT-BOOTSTRAP` keep their original revision and broader method. Schema
+validation, engineering authoring and realization execution remain unfulfilled
+by the reduced candidate even where inspection has a requirement association.
+Installed-baseline MCP validates the canonical corpus and selected traceability;
+that authoring check is not evidence that the candidate implements validation.
 
 Remaining baseline unit-test modules and integration tests remain pending restoration
 with their owning capabilities, including isolated code-adapter fixtures. None

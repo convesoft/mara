@@ -10,61 +10,12 @@ use globset::GlobBuilder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-mod code;
-mod corpus;
 mod diagnostics;
-mod discovery;
-pub use diagnostics::{
-    ConfigurationDiagnostic, DiagnosticCode, DiagnosticItem, DiagnosticLocation,
-    DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
-};
-mod external;
-mod graph_constraints;
-mod mutation;
 mod operations;
-mod query;
-mod relations;
-mod rules;
-mod trace;
-pub use relations::{
-    RelationEdge, RelationEndpoint, RelationError, RelationInspection, RelationOccurrence,
-};
-
-pub use corpus::{
-    Corpus, Diagnostic, Document, DocumentReference, Item, MarkdownBlock, MarkdownBlockKind,
-    Mention, MetadataEntry, ReferenceKind, Relation, SourceLocation, SourceSpan, load_corpus,
-    load_corpus_for_validation, load_corpus_syntax_for_validation, validate_corpus,
-    validate_corpus_independent,
-};
-pub use discovery::{
-    ConnectionKind, DiscoveryConnection, DiscoveryContext, DiscoveryGraph, DiscoveryKind,
-    DiscoveryNode, DiscoveryNodeKind, DiscoveryNodeSummary,
-};
-pub use mutation::{
-    BackfilledMid, BackfilledMids, InitialRelation, ItemCreation, ItemCreationRequest,
-    ItemDeletion, ItemLocation, ItemMove, ItemRename, ItemUpdate, ItemUpdateWarning,
-    RelationMutation, TransactionRollback, add_relation, backfill_mids, create_item, delete_item,
-    move_item, remove_relation, rename_item, rollback_transaction, update_item,
-};
+pub use diagnostics::{ConfigurationDiagnostic, DiagnosticCode, Severity};
 pub use operations::{
-    DeclarationSummary, FieldValue, GetParams, ItemCreateParams, ItemCreationResult,
-    ItemFilterParams, ItemIdParams, ItemMoveParams, ItemUpdateParams, OperationContext,
-    ProjectInitializationResult, ProjectMidBackfillResult, ProjectSummary, RelatedParams,
-    RelationAction, RelationMutationResult, RelationParams, SchemaGetResult, SchemaKind,
-    SchemaListResult, SchemaValidationResult, SearchParams, TransactionRollbackResult,
-    ValidationDiagnostic, ValidationResult, ValidationScope, ValidationSelection, ValidationTarget,
-    ValidationTargetKind, project_initialize,
-};
-pub use query::{
-    EntryRange, FieldFilter, GetResult, ItemCollectionResult, ItemFilters, ItemSource, ItemSummary,
-    MetadataFragment, MetadataValue, QueryError, RelatedConnection, RelatedFilters, RelatedItem,
-    RelatedItemsResult, RelatedNeighbour, RelatedResult, RelationDirection, RelationSummary,
-    ResolvedItem, SearchExcerpt, SearchHit, SearchResult, TextRange, get, get_item, list_items,
-    related, related_items, search, search_items,
-};
-pub use trace::{
-    TraceCheck, TraceField, TraceMatrixParams, TraceMatrixResult, TraceMatrixSummary,
-    TraceSelection,
+    DeclarationSummary, OperationContext, ProjectInitializationResult, ProjectSummary,
+    SchemaGetResult, SchemaKind, SchemaListResult, project_initialize,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";
@@ -88,7 +39,17 @@ pub struct Project {
     content_patterns: Vec<String>,
     content_discovery_complete: bool,
     rule_files: Vec<PathBuf>,
-    code_languages: Vec<code::LanguageConfig>,
+    code_languages: Vec<LanguageConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LanguageConfig {
+    name: String,
+    extensions: Vec<String>,
+    grammar: PathBuf,
+    query: PathBuf,
+    separator: String,
 }
 
 #[derive(Debug)]
@@ -204,67 +165,10 @@ impl Schema {
         })
     }
 
-    fn flavour_for_validation(&self, name: &str) -> Option<&FlavourDefinition> {
-        (!self.validation.invalid_flavours.contains(name))
-            .then(|| self.flavours.get(name))
-            .flatten()
-    }
-
     fn flavour_is_declared(&self, name: &str) -> bool {
         self.validation.flavours_section_invalid
             || self.flavours.contains_key(name)
             || self.validation.invalid_flavours.contains(name)
-    }
-
-    fn id_prefix_is_valid(&self, flavour: &str) -> bool {
-        !self.validation.invalid_id_prefixes.contains(flavour)
-    }
-
-    fn body_is_valid(&self, flavour: &str) -> bool {
-        !self.validation.invalid_bodies.contains(flavour)
-    }
-
-    fn field_is_declared(&self, flavour: &str, field: &str) -> bool {
-        self.validation.invalid_field_sections.contains(flavour)
-            || self
-                .flavours
-                .get(flavour)
-                .is_some_and(|definition| definition.fields.contains_key(field))
-            || self
-                .validation
-                .invalid_fields
-                .contains(&(flavour.to_owned(), field.to_owned()))
-    }
-
-    fn field_is_valid(&self, flavour: &str, field: &str) -> bool {
-        !self
-            .validation
-            .invalid_fields
-            .contains(&(flavour.to_owned(), field.to_owned()))
-    }
-
-    fn field_values_are_valid(&self, flavour: &str, field: &str) -> bool {
-        !self
-            .validation
-            .invalid_field_values
-            .contains(&(flavour.to_owned(), field.to_owned()))
-    }
-
-    fn relation_is_valid(&self, relation: &str) -> bool {
-        !self.validation.relations_section_invalid
-            && !self.validation.invalid_relations.contains(relation)
-    }
-
-    fn relation_source_is_valid(&self, relation: &str) -> bool {
-        !self.validation.invalid_relation_sources.contains(relation)
-    }
-
-    fn relation_target_is_valid(&self, relation: &str) -> bool {
-        !self.validation.invalid_relation_targets.contains(relation)
-    }
-
-    fn same_flavour_is_valid(&self, relation: &str) -> bool {
-        !self.validation.invalid_same_flavour.contains(relation)
     }
 
     fn validation_errors(&mut self) -> Vec<ConfigurationDiagnostic> {
@@ -784,14 +688,6 @@ impl Project {
     pub fn content_patterns(&self) -> &[String] {
         &self.content_patterns
     }
-
-    pub(crate) fn content_discovery_is_complete(&self) -> bool {
-        self.content_discovery_complete
-    }
-
-    pub(crate) fn code_languages(&self) -> &[code::LanguageConfig] {
-        &self.code_languages
-    }
 }
 
 #[derive(Debug)]
@@ -811,14 +707,6 @@ pub enum Error {
     },
     InvalidSchema {
         path: PathBuf,
-        message: String,
-    },
-    InvalidDocument {
-        path: PathBuf,
-        line: usize,
-        message: String,
-    },
-    InvalidMutation {
         message: String,
     },
     Io {
@@ -862,16 +750,6 @@ impl fmt::Display for Error {
                     path.display()
                 )
             }
-            Self::InvalidDocument {
-                path,
-                line,
-                message,
-            } => write!(
-                formatter,
-                "invalid Mara document at {}:{line}: {message}",
-                path.display()
-            ),
-            Self::InvalidMutation { message } => write!(formatter, "{message}"),
             Self::Io {
                 action,
                 path,
@@ -1763,32 +1641,6 @@ fn is_id_prefix(prefix: &str) -> bool {
                     .chars()
                     .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
         })
-}
-
-pub(crate) fn is_item_id(id: &str) -> bool {
-    let mut segments = id.split('-');
-    let Some(first) = segments.next() else {
-        return false;
-    };
-    let mut characters = first.chars();
-    let valid_first = characters
-        .next()
-        .is_some_and(|character| character.is_ascii_uppercase())
-        && characters.all(|character| character.is_ascii_uppercase() || character.is_ascii_digit());
-    valid_first
-        && segments.clone().next().is_some()
-        && segments.all(|segment| {
-            !segment.is_empty()
-                && segment
-                    .chars()
-                    .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
-        })
-}
-
-pub(crate) fn is_mid(value: &str) -> bool {
-    value
-        .parse::<ulid::Ulid>()
-        .is_ok_and(|mid| mid.to_string() == value)
 }
 
 fn endpoint_errors(
