@@ -241,3 +241,23 @@ Require strict document loading to reject malformed/unreadable source. Recovery 
 
 This is the staged document dependency method: `load_documents` and recovering variants return a document-only snapshot and do not load code adapters. A targeted fixture distinguishes that boundary from the later full corpus loader. No CLI/MCP document operation, code discovery, semantic identity/field validation, navigation, mutation or item-list completeness is claimed. Run existing CLI/MCP suites as regressions before committing.
 :::
+
+:::mara evidence EVD-DOCUMENT-PARSING
+:mid: 01M3FZQJDFP199B2BSBMGW0PK1
+:title: Document dependency and existing transport checks pass
+:status: accepted
+:result: passed
+:captured_at: 2026-09-26T23:09:58Z
+:subject_revision: 06d14944c5f9d5e9dd4a8f4e66ffaee3cbf1340a
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+
+The tested implementation was committed as `06d14944c5f9d5e9dd4a8f4e66ffaee3cbf1340a`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1; candidate `/tmp/mara72-target/debug/mara`. Build settings: `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
+
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 69 tests (1 parser unit, 31 corpus, 17 bootstrap and 20 schema), none failed or ignored. The parser suite uses isolated fixtures and an explicit read-only real-repository load; that repository test also passed after the final contract edit. Existing CLI and stdio MCP tests passed as regressions. Targeted checks preserve readable documents beside invalid UTF-8 without fabricated coordinates or source writes, and distinguish document loading from the later code-adapter dependency.
+
+Candidate `schema validate --format json` returned complete and valid with zero diagnostics. Installed full-baseline MCP project/schema validation also returned complete and valid with zero diagnostics; those authoring checks do not establish candidate project validation. Installed-tool intent passed one selected requirement; realization and verification each passed the selected requirement and design, consuming all pages.
+
+This evidence covers the document-only library dependency and existing bootstrap/schema surfaces. Code discovery, full corpus composition, semantic conformance and item listing remain pending. The three private parser files and all dependency versions match the preserved baseline; no parser rewrite or dependency upgrade is claimed.
+:::
