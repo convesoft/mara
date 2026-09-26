@@ -14264,6 +14264,280 @@ fn trace_matrix_request_check_preserves_external_terminal_and_incompleteness() {
 }
 
 #[test]
+fn trace_matrix_binds_revision_evidence_through_cli_and_mcp() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["flavours"]["evidence"]["fields"] = json!({
+        "status":{"type":"enum","values":["failed","passed"]},
+        "subject_revision":{"type":"string"}
+    });
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    let check = "\
+- id: rule:revision_evidence
+  property:
+    - path: {inversePath: verifies}
+      qualifiedValueShape: rule:verified_revision
+      qualifiedMinCount: 1
+- id: rule:verified_revision
+  class: verification
+  property:
+    - path: {inversePath: evidences}
+      qualifiedValueShape: rule:passing_revision
+      qualifiedMinCount: 1
+- id: rule:passing_revision
+  class: evidence
+  property:
+    - path: status
+      hasValue: passed
+    - path: subject_revision
+      hasValue: {parameter: subject_revision}
+";
+    fs::write(root.join("check.yaml"), check).unwrap();
+    assert!(
+        mara(
+            root,
+            &["relation", "add", "VER-APPROVED", "verifies", "REQ-A"]
+        )
+        .status
+        .success()
+    );
+    let create_evidence = |id: &str, revision: &str| {
+        let out = mara(
+            root,
+            &[
+                "item",
+                "create",
+                "evidence",
+                id,
+                "items.mara.md",
+                "--title",
+                id,
+                "--body",
+                "A recorded test result.",
+                "--field",
+                "status=passed",
+                "--field",
+                &format!("subject_revision={revision}"),
+            ],
+        );
+        assert!(out.status.success(), "{}", stderr(&out));
+        let out = mara(root, &["relation", "add", id, "evidences", "VER-APPROVED"]);
+        assert!(out.status.success(), "{}", stderr(&out));
+    };
+    create_evidence("EVD-OLD", "old123");
+    let args = [
+        "--format",
+        "json",
+        "trace",
+        "matrix",
+        "--id",
+        "REQ-A",
+        "--check-file",
+        "check.yaml",
+        "--shape",
+        "urn:mara:rule:revision_evidence",
+        "--param",
+        "subject_revision=new456",
+        "--limit",
+        "100",
+    ];
+    let failed = mara(root, &args);
+    assert!(failed.status.success(), "{}", stderr(&failed));
+    let failed: Value = serde_json::from_str(&stdout(&failed)).unwrap();
+    assert_eq!(failed["summaries"][0]["failed"], 1, "{failed:#}");
+    assert!(
+        failed["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|record| record["condition"]["components"]["hasValue"] == "new456")
+    );
+    let request = json!({"ids":["REQ-A"], "check":{
+        "files":["check.yaml"], "shape":"urn:mara:rule:revision_evidence",
+        "parameters":{"subject_revision":"new456"}}, "limit":100});
+    let responses = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "trace_matrix", request.clone()),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        failed
+    );
+
+    create_evidence("EVD-NEW", "new456");
+    let passed = mara(root, &args);
+    assert!(passed.status.success(), "{}", stderr(&passed));
+    let passed: Value = serde_json::from_str(&stdout(&passed)).unwrap();
+    assert_eq!(passed["summaries"][0]["passed"], 1, "{passed:#}");
+    assert_eq!(fs::read_to_string(root.join("check.yaml")).unwrap(), check);
+    let responses = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "trace_matrix", request),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"],
+        passed
+    );
+
+    let first = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--check-file",
+            "check.yaml",
+            "--shape",
+            "urn:mara:rule:revision_evidence",
+            "--param",
+            "subject_revision=new456",
+            "--limit",
+            "1",
+        ],
+    );
+    let first: Value = serde_json::from_str(&stdout(&first)).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let stale = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--check-file",
+            "check.yaml",
+            "--shape",
+            "urn:mara:rule:revision_evidence",
+            "--param",
+            "subject_revision=old123",
+            "--limit",
+            "1",
+            "--cursor",
+            cursor,
+        ],
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout(&stale)).unwrap()["error"]["code"],
+        "stale_cursor"
+    );
+}
+
+#[test]
+fn trace_matrix_rejects_invalid_bindings_and_supports_in_parameters() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    fs::write(
+        root.join("check.yaml"),
+        "id: rule:owner_check\nproperty: [{path: owner, in: [{parameter: expected_owner}, Bob]}]\n",
+    )
+    .unwrap();
+    let base = [
+        "--format",
+        "json",
+        "trace",
+        "matrix",
+        "--id",
+        "REQ-A",
+        "--check-file",
+        "check.yaml",
+        "--shape",
+        "urn:mara:rule:owner_check",
+    ];
+    let run = |extra: &[&str]| {
+        let mut args = base.to_vec();
+        args.extend_from_slice(extra);
+        let output = mara(root, &args);
+        serde_json::from_str::<Value>(&stdout(&output)).unwrap()
+    };
+    assert_eq!(
+        run(&["--param", "expected_owner=Alice"])["summaries"][0]["passed"],
+        1
+    );
+    assert_eq!(
+        run(&["--param", "expected_owner=Carol"])["summaries"][0]["failed"],
+        1
+    );
+    for extra in [
+        vec![],
+        vec![
+            "--param",
+            "expected_owner=Alice",
+            "--param",
+            "expected_owner=Bob",
+        ],
+        vec!["--param", "expected_owner=Alice", "--param", "unused=x"],
+        vec!["--param", "bad-name=x"],
+        vec!["--param", "expected_owner"],
+    ] {
+        assert_eq!(
+            run(&extra)["error"]["code"],
+            "invalid_argument",
+            "{extra:?}"
+        );
+    }
+    let without_check = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--param",
+            "expected_owner=Alice",
+        ],
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout(&without_check)).unwrap()["error"]["code"],
+        "invalid_argument"
+    );
+    let responses = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "trace_matrix",
+                json!({"ids":["REQ-A"], "check":{
+            "files":["check.yaml"], "shape":"urn:mara:rule:owner_check",
+            "parameters":{"expected_owner":42}}}),
+            ),
+        ],
+    );
+    assert_eq!(
+        mcp_response(&responses, 2)["result"]["structuredContent"]["error"]["code"],
+        "invalid_argument"
+    );
+    fs::write(
+        root.join("check.yaml"),
+        "id: rule:owner_check\nproperty: [{path: owner, hasValue: {parameter: 3}}]\n",
+    )
+    .unwrap();
+    assert_eq!(
+        run(&["--param", "expected_owner=Alice"])["error"]["code"],
+        "invalid_argument"
+    );
+}
+
+#[test]
 fn external_ticket_obligation_and_navigation_have_cli_mcp_parity() {
     let fixture = rule_fixture();
     let root = fixture.path();

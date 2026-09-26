@@ -44,6 +44,9 @@ pub(crate) struct Rules {
     pub diagnostics: Vec<ValidationDiagnostic>,
     ir: Option<IRSchema>,
     source_fingerprints: BTreeMap<PathBuf, String>,
+    parameter_bindings: Option<BTreeMap<String, String>>,
+    parameter_uses: BTreeMap<String, BTreeSet<String>>,
+    binding_error: Option<String>,
 }
 
 pub(crate) struct RuleObservation {
@@ -98,6 +101,25 @@ impl Rules {
                 &mut BTreeSet::new(),
             )
             .map_err(|(_, message)| message)?;
+            if let Some(bindings) = &self.parameter_bindings {
+                let mut pending = vec![selected.clone()];
+                let mut visited = BTreeSet::new();
+                let mut used = BTreeSet::new();
+                while let Some(id) = pending.pop() {
+                    if !visited.insert(id.clone()) {
+                        continue;
+                    }
+                    if let Some(names) = self.parameter_uses.get(&id) {
+                        used.extend(names.iter().cloned());
+                    }
+                    if let Some(shape) = self.shapes.get(&id) {
+                        pending.extend(references(&shape.value).into_iter().map(str::to_owned));
+                    }
+                }
+                if let Some(name) = bindings.keys().find(|name| !used.contains(*name)) {
+                    return Err(format!("unused check parameter '{name}'"));
+                }
+            }
             self.roots = vec![selected.clone()];
             Ok(selected)
         } else {
@@ -109,6 +131,28 @@ impl Rules {
     }
 
     pub(crate) fn load_files(project: &Project, schema: &Schema, files: Vec<PathBuf>) -> Self {
+        Self::load_files_with_parameters(project, schema, files, None)
+    }
+
+    pub(crate) fn load_check_files(
+        project: &Project,
+        schema: &Schema,
+        files: Vec<PathBuf>,
+        parameters: BTreeMap<String, String>,
+    ) -> Result<Self, String> {
+        let rules = Self::load_files_with_parameters(project, schema, files, Some(parameters));
+        match &rules.binding_error {
+            Some(error) => Err(error.clone()),
+            None => Ok(rules),
+        }
+    }
+
+    fn load_files_with_parameters(
+        project: &Project,
+        schema: &Schema,
+        files: Vec<PathBuf>,
+        parameter_bindings: Option<BTreeMap<String, String>>,
+    ) -> Self {
         let mut rules = Self {
             shapes: BTreeMap::new(),
             roots: vec![],
@@ -116,6 +160,9 @@ impl Rules {
             diagnostics: vec![],
             ir: None,
             source_fingerprints: BTreeMap::new(),
+            parameter_bindings,
+            parameter_uses: BTreeMap::new(),
+            binding_error: None,
         };
         let schema_value = serde_json::to_value(schema).expect("schema serializes");
         let mut seen = BTreeSet::new();
@@ -437,6 +484,27 @@ impl Rules {
             && let Ok(expanded) = expand_id(s)
         {
             *s = expanded;
+        }
+        if let Some(bindings) = &self.parameter_bindings {
+            let mut used = BTreeSet::new();
+            let binding = (|| {
+                if let Some(literal) = map.get_mut("hasValue") {
+                    bind_literal(literal, bindings, &mut used)?;
+                }
+                if let Some(Value::Array(literals)) = map.get_mut("in") {
+                    for literal in literals {
+                        bind_literal(literal, bindings, &mut used)?;
+                    }
+                }
+                Ok::<(), String>(())
+            })();
+            if let Err(error) = binding {
+                self.binding_error.get_or_insert(error);
+            }
+            self.parameter_uses
+                .entry(id.clone())
+                .or_default()
+                .extend(used);
         }
         map.insert("id".into(), json!(id));
         let _ = schema;
@@ -927,6 +995,38 @@ fn check_literal(v: &Value) -> Result<(), String> {
     }
     Ok(())
 }
+
+pub(crate) fn valid_parameter_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
+        && bytes.all(|b| matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_'))
+}
+
+fn bind_literal(
+    literal: &mut Value,
+    bindings: &BTreeMap<String, String>,
+    used: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    let Some(object) = literal.as_object() else {
+        return Ok(());
+    };
+    let Some(parameter) = object.get("parameter") else {
+        return Ok(());
+    };
+    let Some(name) = parameter.as_str() else {
+        return Err("check parameter placeholder must have a text name".into());
+    };
+    if object.len() != 1 || !valid_parameter_name(name) {
+        return Err(format!("invalid check parameter placeholder '{name}'"));
+    }
+    let Some(value) = bindings.get(name) else {
+        return Err(format!("missing check parameter '{name}'"));
+    };
+    used.insert(name.to_owned());
+    *literal = Value::String(value.clone());
+    Ok(())
+}
+
 fn datatype_name(t: crate::FieldType) -> &'static str {
     match t {
         crate::FieldType::String | crate::FieldType::Enum => "string",

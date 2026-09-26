@@ -66,7 +66,7 @@ struct TraceMatrixToolParams {
     /// Expanded IRIs of enabled root rules; use this or check, never both.
     #[serde(default)]
     rules: Vec<String>,
-    /// Request-local YAML files and one named targetless node shape; separate from persisted rule policy.
+    /// Request-local YAML files, one named targetless node shape, and optional named text parameters for hasValue or in; separate from persisted rule policy.
     #[serde(default)]
     check: Option<mara::TraceCheck>,
     /// Maximum records per page, 1 through 100 (default 20); the byte budget may return fewer.
