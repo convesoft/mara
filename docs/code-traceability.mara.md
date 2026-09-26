@@ -7,7 +7,11 @@ is evidence for this design; this document owns production semantics.
 :mid: 01M3EQAFT3DPZ2VF1GWZBX2T6Y
 :title: Resolve code associations as typed relations
 
-A project can declare code-to-item relations and navigate the resulting source associations. Missing, ambiguous and unsupported code targets produce source-located diagnostics. A source association does not establish passing test evidence.
+A project can declare code-to-item relations, navigate the resulting source
+associations, and mutate item-authored inverse assertions through relation
+commands. Source code comments remain directly authored in code. Missing,
+ambiguous and unsupported code targets produce source-located diagnostics. A
+source association does not establish passing test evidence.
 :::
 
 :::mara design DES-CODE-TRACEABILITY
@@ -157,7 +161,16 @@ reads the current file or symbol source in bounded pages. Relation inspection
 shows both marker and item-authored occurrences. CLI and MCP expose the same
 results and diagnostics. Code files are discovered locally under the project
 root using the repository's ignore rules; references to ignored or unsupported
-files still resolve as file-only targets when explicitly authored. Code edges
-are authored by editing markers or item inverse fields; `relation add` and
-`relation remove` do not mutate code edges.
+files still resolve as file-only targets when explicitly authored. With an item
+as `source` and a declared inverse alias, `relation add` writes the inverse
+metadata to that item, rejecting an edge already asserted by either an item
+or code marker. `relation remove` removes only item-authored inverse
+occurrences of that edge. A remaining code marker keeps the canonical edge
+present; mutation results report its remaining occurrence count and
+`edge_exists: true`. An item-side remove with no item-authored occurrence fails
+without changing code. A code endpoint as mutation `source` is rejected with
+an explicit diagnostic: relation commands never modify code source files.
+Removing an item-authored inline code relation leaves its `code:` target as
+plain text in the item body.
+Code markers are added or removed by directly editing their source comments.
 :::

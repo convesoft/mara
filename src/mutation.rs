@@ -691,6 +691,12 @@ pub(crate) fn mutate_semantic_relation(
     occurrence: Option<&str>,
 ) -> Result<crate::RelationMutationResult, crate::RelationError> {
     use crate::{RelationAction, RelationError};
+    if params.source.starts_with("code:") {
+        return Err(RelationError::new(
+            "unsupported_mutation",
+            "relation add/remove cannot modify code source files; use the declared inverse with an item source, or edit the code comment directly",
+        ));
+    }
     let _lock = MutationLock::acquire(project)?;
     let corpus = load_corpus(project, schema)?;
     ensure_unambiguous_item_identities(&corpus, "mutate relations")?;
@@ -701,18 +707,22 @@ pub(crate) fn mutate_semantic_relation(
         &params.relation,
         &params.target,
     )?;
-    if matches!(edge.source, crate::RelationEndpoint::Code { .. }) {
-        return Err(RelationError::new(
-            "unsupported_mutation",
-            "edit the authored code comment or item inverse in source; relation add/remove cannot mutate code edges",
-        ));
-    }
+    let code_edge = matches!(edge.source, crate::RelationEndpoint::Code { .. });
     let authored = crate::relations::occurrences(project, &corpus, schema, &edge)?;
+    let editable = authored
+        .iter()
+        .filter(|entry| !code_edge || matches!(entry.author, crate::RelationEndpoint::Item { .. }))
+        .collect::<Vec<_>>();
     if add && !authored.is_empty() {
+        let description = if code_edge {
+            "code-to-item edge already exists"
+        } else {
+            "item already has relation"
+        };
         return Err(RelationError::new(
             "relation_exists",
             format!(
-                "item already has relation; inspect with relation get {} {} {} ({} occurrences)",
+                "{description}; inspect with relation get {} {} {} ({} occurrences)",
                 params.source,
                 params.relation,
                 params.target,
@@ -746,8 +756,22 @@ pub(crate) fn mutate_semantic_relation(
             )
             .on_edge(&edge, authored.len()));
         }
+        if code_edge && !editable.iter().any(|entry| entry.reference == token) {
+            return Err(RelationError::new(
+                "unsupported_mutation",
+                "selected occurrence is a code comment; relation commands do not modify code source files",
+            )
+            .on_edge(&edge, authored.len()));
+        }
     }
-    if !add && authored.is_empty() {
+    if !add && editable.is_empty() {
+        if code_edge && !authored.is_empty() {
+            return Err(RelationError::new(
+                "unsupported_mutation",
+                "no item-authored assertion remains; edit the code comment directly to remove this edge",
+            )
+            .on_edge(&edge, authored.len()));
+        }
         return Err(
             RelationError::new("relation_not_found", "relation does not exist").on_edge(&edge, 0),
         );
@@ -756,7 +780,7 @@ pub(crate) fn mutate_semantic_relation(
     let changed;
     if add {
         let source = resolve_item(&corpus, &params.source, "source")?;
-        let target = if crate::external::address(&params.target).is_some() {
+        let target = if code_edge || crate::external::address(&params.target).is_some() {
             None
         } else {
             Some(resolve_item(&corpus, &params.target, "target")?)
@@ -786,7 +810,7 @@ pub(crate) fn mutate_semantic_relation(
         candidates.insert(document.path().to_path_buf(), candidate);
         changed = 1;
     } else {
-        let selected = authored
+        let selected = editable
             .iter()
             .filter(|entry| occurrence.is_none_or(|token| token == entry.reference))
             .collect::<Vec<_>>();
@@ -805,7 +829,9 @@ pub(crate) fn mutate_semantic_relation(
             if entry.kind == "inline" {
                 candidate.replace_range(
                     entry.source.start_byte()..entry.source.end_byte(),
-                    &if let Some(address) = crate::external::address(&entry.target) {
+                    &if entry.target.starts_with("code:") {
+                        entry.target.clone()
+                    } else if let Some(address) = crate::external::address(&entry.target) {
                         format!("<{address}>")
                     } else {
                         format!("[[{}]]", entry.target)
@@ -842,7 +868,11 @@ pub(crate) fn mutate_semantic_relation(
         }
         Ok(())
     })?;
-    let remaining = if add { 1 } else { authored.len() - changed };
+    let remaining = if add {
+        authored.len() + 1
+    } else {
+        authored.len() - changed
+    };
     Ok(crate::RelationMutationResult {
         format_version: 1,
         action: if add {
@@ -852,6 +882,8 @@ pub(crate) fn mutate_semantic_relation(
         },
         scope: if occurrence.is_some() {
             "occurrence"
+        } else if code_edge {
+            "item"
         } else {
             "relationship"
         }

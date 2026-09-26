@@ -366,22 +366,22 @@ enum RelationCommand {
         #[arg(long)]
         cursor: Option<String>,
     },
-    /// Add a schema-valid relation; rejects an existing edge.
+    /// Add a schema-valid relation. Code links require an item source and declared inverse; code files are never edited.
     Add {
-        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID).
+        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID); code sources are read-only.
         source: String,
         /// Schema-declared relation name; inspect with schema list relation.
         relation: String,
-        /// Target item's exact human ID, canonical MID, or external:HTTP(S) URL.
+        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<selector>] with an inverse alias.
         target: String,
     },
-    /// Remove all assertions of an existing semantic relation, demoting inline tokens to mentions or external links; rejects a missing edge.
+    /// Remove authored item assertions. For code links, code comment markers remain and may keep the edge present.
     Remove {
-        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID).
+        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID); code sources are read-only.
         source: String,
         /// Schema-declared relation name; inspect with schema list relation.
         relation: String,
-        /// Target item's exact human ID, canonical MID, or external:HTTP(S) URL.
+        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<selector>] with an inverse alias.
         target: String,
         /// Remove only this snapshot-bound occurrence from relation get.
         #[arg(long)]

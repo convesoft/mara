@@ -11819,26 +11819,83 @@ fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
         json!({"source":rust,"relation":"code_implements","target":"REQ-A"}),
     );
     assert_eq!(canonical["edge"], edge["edge"]);
-    let remove: Value = serde_json::from_slice(
-        &mara(
-            root,
-            &[
-                "--format",
-                "json",
-                "relation",
-                "remove",
-                "REQ-A",
-                "implemented_by_code",
-                rust,
-            ],
-        )
-        .stdout,
-    )
-    .unwrap();
-    assert_eq!(
-        remove["error"]["code"], "unsupported_mutation",
-        "{remove:#}"
+    let code_before = fs::read(root.join("src/sample.rs")).unwrap();
+    let item_remove = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "relation",
+            "remove",
+            "REQ-A",
+            "implemented_by_code",
+            rust,
+        ],
     );
+    assert!(item_remove.status.success(), "{}", stderr(&item_remove));
+    let removed: Value = serde_json::from_slice(&item_remove.stdout).unwrap();
+    assert_eq!(removed["scope"], "item");
+    assert_eq!(removed["changed_occurrences"], 1);
+    assert_eq!(removed["remaining_occurrences"], 1);
+    assert_eq!(removed["edge_exists"], true);
+    assert_eq!(fs::read(root.join("src/sample.rs")).unwrap(), code_before);
+    assert!(
+        !fs::read_to_string(&item_path)
+            .unwrap()
+            .contains(":implemented_by_code:")
+    );
+    let marker_only = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":rust}),
+    );
+    assert_eq!(marker_only["occurrence_count"], 1);
+    assert_eq!(marker_only["occurrences"][0]["kind"], "code_comment");
+    let duplicate = relation_tool(
+        root,
+        "relation_add",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":rust}),
+    );
+    assert_eq!(duplicate["error"]["code"], "relation_exists");
+    let marker_token = marker_only["occurrences"][0]["reference"].as_str().unwrap();
+    let selected_marker = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":rust,"occurrence":marker_token}),
+    );
+    assert_eq!(selected_marker["error"]["code"], "unsupported_mutation");
+    assert!(
+        selected_marker["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("do not modify code source files")
+    );
+    let no_item_assertion = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":rust}),
+    );
+    assert_eq!(no_item_assertion["error"]["code"], "unsupported_mutation");
+    let code_side = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":rust,"relation":"code_implements","target":"REQ-A"}),
+    );
+    assert_eq!(code_side["error"]["code"], "unsupported_mutation");
+    assert!(
+        code_side["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("cannot modify code source files")
+    );
+    let code_side_add = relation_tool(
+        root,
+        "relation_add",
+        json!({"source":rust,"relation":"code_implements","target":"REQ-A"}),
+    );
+    assert_eq!(code_side_add["error"]["code"], "unsupported_mutation");
+    assert_eq!(fs::read(root.join("src/sample.rs")).unwrap(), code_before);
+    fs::write(&item_path, item).unwrap();
     let mcp = mcp_exchange(
         root,
         &[
@@ -11974,6 +12031,55 @@ fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
     )
     .unwrap();
     assert_eq!(file_only["content"], "notes");
+    fs::write(
+        &item_path,
+        item.replace(":implemented_by_code: code:src/sample.rs::Outer::run\n", ""),
+    )
+    .unwrap();
+    let added = relation_tool(
+        root,
+        "relation_add",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":"code:src/notes.txt"}),
+    );
+    assert_eq!(added["scope"], "item", "{added:#}");
+    assert_eq!(added["changed_occurrences"], 1);
+    assert_eq!(added["remaining_occurrences"], 1);
+    assert!(
+        fs::read_to_string(&item_path)
+            .unwrap()
+            .contains(":implemented_by_code: code:src/notes.txt")
+    );
+    let with_inline = fs::read_to_string(&item_path)
+        .unwrap()
+        .replace("A.\n", "A. [[implemented_by_code:code:src/notes.txt]]\n");
+    fs::write(&item_path, with_inline).unwrap();
+    let occurrences = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":"code:src/notes.txt"}),
+    );
+    assert_eq!(occurrences["occurrence_count"], 2);
+    let inline_token = occurrences["occurrences"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["kind"] == "inline")
+        .unwrap()["reference"]
+        .as_str()
+        .unwrap();
+    let removed_inline = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":"code:src/notes.txt","occurrence":inline_token}),
+    );
+    assert_eq!(removed_inline["scope"], "occurrence", "{removed_inline:#}");
+    assert_eq!(removed_inline["remaining_occurrences"], 1);
+    assert!(
+        fs::read_to_string(&item_path)
+            .unwrap()
+            .contains("A. code:src/notes.txt")
+    );
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
     fs::write(
         &schema_path,
         schema.replace(

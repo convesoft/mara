@@ -159,6 +159,12 @@ inline token to an ordinary Markdown autolink of its address. Preserve all
 bytes outside the selected lines/tokens, including surrounding prose, unrelated
 relations, code examples and existing mentions.
 
+For a code-to-item relation, mutation requires the declared inverse alias with
+the item as `source`. The no-selector remove deletes only assertions authored
+on that item; code comment assertions remain and may keep the edge present.
+An inline inverse becomes plain `code:` text when removed.
+This code-specific authoring boundary is defined in [[DES-CODE-TRACEABILITY]].
+
 An explicit `occurrence` selects exactly one assertion by an opaque token from
 relation inspection. It must belong to the requested edge and current project
 snapshot. Apply the same metadata deletion or inline demotion to that occurrence

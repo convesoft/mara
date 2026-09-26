@@ -418,7 +418,7 @@ struct RelationToolParams {
     source: String,
     /// Schema-declared relation name or inverse alias; discover names with schema_list(kind="relation").
     relation: String,
-    /// Item ID/MID or external:HTTP(S); relation_get also accepts code:<path>[::<selector>] with an item-authored inverse.
+    /// Item ID/MID, external:HTTP(S), or code:<path>[::<selector>] with an item-authored inverse.
     target: String,
 }
 
@@ -720,7 +720,7 @@ impl MaraMcp {
         )
     }
 
-    #[tool(name = "relation_add", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Add one metadata assertion using a canonical name or inverse alias. Reject an existing semantic edge, including inline and reverse symmetric assertions. Returns relationship format 1.")]
+    #[tool(name = "relation_add", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Add one metadata assertion using a canonical name or inverse alias. Code links require an item source and declared inverse; code source files are never modified. Returns relationship format 1.")]
     fn relation_add(
         &self,
         Parameters(params): Parameters<RelationToolParams>,
@@ -733,7 +733,7 @@ impl MaraMcp {
         )
     }
 
-    #[tool(name = "relation_remove", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Remove all assertions of a semantic relationship across included documents, or exactly one snapshot-bound occurrence. Demote inline internal assertions to bare mentions and external assertions to Markdown autolinks, preserving surrounding prose. Reject missing edges and stale or mismatched selectors. Returns relationship format 1.")]
+    #[tool(name = "relation_remove", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Remove item-authored assertions of a semantic relationship, or exactly one snapshot-bound item occurrence. For code links, code comments remain and may keep the edge present; code source files are never modified. Reject missing edges and stale or mismatched selectors. Returns relationship format 1.")]
     fn relation_remove(
         &self,
         Parameters(params): Parameters<RelationRemoveToolParams>,
