@@ -163,6 +163,12 @@ impl Adapter {
         source: &str,
         symbols: &'a [CodeSymbol],
     ) -> Result<Option<&'a CodeSymbol>, ()> {
+        let mut enclosing = symbols
+            .iter()
+            .filter(|s| s.body_start <= comment.start_byte() && comment.end_byte() <= s.body_end)
+            .collect::<Vec<_>>();
+        enclosing.sort_by_key(|s| s.body_end - s.body_start);
+        let scope_end = enclosing.first().map(|symbol| symbol.body_end);
         let mut attached = symbols
             .iter()
             .filter_map(|s| {
@@ -171,6 +177,7 @@ impl Adapter {
                     .copied()
                     .filter(|start| {
                         *start >= comment.end_byte()
+                            && scope_end.is_none_or(|end| *start < end)
                             && source[comment.end_byte()..*start].trim().is_empty()
                     })
                     .min()
@@ -184,11 +191,6 @@ impl Adapter {
             }
             return Ok(Some(first.0));
         }
-        let mut enclosing = symbols
-            .iter()
-            .filter(|s| s.body_start <= comment.start_byte() && comment.end_byte() <= s.body_end)
-            .collect::<Vec<_>>();
-        enclosing.sort_by_key(|s| s.body_end - s.body_start);
         if let Some(first) = enclosing.first() {
             if enclosing.get(1).is_some_and(|next| {
                 next.body_end - next.body_start == first.body_end - first.body_start
@@ -284,7 +286,12 @@ impl CodeIndex {
                     continue;
                 }
             };
-            if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+            let supported_file = entry.file_type().is_some_and(|kind| kind.is_file())
+                || entry.file_type().is_some_and(|kind| kind.is_symlink())
+                    && fs::canonicalize(entry.path()).is_ok_and(|canonical| {
+                        canonical.starts_with(project.root()) && canonical.is_file()
+                    });
+            if !supported_file {
                 continue;
             }
             let path = entry
@@ -741,6 +748,24 @@ mod tests {
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(file.markers.len(), 1);
         assert_eq!(file.markers[0].endpoint, "code:sample.js::run");
+    }
+
+    #[test]
+    fn body_marker_does_not_attach_to_the_next_top_level_declaration() {
+        let mut adapters = adapters();
+        let adapter = adapters
+            .iter_mut()
+            .find(|adapter| adapter.accepts(Path::new("sample.py")))
+            .unwrap();
+        let (file, problems) = parse_file(
+            "sample.py".into(),
+            "def first():\n    pass\n    # @mara code_implements REQ-A\ndef second(): pass\n"
+                .into(),
+            adapter,
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(file.markers.len(), 1);
+        assert_eq!(file.markers[0].endpoint, "code:sample.py::first");
     }
 
     #[test]

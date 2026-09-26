@@ -419,21 +419,27 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
 
     for file in corpus.code().files() {
         for marker in &file.markers {
+            let target_item = match resolve_indexed_item(&ids, &mids, &marker.target) {
+                IndexedItem::One(item) => Some(item),
+                _ => None,
+            };
             let Some((canonical, definition, inverse)) = schema.resolve_relation(&marker.relation)
             else {
-                diagnostic(
+                diagnostic_for_target_item(
                     DiagnosticCode::RelationInvalid,
                     &mut diagnostics,
                     &marker.source,
+                    target_item,
                     format!("unknown code relation '{}'", marker.relation),
                 );
                 continue;
             };
             if inverse || !definition.code_source || !schema.relation_is_valid(canonical) {
-                diagnostic(
+                diagnostic_for_target_item(
                     DiagnosticCode::RelationInvalid,
                     &mut diagnostics,
                     &marker.source,
+                    target_item,
                     format!(
                         "relation '{}' does not allow code source markers",
                         marker.relation
@@ -443,17 +449,24 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
             }
             if let Err(error) = corpus.code().resolve(&marker.endpoint) {
                 let (code, message) = code_resolution_diagnostic(error);
-                diagnostic(code, &mut diagnostics, &marker.source, message);
+                diagnostic_for_target_item(
+                    code,
+                    &mut diagnostics,
+                    &marker.source,
+                    target_item,
+                    message,
+                );
                 continue;
             }
             match resolve_indexed_item(&ids, &mids, &marker.target) {
                 IndexedItem::One(target)
                     if !definition.target.iter().any(|f| f == target.flavour()) =>
                 {
-                    diagnostic(
+                    diagnostic_for_target_item(
                         DiagnosticCode::RelationInvalid,
                         &mut diagnostics,
                         &marker.source,
+                        Some(target),
                         format!(
                             "relation '{}' does not allow target flavour '{}'",
                             marker.relation,
@@ -1063,6 +1076,23 @@ pub(crate) fn diagnostic(
     message: String,
 ) {
     diagnostic_with_kind(diagnostics, source, DiagnosticKind::Other, code, message);
+}
+
+fn diagnostic_for_target_item(
+    code: DiagnosticCode,
+    diagnostics: &mut Vec<Diagnostic>,
+    source: &SourceLocation,
+    item: Option<&Item>,
+    message: String,
+) {
+    diagnostic(code, diagnostics, source, message);
+    if let Some(item) = item {
+        let diagnostic = diagnostics.last_mut().expect("diagnostic was added");
+        diagnostic.item_ids.push(item.id().to_owned());
+        if let Some(mid) = item.mid() {
+            diagnostic.item_ids.push(mid.to_owned());
+        }
+    }
 }
 
 fn code_resolution_diagnostic(error: crate::code::ResolveError) -> (DiagnosticCode, String) {
