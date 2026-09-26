@@ -13230,6 +13230,64 @@ fn trace_matrix_reports_external_qualifier_outcome() {
 }
 
 #[test]
+fn trace_matrix_reports_code_endpoint_predicate_states() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["relations"]["code_implements"] = json!({
+        "description":"Code implements a requirement.", "source":[],
+        "target":["requirement"], "code_source":true,
+        "inverse":"implemented_by_code"
+    });
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(root.join("src/check.rs"), "fn check() {}\n").unwrap();
+    let added = mara(
+        root,
+        &[
+            "relation",
+            "add",
+            "REQ-A",
+            "implemented_by_code",
+            "code:src/check.rs",
+        ],
+    );
+    assert!(added.status.success(), "{}", stderr(&added));
+    fs::write(
+        root.join("rules.yaml"),
+        "id: rule:code_state\ntargetClass: requirement\nproperty:\n  - path: {inversePath: code_implements}\n    qualifiedValueShape: {pattern: 'urn:mara:code:'}\n    qualifiedMinCount: 1\n    node: {pattern: 'urn:mara:code:'}\n",
+    )
+    .unwrap();
+    let output = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--rule",
+            "urn:mara:rule:code_state",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let result: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(result["summaries"][0]["passed"], 1, "{result:#}");
+    assert!(
+        result["records"].as_array().unwrap().iter().any(|record| {
+            record["kind"] == "edge"
+                && record["endpoint"]["reference"] == "code:src/check.rs"
+                && record["qualification"] == "passed"
+                && record["every"] == "passed"
+        }),
+        "{result:#}"
+    );
+}
+
+#[test]
 fn trace_matrix_explains_skipped_evaluation_for_invalid_field() {
     let fixture = rule_fixture();
     let root = fixture.path();

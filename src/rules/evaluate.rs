@@ -69,8 +69,9 @@ impl Rules {
             }
             graph.push(node);
         }
+        let relations = crate::relations::RelationGraph::new(corpus, schema);
         let mut edges = BTreeSet::new();
-        for record in crate::relations::RelationGraph::new(corpus, schema).edges() {
+        for record in relations.edges() {
             let edge = &record.edge;
             let a = relation_iri(&edge.source);
             let b = relation_iri(&edge.target);
@@ -211,7 +212,7 @@ impl Rules {
                     }
                 };
                 if outcome.conforms() {
-                    let states = cached_states(&engine, ir, &self.shapes, corpus);
+                    let states = cached_states(&engine, ir, &self.shapes, &relations);
                     observations.push(record("passed", None, engine.counts, states));
                     continue;
                 }
@@ -299,7 +300,7 @@ impl Rules {
                     }
                 }
                 diagnostic.details = Some(details);
-                let states = cached_states(&engine, ir, &self.shapes, corpus);
+                let states = cached_states(&engine, ir, &self.shapes, &relations);
                 observations.push(record(
                     "failed",
                     Some(diagnostic.clone()),
@@ -346,40 +347,26 @@ fn cached_states(
     engine: &RuleEngine,
     ir: &shacl::ir::IRSchema,
     shapes: &BTreeMap<String, Shape>,
-    corpus: &Corpus,
+    relations: &crate::relations::RelationGraph,
 ) -> BTreeMap<(String, String), bool> {
     use shacl::validator::engine::Engine;
     let mut states = BTreeMap::new();
-    let external_addresses = corpus
-        .items()
-        .flat_map(|item| item.relations())
-        .filter_map(|relation| crate::external::address(relation.target()))
-        .collect::<BTreeSet<_>>();
     for id in shapes.keys() {
         let Ok(iri) = IriS::new(id) else { continue };
         let Some(idx) = ir.get_idx(&Object::iri(iri)) else {
             continue;
         };
-        for item in corpus.items() {
-            let Some(mid) = item.mid() else { continue };
-            let Ok(focus) = IriS::new(&format!("urn:mara:mid:{mid}")) else {
+        for endpoint in relations.nodes.values() {
+            let Ok(focus) = IriS::new(&relation_iri(endpoint)) else {
                 continue;
             };
             if let Some(outcome) = engine.get_cached_outcome(&Object::iri(focus), *idx) {
-                states.insert((id.clone(), mid.to_owned()), outcome.conforms());
-            }
-        }
-        for address in &external_addresses {
-            let encoded =
-                url::form_urlencoded::byte_serialize(address.as_bytes()).collect::<String>();
-            let Ok(focus) = IriS::new(&format!("urn:mara:external:{encoded}")) else {
-                continue;
-            };
-            if let Some(outcome) = engine.get_cached_outcome(&Object::iri(focus), *idx) {
-                states.insert(
-                    (id.clone(), format!("external:{address}")),
-                    outcome.conforms(),
-                );
+                let key = match endpoint {
+                    crate::RelationEndpoint::Item { mid, .. } => mid.clone(),
+                    crate::RelationEndpoint::Code { reference } => reference.clone(),
+                    crate::RelationEndpoint::External { address } => format!("external:{address}"),
+                };
+                states.insert((id.clone(), key), outcome.conforms());
             }
         }
     }

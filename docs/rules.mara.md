@@ -778,8 +778,9 @@ force an unbounded nested row:
 | `issue` | `diagnostic` preventing complete evaluation. |
 
 `evaluation` is `{kind:"rule",shape:"urn:mara:rule:approved_requirement"}`
-or `{kind:"check",shape:"urn:mara:rule:coverage"}`. `root` and item endpoints use discovery item descriptors;
-external endpoints use the relationship contract's external descriptor.
+or `{kind:"check",shape:"urn:mara:rule:coverage"}`. `root` and item endpoints
+use discovery item descriptors; external and code endpoints use their
+relationship endpoint descriptors.
 Every record carries `kind`. A check's `obligation.component` is a sorted array
 of SHACL constraint-component IRIs for its authored shape (empty for a shape
 with no constraints). Its `state` is the whole-shape outcome; it does not
@@ -802,10 +803,10 @@ identifiers, not durable item identities. They connect records across pages.
 Counts belong to the immediate check: include selected and qualifying totals,
 declared minimum/maximum, and every state where present. Counts are null
 when unavailable, not misleading zeros. Qualified literal-field counts use
-the native evaluator's selected and qualifying totals. External endpoints
-retain native qualifier/every outcomes when evaluated; they have no item
-status. An edge's `outside_selection` is true
-when its item endpoint was not selected as a root, or when it is external.
+the native evaluator's selected and qualifying totals. External and code
+endpoints retain native qualifier/every outcomes when evaluated; they have no
+item status. An edge's `outside_selection` is true when its item endpoint was
+not selected as a root, or when it is external or code.
 Local checks retain field paths and constraint parameters. Their `inspection`
 identifies the focus item and field, total authored value count, the first
 authored value (at most 256 characters), whether that value was truncated, and
