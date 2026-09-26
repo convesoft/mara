@@ -444,7 +444,7 @@ impl MaraMcp {
     #[tool(
         name = "trace_matrix",
         output_schema = rmcp::handler::server::common::schema_for_type::<mara::TraceMatrixResult>(),
-        description = "Generate a bounded, read-only traceability matrix. Select roots with ids, flavours, fields, paths or all:true; supply either enabled rule IRIs or a request-local check:{files,shape}, never both. A request check does not enable project policy. Trace format 1 distinguishes passed, failed, not_applicable and unavailable, with source-linked checks, canonical edges and per-evaluation summaries. Use render:markdown for a matching Markdown page. Follow next_cursor with unchanged inputs until has_more:false; restart after source/schema/rule changes. Known policy failures are data; incomplete evaluation sets evaluation_complete:false."
+        description = "Generate a bounded, read-only traceability matrix. Select roots with ids, flavours, fields, paths or all:true; supply either enabled rule IRIs or a request-local check:{files,shape,parameters?}, never both. In check shapes, hasValue:{parameter:subject_revision} or an in-list entry binds exact text from check.parameters:{subject_revision:\"<revision>\"}; missing or unused values are errors. A request check does not enable project policy. Trace format 1 distinguishes passed, failed, not_applicable and unavailable, with source-linked checks, canonical edges and per-evaluation summaries. Use render:markdown for a matching Markdown page. Follow next_cursor with unchanged inputs until has_more:false; restart after source/schema/rule or parameter changes. Known policy failures are data; incomplete evaluation sets evaluation_complete:false."
     )]
     fn trace_matrix(
         &self,

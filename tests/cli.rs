@@ -14364,12 +14364,33 @@ fn trace_matrix_binds_revision_evidence_through_cli_and_mcp() {
             mcp_initialize(1),
             json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
             mcp_call(2, "trace_matrix", request.clone()),
+            mcp_request(3, "tools/list", json!({})),
         ],
     );
     assert_eq!(
         mcp_response(&responses, 2)["result"]["structuredContent"],
         failed
     );
+    let tool = mcp_response(&responses, 3)["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|tool| tool["name"] == "trace_matrix")
+        .unwrap();
+    assert!(
+        tool["description"]
+            .as_str()
+            .unwrap()
+            .contains("check.parameters")
+    );
+    assert_eq!(
+        tool["inputSchema"]["$defs"]["TraceCheck"]["properties"]["parameters"]["additionalProperties"]
+            ["type"],
+        "string"
+    );
+    let help = mara(root, &["trace", "matrix", "--help"]);
+    assert!(help.status.success());
+    assert!(stdout(&help).contains("--param subject_revision=abc123"));
 
     create_evidence("EVD-NEW", "new456");
     let passed = mara(root, &args);

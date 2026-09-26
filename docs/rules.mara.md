@@ -727,7 +727,7 @@ for evaluation and are identified as outside the root selection.
 |---|---|
 | `trace matrix --flavour requirement --rule urn:mara:rule:approved_requirement` | `trace_matrix {flavours:["requirement"], rules:["urn:mara:rule:approved_requirement"]}` |
 | `trace matrix --id REQ-A --check-file rules/coverage.yaml --shape urn:mara:rule:coverage` | `trace_matrix {ids:["REQ-A"], check:{files:["rules/coverage.yaml"], shape:"urn:mara:rule:coverage"}}` |
-| `trace matrix --id REQ-A --check-file rules/revision.yaml --shape urn:mara:rule:revision --param subject_revision=abc123` | `trace_matrix {ids:["REQ-A"], check:{files:["rules/revision.yaml"], shape:"urn:mara:rule:revision", parameters:{subject_revision:"abc123"}}}` |
+| `trace matrix --id REQ-A --check-file rules/revision.yaml --shape urn:mara:rule:revision_evidence --param subject_revision=abc123` | `trace_matrix {ids:["REQ-A"], check:{files:["rules/revision.yaml"], shape:"urn:mara:rule:revision_evidence", parameters:{subject_revision:"abc123"}}}` |
 
 The matrix accepts `--all`, repeatable `--id`, `--flavour`, `--field`,
 `--path`, and `--limit`, `--cursor`. It requires either repeatable `--rule` /
@@ -736,7 +736,8 @@ expanded root shape IRIs from enabled sources; unknown IRIs are errors.
 Prefix abbreviations are source syntax, not request aliases.
 
 For a check, CLI accepts repeatable `--check-file` and one `--shape`;
-MCP accepts `check:{files:[...],shape:IRI}`. Load those YAML sources with the generated bindings
+MCP accepts `check:{files:[...],shape:IRI,parameters?:{NAME:VALUE}}`.
+Load those YAML sources with the generated bindings
 using the rule-file contract and require the designated named node shape.
 Apply it unconditionally to the request's selected roots; reject root targets,
 `whenShape` and `paths` on the designated check, and do not execute other

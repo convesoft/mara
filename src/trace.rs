@@ -51,6 +51,7 @@ pub struct TraceCheck {
     pub shape: String,
     /// Named text literals for placeholders in this request check.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(with = "BTreeMap<String, String>")]
     pub parameters: BTreeMap<String, Value>,
 }
 

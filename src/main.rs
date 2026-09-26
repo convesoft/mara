@@ -162,7 +162,7 @@ enum Command {
 enum TraceCommand {
     /// Generate a bounded, read-only coverage matrix using enabled rule IRIs or a request-local YAML check.
     #[command(
-        after_help = "Select roots with --all or one or more --id, --flavour, --field and --path filters. Use --rule for enabled root rules, or --check-file with --shape for a request-only check; do not mix them. For a reusable revision check containing hasValue: {parameter: subject_revision}, pass --param subject_revision=<revision>. Parameters are exact text values and may also occur in in lists. Default output is Markdown; --format json returns trace format 1. Read result states, checks, edges, summaries and evaluation_complete; follow --cursor with unchanged inputs until has_more is false. The view does not change project policy or source files."
+        after_help = "Select roots with --all or one or more --id, --flavour, --field and --path filters. Use --rule for enabled root rules, or --check-file with --shape for a request-only check; do not mix them. Example for a check containing hasValue: {parameter: subject_revision}: mara trace matrix --id REQ-A --check-file rules/revision.yaml --shape urn:mara:rule:revision_evidence --param subject_revision=abc123. Parameters are exact text values and may also occur in in lists. Default output is Markdown; --format json returns trace format 1. Read result states, checks, edges, summaries and evaluation_complete; follow --cursor with unchanged inputs until has_more is false. The view does not change project policy or source files."
     )]
     Matrix {
         /// Exact human ID or MID for a root item; repeat for OR and intersect with other root filters.

@@ -276,10 +276,22 @@ The check files supply shapes for this request only; they do not enable policy
 for project validation. A named rule uses its own applicability and selection
 within the requested roots.
 
-For a reusable revision check, a targetless root can follow a verification
-and require an evidence shape such as:
+For a reusable revision check, use a targetless root and an evidence shape in
+`rules/revision.yaml` (assuming the project declares these relations, flavours
+and evidence fields):
 
 ```yaml
+- id: rule:revision_evidence
+  property:
+    - path: {inversePath: verifies}
+      qualifiedValueShape: rule:verified_revision
+      qualifiedMinCount: 1
+- id: rule:verified_revision
+  class: verification
+  property:
+    - path: {inversePath: evidences}
+      qualifiedValueShape: rule:passing_revision
+      qualifiedMinCount: 1
 - id: rule:passing_revision
   class: evidence
   property:
@@ -289,10 +301,14 @@ and require an evidence shape such as:
       hasValue: {parameter: subject_revision}
 ```
 
-Use that shape as the qualified value shape for evidence linked through a
-verification to the selected root. A placeholder may also be an entry in `in`.
-Pass the concrete revision with CLI `--param subject_revision=<revision>` or
-MCP `check:{files:[...],shape:"urn:mara:rule:revision",parameters:{subject_revision:"<revision>"}}`.
+Pass the concrete revision through CLI or MCP:
+
+```text
+mara trace matrix --id REQ-A --check-file rules/revision.yaml --shape urn:mara:rule:revision_evidence --param subject_revision=abc123
+trace_matrix {ids:["REQ-A"],check:{files:["rules/revision.yaml"],shape:"urn:mara:rule:revision_evidence",parameters:{subject_revision:"abc123"}}}
+```
+
+A placeholder may also be an entry in `in`.
 Values are exact text literals, including empty text; resolve Git refs before
 calling Mara. Missing, invalid, duplicate CLI, and unused bindings are errors.
 Keep the YAML unchanged across revisions. Read the resulting state and resolved
