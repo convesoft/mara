@@ -222,3 +222,21 @@ Compare complete schema, flavour/relation lists and named declarations through b
 
 This method covers initialization and inspection only. It does not execute schema_validate, project_validate, engineering rules, mutations, retrieval or tracing. Links to schema discovery and the engineering template cover these selected obligations, not full requirement completion. The broader VER-PROJECT-BOOTSTRAP remains a separate method pending restoration.
 :::
+
+:::mara evidence EVD-PROJECT-INSPECTION
+:mid: 01M3FXYH6J23J2YXZBVMA7R6YY
+:title: Reduced bootstrap passes CLI and MCP inspection checks
+:status: accepted
+:result: passed
+:captured_at: 2026-09-26T22:38:43Z
+:subject_revision: 7155e423ce51e7f6a557e26ad9936b98a0597650
+:evidences: VER-PROJECT-INSPECTION
+
+The tested working tree was committed unchanged as `7155e423ce51e7f6a557e26ad9936b98a0597650`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1; candidate `/tmp/mara72-target/debug/mara`. Build settings: `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
+
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 17 integration tests passed, none failed or ignored. Real CLI and stdio MCP processes checked initialization, file preservation, project selection, schema inspection/guidance parity and malformed declaration rejection. Help/tools-list checks confirmed only the bounded operations are advertised.
+
+Installed-baseline MCP, with the absolute worktree selected, reported complete valid schema/project results without errors or warnings. Selected matrices passed two requirement origins, four initialization/discovery/design realizations and two verification definitions, consuming every page. These are authoring-tool checks, not candidate validation or tracing capabilities.
+
+The candidate now has five source files and nine runtime dependencies. Broader methods and historical execution evidence remain preserved; pending test files are neither executed nor claimed as passing. This result does not establish schema validation, engineering rule execution, source/navigation/retrieval, mutation, packaging or whole-product completion.
+:::
