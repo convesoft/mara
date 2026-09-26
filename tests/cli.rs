@@ -11833,6 +11833,31 @@ fn file_only_code_links_accept_binary_targets_and_invalidate_related_cursors() {
     let get = mara(root, &["get", "code:blob.bin"]);
     assert!(!get.status.success());
     assert!(stderr(&get).contains("not UTF-8 text"), "{}", stderr(&get));
+
+    let item = fs::read_to_string(&item_path).unwrap();
+    fs::write(
+        &item_path,
+        item.replace(
+            ":implemented_by_code: code:blob.bin\n",
+            ":implemented_by_code: code:blob.bin\n:implemented_by_code: code:missing-a.txt\n:implemented_by_code: code:missing-b.txt\n",
+        ),
+    )
+    .unwrap();
+    let first = mara(
+        root,
+        &["--format", "json", "project", "validate", "--limit", "1"],
+    );
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+    fs::write(root.join("blob.bin"), [0xff, 0xfe, 0x01]).unwrap();
+    let stale = mara(
+        root,
+        &[
+            "--format", "json", "project", "validate", "--limit", "1", "--cursor", cursor,
+        ],
+    );
+    let stale: Value = serde_json::from_slice(&stale.stdout).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_cursor", "{stale:#}");
 }
 
 #[cfg(unix)]
@@ -13462,6 +13487,93 @@ fn trace_matrix_reports_code_endpoint_predicate_states() {
         }),
         "{result:#}"
     );
+}
+
+#[test]
+fn trace_matrix_cursor_detects_code_source_and_adapter_changes() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["relations"]["code_implements"] = json!({
+        "description":"Code implements a requirement.", "source":[],
+        "target":["requirement"], "code_source":true,
+        "inverse":"implemented_by_code"
+    });
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(".mara");
+    let sample_config = fs::read_to_string(sample.join("project.toml")).unwrap();
+    let rust_language = sample_config
+        .split_once("\n[[code.languages]]")
+        .unwrap()
+        .1
+        .split("\n[[code.languages]]")
+        .next()
+        .unwrap();
+    let config_path = root.join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    fs::write(
+        &config_path,
+        format!(
+            "{}\n[[code.languages]]{rust_language}",
+            config.replacen("format_version = 2", "format_version = 3", 1)
+        ),
+    )
+    .unwrap();
+    fs::create_dir(root.join(".mara/code")).unwrap();
+    for extension in ["wasm", "scm"] {
+        let file = format!("rust.{extension}");
+        fs::copy(
+            sample.join("code").join(&file),
+            root.join(".mara/code").join(file),
+        )
+        .unwrap();
+    }
+    let source_path = root.join("check.rs");
+    let source = "// @mara code_implements REQ-A\nfn check() {}\n";
+    fs::write(&source_path, source).unwrap();
+    fs::write(
+        root.join("rules.yaml"),
+        "id: rule:code_state\ntargetClass: requirement\nproperty: [{path: {inversePath: code_implements}, minCount: 1}]\n",
+    )
+    .unwrap();
+    let args = [
+        "--format",
+        "json",
+        "trace",
+        "matrix",
+        "--id",
+        "REQ-A",
+        "--rule",
+        "urn:mara:rule:code_state",
+        "--limit",
+        "1",
+    ];
+    let first = mara(root, &args);
+    assert!(first.status.success(), "{}", stderr(&first));
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+    fs::write(&source_path, "// ordinary comment\nfn check() {}\n").unwrap();
+    let mut continued = args.to_vec();
+    continued.extend(["--cursor", cursor]);
+    let stale = mara(root, &continued);
+    let stale: Value = serde_json::from_slice(&stale.stdout).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_cursor", "{stale:#}");
+
+    fs::write(&source_path, source).unwrap();
+    let first = mara(root, &args);
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let query_path = root.join(".mara/code/rust.scm");
+    let mut query = fs::read_to_string(&query_path).unwrap();
+    query.push('\n');
+    fs::write(&query_path, query).unwrap();
+    let mut continued = args.to_vec();
+    continued.extend(["--cursor", cursor]);
+    let stale = mara(root, &continued);
+    let stale: Value = serde_json::from_slice(&stale.stdout).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_cursor", "{stale:#}");
 }
 
 #[test]

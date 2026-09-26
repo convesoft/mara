@@ -922,6 +922,33 @@ fn snapshot_id(
         hash.update(document.path().as_os_str().as_encoded_bytes());
         hash.update(document.source().as_bytes());
     }
+    for file in corpus.code().files() {
+        hash.update(b"code-file");
+        hash.update(file.path.as_os_str().as_encoded_bytes());
+        hash.update(file.source.as_bytes());
+    }
+    for path in corpus.code().assets() {
+        hash.update(b"code-asset");
+        hash.update(path.as_os_str().as_encoded_bytes());
+        match fs::read(project.root().join(path)) {
+            Ok(bytes) => {
+                hash.update([1]);
+                hash.update(bytes);
+            }
+            Err(_) => hash.update([0]),
+        }
+    }
+    for path in corpus.file_only_code_paths() {
+        hash.update(b"file-only-code");
+        hash.update(path.as_os_str().as_encoded_bytes());
+        match corpus.code().file_only_bytes(&path) {
+            Some(bytes) => {
+                hash.update([1]);
+                hash.update(bytes);
+            }
+            None => hash.update([0]),
+        }
+    }
     let retained = corpus
         .documents()
         .iter()

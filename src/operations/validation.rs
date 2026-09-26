@@ -325,6 +325,20 @@ impl OperationContext {
             for path in source_paths {
                 hash_file(&mut snapshot, &project.root().join(path));
             }
+            for path in corpus.file_only_code_paths() {
+                snapshot.update(b"file-only-code");
+                let identity = path.as_os_str().as_encoded_bytes();
+                snapshot.update(identity.len().to_le_bytes());
+                snapshot.update(identity);
+                match corpus.code().file_only_bytes(&path) {
+                    Some(bytes) => {
+                        snapshot.update([1]);
+                        snapshot.update(bytes.len().to_le_bytes());
+                        snapshot.update(bytes);
+                    }
+                    None => snapshot.update([0]),
+                }
+            }
             result.evaluation_complete &= corpus.is_complete();
             result.evaluation_complete &= corpus
                 .items()

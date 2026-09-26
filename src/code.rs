@@ -333,6 +333,14 @@ impl CodeIndex {
         self.files.values()
     }
 
+    pub(crate) fn file_only_bytes(&self, path: &Path) -> Option<Vec<u8>> {
+        let canonical = fs::canonicalize(self.root.join(path)).ok()?;
+        if !canonical.starts_with(&self.root) || !canonical.is_file() {
+            return None;
+        }
+        fs::read(canonical).ok()
+    }
+
     pub(crate) fn resolve(&self, reference: &str) -> Result<CodeResolved, ResolveError> {
         let (path, selector) = split_reference(reference)?;
         let absolute = self.root.join(&path);

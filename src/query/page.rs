@@ -1,7 +1,4 @@
-use std::{
-    collections::BTreeSet,
-    hash::{DefaultHasher, Hash, Hasher},
-};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use super::*;
 
@@ -221,21 +218,9 @@ pub(crate) fn fingerprint(
     }
     // Explicit file-only endpoints need no adapter, so they are absent from
     // the code index. Their existence and contents can change related results.
-    let file_only_paths = corpus
-        .items()
-        .flat_map(|item| item.relations())
-        .filter_map(|relation| {
-            let (path, selector) = crate::code::split_reference(relation.target()).ok()?;
-            selector.is_none().then_some(path)
-        })
-        .collect::<BTreeSet<_>>();
-    for path in file_only_paths {
+    for path in corpus.file_only_code_paths() {
         path.hash(&mut hash);
-        let content = std::fs::canonicalize(corpus.code().root().join(&path))
-            .ok()
-            .filter(|canonical| canonical.starts_with(corpus.code().root()) && canonical.is_file())
-            .and_then(|canonical| std::fs::read(canonical).ok());
-        content.hash(&mut hash);
+        corpus.code().file_only_bytes(&path).hash(&mut hash);
     }
     for path in corpus.code().assets() {
         path.hash(&mut hash);

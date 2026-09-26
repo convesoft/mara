@@ -27,6 +27,16 @@ impl Corpus {
         &self.code
     }
 
+    pub(crate) fn file_only_code_paths(&self) -> BTreeSet<PathBuf> {
+        self.items()
+            .flat_map(|item| item.relations())
+            .filter_map(|relation| {
+                let (path, selector) = crate::code::split_reference(relation.target()).ok()?;
+                selector.is_none().then_some(path)
+            })
+            .collect()
+    }
+
     pub fn items(&self) -> impl Iterator<Item = &Item> {
         self.documents.iter().flat_map(|document| document.items())
     }
