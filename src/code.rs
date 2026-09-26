@@ -531,6 +531,11 @@ fn parse_file(
     collect(tree.root_node(), &context, &mut Vec::new(), &mut symbols);
     let mut markers = Vec::new();
     let mut problems = Vec::new();
+    let reference_path = path
+        .iter()
+        .map(|component| component.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
     for comment in comments {
         let raw = &source[comment.byte_range()];
         let mut offset = comment.start_byte();
@@ -565,8 +570,8 @@ fn parse_file(
                     match adapter.attached_symbol(comment, &source, &symbols) {
                         Ok(symbol) => {
                             let endpoint = symbol.map_or_else(
-                                || format!("code:{}", path.display()),
-                                |symbol| format!("code:{}::{}", path.display(), symbol.selector),
+                                || format!("code:{reference_path}"),
+                                |symbol| format!("code:{reference_path}::{}", symbol.selector),
                             );
                             markers.push(CodeMarker {
                                 relation: parts[0].into(),

@@ -636,24 +636,32 @@ fn mutate_relation(
     target_id: &str,
     kind: MutationKind,
 ) -> Result<RelationMutation, Error> {
+    if source_id.starts_with("code:") {
+        return invalid(
+            "relation add/remove cannot modify code source files; use the declared inverse with an item source, or edit the code comment directly",
+        );
+    }
     let _lock = MutationLock::acquire(project)?;
     let corpus = load_corpus(project, schema)?;
     ensure_unambiguous_item_identities(&corpus, "mutate relations")?;
     let source_item = resolve_item(&corpus, source_id, "source")?;
-    let target_item = if crate::external::address(target_id).is_some() {
+    let code_target = target_id.starts_with("code:");
+    let target_item = if crate::external::address(target_id).is_some() || code_target {
         None
     } else {
         Some(resolve_item(&corpus, target_id, "target")?)
     };
-    if let Some(target_item) = target_item {
-        validate_relation_endpoints(
-            schema,
-            relation_name,
-            source_item.flavour(),
-            target_item.flavour(),
-        )?;
-    } else {
-        validate_external_relation(schema, relation_name, source_item.flavour(), target_id)?;
+    if !code_target {
+        if let Some(target_item) = target_item {
+            validate_relation_endpoints(
+                schema,
+                relation_name,
+                source_item.flavour(),
+                target_item.flavour(),
+            )?;
+        } else {
+            validate_external_relation(schema, relation_name, source_item.flavour(), target_id)?;
+        }
     }
 
     let path = source_item.source().path().to_path_buf();

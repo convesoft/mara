@@ -543,7 +543,9 @@ fn related_matches(
             if !matches_name(&filters.relations, relation.name()) {
                 continue;
             }
-            if crate::external::address(relation.target()).is_some() {
+            if crate::external::address(relation.target()).is_some()
+                || relation.target().starts_with("code:")
+            {
                 continue;
             }
             let neighbour =
