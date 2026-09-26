@@ -1043,26 +1043,43 @@ fn load_corpus_for_validation_with_schema(
             documents.push(document);
         }
     }
+    let code = if schema.is_some() {
+        let (index, problems) = crate::code::CodeIndex::load(project);
+        for problem in problems {
+            if problem.code == DiagnosticCode::SourceInvalid {
+                complete = false;
+            }
+            let mut item_ids = Vec::new();
+            if let Some(target) = &problem.target {
+                item_ids.push(target.clone());
+                for item in documents.iter().flat_map(Document::items) {
+                    if item.id() == target || item.mid() == Some(target.as_str()) {
+                        item_ids.push(item.id().to_owned());
+                        if let Some(mid) = item.mid() {
+                            item_ids.push(mid.to_owned());
+                        }
+                    }
+                }
+            }
+            diagnostic(
+                problem.code,
+                &mut diagnostics,
+                &problem.source,
+                problem.message,
+            );
+            diagnostics
+                .last_mut()
+                .expect("diagnostic was added")
+                .item_ids = item_ids;
+        }
+        index
+    } else {
+        crate::code::CodeIndex::empty(project)
+    };
     Ok((
         Corpus {
             documents,
-            code: if schema.is_some() {
-                let (index, problems) = crate::code::CodeIndex::load(project);
-                for problem in problems {
-                    if problem.code == DiagnosticCode::SourceInvalid {
-                        complete = false;
-                    }
-                    diagnostic(
-                        problem.code,
-                        &mut diagnostics,
-                        &problem.source,
-                        problem.message,
-                    );
-                }
-                index
-            } else {
-                crate::code::CodeIndex::empty(project)
-            },
+            code,
             complete,
         },
         diagnostics,

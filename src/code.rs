@@ -50,6 +50,7 @@ pub(crate) struct CodeProblem {
     pub code: DiagnosticCode,
     pub message: String,
     pub source: SourceLocation,
+    pub target: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,6 +100,7 @@ impl Adapter {
             code: DiagnosticCode::CodeUnsupported,
             message,
             source: location(config_path, &[0], 0, 0),
+            target: None,
         };
         let mut adapters = Vec::new();
         let mut assets = vec![config_path.to_path_buf()];
@@ -312,6 +314,7 @@ impl CodeIndex {
                         code: DiagnosticCode::SourceInvalid,
                         message: format!("could not discover code files: {error}"),
                         source: location(&path, &[0], 0, 0),
+                        target: None,
                     });
                     continue;
                 }
@@ -339,6 +342,7 @@ impl CodeIndex {
                         code: DiagnosticCode::SourceInvalid,
                         message: format!("could not read code file: {error}"),
                         source: location(&path, &[0], 0, 0),
+                        target: None,
                     });
                     continue;
                 }
@@ -552,6 +556,10 @@ fn parse_file(
                         message: "invalid code marker; expected @mara <relation> <item-ID-or-MID>"
                             .into(),
                         source: marker_source,
+                        target: parts
+                            .get(1)
+                            .filter(|target| crate::is_item_id(target) || crate::is_mid(target))
+                            .map(|target| (*target).to_owned()),
                     });
                 } else {
                     match adapter.attached_symbol(comment, &source, &symbols) {
@@ -577,6 +585,7 @@ fn parse_file(
                             }
                             .into(),
                             source: marker_source,
+                            target: Some(parts[1].to_owned()),
                         }),
                     }
                 }

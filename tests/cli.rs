@@ -11976,6 +11976,45 @@ fn item_validation_reports_invalid_code_markers_and_internal_symlinks_resolve() 
         "{selected:#}"
     );
 
+    fs::write(
+        &code_path,
+        "const VALUE: () = {\n    // @mara code_implements REQ-A\n};\n",
+    )
+    .unwrap();
+    let project = validation_with_parity(root, &[]);
+    assert_eq!(project["valid"], false);
+    let selected: Value = serde_json::from_slice(
+        &mara(root, &["--format", "json", "item", "validate", "REQ-A"]).stdout,
+    )
+    .unwrap();
+    assert_eq!(selected["valid"], false, "{selected:#}");
+    assert!(
+        selected["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "code_unsupported"),
+        "{selected:#}"
+    );
+    fs::write(
+        &code_path,
+        "const VALUE: () = {\n    // @mara code_implements 01ARZ3NDEKTSV4RRFFQ69G5F00\n};\n",
+    )
+    .unwrap();
+    let selected: Value = serde_json::from_slice(
+        &mara(root, &["--format", "json", "item", "validate", "REQ-A"]).stdout,
+    )
+    .unwrap();
+    assert_eq!(selected["valid"], false, "{selected:#}");
+    assert!(
+        selected["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "code_unsupported"),
+        "{selected:#}"
+    );
+
     fs::write(&code_path, "fn run() {}\n").unwrap();
     std::os::unix::fs::symlink("implementation.rs", root.join("linked.rs")).unwrap();
     fs::write(
