@@ -154,3 +154,25 @@ schema checkpoint and all pending tests meanwhile.
 This review makes the proposed restoration concrete; it does not resolve the
 pending broad-dependency decision or authorize importing the modules. The
 current candidate remains the verified project/schema checkpoint.
+
+## Staged document dependency checkpoint
+
+The user selected separate dependency checkpoints: document discovery/parsing,
+then code discovery, then CLI/MCP item listing. This resolves the pending import
+boundary above; preserve baseline listing behavior when composing those parts.
+No listing endpoint is introduced by the document-only checkpoint.
+
+| Area | Review and disposition |
+|---|---|
+| Document discovery | Retain configured glob matching, project-relative regular Mara files, no followed symlinks, local/parent Git-ignore handling, and stable path/source order. Strict loading fails rather than silently omitting an unreadable or malformed document. |
+| Parser boundary | Retain the private Rushdown adapter and Mara-owned values. Code/raw/escaped contexts remain literal; delimiters, metadata and item bodies use original source offsets. Keep metadata order, exact bodies, mentions, typed relation occurrences and Markdown children without resolving a semantic graph. |
+| Recovery | Retain independently recoverable item data and parse diagnostics, available source coordinates and completeness. Invalid title/metadata/structure suppresses unsupported body-block projection; no read repairs source or backfills identity. Semantic field/body/identity validation remains deferred. |
+| Required implementation | Restore only document values, strict/recovering document loaders, filesystem selection and the three private Markdown adapter files. Name the entry points `load_documents` and `load_documents_for_validation`, returning a DocumentSet; do not expose a reduced `load_corpus` that silently skips its required code scan. Code discovery and full corpus composition follow in their own checkpoint. |
+| Tests | Retain 29 corpus tests for discovery, parent/local ignores, deterministic self-hosting, syntax/recovery, literal contexts, UTF-8/CRLF spans, containers and table/reference spans; retain the Markdown-container unit test. Defer `title_recovery_preserves_independent_missing_body_diagnostics` because its distinct second assertion requires semantic corpus validation; preserve the full original suite in pending reference. Adapt loader names only, preserving assertions. Add two focused checks: unreadable UTF-8 retains other documents and reports unavailable coordinates without writes; document-only loading remains independent of unavailable code adapter assets, without claiming full listing can skip them. |
+| Excluded implementation | Do not restore mutation replacement/preflight, identity indexes, semantic corpus/graph validation, code scanning, discovery navigation or query operations. The accepted source and format contracts and historical evidence remain intact. |
+
+Completion checks: ordinary parser tests and the explicit read-only real-corpus
+load, existing CLI/MCP regression suites, formatting and Clippy, installed-tool
+knowledge validation and selected traceability, then exact-revision evidence.
+This is the user-approved internal dependency checkpoint, not an item-list or
+source-validation command release.

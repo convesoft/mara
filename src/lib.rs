@@ -10,7 +10,13 @@ use globset::GlobBuilder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+mod corpus;
 mod diagnostics;
+pub use corpus::{
+    Diagnostic, Document, DocumentReference, DocumentSet, Item, MarkdownBlock, MarkdownBlockKind,
+    Mention, MetadataEntry, ReferenceKind, Relation, SourceLocation, SourceSpan, load_documents,
+    load_documents_for_validation, load_documents_syntax_for_validation,
+};
 mod operations;
 mod rules;
 pub use diagnostics::{
@@ -678,6 +684,10 @@ impl RelationDefinition {
 }
 
 impl Project {
+    pub(crate) fn content_discovery_is_complete(&self) -> bool {
+        self.content_discovery_complete
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -697,6 +707,11 @@ impl Project {
 
 #[derive(Debug)]
 pub enum Error {
+    InvalidDocument {
+        path: PathBuf,
+        line: usize,
+        message: String,
+    },
     ExistingProject {
         path: PathBuf,
     },
@@ -724,6 +739,15 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidDocument {
+                path,
+                line,
+                message,
+            } => write!(
+                formatter,
+                "invalid Mara document at {}:{line}: {message}",
+                path.display()
+            ),
             Self::ExistingProject { path } => {
                 write!(
                     formatter,
@@ -1759,4 +1783,30 @@ fn schema_template(template: Template) -> &'static str {
         Template::Empty => include_str!("../templates/empty-schema.yaml"),
         Template::Engineering => include_str!("../templates/engineering-schema.yaml"),
     }
+}
+
+pub(crate) fn is_item_id(id: &str) -> bool {
+    let mut segments = id.split('-');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    let mut characters = first.chars();
+    let valid_first = characters
+        .next()
+        .is_some_and(|character| character.is_ascii_uppercase())
+        && characters.all(|character| character.is_ascii_uppercase() || character.is_ascii_digit());
+    valid_first
+        && segments.clone().next().is_some()
+        && segments.all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
+        })
+}
+
+pub(crate) fn is_mid(value: &str) -> bool {
+    value
+        .parse::<ulid::Ulid>()
+        .is_ok_and(|mid| mid.to_string() == value)
 }

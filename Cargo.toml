@@ -31,5 +31,9 @@ shacl = { version = "=0.3.21", default-features = false }
 rudof_rdf = { version = "=0.3.21", default-features = false }
 rudof_iri = "=0.3.21"
 
+ignore = "0.4"
+rushdown = "0.18.0"
+ulid = "1"
+
 [dev-dependencies]
 tempfile = "3"

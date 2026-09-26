@@ -162,6 +162,14 @@ Failures preserve user data and produce actionable diagnostics.
   byte span, and one-based start and end lines.
 - The in-memory model is a disposable projection, never an authoring authority.
 
+Document loading produces a document-only snapshot through `load_documents` and
+recovering variants. Strict loading rejects malformed or unreadable source;
+recovery retains independently available data and diagnostics with explicit
+completeness. It does not run code discovery or semantic conformance checks.
+Full corpus operations compose this dependency with code discovery before
+retrieval; a document-only result is not a substitute for that full read. These
+library boundaries do not introduce new CLI/MCP commands.
+
 ## Evolution
 
 The document syntax has no embedded schema or project configuration. Introduce
@@ -216,4 +224,20 @@ Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-
 Candidate schema/project validation returned complete, valid results with zero diagnostics. Explicit MCP matrices passed for 3 requirement origins and 5 requirement/design realization and verification roots, consuming all pages. Backfill checks confirmed no writes during reads, unchanged existing MIDs, exact non-MID source preservation, idempotence, and source preservation after rejected validation. Duplicate-identity assertions used stable classification and actual source locations because ambiguous item identities are intentionally omitted from those diagnostic records.
 
 The result covers the source/identity and bootstrap methods on this candidate. Reference-resolution, schema-constraint, mutation-recovery and other remaining baseline reviews are not claimed complete.
+:::
+
+:::mara verification VER-DOCUMENT-PARSING
+:mid: 01M3FZHR3XW51YZK11QXDYXC9J
+:title: Load canonical document sources without code or graph operations
+:status: accepted
+:method: test
+:level: integration
+:verifies: REQ-CANONICAL-SOURCE
+:verifies: DES-DOCUMENT-FORMAT
+
+Run `cargo test --locked --lib --test corpus` against the candidate library. Use isolated temporary projects with their own Git/configuration state, plus the explicitly named read-only repository test. Exercise configured discovery and stable ordering; local/parent Git ignores; item, metadata and body parsing; malformed structure and recovery; code/raw/escaped Markdown contexts; container/table/reference spans; and exact UTF-8/CRLF source preservation.
+
+Require strict document loading to reject malformed/unreadable source. Recovery retains independently readable documents and available diagnostics, marks incomplete discovery/parsing, and does not invent coordinates for unreadable bytes. Verify no read backfills MIDs or changes source. Keep the private-parser unit test that checks item containers own only Markdown body children.
+
+This is the staged document dependency method: `load_documents` and recovering variants return a document-only snapshot and do not load code adapters. A targeted fixture distinguishes that boundary from the later full corpus loader. No CLI/MCP document operation, code discovery, semantic identity/field validation, navigation, mutation or item-list completeness is claimed. Run existing CLI/MCP suites as regressions before committing.
 :::

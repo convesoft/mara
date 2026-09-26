@@ -1,0 +1,1079 @@
+mod support;
+
+use std::{fs, path::Path};
+
+use mara::{
+    Template, initialize_project, load_documents, load_documents_for_validation, load_schema,
+};
+use tempfile::TempDir;
+
+fn initialized_project() -> (TempDir, mara::Project, mara::Schema) {
+    let fixture = support::fixture();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    (fixture, project, schema)
+}
+
+fn write(root: &Path, path: &str, source: &str) {
+    let path = root.join(path);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, source).unwrap();
+}
+
+// @mara checks REQ-CANONICAL-SOURCE
+#[test]
+fn discovers_only_configured_mara_documents_in_stable_path_order() {
+    let (fixture, _project, schema) = initialized_project();
+    let project_file = fixture.path().join(".mara/project.toml");
+    let source = fs::read_to_string(&project_file).unwrap();
+    fs::write(
+        &project_file,
+        source.replace("**/*.mara.md", "docs/*.mara.md"),
+    )
+    .unwrap();
+
+    write(fixture.path(), "outside.mara.md", "Outside.\n");
+    write(fixture.path(), "docs/z.mara.md", "Zed.\n");
+    write(fixture.path(), "docs/a.mara.md", "Alpha.\n");
+    write(fixture.path(), "docs/nested/skipped.mara.md", "Nested.\n");
+    write(fixture.path(), "docs/not-mara.md", "Markdown.\n");
+
+    let project = mara::resolve_project(Some(fixture.path()), fixture.path()).unwrap();
+    let corpus = load_documents(&project, &schema).unwrap();
+    let paths = corpus
+        .documents()
+        .iter()
+        .map(|document| document.path().to_str().unwrap())
+        .collect::<Vec<_>>();
+
+    assert_eq!(paths, ["docs/a.mara.md", "docs/z.mara.md"]);
+    assert_eq!(corpus.documents()[0].source(), "Alpha.\n");
+    assert_eq!(project.content_patterns(), ["docs/*.mara.md"]);
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn retains_item_content_references_and_precise_source_locations() {
+    let (fixture, project, schema) = initialized_project();
+    let source = r#"# Context
+
+```markdown
+:::mara requirement REQ-EXAMPLE
+:title: Example only
+
+[[REQ-NOT-DATA]]
+:::
+```
+
+:::mara requirement REQ-PARSE
+:title: Parse canonical documents
+:tag: first
+:depends_on: REQ-SOURCE
+:tag: second
+
+Body with [[REQ-SOURCE]] and `[[REQ-INLINE-CODE]]`.
+:depends_on: REQ-BODY-TEXT
+
+~~~text
+[[REQ-FENCED-CODE]]
+:::
+~~~
+:::
+"#;
+    write(fixture.path(), "docs/model.mara.md", source);
+
+    let corpus = load_documents(&project, &schema).unwrap();
+    let item = corpus.items().next().unwrap();
+
+    assert_eq!(corpus.items().count(), 1);
+    assert_eq!(item.flavour(), "requirement");
+    assert_eq!(item.id(), "REQ-PARSE");
+    assert_eq!(item.title(), "Parse canonical documents");
+    assert_eq!(
+        item.metadata()
+            .iter()
+            .map(|entry| (entry.key(), entry.value()))
+            .collect::<Vec<_>>(),
+        [
+            ("title", "Parse canonical documents"),
+            ("tag", "first"),
+            ("depends_on", "REQ-SOURCE"),
+            ("tag", "second"),
+        ]
+    );
+    assert!(item.body().starts_with("Body with [[REQ-SOURCE]]"));
+    assert!(item.body().contains(":depends_on: REQ-BODY-TEXT"));
+    assert_eq!(item.relations().len(), 1);
+    assert_eq!(item.relations()[0].name(), "depends_on");
+    assert_eq!(item.relations()[0].target(), "REQ-SOURCE");
+    assert_eq!(
+        item.mentions()
+            .iter()
+            .map(|mention| mention.target())
+            .collect::<Vec<_>>(),
+        ["REQ-SOURCE"]
+    );
+
+    assert_eq!(item.source().path(), Path::new("docs/model.mara.md"));
+    assert_eq!(item.source().span().start_line(), 11);
+    assert_eq!(item.source().span().end_line(), 24);
+    assert_eq!(item.body_source().span().start_line(), 17);
+    assert_eq!(item.metadata()[2].source().span().start_line(), 14);
+    assert_eq!(item.relations()[0].source(), item.metadata()[2].source());
+    assert_eq!(item.mentions()[0].source().span().start_line(), 17);
+    let mention_span = item.mentions()[0].source().span();
+    assert_eq!(
+        &source[mention_span.start_byte()..mention_span.end_byte()],
+        "[[REQ-SOURCE]]"
+    );
+}
+
+// @mara implements VER-DOCUMENT-PARSING
+// @mara checks REQ-CANONICAL-SOURCE
+#[test]
+fn parses_the_repository_documents_deterministically() {
+    // Explicit read-only self-hosting check: no fixture or source writes.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let project = mara::resolve_project(Some(root), root).unwrap();
+    let schema = load_schema(&project).unwrap();
+    let first = load_documents(&project, &schema).unwrap();
+    let second = load_documents(&project, &schema).unwrap();
+    assert_eq!(first, second);
+    assert!(
+        first
+            .items()
+            .any(|item| item.id() == "REQ-CANONICAL-SOURCE")
+    );
+    assert!(first.items().any(|item| item.id() == "DES-DOCUMENT-FORMAT"));
+    assert!(!first.items().any(|item| item.id() == "REQ-FAIL-SAFETY"));
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn reports_malformed_item_openers_instead_of_silently_dropping_data() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "broken.mara.md",
+        ":::mara requirement REQ-BROKEN trailing\n:title: Broken\n\nBody.\n:::\n",
+    );
+
+    let error = load_documents(&project, &schema).unwrap_err();
+
+    assert!(
+        matches!(error, mara::Error::InvalidDocument { ref path, line: 1, .. } if path == Path::new("broken.mara.md"))
+    );
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn validation_retains_independent_document_parse_diagnostics() {
+    let (fixture, project, schema) = initialized_project();
+    for name in ["first", "second"] {
+        write(
+            fixture.path(),
+            &format!("{name}.mara.md"),
+            ":::mara requirement REQ-BROKEN trailing\n:title: Broken\n\nBody.\n:::\n",
+        );
+    }
+
+    let (corpus, diagnostics) = load_documents_for_validation(&project, &schema).unwrap();
+
+    assert!(corpus.documents().is_empty());
+    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(diagnostics[0].source().path(), Path::new("first.mara.md"));
+    assert_eq!(diagnostics[1].source().path(), Path::new("second.mara.md"));
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn validation_suppresses_body_blocks_for_invalid_titles() {
+    let (fixture, project, schema) = initialized_project();
+    for title_metadata in ["", ":title: \n", ":title: First\n:title: Second\n"] {
+        let source = format!(
+            ":::mara requirement REQ-FIRST\n:title: First\n\nBefore.\n:::\n\n:::mara requirement REQ-BROKEN\n{title_metadata}\n# Body\n\nSee [[REQ-FIRST]].\n:::\n\n:::mara requirement REQ-LAST\n:title: Last\n\nAfter.\n:::\n"
+        );
+        write(fixture.path(), "titles.mara.md", &source);
+        let (corpus, diagnostics) = load_documents_for_validation(&project, &schema).unwrap();
+        let items = corpus.items().collect::<Vec<_>>();
+        assert_eq!(
+            items.iter().map(|item| item.id()).collect::<Vec<_>>(),
+            ["REQ-FIRST", "REQ-BROKEN", "REQ-LAST"]
+        );
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code(), mara::DiagnosticCode::FieldInvalid);
+        assert_eq!(diagnostics[0].source().span().start_line(), 7);
+        assert!(items[1].body_blocks().is_empty(), "{title_metadata:?}");
+        assert!(!items[0].body_blocks().is_empty());
+        assert!(!items[2].body_blocks().is_empty());
+        assert_eq!(items[1].body(), "# Body\n\nSee [[REQ-FIRST]].\n");
+        assert_eq!(items[1].mentions()[0].target(), "REQ-FIRST");
+        assert_eq!(
+            items[1]
+                .metadata()
+                .iter()
+                .filter(|entry| entry.key() == "title")
+                .count(),
+            title_metadata.lines().count()
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("titles.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn validation_retains_valid_items_around_a_malformed_item() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "mixed.mara.md",
+        ":::mara requirement REQ-FIRST\n:title: First\n\nFirst body.\n:::\n\n:::mara requirement REQ-BROKEN trailing\n:title: Broken\n\nBroken body.\n:::\n\n:::mara requirement REQ-LAST\n:title: Last\n\nLast body.\n:::\n",
+    );
+
+    let (corpus, diagnostics) = load_documents_for_validation(&project, &schema).unwrap();
+    let ids = corpus.items().map(mara::Item::id).collect::<Vec<_>>();
+
+    assert_eq!(corpus.documents().len(), 1);
+    assert_eq!(ids, ["REQ-FIRST", "REQ-LAST"]);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].source().path(), Path::new("mixed.mara.md"));
+    assert_eq!(diagnostics[0].source().span().start_line(), 7);
+    assert_eq!(diagnostics[0].code(), mara::DiagnosticCode::SourceInvalid);
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn reports_tab_separated_item_openers_as_malformed() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "tabbed.mara.md",
+        ":::mara\trequirement REQ-BROKEN\n:title: Broken\n\nBody.\n:::\n",
+    );
+
+    let error = load_documents(&project, &schema).unwrap_err();
+
+    assert!(
+        matches!(error, mara::Error::InvalidDocument { ref path, line: 1, .. } if path == Path::new("tabbed.mara.md"))
+    );
+}
+
+// @mara checks REQ-CANONICAL-SOURCE
+#[test]
+fn excludes_gitignored_mara_documents() {
+    let (fixture, project, schema) = initialized_project();
+    write(fixture.path(), ".gitignore", "ignored.mara.md\n");
+    write(
+        fixture.path(),
+        "ignored.mara.md",
+        ":::mara requirement REQ-IGNORED\n:title: Ignored\n\nBody.\n:::\n",
+    );
+
+    let corpus = load_documents(&project, &schema).unwrap();
+
+    assert!(corpus.documents().is_empty());
+}
+
+// @mara checks REQ-CANONICAL-SOURCE
+#[test]
+fn excludes_documents_ignored_by_the_parent_git_repository() {
+    let fixture = support::fixture();
+    write(fixture.path(), ".gitignore", "project/generated.mara.md\n");
+    let project_root = fixture.path().join("project");
+    let project = initialize_project(&project_root, Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    write(&project_root, "kept.mara.md", "Kept.\n");
+    write(&project_root, "generated.mara.md", "Generated.\n");
+
+    let corpus = load_documents(&project, &schema).unwrap();
+
+    assert_eq!(corpus.documents().len(), 1);
+    assert_eq!(corpus.documents()[0].path(), Path::new("kept.mara.md"));
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn treats_multiline_inline_code_as_example_text_during_item_scans() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "docs/examples.mara.md",
+        r#"`example
+:::mara requirement REQ-EXAMPLE
+`
+
+:::mara requirement REQ-REAL
+:title: Real
+
+Before.
+`code
+:::
+`
+After with [[REQ-TARGET]].
+:::
+"#,
+    );
+
+    let corpus = load_documents(&project, &schema).unwrap();
+    let item = corpus.items().next().unwrap();
+
+    assert_eq!(corpus.items().count(), 1);
+    assert_eq!(item.id(), "REQ-REAL");
+    assert!(item.body().contains("After with [[REQ-TARGET]]"));
+    assert_eq!(
+        item.mentions()
+            .iter()
+            .map(|mention| mention.target())
+            .collect::<Vec<_>>(),
+        ["REQ-TARGET"]
+    );
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn accepts_whitespace_only_body_boundaries() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "spaces.mara.md",
+        ":::mara requirement REQ-SPACES\n:title: Spaces\n \t \nBody.\n:::\n",
+    );
+
+    let corpus = load_documents(&project, &schema).unwrap();
+
+    assert_eq!(corpus.items().next().unwrap().body(), "Body.\n");
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn treats_unmatched_backticks_as_text_when_extracting_mentions() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "mention.mara.md",
+        ":::mara requirement REQ-MENTION\n:title: Mention\n\nAn unmatched ` before [[REQ-TARGET]].\n:::\n",
+    );
+
+    let corpus = load_documents(&project, &schema).unwrap();
+    let item = corpus.items().next().unwrap();
+
+    assert_eq!(item.mentions()[0].target(), "REQ-TARGET");
+    assert_eq!(item.mentions().len(), 1);
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn does_not_pair_an_unmatched_backtick_across_markdown_blocks() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "paragraphs.mara.md",
+        "An unmatched ` in ordinary prose.\n\n:::mara requirement REQ-REAL\n:title: Real\n\nBody.\n:::\n\nLater `code`.\n",
+    );
+
+    let corpus = load_documents(&project, &schema).unwrap();
+
+    assert_eq!(corpus.items().next().unwrap().id(), "REQ-REAL");
+    assert_eq!(corpus.items().count(), 1);
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn excludes_mentions_inside_blockquoted_fenced_code() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "quote.mara.md",
+        ":::mara requirement REQ-REAL\n:title: Real\n\n> ~~~markdown\n> [[REQ-EXAMPLE]]\n> ~~~\n:::\n",
+    );
+
+    let corpus = load_documents(&project, &schema).unwrap();
+
+    assert!(corpus.items().next().unwrap().mentions().is_empty());
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn recognizes_adjacent_item_delimiters_through_markdown_inline_parsing() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "adjacent.mara.md",
+        ":::mara requirement REQ-FIRST\n:title: First\n\nFirst body.\n:::\n:::mara requirement REQ-SECOND\n:title: Second\n\nSecond body.\n:::\n",
+    );
+
+    let corpus = load_documents(&project, &schema).unwrap();
+
+    assert_eq!(
+        corpus.items().map(|item| item.id()).collect::<Vec<_>>(),
+        ["REQ-FIRST", "REQ-SECOND"]
+    );
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn ignores_mara_syntax_in_raw_html_blocks() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "raw.mara.md",
+        "<script>\n:::mara requirement REQ-EXAMPLE\n:title: Example\n\n[[REQ-NOT-DATA]]\n:::\n</script>\n\n:::mara requirement REQ-REAL\n:title: Real\n\n<script>\n[[REQ-NOT-DATA]]\n</script>\n\n[[REQ-TARGET]]\n:::\n",
+    );
+
+    let corpus = load_documents(&project, &schema).unwrap();
+    let item = corpus.items().next().unwrap();
+
+    assert_eq!(corpus.items().count(), 1);
+    assert_eq!(item.id(), "REQ-REAL");
+    assert_eq!(
+        item.mentions()
+            .iter()
+            .map(|mention| mention.target())
+            .collect::<Vec<_>>(),
+        ["REQ-TARGET"]
+    );
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn rejects_nested_items_after_the_body_boundary() {
+    let (fixture, project, schema) = initialized_project();
+    write(
+        fixture.path(),
+        "nested.mara.md",
+        ":::mara requirement REQ-OUTER\n:title: Outer\n\n:::mara requirement REQ-INNER\n:title: Inner\n\nBody.\n:::\n:::\n",
+    );
+
+    let error = load_documents(&project, &schema).unwrap_err();
+
+    assert!(
+        matches!(error, mara::Error::InvalidDocument { ref path, line: 4, .. } if path == Path::new("nested.mara.md"))
+    );
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn retains_markdown_children_inside_items_with_original_utf8_crlf_spans() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    let body = "### Héading\r\n\r\n> Quote.\r\n>\r\n> - Outer\r\n>   - Inner with **bold** and `code`.\r\n\r\n| Name | Value |\r\n| --- | --- |\r\n| α | β |\r\n\r\n```text\r\n:::mara requirement REQ-EXAMPLE\r\n:::\r\n```\r\n\r\n<script>\r\n:::mara requirement REQ-RAW\r\n:::\r\n</script>\r\n\r\nLast paragraph with [[REQ-TARGET]].\r\n";
+    let source = format!(
+        "# Outside\r\n\r\n:::mara requirement REQ-TREE\r\n:title: Tree\r\n:tag: first\r\n:tag: second\r\n\r\n{body}:::\r\n\r\n# After\r\n"
+    );
+    write(fixture.path(), "tree.mara.md", &source);
+
+    let corpus = load_documents(&project, &schema).unwrap();
+    let item = corpus.items().next().unwrap();
+    assert_eq!(corpus.items().count(), 1);
+    assert_eq!(item.body(), body);
+    assert_eq!(corpus.documents()[0].source(), source);
+    let blocks = item.body_blocks();
+    assert_eq!(
+        blocks.iter().map(|block| block.kind()).collect::<Vec<_>>(),
+        [
+            Kind::Heading { level: 3 },
+            Kind::Blockquote,
+            Kind::Table,
+            Kind::CodeBlock,
+            Kind::HtmlBlock,
+            Kind::Paragraph,
+        ]
+    );
+    assert_eq!(blocks[1].children()[1].kind(), Kind::List);
+    let quote_paragraph = blocks[1].children()[0].source().span();
+    assert_eq!(
+        &source[quote_paragraph.start_byte()..quote_paragraph.end_byte()],
+        "Quote.\r\n"
+    );
+    let outer_item = &blocks[1].children()[1].children()[0];
+    assert_eq!(outer_item.kind(), Kind::ListItem);
+    assert_eq!(outer_item.children()[1].kind(), Kind::List);
+    assert_eq!(item.mentions().len(), 1);
+    assert_eq!(item.mentions()[0].target(), "REQ-TARGET");
+    let expected = [
+        "### Héading\r\n",
+        "> Quote.\r\n>\r\n> - Outer\r\n>   - Inner with **bold** and `code`.\r\n",
+        "| Name | Value |\r\n| --- | --- |\r\n| α | β |\r\n",
+        "```text\r\n:::mara requirement REQ-EXAMPLE\r\n:::\r\n```\r\n",
+        "<script>\r\n:::mara requirement REQ-RAW\r\n:::\r\n</script>\r\n",
+        "Last paragraph with [[REQ-TARGET]].\r\n",
+    ];
+    for (block, expected) in blocks.iter().zip(expected) {
+        assert_eq!(
+            &source[block.source().span().start_byte()..block.source().span().end_byte()],
+            expected,
+            "{:?}",
+            block.kind()
+        );
+        let start = source.find(expected).unwrap();
+        assert_eq!(block.source().span().start_byte(), start);
+        assert_eq!(
+            block.source().span().start_line(),
+            source[..start].bytes().filter(|&b| b == b'\n').count() + 1
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("tree.mara.md")).unwrap(),
+        source
+    );
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn container_boundaries_preserve_code_context_and_adjacent_empty_items() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    let source = "    :::mara requirement REQ-INDENTED\n\n> :::mara requirement REQ-QUOTED\n\n:::mara requirement REQ-CODE\n:title: Code\n\n`multiline\n:::\n:::mara requirement REQ-EXAMPLE\n`\n\n    :::mara requirement REQ-INDENTED-BODY\n    :::\n\nEnd.\n:::\n:::mara requirement REQ-EMPTY\n:title: Empty\n\n:::";
+    write(fixture.path(), "contexts.mara.md", source);
+    let corpus = load_documents(&project, &schema).unwrap();
+    let items = corpus.items().collect::<Vec<_>>();
+    assert_eq!(
+        items.iter().map(|item| item.id()).collect::<Vec<_>>(),
+        ["REQ-CODE", "REQ-EMPTY"]
+    );
+    assert_eq!(
+        items[0]
+            .body_blocks()
+            .iter()
+            .map(|block| block.kind())
+            .collect::<Vec<_>>(),
+        [Kind::Paragraph, Kind::CodeBlock, Kind::Paragraph]
+    );
+    assert!(items[1].body_blocks().is_empty());
+    assert_eq!(items[1].source().span().end_byte(), source.len());
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn tables_outside_their_parent_scope_are_not_projected() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    let body = "* ```\n* x\n| a | b |\n|---|---|\nx\n y\n     ---\n";
+    let source = format!(":::mara requirement REQ-TABLE\n:title: Table\n\n{body}:::\n");
+    write(fixture.path(), "table.mara.md", &source);
+    let corpus = load_documents(&project, &schema).unwrap();
+    let item = corpus.items().next().unwrap();
+    let mut pending = item.body_blocks().iter().collect::<Vec<_>>();
+    while let Some(parent) = pending.pop() {
+        assert_ne!(parent.kind(), Kind::Table);
+        let span = parent.source().span();
+        let mut previous_end = span.start_byte();
+        for child in parent.children() {
+            let child_span = child.source().span();
+            assert!(previous_end <= child_span.start_byte());
+            assert!(child_span.start_byte() <= child_span.end_byte());
+            assert!(child_span.end_byte() <= span.end_byte());
+            previous_end = child_span.end_byte();
+            pending.push(child);
+        }
+    }
+    assert_eq!(item.body(), body);
+    assert_eq!(
+        fs::read_to_string(fixture.path().join("table.mara.md")).unwrap(),
+        source
+    );
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn tab_indented_containers_do_not_overlap_following_siblings() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    for newline in ["\n", "\r\n"] {
+        let first = format!("*\t>\t-{newline}");
+        let following = format!(">\ttéxt 🌱{newline}end{newline}");
+        let body = format!("{first}{following}");
+        let source = format!(":::mara requirement REQ-TABS\n:title: Tabs\n\n{body}:::\n");
+        write(fixture.path(), "tabs.mara.md", &source);
+        let corpus = load_documents(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let blocks = item.body_blocks();
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].kind(), Kind::List);
+        assert_eq!(blocks[1].kind(), Kind::Blockquote);
+        let list_span = blocks[0].source().span();
+        let quote_span = blocks[1].source().span();
+        assert!(list_span.end_byte() <= quote_span.start_byte());
+        assert_eq!(&source[list_span.start_byte()..list_span.end_byte()], first);
+        assert_eq!(
+            &source[quote_span.start_byte()..quote_span.end_byte()],
+            following
+        );
+        assert_eq!(list_span.start_line(), 4);
+        assert_eq!(list_span.end_line(), 4);
+        assert_eq!(quote_span.start_line(), 5);
+        assert_eq!(quote_span.end_line(), 6);
+        let paragraph = blocks[1].children()[0].source().span();
+        assert_eq!(
+            &source[paragraph.start_byte()..paragraph.end_byte()],
+            &following[2..]
+        );
+        let mut pending = blocks.iter().collect::<Vec<_>>();
+        while let Some(parent) = pending.pop() {
+            let span = parent.source().span();
+            let mut previous_end = span.start_byte();
+            for child in parent.children() {
+                let child_span = child.source().span();
+                assert!(previous_end <= child_span.start_byte());
+                assert!(child_span.start_byte() <= child_span.end_byte());
+                assert!(child_span.end_byte() <= span.end_byte());
+                previous_end = child_span.end_byte();
+                pending.push(child);
+            }
+        }
+        assert_eq!(item.body(), body);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("tabs.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn nested_containers_exclude_outer_quote_separators() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    for (body, expected, kind) in [
+        ("> - one\n>\n> next\n", "- one\n", Kind::List),
+        ("> > inner\n>\n> outer\n", "> inner\n", Kind::Blockquote),
+        ("> -\n>\n> next\n", "-\n", Kind::List),
+        ("> >\n>\n> next\n", ">\n", Kind::Blockquote),
+        (
+            "> > α\r\n> >\r\n>\r\n> next\r\n",
+            "> α\r\n> >\r\n",
+            Kind::Blockquote,
+        ),
+        ("> - > α\n>   >\n>\n> next\n", "- > α\n>   >\n", Kind::List),
+        (
+            "> > inner\nlazy continuation\n>\n> outer\n",
+            "> inner\nlazy continuation\n",
+            Kind::Blockquote,
+        ),
+        (
+            "> - first\n>\n> - second\n>\n> next\n",
+            "- first\n>\n> - second\n",
+            Kind::List,
+        ),
+    ] {
+        let source =
+            format!(":::mara requirement REQ-CONTAINERS\n:title: Containers\n\n{body}:::\n");
+        write(fixture.path(), "containers.mara.md", &source);
+        let corpus = load_documents(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let outer = &item.body_blocks()[0];
+        assert_eq!(outer.kind(), Kind::Blockquote);
+        let blocks = outer.children();
+        assert_eq!(blocks[0].kind(), kind);
+        assert_eq!(blocks[1].kind(), Kind::Paragraph);
+        let span = blocks[0].source().span();
+        assert_eq!(
+            &source[span.start_byte()..span.end_byte()],
+            expected,
+            "{body}"
+        );
+        assert_eq!(span.start_byte(), source.find(expected).unwrap());
+        assert_eq!(span.start_line(), 4);
+        assert_eq!(span.end_line(), 3 + expected.lines().count());
+        if kind == Kind::List {
+            let last_item = blocks[0].children().last().unwrap();
+            assert_eq!(last_item.kind(), Kind::ListItem);
+            assert_eq!(last_item.source().span().end_byte(), span.end_byte());
+        }
+        let outer_span = outer.source().span();
+        assert_eq!(
+            &source[outer_span.start_byte()..outer_span.end_byte()],
+            body
+        );
+        assert_eq!(item.body(), body);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("containers.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn quoted_html_and_indented_code_end_at_their_parsed_content() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    for (body, expected, kind) in [
+        (
+            "> <!-- comment -->\n>\n> para\n",
+            "<!-- comment -->\n",
+            Kind::HtmlBlock,
+        ),
+        (">     code\n>\n> para\n", "code\n", Kind::CodeBlock),
+        (
+            "> > <script>\r\n> >\r\n> > α\r\n> > </script>\r\n> >\r\n> > para\r\n",
+            "<script>\r\n> >\r\n> > α\r\n> > </script>\r\n",
+            Kind::HtmlBlock,
+        ),
+        (
+            "> >     α\r\n> >\r\n> >     > literal\r\n> >\r\n> > para\r\n",
+            "α\r\n> >\r\n> >     > literal\r\n",
+            Kind::CodeBlock,
+        ),
+    ] {
+        let source = format!(":::mara requirement REQ-RAW\n:title: Raw\n\n{body}:::\n");
+        write(fixture.path(), "raw.mara.md", &source);
+        let corpus = load_documents(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let mut blocks = item.body_blocks();
+        while blocks[0].kind() == Kind::Blockquote {
+            blocks = blocks[0].children();
+        }
+        assert_eq!(blocks[0].kind(), kind);
+        let span = blocks[0].source().span();
+        assert_eq!(
+            &source[span.start_byte()..span.end_byte()],
+            expected,
+            "{body}"
+        );
+        assert_eq!(span.start_byte(), source.find(expected).unwrap());
+        assert_eq!(span.start_line(), 4);
+        assert_eq!(span.end_line(), 3 + expected.lines().count());
+        assert_eq!(blocks[1].kind(), Kind::Paragraph);
+        assert_eq!(item.body(), body);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("raw.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn quoted_leaf_blocks_exclude_following_quote_separators() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    for (block_text, kind) in [
+        ("# Héading ###\n", Kind::Heading { level: 1 }),
+        ("Two-line\nheading\n===\n", Kind::Heading { level: 1 }),
+        ("```text\n>\n\n```\n", Kind::CodeBlock),
+        ("~~~\n~~~\n", Kind::CodeBlock),
+        ("---\n", Kind::ThematicBreak),
+        ("[foo]: /url\n", Kind::LinkReferenceDefinition),
+        (
+            "[foo]: /url\n  \"A\n  title\"\n",
+            Kind::LinkReferenceDefinition,
+        ),
+        ("[foo]: /url\n  \"\"\n", Kind::LinkReferenceDefinition),
+    ] {
+        for prefix in ["> ", "> > "] {
+            let quoted = block_text
+                .lines()
+                .map(|line| format!("{prefix}{line}\r\n"))
+                .collect::<String>();
+            let body = format!("{quoted}{prefix}\r\n{prefix}para\r\n");
+            let source = format!(":::mara requirement REQ-QUOTE\n:title: Quote\n\n{body}:::\n");
+            write(fixture.path(), "quote.mara.md", &source);
+            let corpus = load_documents(&project, &schema).unwrap();
+            let item = corpus.items().next().unwrap();
+            let mut blocks = item.body_blocks();
+            while blocks[0].kind() == Kind::Blockquote {
+                blocks = blocks[0].children();
+            }
+            assert_eq!(blocks[0].kind(), kind, "{body}");
+            let span = blocks[0].source().span();
+            assert_eq!(
+                &source[span.start_byte()..span.end_byte()],
+                &quoted[prefix.len()..],
+                "{body}"
+            );
+            assert_eq!(span.start_line(), 4);
+            assert_eq!(span.end_line(), 3 + block_text.lines().count());
+            assert_eq!(blocks[1].kind(), Kind::Paragraph);
+            assert_eq!(item.body(), body);
+            assert_eq!(
+                fs::read_to_string(fixture.path().join("quote.mara.md")).unwrap(),
+                source
+            );
+        }
+    }
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn quoted_unclosed_fence_preserves_literal_quote_lines_until_container_end() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    let source = ":::mara requirement REQ-CODE\n:title: Code\n\n> ```text\n> literal\n> >\n\nOutside.\n:::\n";
+    write(fixture.path(), "code.mara.md", source);
+    let corpus = load_documents(&project, &schema).unwrap();
+    let blocks = corpus.items().next().unwrap().body_blocks();
+    assert_eq!(blocks[0].kind(), Kind::Blockquote);
+    assert_eq!(blocks[1].kind(), Kind::Paragraph);
+    let code = &blocks[0].children()[0];
+    assert_eq!(code.kind(), Kind::CodeBlock);
+    let span = code.source().span();
+    assert_eq!(
+        &source[span.start_byte()..span.end_byte()],
+        "```text\n> literal\n> >\n"
+    );
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn reference_definitions_and_adjacent_prose_have_separate_source_spans() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    for (definitions, prose, newline, prefix) in [
+        (vec!["[foo]: /url"], "ordinary paragraph", "\n", ""),
+        (
+            vec!["[foo]: /url", "[bar]: /other \"Title\""],
+            "Résumé with [foo] and [bar].",
+            "\r\n",
+            "> ",
+        ),
+    ] {
+        let body = definitions
+            .iter()
+            .copied()
+            .chain(std::iter::once(prose))
+            .map(|line| format!("{prefix}{line}{newline}"))
+            .collect::<String>();
+        let source =
+            format!("Prelude.\n\n:::mara requirement REQ-REF\n:title: References\n\n{body}:::\n");
+        write(fixture.path(), "references.mara.md", &source);
+        let corpus = load_documents(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let blocks = if prefix.is_empty() {
+            item.body_blocks()
+        } else {
+            item.body_blocks()[0].children()
+        };
+        assert_eq!(blocks.len(), definitions.len() + 1);
+        let mut previous_end = item.body_source().span().start_byte();
+        for (index, (block, expected)) in blocks
+            .iter()
+            .zip(definitions.iter().copied().chain(std::iter::once(prose)))
+            .enumerate()
+        {
+            assert_eq!(
+                block.kind(),
+                if index < definitions.len() {
+                    Kind::LinkReferenceDefinition
+                } else {
+                    Kind::Paragraph
+                }
+            );
+            let expected = format!("{expected}{newline}");
+            let span = block.source().span();
+            assert_eq!(&source[span.start_byte()..span.end_byte()], expected);
+            assert_eq!(span.start_byte(), source.find(&expected).unwrap());
+            assert_eq!(span.start_line(), 6 + index);
+            assert_eq!(span.end_line(), span.start_line());
+            assert!(span.start_byte() >= previous_end);
+            previous_end = span.end_byte();
+        }
+        assert_eq!(item.body(), body);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("references.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn padded_table_cells_follow_the_last_authored_content() {
+    use mara::MarkdownBlockKind as Kind;
+
+    let (fixture, project, schema) = initialized_project();
+    for (row, content, prefix, newline) in [
+        ("| x |   ", "x", "", "\n"),
+        ("| x   ", "x", "", "\n"),
+        ("| α\\|β | \t ", "α\\|β", "> ", "\r\n"),
+        ("| `終🙂` |   ", "`終🙂`", "", "\r\n"),
+    ] {
+        let body = format!(
+            "{prefix}| A | B | C |{newline}{prefix}|---|---|---|{newline}{prefix}{row}{newline}"
+        );
+        let source = format!(":::mara requirement REQ-PADDED\n:title: Padded\n\n{body}:::\n");
+        write(fixture.path(), "padded.mara.md", &source);
+        let corpus = load_documents(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let block = &item.body_blocks()[0];
+        let table = if block.kind() == Kind::Blockquote {
+            &block.children()[0]
+        } else {
+            block
+        };
+        assert_eq!(table.kind(), Kind::Table);
+        let row = &table.children()[1].children()[0];
+        let cells = row.children();
+        assert_eq!(cells.len(), 3);
+        let content_end = source.find(content).unwrap() + content.len();
+        assert_eq!(cells[0].source().span().end_byte(), content_end);
+        for padded in &cells[1..] {
+            let span = padded.source().span();
+            assert_eq!(span.start_byte(), content_end, "{body:?}");
+            assert_eq!(span.end_byte(), content_end);
+            assert_eq!(span.start_line(), 6);
+            assert_eq!(span.end_line(), 6);
+        }
+        assert_eq!(item.body(), body);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("padded.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn table_children_retain_only_their_own_source() {
+    use mara::{MarkdownBlock, MarkdownBlockKind as Kind};
+
+    fn text<'a>(source: &'a str, block: &MarkdownBlock) -> &'a str {
+        let span = block.source().span();
+        &source[span.start_byte()..span.end_byte()]
+    }
+
+    let (fixture, project, schema) = initialized_project();
+    // Header-only and quoted tables must not lend separator rows or enclosing
+    // quote markers to their cells. Short rows contain synthetic empty cells.
+    for (body, header, rows, cells) in [
+        (
+            "| A | B |\n|---|---|\n| a | b |\n",
+            "| A | B |\n",
+            vec!["| a | b |\n"],
+            vec![vec!["A", "B"], vec!["a", "b"]],
+        ),
+        (
+            "| A | B |\n|---|---|\n",
+            "| A | B |\n",
+            vec![],
+            vec![vec!["A", "B"]],
+        ),
+        (
+            "> | α | β |\r\n> | --- | --- |\r\n> | a\\|b | `γ` |\r\n> | δ |\r\n>\r\n",
+            "| α | β |\r\n",
+            vec!["| a\\|b | `γ` |\r\n", "| δ |\r\n"],
+            vec![vec!["α", "β"], vec!["a\\|b", "`γ`"], vec!["δ", ""]],
+        ),
+    ] {
+        let source =
+            format!("Prelude.\n\n:::mara requirement REQ-TABLE\n:title: Table\n\n{body}:::\n");
+        write(fixture.path(), "table.mara.md", &source);
+        let corpus = load_documents(&project, &schema).unwrap();
+        let item = corpus.items().next().unwrap();
+        let block = &item.body_blocks()[0];
+        let table = if block.kind() == Kind::Blockquote {
+            &block.children()[0]
+        } else {
+            block
+        };
+        assert_eq!(
+            table.kind(),
+            Kind::Table,
+            "body: {body:?}, blocks: {:?}",
+            item.body_blocks()
+        );
+        let table_header = &table.children()[0];
+        let header_row = &table_header.children()[0];
+        assert_eq!(text(&source, table_header), header);
+        assert_eq!(text(&source, header_row), header);
+        let body_rows = table
+            .children()
+            .get(1)
+            .map_or(&[][..], |body| body.children());
+        assert_eq!(
+            body_rows
+                .iter()
+                .map(|row| text(&source, row))
+                .collect::<Vec<_>>(),
+            rows
+        );
+        for (row, expected) in std::iter::once(header_row).chain(body_rows).zip(cells) {
+            assert_eq!(
+                row.children()
+                    .iter()
+                    .map(|cell| text(&source, cell))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            for cell in row.children() {
+                let span = cell.source().span();
+                assert!(span.start_byte() >= row.source().span().start_byte());
+                assert!(span.end_byte() <= row.source().span().end_byte());
+                assert_eq!(span.start_line(), span.end_line());
+            }
+        }
+        assert_eq!(item.body(), body);
+        assert_eq!(
+            fs::read_to_string(fixture.path().join("table.mara.md")).unwrap(),
+            source
+        );
+    }
+}
+
+// @mara checks DES-DOCUMENT-FORMAT
+#[test]
+fn document_recovery_retains_other_files_without_inventing_unreadable_coordinates() {
+    let (fixture, project, schema) = initialized_project();
+    fs::write(fixture.path().join("bad.mara.md"), [0xff]).unwrap();
+    write(
+        fixture.path(),
+        "good.mara.md",
+        ":::mara requirement REQ-GOOD\n:title: Good\n\nUnchanged body.\n:::\n",
+    );
+    let before = fs::read(fixture.path().join("good.mara.md")).unwrap();
+    assert!(matches!(
+        load_documents(&project, &schema),
+        Err(mara::Error::Io { .. })
+    ));
+    let (documents, diagnostics) = load_documents_for_validation(&project, &schema).unwrap();
+    assert!(!documents.is_complete());
+    assert_eq!(
+        documents.items().map(mara::Item::id).collect::<Vec<_>>(),
+        ["REQ-GOOD"]
+    );
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code(), mara::DiagnosticCode::SourceInvalid);
+    assert_eq!(diagnostics[0].source().path(), Path::new("bad.mara.md"));
+    assert!(!diagnostics[0].coordinates_available());
+    assert_eq!(
+        fs::read(fixture.path().join("bad.mara.md")).unwrap(),
+        [0xff]
+    );
+    assert_eq!(
+        fs::read(fixture.path().join("good.mara.md")).unwrap(),
+        before
+    );
+}
+
+// @mara implements VER-DOCUMENT-PARSING
+#[test]
+fn document_loading_is_a_separate_dependency_from_code_discovery() {
+    let (fixture, _, schema) = initialized_project();
+    let config_path = fixture.path().join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path).unwrap().replacen(
+        "format_version = 1",
+        "format_version = 3",
+        1,
+    );
+    fs::write(&config_path, format!("{config}\n[[code.languages]]\nname = \"rust\"\nextensions = [\"rs\"]\ngrammar = \"missing.wasm\"\nquery = \"missing.scm\"\nseparator = \"::\"\n")).unwrap();
+    write(fixture.path(), "notes.mara.md", "Canonical narrative.\n");
+    let project = mara::resolve_project(Some(fixture.path()), fixture.path()).unwrap();
+    let documents = load_documents(&project, &schema).unwrap();
+    assert_eq!(documents.documents().len(), 1);
+    assert_eq!(documents.documents()[0].source(), "Canonical narrative.\n");
+    assert!(documents.is_complete());
+    // Public corpus operations will compose this reader with code discovery later.
+    // This test makes no claim that item listing may ignore the missing adapter.
+}

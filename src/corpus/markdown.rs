@@ -1,0 +1,903 @@
+//! Private Rushdown adapter. The recognition pass preserves Markdown-aware
+//! delimiter rules; the container pass retains ordinary item-body children.
+
+mod containers;
+mod references;
+
+use std::{fmt, ops::Range};
+
+use rushdown::{
+    ast::{Arena, KindData, NodeKind, NodeRef, NodeType, PrettyPrint},
+    parser::{
+        self, AnyBlockParser, AnyInlineParser, BlockParser, InlineParser,
+        PRIORITY_FENCED_CODE_BLOCK, PRIORITY_LINK, Parser, ParserExtension, ParserExtensionFn,
+    },
+    text::{self, BasicReader, Reader as _, Segment},
+};
+
+use crate::{is_item_id, is_snake_name};
+
+const DELIMITER_BLOCK_PRIORITY: u32 = PRIORITY_FENCED_CODE_BLOCK + 50;
+const MARA_INLINE_PRIORITY: u32 = PRIORITY_LINK - 50;
+
+#[derive(Debug)]
+pub(super) struct ParsedDocument {
+    pub(super) items: Vec<ParsedItem>,
+    pub(super) blocks: Vec<ParsedBlock>,
+    pub(super) references: Vec<ParsedReference>,
+    pub(super) complete: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ParsedReference {
+    pub(super) kind: super::ReferenceKind,
+    pub(super) target: String,
+    pub(super) source: Range<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ParsedItem {
+    pub(super) flavour: String,
+    pub(super) id: String,
+    pub(super) title: String,
+    pub(super) metadata: Vec<ParsedMetadataEntry>,
+    pub(super) body: Range<usize>,
+    pub(super) blocks: Vec<ParsedBlock>,
+    pub(super) mentions: Vec<ParsedMention>,
+    pub(super) source: Range<usize>,
+    pub(super) metadata_valid: bool,
+    pub(super) title_valid: bool,
+    pub(super) body_valid: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ParsedBlock {
+    pub(super) kind: super::MarkdownBlockKind,
+    pub(super) heading_text: Option<String>,
+    pub(super) heading_source_offsets: Vec<usize>,
+    pub(super) source: Range<usize>,
+    pub(super) children: Vec<ParsedBlock>,
+}
+
+#[derive(Debug)]
+struct ProjectedItem {
+    item: ParsedItem,
+    errors: Vec<ParseError>,
+    complete: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ParsedMetadataEntry {
+    pub(super) key: String,
+    pub(super) value: String,
+    pub(super) source: Range<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ParsedMention {
+    pub(super) target: String,
+    // Includes malformed typed candidates whose colon starts on a later line.
+    pub(super) typed: bool,
+    pub(super) source: Range<usize>,
+}
+
+#[derive(Debug)]
+pub(super) struct ParseError {
+    pub(super) code: crate::DiagnosticCode,
+    pub(super) line: usize,
+    pub(super) source: Range<usize>,
+    pub(super) item_ids: Vec<String>,
+    pub(super) message: String,
+}
+
+#[derive(Debug)]
+struct MetadataParseError {
+    metadata: Vec<ParsedMetadataEntry>,
+    error: ParseError,
+}
+
+impl ParseError {
+    fn with_item_id(mut self, item_id: &str) -> Self {
+        if !self.item_ids.iter().any(|existing| existing == item_id) {
+            self.item_ids.push(item_id.to_owned());
+        }
+        self
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DelimiterKind {
+    Opener,
+    Closer,
+}
+
+#[derive(Debug, Clone)]
+struct Delimiter {
+    kind: DelimiterKind,
+    source: Range<usize>,
+}
+
+#[derive(Debug)]
+struct MaraBlockDelimiterNode {
+    delimiter: Delimiter,
+}
+
+impl NodeKind for MaraBlockDelimiterNode {
+    fn typ(&self) -> NodeType {
+        NodeType::LeafBlock
+    }
+
+    fn kind_name(&self) -> &'static str {
+        "MaraBlockDelimiter"
+    }
+}
+
+impl PrettyPrint for MaraBlockDelimiterNode {
+    fn pretty_print(
+        &self,
+        writer: &mut dyn fmt::Write,
+        _source: &str,
+        level: usize,
+    ) -> fmt::Result {
+        writeln!(writer, "{}MaraBlockDelimiter", "  ".repeat(level))
+    }
+}
+
+impl From<MaraBlockDelimiterNode> for KindData {
+    fn from(node: MaraBlockDelimiterNode) -> Self {
+        Self::Extension(Box::new(node))
+    }
+}
+
+#[derive(Debug)]
+struct MaraInlineDelimiterNode {
+    delimiter: Delimiter,
+}
+
+impl NodeKind for MaraInlineDelimiterNode {
+    fn typ(&self) -> NodeType {
+        NodeType::Inline
+    }
+
+    fn kind_name(&self) -> &'static str {
+        "MaraInlineDelimiter"
+    }
+}
+
+impl PrettyPrint for MaraInlineDelimiterNode {
+    fn pretty_print(
+        &self,
+        writer: &mut dyn fmt::Write,
+        _source: &str,
+        level: usize,
+    ) -> fmt::Result {
+        writeln!(writer, "{}MaraInlineDelimiter", "  ".repeat(level))
+    }
+}
+
+impl From<MaraInlineDelimiterNode> for KindData {
+    fn from(node: MaraInlineDelimiterNode) -> Self {
+        Self::Extension(Box::new(node))
+    }
+}
+
+#[derive(Debug)]
+struct MaraMentionNode {
+    target: String,
+    typed: bool,
+    source: Range<usize>,
+}
+
+impl NodeKind for MaraMentionNode {
+    fn typ(&self) -> NodeType {
+        NodeType::Inline
+    }
+
+    fn kind_name(&self) -> &'static str {
+        "MaraMention"
+    }
+}
+
+impl PrettyPrint for MaraMentionNode {
+    fn pretty_print(
+        &self,
+        writer: &mut dyn fmt::Write,
+        _source: &str,
+        level: usize,
+    ) -> fmt::Result {
+        writeln!(writer, "{}MaraMention", "  ".repeat(level))
+    }
+}
+
+impl From<MaraMentionNode> for KindData {
+    fn from(node: MaraMentionNode) -> Self {
+        Self::Extension(Box::new(node))
+    }
+}
+
+#[derive(Debug, Default)]
+struct MaraDelimiterBlockParser;
+
+impl MaraDelimiterBlockParser {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl BlockParser for MaraDelimiterBlockParser {
+    fn trigger(&self) -> &[u8] {
+        b":"
+    }
+
+    fn open(
+        &self,
+        arena: &mut Arena,
+        _parent_ref: NodeRef,
+        reader: &mut BasicReader,
+        _context: &mut parser::Context,
+    ) -> Option<(NodeRef, parser::State)> {
+        let segment = reader.peek_line_segment()?;
+        let delimiter = delimiter(reader.source(), segment)?;
+        reader.advance_to_eol();
+        Some((
+            arena.new_node(MaraBlockDelimiterNode { delimiter }),
+            parser::State::NO_CHILDREN,
+        ))
+    }
+
+    fn cont(
+        &self,
+        _arena: &mut Arena,
+        _node_ref: NodeRef,
+        _reader: &mut BasicReader,
+        _context: &mut parser::Context,
+    ) -> Option<parser::State> {
+        None
+    }
+}
+
+impl From<MaraDelimiterBlockParser> for AnyBlockParser {
+    fn from(parser: MaraDelimiterBlockParser) -> Self {
+        Self::Extension(Box::new(parser))
+    }
+}
+
+#[derive(Debug, Default)]
+struct MaraInlineParser;
+
+impl MaraInlineParser {
+    fn new() -> Self {
+        Self
+    }
+
+    fn parse_delimiter(
+        &self,
+        arena: &mut Arena,
+        reader: &mut text::BlockReader,
+    ) -> Option<NodeRef> {
+        let (_, segment) = reader.peek_line_bytes()?;
+        let delimiter = delimiter(reader.source(), segment)?;
+        reader.advance(delimiter.source.end - delimiter.source.start);
+        Some(arena.new_node(MaraInlineDelimiterNode { delimiter }))
+    }
+
+    fn parse_mention(&self, arena: &mut Arena, reader: &mut text::BlockReader) -> Option<NodeRef> {
+        let (line, segment) = reader.peek_line_bytes()?;
+        if !line.starts_with(b"[[") || escaped_opening(reader.source().as_bytes(), segment.start())
+        {
+            return None;
+        }
+        // A Markdown link label may begin with a Mara reference. Let its
+        // enclosing '[' reach the link parser, then recognize the inner token.
+        if line.starts_with(b"[[[") {
+            return None;
+        }
+        let closing = line[2..]
+            .windows(2)
+            .position(|pair| pair == b"]]")
+            .map(|i| i + 2);
+        // Retain typed-looking malformed tokens for source-located validation.
+        // Bare mentions keep their existing exact grammar. Never cross a line
+        // boundary to consume prose or an item delimiter while seeking closure.
+        let end = closing.unwrap_or_else(|| {
+            line.iter()
+                .position(|b| matches!(b, b'\r' | b'\n'))
+                .unwrap_or(line.len())
+        });
+        let target = std::str::from_utf8(&line[2..end]).ok()?;
+        let typed =
+            target.contains(':') || (closing.is_none() && has_typed_continuation(reader, target));
+        if !typed && (closing.is_none() || (!is_item_id(target) && !crate::is_mid(target))) {
+            return None;
+        }
+        let length = closing.map_or(end, |closing| closing + 2);
+        reader.advance(length);
+        Some(arena.new_node(MaraMentionNode {
+            target: target.to_owned(),
+            typed,
+            source: segment.start()..segment.start() + length,
+        }))
+    }
+}
+
+/// Look ahead within this Markdown block, leaving all subsequent bytes for the
+/// normal parser. A split relation name is invalid, but still needs a diagnostic
+/// at its opening. Stop at literal contexts, bracket boundaries or item delimiters.
+fn has_typed_continuation(reader: &mut text::BlockReader, prefix: &str) -> bool {
+    let boundary = |byte: u8| matches!(byte, b'[' | b']' | b'`' | b'\\' | b'<' | b'>');
+    if prefix.bytes().any(boundary) {
+        return false;
+    }
+    let (line, position) = reader.position();
+    let typed = (|| {
+        reader.advance_line();
+        while let Some((content, segment)) = reader.peek_line_bytes() {
+            if delimiter(reader.source(), segment).is_some() {
+                return false;
+            }
+            for byte in content.iter().copied() {
+                if byte == b':' {
+                    return true;
+                }
+                if boundary(byte) {
+                    return false;
+                }
+            }
+            reader.advance_line();
+        }
+        false
+    })();
+    reader.set_position(line, position);
+    typed
+}
+
+impl InlineParser for MaraInlineParser {
+    fn trigger(&self) -> &[u8] {
+        b":["
+    }
+
+    fn parse(
+        &self,
+        arena: &mut Arena,
+        _parent_ref: NodeRef,
+        reader: &mut text::BlockReader,
+        _context: &mut parser::Context,
+    ) -> Option<NodeRef> {
+        match reader.peek_byte() {
+            b':' => self.parse_delimiter(arena, reader),
+            b'[' => self.parse_mention(arena, reader),
+            _ => None,
+        }
+    }
+}
+
+impl From<MaraInlineParser> for AnyInlineParser {
+    fn from(parser: MaraInlineParser) -> Self {
+        Self::Extension(Box::new(parser))
+    }
+}
+
+fn mara_extension() -> impl ParserExtension {
+    ParserExtensionFn::new(|parser: &mut Parser| {
+        parser.add_block_parser(
+            MaraDelimiterBlockParser::new,
+            parser::NoParserOptions,
+            DELIMITER_BLOCK_PRIORITY,
+        );
+        parser.add_inline_parser(
+            MaraInlineParser::new,
+            parser::NoParserOptions,
+            MARA_INLINE_PRIORITY,
+        );
+    })
+}
+
+// @mara implements DES-DOCUMENT-FORMAT
+pub(super) fn parse(source: &str) -> Result<ParsedDocument, ParseError> {
+    let (delimiters, mentions) = parse_extensions(source);
+    let mut document = project(source, &delimiters, &mentions)?;
+    populate_mentions(&mut document, mentions);
+    containers::populate(source, &mut document);
+    Ok(document)
+}
+
+pub(super) fn parse_for_validation(source: &str) -> (ParsedDocument, Vec<ParseError>) {
+    let (delimiters, mentions) = parse_extensions(source);
+    let (mut document, errors) = project_for_validation(source, &delimiters, &mentions);
+    populate_mentions(&mut document, mentions);
+    containers::populate(source, &mut document);
+    (document, errors)
+}
+
+fn populate_mentions(document: &mut ParsedDocument, mentions: Vec<ParsedMention>) {
+    document.references.extend(
+        mentions
+            .into_iter()
+            .filter(|mention| {
+                !mention.typed
+                    && document.items.iter().all(|item| {
+                        !item.source.contains(&mention.source.start)
+                            || (item.metadata_valid
+                                && item.body_valid
+                                && mention.source.start >= item.body.start
+                                && mention.source.end <= item.body.end)
+                    })
+            })
+            .map(|mention| ParsedReference {
+                kind: super::ReferenceKind::Item,
+                target: mention.target,
+                source: mention.source,
+            }),
+    );
+}
+
+fn parse_extensions(source: &str) -> (Vec<Delimiter>, Vec<ParsedMention>) {
+    let parser = Parser::with_extensions(parser::Options::default(), mara_extension());
+    let mut reader = BasicReader::new(source);
+    let (arena, document_ref) = parser.parse(&mut reader);
+    let mut delimiters = Vec::new();
+    let mut mentions = Vec::new();
+    collect_extensions(&arena, document_ref, &mut delimiters, &mut mentions);
+    delimiters.sort_by_key(|delimiter| delimiter.source.start);
+    mentions.sort_by_key(|mention| mention.source.start);
+
+    (delimiters, mentions)
+}
+
+fn collect_extensions(
+    arena: &Arena,
+    node_ref: NodeRef,
+    delimiters: &mut Vec<Delimiter>,
+    mentions: &mut Vec<ParsedMention>,
+) {
+    match arena[node_ref].kind_data().kind_name() {
+        "MaraBlockDelimiter" => {
+            let node = rushdown::as_extension_data!(arena, node_ref, MaraBlockDelimiterNode);
+            delimiters.push(node.delimiter.clone());
+        }
+        "MaraInlineDelimiter" => {
+            let node = rushdown::as_extension_data!(arena, node_ref, MaraInlineDelimiterNode);
+            delimiters.push(node.delimiter.clone());
+        }
+        "MaraMention" => {
+            let node = rushdown::as_extension_data!(arena, node_ref, MaraMentionNode);
+            mentions.push(ParsedMention {
+                target: node.target.clone(),
+                typed: node.typed,
+                source: node.source.clone(),
+            });
+        }
+        _ => {}
+    }
+
+    for child in arena[node_ref].children(arena) {
+        collect_extensions(arena, child, delimiters, mentions);
+    }
+}
+
+fn project(
+    source: &str,
+    delimiters: &[Delimiter],
+    mentions: &[ParsedMention],
+) -> Result<ParsedDocument, ParseError> {
+    let lines = source_lines(source);
+    let mut items = Vec::new();
+    let mut delimiter_index = 0;
+
+    while let Some(delimiter) = delimiters.get(delimiter_index) {
+        if delimiter.kind == DelimiterKind::Closer {
+            delimiter_index += 1;
+            continue;
+        }
+
+        match project_item(&lines, delimiters, mentions, &mut delimiter_index) {
+            Ok(mut projected) if !projected.errors.is_empty() => {
+                return Err(projected.errors.remove(0));
+            }
+            Ok(projected) => items.push(projected.item),
+            Err(mut errors) => return Err(errors.remove(0)),
+        }
+    }
+
+    Ok(ParsedDocument {
+        items,
+        blocks: Vec::new(),
+        references: Vec::new(),
+        complete: true,
+    })
+}
+
+fn project_for_validation(
+    source: &str,
+    delimiters: &[Delimiter],
+    mentions: &[ParsedMention],
+) -> (ParsedDocument, Vec<ParseError>) {
+    let lines = source_lines(source);
+    let mut items = Vec::new();
+    let mut errors = Vec::new();
+    let mut delimiter_index = 0;
+    let mut complete = true;
+
+    while let Some(delimiter) = delimiters.get(delimiter_index) {
+        if delimiter.kind == DelimiterKind::Closer {
+            delimiter_index += 1;
+            continue;
+        }
+
+        let opener_index = delimiter_index;
+        match project_item(&lines, delimiters, mentions, &mut delimiter_index) {
+            Ok(projected) => {
+                complete &= projected.complete;
+                items.push(projected.item);
+                errors.extend(projected.errors);
+            }
+            Err(item_errors) => {
+                complete = false;
+                errors.extend(item_errors);
+                if delimiter_index == opener_index {
+                    delimiter_index += 1;
+                    if let Some(next) = delimiters.get(delimiter_index) {
+                        match next.kind {
+                            DelimiterKind::Closer => delimiter_index += 1,
+                            DelimiterKind::Opener => {
+                                let outer = line_at(&lines, delimiter.source.start);
+                                let outer_id = opener_id(outer.text);
+                                errors.push(nested_item_error(&lines, outer_id, next));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    (
+        ParsedDocument {
+            items,
+            blocks: Vec::new(),
+            references: Vec::new(),
+            complete,
+        },
+        errors,
+    )
+}
+
+fn project_item(
+    lines: &[SourceLine<'_>],
+    delimiters: &[Delimiter],
+    mentions: &[ParsedMention],
+    delimiter_index: &mut usize,
+) -> Result<ProjectedItem, Vec<ParseError>> {
+    let delimiter = &delimiters[*delimiter_index];
+    debug_assert_eq!(delimiter.kind, DelimiterKind::Opener);
+
+    let opener_line = line_at(lines, delimiter.source.start);
+    let (flavour, id) = opener(opener_line.text).ok_or_else(|| {
+        vec![ParseError {
+            code: crate::DiagnosticCode::SourceInvalid,
+            line: opener_line.number,
+            source: opener_line.start..opener_line.end,
+            item_ids: opener_item_ids(opener_line.text),
+            message: "item opener must be ':::mara <flavour> <id>' with no other tokens".to_owned(),
+        }]
+    })?;
+    if !is_snake_name(flavour) {
+        return Err(vec![ParseError {
+            code: crate::DiagnosticCode::SourceInvalid,
+            line: opener_line.number,
+            source: opener_line.start..opener_line.end,
+            item_ids: opener_item_ids(opener_line.text),
+            message: format!("invalid flavour '{flavour}'"),
+        }]);
+    }
+    if !is_item_id(id) {
+        return Err(vec![ParseError {
+            code: crate::DiagnosticCode::IdentityInvalid,
+            line: opener_line.number,
+            source: opener_line.start..opener_line.end,
+            item_ids: Vec::new(),
+            message: format!("invalid item ID '{id}'"),
+        }]);
+    }
+
+    let (metadata, body_start, metadata_valid, mut errors) =
+        match parse_metadata(lines, opener_line) {
+            Ok((metadata, body_start)) => (metadata, body_start, true, Vec::new()),
+            Err(failure) => (
+                failure.metadata,
+                opener_line.full_end,
+                false,
+                vec![failure.error.with_item_id(id)],
+            ),
+        };
+    let title_entries = metadata
+        .iter()
+        .filter(|entry| entry.key == "title")
+        .collect::<Vec<_>>();
+    let title_is_invalid = title_entries.len() > 1
+        || title_entries
+            .first()
+            .is_some_and(|entry| entry.value.is_empty())
+        || (metadata_valid && title_entries.is_empty());
+    if title_is_invalid {
+        errors.push(ParseError {
+            code: crate::DiagnosticCode::FieldInvalid,
+            line: opener_line.number,
+            source: opener_line.start..opener_line.end,
+            item_ids: vec![id.to_owned()],
+            message: "item must have exactly one non-empty title entry".to_owned(),
+        });
+    }
+    let title = title_entries
+        .first()
+        .map(|entry| entry.value.clone())
+        .unwrap_or_default();
+
+    *delimiter_index += 1;
+    let (body_end, source_end, structure_complete) = loop {
+        let Some(next) = delimiters.get(*delimiter_index) else {
+            errors.push(ParseError {
+                code: crate::DiagnosticCode::SourceInvalid,
+                line: opener_line.number,
+                source: opener_line.start..opener_line.end,
+                item_ids: vec![id.to_owned()],
+                message: "item is missing its closing delimiter".to_owned(),
+            });
+            let source_end = lines
+                .last()
+                .map(|line| line.full_end)
+                .unwrap_or(opener_line.full_end);
+            break (source_end, source_end, false);
+        };
+        if next.source.start < body_start {
+            *delimiter_index += 1;
+            continue;
+        }
+        match next.kind {
+            DelimiterKind::Closer => {
+                let closing_line = line_at(lines, next.source.start);
+                *delimiter_index += 1;
+                break (closing_line.start, closing_line.full_end, true);
+            }
+            DelimiterKind::Opener => {
+                errors.push(nested_item_error(lines, Some(id), next));
+                break (next.source.start, next.source.start, false);
+            }
+        }
+    };
+    let projected_body_start = if metadata_valid { body_start } else { body_end };
+    let item_mentions = if metadata_valid {
+        mentions
+            .iter()
+            .filter(|mention| mention.source.start >= body_start && mention.source.end <= body_end)
+            .map(|mention| ParsedMention {
+                target: mention.target.clone(),
+                typed: mention.typed,
+                source: mention.source.clone(),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    Ok(ProjectedItem {
+        item: ParsedItem {
+            flavour: flavour.to_owned(),
+            id: id.to_owned(),
+            title,
+            metadata,
+            body: projected_body_start..body_end,
+            blocks: Vec::new(),
+            mentions: item_mentions,
+            source: opener_line.start..source_end,
+            metadata_valid,
+            title_valid: !title_is_invalid,
+            body_valid: metadata_valid && structure_complete,
+        },
+        errors,
+        complete: structure_complete,
+    })
+}
+
+fn nested_item_error(
+    lines: &[SourceLine<'_>],
+    outer_id: Option<&str>,
+    nested_delimiter: &Delimiter,
+) -> ParseError {
+    let nested = line_at(lines, nested_delimiter.source.start);
+    let nested_opener = opener(nested.text);
+    let mut item_ids = outer_id
+        .filter(|id| is_item_id(id))
+        .map(|id| vec![id.to_owned()])
+        .unwrap_or_default();
+    if let Some(nested_id) = opener_id(nested.text)
+        && !item_ids.iter().any(|existing| existing == nested_id)
+    {
+        item_ids.push(nested_id.to_owned());
+    }
+    ParseError {
+        code: crate::DiagnosticCode::SourceInvalid,
+        line: nested.number,
+        source: nested.start..nested.end,
+        item_ids,
+        message: if nested_opener.is_some() {
+            "items cannot nest"
+        } else {
+            "invalid nested item opener"
+        }
+        .to_owned(),
+    }
+}
+
+fn parse_metadata(
+    lines: &[SourceLine<'_>],
+    opener_line: SourceLine<'_>,
+) -> Result<(Vec<ParsedMetadataEntry>, usize), MetadataParseError> {
+    let mut metadata = Vec::new();
+    let mut line_index = opener_line.number;
+    while line_index < lines.len() && !lines[line_index].text.trim().is_empty() {
+        let line = lines[line_index];
+        let Some(rest) = line.text.strip_prefix(':') else {
+            return Err(MetadataParseError {
+                metadata,
+                error: ParseError {
+                    code: crate::DiagnosticCode::SourceInvalid,
+                    line: line.number,
+                    source: line.start..line.end,
+                    item_ids: Vec::new(),
+                    message: "expected metadata or a blank line before the item body".to_owned(),
+                },
+            });
+        };
+        let Some((key, value)) = rest.split_once(':') else {
+            return Err(MetadataParseError {
+                metadata,
+                error: ParseError {
+                    code: crate::DiagnosticCode::SourceInvalid,
+                    line: line.number,
+                    source: line.start..line.end,
+                    item_ids: Vec::new(),
+                    message: "invalid metadata entry".to_owned(),
+                },
+            });
+        };
+        if !is_snake_name(key) {
+            return Err(MetadataParseError {
+                metadata,
+                error: ParseError {
+                    code: crate::DiagnosticCode::SourceInvalid,
+                    line: line.number,
+                    source: line.start..line.end,
+                    item_ids: Vec::new(),
+                    message: format!("invalid metadata key '{key}'"),
+                },
+            });
+        }
+        metadata.push(ParsedMetadataEntry {
+            key: key.to_owned(),
+            value: value.trim().to_owned(),
+            source: line.start..line.end,
+        });
+        line_index += 1;
+    }
+    if line_index == lines.len() {
+        return Err(MetadataParseError {
+            metadata,
+            error: ParseError {
+                code: crate::DiagnosticCode::SourceInvalid,
+                line: opener_line.number,
+                source: opener_line.start..opener_line.end,
+                item_ids: Vec::new(),
+                message: "item is missing its body boundary and closing delimiter".to_owned(),
+            },
+        });
+    }
+
+    Ok((metadata, lines[line_index].full_end))
+}
+
+fn delimiter(source: &str, segment: Segment) -> Option<Delimiter> {
+    if !is_physical_line_start(source, segment.start()) {
+        return None;
+    }
+    let mut end = segment.stop();
+    let bytes = source.as_bytes();
+    if end > segment.start() && bytes[end - 1] == b'\n' {
+        end -= 1;
+    }
+    if end > segment.start() && bytes[end - 1] == b'\r' {
+        end -= 1;
+    }
+    let line = &source[segment.start()..end];
+    let kind = if line == ":::" {
+        DelimiterKind::Closer
+    } else if looks_like_item_opener(line) {
+        DelimiterKind::Opener
+    } else {
+        return None;
+    };
+    Some(Delimiter {
+        kind,
+        source: segment.start()..end,
+    })
+}
+
+fn is_physical_line_start(source: &str, start: usize) -> bool {
+    start == 0 || source.as_bytes().get(start.wrapping_sub(1)) == Some(&b'\n')
+}
+
+fn opener(line: &str) -> Option<(&str, &str)> {
+    let declaration = line.strip_prefix(":::mara ")?;
+    let (flavour, id) = declaration.split_once(' ')?;
+    (!flavour.is_empty() && !id.is_empty() && !id.bytes().any(|byte| byte.is_ascii_whitespace()))
+        .then_some((flavour, id))
+}
+
+fn opener_id(line: &str) -> Option<&str> {
+    let mut tokens = line.split_ascii_whitespace();
+    (tokens.next() == Some(":::mara")).then_some(())?;
+    tokens.next()?;
+    let id = tokens.next()?;
+    is_item_id(id).then_some(id)
+}
+
+fn opener_item_ids(line: &str) -> Vec<String> {
+    opener_id(line).map_or_else(Vec::new, |id| vec![id.to_owned()])
+}
+
+fn looks_like_item_opener(line: &str) -> bool {
+    line.strip_prefix(":::mara")
+        .is_some_and(|rest| rest.is_empty() || rest.chars().next().is_some_and(char::is_whitespace))
+}
+
+fn escaped_opening(source: &[u8], opening: usize) -> bool {
+    let mut cursor = opening;
+    while cursor > 0 && source[cursor - 1] == b'\\' {
+        cursor -= 1;
+    }
+    (opening - cursor) % 2 == 1
+}
+
+#[derive(Clone, Copy)]
+struct SourceLine<'a> {
+    text: &'a str,
+    start: usize,
+    end: usize,
+    full_end: usize,
+    number: usize,
+}
+
+fn source_lines(source: &str) -> Vec<SourceLine<'_>> {
+    let bytes = source.as_bytes();
+    let mut lines = Vec::new();
+    let mut start = 0;
+    let mut number = 1;
+    while start < bytes.len() {
+        let newline = bytes[start..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|offset| start + offset);
+        let full_end = newline.map_or(bytes.len(), |offset| offset + 1);
+        let mut end = newline.unwrap_or(bytes.len());
+        if end > start && bytes[end - 1] == b'\r' {
+            end -= 1;
+        }
+        lines.push(SourceLine {
+            text: &source[start..end],
+            start,
+            end,
+            full_end,
+            number,
+        });
+        start = full_end;
+        number += 1;
+    }
+    lines
+}
+
+fn line_at<'a>(lines: &[SourceLine<'a>], start: usize) -> SourceLine<'a> {
+    let index = lines
+        .binary_search_by_key(&start, |line| line.start)
+        .expect("Rushdown Mara delimiter starts on a source line");
+    lines[index]
+}
