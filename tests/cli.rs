@@ -11866,6 +11866,32 @@ fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
         "{related:#}"
     );
     fs::remove_file(rejected_path).unwrap();
+    fs::write(
+        &item_path,
+        item.replace(
+            ":implemented_by_code: code:src/sample.rs::Outer::run\n",
+            ":implemented_by_code: code:src/sample.rs::Outer::run\n:implemented_by_code: code:src/./sample.rs::Outer::run\n:implemented_by_code: code:src//sample.rs::Outer::run\n",
+        ),
+    )
+    .unwrap();
+    let invalid_paths = validation_with_parity(root, &[]);
+    assert_eq!(
+        invalid_paths["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == "code_unsupported")
+            .count(),
+        2,
+        "{invalid_paths:#}"
+    );
+    let canonical = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":"code:src/sample.rs::Outer::run"}),
+    );
+    assert_eq!(canonical["occurrence_count"], 2, "{canonical:#}");
+    fs::write(&item_path, item).unwrap();
     let project = resolve_project(Some(root), root).unwrap();
     let loaded_schema = mara::load_schema(&project).unwrap();
     let corpus = mara::load_corpus(&project, &loaded_schema).unwrap();

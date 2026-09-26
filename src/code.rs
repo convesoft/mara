@@ -212,6 +212,9 @@ pub(crate) fn split_reference(reference: &str) -> Result<(PathBuf, Option<&str>)
         || selector.is_some_and(str::is_empty)
         || path.contains('\\')
         || path.chars().any(char::is_whitespace)
+        || path
+            .split('/')
+            .any(|component| component.is_empty() || component == "." || component == "..")
         || Path::new(path)
             .components()
             .any(|c| !matches!(c, Component::Normal(_)))
@@ -600,6 +603,22 @@ fn collect<'tree>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_references_require_raw_ordinary_path_components() {
+        for reference in [
+            "code:src/./part.rs::run",
+            "code:src//part.rs::run",
+            "code:src/../part.rs::run",
+            "code:src/part.rs/::run",
+        ] {
+            assert_eq!(split_reference(reference), Err(ResolveError::Unsupported));
+        }
+        assert_eq!(
+            split_reference("code:src/.hidden.rs::run"),
+            Ok((PathBuf::from("src/.hidden.rs"), Some("run")))
+        );
+    }
 
     fn adapters() -> Vec<Adapter> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
