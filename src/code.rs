@@ -77,6 +77,11 @@ struct Adapter {
     query: Query,
 }
 
+enum AttachmentError {
+    Ambiguous,
+    Unsupported,
+}
+
 impl Adapter {
     fn accepts(&self, path: &Path) -> bool {
         path.extension()
@@ -162,7 +167,7 @@ impl Adapter {
         comment: Node<'_>,
         source: &str,
         symbols: &'a [CodeSymbol],
-    ) -> Result<Option<&'a CodeSymbol>, ()> {
+    ) -> Result<Option<&'a CodeSymbol>, AttachmentError> {
         let mut enclosing = symbols
             .iter()
             .filter(|s| s.body_start <= comment.start_byte() && comment.end_byte() <= s.body_end)
@@ -187,7 +192,7 @@ impl Adapter {
         attached.sort_by_key(|(_, start)| *start);
         if let Some(first) = attached.first() {
             if attached.get(1).is_some_and(|next| next.1 == first.1) {
-                return Err(());
+                return Err(AttachmentError::Ambiguous);
             }
             return Ok(Some(first.0));
         }
@@ -195,11 +200,18 @@ impl Adapter {
             if enclosing.get(1).is_some_and(|next| {
                 next.body_end - next.body_start == first.body_end - first.body_start
             }) {
-                return Err(());
+                return Err(AttachmentError::Ambiguous);
             }
             return Ok(Some(first));
         }
-        Ok(None)
+        if comment
+            .parent()
+            .is_some_and(|parent| parent.parent().is_none())
+        {
+            Ok(None)
+        } else {
+            Err(AttachmentError::Unsupported)
+        }
     }
 }
 
@@ -537,9 +549,15 @@ fn parse_file(
                                 source: marker_source,
                             });
                         }
-                        Err(()) => problems.push(CodeProblem {
+                        Err(error) => problems.push(CodeProblem {
                             code: DiagnosticCode::CodeUnsupported,
-                            message: "ambiguous comment attachment".into(),
+                            message: match error {
+                                AttachmentError::Ambiguous => "ambiguous comment attachment",
+                                AttachmentError::Unsupported => {
+                                    "comment has no supported code owner"
+                                }
+                            }
+                            .into(),
                             source: marker_source,
                         }),
                     }
@@ -766,6 +784,32 @@ mod tests {
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(file.markers.len(), 1);
         assert_eq!(file.markers[0].endpoint, "code:sample.py::first");
+    }
+
+    #[test]
+    fn unowned_nested_marker_is_not_assigned_to_the_file() {
+        let mut adapters = adapters();
+        let adapter = adapters
+            .iter_mut()
+            .find(|adapter| adapter.accepts(Path::new("sample.js")))
+            .unwrap();
+        let (file, problems) = parse_file(
+            "sample.js".into(),
+            "const run = () => { /* @mara code_implements REQ-A */ };\n".into(),
+            adapter,
+        );
+        assert!(file.markers.is_empty());
+        assert_eq!(problems.len(), 1);
+        assert_eq!(problems[0].code, DiagnosticCode::CodeUnsupported);
+        assert!(problems[0].message.contains("no supported code owner"));
+
+        let (file, problems) = parse_file(
+            "sample.js".into(),
+            "// @mara code_implements REQ-A\nconst run = () => {};\n".into(),
+            adapter,
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(file.markers[0].endpoint, "code:sample.js");
     }
 
     #[test]
