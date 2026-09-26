@@ -202,3 +202,22 @@ Real CLI/MCP checks reject malformed, missing, duplicate and misplaced identitie
 
 Pass only when these processes and parser checks meet their assertions. Rename/move identity preservation is also checked by the mutation capability's own tests; this method does not claim that pending review.
 :::
+
+:::mara evidence EVD-SOURCE-AND-IDENTITY
+:mid: 01M3FWPHJF68AGEWWKRZGNNZ8V
+:title: Source and identity checkpoint passes restored suites
+:status: accepted
+:result: passed
+:captured_at: 2026-09-26T22:16:47Z
+:subject_revision: 35a37fc2bddaec0ef5943322bab7ce3fd65a321a
+:evidences: VER-SOURCE-AND-IDENTITY
+:evidences: VER-PROJECT-BOOTSTRAP
+
+The tested working tree was committed unchanged as `35a37fc2bddaec0ef5943322bab7ce3fd65a321a`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
+
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 58 tests passed (1 Markdown-container unit, 30 corpus, 9 identity/backfill, 18 bootstrap), none failed or ignored. Real CLI and stdio MCP checks used isolated temporary projects; the named deterministic corpus test intentionally performed read-only self-hosting.
+
+Candidate schema/project validation returned complete, valid results with zero diagnostics. Explicit MCP matrices passed for 3 requirement origins and 5 requirement/design realization and verification roots, consuming all pages. Backfill checks confirmed no writes during reads, unchanged existing MIDs, exact non-MID source preservation, idempotence, and source preservation after rejected validation. Duplicate-identity assertions used stable classification and actual source locations because ambiguous item identities are intentionally omitted from those diagnostic records.
+
+The result covers the source/identity and bootstrap methods on this candidate. Reference-resolution, schema-constraint, mutation-recovery and other remaining baseline reviews are not claimed complete.
+:::
