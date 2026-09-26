@@ -36,7 +36,8 @@ reuse a value; expanded constraints retain their authored occurrence/source
 mapping. Null is not a missing constraint parameter.
 
 Project configuration references explicit project-relative files; rule bodies
-are separate from vocabulary schema YAML. Enable sources with project format 2:
+are separate from vocabulary schema YAML. Enable sources with project format 2
+or 3:
 
 ```toml
 [rules]
@@ -844,7 +845,7 @@ implemented validation and matrices.
 |---|---|
 | Schema | Format 3 includes vocabulary/relationships and optional structural cardinality/acyclic declarations. Conditional rules are separate YAML shape files, not an embedded rules mapping in the vocabulary schema. Absent policies impose no obligations. |
 | Documents | No new marker or metadata syntax. Status and other rule inputs are ordinary project-defined fields. |
-| Project configuration | Continue accepting format 1 for projects without rule sources. Enabling YAML rule sources requires format 2 and the optional rules table in DES-TRACE-RULE-GRAMMAR; reject unknown/unsupported versions. No saved views. |
+| Project configuration | Continue accepting format 1 for projects without rule sources. Enabling YAML rule sources requires format 2 or 3 and the optional rules table in DES-TRACE-RULE-GRAMMAR; reject unknown/unsupported versions. No saved views. |
 | Rule binding | Start format_version 1 inside the rules table. It selects the supported YAML/SHACL Core profile, generated context and namespaces, field projection and host selection vocabulary. This is independent of W3C or crate release numbers. |
 | Validation JSON | Start format_version 1 for project/item/schema validation and operation errors, replacing unversioned results. Explicit completeness, codes, severities, counts and continuation require client updates. |
 | Trace JSON | Start a separate format_version 1 family for matrix results and errors. |

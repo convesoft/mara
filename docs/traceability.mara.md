@@ -149,6 +149,8 @@ itself establishes implementation correctness or a successful test execution.
 :mid: 01M2FX4BS193R12Z27E3M7CQZQ
 :title: Check declared relationship cardinality
 :derives_from: SCN-CHECK-TRACE-OBLIGATIONS
+:implemented_by_code: code:src/graph_constraints.rs::evaluate
+:verified_by_code: code:tests/cli.rs::structural_relation_policies_validate_normalized_edges_through_cli_and_mcp
 
 Allow a project to constrain the minimum and maximum number of semantic
 relationships of a declared kind at an eligible endpoint. State which

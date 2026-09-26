@@ -701,6 +701,12 @@ pub(crate) fn mutate_semantic_relation(
         &params.relation,
         &params.target,
     )?;
+    if matches!(edge.source, crate::RelationEndpoint::Code { .. }) {
+        return Err(RelationError::new(
+            "unsupported_mutation",
+            "edit the authored code comment or item inverse in source; relation add/remove cannot mutate code edges",
+        ));
+    }
     let authored = crate::relations::occurrences(project, &corpus, schema, &edge)?;
     if add && !authored.is_empty() {
         return Err(RelationError::new(

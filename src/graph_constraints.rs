@@ -13,6 +13,7 @@ struct EdgeRecord {
     source: DiagnosticLocation,
 }
 
+// @mara code_implements REQ-RELATION-CARDINALITY
 pub(crate) fn evaluate(
     project: &Project,
     corpus: &Corpus,
@@ -69,6 +70,7 @@ pub(crate) fn evaluate(
             let target = match &edge.target {
                 RelationEndpoint::Item { mid, .. } => format!("item:{mid}"),
                 RelationEndpoint::External { address } => format!("external:{address}"),
+                RelationEndpoint::Code { reference } => reference.clone(),
             };
             edges
                 .entry((edge.relation.clone(), source.clone(), target))

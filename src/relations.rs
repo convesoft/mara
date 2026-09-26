@@ -9,6 +9,7 @@ use serde::Serialize;
 pub enum RelationEndpoint {
     Item { id: String, mid: String },
     External { address: String },
+    Code { reference: String },
 }
 
 impl RelationEndpoint {
@@ -30,12 +31,14 @@ impl RelationEndpoint {
         match self {
             Self::Item { id, .. } => id,
             Self::External { address } => address,
+            Self::Code { reference } => reference,
         }
     }
     fn mid(&self) -> Option<&str> {
         match self {
             Self::Item { mid, .. } => Some(mid),
             Self::External { .. } => None,
+            Self::Code { .. } => None,
         }
     }
 }
@@ -49,6 +52,36 @@ pub struct RelationEdge {
 }
 
 impl RelationEdge {
+    pub(crate) fn code(
+        schema: &Schema,
+        reference: &str,
+        name: &str,
+        item: &Item,
+    ) -> Result<Self, RelationError> {
+        let (canonical, definition, inverse) = schema.resolve_relation(name).ok_or_else(|| {
+            RelationError::new("invalid_relation", format!("unknown relation '{name}'"))
+        })?;
+        if !definition.code_source || !definition.target.iter().any(|f| f == item.flavour()) {
+            return Err(RelationError::new(
+                "invalid_endpoint",
+                format!("relation '{name}' does not allow this code/item pair"),
+            ));
+        }
+        if inverse && definition.inverse.is_none() {
+            return Err(RelationError::new(
+                "invalid_relation",
+                "inverse alias is not declared",
+            ));
+        }
+        Ok(Self {
+            relation: canonical.into(),
+            symmetric: false,
+            source: RelationEndpoint::Code {
+                reference: reference.into(),
+            },
+            target: RelationEndpoint::new(item)?,
+        })
+    }
     pub(crate) fn external(
         schema: &Schema,
         source: &Item,
@@ -223,11 +256,36 @@ pub(crate) fn resolve_edge(
     relation: &str,
     target: &str,
 ) -> Result<RelationEdge, RelationError> {
+    if source.starts_with("code:") {
+        corpus
+            .code()
+            .resolve(source)
+            .map_err(|e| RelationError::new("invalid_endpoint", format!("code source {e:?}")))?;
+        let item =
+            resolve_item(corpus, target).map_err(|e| RelationError::new("invalid_endpoint", e))?;
+        return RelationEdge::code(schema, source, relation, item);
+    }
     let source_item = resolve_item(corpus, source).map_err(|error| {
         RelationError::new("invalid_endpoint", format!("relation source {error}"))
     })?;
     if let Some(address) = crate::external::address(target) {
         return RelationEdge::external(schema, source_item, relation, address);
+    }
+    if target.starts_with("code:") {
+        corpus
+            .code()
+            .resolve(target)
+            .map_err(|e| RelationError::new("invalid_endpoint", format!("code target {e:?}")))?;
+        let (_, definition, inverse) = schema.resolve_relation(relation).ok_or_else(|| {
+            RelationError::new("invalid_relation", format!("unknown relation '{relation}'"))
+        })?;
+        if !inverse || !definition.code_source {
+            return Err(RelationError::new(
+                "invalid_endpoint",
+                "item-to-code authoring requires the declared inverse alias",
+            ));
+        }
+        return RelationEdge::code(schema, target, relation, source_item);
     }
     let target_item = resolve_item(corpus, target).map_err(|error| {
         RelationError::new("invalid_endpoint", format!("relation target {error}"))
@@ -246,7 +304,12 @@ pub(crate) fn occurrences(
     let mut index = 0;
     for item in corpus.items() {
         for relation in item.relations() {
-            let matches = if crate::external::address(relation.target()).is_some() {
+            let matches = if let RelationEndpoint::Code { reference } = &edge.source {
+                relation.inverse
+                    && relation.canonical == edge.relation
+                    && relation.target() == reference
+                    && item.mid() == edge.target.mid()
+            } else if crate::external::address(relation.target()).is_some() {
                 edge.matches_external(item, relation)
             } else {
                 resolve_item(corpus, relation.target())
@@ -268,6 +331,29 @@ pub(crate) fn occurrences(
                 });
             }
             index += 1;
+        }
+    }
+    if let RelationEndpoint::Code { reference } = &edge.source {
+        for file in corpus.code().files() {
+            for marker in &file.markers {
+                if marker.endpoint == *reference
+                    && marker.relation == edge.relation
+                    && resolve_item(corpus, &marker.target)
+                        .is_ok_and(|item| item.mid() == edge.target.mid())
+                {
+                    result.push(RelationOccurrence {
+                        reference: format!("occ-1-{snapshot}-{index:016x}"),
+                        kind: "code_comment".into(),
+                        source: (&marker.source).into(),
+                        author: RelationEndpoint::Code {
+                            reference: reference.clone(),
+                        },
+                        relation: marker.relation.clone(),
+                        target: marker.target.clone(),
+                    });
+                }
+                index += 1;
+            }
         }
     }
     Ok(result)

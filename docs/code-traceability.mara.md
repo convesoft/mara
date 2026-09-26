@@ -18,23 +18,25 @@ A project can declare code-to-item relations and navigate the resulting source a
 Schema format 3 accepts optional `code_source: true` on a directed relation.
 Such a declaration has `source: []`, a nonempty item-flavour `target`, and an
 optional `inverse` for authoring from the item. It cannot be symmetric,
-same-flavour, external, or code-to-code. A relation without `code_source`
-retains its current item/external behaviour. For example:
+same-flavour, external, or code-to-code; cardinality and acyclic policies do
+not apply to code-source relations. A relation without `code_source` retains
+its current item/external behaviour. All names remain project-declared. For
+example, Mara's self-hosting project declares:
 
 ```yaml
 relations:
-  implements:
+  code_implements:
     description: The code implements the requirement.
     source: []
     target: [requirement]
     code_source: true
-    inverse: implemented_by
-  verifies:
+    inverse: implemented_by_code
+  code_verifies:
     description: The code defines a check of the requirement.
     source: []
     target: [requirement]
     code_source: true
-    inverse: verified_by
+    inverse: verified_by_code
 ```
 
 The canonical edge is `(relation, code endpoint, item MID)`. Code endpoints
@@ -49,9 +51,9 @@ with distinct source occurrences. Code links are structural associations;
 An item may assert the inverse in metadata or a typed inline reference:
 
 ```markdown
-:implemented_by: code:src/graph_constraints.rs::evaluate
+:implemented_by_code: code:src/graph_constraints.rs::evaluate
 
-Implemented by [[implemented_by:code:src/graph_constraints.rs::evaluate]].
+Implemented by [[implemented_by_code:code:src/graph_constraints.rs::evaluate]].
 ```
 
 The target grammar is `code:<project-relative-path>[::<language-native-symbol-selector>]`.
@@ -64,7 +66,9 @@ No absolute path, authored byte span, line number, or generated identity is
 part of the target spelling.
 
 A source comment marker is `@mara <canonical-relation> <item-ID-or-MID>` on
-its own comment line. The relation must declare `code_source: true` and allow
+its own comment line. Tree-sitter identifies comment nodes and source spans;
+one shared parser searches only their text for markers. It does not scan raw
+source as text. The relation must declare `code_source: true` and allow
 the target item's flavour. Rust `//`, `///`, and block comments; Python `#`;
 and JavaScript/TypeScript `//` and block comments are supported. A marker
 immediately preceding a named declaration, separated only by whitespace and
@@ -76,18 +80,50 @@ symbol selection are adapter responsibilities, not generic text heuristics.
 
 ## Adapter and selector boundary
 
-Mara owns marker parsing, schema and item resolution, canonical edge identity,
-diagnostics, navigation, and backlinks. Each language adapter owns syntax
-parsing, comment recognition and attachment, symbol enumeration, and selector
-resolution. Adding a language must preserve the shared relation semantics.
-The initial adapters are Rust, Python, JavaScript, and TypeScript. Extension
-selects the adapter (`.rs`, `.py`, `.js`/`.mjs`/`.cjs`, `.ts`/`.mts`/`.cts`);
-TypeScript `.tsx` and JavaScript `.jsx` require explicit adapter support
-before use.
+Mara owns marker parsing of comment text, schema and item resolution, canonical edge identity,
+diagnostics, navigation, and backlinks. A project supplies Tree-sitter language
+bindings in `.mara/project.toml` format 3. Each entry maps extensions to a
+project-relative WebAssembly grammar, a Tree-sitter query file, and the native
+selector separator. The query captures declarations with `@symbol` and their
+`@name`, lexical containers that are not direct targets with `@scope` and
+`@name`, and comments with `@comment`. Mara loads and checks these assets
+locally at runtime, uses the grammar and query to enumerate symbols and
+comments, and searches only captured comment text for markers. The deepest
+enclosing declaration body or immediately following declaration owns a marker.
+Invalid packs and duplicate extension assignments are diagnosed. An absent
+pack leaves file-only endpoints usable. Adding another language or extension
+does not require a Mara rebuild. Language packs do not change the shared
+relation semantics or execute project code.
+
+The repository's packs for Rust, Python, JavaScript, and TypeScript demonstrate
+the contract. They are project assets, not language dependencies compiled into
+Mara. Extensions configured here are `.rs`, `.py`, `.js`/`.mjs`/`.cjs`, and
+`.ts`/`.mts`/`.cts`; projects may configure others, including JSX and TSX,
+with a suitable grammar and query. A grammar can be built with the Tree-sitter
+CLI's `tree-sitter build --wasm`; the generated file and query are supplied by
+the project. Mara does not fetch or compile grammars during validation.
+For example, one `.mara/project.toml` entry is:
+
+```toml
+format_version = 3
+[[code.languages]]
+name = "rust"
+extensions = ["rs"]
+grammar = ".mara/code/rust.wasm"
+query = ".mara/code/rust.scm"
+separator = "::"
+```
+
+The query uses standard Tree-sitter capture syntax, for example
+`(function_item name: (_) @name) @symbol` and
+`(line_comment) @comment`. Asset paths must remain inside the project.
+The bundled grammar assets were built from tree-sitter-rust 0.24.2,
+tree-sitter-python 0.25.0, tree-sitter-javascript 0.25.0, and
+tree-sitter-typescript 0.23.2; their MIT notices accompany the files.
 
 Rust selectors use `::` qualification through named modules, types, traits,
-functions, and methods; a trait implementation method uses
-`<Type as Trait>::method`. Python and JavaScript/TypeScript selectors use `.`
+functions, and methods; implementation blocks supply their type as a lexical
+scope. Python and JavaScript/TypeScript selectors use `.`
 qualification through named classes, functions, and methods. Nested named
 functions use their lexical owners. Named declarations may be selected
 directly; computed names, anonymous constructs, macro-expanded declarations,
@@ -121,5 +157,7 @@ reads the current file or symbol source in bounded pages. Relation inspection
 shows both marker and item-authored occurrences. CLI and MCP expose the same
 results and diagnostics. Code files are discovered locally under the project
 root using the repository's ignore rules; references to ignored or unsupported
-files still resolve as file-only targets when explicitly authored.
+files still resolve as file-only targets when explicitly authored. Code edges
+are authored by editing markers or item inverse fields; `relation add` and
+`relation remove` do not mutate code edges.
 :::

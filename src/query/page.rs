@@ -212,6 +212,16 @@ pub(crate) fn fingerprint(
         document.path().hash(&mut hash);
         document.source().hash(&mut hash);
     }
+    for file in corpus.code().files() {
+        file.path.hash(&mut hash);
+        file.source.hash(&mut hash);
+    }
+    for path in corpus.code().assets() {
+        path.hash(&mut hash);
+        std::fs::read(corpus.code().root().join(path))
+            .unwrap_or_default()
+            .hash(&mut hash);
+    }
     Ok(format!("{:016x}", hash.finish()))
 }
 

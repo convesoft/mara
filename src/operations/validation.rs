@@ -316,6 +316,12 @@ impl OperationContext {
             for diagnostic in &source_diagnostics {
                 source_paths.insert(diagnostic.source().path().to_owned());
             }
+            for file in corpus.code().files() {
+                source_paths.insert(file.path.clone());
+            }
+            for path in corpus.code().assets() {
+                source_paths.insert(path.clone());
+            }
             for path in source_paths {
                 hash_file(&mut snapshot, &project.root().join(path));
             }

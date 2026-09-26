@@ -55,3 +55,17 @@ design.
 The source replaces an older target of the same flavour while preserving the
 target as history. Do not use it for ordinary revisions of one item.
 :::
+
+:::mara term TERM-RELATION-CODE-IMPLEMENTS
+:mid: 01M3EQX7RB89VZSBXS0XN2WSY2
+:title: code_implements
+
+The source code declaration or file implements the target requirement. This structural association does not prove correctness or passing tests.
+:::
+
+:::mara term TERM-RELATION-CODE-VERIFIES
+:mid: 01M3EQXB76BZJYQA5M5N9SP8SX
+:title: code_verifies
+
+The source code declaration or file defines a check of the target requirement. This structural association does not report execution or a passing result.
+:::

@@ -636,6 +636,7 @@ fn explain(
             let outside_selection = match endpoint {
                 RelationEndpoint::Item { mid, .. } => !ctx.selected_mids.contains(mid),
                 RelationEndpoint::External { .. } => true,
+                RelationEndpoint::Code { .. } => true,
             };
             output.records.push(record(
                 json!({"kind":"edge","check":reference,"edge":entry.edge,
@@ -648,6 +649,7 @@ fn explain(
                     "target":match &entry.edge.target {
                         RelationEndpoint::Item{id,..}=>id.clone(),
                         RelationEndpoint::External{address}=>format!("external:{address}"),
+                        RelationEndpoint::Code{reference}=>reference.clone(),
                     }}}),
             ));
             if let RelationEndpoint::Item { mid, .. } = endpoint
@@ -826,6 +828,7 @@ fn endpoint_descriptor(
     match endpoint {
         RelationEndpoint::Item { mid, .. } => descriptors[mid].clone(),
         RelationEndpoint::External { address } => json!({"kind":"external","address":address}),
+        RelationEndpoint::Code { reference } => json!({"kind":"code","reference":reference}),
     }
 }
 
@@ -833,6 +836,7 @@ fn endpoint_state_key(endpoint: &RelationEndpoint) -> String {
     match endpoint {
         RelationEndpoint::Item { mid, .. } => mid.clone(),
         RelationEndpoint::External { address } => format!("external:{address}"),
+        RelationEndpoint::Code { reference } => reference.clone(),
     }
 }
 

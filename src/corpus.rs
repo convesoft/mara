@@ -14,12 +14,17 @@ mod markdown;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Corpus {
     documents: Vec<Document>,
+    code: crate::code::CodeIndex,
     complete: bool,
 }
 
 impl Corpus {
     pub fn documents(&self) -> &[Document] {
         &self.documents
+    }
+
+    pub(crate) fn code(&self) -> &crate::code::CodeIndex {
+        &self.code
     }
 
     pub fn items(&self) -> impl Iterator<Item = &Item> {
@@ -52,6 +57,7 @@ impl Corpus {
         documents.sort_by(|left, right| left.path().cmp(right.path()));
         Ok(Self {
             documents,
+            code: self.code.clone(),
             complete: self.complete,
         })
     }
@@ -401,6 +407,67 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
     let ids = item_index(corpus);
     let mids = mid_index(corpus);
 
+    for file in corpus.code().files() {
+        for marker in &file.markers {
+            let Some((canonical, definition, inverse)) = schema.resolve_relation(&marker.relation)
+            else {
+                diagnostic(
+                    DiagnosticCode::RelationInvalid,
+                    &mut diagnostics,
+                    &marker.source,
+                    format!("unknown code relation '{}'", marker.relation),
+                );
+                continue;
+            };
+            if inverse || !definition.code_source || !schema.relation_is_valid(canonical) {
+                diagnostic(
+                    DiagnosticCode::RelationInvalid,
+                    &mut diagnostics,
+                    &marker.source,
+                    format!(
+                        "relation '{}' does not allow code source markers",
+                        marker.relation
+                    ),
+                );
+                continue;
+            }
+            if let Err(error) = corpus.code().resolve(&marker.endpoint) {
+                let (code, message) = code_resolution_diagnostic(error);
+                diagnostic(code, &mut diagnostics, &marker.source, message);
+                continue;
+            }
+            match resolve_indexed_item(&ids, &mids, &marker.target) {
+                IndexedItem::One(target)
+                    if !definition.target.iter().any(|f| f == target.flavour()) =>
+                {
+                    diagnostic(
+                        DiagnosticCode::RelationInvalid,
+                        &mut diagnostics,
+                        &marker.source,
+                        format!(
+                            "relation '{}' does not allow target flavour '{}'",
+                            marker.relation,
+                            target.flavour()
+                        ),
+                    )
+                }
+                IndexedItem::One(_) => {}
+                IndexedItem::Missing => diagnostic(
+                    DiagnosticCode::ReferenceUnresolved,
+                    &mut diagnostics,
+                    &marker.source,
+                    format!("code marker references missing item '{}'", marker.target),
+                ),
+                IndexedItem::Ambiguous => diagnostic(
+                    DiagnosticCode::ReferenceUnresolved,
+                    &mut diagnostics,
+                    &marker.source,
+                    format!("code marker references ambiguous item '{}'", marker.target),
+                ),
+            }
+        }
+    }
+
     for item in corpus.items() {
         let Some(flavour) = schema.flavour_for_validation(item.flavour()) else {
             if !schema.flavour_is_declared(item.flavour()) {
@@ -412,6 +479,9 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 );
             }
             for relation in item.relations() {
+                if relation.target().starts_with("code:") {
+                    continue;
+                }
                 if let Some(address) = crate::external::address(relation.target()) {
                     if !crate::external::valid_address(address) {
                         diagnostic(
@@ -613,6 +683,26 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                                 relation.name()
                             ),
                         );
+                    }
+                    continue;
+                }
+                if relation.target().starts_with("code:") {
+                    if !inverse
+                        || !definition.code_source
+                        || !definition.target.iter().any(|f| f == item.flavour())
+                    {
+                        diagnostic(
+                            DiagnosticCode::RelationInvalid,
+                            &mut diagnostics,
+                            relation.source(),
+                            format!(
+                                "relation '{}' does not allow this code target",
+                                relation.name()
+                            ),
+                        );
+                    } else if let Err(error) = corpus.code().resolve(relation.target()) {
+                        let (code, message) = code_resolution_diagnostic(error);
+                        diagnostic(code, &mut diagnostics, relation.source(), message);
                     }
                     continue;
                 }
@@ -933,6 +1023,20 @@ fn load_corpus_for_validation_with_schema(
     Ok((
         Corpus {
             documents,
+            code: if schema.is_some() {
+                let (index, problems) = crate::code::CodeIndex::load(project);
+                for problem in problems {
+                    diagnostic(
+                        problem.code,
+                        &mut diagnostics,
+                        &problem.source,
+                        problem.message,
+                    );
+                }
+                index
+            } else {
+                crate::code::CodeIndex::empty(project)
+            },
             complete,
         },
         diagnostics,
@@ -946,6 +1050,25 @@ pub(crate) fn diagnostic(
     message: String,
 ) {
     diagnostic_with_kind(diagnostics, source, DiagnosticKind::Other, code, message);
+}
+
+fn code_resolution_diagnostic(error: crate::code::ResolveError) -> (DiagnosticCode, String) {
+    match error {
+        crate::code::ResolveError::MissingFile => {
+            (DiagnosticCode::CodeMissing, "code file is missing".into())
+        }
+        crate::code::ResolveError::MissingSymbol => {
+            (DiagnosticCode::CodeMissing, "code symbol is missing".into())
+        }
+        crate::code::ResolveError::Ambiguous => (
+            DiagnosticCode::CodeAmbiguous,
+            "code selector is ambiguous".into(),
+        ),
+        crate::code::ResolveError::Unsupported => (
+            DiagnosticCode::CodeUnsupported,
+            "code path or selector is unsupported".into(),
+        ),
+    }
 }
 
 fn diagnostic_with_kind(
@@ -1004,6 +1127,7 @@ pub fn load_corpus(project: &Project, schema: &Schema) -> Result<Corpus, Error> 
     }
     Ok(Corpus {
         documents,
+        code: crate::code::CodeIndex::load(project).0,
         complete: true,
     })
 }
@@ -1250,7 +1374,7 @@ fn project_document(
                 let (name, target) = token.target.split_once(':').unwrap_or(("", ""));
                 let source_location = location(&path, &line_starts, token.source.start, token.source.end);
                 if !crate::is_snake_name(name)
-                    || (!crate::is_item_id(target) && !crate::is_mid(target) && !target.starts_with("external:"))
+                    || (!crate::is_item_id(target) && !crate::is_mid(target) && !target.starts_with("external:") && !target.starts_with("code:"))
                     || source[token.source.clone()] != format!("[[{}]]", token.target)
                 {
                     diagnostic(DiagnosticCode::RelationInvalid, &mut inline_diagnostics, &source_location,

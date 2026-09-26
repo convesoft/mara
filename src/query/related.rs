@@ -107,6 +107,17 @@ pub fn related(
         ),
     )?;
     let start = cursor_position(filters.cursor.as_deref(), &fingerprint)?;
+    if reference.starts_with("code:") {
+        return related_code(
+            corpus,
+            schema,
+            reference,
+            filters,
+            &relations,
+            start,
+            &fingerprint,
+        );
+    }
     let graph = corpus.discovery();
     let node = graph.resolve(reference)?;
     if let DiscoveryNodeKind::Item(item) = node.kind() {
@@ -205,6 +216,39 @@ pub fn related(
         }
         all.splice(outgoing_count..outgoing_count, external_connections);
     }
+    if filters
+        .direction
+        .is_none_or(|d| d == RelationDirection::Incoming)
+        && filters.flavours.is_empty()
+        && let DiscoveryNodeKind::Item(item) = node.kind()
+    {
+        for connection in code_connections(corpus, schema)
+            .into_iter()
+            .filter(|c| c.item.mid() == item.mid())
+        {
+            if !relations.is_empty()
+                && !relations.contains(&RelationName::Schema(&connection.edge.relation))
+            {
+                continue;
+            }
+            let definition = &schema.relations()[&connection.edge.relation];
+            all.push(RelatedConnection {
+                relation: RelationName::Schema(&connection.edge.relation).display(schema),
+                direction: RelationDirection::Incoming,
+                neighbour: RelatedNeighbour::Internal(connection.code.summary()),
+                source: None,
+                label: Some(
+                    definition
+                        .inverse
+                        .as_deref()
+                        .unwrap_or(&connection.edge.relation)
+                        .to_owned(),
+                ),
+                edge: Some(connection.edge),
+                occurrence_count: Some(connection.count),
+            });
+        }
+    }
     if filters.cursor.is_some() && (start == 0 || start >= all.len()) {
         return Err(page_error(
             "invalid continuation position; restart from the first page",
@@ -278,10 +322,143 @@ fn validate_authored_targets(
             if filters.direction.is_some_and(|d| d != direction) {
                 continue;
             }
-            if crate::external::address(relation.target()).is_none() {
+            if crate::external::address(relation.target()).is_none()
+                && !relation.target().starts_with("code:")
+            {
                 resolve_relation_target(corpus, author, relation.name(), relation.target())?;
             }
         }
     }
     Ok(())
+}
+
+struct CodeConnection<'a> {
+    edge: crate::RelationEdge,
+    item: &'a Item,
+    code: crate::code::CodeResolved,
+    count: usize,
+}
+
+fn code_connections<'a>(corpus: &'a Corpus, schema: &Schema) -> Vec<CodeConnection<'a>> {
+    let mut entries = BTreeMap::<(String, String, String), CodeConnection<'a>>::new();
+    let mut add = |reference: &str, name: &str, item: &'a Item| {
+        let Ok(code) = corpus.code().resolve(reference) else {
+            return;
+        };
+        let Ok(edge) = crate::RelationEdge::code(schema, reference, name, item) else {
+            return;
+        };
+        let key = (
+            reference.to_owned(),
+            edge.relation.clone(),
+            item.mid().unwrap_or(item.id()).to_owned(),
+        );
+        entries
+            .entry(key)
+            .and_modify(|entry| entry.count += 1)
+            .or_insert(CodeConnection {
+                edge,
+                item,
+                code,
+                count: 1,
+            });
+    };
+    for file in corpus.code().files() {
+        for marker in &file.markers {
+            if schema
+                .resolve_relation(&marker.relation)
+                .is_some_and(|(_, _, inverse)| !inverse)
+                && let Ok(item) = resolve_item(corpus, &marker.target)
+            {
+                add(&marker.endpoint, &marker.relation, item);
+            }
+        }
+    }
+    for item in corpus.items() {
+        for relation in item.relations() {
+            if relation.inverse && relation.target().starts_with("code:") {
+                add(relation.target(), relation.name(), item);
+            }
+        }
+    }
+    entries.into_values().collect()
+}
+
+fn related_code(
+    corpus: &Corpus,
+    schema: &Schema,
+    reference: &str,
+    filters: &RelatedFilters,
+    relations: &[RelationName<'_>],
+    start: usize,
+    fingerprint: &str,
+) -> Result<RelatedResult, QueryError> {
+    let limit = page_limit(filters.limit)?;
+    let code = corpus
+        .code()
+        .resolve(reference)
+        .map_err(|error| page_error(&format!("code target {error:?}")))?;
+    let graph = corpus.discovery();
+    let mut all = Vec::new();
+    if filters
+        .direction
+        .is_none_or(|d| d == RelationDirection::Outgoing)
+    {
+        for connection in code_connections(corpus, schema)
+            .into_iter()
+            .filter(|entry| entry.code.reference == reference)
+        {
+            if !relations.is_empty()
+                && !relations.contains(&RelationName::Schema(&connection.edge.relation))
+            {
+                continue;
+            }
+            if !filters.flavours.is_empty()
+                && !matches_name(&filters.flavours, connection.item.flavour())
+            {
+                continue;
+            }
+            all.push(RelatedConnection {
+                relation: RelationName::Schema(&connection.edge.relation).display(schema),
+                direction: RelationDirection::Outgoing,
+                neighbour: RelatedNeighbour::Internal(
+                    graph
+                        .resolve(connection.item.mid().unwrap_or(connection.item.id()))?
+                        .summary(),
+                ),
+                source: None,
+                label: Some(connection.edge.relation.clone()),
+                edge: Some(connection.edge),
+                occurrence_count: Some(connection.count),
+            });
+        }
+    }
+    if filters.cursor.is_some() && (start == 0 || start >= all.len()) {
+        return Err(page_error(
+            "invalid continuation position; restart from the first page",
+        ));
+    }
+    let mut page = RelatedResult {
+        format_version: 2,
+        node: code.summary(),
+        connections: vec![],
+        has_more: false,
+        next_cursor: None,
+    };
+    ensure_budget(&page)?;
+    for connection in all.iter().skip(start).take(limit) {
+        page.connections.push(connection.clone());
+        (page.has_more, page.next_cursor) =
+            continuation(start, page.connections.len(), all.len(), fingerprint);
+        if ensure_budget(&page).is_err() {
+            page.connections.pop();
+            if page.connections.is_empty() {
+                return Err(budget_error());
+            }
+            (page.has_more, page.next_cursor) =
+                continuation(start, page.connections.len(), all.len(), fingerprint);
+            break;
+        }
+    }
+    Ok(page)
 }

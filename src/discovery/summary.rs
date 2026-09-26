@@ -12,6 +12,7 @@ const TITLE_CHARS: usize = 256;
 #[serde(rename_all = "snake_case")]
 pub enum DiscoveryKind {
     Item,
+    Code,
     Section,
     Block,
     Document,

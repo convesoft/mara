@@ -103,6 +103,9 @@ impl Rules {
                         url::form_urlencoded::byte_serialize(address.as_bytes())
                             .collect::<String>()
                     ),
+                    crate::RelationEndpoint::Code { reference } => {
+                        format!("urn:mara:code:{reference}")
+                    }
                 };
                 let a = format!("urn:mara:mid:{a}");
                 edges.insert((a.clone(), edge.relation.clone(), b.clone()));
