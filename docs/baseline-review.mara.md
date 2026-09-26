@@ -24,11 +24,32 @@ linked capability documents rather than in this inventory.
 
 ## Runtime and remaining test obligations
 
-The bootstrap slice restores the shared baseline production runtime unchanged,
-apart from code associations. Initialization, authoring, retrieval and validation
-share this dependency base. Its presence does not mark other capability rows as
-reviewed. The bootstrap check runs real CLI and stdio MCP processes against the
-candidate; the installed baseline executable only assists knowledge authoring.
+Commit `8205108` imported the complete baseline runtime before its capability
+reviews. This was not the agreed incremental rebuild. The current bootstrap must
+be corrected before advancing another capability; previously recorded results
+remain evidence for their exact revisions, not approval of the unreviewed runtime.
+The installed baseline executable remains an authoring tool, not the candidate.
+
+The dependency audit establishes a smaller entry boundary: CLI/MCP project
+initialization and selection plus schema get/list need configuration, schema
+declarations, template publication and transport dispatch. They do not load the
+corpus or execute rules. The project type currently imports the code-language
+configuration record from the code module; that data dependency does not require
+the code scanner.
+
+The earlier bootstrap tests cross that boundary. Schema validation loads YAML
+rule declarations; project validation additionally loads source/code, evaluates
+rules and graph policies, and paginates diagnostics. Creation and edits require
+candidate-corpus validation, link-preservation preflight and transaction recovery.
+Source/identity/navigation tests also exercise these operations. Preserving all
+those workflows in the active build would retain unreviewed dependencies.
+
+Pending scope decision: reduce the active implementation to initialization,
+selection and schema inspection while retaining subsequent work for staged
+reintroduction, or explicitly authorize the broader dependency review first.
+Do not silently remove rule checks, code scanning or mutation safety to make a
+smaller candidate appear equivalent. Preserve existing commits, contracts,
+regressions and the verified realization-template fix in either case.
 
 Remaining baseline unit-test modules and integration tests remain pending restoration
 with their owning capabilities, including isolated code-adapter fixtures. None
