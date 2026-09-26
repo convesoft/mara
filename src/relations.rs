@@ -3,6 +3,7 @@ use crate::query::{page::*, resolve_item};
 use crate::{Corpus, Item, ItemSource, Project, Relation, Schema};
 use schemars::JsonSchema;
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "lowercase")]
@@ -40,6 +41,92 @@ impl RelationEndpoint {
             Self::External { .. } => None,
             Self::Code { .. } => None,
         }
+    }
+
+    fn identity(&self) -> NodeIdentity {
+        match self {
+            Self::Item { mid, .. } => NodeIdentity::Item(mid.clone()),
+            Self::Code { reference } => NodeIdentity::Code(reference.clone()),
+            Self::External { address } => NodeIdentity::External(address.clone()),
+        }
+    }
+}
+
+/// Identity in the disposable relation graph. Only item identities are persisted MIDs.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum NodeIdentity {
+    Item(String),
+    Code(String),
+    External(String),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct GraphEdge {
+    pub edge: RelationEdge,
+    pub source: ItemSource,
+    pub occurrence_count: usize,
+}
+
+/// One semantic graph for item, code and external endpoints. Invalid assertions
+/// have no edge; source validation reports them before policy evaluation.
+#[derive(Debug, Default)]
+pub(crate) struct RelationGraph {
+    pub nodes: BTreeMap<NodeIdentity, RelationEndpoint>,
+    edges: BTreeMap<(String, NodeIdentity, NodeIdentity), GraphEdge>,
+}
+
+impl RelationGraph {
+    pub(crate) fn new(corpus: &Corpus, schema: &Schema) -> Self {
+        let mut graph = Self::default();
+        for item in corpus.items() {
+            if let Ok(endpoint) = RelationEndpoint::new(item) {
+                graph.nodes.insert(endpoint.identity(), endpoint);
+            }
+            for relation in item.relations() {
+                if let Ok(edge) = resolve_edge(
+                    corpus,
+                    schema,
+                    item.id(),
+                    relation.name(),
+                    relation.target(),
+                ) {
+                    graph.insert(edge, relation.source().into());
+                }
+            }
+        }
+        for file in corpus.code().files() {
+            for marker in &file.markers {
+                if let Ok(edge) = resolve_edge(
+                    corpus,
+                    schema,
+                    &marker.endpoint,
+                    &marker.relation,
+                    &marker.target,
+                ) {
+                    graph.insert(edge, (&marker.source).into());
+                }
+            }
+        }
+        graph
+    }
+
+    fn insert(&mut self, edge: RelationEdge, source: ItemSource) {
+        let from = edge.source.identity();
+        let to = edge.target.identity();
+        self.nodes.insert(from.clone(), edge.source.clone());
+        self.nodes.insert(to.clone(), edge.target.clone());
+        self.edges
+            .entry((edge.relation.clone(), from, to))
+            .and_modify(|record| record.occurrence_count += 1)
+            .or_insert(GraphEdge {
+                edge,
+                source,
+                occurrence_count: 1,
+            });
+    }
+
+    pub(crate) fn edges(&self) -> impl Iterator<Item = &GraphEdge> {
+        self.edges.values()
     }
 }
 

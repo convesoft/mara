@@ -11791,6 +11791,68 @@ fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
     }
     let valid = validation_with_parity(root, &[]);
     assert_eq!(valid["valid"], true, "{valid:#}");
+    let project = resolve_project(Some(root), root).unwrap();
+    let loaded_schema = mara::load_schema(&project).unwrap();
+    let corpus = mara::load_corpus(&project, &loaded_schema).unwrap();
+    let summary = mara::get_item(&corpus, "REQ-A").unwrap();
+    assert_eq!(
+        summary.outgoing_relations()[0].code_reference(),
+        Some("code:src/sample.rs::Outer::run")
+    );
+    for args in [
+        vec!["item", "update", "REQ-A", "--title", "Updated"],
+        vec!["item", "move", "REQ-A", "moved.mara.md"],
+        vec!["item", "move", "REQ-A", "req.mara.md"],
+    ] {
+        let outcome = mara(root, &args);
+        assert!(
+            outcome.status.success(),
+            "{}: {}",
+            args.join(" "),
+            stderr(&outcome)
+        );
+    }
+    fs::write(&item_path, item).unwrap();
+
+    fs::write(
+        &schema_path,
+        schema.replace(
+            "    code_source: true\n",
+            "    code_source: true\n    cardinality:\n      incoming: {maximum: 0}\n",
+        ),
+    )
+    .unwrap();
+    let constrained = validation_with_parity(root, &[]);
+    let count = constrained["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "relation_cardinality")
+        .unwrap();
+    assert_eq!(count["details"]["direction"], "incoming");
+    assert_eq!(count["details"]["actual"], 14, "{constrained:#}");
+    fs::write(
+        &schema_path,
+        schema.replace(
+            "    code_source: true\n",
+            "    code_source: true\n    cardinality:\n      incoming: {minimum: 1}\n",
+        ),
+    )
+    .unwrap();
+    let base_config = fs::read_to_string(&code_config_path).unwrap();
+    fs::write(
+        &code_config_path,
+        format!("{base_config}\n[rules]\nformat_version = 1\nfiles = [\"rules.yaml\"]\n"),
+    )
+    .unwrap();
+    fs::write(root.join("rules.yaml"),
+        "id: rule:code_link\ntargetClass: requirement\nproperty: [{path: {inversePath: code_implements}, minCount: 1}]\n"
+    ).unwrap();
+    let ruled = validation_with_parity(root, &[]);
+    assert_eq!(ruled["valid"], true, "{ruled:#}");
+    fs::write(&code_config_path, base_config).unwrap();
+    fs::remove_file(root.join("rules.yaml")).unwrap();
+    fs::write(&schema_path, &schema).unwrap();
     let code_config = fs::read_to_string(&code_config_path).unwrap().replace(
         "extensions = [\"js\", \"mjs\", \"cjs\"]",
         "extensions = [\"js\", \"mjs\", \"cjs\", \"jsx\"]",

@@ -431,32 +431,13 @@ struct EdgeEntry {
 }
 
 fn collect_edges(corpus: &Corpus, schema: &Schema) -> Result<Vec<EdgeEntry>, ValidationError> {
-    let mut unique = BTreeMap::<String, EdgeEntry>::new();
-    for author in corpus.items() {
-        for relation in author.relations() {
-            let edge = if let Some(address) = crate::external::address(relation.target()) {
-                RelationEdge::external(schema, author, relation.name(), address)
-                    .map_err(|e| ValidationError::invalid_argument(e.to_string()))
-            } else {
-                query::resolve_item(corpus, relation.target())
-                    .map_err(|e| ValidationError::invalid_argument(e.to_string()))
-                    .and_then(|target| {
-                        RelationEdge::new(schema, author, relation.name(), target)
-                            .map_err(|e| ValidationError::invalid_argument(e.to_string()))
-                    })
-            };
-            let Ok(edge) = edge else { continue };
-            let key = serde_json::to_string(&edge).expect("edge serializes");
-            unique
-                .entry(key)
-                .and_modify(|e| e.occurrences += 1)
-                .or_insert(EdgeEntry {
-                    edge,
-                    occurrences: 1,
-                });
-        }
-    }
-    Ok(unique.into_values().collect())
+    Ok(crate::relations::RelationGraph::new(corpus, schema)
+        .edges()
+        .map(|record| EdgeEntry {
+            edge: record.edge.clone(),
+            occurrences: record.occurrence_count,
+        })
+        .collect())
 }
 
 struct ExplainContext<'a> {

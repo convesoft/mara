@@ -47,13 +47,6 @@ impl Rules {
             return observations;
         }
         let mut graph = Vec::new();
-        let mut identity = BTreeMap::new();
-        for item in corpus.items() {
-            identity.insert(item.id(), item);
-            if let Some(mid) = item.mid() {
-                identity.insert(mid, item);
-            }
-        }
         for item in corpus.items() {
             let Some(mid) = item.mid() else {
                 project_unavailable(result, "rule evaluation requires valid item identities");
@@ -77,41 +70,13 @@ impl Rules {
             graph.push(node);
         }
         let mut edges = BTreeSet::new();
-        for item in corpus.items() {
-            for relation in item.relations() {
-                let edge = if let Some(address) = crate::external::address(relation.target()) {
-                    crate::RelationEdge::external(schema, item, relation.name(), address).ok()
-                } else {
-                    identity.get(relation.target()).and_then(|target| {
-                        crate::RelationEdge::new(schema, item, relation.name(), target).ok()
-                    })
-                };
-                let Some(edge) = edge else {
-                    project_unavailable(
-                        result,
-                        "rule evaluation requires resolved, valid relationships",
-                    );
-                    return observations;
-                };
-                let crate::RelationEndpoint::Item { mid: a, .. } = &edge.source else {
-                    unreachable!()
-                };
-                let b = match &edge.target {
-                    crate::RelationEndpoint::Item { mid, .. } => format!("urn:mara:mid:{mid}"),
-                    crate::RelationEndpoint::External { address } => format!(
-                        "urn:mara:external:{}",
-                        url::form_urlencoded::byte_serialize(address.as_bytes())
-                            .collect::<String>()
-                    ),
-                    crate::RelationEndpoint::Code { reference } => {
-                        format!("urn:mara:code:{reference}")
-                    }
-                };
-                let a = format!("urn:mara:mid:{a}");
-                edges.insert((a.clone(), edge.relation.clone(), b.clone()));
-                if edge.symmetric {
-                    edges.insert((b, edge.relation, a));
-                }
+        for record in crate::relations::RelationGraph::new(corpus, schema).edges() {
+            let edge = &record.edge;
+            let a = relation_iri(&edge.source);
+            let b = relation_iri(&edge.target);
+            edges.insert((a.clone(), edge.relation.clone(), b.clone()));
+            if edge.symmetric {
+                edges.insert((b, edge.relation.clone(), a));
             }
         }
         for (a, relation, b) in &edges {
@@ -361,6 +326,20 @@ impl Rules {
             mid: item.mid().map(str::to_owned),
         });
         result.diagnostics.push(d);
+    }
+}
+
+fn relation_iri(endpoint: &crate::RelationEndpoint) -> String {
+    match endpoint {
+        crate::RelationEndpoint::Item { mid, .. } => format!("urn:mara:mid:{mid}"),
+        crate::RelationEndpoint::Code { reference } => format!(
+            "urn:mara:code:{}",
+            url::form_urlencoded::byte_serialize(reference.as_bytes()).collect::<String>()
+        ),
+        crate::RelationEndpoint::External { address } => format!(
+            "urn:mara:external:{}",
+            url::form_urlencoded::byte_serialize(address.as_bytes()).collect::<String>()
+        ),
     }
 }
 fn cached_states(

@@ -115,6 +115,9 @@ address only, with no MID, source document, fields or outgoing graph. Rules
 may test the presence/count of such edges, but attempts to inspect external
 status or traverse beyond the address are configuration errors. No network
 request, credential or external-system integration participates in validation.
+External targets use the same derived relation graph as item and code targets,
+with the exact authored address as their built-in node identity. The external
+endpoint constraints above still apply.
 :::
 
 :::mara design DES-RELATION-MUTATION

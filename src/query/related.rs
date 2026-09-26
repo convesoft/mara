@@ -183,37 +183,44 @@ pub fn related(
         && filters.flavours.is_empty()
         && let DiscoveryNodeKind::Item(item) = node.kind()
     {
-        let mut externals = BTreeMap::<(String, String), usize>::new();
-        for relation in item.relations() {
-            let Some(address) = crate::external::address(relation.target()) else {
+        let mut external_connections = Vec::new();
+        for record in crate::relations::RelationGraph::new(corpus, schema).edges() {
+            let (
+                crate::RelationEndpoint::Item { mid, .. },
+                crate::RelationEndpoint::External { address },
+            ) = (&record.edge.source, &record.edge.target)
+            else {
                 continue;
             };
-            if !relations.is_empty()
-                && !relations.contains(&RelationName::Schema(&relation.canonical))
-            {
+            if item.mid() != Some(mid) {
                 continue;
             }
-            *externals
-                .entry((address.to_owned(), relation.canonical.clone()))
-                .or_default() += 1;
-        }
-        let mut external_connections = Vec::new();
-        for ((address, name), count) in externals {
-            let edge = crate::RelationEdge::external(schema, item, &name, &address)
-                .map_err(|error| page_error(&error.to_string()))?;
+            let name = &record.edge.relation;
+            if !relations.is_empty() && !relations.contains(&RelationName::Schema(name)) {
+                continue;
+            }
             external_connections.push(RelatedConnection {
-                relation: RelationName::Schema(&name).display(schema),
+                relation: RelationName::Schema(name).display(schema),
                 direction: RelationDirection::Outgoing,
                 neighbour: RelatedNeighbour::External {
                     kind: "external".into(),
-                    address,
+                    address: address.clone(),
                 },
                 source: None,
-                label: Some(name),
-                edge: Some(edge),
-                occurrence_count: Some(count),
+                label: Some(name.clone()),
+                edge: Some(record.edge.clone()),
+                occurrence_count: Some(record.occurrence_count),
             });
         }
+        external_connections.sort_by(|a, b| {
+            let RelatedNeighbour::External { address: left, .. } = &a.neighbour else {
+                unreachable!()
+            };
+            let RelatedNeighbour::External { address: right, .. } = &b.neighbour else {
+                unreachable!()
+            };
+            left.cmp(right).then_with(|| a.relation.cmp(&b.relation))
+        });
         all.splice(outgoing_count..outgoing_count, external_connections);
     }
     if filters
@@ -340,48 +347,36 @@ struct CodeConnection<'a> {
 }
 
 fn code_connections<'a>(corpus: &'a Corpus, schema: &Schema) -> Vec<CodeConnection<'a>> {
-    let mut entries = BTreeMap::<(String, String, String), CodeConnection<'a>>::new();
-    let mut add = |reference: &str, name: &str, item: &'a Item| {
-        let Ok(code) = corpus.code().resolve(reference) else {
-            return;
-        };
-        let Ok(edge) = crate::RelationEdge::code(schema, reference, name, item) else {
-            return;
-        };
-        let key = (
-            reference.to_owned(),
-            edge.relation.clone(),
-            item.mid().unwrap_or(item.id()).to_owned(),
-        );
-        entries
-            .entry(key)
-            .and_modify(|entry| entry.count += 1)
-            .or_insert(CodeConnection {
-                edge,
-                item,
-                code,
-                count: 1,
-            });
-    };
-    for file in corpus.code().files() {
-        for marker in &file.markers {
-            if schema
-                .resolve_relation(&marker.relation)
-                .is_some_and(|(_, _, inverse)| !inverse)
-                && let Ok(item) = resolve_item(corpus, &marker.target)
-            {
-                add(&marker.endpoint, &marker.relation, item);
-            }
-        }
-    }
-    for item in corpus.items() {
-        for relation in item.relations() {
-            if relation.inverse && relation.target().starts_with("code:") {
-                add(relation.target(), relation.name(), item);
-            }
-        }
-    }
-    entries.into_values().collect()
+    let items = corpus
+        .items()
+        .filter_map(|item| item.mid().map(|mid| (mid, item)))
+        .collect::<BTreeMap<_, _>>();
+    let mut connections = crate::relations::RelationGraph::new(corpus, schema)
+        .edges()
+        .filter_map(|record| {
+            let (
+                crate::RelationEndpoint::Code { reference },
+                crate::RelationEndpoint::Item { mid, .. },
+            ) = (&record.edge.source, &record.edge.target)
+            else {
+                return None;
+            };
+            Some(CodeConnection {
+                edge: record.edge.clone(),
+                item: *items.get(mid.as_str())?,
+                code: corpus.code().resolve(reference).ok()?,
+                count: record.occurrence_count,
+            })
+        })
+        .collect::<Vec<_>>();
+    connections.sort_by(|a, b| {
+        a.code
+            .reference
+            .cmp(&b.code.reference)
+            .then_with(|| a.edge.relation.cmp(&b.edge.relation))
+            .then_with(|| a.item.mid().cmp(&b.item.mid()))
+    });
+    connections
 }
 
 fn related_code(

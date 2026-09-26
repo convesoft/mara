@@ -21,8 +21,9 @@ source association does not establish passing test evidence.
 Schema format 3 accepts optional `code_source: true` on a directed relation.
 Such a declaration has `source: []`, a nonempty item-flavour `target`, and an
 optional `inverse` for authoring from the item. It cannot be symmetric,
-same-flavour, external, or code-to-code; cardinality and acyclic policies do
-not apply to code-source relations. A relation without `code_source` retains
+same-flavour, external, or code-to-code. It may declare incoming cardinality
+on eligible item targets; outgoing and symmetric cardinality and acyclic
+policies are invalid. A relation without `code_source` retains
 its current item/external behaviour. All names remain project-declared. For
 example, Mara's self-hosting project declares:
 
@@ -42,12 +43,17 @@ relations:
     inverse: verified_by_code
 ```
 
-The canonical edge is `(relation, code endpoint, item MID)`. Code endpoints
-have no MID or item flavour. Their identity is the exact project-relative
+The canonical edge is `(relation, code endpoint, item MID)`. Code is a built-in
+node kind in the disposable relation graph, alongside item and external nodes.
+Each kind supplies its own graph identity; only items have persisted MIDs and
+schema-defined flavours. Code identity is the exact project-relative
 file path plus the adapter's exact symbol selector, or just the path for a
 file-only endpoint. Identical assertions from either side count as one edge
 with distinct source occurrences. Code links are structural associations;
 `verifies` identifies a check definition and never claims a passing execution.
+Incoming cardinality counts distinct canonical code-to-item edges, including
+marker and item-authored assertions, at each eligible item. It does not count
+multiple occurrences of one edge twice.
 
 ## Authored forms
 
@@ -163,7 +169,9 @@ code/item neighbours, canonical edges, direction, occurrence count, and
 navigable source locations. `get` accepts the returned code reference and
 reads the current file or symbol source in bounded pages. Relation inspection
 shows both marker and item-authored occurrences. CLI and MCP expose the same
-results and diagnostics. Code files are discovered locally under the project
+results and diagnostics. Item detail summaries expose an item-authored inverse
+target as `code_reference`; this is the exact `code:` reference and has no
+item MID or item summary. Code files are discovered locally under the project
 root using the repository's ignore rules; references to ignored or unsupported
 files still resolve as file-only targets when explicitly authored. With an item
 as `source` and a declared inverse alias, `relation add` writes the inverse

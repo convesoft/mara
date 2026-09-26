@@ -363,12 +363,14 @@ impl Schema {
                     || relation.external
                     || relation.symmetric
                     || relation.same_flavour
-                    || relation.cardinality.is_some()
+                    || relation.cardinality.as_ref().is_some_and(|policy| {
+                        policy.outgoing.is_some() || policy.symmetric.is_some()
+                    })
                     || relation.acyclic.is_some())
             {
                 errors.push(ConfigurationDiagnostic::schema(
                     &["relations", name],
-                    format!("code-source relation '{name}' requires empty source and item target flavours and cannot declare external, symmetric, same_flavour, cardinality or acyclic"),
+                    format!("code-source relation '{name}' requires empty source and item target flavours and cannot declare external, symmetric, same_flavour, outgoing/symmetric cardinality or acyclic"),
                 ));
                 self.validation.invalid_relations.insert(name.clone());
             }

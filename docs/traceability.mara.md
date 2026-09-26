@@ -316,11 +316,16 @@ and corpus, including a relation vocabulary change and an invalid migration.
 :satisfies: REQ-SYMMETRIC-RELATIONS
 :satisfies: REQ-TYPED-INLINE-RELATIONS
 :satisfies: REQ-TYPED-EXTERNAL-TARGETS
+:satisfies: REQ-CODE-TRACEABILITY
 
-Extend the disposable graph of [[ADR-PETGRAPH-DISCOVERY]] with a distinction
-between semantic relationships and authored occurrences. Internal endpoint
-identity is the MID. Canonical relation name and directed endpoints identify
-a directed relationship; endpoint exchange does not create a second symmetric
+Build a disposable semantic relation graph alongside the document structure
+graph of [[ADR-PETGRAPH-DISCOVERY]]. Distinguish semantic relationships from
+authored occurrences. The built-in relation node kinds are item, code and
+external; each supplies its own identity. An item uses its persisted MID, a
+code endpoint its exact project-relative code reference, and an external
+endpoint its exact authored address. Code and external nodes have no fabricated
+MID or item flavour. Canonical relation name and directed endpoints identify a
+directed relationship; endpoint exchange does not create a second symmetric
 relationship. Different relation kinds between the same endpoints remain
 different relationships.
 
@@ -330,19 +335,31 @@ Retain each occurrence's document, source span, spelling and authored endpoint
 so diagnostics and edits can locate the actual source. Do not generate a
 second stored assertion merely to provide reverse navigation.
 
-Bare mentions and structural connections retain their own meaning. An external
-target is explicitly distinguished from an internal item, without a fabricated
-MID or lifecycle. Graph storage remains a derived in-memory projection.
-
-External endpoint identity is its exact address under [[DES-RELATION-AUTHORING]].
-A directed internal-to-external edge is identified by canonical relation,
-source MID and external address. It has no fabricated external MID.
+Bare mentions and structural connections retain their own meaning. Graph
+storage remains a derived in-memory projection. Endpoint-specific validation
+and constraints follow [[DES-RELATION-AUTHORING]] and
+[[DES-CODE-TRACEABILITY]].
 
 Authoring declarations and spelling follow [[DES-RELATION-AUTHORING]].
 Duplicate add and whole-edge/occurrence removal follow [[DES-RELATION-MUTATION]];
 results and bounded occurrence inspection follow [[DES-RELATION-INTERFACES]].
 Format and client migration follow [[DES-RELATION-COMPATIBILITY]].
 Reviewed schema and vocabulary migration follow [[DES-SCHEMA-MIGRATION-WORKFLOW]].
+:::
+
+:::mara decision ADR-RELATION-NODE-IDENTITY
+:mid: 01M3EZBN2RY5YNX3NXWX8R08XJ
+:title: Use kind-specific identities in the relation graph
+:justifies: DES-CANONICAL-TRACE-RELATIONS
+:justifies: DES-CODE-TRACEABILITY
+
+Use built-in item, code and external node kinds with identities supplied by
+their kind. Persist item MIDs; derive code identity from its exact reference
+and external identity from its exact authored address. Synthetic MIDs for code
+and external nodes would imply item lifecycle and migration rules they do not
+have. One semantic graph lets edge counting, rules and trace views share
+normalized relationships while each node kind retains its validation
+constraints.
 :::
 
 :::mara design DES-DECLARATIVE-TRACE-RULES

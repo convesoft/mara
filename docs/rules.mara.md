@@ -190,11 +190,17 @@ but a self-edge appears once. Retain source occurrences outside the RDF set.
 Flavour, relation and field names are encoded as UTF-8 percent-escaped IRI suffixes
 when needed; do not normalize case or substitute alias names.
 
-External endpoints remain distinct terminal nodes keyed by the exact normalized
+External endpoints remain distinct terminal nodes keyed by the exact authored
 address from [[DES-CANONICAL-TRACE-RELATIONS]], using
 `urn:mara:external:` plus its percent-encoded address. They have no item flavour
 or custom field triples. Count them where the relation permits; do not traverse
 through them or interpret their URI as fetched RDF.
+
+Code endpoints are distinct nodes keyed by their exact code reference under
+[[DES-CODE-TRACEABILITY]], using `urn:mara:code:` plus its percent-encoded
+reference. Project code-to-item edges in canonical direction once, whether
+asserted by a code marker, an item inverse, or both. Code nodes have no item
+flavour or custom field triples; an association does not supply test results.
 
 Project schema-declared custom fields as RDF literals under their field
 predicates: strings/enums as `xsd:string`, booleans as `xsd:boolean`,
@@ -448,6 +454,10 @@ edges, independent of conditional rules in [[DES-TRACE-RULE-GRAMMAR]].
 Both declarations are active in the current checkout. Run `schema validate`
 to check configuration and `project validate` or `item validate` to evaluate
 the policy through CLI or MCP. No policy applies when these keys are absent.
+Code-source relations may constrain incoming cardinality on eligible item
+targets. Their code nodes have no flavour-based outgoing policy population;
+acyclic is invalid for these one-way code-to-item relations. Distinct canonical
+edges count once regardless of the number or location of assertions.
 
 ```yaml
 relations:
