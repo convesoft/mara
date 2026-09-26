@@ -106,3 +106,35 @@ designs must link to them when restored, preserving their original identities
 for remaining evaluation/projection meaning instead of duplicating these facts.
 The native compiler and all transitive versions match the preserved checkpoint
 lockfile; no dependency upgrade is part of this slice.
+
+## Item-list dependency boundary
+
+The next proposed vertical slice is CLI `item list` / MCP `item_list`: compact
+item summaries, exact filters, deterministic order, bounded continuation and
+source preservation. No implementation has been restored for this slice yet.
+
+Baseline calls are `OperationContext::item_list` → `load_query_project` →
+`load_corpus`, then `query::list_items` → `page::filtered_page`.
+`load_corpus` parses selected documents and always calls `CodeIndex::load`;
+code-discovery failures fail the read. The listing fingerprint includes document
+bytes, discovered code bytes, configured adapter assets and file-only code
+endpoint bytes. This is observable behavior, not merely an unused type import.
+
+A real installed-baseline CLI check in a disposable, Git/configuration-isolated
+project on 2026-09-27 established:
+
+- Two valid requirements with one configured Rust adapter produced a one-item
+  page and continuation.
+- Changing only an unmarked Rust function made that continuation fail as stale.
+- Removing only the grammar asset made a fresh item-list request fail; the
+  documents remained unchanged.
+
+Preserving the baseline therefore requires reviewing document discovery and
+Markdown parsing plus code adapter loading/discovery/marker ownership and
+snapshot identity before the item-list query/transport implementation. It does
+not require mutations, graph validation, rule evaluation, navigation or matrices.
+The smaller alternative is a dependency-only checkpoint before exposing listing;
+omitting code discovery from listing would instead change compatibility and
+requires an explicit product decision. Under GOAL.md's broad-import gate, settle
+this dependency boundary before restoring these modules. Preserve the current
+schema checkpoint and all pending tests meanwhile.
