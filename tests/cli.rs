@@ -12047,6 +12047,28 @@ fn invalid_language_pack_does_not_return_partial_code_relations() {
         "{}",
         stderr(&related)
     );
+
+    fs::write(
+        root.join(".mara/code/rust.scm"),
+        "(function_item) @symbol\n(function_item name: (_) @name)\n(line_comment) @comment\n",
+    )
+    .unwrap();
+    let validation = validation_with_parity(root, &[]);
+    assert_eq!(validation["valid"], false);
+    assert!(
+        validation["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "code_unsupported"
+                && diagnostic["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("pair @name with @symbol"))
+    );
+    let related = mara(root, &["related", "REQ-A"]);
+    assert!(!related.status.success());
+    assert!(stderr(&related).contains("pair @name with @symbol"));
 }
 
 #[test]

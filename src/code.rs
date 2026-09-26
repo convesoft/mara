@@ -144,6 +144,24 @@ impl Adapter {
                     language.query.display()
                 )));
             }
+            let name_capture = query.capture_index_for_name("name").unwrap() as usize;
+            let symbol_capture = query.capture_index_for_name("symbol").unwrap() as usize;
+            let scope_capture = query
+                .capture_index_for_name("scope")
+                .map(|index| index as usize);
+            if (0..query.pattern_count()).any(|pattern| {
+                let captures = query.capture_quantifiers(pattern);
+                (captures[symbol_capture] != tree_sitter::CaptureQuantifier::Zero
+                    || scope_capture.is_some_and(|index| {
+                        captures[index] != tree_sitter::CaptureQuantifier::Zero
+                    }))
+                    && captures[name_capture] == tree_sitter::CaptureQuantifier::Zero
+            }) {
+                return Err(fail(format!(
+                    "{} must pair @name with @symbol or @scope in each declaration pattern",
+                    language.query.display()
+                )));
+            }
             let mut parser = Parser::new();
             parser
                 .set_wasm_store(store)
