@@ -524,6 +524,7 @@ fn require_valid_move_corpus(corpus: &Corpus, schema: &Schema) -> Result<(), Err
     Ok(())
 }
 
+// @mara implements REQ-MID-BACKFILL
 pub fn backfill_mids(project: &Project, schema: &Schema) -> Result<BackfilledMids, Error> {
     let _lock = MutationLock::acquire(project)?;
     let (corpus, mut diagnostics) = load_corpus_for_validation(project, schema)?;
@@ -1288,6 +1289,7 @@ fn end_of_line_containing(source: &str, start: usize) -> usize {
         .map_or(source.len(), |offset| start + offset + 1)
 }
 
+// @mara implements REQ-DURABLE-ITEM-IDENTITY
 fn generate_mid<'a>(existing: impl IntoIterator<Item = &'a str>) -> String {
     let existing = existing.into_iter().collect::<Vec<_>>();
     loop {

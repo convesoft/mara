@@ -8,6 +8,7 @@ The [baseline review](baseline-review.mara.md) records the rebuild's reviewed
 dispositions and remaining scope.
 
 - [Project initialization and schema discovery](project.mara.md)
+- [Canonical source, document format and item identity](format.mara.md)
 
 Use the [Mara skill](../skills/mara/SKILL.md) for authoring and the configured
 [schema](../.mara/schema.yaml) for flavours, fields, and relationships.

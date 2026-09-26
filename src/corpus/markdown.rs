@@ -392,6 +392,7 @@ fn mara_extension() -> impl ParserExtension {
     })
 }
 
+// @mara implements DES-DOCUMENT-FORMAT
 pub(super) fn parse(source: &str) -> Result<ParsedDocument, ParseError> {
     let (delimiters, mentions) = parse_extensions(source);
     let mut document = project(source, &delimiters, &mentions)?;

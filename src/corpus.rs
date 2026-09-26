@@ -797,6 +797,7 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
     diagnostics
 }
 
+// @mara implements REQ-DURABLE-ITEM-IDENTITY
 pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
     let mut diagnostics = corpus
         .items()
@@ -1171,6 +1172,7 @@ fn field_type_name(kind: FieldType) -> &'static str {
     }
 }
 
+// @mara implements REQ-CANONICAL-SOURCE
 pub fn load_corpus(project: &Project, schema: &Schema) -> Result<Corpus, Error> {
     let matcher = content_matcher(project)?;
     let paths = discover(project.root(), &matcher)?;

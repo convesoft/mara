@@ -338,6 +338,7 @@ fn markdown_tree(
     (arena, root, ends, link_ends.take())
 }
 
+// @mara implements DES-DOCUMENT-FORMAT
 pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
     // Parse ordinary content and item bodies together so Rushdown resolves
     // references against one document-wide definition context. Recognized item
@@ -780,4 +781,32 @@ fn heading_text(arena: &Arena, node: NodeRef, source: &str) -> (String, Vec<usiz
         }
     }
     (text, offsets)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // @mara checks DES-DOCUMENT-FORMAT
+    #[test]
+    fn rushdown_item_is_a_container_with_only_markdown_body_children() {
+        let source =
+            "Prelude.\n\n:::mara requirement REQ-ONE\n:title: One\n\n# Heading\n\nBody.\n:::\n";
+        let parsed = super::super::parse(source).unwrap();
+        let (arena, root, _, _) = markdown_tree(
+            source,
+            parsed.items[0].source.clone(),
+            std::slice::from_ref(&parsed.items[0]),
+            &parsed.references,
+        );
+        let container = arena[root].first_child().unwrap();
+        assert_eq!(arena[container].kind_data().typ(), NodeType::ContainerBlock);
+        assert_eq!(arena[container].kind_data().kind_name(), "MaraItem");
+        let children = arena[container]
+            .children(&arena)
+            .map(|child| arena[child].kind_data().kind_name())
+            .collect::<Vec<_>>();
+        assert_eq!(children, ["Heading", "Paragraph"]);
+        assert!(arena[container].next_sibling().is_none());
+    }
 }

@@ -9,7 +9,7 @@ linked capability documents rather than in this inventory.
 | Baseline capability | Disposition and review boundary |
 |---|---|
 | Product intent and scenarios | Retain the two goals and eleven scenarios with their original identities in [product intent](product.mara.md). Add flows for connected editing, interrupted-edit recovery, and code associations from the existing baseline contracts. Remove obsolete release-relative wording from document-context discovery. No behavior change. |
-| Canonical source, item identity, document format and schema | Pending: `alpha`, `format`, and `taxonomy` contracts; corpus and reference tests. |
+| Canonical source, item identity, document format and schema | Retain source syntax, lossless parsing, item identity and deliberate MID backfill under [format contracts](format.mara.md). Restore all 30 corpus tests, 9 identity/backfill CLI tests and the Markdown-container unit test. Keep distinct Markdown-context, recovery, container/table-span, identity ambiguity and source-preservation obligations. The deterministic repository check is now explicitly read-only and independent of the historical document count. Identity diagnostics use stable codes, severity and source locations, with CLI/MCP parity; backfill also checks existing MIDs and exact preservation of other bytes. Full schema constraints, reference resolution and taxonomy review remain pending. |
 | Project discovery, initialization and profiles | Retain initialization, project selection, schema inspection and flavour guidance under [project contracts](project.mara.md). Seventeen baseline tests retain distinct target-selection, transport, template, guidance, inspection and source-preservation obligations in `tests/project_bootstrap.rs`; add CLI/MCP parity for declaration inspection. Fixtures now own their Git/configuration state; guidance assertions use diagnostic codes/severity. Correct obsolete format-2 guidance prose to the implemented schema format 3. Fix the realization check with a requirement-class guard so design and mixed selections evaluate; a new real CLI/MCP regression first reproduced the baseline failure. Engineering policy, classification and execution semantics remain pending separate review. |
 | Creation, update, move, rename, deletion and recovery | Pending: mutation contracts and reference preservation; CLI and mutation-reference tests. |
 | Item and narrative discovery, search, navigation and bounded reads | Pending: discovery and retrieval contracts; search, handles, pagination, and reference tests. |
@@ -30,7 +30,7 @@ share this dependency base. Its presence does not mark other capability rows as
 reviewed. The bootstrap check runs real CLI and stdio MCP processes against the
 candidate; the installed baseline executable only assists knowledge authoring.
 
-Baseline unit-test modules and other integration tests remain pending restoration
+Remaining baseline unit-test modules and integration tests remain pending restoration
 with their owning capabilities, including isolated code-adapter fixtures. None
 of their distinct obligations has been dismissed as redundant or obsolete.
 The old cardinality code association is pending its contract review; new links

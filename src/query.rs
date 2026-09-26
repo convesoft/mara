@@ -805,6 +805,7 @@ fn matches_name_filter(names: &[String], predicate: impl Fn(&str) -> bool) -> bo
     names.is_empty() || names.iter().any(|name| predicate(name))
 }
 
+// @mara implements DES-DURABLE-ITEM-IDENTITIES
 pub(crate) fn resolve_item<'a>(corpus: &'a Corpus, id: &str) -> Result<&'a Item, QueryError> {
     let by_mid = crate::is_mid(id);
     let mut matches = corpus.items().filter(|item| {
