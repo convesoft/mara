@@ -27,7 +27,8 @@
   and:
     - or:
         - node: rule:direct_realization
-        - property:
+        - class: requirement
+          property:
             - path: {inversePath: satisfies}
               qualifiedValueShape:
                 class: design
