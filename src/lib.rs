@@ -15,9 +15,14 @@ pub use code::{CodeFile, CodeIndex, CodeMarker, CodeProblem, CodeSymbol};
 mod corpus;
 mod diagnostics;
 pub use corpus::{
-    Diagnostic, Document, DocumentReference, DocumentSet, Item, MarkdownBlock, MarkdownBlockKind,
-    Mention, MetadataEntry, ReferenceKind, Relation, SourceLocation, SourceSpan, load_documents,
-    load_documents_for_validation, load_documents_syntax_for_validation,
+    Corpus, Diagnostic, Document, DocumentReference, DocumentSet, Item, MarkdownBlock,
+    MarkdownBlockKind, Mention, MetadataEntry, ReferenceKind, Relation, SourceLocation, SourceSpan,
+    load_corpus, load_documents, load_documents_for_validation,
+    load_documents_syntax_for_validation,
+};
+mod query;
+pub use query::{
+    FieldFilter, ItemCollectionResult, ItemFilters, ItemSummary, QueryError, list_items,
 };
 mod operations;
 mod rules;
@@ -26,9 +31,10 @@ pub use diagnostics::{
     DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
 };
 pub use operations::{
-    DeclarationSummary, OperationContext, ProjectInitializationResult, ProjectSummary,
-    SchemaGetResult, SchemaKind, SchemaListResult, ValidationDiagnostic, ValidationResult,
-    ValidationScope, ValidationTargetKind, project_initialize,
+    DeclarationSummary, FieldValue, ItemFilterParams, OperationContext,
+    ProjectInitializationResult, ProjectSummary, SchemaGetResult, SchemaKind, SchemaListResult,
+    ValidationDiagnostic, ValidationResult, ValidationScope, ValidationTargetKind,
+    project_initialize,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";

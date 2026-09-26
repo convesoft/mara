@@ -1,3 +1,4 @@
+use crate::{Corpus, FieldFilter, ItemCollectionResult, ItemFilters, list_items, load_corpus};
 mod validation;
 use crate::{
     FlavourDefinition, Project, RelationDefinition, Schema, Template, initialize_project,
@@ -113,6 +114,17 @@ impl OperationContext {
         Ok(SchemaListResult { kind, declarations })
     }
 
+    pub fn item_list(&self, filters: ItemFilterParams) -> Result<ItemCollectionResult, String> {
+        let (corpus, schema) = self.load_query_project()?;
+        list_items(&corpus, &schema, &filters.into_domain()).map_err(|error| error.to_string())
+    }
+
+    fn load_query_project(&self) -> Result<(Corpus, Schema), String> {
+        let (project, schema) = self.load_project()?;
+        let corpus = load_corpus(&project, &schema).map_err(|error| error.to_string())?;
+        Ok((corpus, schema))
+    }
+
     fn load_project(&self) -> Result<(Project, Schema), String> {
         let project = resolve_project(self.selected.as_deref(), &self.current_directory)
             .map_err(|error| error.to_string())?;
@@ -220,4 +232,45 @@ fn declaration_summaries<T: DescribedDeclaration>(
             symmetric: None,
         })
         .collect()
+}
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FieldValue {
+    /// Schema-declared custom-field key; structural title/MID metadata and typed relations are excluded from authoring and retrieval field filters.
+    pub key: String,
+    /// Scalar text, including numbers and booleans as strings. Authoring trims surrounding whitespace and rejects line breaks; retrieval filters match exactly.
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ItemFilterParams {
+    #[serde(default)]
+    pub flavours: Vec<String>,
+    #[serde(default)]
+    pub fields: Vec<FieldValue>,
+    #[serde(default)]
+    pub relations: Vec<String>,
+    #[serde(default)]
+    pub paths: Vec<PathBuf>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+impl ItemFilterParams {
+    fn into_domain(self) -> ItemFilters {
+        ItemFilters::new(
+            self.flavours,
+            self.fields
+                .into_iter()
+                .map(|field| FieldFilter::new(field.key, field.value))
+                .collect(),
+            self.relations,
+            self.paths,
+            self.limit,
+        )
+        .with_cursor(self.cursor)
+    }
 }

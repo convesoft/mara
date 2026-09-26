@@ -815,3 +815,44 @@ fn invalid(path: &Path, line: usize, message: impl Into<String>) -> Error {
         message: message.into(),
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Corpus {
+    documents: DocumentSet,
+    code: crate::CodeIndex,
+}
+impl Corpus {
+    pub fn documents(&self) -> &[Document] {
+        self.documents.documents()
+    }
+    pub fn items(&self) -> impl Iterator<Item = &Item> {
+        self.documents.items()
+    }
+    pub fn is_complete(&self) -> bool {
+        self.documents.is_complete()
+    }
+    pub(crate) fn code(&self) -> &crate::CodeIndex {
+        &self.code
+    }
+    pub(crate) fn file_only_code_paths(&self) -> std::collections::BTreeSet<PathBuf> {
+        self.items()
+            .flat_map(Item::relations)
+            .filter_map(|relation| {
+                let (path, selector) = crate::code::split_reference(relation.target()).ok()?;
+                selector.is_none().then_some(path)
+            })
+            .collect()
+    }
+}
+
+pub fn load_corpus(project: &Project, schema: &Schema) -> Result<Corpus, Error> {
+    let documents = load_documents(project, schema)?;
+    let (code, problems) = crate::CodeIndex::load(project);
+    if let Some(problem) = problems.into_iter().next() {
+        return Err(Error::InvalidProject {
+            path: project.root().join(problem.source.path()),
+            message: problem.message,
+        });
+    }
+    Ok(Corpus { documents, code })
+}

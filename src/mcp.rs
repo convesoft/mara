@@ -1,3 +1,4 @@
+use mara::{FieldValue, ItemCollectionResult, ItemFilterParams};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
     Template, ValidationResult,
@@ -61,8 +62,62 @@ struct SchemaValidateParams {
     options: mara::ValidationOptions,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemFilterToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Exact flavour names, combined with OR and intersected with other filter categories. Omitted or [] selects all flavours.
+    #[serde(default)]
+    flavours: Vec<String>,
+    /// Exact schema-declared custom-field key/value filters; excludes title/MID and typed relations. Key and scalar text value match exactly, without trimming; an empty value matches an empty field value. OR within one key, AND across keys and other filter categories. Omitted or [] adds no restriction.
+    #[serde(default)]
+    fields: Vec<FieldValue>,
+    /// Exact authored relation name or inverse aliases, combined with OR and intersected with other filters. Omitted or [] adds no restriction.
+    #[serde(default)]
+    relations: Vec<String>,
+    /// Exact documents or directory subtrees relative to the project root, combined with OR. No glob expansion, absolute paths, .. or empty/root-only paths; dot components and repeated separators normalize; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
+    #[serde(default)]
+    paths: Vec<PathBuf>,
+    /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid.
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+impl ItemFilterToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, ItemFilterParams) {
+        (
+            self.project,
+            ItemFilterParams {
+                flavours: self.flavours,
+                fields: self.fields,
+                relations: self.relations,
+                paths: self.paths,
+                limit: self.limit,
+                cursor: self.cursor,
+            },
+        )
+    }
+}
+
 #[tool_router]
 impl MaraMcp {
+    #[tool(
+        name = "item_list",
+        description = "List bounded item-summary pages in document-path and source order. Continue with next_cursor and unchanged options; restart after source/schema changes."
+    )]
+    fn item_list(
+        &self,
+        Parameters(params): Parameters<ItemFilterToolParams>,
+    ) -> Result<Json<ItemCollectionResult>, String> {
+        let (project, params) = params.into_parts();
+        self.for_project(project)?.item_list(params).map(Json)
+    }
+
     fn for_project(&self, project: Option<PathBuf>) -> Result<OperationContext, String> {
         self.operations.for_project(project)
     }

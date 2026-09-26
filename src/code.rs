@@ -558,3 +558,62 @@ fn collect<'tree>(
         prefix.pop();
     }
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ReferenceError {
+    Unsupported,
+}
+
+pub(crate) fn split_reference(reference: &str) -> Result<(PathBuf, Option<&str>), ReferenceError> {
+    let rest = reference
+        .strip_prefix("code:")
+        .ok_or(ReferenceError::Unsupported)?;
+    let (path, selector) = rest
+        .split_once("::")
+        .map_or((rest, None), |(p, s)| (p, Some(s)));
+    if path.is_empty()
+        || selector.is_some_and(str::is_empty)
+        || path.contains('\\')
+        || path.chars().any(char::is_whitespace)
+        || path
+            .split('/')
+            .any(|component| component.is_empty() || component == "." || component == "..")
+        || Path::new(path)
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+        || Path::new(path).is_absolute()
+    {
+        return Err(ReferenceError::Unsupported);
+    }
+    Ok((PathBuf::from(path), selector))
+}
+
+impl CodeIndex {
+    pub(crate) fn file_only_bytes(&self, path: &Path) -> Option<Vec<u8>> {
+        let canonical = fs::canonicalize(self.root.join(path)).ok()?;
+        if !canonical.starts_with(&self.root) || !canonical.is_file() {
+            return None;
+        }
+        fs::read(canonical).ok()
+    }
+}
+
+#[cfg(test)]
+mod reference_tests {
+    use super::*;
+    #[test]
+    fn code_references_require_raw_ordinary_path_components() {
+        for reference in [
+            "code:src/./part.rs::run",
+            "code:src//part.rs::run",
+            "code:src/../part.rs::run",
+            "code:src/part.rs/::run",
+        ] {
+            assert_eq!(split_reference(reference), Err(ReferenceError::Unsupported));
+        }
+        assert_eq!(
+            split_reference("code:src/.hidden.rs::run"),
+            Ok((PathBuf::from("src/.hidden.rs"), Some("run")))
+        );
+    }
+}

@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand, ValueEnum, error::ErrorKind};
+use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
+use mara::{FieldValue, ItemCollectionResult, ItemFilterParams, ItemSummary};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
     Template, ValidationOptions, ValidationResult, ValidationTargetKind, project_initialize,
@@ -19,7 +20,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "This rebuild checkpoint supports project initialization, schema inspection and definition validation. Further capabilities are pending their implementation reviews."
+    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation and item listing. Further capabilities are pending their implementation reviews."
 )]
 struct Cli {
     /// Use this project root instead of ancestor discovery; selects the init target or binds MCP.
@@ -34,6 +35,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// List compact item summaries.
+    Item {
+        #[command(subcommand)]
+        command: ItemCommand,
+    },
     /// Initialize a Mara project.
     Project {
         #[command(subcommand)]
@@ -205,6 +211,13 @@ fn run(cli: Cli) -> Result<bool, String> {
         command,
     } = cli;
     match command {
+        Command::Item {
+            command: ItemCommand::List { filters },
+        } => {
+            let result =
+                OperationContext::from_environment(project)?.item_list(filters.into_params())?;
+            emit(format, &result, print_item_collection)?;
+        }
         Command::Mcp => mcp::run(project)?,
         Command::Project {
             command: ProjectCommand::Init { path, template },
@@ -402,4 +415,130 @@ fn print_validation(result: &ValidationResult) -> Result<(), String> {
         eprintln!("evaluation incomplete; diagnostic counts are lower bounds");
     }
     Ok(())
+}
+
+#[derive(Debug, Subcommand)]
+enum ItemCommand {
+    /// List bounded item summaries in document-path and source order.
+    List {
+        #[command(flatten)]
+        filters: ItemFilterArgs,
+    },
+}
+#[derive(Debug, Clone)]
+struct CliField {
+    key: String,
+    value: String,
+}
+
+impl From<CliField> for FieldValue {
+    fn from(value: CliField) -> Self {
+        Self {
+            key: value.key,
+            value: value.value,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct ItemFilterArgs {
+    /// Select exact flavours (repeatable, OR); distinct filter categories combine with AND. Omission selects all flavours.
+    #[arg(long)]
+    flavour: Vec<String>,
+
+    /// Exact schema-declared custom-field KEY=VALUE filter; excludes title/MID and typed relations. Key and scalar text value match exactly, without trimming; KEY= matches an empty value. OR within one key, AND across keys and other filter categories (repeatable). Omission adds no restriction.
+    #[arg(long = "field", value_parser = parse_field)]
+    fields: Vec<CliField>,
+
+    /// Select items with these exact authored outgoing schema relation names (repeatable, OR). Inverse aliases match their canonical declaration. Omission adds no restriction.
+    #[arg(long)]
+    relation: Vec<String>,
+
+    #[arg(
+        long,
+        help = "Select an exact document or directory subtree (project-relative, repeatable OR), e.g. packages/query/docs/; no glob expansion, absolute paths, .. or empty/root-only paths; dot components and repeated separators normalize; omit --path for the whole project"
+    )]
+    path: Vec<PathBuf>,
+
+    #[arg(
+        long,
+        help = "Maximum entries per page: 1 through 100 (default 20); the byte budget may return fewer"
+    )]
+    limit: Option<usize>,
+
+    #[arg(
+        long,
+        help = "Opaque next_cursor from the previous page; keep all other inputs unchanged until has_more is false; omit to start or restart after source/schema changes. Empty strings are invalid"
+    )]
+    cursor: Option<String>,
+}
+
+impl ItemFilterArgs {
+    fn into_params(self) -> ItemFilterParams {
+        ItemFilterParams {
+            flavours: self.flavour,
+            fields: self.fields.into_iter().map(Into::into).collect(),
+            relations: self.relation,
+            paths: self.path,
+            limit: self.limit,
+            cursor: self.cursor,
+        }
+    }
+}
+
+fn parse_field(value: &str) -> Result<CliField, String> {
+    let (key, value) = value
+        .split_once('=')
+        .ok_or_else(|| "field must use KEY=VALUE".to_owned())?;
+    if key.is_empty() {
+        return Err("field key must not be empty".into());
+    }
+    Ok(CliField {
+        key: key.to_owned(),
+        value: value.to_owned(),
+    })
+}
+
+fn print_item_collection(result: &ItemCollectionResult) -> Result<(), String> {
+    for item in &result.items {
+        print_item_summary(item);
+    }
+    print_page_continuation(result.has_more, result.next_cursor.as_deref());
+    Ok(())
+}
+
+fn print_page_continuation(has_more: bool, next_cursor: Option<&str>) {
+    print!("page\thas_more={has_more}");
+    if let Some(cursor) = next_cursor {
+        print!("\tnext_cursor={cursor}");
+    }
+    println!();
+}
+
+fn print_item_summary(item: &ItemSummary) {
+    let title = if item.title_truncated() {
+        format!("{} [title truncated]", item.title())
+    } else {
+        item.title().to_owned()
+    };
+    if let Some(mid) = item.mid() {
+        println!(
+            "{}\t{}\t{}\t{}\t{}:{}",
+            item.id(),
+            mid,
+            item.flavour(),
+            title,
+            item.path().display(),
+            item.line()
+        );
+    } else {
+        println!(
+            "{}\t{}\t{}\t{}:{}",
+            item.id(),
+            item.flavour(),
+            title,
+            item.path().display(),
+            item.line()
+        );
+    }
 }

@@ -205,3 +205,38 @@ test groups now run through the real loader; six focused discovery groups cover
 file selection, bad packs, duplicate extension assignment, read/marker failures,
 symlink confinement and walk failures. Original code contract MIDs are retained;
 the method explicitly leaves endpoint/graph/transport verification pending.
+
+## Composed item-list checkpoint
+
+Both user-approved dependencies now have verified checkpoints. Apply the earlier
+item-list review: restore strict corpus composition, list-only filters/summaries,
+shared operation and CLI/MCP transports. Retain baseline request serialization,
+stateless cursor format, page budgets and errors; omit search ranking, selected-ID
+lookup, excerpts and relation navigation. Restore only ordinary code-reference
+path parsing and confined file-only reads required by cursor fingerprinting;
+exact symbol resolution is still deferred. Their distinct path-component unit
+obligation and binary/outside-file behavior accompany the list checks.
+
+The new independent list requirement/design own the retained listing portion of
+the broader baseline retrieval contracts. When restoring search/get/related,
+reconcile their shared pagination/path facts here instead of duplicating them.
+CLI/MCP path guidance will describe actual baseline normalization: leading/interior
+dot and repeated separators normalize, while empty/root/parent paths are rejected.
+This corrects restrictive help text without changing accepted read behavior.
+
+Completion: real filtered CLI/MCP pages through exhaustion, unchanged source and
+MID absence, invalid/oversized requests, code/adapter/file-only cursor changes and
+fresh-read adapter failure, existing suites and exact-revision evidence. Fixture
+setup remains direct file creation; no mutation capability is imported for tests.
+
+The list suite retains compact human-output, exact/path-filter, complete-page and
+oversized-handle obligations from the pending retrieval suite. Its ten groups
+add CLI/MCP parity throughout, byte-limited Unicode pages, invalid/stale positions,
+code/query/configuration and binary file-only changes, outside-symlink exclusion,
+and strict malformed-source failures. The original reference grammar unit test
+is restored. Pending search/get/related tests and their assertions remain intact.
+
+A read-only candidate/installed-baseline comparison traversed all 56 repository
+items in three pages with identical JSON, including continuation tokens. No
+listing behavior change was needed. The corrected path help describes behavior
+already accepted and tested in the preserved baseline.

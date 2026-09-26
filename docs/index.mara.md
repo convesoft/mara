@@ -11,6 +11,7 @@ dispositions and remaining scope.
 - [Canonical source, document format and item identity](format.mara.md)
 - [Document structure, references and direct navigation](discovery.mara.md)
 - [Code adapters and traceability](code-traceability.mara.md)
+- [Bounded item listing](retrieval.mara.md)
 
 Use the [Mara skill](../skills/mara/SKILL.md) for authoring and the configured
 [schema](../.mara/schema.yaml) for flavours, fields, and relationships.

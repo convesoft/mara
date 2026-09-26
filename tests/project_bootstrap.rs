@@ -661,8 +661,8 @@ fn bootstrap_advertises_only_its_available_operations() {
     for (args, present, absent) in [
         (
             vec!["--help"],
-            vec!["project", "schema", "mcp"],
-            vec!["search", "trace", "item"],
+            vec!["project", "schema", "item", "mcp"],
+            vec!["search", "trace"],
         ),
         (
             vec!["project", "--help"],
@@ -673,6 +673,11 @@ fn bootstrap_advertises_only_its_available_operations() {
             vec!["schema", "--help"],
             vec!["get", "list", "validate"],
             vec![],
+        ),
+        (
+            vec!["item", "--help"],
+            vec!["list"],
+            vec!["get", "create", "validate", "search"],
         ),
     ] {
         let output = mara(fixture.path(), &args);
@@ -712,6 +717,7 @@ fn bootstrap_advertises_only_its_available_operations() {
     assert_eq!(
         names,
         [
+            "item_list",
             "project_init",
             "schema_get",
             "schema_list",
