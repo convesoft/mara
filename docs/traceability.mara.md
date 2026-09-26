@@ -489,54 +489,14 @@ alone cannot establish execution evidence under [[REQ-TRACE-COVERAGE]].
 
 ### MARA-69 evaluation
 
-The pilot uses Rust and the real `REQ-RELATION-CARDINALITY` workflow:
-`src/graph_constraints.rs::evaluate` implements the check, and
-`tests/cli.rs::structural_relation_policies_validate_normalized_edges_through_cli_and_mcp`
-defines a verification. The tested boundary is project-relative Rust files and
-top-level free functions; file-only targets are also supported. The disposable
-resolver in `experiments/mara-69/` parses Rust with `syn` and uses Rust doc
-comments as attached markers:
-
-Run `cargo run --manifest-path experiments/mara-69/Cargo.toml -- .
-code:src/graph_constraints.rs::evaluate` from the repository root to resolve
-the unchanged source.
-
-```rust
-/// @mara implements REQ-RELATION-CARDINALITY
-pub(crate) fn evaluate(/* ... */) { /* ... */ }
-```
-
-The corresponding document-authored candidate is
-`:implemented_by: code:src/graph_constraints.rs::evaluate`, where
-`implemented_by` would be the declared inverse of `implements`. The test marker
-uses `@mara verifies REQ-RELATION-CARDINALITY`. Relation names and endpoint
-permissions must come from the project schema; these example relations are not
-declared for code endpoints in the current self-hosting schema. The candidate
-target notation is `code:<project-relative-path>[::<language-native-symbol>]`.
-
-The experiment read copies of the actual source files with the two doc comments
-inserted. It derived a backlink and comment location from each marker and
-resolved the corresponding `code:` selector to the function name location.
-`code:src/graph_constraints.rs` resolved to the file. Renaming `evaluate` in
-the copy changed the marker-derived backlink to `::evaluate_renamed`; the old
-document-authored selector reported a missing symbol. A missing file reported
-a missing file, and two same-named definitions reported an ambiguous selector.
-These are prototype outputs, not Mara validation diagnostics or editor links.
-
-The pilot does not parse Mara item metadata, validate marker relations against
-the schema, add graph edges, or expose backlinks through CLI/MCP. Its Rust
-resolver does not handle methods, nested modules, trait items, macros, ordinary
-`//` comments, or other languages. The ambiguous-definition fixture is
-syntactically parseable but not valid compiled Rust. No source association
-establishes a passing test result.
-
-**Recommendation:** defer production code links from 0.3. Keep this evaluation
-as evidence for a follow-up contract covering typed code endpoints, schema
-declarations, marker attachment, native symbol resolution, diagnostics,
-navigation, and an adapter boundary proven with another language.
-MARA-71 accepts that follow-up contract in
-[code traceability](code-traceability.mara.md); the recommendation above records
-the pilot's shipping decision at the time of evaluation.
+MARA-69 evaluated Rust source markers with a disposable resolver. It showed
+that markers can yield source locations and backlinks, and that file, symbol,
+rename, and ambiguity cases need explicit resolution behavior. The prototype
+did not integrate with Mara's schema, graph, validation, or CLI/MCP. It was
+removed after MARA-71 established the production, runtime language-adapter
+contract in [code traceability](code-traceability.mara.md). The pilot's
+decision was to defer shipping code links in 0.3. A source association alone
+does not establish a passing test result.
 
 Optional engineering-template lifecycle examples may demonstrate these rules;
 do not silently add required statuses or policy to existing projects. Template

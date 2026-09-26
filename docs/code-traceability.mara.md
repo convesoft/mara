@@ -1,7 +1,6 @@
 # Code traceability
 
-Accepted contract for MARA-71. The [Rust evaluation](traceability.mara.md#code-traceability-pilot)
-is evidence for this design; this document owns production semantics.
+Accepted contract for MARA-71. This document owns production semantics.
 
 :::mara requirement REQ-CODE-TRACEABILITY
 :mid: 01M3EQAFT3DPZ2VF1GWZBX2T6Y
