@@ -9549,6 +9549,49 @@ fn get_rejects_changed_inputs_and_invalid_fragment_cursors() {
 }
 
 #[test]
+fn get_rejects_changed_file_only_code_cursor() {
+    let fixture = retrieval_fixture();
+    let path = fixture.path().join("notes.txt");
+    let original = "A".repeat(120_000);
+    fs::write(&path, &original).unwrap();
+    let first = mara(
+        fixture.path(),
+        &["--format", "json", "get", "code:notes.txt"],
+    );
+    assert!(first.status.success(), "{}", stderr(&first));
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+
+    fs::write(&path, "B".repeat(120_000)).unwrap();
+    let stale = mara(
+        fixture.path(),
+        &["get", "code:notes.txt", "--cursor", cursor],
+    );
+    assert!(!stale.status.success());
+    assert!(stderr(&stale).contains("restart"));
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "get",
+                json!({"reference":"code:notes.txt","cursor":cursor}),
+            ),
+        ],
+    );
+    assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
+
+    fs::write(&path, original).unwrap();
+    let resumed = mara(
+        fixture.path(),
+        &["get", "code:notes.txt", "--cursor", cursor],
+    );
+    assert!(resumed.status.success(), "{}", stderr(&resumed));
+}
+
+#[test]
 fn get_ignores_neighbours_and_fails_on_unpageable_identity() {
     let fixture = retrieval_fixture();
     let title = "🦀\"\\".repeat(300);
@@ -11791,6 +11834,38 @@ fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
     }
     let valid = validation_with_parity(root, &[]);
     assert_eq!(valid["valid"], true, "{valid:#}");
+    let rejected_path = root.join("src/rejected.rs");
+    fs::write(
+        &rejected_path,
+        "// @mara implemented_by_code REQ-A\nfn run() {}\n",
+    )
+    .unwrap();
+    let rejected = validation_with_parity(root, &[]);
+    assert!(
+        rejected["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "relation_invalid"),
+        "{rejected:#}"
+    );
+    let related: Value = serde_json::from_slice(
+        &mara(
+            root,
+            &["--format", "json", "related", "REQ-A", "--limit", "50"],
+        )
+        .stdout,
+    )
+    .unwrap();
+    assert!(
+        related["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|connection| connection["neighbour"]["reference"] != "code:src/rejected.rs::run"),
+        "{related:#}"
+    );
+    fs::remove_file(rejected_path).unwrap();
     let project = resolve_project(Some(root), root).unwrap();
     let loaded_schema = mara::load_schema(&project).unwrap();
     let corpus = mara::load_corpus(&project, &loaded_schema).unwrap();

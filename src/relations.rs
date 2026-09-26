@@ -154,10 +154,10 @@ impl RelationEdge {
                 format!("relation '{name}' does not allow this code/item pair"),
             ));
         }
-        if inverse && definition.inverse.is_none() {
+        if inverse {
             return Err(RelationError::new(
                 "invalid_relation",
-                "inverse alias is not declared",
+                "code source assertions require the canonical relation name",
             ));
         }
         Ok(Self {
@@ -363,16 +363,17 @@ pub(crate) fn resolve_edge(
             .code()
             .resolve(target)
             .map_err(|e| RelationError::new("invalid_endpoint", format!("code target {e:?}")))?;
-        let (_, definition, inverse) = schema.resolve_relation(relation).ok_or_else(|| {
-            RelationError::new("invalid_relation", format!("unknown relation '{relation}'"))
-        })?;
+        let (canonical, definition, inverse) =
+            schema.resolve_relation(relation).ok_or_else(|| {
+                RelationError::new("invalid_relation", format!("unknown relation '{relation}'"))
+            })?;
         if !inverse || !definition.code_source {
             return Err(RelationError::new(
                 "invalid_endpoint",
                 "item-to-code authoring requires the declared inverse alias",
             ));
         }
-        return RelationEdge::code(schema, target, relation, source_item);
+        return RelationEdge::code(schema, target, canonical, source_item);
     }
     let target_item = resolve_item(corpus, target).map_err(|error| {
         RelationError::new("invalid_endpoint", format!("relation target {error}"))

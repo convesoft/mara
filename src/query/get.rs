@@ -221,7 +221,17 @@ pub fn get(
         };
         (node.summary(), item)
     };
-    let fingerprint = fingerprint(corpus, schema, &("discovery-get-v2", reference))?;
+    // Explicit file-only code targets need not be in the discovered language
+    // index. Bind their read content to the cursor as well as corpus sources.
+    let fingerprint = fingerprint(
+        corpus,
+        schema,
+        &(
+            "discovery-get-v2",
+            reference,
+            code.as_ref().map(|resolved| resolved.content.as_str()),
+        ),
+    )?;
     let start = Position::read(cursor, &fingerprint, &item)?;
     let mut next = start;
     let mut result = GetResult {
