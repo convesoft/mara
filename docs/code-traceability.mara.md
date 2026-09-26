@@ -212,3 +212,24 @@ Check native selectors, nested and modifier/wrapper ownership, content spans, co
 
 This method verifies the code-discovery dependency through `CodeIndex::load`, its file projection and asset inventory. It does not establish exact endpoint resolution, semantic relation permission/target validation, navigation, mutation, cursor continuation or CLI/MCP code operations. Existing CLI/MCP tests run as regressions; later item-list verification must prove full corpus composition and code-sensitive continuations.
 :::
+
+:::mara evidence EVD-CODE-DISCOVERY
+:mid: 01M3G02YPBQPFD6G44N5FMVY1K
+:title: Code discovery dependency passes real adapter fixtures
+:status: accepted
+:result: passed
+:captured_at: 2026-09-26T23:16:08Z
+:subject_revision: 44f0f6c74e035dee8b6fa2b535ba2e7aab368ece
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+
+The tested implementation was committed as `44f0f6c74e035dee8b6fa2b535ba2e7aab368ece`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
+
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 82 tests (1 parser unit, 13 code discovery, 31 corpus, 17 bootstrap, 20 schema), none failed or ignored. Seven retained parser groups exercise real Rust/Python/JavaScript/TypeScript Wasm adapters through the loader in isolated projects. Six discovery groups check ordering/ignore/filter independence, bad packs/captures, extension collisions, unreadable-source and marker problems, symlink confinement and walk errors. Source preservation assertions pass. Existing CLI and stdio MCP suites pass as regressions.
+
+Installed full-baseline MCP schema/project validation returned complete and valid with zero diagnostics. Selected intent passed one requirement; realization and verification each passed the requirement and design, consuming every page. These authoring checks use the installed full tool, not candidate graph operations. All dependency versions match the preserved lockfile.
+
+The result covers the independently callable scanner and previously restored dependencies/surfaces. Exact endpoint resolution, semantic code relations, navigation, corpus composition and item listing remain pending; passing coverage matrices do not establish those behaviors.
+:::
