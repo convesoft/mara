@@ -532,6 +532,9 @@ establishes a passing test result.
 as evidence for a follow-up contract covering typed code endpoints, schema
 declarations, marker attachment, native symbol resolution, diagnostics,
 navigation, and an adapter boundary proven with another language.
+MARA-71 accepts that follow-up contract in
+[code traceability](code-traceability.mara.md); the recommendation above records
+the pilot's shipping decision at the time of evaluation.
 
 Optional engineering-template lifecycle examples may demonstrate these rules;
 do not silently add required statuses or policy to existing projects. Template
