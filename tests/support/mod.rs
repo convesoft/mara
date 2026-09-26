@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // Ordinary shared process helpers; each test owns its fixture and assertions.
 use std::{
     io::{BufRead, BufReader, Write},

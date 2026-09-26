@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
-    Template, project_initialize,
+    Template, ValidationOptions, ValidationResult, ValidationTargetKind, project_initialize,
 };
 use serde::Serialize;
 use std::{
@@ -19,7 +19,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "This rebuild checkpoint supports project initialization and schema inspection. Further capabilities are pending their implementation reviews."
+    after_help = "This rebuild checkpoint supports project initialization, schema inspection and definition validation. Further capabilities are pending their implementation reviews."
 )]
 struct Cli {
     /// Use this project root instead of ancestor discovery; selects the init target or binds MCP.
@@ -62,6 +62,15 @@ enum ProjectCommand {
 
 #[derive(Debug, Subcommand)]
 enum SchemaCommand {
+    /// Validate schema declarations and configured YAML rule definitions without evaluating items.
+    Validate {
+        /// Maximum diagnostics per page, 1 through 100; default 20.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Opaque continuation; repeat unchanged options or restart after configuration changes.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
     /// Get the full effective schema or one named flavour/relation declaration, including authoring guidance.
     Get {
         /// Supply KIND and NAME together, or omit both for the complete schema.
@@ -215,6 +224,13 @@ fn run(cli: Cli) -> Result<bool, String> {
             )?;
         }
         Command::Schema {
+            command: SchemaCommand::Validate { limit, cursor },
+        } => {
+            let result = OperationContext::from_environment(project)?
+                .schema_validate_with_options(&ValidationOptions { limit, cursor });
+            return emit_validation(format, result);
+        }
+        Command::Schema {
             command: SchemaCommand::Get { kind, name },
         } => {
             let result = OperationContext::from_environment(project)?
@@ -301,5 +317,89 @@ fn print_yaml(value: &impl Serialize) -> Result<(), String> {
     let source = serde_saphyr::to_string(value)
         .map_err(|error| format!("could not render schema: {error}"))?;
     print!("{source}");
+    Ok(())
+}
+
+fn emit_validation(
+    format: OutputFormat,
+    result: Result<ValidationResult, mara::ValidationError>,
+) -> Result<bool, String> {
+    match result {
+        Ok(result) => {
+            emit(format, &result, print_validation)?;
+            Ok(result.valid)
+        }
+        Err(error) => {
+            if matches!(format, OutputFormat::Json) {
+                write_json(&error.envelope())?;
+            } else {
+                eprintln!("error: {error}");
+            }
+            Ok(false)
+        }
+    }
+}
+
+fn print_validation(result: &ValidationResult) -> Result<(), String> {
+    for diagnostic in &result.diagnostics {
+        let location = diagnostic
+            .location
+            .path
+            .as_ref()
+            .map(|p| {
+                let line = diagnostic
+                    .location
+                    .line
+                    .map(|n| format!(":{n}"))
+                    .unwrap_or_default();
+                format!("{}{line}: ", p.display())
+            })
+            .unwrap_or_default();
+        let code = serde_json::to_value(diagnostic.code).expect("diagnostic code");
+        eprintln!(
+            "{location}{}: {} [{}]",
+            diagnostic.severity,
+            diagnostic.message,
+            code.as_str().unwrap()
+        );
+    }
+    let omitted = result
+        .selection
+        .as_ref()
+        .map_or(0, |s| s.omitted_diagnostics);
+    if omitted > 0 {
+        eprintln!("{omitted} diagnostics outside the selection omitted");
+    }
+    if result.has_more {
+        eprintln!(
+            "more diagnostics; repeat with --cursor {} and unchanged options",
+            result.next_cursor.as_deref().unwrap()
+        );
+    }
+    if result.valid {
+        match result.target.kind {
+            ValidationTargetKind::Project => {
+                println!("valid project at {}", result.project.display())
+            }
+            ValidationTargetKind::Item => {
+                println!("valid item '{}'", result.target.id.as_deref().unwrap())
+            }
+            ValidationTargetKind::Schema => println!(
+                "valid schema at {} ({} flavours, {} relations)",
+                result.path.as_ref().unwrap().display(),
+                result.flavours.flatten().unwrap(),
+                result.relations.flatten().unwrap()
+            ),
+        }
+    } else {
+        let count = result.summary.errors + result.summary.warnings;
+        eprintln!(
+            "error: validation failed with {count} diagnostic{}",
+            if count == 1 { "" } else { "s" }
+        );
+    }
+    if !result.evaluation_complete {
+        eprintln!("evaluation incomplete; diagnostic counts are lower bounds");
+    }
     Ok(())
 }

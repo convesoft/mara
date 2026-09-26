@@ -1,3 +1,4 @@
+mod validation;
 use crate::{
     FlavourDefinition, Project, RelationDefinition, Schema, Template, initialize_project,
     load_schema, resolve_project,
@@ -5,6 +6,9 @@ use crate::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, env, path::PathBuf};
+pub use validation::{
+    ValidationDiagnostic, ValidationResult, ValidationScope, ValidationTargetKind,
+};
 
 #[derive(Debug, Clone)]
 pub struct OperationContext {

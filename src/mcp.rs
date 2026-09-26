@@ -1,6 +1,6 @@
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
-    Template,
+    Template, ValidationResult,
 };
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -52,6 +52,15 @@ struct SchemaListParams {
     kind: SchemaKind,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SchemaValidateParams {
+    /// Absolute project root; omit when this server is bound with --project.
+    project: Option<PathBuf>,
+    #[serde(flatten)]
+    options: mara::ValidationOptions,
+}
+
 #[tool_router]
 impl MaraMcp {
     fn for_project(&self, project: Option<PathBuf>) -> Result<OperationContext, String> {
@@ -95,11 +104,26 @@ impl MaraMcp {
             .schema_list(params.kind)
             .map(Json)
     }
+    #[tool(
+        name = "schema_validate",
+        output_schema = rmcp::handler::server::common::schema_for_type::<ValidationResult>(),
+        description = "Validate schema format 3 without validating item content. Every flavour requires nonblank description, nonempty use_when, avoid_when ([] is valid), and distinguish_from ({} is valid); entries must be nonblank and distinction targets declared. Migrate existing schemas manually in place, preserving declarations and item identities; see https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md. Corpus validation is pending its capability review. Returns validation format 1, with null declaration counts if the schema cannot load. Follow next_cursor with unchanged options; invalid schemas return valid:false without a tool error."
+    )]
+    fn schema_validate(
+        &self,
+        Parameters(params): Parameters<SchemaValidateParams>,
+    ) -> rmcp::model::CallToolResult {
+        validation_result(
+            self.for_project(params.project)
+                .map_err(mara::ValidationError::invalid_argument)
+                .and_then(|context| context.schema_validate_with_options(&params.options)),
+        )
+    }
 }
 
 #[tool_handler(
     name = "mara",
-    instructions = "This rebuild checkpoint provides project_init, schema_get and schema_list. Pass an absolute project path per call, or omit it for execution-directory discovery. When the server starts with --project, omit request-level project selection, including for project_init. Initialization requires an explicit destination only when the server is unbound. Further capabilities await their implementation reviews."
+    instructions = "This rebuild checkpoint provides project_init, schema_get, schema_list and schema_validate. Pass an absolute project path per call, or omit it for execution-directory discovery. When the server starts with --project, omit request-level project selection, including for project_init. Initialization requires an explicit destination only when the server is unbound. Further capabilities await their implementation reviews."
 )]
 impl ServerHandler for MaraMcp {}
 
@@ -120,4 +144,19 @@ pub fn run(selected: Option<PathBuf>) -> Result<(), String> {
             .map_err(|error| format!("MCP server failed: {error}"))?;
         Ok(())
     })
+}
+
+fn validation_result(
+    result: Result<ValidationResult, mara::ValidationError>,
+) -> rmcp::model::CallToolResult {
+    let (value, failed) = match result {
+        Ok(result) => (
+            serde_json::to_value(result).expect("serializable validation result"),
+            false,
+        ),
+        Err(error) => (error.envelope(), true),
+    };
+    let mut response = rmcp::model::CallToolResult::structured(value);
+    response.is_error = Some(failed);
+    response
 }

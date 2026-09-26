@@ -43,9 +43,9 @@ must then omit `project`. Each operation resolves exactly one project.
 :derives_from: SCN-START-STRUCTURED-PROJECT
 :kind: functional
 
-Users and agents can retrieve the complete schema, list flavours or relations,
-retrieve one declaration, and validate `.mara/schema.yaml`. Every flavour and
-relation has a concise description suitable for discovery.
+Users and agents can retrieve the complete effective project schema, list flavours or relations, retrieve one declaration, and validate the configured schema. Every flavour and relation has a concise description suitable for discovery.
+
+Schema validation checks project/schema configuration and configured YAML rule definitions independently of item or code content. Report invalid definitions with stable diagnostics and bounded continuation following [[DES-SCHEMA-VALIDATION]]. Successful definition checking does not establish item conformance.
 :::
 
 :::mara requirement REQ-SURFACE-PARITY
@@ -218,9 +218,9 @@ This is local bootstrap evidence only. Other baseline integration tests and unit
 
 Run `cargo test --locked --test project_bootstrap` against the candidate CLI and real stdio MCP server in disposable projects with isolated Git/configuration state. Check current, named and explicit initialization targets; all three bundled templates; existing-file preservation and conflicting-target rejection; nearest and explicit discovery; and absolute per-call selection versus bound-server override rejection.
 
-Compare complete schema, flavour/relation lists and named declarations through both transports. Inspect configured schema paths and authoring guidance, and reject malformed guidance without rewriting source. Inspect CLI help and MCP tools/list: this bootstrap advertises only project initialization and schema get/list.
+Compare complete schema, flavour/relation lists and named declarations through both transports. Inspect configured schema paths and authoring guidance, and reject malformed guidance without rewriting source. Inspect CLI help and MCP tools/list against the current reviewed capability inventory; unreviewed operations must not be advertised.
 
-This method covers initialization and inspection only. It does not execute schema_validate, project_validate, engineering rules, mutations, retrieval or tracing. Links to schema discovery and the engineering template cover these selected obligations, not full requirement completion. The broader VER-PROJECT-BOOTSTRAP remains a separate method pending restoration.
+This method covers initialization and inspection. Definition validation now has its own method, [[VER-SCHEMA-DEFINITIONS]]. This method does not execute project_validate, engineering rules, mutations, retrieval or tracing. Links to the engineering template cover selected installation obligations, not full requirement completion. The broader VER-PROJECT-BOOTSTRAP remains a separate method pending restoration.
 :::
 
 :::mara evidence EVD-PROJECT-INSPECTION
@@ -239,4 +239,64 @@ Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-
 Installed-baseline MCP, with the absolute worktree selected, reported complete valid schema/project results without errors or warnings. Selected matrices passed two requirement origins, four initialization/discovery/design realizations and two verification definitions, consuming every page. These are authoring-tool checks, not candidate validation or tracing capabilities.
 
 The candidate now has five source files and nine runtime dependencies. Broader methods and historical execution evidence remain preserved; pending test files are neither executed nor claimed as passing. This result does not establish schema validation, engineering rule execution, source/navigation/retrieval, mutation, packaging or whole-product completion.
+:::
+
+:::mara design DES-SCHEMA-RULE-DEFINITIONS
+:mid: 01M3FY8VS6DBKJ78K359ZETS59
+:title: Check the supported YAML rule definition profile
+:status: accepted
+:kind: data
+:satisfies: REQ-SCHEMA-DISCOVERY
+
+Project formats 2/3 may enable `[rules]` with `format_version = 1` and explicit project-relative YAML/YML files. Omitted or empty files means no enabled rules. Sources must resolve to distinct regular files inside the project; no globs, imports or network reads. Read fresh UTF-8 source on each request.
+
+Each file contains one mapping or sequence of shape mappings with string keys and JSON-compatible values. Reject duplicate keys, merge keys, custom tags and invalid aliases. Keep authored YAML locations. Top-level shapes require `id`: `rule:name` expands to `urn:mara:rule:name`; other IDs must be absolute IRIs. Nested anonymous identities are tied to source snapshot and location. Merge compatible repeated named definitions; conflicting single-valued parameters fail, while property/class/targetClass lists combine distinct values. File order is not override precedence.
+
+Generate JSON-LD bindings in memory from declared fields, flavours and canonical relations. Reject authored contexts, raw JSON-LD keys, unsupported keys or parameter types before conversion. Compile with unmodified `shacl`, `rudof_rdf` and `rudof_iri` 0.3.21. This retains the baseline native language boundary; no second constraint evaluator is introduced.
+
+Supported shapes are NodeShape and PropertyShape (the latter requires path). Bind `targetClass`/`class` to declared flavours; property paths are declared field/canonical relation names or `{inversePath: relation}`. Use `field:`/`schema:` qualification for collisions; inverse paths require canonical relations. Support property, node, not, and, or, qualifiedValueShape, min/max and qualified min/max counts, datatype, pattern, hasValue, in, and name/description/message annotations. Datatypes are string/integer/double/boolean. Nonnegative counts must fit the supported integer range; qualified counts require qualifiedValueShape. Validate regular expressions before native compilation.
+
+Literal constraints accept scalars or exactly `{value,datatype}` with matching scalar type; null/containers are invalid. Explicit double literals accept finite numeric values; numeric strings are not converted. Persisted enabled rules reject request-parameter placeholders. Plain scalar RDF typing remains native JSON-LD typing, not coercion from the selected field's schema.
+
+Only enabled NodeShape roots carry targetClass, optional Violation/Warning severity, whenShape or paths. Referenced shapes have no root selection metadata; whenShape names a targetless NodeShape. Validate reusable class-scoped definitions even when unused. Reject unknown references, cycles, shape-reference depth above 32, and relationship depth above eight. Field paths preserve declared datatypes through nested/logical/reused shapes. Reject item-class/path constraints on literals and literal/datatype constraints on relation endpoints. Class constraints narrow internal endpoints; external endpoints are terminal unless narrowed to an internal flavour. Same-flavour relations narrow both traversal directions. No unbounded paths, SPARQL or external code.
+
+These are definition checks only. Successful compilation does not establish applicability, conformance, trace coverage or execution results.
+:::
+
+:::mara design DES-SCHEMA-VALIDATION
+:mid: 01M3FY9S8B1JRX642ASSDKE3SD
+:title: Validate schema and configured rule definitions without reading items
+:status: accepted
+:kind: interface
+:satisfies: REQ-SCHEMA-DISCOVERY
+:satisfies: REQ-FLAVOUR-AUTHORING-GUIDANCE
+:satisfies: REQ-SURFACE-PARITY
+
+`schema validate` and MCP `schema_validate` resolve the selected project, recover independent configuration/declaration errors, and check [[DES-SCHEMA-RULE-DEFINITIONS]]. They do not discover or evaluate item/code content. Reads preserve source. Schema read I/O failures are operation errors; malformed or unsupported configuration returns an invalid, incomplete domain result. Schema get/list retain their separate operation-error behavior.
+
+Return validation `format_version:1`, `project`, `target:{kind:schema}`, `path`, `flavours`, `relations`, `valid`, `evaluation_complete`, `diagnostics`, `summary`, `selection:null`, `has_more` and `next_cursor`. Declaration counts are null when the schema cannot load. Summary contains whole-target errors, warnings and counts_exact; incomplete prerequisites make counts lower bounds. Validity requires complete evaluation and zero errors.
+
+Configuration diagnostics use project_invalid, schema_invalid, format_unsupported or rule_invalid, always error severity. Each carries scope, actionable message and location with available project-relative path, one-based line, UTF-8 byte span and JSON Pointer. External configured schema paths stay absolute. Legacy path/line aliases match location. Preserve authored rule locations through conversion; include the expanded root rule IRI when unambiguous. Classify by code, never message parsing.
+
+Sort by scope, path, byte/line, item MID, rule, obligation source/shape/component, code and message. Limits are 1–100 records (default 20) and 65,536 serialized bytes including envelope/cursor. Compute summary and validity before pagination. Continue with unchanged project, options and accepted configuration/rule bytes; changes or malformed cursors return stale_cursor. Rejected external rule files are not read or hashed. Never silently skip a diagnostic; an indivisible oversized diagnostic returns output_limit.
+
+CLI returns JSON or text diagnostics and exits 0 only for valid results. MCP returns invalid domain results with isError:false. Invalid options, stale continuation, I/O preventing a result and output limits return `{format_version:1,error:{code,message}}`, nonzero CLI status and MCP isError:true. Operation codes are invalid_argument, stale_cursor, io_error and output_limit.
+
+Project/item validation and rule conformance use the same baseline response family but remain separate capabilities.
+:::
+
+:::mara verification VER-SCHEMA-DEFINITIONS
+:mid: 01M3FY9WNH3D1NC2F7VKFMBR93
+:title: Check schema definitions and continuation through real CLI and MCP
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-SCHEMA-DISCOVERY
+:verifies: REQ-FLAVOUR-AUTHORING-GUIDANCE
+:verifies: DES-SCHEMA-VALIDATION
+:verifies: DES-SCHEMA-RULE-DEFINITIONS
+
+Run `cargo test --locked --test schema_validation` against the candidate CLI and real stdio MCP server in isolated temporary projects. Verify all bundled schemas/rule definitions; invalid schema vocabulary, structural names and guidance; configuration recovery, stable codes and authored locations; reusable and nested definition type checks; unsupported grammar, recursion and depth boundaries; and valid counterparts.
+
+Require identical domain envelopes and operation-error classifications across transports. Check full counts across pages, deterministic continuation, stale source/options, rejected outside rule sources, invalid limits/cursors, schema read errors and oversized diagnostics. Verify schema validation preserves source and succeeds despite unreadable corpus content. Review CLI help and tools/list for the added operation. These checks do not evaluate item conformance or establish graph/matrix behavior.
 :::

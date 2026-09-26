@@ -14,8 +14,8 @@ linked capability documents rather than in this inventory.
 | Creation, update, move, rename, deletion and recovery | Pending: mutation contracts and reference preservation; CLI and mutation-reference tests. |
 | Item and narrative discovery, search, navigation and bounded reads | Retain Markdown structure, references, source handles and direct navigation under [discovery contracts](discovery.mara.md), with 10 discovery, 5 handle, 13 reference and 3 real CLI/MCP navigation tests. Retain distinct heading-scope, anchor, source-span, process-restart, stale-handle, provenance, namespace and continuation obligations. Fixtures now own Git/configuration and child working directories; named self-host checks are read-only. Broken-reference diagnostics assert stable codes, severity and CLI/MCP parity. Handle and summary meaning now belongs to the structural design; the pending unified-retrieval design must link to it instead of repeating it. Full search ranking, filters, get/list/related continuation and response-bound suites remain pending. |
 | Typed relations, aliases, symmetry, inline assertions and external targets | Pending: relation contracts; semantic-edge identity, occurrence inspection, mutation, and terminal external-target tests. |
-| Validation, diagnostics and structural graph policies | Pending: independent diagnostics, recovery, reporting filters, graph constraints, and CLI/MCP parity tests. |
-| YAML rules and native evaluation | Pending: rule grammar, applicability, bounded paths, evaluation prerequisites, and rule tests. |
+| Validation, diagnostics and structural graph policies | Retain schema-only configuration recovery, format-1 diagnostics, output bounds and continuation under the schema definition review below. Project/item validation, reporting filters and graph evaluation remain pending. |
+| YAML rules and native evaluation | Retain the reviewed definition loader, vocabulary/type checks, finite definition paths and native compilation for schema validation. Applicability, item projection, native evaluation and matrices remain pending. |
 | Matrices, parameter binding and pagination | Pending: selected coverage, explanations, revision parameters, bounds, and matrix tests. |
 | Code endpoints, comment markers and language adapters | Pending: endpoint resolution and navigation; real code checks and isolated multi-language fixtures. |
 | CLI/MCP interfaces and project context | Retain project context and bootstrap transport/parity behavior. Full command help, tool schemas, and remaining operation parity tests are pending. |
@@ -79,3 +79,30 @@ of their distinct obligations has been dismissed as redundant or obsolete.
 The old cardinality code association is pending its contract review; new links
 identify the reviewed initialization and schema paths. Missing coverage remains
 visible in selected-scope matrices.
+
+## Schema definition validation review
+
+Selected increment: `schema validate` / `schema_validate`, including configured
+YAML definition checking but excluding corpus conformance. Required dependencies
+are existing configuration recovery, format-1 diagnostics and pagination, and the
+baseline YAML binding/type checker plus pinned native SHACL compiler. No corpus,
+code scanner, mutation, rule evaluation, discovery or matrix module is restored.
+
+| Area | Decision and obligation |
+|---|---|
+| Configuration recovery | Retain independent project/schema diagnostics, available coordinates and null counts when the schema cannot load. Invalid prerequisites produce incomplete results; read failures remain operation errors. |
+| Rule loading | Retain project-relative YAML/YML checks, canonical inside-project file checks, duplicate-source rejection, UTF-8 parsing and authored spans. Hash only accepted sources; rejected outside files must not influence cursors. Loading does not execute a rule or access authored network targets. |
+| Binding/compiler | Retain supported-key rejection before JSON-LD, declared vocabulary/type/endpoint checks, named and anonymous definitions, consistent multi-file merges, cycle/depth checks and native compilation at registry 0.3.21. Omit the evaluation adapter and request-check/parameter APIs until their capabilities. Move only the existing root-path syntax predicate out of the absent query module; preserve its behavior. |
+| Envelope/continuation | Retain common format-1 fields and stable codes as protocol data, deterministic ordering, whole-result summary, 1–100/default-20 count and 65,536-byte bounds, source/options cursor identity, and explicit oversized-record failure. Extract the schema-only branch without stubbing item/project validation. |
+| Surfaces | Share the schema operation; retain CLI status/text/JSON and MCP successful invalid-result versus operation-error semantics. Add only schema_validate to MCP. |
+| Test obligations | Restore schema declaration rejection and guidance cases; typed configuration/error envelopes; schema I/O failure; rule-source confinement and stale continuation; reusable-shape, endpoint and nested field-type compatibility. Keep valid definition counterparts. Retain mixed evaluation tests in the baseline for later restoration; declaration success never substitutes for item conformance. Add focused schema pagination/oversized-diagnostic and no-corpus-read checks. |
+
+Completion requires these checks through real CLI and stdio MCP, canonical
+knowledge validation, selected traceability, and exact-revision evidence.
+
+The schema-specific interface and definition rules now have independent design
+items in project contracts. The pending broader rule grammar and diagnostic
+designs must link to them when restored, preserving their original identities
+for remaining evaluation/projection meaning instead of duplicating these facts.
+The native compiler and all transitive versions match the preserved checkpoint
+lockfile; no dependency upgrade is part of this slice.

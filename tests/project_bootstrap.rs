@@ -671,8 +671,8 @@ fn bootstrap_advertises_only_its_available_operations() {
         ),
         (
             vec!["schema", "--help"],
-            vec!["get", "list"],
-            vec!["validate"],
+            vec!["get", "list", "validate"],
+            vec![],
         ),
     ] {
         let output = mara(fixture.path(), &args);
@@ -709,5 +709,13 @@ fn bootstrap_advertises_only_its_available_operations() {
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
     names.sort();
-    assert_eq!(names, ["project_init", "schema_get", "schema_list"]);
+    assert_eq!(
+        names,
+        [
+            "project_init",
+            "schema_get",
+            "schema_list",
+            "schema_validate"
+        ]
+    );
 }

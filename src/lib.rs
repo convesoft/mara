@@ -12,10 +12,15 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 mod diagnostics;
 mod operations;
-pub use diagnostics::{ConfigurationDiagnostic, DiagnosticCode, Severity};
+mod rules;
+pub use diagnostics::{
+    ConfigurationDiagnostic, DiagnosticCode, DiagnosticItem, DiagnosticLocation,
+    DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
+};
 pub use operations::{
     DeclarationSummary, OperationContext, ProjectInitializationResult, ProjectSummary,
-    SchemaGetResult, SchemaKind, SchemaListResult, project_initialize,
+    SchemaGetResult, SchemaKind, SchemaListResult, ValidationDiagnostic, ValidationResult,
+    ValidationScope, ValidationTargetKind, project_initialize,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";
