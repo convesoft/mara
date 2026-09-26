@@ -329,11 +329,17 @@ impl CodeIndex {
             return Err(ResolveError::Unsupported);
         }
         let Some(selector) = selector else {
-            let content = fs::read_to_string(&absolute).map_err(|_| ResolveError::Unsupported)?;
-            let lines = line_starts(&content);
+            let content = fs::read(&absolute)
+                .map_err(|_| ResolveError::Unsupported)
+                .map(|bytes| String::from_utf8(bytes).ok())?;
+            let lines = content
+                .as_deref()
+                .map(line_starts)
+                .unwrap_or_else(|| vec![0]);
+            let length = content.as_ref().map_or(0, String::len);
             return Ok(CodeResolved {
                 reference: reference.to_owned(),
-                source: location(&path, &lines, 0, content.len()),
+                source: location(&path, &lines, 0, length),
                 content,
                 symbol: None,
             });
@@ -350,9 +356,10 @@ impl CodeIndex {
         Ok(CodeResolved {
             reference: reference.to_owned(),
             source: symbol.source.clone(),
-            content: file.source
-                [symbol.content.span().start_byte()..symbol.content.span().end_byte()]
-                .to_owned(),
+            content: Some(
+                file.source[symbol.content.span().start_byte()..symbol.content.span().end_byte()]
+                    .to_owned(),
+            ),
             symbol: Some(symbol.selector.clone()),
         })
     }
@@ -361,7 +368,7 @@ impl CodeIndex {
 pub(crate) struct CodeResolved {
     pub reference: String,
     pub source: SourceLocation,
-    pub content: String,
+    pub content: Option<String>,
     pub symbol: Option<String>,
 }
 

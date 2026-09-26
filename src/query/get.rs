@@ -191,10 +191,13 @@ pub fn get(
         None
     };
     let (summary, item) = if let Some(code) = &code {
+        let content = code.content.as_deref().ok_or_else(|| {
+            page_error("code file is not UTF-8 text; get cannot read its content")
+        })?;
         (
             code.summary(),
             ReadContent {
-                content: &code.content,
+                content,
                 metadata: &[],
             },
         )
@@ -229,7 +232,8 @@ pub fn get(
         &(
             "discovery-get-v2",
             reference,
-            code.as_ref().map(|resolved| resolved.content.as_str()),
+            code.as_ref()
+                .and_then(|resolved| resolved.content.as_deref()),
         ),
     )?;
     let start = Position::read(cursor, &fingerprint, &item)?;

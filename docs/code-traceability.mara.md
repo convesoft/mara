@@ -167,8 +167,10 @@ one edge, while retaining both locations.
 `related` accepts an item reference or `code:` reference and returns direct
 code/item neighbours, canonical edges, direction, occurrence count, and
 navigable source locations. `get` accepts the returned code reference and
-reads the current file or symbol source in bounded pages. Relation inspection
-shows both marker and item-authored occurrences. CLI and MCP expose the same
+reads UTF-8 file or symbol source in bounded pages; a binary file-only target
+still resolves as a relation endpoint but `get` reports that its content is
+not readable as text. Relation inspection shows both marker and item-authored
+occurrences. CLI and MCP expose the same
 results and diagnostics. Item detail summaries expose an item-authored inverse
 target as `code_reference`; this is the exact `code:` reference and has no
 item MID or item summary. Code files are discovered locally under the project

@@ -11728,6 +11728,114 @@ fn relationship_alias_filters_initial_edges_and_identity_edits_preserve_occurren
 }
 
 #[test]
+fn file_only_code_links_accept_binary_targets_and_invalidate_related_cursors() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(
+        mara(root, &["project", "init", "--template", "engineering"])
+            .status
+            .success()
+    );
+    let config_path = root.join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    fs::write(
+        &config_path,
+        config.replacen("format_version = 1", "format_version = 3", 1),
+    )
+    .unwrap();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema = fs::read_to_string(&schema_path).unwrap();
+    schema.push_str("  code_implements:\n    description: Code implements a requirement.\n    source: []\n    target: [requirement]\n    code_source: true\n    inverse: implemented_by_code\n");
+    fs::write(&schema_path, schema).unwrap();
+    let item_path = root.join("req.mara.md");
+    fs::write(&item_path, ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:implemented_by_code: code:a.txt\n:implemented_by_code: code:b.txt\n:implemented_by_code: code:c.txt\n\nA.\n:::\n").unwrap();
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        fs::write(root.join(name), name).unwrap();
+    }
+    let first: Value = serde_json::from_slice(
+        &mara(
+            root,
+            &[
+                "--format",
+                "json",
+                "related",
+                "REQ-A",
+                "--relation",
+                "code_implements",
+                "--limit",
+                "1",
+            ],
+        )
+        .stdout,
+    )
+    .unwrap();
+    assert_eq!(
+        first["connections"][0]["neighbour"]["reference"],
+        "code:a.txt"
+    );
+    let cursor = first["next_cursor"].as_str().unwrap();
+    fs::remove_file(root.join("a.txt")).unwrap();
+    let stale = mara(
+        root,
+        &[
+            "related",
+            "REQ-A",
+            "--relation",
+            "code_implements",
+            "--limit",
+            "1",
+            "--cursor",
+            cursor,
+        ],
+    );
+    assert!(!stale.status.success());
+    assert!(stderr(&stale).contains("restart"), "{}", stderr(&stale));
+
+    fs::write(root.join("a.txt"), "a").unwrap();
+    fs::write(root.join("blob.bin"), [0xff, 0xfe, 0x00]).unwrap();
+    let item = fs::read_to_string(&item_path).unwrap();
+    fs::write(
+        &item_path,
+        item.replace(
+            ":implemented_by_code: code:c.txt\n",
+            ":implemented_by_code: code:c.txt\n:implemented_by_code: code:blob.bin\n",
+        ),
+    )
+    .unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let related: Value = serde_json::from_slice(
+        &mara(
+            root,
+            &[
+                "--format",
+                "json",
+                "related",
+                "REQ-A",
+                "--relation",
+                "code_implements",
+            ],
+        )
+        .stdout,
+    )
+    .unwrap();
+    assert!(
+        related["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["neighbour"]["reference"] == "code:blob.bin")
+    );
+    let backlink: Value = serde_json::from_slice(
+        &mara(root, &["--format", "json", "related", "code:blob.bin"]).stdout,
+    )
+    .unwrap();
+    assert_eq!(backlink["connections"][0]["neighbour"]["id"], "REQ-A");
+    let get = mara(root, &["get", "code:blob.bin"]);
+    assert!(!get.status.success());
+    assert!(stderr(&get).contains("not UTF-8 text"), "{}", stderr(&get));
+}
+
+#[test]
 fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
