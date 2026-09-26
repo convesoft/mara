@@ -9,6 +9,7 @@ use crate::{DocumentReference, ReferenceKind, corpus::diagnostic};
 type Anchors = BTreeMap<(PathBuf, String), Vec<(NodeIndex, SourceLocation)>>;
 
 impl<'corpus> DiscoveryGraph<'corpus> {
+    // @mara implements DES-DOCUMENT-STRUCTURE
     pub(super) fn add_references(&mut self, corpus: &'corpus Corpus) {
         let mut anchors: Anchors = BTreeMap::new();
         let mut generated: BTreeMap<PathBuf, BTreeSet<String>> = BTreeMap::new();

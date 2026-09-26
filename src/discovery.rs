@@ -81,6 +81,7 @@ pub struct DiscoveryConnection<'graph, 'corpus> {
 }
 
 impl<'corpus> DiscoveryGraph<'corpus> {
+    // @mara implements DES-DOCUMENT-STRUCTURE
     pub(crate) fn new(corpus: &'corpus Corpus) -> Self {
         let mut result = Self {
             graph: DiGraph::new(),
@@ -291,6 +292,7 @@ impl<'graph, 'corpus> DiscoveryNode<'graph, 'corpus> {
 
     /// Only immediate connections. Incoming containment is the reverse view
     /// of the stored parent-to-child edge, never a separately authored edge.
+    // @mara implements REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
     pub fn connections(
         self,
         direction: RelationDirection,

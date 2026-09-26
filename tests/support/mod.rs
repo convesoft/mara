@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 // Ordinary shared process helpers; each test owns its fixture and assertions.
 use std::{
+    fs,
     io::{BufRead, BufReader, Write},
     path::Path,
     process::{Command, Stdio},
@@ -173,4 +174,32 @@ pub fn mcp_response(responses: &[Value], id: u64) -> &Value {
 
 pub fn stdout(output: &std::process::Output) -> String {
     String::from_utf8(output.stdout.clone()).expect("stdout is UTF-8")
+}
+
+pub fn retrieval_fixture() -> TempDir {
+    let fixture = fixture();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let schema_file = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_file).unwrap();
+    fs::write(
+        &schema_file,
+        schema.replace(
+            "    id_prefix: REQ-\n    body: required\n    fields: {}",
+            "    id_prefix: REQ-\n    body: required\n    fields:\n      status:\n        type: enum\n        values: [draft, accepted]",
+        ),
+    )
+    .unwrap();
+    fs::create_dir(fixture.path().join("docs")).unwrap();
+    fs::write(
+        fixture.path().join("docs/a.mara.md"),
+        ":::mara scenario SCN-BASE\n:title: Base scenario\n\nBase workflow.\n:::\n\n:::mara requirement REQ-ALPHA\n:title: Alpha requirement\n:status: draft\n:derives_from: SCN-BASE\n\nNeed searchable Zebra knowledge.\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("docs/b.mara.md"),
+        ":::mara requirement REQ-BETA\n:title: Beta requirement\n:status: accepted\n:derives_from: SCN-BASE\n\nSecond requirement body.\n:::\n\n:::mara design DES-ALPHA\n:title: Alpha design\n:satisfies: REQ-ALPHA\n\nDesign body.\n:::\n\n:::mara scenario SCN-GERMAN\n:title: Straße\n\nGerman title.\n:::\n",
+    )
+    .unwrap();
+    fixture
 }

@@ -53,6 +53,7 @@ pub struct DiscoveryNodeSummary {
 }
 
 impl DiscoveryGraph<'_> {
+    // @mara implements DES-DOCUMENT-STRUCTURE
     pub(super) fn index_references(&mut self, corpus: &Corpus) {
         let revisions = corpus
             .documents()

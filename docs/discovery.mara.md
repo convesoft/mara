@@ -1,0 +1,170 @@
+# Document structure and direct navigation
+
+Items, narrative, sections and documents share one disposable source-backed
+graph. These contracts own structure, references and node handles. Search ranking
+and full retrieval bounds are a separate capability under review.
+
+:::mara requirement REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
+:mid: 01M232S32V718GRMEHSBPY46CQ
+:title: Explore direct connections from items and narrative Markdown blocks
+:status: accepted
+:kind: functional
+:derives_from: SCN-READ-DOCUMENT-CONTEXT
+
+From an item, section or Markdown block returned by search, an actor can inspect
+direct outgoing and incoming connections through CLI `related` or MCP `related`.
+Return connection kind, direction, neighbour and source evidence. Preserve
+parallel mention occurrences and distinguish mentions, authored schema relations
+and structural containment. Narrative acquires neither a flavour nor neighbouring
+items' metadata or relations.
+
+Expose direct parent/child membership so actors can select sibling context through
+successive calls. Each call is bounded with explicit continuation; it must not
+expand another hop, assemble a path, or claim a complete trace. There is no `hops`
+parameter. A returned reference can be passed to `get` or another `related` call.
+
+Use `schema:` and `builtin:` to disambiguate relation names. Reject ambiguous
+unqualified filters based on the schema vocabulary, even when the selected node
+has no conflicting edges. Namespace qualification does not create a new edge.
+:::
+
+:::mara design DES-DOCUMENT-STRUCTURE
+:mid: 01M234WMS5522HC5HDV42NG886
+:title: Retain Markdown item containers and navigable section structure
+:status: accepted
+:kind: structure
+:satisfies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
+
+## Markdown projection
+
+The parser adapter retains Mara items as containers with ordinary Markdown body
+children under [[DES-DOCUMENT-FORMAT]]. Delimiter and mention recognition uses
+whole-document Markdown context before container parsing; narrative and valid
+item bodies share reference definitions, regardless of definition placement.
+Heading scopes remain local to their item or Markdown container.
+
+`Document::blocks()` and `Item::body_blocks()` expose Mara-owned blocks, including
+GFM tables. Preserve nested children, heading levels, original source and UTF-8
+byte spans. Table rows cover authored lines; cell spans exclude surrounding
+separators/whitespace; padded cells have empty spans at the row content end. The
+table owns its separator row. Bound containers at siblings and scope ends,
+including the final line without a newline. Omit escaping children rather than
+assigning neighbouring bytes or truncating an escaping table to fit. Invalid
+metadata or incomplete item structure exposes no body blocks during recovery.
+
+## Sections and graph
+
+A heading opens a section ending before the next heading of the same or higher
+importance, or at its scope's end. Lower headings open subsections; skipped
+levels create no invented parents. Item headings cannot close outer sections.
+Content before a heading belongs directly to its enclosing document or block.
+Section extent includes its content; the original heading retains its own span.
+Heading text decodes escapes and named/numeric entities once in ordinary text;
+inline code remains literal. Retain decoded-text offsets into original Markdown.
+
+`Corpus::discovery()` builds a disposable petgraph graph in document-path and
+structural source order. Borrowed nodes expose kind, source, parent, children and
+directional connections; graph indexes never escape. `contains` joins direct
+parent to child; `contained_by` is its reverse view, with the same provenance.
+Structure is distinct from schema relations, needs no authored identity and
+implies no semantic dependency. Sibling navigation requires a parent call then a
+children call. No recursive or automatic sibling edges are added.
+
+Link sources belong to their owning item, otherwise their outermost ordinary
+Markdown container. Destinations remain precise sections or blocks even inside
+items. `Document::references()` retains parsed mentions, link destinations and
+anchor declarations with exact locations, including unresolved references.
+
+## Links and anchors
+
+Bare item mentions resolve exact human IDs or MIDs. Markdown links without a
+fragment resolve to documents; fragments resolve to sections or explicit anchors.
+Resolve relative paths from the linking document, including `.` and `..`; a
+leading slash selects a project-relative path. Decode path and fragment URL
+escapes once. URI schemes, network-path URLs and links to non-Mara assets remain
+source content without graph destinations or network reads.
+
+Generated heading anchors lowercase decoded text, replace spaces with hyphens,
+remove punctuation except hyphen/underscore, and retain letters, numbers and
+combining marks. Allocate duplicate suffixes `-1`, `-2`, etc. across the whole
+document, including item headings; already allocated names remain reserved.
+Explicit anchors accept `<a name="value"></a>` with either quote style. Inline
+anchors target the containing discovery block. A standalone anchor immediately
+before a heading targets its section; before another block it targets that block.
+Do not attach across item/container boundaries or a section end. In a shared
+HTML block, placement is assessed for each declaration, not the whole block.
+
+Resolved references produce `mentions` and derived backlinks carrying the same
+source span. Ambiguous anchors and broken internal destinations produce
+`reference_unresolved` errors and no resolved edge; source remains unchanged.
+Mentions take precedence over Markdown reference definitions. Code, raw contexts
+and escaped reference openings remain inert under [[DES-DOCUMENT-FORMAT]].
+
+## Reusable references and summaries
+
+An item reference is its MID; exact human IDs also resolve. Recovery items lacking
+a MID remain addressable by ID while validation reports the defect. Other nodes
+use opaque versioned handles derived from project-relative document path, current
+source hash, kind and byte span. They survive process restarts and unrelated
+document edits; any edit or move of their containing document invalidates them.
+Stale or malformed handles fail with a rediscovery instruction. Git commits and
+process-local graph indexes do not participate. Source-identical structural nodes
+such as padded empty cells may share a handle.
+
+The shared summary contains `reference`, `kind`, exact `source`,
+`title_truncated`, and `context` references to the direct parent and nearest
+enclosing section when present. Item summaries add ID/MID/flavour and title;
+sections add title/heading level; blocks add block kind. Omit inapplicable fields.
+Only titles truncate, at 256 Unicode scalars. Do not truncate identities, paths,
+locations or context references. Pagination must fail rather than silently omit
+a node whose mandatory summary cannot fit the response budget.
+
+Item mutations must preserve the identity target of untouched surviving links.
+Rename rewrites supported item-ID mentions in narrative; incoming references
+block unsafe deletion. The full candidate-graph preflight and Markdown-link
+retargeting obligations remain assigned to the mutation capability review.
+:::
+
+:::mara decision ADR-PETGRAPH-DISCOVERY
+:mid: 01M2335G69NFYNP2J5BBBEGFYY
+:title: Use petgraph for the private discovery graph
+:status: accepted
+:justifies: DES-DOCUMENT-STRUCTURE
+
+Use petgraph's directed node/edge storage and directional iteration for shared
+adjacency across items, narrative, sections and documents. Parallel connection
+kinds and backlinks are immediate needs; a custom adjacency implementation would
+duplicate them. Mara owns identity, reference resolution, connection meaning,
+source provenance, deterministic ordering and pagination. Keep graph indexes
+private and adapt results to Mara-owned values; persist no graph store.
+This choice claims neither a measured speedup nor improved text-search relevance.
+:::
+
+:::mara decision ADR-MARKDOWN-STRUCTURAL-DISCOVERY
+:mid: 01M234WMSE4STR6JPWZYHGQC1R
+:title: Build discovery on Markdown containers and visible structural context
+:status: accepted
+:justifies: DES-DOCUMENT-STRUCTURE
+
+Treat Mara as a Markdown extension with real item containers and derived section
+hierarchy. Interleaved prose and items need visible parentage so actors can select
+surrounding context without inventing authored section IDs or CRUD operations.
+Keep search matches inside an item owned by that item while retaining precise
+source locations and destinations within it. The `:::` grammar is Mara-owned,
+not a CommonMark standard; this decision preserves the established item syntax.
+:::
+
+:::mara verification VER-DOCUMENT-NAVIGATION
+:mid: 01M3FWZWMH99GSRHKJ08RF1SZQ
+:title: Check document structure, references and direct navigation
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
+:verifies: DES-DOCUMENT-STRUCTURE
+:validates: SCN-READ-DOCUMENT-CONTEXT
+
+Run `cargo test --locked --test discovery --test discovery_handles --test references --test navigation` against the candidate. Structure checks cover local heading scopes, interleaved content, Markdown containers, Unicode/CRLF/EOF spans, shared reference definitions and deterministic read-only self-hosting. Reference checks cover exact forward/backlink evidence, relative links, generated and explicit anchors, ambiguity, inert contexts and source preservation. Handle checks cover bounded summaries, process restarts, unrelated edits, stale documents and stable item identities through real CLI edits.
+
+The real CLI/stdin-stdout MCP workflow searches narrative, pages its direct references, follows an item relation, reads the destination and navigates parent/children. Compare transport responses, retain each occurrence and source span, reject namespace ambiguity and removed interfaces, and reject an oversized mandatory summary without omission. Pass only when all assertions succeed; library projections alone do not establish this workflow. Full search ranking, retrieval pagination and mutation preflight suites remain separate obligations.
+:::

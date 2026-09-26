@@ -175,13 +175,9 @@ versions remain independent from the Mara application version.
 :status: accepted
 :justifies: DES-DOCUMENT-FORMAT
 
-Use Rushdown custom block and inline extensions to recognize Mara structures
-with Markdown-aware code and raw-context handling and exact source spans. A
-private adapter converts the Rushdown result immediately into Mara-owned values,
-containing third-party AST and parser API churn behind that boundary.
+Use Rushdown custom block and inline extensions to recognize Mara structures with Markdown-aware code and raw-context handling and exact source spans. A private adapter converts the Rushdown result immediately into Mara-owned values, containing third-party AST and parser API churn behind that boundary.
 
-This does not add the explicitly deferred complete Markdown AST to the alpha
-contract.
+Mara-owned source and block projections form the public contract under [[DES-DOCUMENT-FORMAT]] and [[DES-DOCUMENT-STRUCTURE]]; the parser AST remains private.
 :::
 
 :::mara verification VER-SOURCE-AND-IDENTITY
