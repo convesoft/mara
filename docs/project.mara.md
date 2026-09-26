@@ -300,3 +300,22 @@ Run `cargo test --locked --test schema_validation` against the candidate CLI and
 
 Require identical domain envelopes and operation-error classifications across transports. Check full counts across pages, deterministic continuation, stale source/options, rejected outside rule sources, invalid limits/cursors, schema read errors and oversized diagnostics. Verify schema validation preserves source and succeeds despite unreadable corpus content. Review CLI help and tools/list for the added operation. These checks do not evaluate item conformance or establish graph/matrix behavior.
 :::
+
+:::mara evidence EVD-SCHEMA-DEFINITIONS
+:mid: 01M3FYFB45V90SGGMSNXXNSTA5
+:title: Schema definition validation passes through CLI and MCP
+:status: accepted
+:result: passed
+:captured_at: 2026-09-26T22:47:49Z
+:subject_revision: 0aed5b44268ca1f3c22cdc0869301f848bd6f12c
+:evidences: VER-SCHEMA-DEFINITIONS
+:evidences: VER-PROJECT-INSPECTION
+
+The tested worktree was committed unchanged as `0aed5b44268ca1f3c22cdc0869301f848bd6f12c`; Git reported a clean tree before adding this evidence. Linux x86_64, Rust 1.97.1; candidate `/tmp/mara72-target/debug/mara`. Build settings: `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
+
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 17 bootstrap and 20 schema-validation integration tests, none failed or ignored. Real CLI/stdin MCP processes verified schema/rule definitions, guidance and declaration errors, typed diagnostics, file preservation, no corpus reads, complete counts across pages, stale continuation, invalid arguments, schema I/O errors, output bounds, definition merges and shape/relationship depth limits. Native dependency versions match the preserved checkpoint; no upgrade is included.
+
+Candidate CLI schema validation of the explicit real repository returned valid:true, evaluation_complete:true, 11 flavours, 18 relations, and no diagnostics. Installed-baseline MCP project validation reported complete validity with no errors or warnings. Its selected matrices passed one schema requirement origin, three requirement/design realizations and three verification definitions, consuming every page. Those corpus/trace checks use the installed authoring tool, not candidate project validation or tracing.
+
+The active candidate adds only schema_validate to the prior three MCP tools and schema validate to the CLI. Rule applicability/evaluation, source loading, graph policies, mutations, retrieval, matrices and packaging remain outside this checkpoint. This evidence establishes definition checking and bootstrap regression coverage, not full rebuild completion.
+:::
