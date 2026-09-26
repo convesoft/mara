@@ -1,3 +1,5 @@
+# Standalone rule-engine example with a custom status/owner schema.
+# The bundled engineering profile lives in templates/engineering-rules.yaml.
 - id: rule:approved_requirement
   type: NodeShape
   targetClass: requirement

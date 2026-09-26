@@ -812,9 +812,16 @@ fn format_two_templates_initialize_and_inspect_equally_through_cli_and_mcp() {
         );
         for root in [&cli_root, &mcp_root] {
             assert_eq!(fs::read_dir(root).unwrap().count(), 1);
-            assert_eq!(fs::read_dir(root.join(".mara")).unwrap().count(), 2);
+            assert_eq!(
+                fs::read_dir(root.join(".mara")).unwrap().count(),
+                if template == "engineering" { 4 } else { 2 }
+            );
             let config = fs::read_to_string(root.join(".mara/project.toml")).unwrap();
-            assert!(config.contains("format_version = 1"));
+            assert!(config.starts_with(if template == "engineering" {
+                "format_version = 2"
+            } else {
+                "format_version = 1"
+            }));
         }
     }
 }
@@ -838,7 +845,7 @@ fn engineering_workflow_creates_connects_and_retrieves_through_cli_and_mcp() {
         ("VER-LOGIN", "verifies", "REQ-ACCESS"),
         ("VER-LOGIN", "validates", "GOAL-ACCESS"),
         ("EVD-LOGIN", "evidences", "VER-LOGIN"),
-        ("ART-AUTH", "implements", "DES-AUTH"),
+        ("ART-AUTH", "realizes", "DES-AUTH"),
         ("RISK-LOCKOUT", "affects", "ACT-USER"),
         ("ADR-AUTH", "mitigates", "RISK-LOCKOUT"),
         ("DES-AUTH", "satisfies", "REQ-ACCESS"),
@@ -877,7 +884,8 @@ fn engineering_workflow_creates_connects_and_retrieves_through_cli_and_mcp() {
                     "item_create",
                     json!({
                         "flavour":flavour,"id":id,"file":"knowledge.mara.md",
-                        "title":id,"body":"Durable engineering knowledge for this workflow."
+                        "title":id,"body":"Durable engineering knowledge for this workflow.",
+                        "fields":[{"key":"status","value":"draft"}]
                     }),
                 );
                 assert_eq!(result["isError"], false, "{result}");
@@ -895,6 +903,8 @@ fn engineering_workflow_creates_connects_and_retrieves_through_cli_and_mcp() {
                         id,
                         "--body",
                         "Durable engineering knowledge for this workflow.",
+                        "--field",
+                        "status=draft",
                     ],
                 );
                 assert!(result.status.success(), "{}", stderr(&result));
@@ -980,6 +990,208 @@ fn engineering_workflow_creates_connects_and_retrieves_through_cli_and_mcp() {
 }
 
 #[test]
+fn engineering_profile_gates_acceptance_and_separates_coverage_from_results() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    let run = |args: &[&str]| {
+        let output = mara(root, args);
+        assert!(
+            output.status.success(),
+            "{args:?}: {} {}",
+            stderr(&output),
+            stdout(&output)
+        );
+    };
+    run(&["project", "init", "--template", "engineering"]);
+    for (flavour, id) in [
+        ("goal", "GOAL-EXPORT"),
+        ("scenario", "SCN-EXPORT"),
+        ("requirement", "REQ-EXPORT"),
+        ("design", "DES-EXPORT"),
+        ("verification", "VER-EXPORT"),
+        ("evidence", "EVD-EXPORT"),
+        ("risk", "RISK-EXPORT"),
+        ("decision", "ADR-EXPORT"),
+    ] {
+        run(&[
+            "item",
+            "create",
+            flavour,
+            id,
+            "export.mara.md",
+            "--title",
+            id,
+            "--body",
+            "Export contract or its supporting knowledge.",
+            "--field",
+            "status=draft",
+        ]);
+    }
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    run(&["item", "update", "REQ-EXPORT", "--field", "status=accepted"]);
+    let incomplete = validation_with_parity(root, &[]);
+    assert_eq!(incomplete["valid"], false);
+    assert!(
+        incomplete["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "rule_failed")
+    );
+
+    for (id, fields) in [
+        ("GOAL-EXPORT", vec!["status=accepted"]),
+        ("SCN-EXPORT", vec!["status=accepted"]),
+        ("REQ-EXPORT", vec!["kind=functional"]),
+        ("DES-EXPORT", vec!["status=accepted", "kind=interface"]),
+        (
+            "VER-EXPORT",
+            vec!["status=accepted", "method=test", "level=system"],
+        ),
+    ] {
+        let mut args = vec!["item", "update", id];
+        for field in fields {
+            args.extend(["--field", field]);
+        }
+        run(&args);
+    }
+    for (source, relation, target) in [
+        ("SCN-EXPORT", "contributes_to", "GOAL-EXPORT"),
+        ("REQ-EXPORT", "derives_from", "SCN-EXPORT"),
+        ("DES-EXPORT", "satisfies", "REQ-EXPORT"),
+        ("VER-EXPORT", "verifies", "REQ-EXPORT"),
+    ] {
+        run(&["relation", "add", source, relation, target]);
+    }
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+
+    let check = |id: &str, shape: &str, passed: bool| {
+        let shape = format!("urn:mara:rule:{shape}");
+        let args = [
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            id,
+            "--check-file",
+            ".mara/engineering-checks.yaml",
+            "--shape",
+            &shape,
+        ];
+        let output = mara(root, &args);
+        assert!(
+            output.status.success(),
+            "{} {}",
+            stderr(&output),
+            stdout(&output)
+        );
+        let cli: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let mcp = relation_tool(
+            root,
+            "trace_matrix",
+            json!({"ids":[id],
+            "check":{"files":[".mara/engineering-checks.yaml"],"shape":shape}}),
+        );
+        assert_eq!(cli, mcp);
+        assert_eq!(cli["evaluation_complete"], true, "{cli:#}");
+        assert_eq!(
+            cli["summaries"][0][if passed { "passed" } else { "failed" }],
+            1,
+            "{cli:#}"
+        );
+    };
+    check("REQ-EXPORT", "intent", true);
+    check("REQ-EXPORT", "verification", true);
+    check("REQ-EXPORT", "realization", false);
+    check("GOAL-EXPORT", "validation", false);
+    fs::write(root.join("export.txt"), "Concrete implementation fixture.").unwrap();
+    fs::write(
+        root.join("export-test.txt"),
+        "Concrete check definition fixture.",
+    )
+    .unwrap();
+    run(&[
+        "relation",
+        "add",
+        "DES-EXPORT",
+        "implemented_by",
+        "code:export.txt",
+    ]);
+    check("REQ-EXPORT", "realization", true);
+    run(&["relation", "add", "VER-EXPORT", "validates", "GOAL-EXPORT"]);
+    check("GOAL-EXPORT", "validation", true);
+
+    // Retired methods stop qualifying; a direct code check can define verification.
+    run(&["item", "update", "VER-EXPORT", "--field", "status=retired"]);
+    check("REQ-EXPORT", "verification", false);
+    run(&[
+        "relation",
+        "add",
+        "REQ-EXPORT",
+        "checked_by",
+        "code:export-test.txt",
+    ]);
+    check("REQ-EXPORT", "verification", true);
+    run(&["item", "update", "VER-EXPORT", "--field", "status=accepted"]);
+
+    // Accepted evidence may honestly record failure, with concrete provenance.
+    run(&["relation", "add", "EVD-EXPORT", "evidences", "VER-EXPORT"]);
+    run(&[
+        "item",
+        "update",
+        "EVD-EXPORT",
+        "--field",
+        "status=accepted",
+        "--field",
+        "result=failed",
+    ]);
+    assert_eq!(validation_with_parity(root, &[])["valid"], false);
+    run(&[
+        "item",
+        "update",
+        "EVD-EXPORT",
+        "--field",
+        "captured_at=2026-09-26T20:00:00Z",
+        "--field",
+        "subject_revision=def456",
+    ]);
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+
+    run(&["relation", "add", "RISK-EXPORT", "affects", "REQ-EXPORT"]);
+    run(&[
+        "item",
+        "update",
+        "RISK-EXPORT",
+        "--field",
+        "status=accepted",
+        "--field",
+        "treatment=tolerated",
+    ]);
+    assert_eq!(validation_with_parity(root, &[])["valid"], false);
+    run(&["relation", "add", "ADR-EXPORT", "justifies", "RISK-EXPORT"]);
+    run(&["item", "update", "ADR-EXPORT", "--field", "status=accepted"]);
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+}
+
+#[test]
+fn engineering_init_preserves_existing_policy_and_check_files() {
+    for file in ["engineering-rules.yaml", "engineering-checks.yaml"] {
+        let fixture = TempDir::new().unwrap();
+        let root = fixture.path();
+        fs::create_dir(root.join(".mara")).unwrap();
+        fs::write(root.join(".mara").join(file), "project-owned content").unwrap();
+        let init = mara(root, &["project", "init", "--template", "engineering"]);
+        assert!(!init.status.success());
+        assert_eq!(fs::read_dir(root.join(".mara")).unwrap().count(), 1);
+        assert_eq!(
+            fs::read_to_string(root.join(".mara").join(file)).unwrap(),
+            "project-owned content"
+        );
+    }
+}
+
+#[test]
 fn engineering_schema_preserves_customization_and_declares_agreed_endpoints() {
     let fixture = TempDir::new().unwrap();
     assert!(
@@ -1017,7 +1229,7 @@ fn engineering_schema_preserves_customization_and_declares_agreed_endpoints() {
         ]
     );
     let relations = schema["relations"].as_object().unwrap();
-    assert_eq!(relations.len(), 11);
+    assert_eq!(relations.len(), 18);
     for (name, sources, targets) in [
         (
             "verifies",
@@ -1026,11 +1238,7 @@ fn engineering_schema_preserves_customization_and_declares_agreed_endpoints() {
         ),
         ("validates", vec!["verification"], vec!["goal", "scenario"]),
         ("evidences", vec!["evidence"], vec!["verification"]),
-        (
-            "implements",
-            vec!["artifact"],
-            vec!["requirement", "design"],
-        ),
+        ("realizes", vec!["artifact"], vec!["requirement", "design"]),
         ("affects", vec!["risk"], flavours),
         (
             "mitigates",
@@ -1212,8 +1420,7 @@ fn documented_schema_migration_preserves_custom_declarations_and_item_identities
 fn manual_03_migration_preserves_custom_knowledge_and_rejects_unrewritten_aliases() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
-    let init = mara(root, &["project", "init", "--template", "engineering"]);
-    assert!(init.status.success(), "{}", stderr(&init));
+    legacy_engineering_project(root);
     let schema_path = root.join(".mara/schema.yaml");
     let original_schema = fs::read_to_string(&schema_path).unwrap().replace(
         "    id_prefix: VER-\n    body: required\n    fields: {}",
@@ -10562,16 +10769,19 @@ fn relation_tool(root: &Path, name: &str, params: Value) -> Value {
     value
 }
 
+fn legacy_engineering_project(root: &Path) {
+    let init = mara(root, &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    fs::write(
+        root.join(".mara/schema.yaml"),
+        include_str!("fixtures/engineering-legacy-schema.yaml"),
+    )
+    .unwrap();
+}
+
 fn relation_fixture() -> TempDir {
     let fixture = TempDir::new().unwrap();
-    assert!(
-        mara(
-            fixture.path(),
-            &["project", "init", "--template", "engineering"]
-        )
-        .status
-        .success()
-    );
+    legacy_engineering_project(fixture.path());
     let schema_file = fixture.path().join(".mara/schema.yaml");
     let schema = fs::read_to_string(&schema_file)
         .unwrap()
@@ -11771,11 +11981,7 @@ fn relationship_alias_filters_initial_edges_and_identity_edits_preserve_occurren
 fn file_only_code_links_accept_binary_targets_and_invalidate_related_cursors() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
-    assert!(
-        mara(root, &["project", "init", "--template", "engineering"])
-            .status
-            .success()
-    );
+    legacy_engineering_project(root);
     let config_path = root.join(".mara/project.toml");
     let config = fs::read_to_string(&config_path).unwrap();
     fs::write(
@@ -11924,11 +12130,7 @@ fn file_only_code_links_accept_binary_targets_and_invalidate_related_cursors() {
 fn rust_code_fixture() -> TempDir {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
-    assert!(
-        mara(root, &["project", "init", "--template", "engineering"])
-            .status
-            .success()
-    );
+    legacy_engineering_project(root);
     let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(".mara");
     let sample_config = fs::read_to_string(sample.join("project.toml")).unwrap();
     let first_language = sample_config
@@ -12233,11 +12435,7 @@ fn code_related_reports_missing_marker_targets_and_pages_by_item_source() {
 fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
-    assert!(
-        mara(root, &["project", "init", "--template", "engineering"])
-            .status
-            .success()
-    );
+    legacy_engineering_project(root);
     let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(".mara");
     let sample_config = fs::read_to_string(sample.join("project.toml")).unwrap();
     let (_, code_bindings) = sample_config.split_once("\n[[code.languages]]").unwrap();
@@ -13314,11 +13512,7 @@ fn diagnostic_output_budget_never_silently_discards_an_oversized_record() {
 fn rule_fixture() -> TempDir {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
-    assert!(
-        mara(root, &["project", "init", "--template", "engineering"])
-            .status
-            .success()
-    );
+    legacy_engineering_project(root);
     let schema_path = root.join(".mara/schema.yaml");
     let mut schema: Value =
         serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
@@ -15896,11 +16090,7 @@ fn bounded_trace_chains_reject_excess_depth_and_finish_on_cycles() {
 fn structural_relation_policies_validate_normalized_edges_through_cli_and_mcp() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
-    assert!(
-        mara(root, &["project", "init", "--template", "engineering"])
-            .status
-            .success()
-    );
+    legacy_engineering_project(root);
     let schema_path = root.join(".mara/schema.yaml");
     let mut schema: Value =
         serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
@@ -16101,11 +16291,7 @@ Checks the requirements.
 fn structural_counts_cover_incoming_symmetric_and_external_targets() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();
-    assert!(
-        mara(root, &["project", "init", "--template", "engineering"])
-            .status
-            .success()
-    );
+    legacy_engineering_project(root);
     let schema_path = root.join(".mara/schema.yaml");
     let mut schema: Value =
         serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();

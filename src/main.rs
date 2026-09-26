@@ -202,13 +202,13 @@ enum TraceCommand {
 enum ProjectCommand {
     /// Initialize a Mara project without overwriting existing content; rejects an existing Mara project.
     #[command(
-        after_help = "All templates create only .mara/project.toml and .mara/schema.yaml, with schema format 3 and flavour guidance; no starter documents or items. Edit the resulting project-owned schema to customize it. For an existing project, follow the manual workflow in docs/migration-0.3.mara.md on a recoverable checkpoint; do not reinitialize or replace it with a template. Use schema get to inspect declarations, then schema validate and project validate."
+        after_help = "All templates create .mara/project.toml and .mara/schema.yaml with schema format 3 and flavour guidance. Engineering also installs .mara/engineering-rules.yaml (enabled policy) and .mara/engineering-checks.yaml (request-local checks); no starter documents or items. Edit the resulting project-owned schema to customize it. For an existing project, follow the manual workflow in docs/migration-0.3.mara.md on a recoverable checkpoint; do not reinitialize or replace it with a template. Use schema get to inspect declarations, then schema validate and project validate."
     )]
     Init {
         /// Destination directory (absolute or relative to the working directory), created if missing. Defaults to the working directory only when --project is also omitted. Cannot combine PATH with --project.
         path: Option<PathBuf>,
 
-        /// Initial schema: minimal (default) includes common flavours and relations; empty declares none; engineering adds the full engineering vocabulary and traceability relations.
+        /// Initial schema: minimal (default) includes common flavours and relations; empty declares none; engineering adds engineering vocabulary, accepted-knowledge policies and request-local coverage checks.
         #[arg(long, value_enum, default_value_t)]
         template: CliTemplate,
     },

@@ -117,7 +117,7 @@ struct ProjectInitParams {
     /// Absolute destination directory; required unless the server was started with --project, in which case omit it. Creates a missing directory; rejects an existing Mara project.
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Initial schema: minimal (default) includes common flavours and relations; empty declares none; engineering adds the full engineering vocabulary and traceability relations.
+    /// Initial schema: minimal (default) includes common flavours and relations; empty declares none; engineering adds engineering vocabulary, accepted-knowledge policies and request-local coverage checks.
     #[serde(default)]
     template: Template,
 }
@@ -466,7 +466,7 @@ impl MaraMcp {
 
     #[tool(
         name = "project_init",
-        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project. Templates create only .mara/project.toml and .mara/schema.yaml with schema format 3 and flavour guidance, no starter documents or items. Customize the project-owned schema; migrate existing projects manually on a recoverable checkpoint instead of reinitializing. See https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md. Inspect declarations with schema_get, then run schema_validate and project_validate."
+        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project. Templates create .mara/project.toml and .mara/schema.yaml with schema format 3 and flavour guidance. Engineering also installs .mara/engineering-rules.yaml (enabled policy) and .mara/engineering-checks.yaml (request-local checks), with required item status; no starter documents or items. Customize the project-owned schema; migrate existing projects manually on a recoverable checkpoint instead of reinitializing. See https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md. Inspect declarations with schema_get, then run schema_validate and project_validate."
     )]
     fn project_init(
         &self,

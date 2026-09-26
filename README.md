@@ -103,18 +103,21 @@ mara schema list flavour
 mara schema get flavour requirement
 mara schema get relation verifies
 mara item create requirement REQ-ACCESS knowledge.mara.md \
-  --title "Permit access" --body "An authorized user can access the service."
+  --title "Permit access" --body "An authorized user can access the service." \
+  --field status=draft
 mara item create verification VER-ACCESS knowledge.mara.md \
   --title "Check access" \
   --body "Demonstrate that an authorized user can access the service." \
-  --relation verifies=REQ-ACCESS
+  --field status=draft --relation verifies=REQ-ACCESS
 mara project validate
 ```
 
 `minimal` remains the default template; `empty` declares no vocabulary.
-`engineering` supplies engineering flavours and traceability relations.
-Templates create configuration and an editable schema only. Before creating an
-item, use the flavour's `description`, `use_when`, `avoid_when`, and
+`engineering` supplies flavours, classifications, traceability relations, enabled
+policies for accepted knowledge, and optional coverage checks. See the
+[engineering profile](docs/engineering-template.mara.md) for the lifecycle and
+coverage workflow. Templates create editable project assets without starter items.
+Before creating an item, use the flavour's `description`, `use_when`, `avoid_when`, and
 `distinguish_from` to choose appropriate knowledge, then inspect its ID prefix,
 body, and field constraints. These guidance keys belong to the schema, not
 item metadata. See [guided authoring](docs/guided-authoring.mara.md) for the

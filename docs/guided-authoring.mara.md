@@ -6,7 +6,9 @@ context as well as items. Schema format 2, mandatory flavour guidance,
 all three bundled templates, and engineering traceability relations are
 implemented starting with `0.2.0-alpha.0`. The current checkout also implements
 unified discovery, reading, direct navigation, and reference-safe item mutations
-under [the discovery contract](discovery.mara.md).
+under [the discovery contract](discovery.mara.md). The
+[engineering profile](engineering-template.mara.md) extends the original template
+with classifications, lifecycle policies and selected-scope checks.
 
 Prioritize bundled templates and flavour guidance together, then useful
 engineering relations and unified discovery. Diagnostic codes and severity are
@@ -67,18 +69,20 @@ code-symbol extraction are later work.
 :title: Initialize from a bundled engineering template
 :derives_from: SCN-START-ENGINEERING-KNOWLEDGE
 
-Offer an optional `engineering` template based on the reusable vocabulary in
-[the self-hosting taxonomy](taxonomy.mara.md). Keep `minimal` as the default and
-retain `empty`. Initialization preserves [[REQ-PROJECT-INITIALIZATION]] and
-generates only `.mara/project.toml` and `.mara/schema.yaml`, with no starter
-Markdown or separate guidance document. The schema is editable project-owned
-data; templates do not copy Mara's product items or MIDs.
+Offer an optional `engineering` template with the reusable engineering vocabulary
+and incremental knowledge policies in [[DES-ENGINEERING-PROFILE]]. Keep `minimal`
+as the default and retain `empty`. Initialization preserves
+[[REQ-PROJECT-INITIALIZATION]] and creates no starter Markdown, product items or MIDs.
 
-Maintain the `minimal`, `empty`, and `engineering` schema templates as source
-files embedded in the executable, without requiring a runtime template directory.
-Generate project configuration programmatically, deriving the project name from
-the destination directory. Changing a bundled schema template must not silently
-rewrite schemas in projects already initialized from it.
+All templates install `.mara/project.toml` and `.mara/schema.yaml`.
+Engineering additionally installs enabled `.mara/engineering-rules.yaml` and
+request-local `.mara/engineering-checks.yaml`. Its configuration uses format 2;
+minimal and empty retain format 1. All schemas use format 3.
+
+Embed template source files in the executable. Generate configuration from the
+destination name and selected template. Preserve all existing destination files;
+on initialization failure remove only files created by that attempt. Bundled
+template changes never silently rewrite previously initialized projects.
 :::
 
 :::mara requirement REQ-FLAVOUR-AUTHORING-GUIDANCE
@@ -106,15 +110,17 @@ Migration follows [[REQ-FLAVOUR-GUIDANCE-MIGRATION]].
 :title: Connect engineering knowledge with meaningful typed relations
 :derives_from: SCN-START-ENGINEERING-KNOWLEDGE
 
-The engineering template must provide relations for connecting verification to
-its targets, evidence to verification, implementation artifacts to requirements
-or designs, and risks to affected knowledge and mitigation. Names, meanings,
-directions, and allowed endpoints follow [[DES-ENGINEERING-RELATION-VOCABULARY]].
+The engineering template connects stakeholder intent, scenarios, requirements,
+design, decisions, implementation, verification, evidence and risk treatment.
+Names, meanings and endpoints follow [[DES-ENGINEERING-RELATION-VOCABULARY]];
+classifications, lifecycle policies and selected-scope coverage checks follow
+[[DES-ENGINEERING-PROFILE]].
 
-Authors add only links that carry useful meaning. The template must not require
-placeholder items, a complete trace chain, or a particular lifecycle. Existing
-relation mutation and retrieval operations remain the mechanism for these links;
-this requirement does not introduce a graph-rule engine.
+Authors add only meaningful links. Drafts can develop incrementally; acceptance
+requires the agreed knowledge connections without forcing a complete implementation
+or passing execution chain. Ordinary code checks need no duplicate verification
+item. Existing schema, relation, rule and matrix operations implement the profile;
+the engine does not hardcode engineering flavours or relation names.
 :::
 
 :::mara requirement REQ-DOCUMENT-CONTEXT-DISCOVERY
@@ -226,15 +232,22 @@ its existing schema behavior.
 
 :::mara decision ADR-SCHEMA-ONLY-TEMPLATES
 :mid: 01M230NZB3DX52SQDS91XXF06A
-:title: Generate configuration and schema without starter documents
+:title: Generate project configuration and policy without starter documents
 :justifies: REQ-ENGINEERING-TEMPLATE
 
-Bundled templates generate project configuration and schema only. Flavour
-guidance belongs in the schema and is exposed through Mara's schema inspection.
-Do not generate starter Markdown or a second guidance document.
+Bundled templates generate editable project configuration and vocabulary.
+Engineering additionally installs the accepted-knowledge policies and optional
+coverage checks in [[DES-ENGINEERING-PROFILE]]. Flavour guidance belongs in the
+schema and is exposed through schema inspection. Do not generate starter
+Markdown, product items or a second guidance document.
 
-This keeps initialization small, gives project authors ownership of document
-structure, and avoids maintaining duplicate guidance in schema and Markdown.
+The original schema-only boundary avoided premature process defaults.
+The engineering review established a concrete incremental-authoring workflow:
+drafts can remain incomplete, acceptance requires agreed knowledge connections,
+and implementation/execution coverage is assessed separately. Shipping those
+rules with the optional engineering profile makes that workflow usable without
+changing the minimal default or previously initialized projects. Authors retain
+ownership of document structure and can edit all generated assets.
 :::
 
 ## Accepted 0.2 designs
@@ -292,31 +305,45 @@ and unknown/self distinction targets through the real schema-loading workflow.
 
 :::mara design DES-ENGINEERING-RELATION-VOCABULARY
 :mid: 01M231916ZSZ50Y2XCAFYF4JZJ
-:title: Define the engineering template's additional typed relations
+:title: Define the engineering template's typed relationships
 :satisfies: REQ-ENGINEERING-TRACEABILITY
 
-The engineering template adds the following project-defined relations to the
-existing vocabulary. Each edge is authored on its source and points to its
-target; incoming views remain derived.
+The [engineering schema](../templates/engineering-schema.yaml) owns exact source
+and target permissions and inverse aliases. Relations are project-owned vocabulary;
+code endpoints and external references use the existing generic engine contracts.
 
-| Relation | Source flavours | Target flavours | Meaning |
-|---|---|---|---|
-| `verifies` | verification | requirement, design | Checks conformance to a specified obligation. |
-| `validates` | verification | goal, scenario | Checks whether the intended outcome is achieved. |
-| `evidences` | evidence | verification | Records a result from performing that verification. |
-| `implements` | artifact | requirement, design | Identifies the implementation. |
-| `affects` | risk | any flavour in the engineering template | Identifies knowledge exposed to that risk. |
-| `mitigates` | requirement, design, decision, verification | risk | Specifies or provides a measure reducing that risk. |
+| Relation / inverse | Meaning |
+|---|---|
+| contributes_to / supported_by | Scenario or requirement advances a goal |
+| involves / involved_in | Scenario identifies a participating actor |
+| refines / refined_by | More specific goal, requirement or design elaborates one of the same flavour |
+| derives_from / source_of | Requirement or design originates from a scenario, requirement or authoritative artifact |
+| satisfies / satisfied_by | Design defines a solution to a requirement |
+| justifies / justified_by | Decision preserves rationale for a requirement, design or risk treatment |
+| realizes / realized_by | Artifact provides a concrete realization of a requirement or design |
+| implements / implemented_by | Code implements a requirement, design or verification method |
+| checks / checked_by | Code defines a check of a requirement or design |
+| verifies / verified_by | Verification method checks conformance to a requirement or design |
+| validates / validated_by | Verification method checks achievement of a goal or scenario outcome |
+| evidences / evidenced_by | Evidence records a verification execution result |
+| affects / affected_by | Risk exposes knowledge to potential harm |
+| mitigates / mitigated_by | Requirement, design, decision or verification provides a risk mitigation |
+| depends_on / required_by | Source relies on the target |
+| supersedes / superseded_by | Source replaces historical knowledge of the same flavour |
+| sourced_from | Item cites an external originating document or authority |
+| reported_at | Evidence locates an external supporting report |
 
-Verification describes the check; evidence records its result. These links are
-optional and do not require a complete trace chain. Existing relation meanings
-and endpoints are unchanged. The engine continues to validate schema-declared
-endpoints rather than hardcoding these names or introducing external or derived
-source-code nodes.
+`implements` and `checks` have code sources, and can be authored from items using
+their inverse aliases. Artifact implementation uses `realizes`. Code links do not
+establish execution or passing results. External links remain local-only terminal
+references; they are not fetched.
 
-Verify initialization from the engineering template, creation of representative
-source/target items, relation addition, and incoming/outgoing retrieval through
-CLI and MCP. Rejected endpoint combinations must preserve source files.
+When migrating an older engineering profile, reauthor artifact `implements`
+edges as `realizes` before introducing code `implements`. Move same-flavour
+decomposition from `derives_from` to `refines` only after reviewing its meaning.
+Existing self-hosting `code_implements` and `code_verifies` names are migrated
+separately with their code markers and item-authored inverses; a bundled template
+change never rewrites a project's vocabulary.
 :::
 
 :::mara evidence EVD-02-PACKAGED-WORKFLOW

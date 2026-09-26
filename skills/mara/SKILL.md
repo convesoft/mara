@@ -52,7 +52,8 @@ the MCP server was started with that root bound by `--project`. Use the default
 `minimal` template unless the user explicitly requests `empty` or `engineering`.
 Pass the selected name as `template` to `project_init`.
 `engineering` includes engineering flavours, selection guidance, and traceability
-relations; all templates generate configuration and schema only. The CLI equivalent
+relations. It also installs enabled `.mara/engineering-rules.yaml` and request-local
+`.mara/engineering-checks.yaml`; no starter items are generated. The CLI equivalent
 is `"${mara_cli[@]}" --project /absolute/project --format json project init --template <template>`,
 where `<template>` is the selected `minimal`, `empty`, or `engineering` name.
 Do not create or modify `AGENTS.md` as part of Mara onboarding.
@@ -89,11 +90,26 @@ For the engineering template, inspect `schema_get` relation declarations before
 connecting items. `verification` describes a repeatable check; `evidence`
 records its result. The added relations are `verifies` (verification →
 requirement/design), `validates` (verification → goal/scenario), `evidences`
-(evidence → verification), `implements` (artifact → requirement/design),
+(evidence → verification), `realizes` (artifact → requirement/design), code `implements`
+(→ requirement/design/verification) and code `checks` (→ requirement/design),
 `affects` (risk → affected knowledge), and `mitigates`
 (requirement/design/decision/verification → risk). Add only meaningful links;
 no complete trace chain or placeholder items are required. Existing projects
 do not gain these declarations automatically.
+
+New engineering items require `status`. Use `draft` while classifications and
+links are incomplete; `accepted` enables the bundled knowledge policies, and
+`retired` preserves history without qualifying for accepted coverage. Requirements
+and designs need `kind` when accepted; verification needs `method`, evidence needs
+`result`, `captured_at` and `subject_revision`, and risk needs `treatment`. Inspect
+the schema for enum values and optional fields. A status of accepted does not
+claim implementation or passing tests.
+
+Use `.mara/engineering-checks.yaml` with shape IRIs `urn:mara:rule:intent`,
+`urn:mara:rule:realization`, `urn:mara:rule:verification` or
+`urn:mara:rule:validation` on appropriate accepted roots. Execution for a selected
+revision requires the separate matrix-parameter contract; historical passing
+evidence and code associations do not establish a current execution result.
 
 ## Choose the operation
 
@@ -123,9 +139,9 @@ Warnings do not invalidate a complete result; configuration/source failures
 remain errors. Current-state rules load from explicit YAML files enabled by
 project format 2 and `[rules]` with `format_version = 1` and `files = [...]`.
 Run `schema_validate` to check definitions, then `project_validate` or
-`item_validate` to evaluate policy. Status/owner fields are project-defined;
-templates and existing projects gain no policies automatically. Schema relation
-`cardinality` and `acyclic` declarations impose structural graph policies when
+`item_validate` to evaluate policy. Status/owner fields are project-defined.
+The engineering template supplies `status: draft|accepted|retired` and accepted-knowledge policies; existing
+projects gain no policies automatically. Schema relation `cardinality` and `acyclic` declarations impose structural graph policies when
 present. Policy failures do not block structured edits.
 Invalid schemas now return the common envelope with `valid:false`, not an MCP
 tool error. Counts are null when the schema cannot load. Diagnostic `path` and
