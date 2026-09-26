@@ -1168,9 +1168,16 @@ pub fn load_corpus(project: &Project, schema: &Schema) -> Result<Corpus, Error> 
         })?;
         documents.push(parse_document(relative_path, source, schema)?);
     }
+    let (code, problems) = crate::code::CodeIndex::load(project);
+    if let Some(problem) = problems.into_iter().next() {
+        return Err(Error::InvalidProject {
+            path: project.root().join(problem.source.path()),
+            message: problem.message,
+        });
+    }
     Ok(Corpus {
         documents,
-        code: crate::code::CodeIndex::load(project).0,
+        code,
         complete: true,
     })
 }

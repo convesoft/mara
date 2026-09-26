@@ -104,7 +104,9 @@ decorators, and exports through these captures. Mara loads and checks these asse
 locally at runtime, uses the grammar and query to enumerate symbols and
 comments, and searches only captured comment text for markers. The deepest
 enclosing declaration body or immediately following declaration owns a marker.
-Invalid packs and duplicate extension assignments are diagnosed. An absent
+Invalid packs and duplicate extension assignments are diagnosed. Normal corpus
+operations fail when code indexing reports a problem, rather than returning a
+partial relation graph; validation reports the problem as a diagnostic. An absent
 pack leaves file-only endpoints usable. Adding another language or extension
 does not require a Mara rebuild. Language packs do not change the shared
 relation semantics or execute project code.

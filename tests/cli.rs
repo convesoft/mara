@@ -11991,6 +11991,51 @@ fn item_validation_reports_invalid_code_markers_and_internal_symlinks_resolve() 
     assert_eq!(related["connections"][0]["neighbour"]["id"], "REQ-A");
 }
 
+#[cfg(unix)]
+#[test]
+fn invalid_language_pack_does_not_return_partial_code_relations() {
+    let fixture = rust_code_fixture();
+    let root = fixture.path();
+    fs::write(
+        root.join("req.mara.md"),
+        ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n\nA.\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("implementation.rs"),
+        "// @mara code_implements REQ-A\nfn run() {}\n",
+    )
+    .unwrap();
+    let related = mara(root, &["--format", "json", "related", "REQ-A"]);
+    assert!(related.status.success(), "{}", stderr(&related));
+    let related: Value = serde_json::from_slice(&related.stdout).unwrap();
+    assert!(
+        related["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| { entry["neighbour"]["reference"] == "code:implementation.rs::run" })
+    );
+
+    fs::write(root.join(".mara/code/rust.scm"), "(").unwrap();
+    let validation = validation_with_parity(root, &[]);
+    assert_eq!(validation["valid"], false);
+    assert!(
+        validation["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| { diagnostic["code"] == "code_unsupported" })
+    );
+    let related = mara(root, &["related", "REQ-A"]);
+    assert!(!related.status.success());
+    assert!(
+        stderr(&related).contains("rust.scm"),
+        "{}",
+        stderr(&related)
+    );
+}
+
 #[test]
 fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
     let fixture = TempDir::new().unwrap();
