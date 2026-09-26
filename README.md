@@ -116,7 +116,9 @@ mara project validate
 `engineering` supplies flavours, classifications, traceability relations, enabled
 policies for accepted knowledge, and optional coverage checks. See the
 [engineering profile](docs/engineering-template.mara.md) for the lifecycle and
-coverage workflow. Templates create editable project assets without starter items.
+coverage rules, and the [engineering workflow](docs/engineering-workflow.mara.md)
+for the path from intent to verified production. Templates create editable project
+assets without starter items.
 Before creating an item, use the flavour's `description`, `use_when`, `avoid_when`, and
 `distinguish_from` to choose appropriate knowledge, then inspect its ID prefix,
 body, and field constraints. These guidance keys belong to the schema, not

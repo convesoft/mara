@@ -1,5 +1,8 @@
 # Engineering template
 
+Follow the [intended engineering workflow](engineering-workflow.mara.md) from
+intent through implementation, candidate assessment and production verification.
+
 :::mara design DES-ENGINEERING-PROFILE
 :mid: 01M3FNS3QT63PBXC7HB76A0S4S
 :title: Develop engineering knowledge incrementally with explicit coverage checks
