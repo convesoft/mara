@@ -1,4 +1,5 @@
 (function_item name: (_) @name) @symbol
+(function_signature_item name: (_) @name) @symbol
 (mod_item name: (_) @name) @symbol
 (struct_item name: (_) @name) @symbol
 (enum_item name: (_) @name) @symbol

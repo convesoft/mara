@@ -518,7 +518,7 @@ fn collect<'a>(
             let body = node.child_by_field_name("body");
             let attach_start = node
                 .parent()
-                .filter(|p| p.kind() == "decorated_definition")
+                .filter(|p| matches!(p.kind(), "decorated_definition" | "export_statement"))
                 .map_or(node.start_byte(), |p| p.start_byte());
             symbols.push(CodeSymbol {
                 selector: prefix.join(separator),
@@ -613,5 +613,42 @@ mod tests {
         );
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(file.markers[0].endpoint, "code:sample.js::run");
+    }
+
+    #[test]
+    fn adapters_attach_markers_through_declaration_modifiers() {
+        let cases = [
+            (
+                "sample.rs",
+                "trait Api {\n    /// @mara code_implements REQ-A\n    fn run(&self);\n}\n",
+                "code:sample.rs::Api::run",
+            ),
+            (
+                "sample.js",
+                "// @mara code_implements REQ-A\nexport function run() {}\n",
+                "code:sample.js::run",
+            ),
+            (
+                "sample.ts",
+                "// @mara code_implements REQ-A\nexport function run(): void {}\n",
+                "code:sample.ts::run",
+            ),
+        ];
+        let mut adapters = adapters();
+        for (path, source, endpoint) in cases {
+            let adapter = adapters
+                .iter_mut()
+                .find(|adapter| adapter.accepts(Path::new(path)))
+                .unwrap();
+            let (file, problems) = parse_file(path.into(), source.into(), adapter);
+            assert!(problems.is_empty(), "{path}: {problems:?}");
+            assert!(
+                file.symbols
+                    .iter()
+                    .any(|s| format!("code:{path}::{}", s.selector) == endpoint)
+            );
+            assert_eq!(file.markers.len(), 1, "{path}: {:?}", file.markers);
+            assert_eq!(file.markers[0].endpoint, endpoint, "{path}");
+        }
     }
 }

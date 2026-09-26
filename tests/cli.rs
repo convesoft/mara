@@ -11754,6 +11754,26 @@ fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
     for (file, source, _, _) in cases {
         fs::write(root.join("src").join(file), source).unwrap();
     }
+    let modified_declarations = [
+        (
+            "trait.rs",
+            "trait Api {\n    /// @mara code_implements REQ-A\n    fn run(&self);\n}\n",
+            "Api::run",
+        ),
+        (
+            "export.js",
+            "// @mara code_implements REQ-A\nexport function run() {}\n",
+            "run",
+        ),
+        (
+            "export.ts",
+            "// @mara code_implements REQ-A\nexport function run(): void {}\n",
+            "run",
+        ),
+    ];
+    for (file, source, _) in modified_declarations {
+        fs::write(root.join("src").join(file), source).unwrap();
+    }
     let valid = validation_with_parity(root, &[]);
     assert_eq!(valid["valid"], true, "{valid:#}");
     let code_config = fs::read_to_string(&code_config_path).unwrap().replace(
@@ -11781,6 +11801,17 @@ fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
             .iter()
             .any(|entry| entry["neighbour"]["reference"] == "code:src/extra.jsx::extra")
     );
+    for (file, _, selector) in modified_declarations {
+        let reference = format!("code:src/{file}::{selector}");
+        assert!(
+            connections
+                .iter()
+                .any(|entry| entry["neighbour"]["reference"] == reference),
+            "missing {reference}: {related:#}"
+        );
+        let get = mara(root, &["--format", "json", "get", &reference]);
+        assert!(get.status.success(), "{}", stderr(&get));
+    }
     for (file, _, method, nested) in cases {
         for selector in [method, nested] {
             let reference = format!("code:src/{file}::{selector}");
