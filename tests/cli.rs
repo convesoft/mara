@@ -11835,6 +11835,62 @@ fn file_only_code_links_accept_binary_targets_and_invalidate_related_cursors() {
     assert!(stderr(&get).contains("not UTF-8 text"), "{}", stderr(&get));
 }
 
+#[cfg(unix)]
+#[test]
+fn code_discovery_walk_errors_make_validation_incomplete() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(mara(root, &["project", "init"]).status.success());
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(".mara");
+    let sample_config = fs::read_to_string(sample.join("project.toml")).unwrap();
+    let first_language = sample_config
+        .split_once("\n[[code.languages]]")
+        .unwrap()
+        .1
+        .split("\n[[code.languages]]")
+        .next()
+        .unwrap();
+    let config_path = root.join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    fs::write(
+        &config_path,
+        format!(
+            "{}\n[[code.languages]]{first_language}",
+            config.replacen("format_version = 1", "format_version = 3", 1)
+        ),
+    )
+    .unwrap();
+    fs::create_dir(root.join(".mara/code")).unwrap();
+    for extension in ["wasm", "scm"] {
+        let file = format!("rust.{extension}");
+        fs::copy(
+            sample.join("code").join(&file),
+            root.join(".mara/code").join(file),
+        )
+        .unwrap();
+    }
+    let unreadable = root.join("unreadable");
+    fs::create_dir(&unreadable).unwrap();
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+    let output = mara(root, &["--format", "json", "project", "validate"]);
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o755)).unwrap();
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["evaluation_complete"], false, "{result:#}");
+    assert!(
+        result["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic["code"] == "source_invalid"
+                    && diagnostic["message"]
+                        .as_str()
+                        .is_some_and(|message| message.contains("could not discover code files"))
+            }),
+        "{result:#}"
+    );
+}
+
 #[test]
 fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
     let fixture = TempDir::new().unwrap();

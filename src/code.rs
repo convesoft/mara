@@ -271,7 +271,19 @@ impl CodeIndex {
             .parents(true)
             .require_git(false)
             .follow_links(false);
-        for entry in walker.build().filter_map(Result::ok) {
+        for entry in walker.build() {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    let path = crate::corpus::walk_error_path(project.root(), &error);
+                    problems.push(CodeProblem {
+                        code: DiagnosticCode::SourceInvalid,
+                        message: format!("could not discover code files: {error}"),
+                        source: location(&path, &[0], 0, 0),
+                    });
+                    continue;
+                }
+            };
             if !entry.file_type().is_some_and(|kind| kind.is_file()) {
                 continue;
             }
@@ -480,7 +492,10 @@ fn parse_file(
                     ch.is_whitespace() || ch.is_ascii_punctuation() && ch != '@'
                 })
                 .trim_end_matches(|ch: char| ch.is_whitespace() || ch.is_ascii_punctuation());
-            if let Some(marker) = cleaned.strip_prefix("@mara") {
+            if let Some(marker) = cleaned
+                .strip_prefix("@mara")
+                .filter(|rest| rest.chars().next().is_none_or(char::is_whitespace))
+            {
                 let marker_source = location(&path, &lines, offset, offset + line.len());
                 let parts = marker.split_whitespace().collect::<Vec<_>>();
                 if parts.len() != 2
@@ -699,6 +714,24 @@ mod tests {
             adapter,
         );
         assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(file.markers[0].endpoint, "code:sample.js::run");
+    }
+
+    #[test]
+    fn shared_marker_parser_requires_the_complete_introducer() {
+        let mut adapters = adapters();
+        let adapter = adapters
+            .iter_mut()
+            .find(|adapter| adapter.accepts(Path::new("sample.js")))
+            .unwrap();
+        let (file, problems) = parse_file(
+            "sample.js".into(),
+            "// @marathon is an ordinary comment\n// @mara code_implements REQ-A\nfunction run() {}\n"
+                .into(),
+            adapter,
+        );
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(file.markers.len(), 1);
         assert_eq!(file.markers[0].endpoint, "code:sample.js::run");
     }
 

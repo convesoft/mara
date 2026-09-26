@@ -1026,6 +1026,9 @@ fn load_corpus_for_validation_with_schema(
             code: if schema.is_some() {
                 let (index, problems) = crate::code::CodeIndex::load(project);
                 for problem in problems {
+                    if problem.code == DiagnosticCode::SourceInvalid {
+                        complete = false;
+                    }
                     diagnostic(
                         problem.code,
                         &mut diagnostics,
@@ -1232,7 +1235,7 @@ fn discovered_document(root: &Path, matcher: &GlobSet, entry: &DirEntry) -> Opti
     (is_mara_document(&relative) && matcher.is_match(&relative)).then_some(relative)
 }
 
-fn walk_error_path(root: &Path, error: &WalkError) -> PathBuf {
+pub(crate) fn walk_error_path(root: &Path, error: &WalkError) -> PathBuf {
     let path = match error {
         WalkError::Partial(errors) => errors.iter().find_map(walk_error_source_path),
         _ => walk_error_source_path(error),
