@@ -11834,6 +11834,19 @@ fn file_only_code_links_accept_binary_targets_and_invalidate_related_cursors() {
     assert!(!get.status.success());
     assert!(stderr(&get).contains("not UTF-8 text"), "{}", stderr(&get));
 
+    fs::write(
+        root.join("other.mara.md"),
+        ":::mara requirement REQ-B\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: B\n\nB.\n:::\n",
+    )
+    .unwrap();
+    let renamed = mara(root, &["item", "rename", "REQ-B", "REQ-C"]);
+    assert!(renamed.status.success(), "{}", stderr(&renamed));
+    assert!(
+        fs::read_to_string(&item_path)
+            .unwrap()
+            .contains("code:blob.bin")
+    );
+
     let item = fs::read_to_string(&item_path).unwrap();
     fs::write(
         &item_path,
