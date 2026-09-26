@@ -258,6 +258,9 @@ impl CodeIndex {
                 return (result, problems);
             }
         };
+        if adapters.is_empty() {
+            return (result, problems);
+        }
         let mut walker = WalkBuilder::new(project.root());
         walker
             .hidden(false)
@@ -571,6 +574,11 @@ fn collect<'tree>(
                     break;
                 }
             }
+            let content_start = attach_starts
+                .iter()
+                .copied()
+                .min()
+                .unwrap_or(node.start_byte());
             symbols.push(CodeSymbol {
                 selector: prefix.join(context.separator),
                 source: location(
@@ -579,12 +587,7 @@ fn collect<'tree>(
                     name_node.start_byte(),
                     name_node.end_byte(),
                 ),
-                content: location(
-                    context.path,
-                    context.lines,
-                    node.start_byte(),
-                    node.end_byte(),
-                ),
+                content: location(context.path, context.lines, content_start, outer.end_byte()),
                 body_start: body.map_or(node.start_byte(), |b| b.start_byte()),
                 body_end: body.map_or(node.end_byte(), |b| b.end_byte()),
                 attach_starts,
@@ -761,6 +764,53 @@ mod tests {
             );
             assert_eq!(file.markers.len(), 1, "{path}: {:?}", file.markers);
             assert_eq!(file.markers[0].endpoint, endpoint, "{path}");
+        }
+    }
+
+    #[test]
+    fn symbol_content_includes_attached_modifiers() {
+        let cases = [
+            (
+                "sample.rs",
+                "#[test]\nfn run() {}\n",
+                "run",
+                "#[test]\nfn run() {}",
+            ),
+            (
+                "sample.py",
+                "@decorator\ndef run(): pass\n",
+                "run",
+                "@decorator\ndef run(): pass",
+            ),
+            (
+                "sample.js",
+                "export function run() {}\n",
+                "run",
+                "export function run() {}",
+            ),
+            (
+                "sample.ts",
+                "@sealed\nclass Service {}\n",
+                "Service",
+                "@sealed\nclass Service {}",
+            ),
+        ];
+        let mut adapters = adapters();
+        for (path, source, selector, expected) in cases {
+            let adapter = adapters
+                .iter_mut()
+                .find(|adapter| adapter.accepts(Path::new(path)))
+                .unwrap();
+            let (file, problems) = parse_file(path.into(), source.into(), adapter);
+            assert!(problems.is_empty(), "{path}: {problems:?}");
+            let symbol = file
+                .symbols
+                .iter()
+                .find(|symbol| symbol.selector == selector)
+                .unwrap();
+            let content =
+                &file.source[symbol.content.span().start_byte()..symbol.content.span().end_byte()];
+            assert_eq!(content, expected, "{path}");
         }
     }
 }

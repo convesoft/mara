@@ -11989,6 +11989,19 @@ fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
         );
         let get = mara(root, &["--format", "json", "get", &reference]);
         assert!(get.status.success(), "{}", stderr(&get));
+        if let Some(prefix) = match file {
+            "attribute.rs" => Some("#[test]"),
+            "decorated.py" => Some("@decorator"),
+            "decorated.ts" => Some("@sealed"),
+            "export.js" | "export.ts" => Some("export"),
+            _ => None,
+        } {
+            let response: Value = serde_json::from_slice(&get.stdout).unwrap();
+            assert!(
+                response["content"].as_str().unwrap().starts_with(prefix),
+                "{reference}: {response:#}"
+            );
+        }
     }
     for (file, _, method, nested) in cases {
         for selector in [method, nested] {
