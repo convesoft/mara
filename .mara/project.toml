@@ -1,4 +1,4 @@
-format_version = 1
+format_version = 3
 
 [project]
 name = "mara"
@@ -6,3 +6,31 @@ schema = ".mara/schema.yaml"
 
 [content]
 include = ["**/*.mara.md"]
+
+[[code.languages]]
+name = "rust"
+extensions = ["rs"]
+grammar = ".mara/code/rust.wasm"
+query = ".mara/code/rust.scm"
+separator = "::"
+
+[[code.languages]]
+name = "python"
+extensions = ["py"]
+grammar = ".mara/code/python.wasm"
+query = ".mara/code/python.scm"
+separator = "."
+
+[[code.languages]]
+name = "javascript"
+extensions = ["js", "mjs", "cjs"]
+grammar = ".mara/code/javascript.wasm"
+query = ".mara/code/javascript.scm"
+separator = "."
+
+[[code.languages]]
+name = "typescript"
+extensions = ["ts", "mts", "cts"]
+grammar = ".mara/code/typescript.wasm"
+query = ".mara/code/typescript.scm"
+separator = "."

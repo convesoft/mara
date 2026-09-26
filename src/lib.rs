@@ -10,6 +10,7 @@ use globset::GlobBuilder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+mod code;
 mod corpus;
 mod diagnostics;
 mod discovery;
@@ -87,6 +88,7 @@ pub struct Project {
     content_patterns: Vec<String>,
     content_discovery_complete: bool,
     rule_files: Vec<PathBuf>,
+    code_languages: Vec<code::LanguageConfig>,
 }
 
 #[derive(Debug)]
@@ -355,6 +357,23 @@ impl Schema {
         }
 
         for (name, relation) in &self.relations {
+            if relation.code_source
+                && (!relation.source.is_empty()
+                    || relation.target.is_empty()
+                    || relation.external
+                    || relation.symmetric
+                    || relation.same_flavour
+                    || relation.cardinality.as_ref().is_some_and(|policy| {
+                        policy.outgoing.is_some() || policy.symmetric.is_some()
+                    })
+                    || relation.acyclic.is_some())
+            {
+                errors.push(ConfigurationDiagnostic::schema(
+                    &["relations", name],
+                    format!("code-source relation '{name}' requires empty source and item target flavours and cannot declare external, symmetric, same_flavour, outgoing/symmetric cardinality or acyclic"),
+                ));
+                self.validation.invalid_relations.insert(name.clone());
+            }
             if let Some(cardinality) = &relation.cardinality {
                 if cardinality.outgoing.is_none()
                     && cardinality.incoming.is_none()
@@ -467,7 +486,7 @@ impl Schema {
                     format!("relation '{name}' description must not be empty"),
                 ));
             }
-            if !self.validation.flavours_section_invalid {
+            if !self.validation.flavours_section_invalid && !relation.code_source {
                 errors.extend(endpoint_errors(
                     name,
                     "source",
@@ -477,11 +496,12 @@ impl Schema {
                 ));
             }
             if self.validation.flavours_section_invalid
-                || !endpoints_are_usable(
-                    &relation.source,
-                    &self.flavours,
-                    &self.validation.invalid_flavours,
-                )
+                || (!relation.code_source
+                    && !endpoints_are_usable(
+                        &relation.source,
+                        &self.flavours,
+                        &self.validation.invalid_flavours,
+                    ))
             {
                 self.validation
                     .invalid_relation_sources
@@ -659,6 +679,8 @@ pub struct RelationDefinition {
     symmetric: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     external: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    code_source: bool,
     #[serde(
         default,
         deserialize_with = "present_value",
@@ -765,6 +787,10 @@ impl Project {
 
     pub(crate) fn content_discovery_is_complete(&self) -> bool {
         self.content_discovery_complete
+    }
+
+    pub(crate) fn code_languages(&self) -> &[code::LanguageConfig] {
+        &self.code_languages
     }
 }
 
@@ -1379,6 +1405,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
                     content_patterns: vec![],
                     content_discovery_complete: false,
                     rule_files: vec![],
+                    code_languages: vec![],
                 },
                 errors: vec![diagnostic],
                 schema_available: false,
@@ -1416,10 +1443,10 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         };
     let mut rule_files = Vec::new();
     if configuration.contains_key("rules") {
-        if format_version != Some(2) {
+        if !matches!(format_version, Some(2 | 3)) {
             errors.push(ConfigurationDiagnostic::project(
                 &["rules"],
-                "rule sources require project format 2".into(),
+                "rule sources require project format 2 or 3".into(),
             ));
         }
         if let Some(mut rules) =
@@ -1444,14 +1471,30 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
             unknown_project_keys(&rules, "rules", &mut errors);
         }
     }
+    let mut code_languages = Vec::new();
+    if configuration.contains_key("code") {
+        if format_version != Some(3) {
+            errors.push(ConfigurationDiagnostic::project(
+                &["code"],
+                "code language bindings require project format 3".into(),
+            ));
+        }
+        if let Some(mut code) = take_project_table(&mut configuration, "code", "code", &mut errors)
+        {
+            code_languages =
+                take_project_value(&mut code, "languages", "code.languages", &mut errors)
+                    .unwrap_or_default();
+            unknown_project_keys(&code, "code", &mut errors);
+        }
+    }
     unknown_project_keys(&configuration, "", &mut errors);
 
-    if format_version.is_some_and(|version| version != 1 && version != 2) {
+    if format_version.is_some_and(|version| version != 1 && version != 2 && version != 3) {
         errors.push(ConfigurationDiagnostic::new(
             DiagnosticCode::FormatUnsupported,
             diagnostics::pointer(&["format_version"]),
             format!(
-                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. Supported formats are 1 (without rules) and 2",
+                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. Supported formats are 1 (without rules or code), 2 (without code), and 3",
                 format_version.expect("format version is present")
             ),
         ));
@@ -1547,6 +1590,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
             content_patterns,
             content_discovery_complete,
             rule_files,
+            code_languages,
         },
         errors,
         schema_available,

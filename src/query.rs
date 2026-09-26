@@ -152,6 +152,8 @@ pub struct RelationSummary {
     item: Option<ItemSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     external_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code_reference: Option<String>,
 }
 
 impl RelationSummary {
@@ -165,6 +167,10 @@ impl RelationSummary {
 
     pub fn external_address(&self) -> Option<&str> {
         self.external_address.as_deref()
+    }
+
+    pub fn code_reference(&self) -> Option<&str> {
+        self.code_reference.as_deref()
     }
 }
 
@@ -436,6 +442,14 @@ pub fn get_item(corpus: &Corpus, id: &str) -> Result<ResolvedItem, QueryError> {
                     relation: relation.name().to_owned(),
                     item: None,
                     external_address: Some(address.to_owned()),
+                    code_reference: None,
+                })
+            } else if relation.target().starts_with("code:") {
+                Ok(RelationSummary {
+                    relation: relation.name().to_owned(),
+                    item: None,
+                    external_address: None,
+                    code_reference: Some(relation.target().to_owned()),
                 })
             } else {
                 Ok(RelationSummary {
@@ -445,6 +459,7 @@ pub fn get_item(corpus: &Corpus, id: &str) -> Result<ResolvedItem, QueryError> {
                             .into(),
                     ),
                     external_address: None,
+                    code_reference: None,
                 })
             }
         })
@@ -463,6 +478,7 @@ pub fn get_item(corpus: &Corpus, id: &str) -> Result<ResolvedItem, QueryError> {
                     relation: relation.name().to_owned(),
                     item: Some(source.into()),
                     external_address: None,
+                    code_reference: None,
                 });
             }
         }
@@ -527,7 +543,9 @@ fn related_matches(
             if !matches_name(&filters.relations, relation.name()) {
                 continue;
             }
-            if crate::external::address(relation.target()).is_some() {
+            if crate::external::address(relation.target()).is_some()
+                || relation.target().starts_with("code:")
+            {
                 continue;
             }
             let neighbour =

@@ -120,6 +120,18 @@ flavours:
     body: required
     fields: {}
 relations:
+  code_implements:
+    description: The code implements the requirement; the association does not prove correctness.
+    source: []
+    target: [requirement]
+    code_source: true
+    inverse: implemented_by_code
+  code_verifies:
+    description: The code defines a check of the requirement; the association does not report execution results.
+    source: []
+    target: [requirement]
+    code_source: true
+    inverse: verified_by_code
   derives_from:
     description: The source originates from or refines the target’s intent. Use for a direct semantic basis, not chronology or general association.
     source: [requirement, design]

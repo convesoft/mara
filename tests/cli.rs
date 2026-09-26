@@ -1,9 +1,11 @@
 use std::{
     collections::BTreeSet,
     fs,
-    io::Write,
+    io::{BufRead, BufReader, Write},
     path::Path,
     process::{Command, Stdio},
+    sync::mpsc,
+    time::Duration,
 };
 
 #[cfg(unix)]
@@ -95,12 +97,50 @@ fn mcp_exchange_with_arguments(
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    let output = mara_with_stdin(current_directory, arguments, &input);
+    let expected = requests
+        .iter()
+        .filter(|request| request.get("id").is_some())
+        .count();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mara"))
+        .current_dir(current_directory)
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run Mara MCP server");
+    let mut stdin = child.stdin.take().expect("capture Mara stdin");
+    stdin.write_all(input.as_bytes()).expect("write Mara stdin");
+    let stdout = child.stdout.take().expect("capture Mara stdout");
+    let (sender, receiver) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if sender.send(line.expect("read MCP response")).is_err() {
+                break;
+            }
+        }
+    });
+    let mut responses = Vec::new();
+    while responses.len() < expected {
+        match receiver.recv_timeout(Duration::from_secs(120)) {
+            Ok(line) => responses.push(serde_json::from_str(&line).expect("MCP response is JSON")),
+            Err(error) => {
+                let _ = child.kill();
+                let output = child.wait_with_output().expect("read Mara MCP output");
+                reader.join().expect("read MCP stdout");
+                panic!(
+                    "received {} of {expected} MCP responses: {error}; {}",
+                    responses.len(),
+                    stderr(&output)
+                );
+            }
+        }
+    }
+    drop(stdin);
+    let output = child.wait_with_output().expect("read Mara MCP output");
+    reader.join().expect("read MCP stdout");
     assert!(output.status.success(), "{}", stderr(&output));
-    stdout(&output)
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("MCP response is JSON"))
-        .collect()
+    responses
 }
 
 fn mcp_request(id: u64, method: &str, params: Value) -> Value {
@@ -9549,6 +9589,49 @@ fn get_rejects_changed_inputs_and_invalid_fragment_cursors() {
 }
 
 #[test]
+fn get_rejects_changed_file_only_code_cursor() {
+    let fixture = retrieval_fixture();
+    let path = fixture.path().join("notes.txt");
+    let original = "A".repeat(120_000);
+    fs::write(&path, &original).unwrap();
+    let first = mara(
+        fixture.path(),
+        &["--format", "json", "get", "code:notes.txt"],
+    );
+    assert!(first.status.success(), "{}", stderr(&first));
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+
+    fs::write(&path, "B".repeat(120_000)).unwrap();
+    let stale = mara(
+        fixture.path(),
+        &["get", "code:notes.txt", "--cursor", cursor],
+    );
+    assert!(!stale.status.success());
+    assert!(stderr(&stale).contains("restart"));
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(
+                2,
+                "get",
+                json!({"reference":"code:notes.txt","cursor":cursor}),
+            ),
+        ],
+    );
+    assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
+
+    fs::write(&path, original).unwrap();
+    let resumed = mara(
+        fixture.path(),
+        &["get", "code:notes.txt", "--cursor", cursor],
+    );
+    assert!(resumed.status.success(), "{}", stderr(&resumed));
+}
+
+#[test]
 fn get_ignores_neighbours_and_fails_on_unpageable_identity() {
     let fixture = retrieval_fixture();
     let title = "🦀\"\\".repeat(300);
@@ -11684,6 +11767,1065 @@ fn relationship_alias_filters_initial_edges_and_identity_edits_preserve_occurren
     assert_eq!(validation_with_parity(root, &[])["valid"], true);
 }
 
+#[test]
+fn file_only_code_links_accept_binary_targets_and_invalidate_related_cursors() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(
+        mara(root, &["project", "init", "--template", "engineering"])
+            .status
+            .success()
+    );
+    let config_path = root.join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    fs::write(
+        &config_path,
+        config.replacen("format_version = 1", "format_version = 3", 1),
+    )
+    .unwrap();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema = fs::read_to_string(&schema_path).unwrap();
+    schema.push_str("  code_implements:\n    description: Code implements a requirement.\n    source: []\n    target: [requirement]\n    code_source: true\n    inverse: implemented_by_code\n");
+    fs::write(&schema_path, schema).unwrap();
+    let item_path = root.join("req.mara.md");
+    fs::write(&item_path, ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:implemented_by_code: code:a.txt\n:implemented_by_code: code:b.txt\n:implemented_by_code: code:c.txt\n\nA.\n:::\n").unwrap();
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        fs::write(root.join(name), name).unwrap();
+    }
+    let first: Value = serde_json::from_slice(
+        &mara(
+            root,
+            &[
+                "--format",
+                "json",
+                "related",
+                "REQ-A",
+                "--relation",
+                "code_implements",
+                "--limit",
+                "1",
+            ],
+        )
+        .stdout,
+    )
+    .unwrap();
+    assert_eq!(
+        first["connections"][0]["neighbour"]["reference"],
+        "code:a.txt"
+    );
+    let cursor = first["next_cursor"].as_str().unwrap();
+    fs::remove_file(root.join("a.txt")).unwrap();
+    let stale = mara(
+        root,
+        &[
+            "related",
+            "REQ-A",
+            "--relation",
+            "code_implements",
+            "--limit",
+            "1",
+            "--cursor",
+            cursor,
+        ],
+    );
+    assert!(!stale.status.success());
+    assert!(stderr(&stale).contains("restart"), "{}", stderr(&stale));
+
+    fs::write(root.join("a.txt"), "a").unwrap();
+    fs::write(root.join("blob.bin"), [0xff, 0xfe, 0x00]).unwrap();
+    let item = fs::read_to_string(&item_path).unwrap();
+    fs::write(
+        &item_path,
+        item.replace(
+            ":implemented_by_code: code:c.txt\n",
+            ":implemented_by_code: code:c.txt\n:implemented_by_code: code:blob.bin\n",
+        ),
+    )
+    .unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let related: Value = serde_json::from_slice(
+        &mara(
+            root,
+            &[
+                "--format",
+                "json",
+                "related",
+                "REQ-A",
+                "--relation",
+                "code_implements",
+            ],
+        )
+        .stdout,
+    )
+    .unwrap();
+    assert!(
+        related["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["neighbour"]["reference"] == "code:blob.bin")
+    );
+    let backlink: Value = serde_json::from_slice(
+        &mara(root, &["--format", "json", "related", "code:blob.bin"]).stdout,
+    )
+    .unwrap();
+    assert_eq!(backlink["connections"][0]["neighbour"]["id"], "REQ-A");
+    let get = mara(root, &["get", "code:blob.bin"]);
+    assert!(!get.status.success());
+    assert!(stderr(&get).contains("not UTF-8 text"), "{}", stderr(&get));
+
+    fs::write(
+        root.join("other.mara.md"),
+        ":::mara requirement REQ-B\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: B\n\nB.\n:::\n",
+    )
+    .unwrap();
+    let renamed = mara(root, &["item", "rename", "REQ-B", "REQ-C"]);
+    assert!(renamed.status.success(), "{}", stderr(&renamed));
+    assert!(
+        fs::read_to_string(&item_path)
+            .unwrap()
+            .contains("code:blob.bin")
+    );
+
+    let item = fs::read_to_string(&item_path).unwrap();
+    fs::write(
+        &item_path,
+        item.replace(
+            ":implemented_by_code: code:blob.bin\n",
+            ":implemented_by_code: code:blob.bin\n:implemented_by_code: code:missing-a.txt\n:implemented_by_code: code:missing-b.txt\n",
+        ),
+    )
+    .unwrap();
+    let related = mara(root, &["related", "REQ-A"]);
+    assert!(!related.status.success());
+    assert!(
+        stderr(&related).contains("code:missing-a.txt"),
+        "{}",
+        stderr(&related)
+    );
+    let first = mara(
+        root,
+        &["--format", "json", "project", "validate", "--limit", "1"],
+    );
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+    fs::write(root.join("blob.bin"), [0xff, 0xfe, 0x01]).unwrap();
+    let stale = mara(
+        root,
+        &[
+            "--format", "json", "project", "validate", "--limit", "1", "--cursor", cursor,
+        ],
+    );
+    let stale: Value = serde_json::from_slice(&stale.stdout).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_cursor", "{stale:#}");
+}
+
+#[cfg(unix)]
+fn rust_code_fixture() -> TempDir {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(
+        mara(root, &["project", "init", "--template", "engineering"])
+            .status
+            .success()
+    );
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(".mara");
+    let sample_config = fs::read_to_string(sample.join("project.toml")).unwrap();
+    let first_language = sample_config
+        .split_once("\n[[code.languages]]")
+        .unwrap()
+        .1
+        .split("\n[[code.languages]]")
+        .next()
+        .unwrap();
+    let config_path = root.join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    fs::write(
+        &config_path,
+        format!(
+            "{}\n[[code.languages]]{first_language}",
+            config.replacen("format_version = 1", "format_version = 3", 1)
+        ),
+    )
+    .unwrap();
+    fs::create_dir(root.join(".mara/code")).unwrap();
+    for extension in ["wasm", "scm"] {
+        let file = format!("rust.{extension}");
+        fs::copy(
+            sample.join("code").join(&file),
+            root.join(".mara/code").join(file),
+        )
+        .unwrap();
+    }
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema = fs::read_to_string(&schema_path).unwrap();
+    schema.push_str("  code_implements:\n    description: Code implements a requirement.\n    source: []\n    target: [requirement]\n    code_source: true\n    inverse: implemented_by_code\n");
+    fs::write(&schema_path, schema).unwrap();
+    fixture
+}
+
+#[cfg(unix)]
+#[test]
+fn code_discovery_walk_errors_make_validation_incomplete() {
+    let fixture = rust_code_fixture();
+    let root = fixture.path();
+    let unreadable = root.join("unreadable");
+    fs::create_dir(&unreadable).unwrap();
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+    let output = mara(root, &["--format", "json", "project", "validate"]);
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o755)).unwrap();
+    let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(result["evaluation_complete"], false, "{result:#}");
+    assert!(
+        result["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic["code"] == "source_invalid"
+                    && diagnostic["message"]
+                        .as_str()
+                        .is_some_and(|message| message.contains("could not discover code files"))
+            }),
+        "{result:#}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn item_validation_reports_invalid_code_markers_and_internal_symlinks_resolve() {
+    let fixture = rust_code_fixture();
+    let root = fixture.path();
+    let item_path = root.join("req.mara.md");
+    let item =
+        ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n\nA.\n:::\n";
+    fs::write(&item_path, item).unwrap();
+    let code_path = root.join("implementation.rs");
+    fs::write(&code_path, "// @mara unknown_relation REQ-A\nfn run() {}\n").unwrap();
+    let project = validation_with_parity(root, &[]);
+    assert_eq!(project["valid"], false);
+    let selected: Value = serde_json::from_slice(
+        &mara(root, &["--format", "json", "item", "validate", "REQ-A"]).stdout,
+    )
+    .unwrap();
+    assert_eq!(selected["valid"], false, "{selected:#}");
+    assert!(
+        selected["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| {
+                diagnostic["code"] == "relation_invalid"
+                    && diagnostic["message"]
+                        .as_str()
+                        .is_some_and(|message| message.contains("unknown code relation"))
+            }),
+        "{selected:#}"
+    );
+
+    fs::write(
+        &code_path,
+        "const VALUE: () = {\n    // @mara code_implements REQ-A\n};\n",
+    )
+    .unwrap();
+    let project = validation_with_parity(root, &[]);
+    assert_eq!(project["valid"], false);
+    let selected: Value = serde_json::from_slice(
+        &mara(root, &["--format", "json", "item", "validate", "REQ-A"]).stdout,
+    )
+    .unwrap();
+    assert_eq!(selected["valid"], false, "{selected:#}");
+    assert!(
+        selected["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "code_unsupported"),
+        "{selected:#}"
+    );
+    fs::write(
+        &code_path,
+        "const VALUE: () = {\n    // @mara code_implements 01ARZ3NDEKTSV4RRFFQ69G5F00\n};\n",
+    )
+    .unwrap();
+    let selected: Value = serde_json::from_slice(
+        &mara(root, &["--format", "json", "item", "validate", "REQ-A"]).stdout,
+    )
+    .unwrap();
+    assert_eq!(selected["valid"], false, "{selected:#}");
+    assert!(
+        selected["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "code_unsupported"),
+        "{selected:#}"
+    );
+
+    fs::write(&code_path, "fn run() {}\n").unwrap();
+    std::os::unix::fs::symlink("implementation.rs", root.join("linked.rs")).unwrap();
+    fs::write(
+        &item_path,
+        item.replace(
+            ":title: A\n",
+            ":title: A\n:implemented_by_code: code:linked.rs::run\n",
+        ),
+    )
+    .unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let get: Value = serde_json::from_slice(
+        &mara(root, &["--format", "json", "get", "code:linked.rs::run"]).stdout,
+    )
+    .unwrap();
+    assert_eq!(get["content"], "fn run() {}");
+    assert_eq!(get["node"]["source"]["path"], "linked.rs");
+    let related: Value = serde_json::from_slice(
+        &mara(
+            root,
+            &["--format", "json", "related", "code:linked.rs::run"],
+        )
+        .stdout,
+    )
+    .unwrap();
+    assert_eq!(related["connections"][0]["neighbour"]["id"], "REQ-A");
+}
+
+#[cfg(unix)]
+#[test]
+fn invalid_language_pack_does_not_return_partial_code_relations() {
+    let fixture = rust_code_fixture();
+    let root = fixture.path();
+    fs::write(
+        root.join("req.mara.md"),
+        ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n\nA.\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("implementation.rs"),
+        "// @mara code_implements REQ-A\nfn run() {}\n",
+    )
+    .unwrap();
+    let related = mara(root, &["--format", "json", "related", "REQ-A"]);
+    assert!(related.status.success(), "{}", stderr(&related));
+    let related: Value = serde_json::from_slice(&related.stdout).unwrap();
+    assert!(
+        related["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| { entry["neighbour"]["reference"] == "code:implementation.rs::run" })
+    );
+
+    fs::write(root.join(".mara/code/rust.scm"), "(").unwrap();
+    let validation = validation_with_parity(root, &[]);
+    assert_eq!(validation["valid"], false);
+    assert!(
+        validation["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| { diagnostic["code"] == "code_unsupported" })
+    );
+    let related = mara(root, &["related", "REQ-A"]);
+    assert!(!related.status.success());
+    assert!(
+        stderr(&related).contains("rust.scm"),
+        "{}",
+        stderr(&related)
+    );
+
+    fs::write(
+        root.join(".mara/code/rust.scm"),
+        "(function_item) @symbol\n(function_item name: (_) @name)\n(line_comment) @comment\n",
+    )
+    .unwrap();
+    let validation = validation_with_parity(root, &[]);
+    assert_eq!(validation["valid"], false);
+    assert!(
+        validation["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "code_unsupported"
+                && diagnostic["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("pair @name with @symbol"))
+    );
+    let related = mara(root, &["related", "REQ-A"]);
+    assert!(!related.status.success());
+    assert!(stderr(&related).contains("pair @name with @symbol"));
+}
+
+#[cfg(unix)]
+#[test]
+fn code_related_reports_missing_marker_targets_and_pages_by_item_source() {
+    let fixture = rust_code_fixture();
+    let root = fixture.path();
+    fs::write(
+        root.join("a.mara.md"),
+        ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02\n:title: A\n\nA.\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("z.mara.md"),
+        ":::mara requirement REQ-Z\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: Z\n\nZ.\n:::\n",
+    )
+    .unwrap();
+    let code_path = root.join("implementation.rs");
+    fs::write(
+        &code_path,
+        "fn run() {\n // @mara code_implements REQ-MISSING\n // @mara code_implements REQ-Z\n // @mara code_implements REQ-A\n}\n",
+    )
+    .unwrap();
+    let missing = mara(root, &["related", "code:implementation.rs::run"]);
+    assert!(!missing.status.success());
+    assert!(
+        stderr(&missing).contains("REQ-MISSING"),
+        "{}",
+        stderr(&missing)
+    );
+
+    fs::write(
+        &code_path,
+        "fn run() {\n // @mara code_implements REQ-Z\n // @mara code_implements REQ-A\n}\n",
+    )
+    .unwrap();
+    let first = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "related",
+            "code:implementation.rs::run",
+            "--relation",
+            "code_implements",
+            "--limit",
+            "1",
+        ],
+    );
+    assert!(first.status.success(), "{}", stderr(&first));
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(first["connections"][0]["neighbour"]["id"], "REQ-A");
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let second = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "related",
+            "code:implementation.rs::run",
+            "--relation",
+            "code_implements",
+            "--limit",
+            "1",
+            "--cursor",
+            cursor,
+        ],
+    );
+    assert!(second.status.success(), "{}", stderr(&second));
+    let second: Value = serde_json::from_slice(&second.stdout).unwrap();
+    assert_eq!(second["connections"][0]["neighbour"]["id"], "REQ-Z");
+    assert_eq!(second["has_more"], false);
+}
+
+#[test]
+fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    assert!(
+        mara(root, &["project", "init", "--template", "engineering"])
+            .status
+            .success()
+    );
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(".mara");
+    let sample_config = fs::read_to_string(sample.join("project.toml")).unwrap();
+    let (_, code_bindings) = sample_config.split_once("\n[[code.languages]]").unwrap();
+    let code_config_path = root.join(".mara/project.toml");
+    let initialized = fs::read_to_string(&code_config_path).unwrap();
+    fs::write(
+        &code_config_path,
+        format!(
+            "{}\n[[code.languages]]{code_bindings}",
+            initialized.replacen("format_version = 1", "format_version = 3", 1)
+        ),
+    )
+    .unwrap();
+    fs::create_dir(root.join(".mara/code")).unwrap();
+    for name in ["rust", "python", "javascript", "typescript"] {
+        for extension in ["wasm", "scm"] {
+            let file = format!("{name}.{extension}");
+            fs::copy(
+                sample.join("code").join(&file),
+                root.join(".mara/code").join(file),
+            )
+            .unwrap();
+        }
+    }
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema = fs::read_to_string(&schema_path).unwrap();
+    schema.push_str("  code_implements:\n    description: Code implements a requirement.\n    source: []\n    target: [requirement]\n    code_source: true\n    inverse: implemented_by_code\n");
+    fs::write(&schema_path, &schema).unwrap();
+    let item_path = root.join("req.mara.md");
+    let item = ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:implemented_by_code: code:src/sample.rs::Outer::run\n\nA.\n:::\n";
+    fs::write(&item_path, item).unwrap();
+    fs::create_dir(root.join("src")).unwrap();
+    let cases = [
+        (
+            "sample.rs",
+            "struct Outer;\nimpl Outer {\n // @mara code_implements REQ-A\n fn run() { // @mara code_implements REQ-A\n fn check() {} }\n}\n",
+            "Outer::run",
+            "Outer::run::check",
+        ),
+        (
+            "sample.py",
+            "class Outer:\n    # @mara code_implements REQ-A\n    def run(self):\n        # @mara code_implements REQ-A\n        def check(): pass\n",
+            "Outer.run",
+            "Outer.run.check",
+        ),
+        (
+            "sample.js",
+            "class Outer {\n // @mara code_implements REQ-A\n run() { // @mara code_implements REQ-A\n function check() {} }\n}\n",
+            "Outer.run",
+            "Outer.run.check",
+        ),
+        (
+            "sample.ts",
+            "class Outer {\n // @mara code_implements REQ-A\n run(): void { // @mara code_implements REQ-A\n function check(): void {} }\n}\n",
+            "Outer.run",
+            "Outer.run.check",
+        ),
+    ];
+    for (file, source, _, _) in cases {
+        fs::write(root.join("src").join(file), source).unwrap();
+    }
+    let modified_declarations = [
+        (
+            "attribute.rs",
+            "// @mara code_implements REQ-A\n#[test]\nfn run() {}\n",
+            "run",
+        ),
+        (
+            "decorated.py",
+            "# @mara code_implements REQ-A\n@decorator\ndef run(): pass\n",
+            "run",
+        ),
+        (
+            "decorated.ts",
+            "@sealed\n// @mara code_implements REQ-A\nclass Service {}\n",
+            "Service",
+        ),
+        (
+            "trait.rs",
+            "trait Api {\n    /// @mara code_implements REQ-A\n    fn run(&self);\n}\n",
+            "Api::run",
+        ),
+        (
+            "export.js",
+            "// @mara code_implements REQ-A\nexport function run() {}\n",
+            "run",
+        ),
+        (
+            "export.ts",
+            "// @mara code_implements REQ-A\nexport function run(): void {}\n",
+            "run",
+        ),
+    ];
+    for (file, source, _) in modified_declarations {
+        fs::write(root.join("src").join(file), source).unwrap();
+    }
+    let valid = validation_with_parity(root, &[]);
+    assert_eq!(valid["valid"], true, "{valid:#}");
+    let rejected_path = root.join("src/rejected.rs");
+    fs::write(
+        &rejected_path,
+        "// @mara implemented_by_code REQ-A\nfn run() {}\n",
+    )
+    .unwrap();
+    let rejected = validation_with_parity(root, &[]);
+    assert!(
+        rejected["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|diagnostic| diagnostic["code"] == "relation_invalid"),
+        "{rejected:#}"
+    );
+    let related: Value = serde_json::from_slice(
+        &mara(
+            root,
+            &["--format", "json", "related", "REQ-A", "--limit", "50"],
+        )
+        .stdout,
+    )
+    .unwrap();
+    assert!(
+        related["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|connection| connection["neighbour"]["reference"] != "code:src/rejected.rs::run"),
+        "{related:#}"
+    );
+    fs::remove_file(rejected_path).unwrap();
+    fs::write(
+        &item_path,
+        item.replace(
+            ":implemented_by_code: code:src/sample.rs::Outer::run\n",
+            ":implemented_by_code: code:src/sample.rs::Outer::run\n:implemented_by_code: code:src/./sample.rs::Outer::run\n:implemented_by_code: code:src//sample.rs::Outer::run\n",
+        ),
+    )
+    .unwrap();
+    let invalid_paths = validation_with_parity(root, &[]);
+    assert_eq!(
+        invalid_paths["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == "code_unsupported")
+            .count(),
+        2,
+        "{invalid_paths:#}"
+    );
+    let canonical = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":"code:src/sample.rs::Outer::run"}),
+    );
+    assert_eq!(canonical["occurrence_count"], 2, "{canonical:#}");
+    fs::write(&item_path, item).unwrap();
+    let project = resolve_project(Some(root), root).unwrap();
+    let loaded_schema = mara::load_schema(&project).unwrap();
+    let corpus = mara::load_corpus(&project, &loaded_schema).unwrap();
+    let summary = mara::get_item(&corpus, "REQ-A").unwrap();
+    assert_eq!(
+        summary.outgoing_relations()[0].code_reference(),
+        Some("code:src/sample.rs::Outer::run")
+    );
+    for args in [
+        vec!["item", "update", "REQ-A", "--title", "Updated"],
+        vec!["item", "move", "REQ-A", "moved.mara.md"],
+        vec!["item", "move", "REQ-A", "req.mara.md"],
+    ] {
+        let outcome = mara(root, &args);
+        assert!(
+            outcome.status.success(),
+            "{}: {}",
+            args.join(" "),
+            stderr(&outcome)
+        );
+    }
+    fs::write(&item_path, item).unwrap();
+
+    fs::write(
+        &schema_path,
+        schema.replace(
+            "    code_source: true\n",
+            "    code_source: true\n    cardinality:\n      incoming: {maximum: 0}\n",
+        ),
+    )
+    .unwrap();
+    let constrained = validation_with_parity(root, &[]);
+    let count = constrained["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|diagnostic| diagnostic["code"] == "relation_cardinality")
+        .unwrap();
+    assert_eq!(count["details"]["direction"], "incoming");
+    assert_eq!(count["details"]["actual"], 14, "{constrained:#}");
+    fs::write(
+        &schema_path,
+        schema.replace(
+            "    code_source: true\n",
+            "    code_source: true\n    cardinality:\n      incoming: {minimum: 1}\n",
+        ),
+    )
+    .unwrap();
+    let base_config = fs::read_to_string(&code_config_path).unwrap();
+    fs::write(
+        &code_config_path,
+        format!("{base_config}\n[rules]\nformat_version = 1\nfiles = [\"rules.yaml\"]\n"),
+    )
+    .unwrap();
+    fs::write(root.join("rules.yaml"),
+        "id: rule:code_link\ntargetClass: requirement\nproperty: [{path: {inversePath: code_implements}, minCount: 1}]\n"
+    ).unwrap();
+    let ruled = validation_with_parity(root, &[]);
+    assert_eq!(ruled["valid"], true, "{ruled:#}");
+    fs::write(&code_config_path, base_config).unwrap();
+    fs::remove_file(root.join("rules.yaml")).unwrap();
+    fs::write(&schema_path, &schema).unwrap();
+    let code_config = fs::read_to_string(&code_config_path).unwrap().replace(
+        "extensions = [\"js\", \"mjs\", \"cjs\"]",
+        "extensions = [\"js\", \"mjs\", \"cjs\", \"jsx\"]",
+    );
+    fs::write(&code_config_path, code_config).unwrap();
+    fs::write(
+        root.join("src/extra.jsx"),
+        "// @mara code_implements REQ-A\nfunction extra() {}\n",
+    )
+    .unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let related: Value = serde_json::from_slice(
+        &mara(
+            root,
+            &["--format", "json", "related", "REQ-A", "--limit", "20"],
+        )
+        .stdout,
+    )
+    .unwrap();
+    let connections = related["connections"].as_array().unwrap();
+    assert!(
+        connections
+            .iter()
+            .any(|entry| entry["neighbour"]["reference"] == "code:src/extra.jsx::extra")
+    );
+    for (file, _, selector) in modified_declarations {
+        let reference = format!("code:src/{file}::{selector}");
+        assert!(
+            connections
+                .iter()
+                .any(|entry| entry["neighbour"]["reference"] == reference),
+            "missing {reference}: {related:#}"
+        );
+        let get = mara(root, &["--format", "json", "get", &reference]);
+        assert!(get.status.success(), "{}", stderr(&get));
+        if let Some(prefix) = match file {
+            "attribute.rs" => Some("#[test]"),
+            "decorated.py" => Some("@decorator"),
+            "decorated.ts" => Some("@sealed"),
+            "export.js" | "export.ts" => Some("export"),
+            _ => None,
+        } {
+            let response: Value = serde_json::from_slice(&get.stdout).unwrap();
+            assert!(
+                response["content"].as_str().unwrap().starts_with(prefix),
+                "{reference}: {response:#}"
+            );
+        }
+    }
+    for (file, _, method, nested) in cases {
+        for selector in [method, nested] {
+            let reference = format!("code:src/{file}::{selector}");
+            assert!(
+                connections
+                    .iter()
+                    .any(|entry| entry["neighbour"]["reference"] == reference),
+                "missing {reference}: {related:#}"
+            );
+            let get: Value = serde_json::from_slice(
+                &mara(root, &["--format", "json", "get", &reference]).stdout,
+            )
+            .unwrap();
+            assert_eq!(get["node"]["kind"], "code", "{get:#}");
+            let back: Value = serde_json::from_slice(
+                &mara(root, &["--format", "json", "related", &reference]).stdout,
+            )
+            .unwrap();
+            assert_eq!(
+                back["connections"][0]["neighbour"]["id"], "REQ-A",
+                "{back:#}"
+            );
+        }
+    }
+    let rust = "code:src/sample.rs::Outer::run";
+    let edge = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":rust}),
+    );
+    assert_eq!(edge["occurrence_count"], 2, "{edge:#}");
+    assert_eq!(edge["occurrences"][1]["kind"], "code_comment");
+    let canonical = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":rust,"relation":"code_implements","target":"REQ-A"}),
+    );
+    assert_eq!(canonical["edge"], edge["edge"]);
+    let code_before = fs::read(root.join("src/sample.rs")).unwrap();
+    let item_remove = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "relation",
+            "remove",
+            "REQ-A",
+            "implemented_by_code",
+            rust,
+        ],
+    );
+    assert!(item_remove.status.success(), "{}", stderr(&item_remove));
+    let removed: Value = serde_json::from_slice(&item_remove.stdout).unwrap();
+    assert_eq!(removed["scope"], "item");
+    assert_eq!(removed["changed_occurrences"], 1);
+    assert_eq!(removed["remaining_occurrences"], 1);
+    assert_eq!(removed["edge_exists"], true);
+    assert_eq!(fs::read(root.join("src/sample.rs")).unwrap(), code_before);
+    assert!(
+        !fs::read_to_string(&item_path)
+            .unwrap()
+            .contains(":implemented_by_code:")
+    );
+    let marker_only = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":rust}),
+    );
+    assert_eq!(marker_only["occurrence_count"], 1);
+    assert_eq!(marker_only["occurrences"][0]["kind"], "code_comment");
+    let duplicate = relation_tool(
+        root,
+        "relation_add",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":rust}),
+    );
+    assert_eq!(duplicate["error"]["code"], "relation_exists");
+    let marker_token = marker_only["occurrences"][0]["reference"].as_str().unwrap();
+    let selected_marker = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":rust,"occurrence":marker_token}),
+    );
+    assert_eq!(selected_marker["error"]["code"], "unsupported_mutation");
+    assert!(
+        selected_marker["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("do not modify code source files")
+    );
+    let no_item_assertion = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":rust}),
+    );
+    assert_eq!(no_item_assertion["error"]["code"], "unsupported_mutation");
+    let code_side = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":rust,"relation":"code_implements","target":"REQ-A"}),
+    );
+    assert_eq!(code_side["error"]["code"], "unsupported_mutation");
+    assert!(
+        code_side["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("cannot modify code source files")
+    );
+    let code_side_add = relation_tool(
+        root,
+        "relation_add",
+        json!({"source":rust,"relation":"code_implements","target":"REQ-A"}),
+    );
+    assert_eq!(code_side_add["error"]["code"], "unsupported_mutation");
+    assert_eq!(fs::read(root.join("src/sample.rs")).unwrap(), code_before);
+    fs::write(&item_path, item).unwrap();
+    let mcp = mcp_exchange(
+        root,
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "related", json!({"reference":rust})),
+            mcp_call(3, "get", json!({"reference":rust})),
+        ],
+    );
+    let cli_back: Value =
+        serde_json::from_slice(&mara(root, &["--format", "json", "related", rust]).stdout).unwrap();
+    let cli_get: Value =
+        serde_json::from_slice(&mara(root, &["--format", "json", "get", rust]).stdout).unwrap();
+    assert_eq!(
+        mcp_response(&mcp, 2)["result"]["structuredContent"],
+        cli_back
+    );
+    assert_eq!(
+        mcp_response(&mcp, 3)["result"]["structuredContent"],
+        cli_get
+    );
+
+    let rust_path = root.join("src/sample.rs");
+    fs::write(&rust_path, cases[0].1.replace("run()", "renamed()")).unwrap();
+    let renamed = validation_with_parity(root, &[]);
+    assert!(
+        renamed["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "code_missing"),
+        "{renamed:#}"
+    );
+    let new_ref = "code:src/sample.rs::Outer::renamed";
+    let new_back: Value =
+        serde_json::from_slice(&mara(root, &["--format", "json", "related", new_ref]).stdout)
+            .unwrap();
+    assert_eq!(new_back["connections"][0]["neighbour"]["id"], "REQ-A");
+    fs::rename(&rust_path, root.join("src/moved.rs")).unwrap();
+    let moved = validation_with_parity(root, &[]);
+    assert!(
+        moved["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "code_missing"),
+        "{moved:#}"
+    );
+    let moved_back: Value = serde_json::from_slice(
+        &mara(
+            root,
+            &[
+                "--format",
+                "json",
+                "related",
+                "code:src/moved.rs::Outer::renamed",
+            ],
+        )
+        .stdout,
+    )
+    .unwrap();
+    assert_eq!(moved_back["connections"][0]["neighbour"]["id"], "REQ-A");
+
+    let python_path = root.join("src/sample.py");
+    fs::write(
+        &python_path,
+        "class Outer:\n    def run(self): pass\n    def run(self): pass\n",
+    )
+    .unwrap();
+    fs::write(
+        &item_path,
+        item.replace(
+            "code:src/sample.rs::Outer::run",
+            "code:src/sample.py::Outer.run",
+        ),
+    )
+    .unwrap();
+    let ambiguous = validation_with_parity(root, &[]);
+    assert!(
+        ambiguous["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "code_ambiguous"),
+        "{ambiguous:#}"
+    );
+    fs::write(&python_path, "class Outer:\n    def other(self): pass\n").unwrap();
+    let missing_symbol = validation_with_parity(root, &[]);
+    assert!(
+        missing_symbol["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "code_missing"),
+        "{missing_symbol:#}"
+    );
+    fs::remove_file(&python_path).unwrap();
+    let deleted = validation_with_parity(root, &[]);
+    assert!(
+        deleted["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "code_missing"),
+        "{deleted:#}"
+    );
+    fs::write(root.join("src/notes.txt"), "notes").unwrap();
+    fs::write(
+        &item_path,
+        item.replace(
+            "code:src/sample.rs::Outer::run",
+            "code:src/notes.txt::thing",
+        ),
+    )
+    .unwrap();
+    let unsupported = validation_with_parity(root, &[]);
+    assert!(
+        unsupported["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "code_unsupported"),
+        "{unsupported:#}"
+    );
+    fs::write(
+        &item_path,
+        item.replace("code:src/sample.rs::Outer::run", "code:src/notes.txt"),
+    )
+    .unwrap();
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    let file_only: Value = serde_json::from_slice(
+        &mara(root, &["--format", "json", "get", "code:src/notes.txt"]).stdout,
+    )
+    .unwrap();
+    assert_eq!(file_only["content"], "notes");
+    fs::write(
+        &item_path,
+        item.replace(":implemented_by_code: code:src/sample.rs::Outer::run\n", ""),
+    )
+    .unwrap();
+    let added = relation_tool(
+        root,
+        "relation_add",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":"code:src/notes.txt"}),
+    );
+    assert_eq!(added["scope"], "item", "{added:#}");
+    assert_eq!(added["changed_occurrences"], 1);
+    assert_eq!(added["remaining_occurrences"], 1);
+    assert!(
+        fs::read_to_string(&item_path)
+            .unwrap()
+            .contains(":implemented_by_code: code:src/notes.txt")
+    );
+    let with_inline = fs::read_to_string(&item_path)
+        .unwrap()
+        .replace("A.\n", "A. [[implemented_by_code:code:src/notes.txt]]\n");
+    fs::write(&item_path, with_inline).unwrap();
+    let occurrences = relation_tool(
+        root,
+        "relation_get",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":"code:src/notes.txt"}),
+    );
+    assert_eq!(occurrences["occurrence_count"], 2);
+    let inline_token = occurrences["occurrences"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["kind"] == "inline")
+        .unwrap()["reference"]
+        .as_str()
+        .unwrap();
+    let removed_inline = relation_tool(
+        root,
+        "relation_remove",
+        json!({"source":"REQ-A","relation":"implemented_by_code","target":"code:src/notes.txt","occurrence":inline_token}),
+    );
+    assert_eq!(removed_inline["scope"], "occurrence", "{removed_inline:#}");
+    assert_eq!(removed_inline["remaining_occurrences"], 1);
+    assert!(
+        fs::read_to_string(&item_path)
+            .unwrap()
+            .contains("A. code:src/notes.txt")
+    );
+    assert_eq!(validation_with_parity(root, &[])["valid"], true);
+    fs::write(
+        &schema_path,
+        schema.replace(
+            "    target: [requirement]\n    code_source: true",
+            "    target: [design]\n    code_source: true",
+        ),
+    )
+    .unwrap();
+    let forbidden = validation_with_parity(root, &[]);
+    assert!(
+        forbidden["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "relation_invalid"),
+        "{forbidden:#}"
+    );
+    fs::write(&schema_path, schema.replace("    code_source: true\n", "")).unwrap();
+    let rejected = diagnostic_parity(root, &["schema", "validate"], "schema_validate", json!({}));
+    assert_eq!(rejected["valid"], false, "{rejected:#}");
+}
+
 // Exercise the real CLI and stdio server for the validation result family.
 fn diagnostic_parity(root: &Path, args: &[&str], tool: &str, params: Value) -> Value {
     let mut cli_args = vec!["--format", "json"];
@@ -12600,6 +13742,151 @@ fn trace_matrix_reports_external_qualifier_outcome() {
                 && r["qualification"] == "passed"),
         "{result:#}"
     );
+}
+
+#[test]
+fn trace_matrix_reports_code_endpoint_predicate_states() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["relations"]["code_implements"] = json!({
+        "description":"Code implements a requirement.", "source":[],
+        "target":["requirement"], "code_source":true,
+        "inverse":"implemented_by_code"
+    });
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(root.join("src/check.rs"), "fn check() {}\n").unwrap();
+    let added = mara(
+        root,
+        &[
+            "relation",
+            "add",
+            "REQ-A",
+            "implemented_by_code",
+            "code:src/check.rs",
+        ],
+    );
+    assert!(added.status.success(), "{}", stderr(&added));
+    fs::write(
+        root.join("rules.yaml"),
+        "id: rule:code_state\ntargetClass: requirement\nproperty:\n  - path: {inversePath: code_implements}\n    qualifiedValueShape: {pattern: 'urn:mara:code:'}\n    qualifiedMinCount: 1\n    node: {pattern: 'urn:mara:code:'}\n",
+    )
+    .unwrap();
+    let output = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "trace",
+            "matrix",
+            "--id",
+            "REQ-A",
+            "--rule",
+            "urn:mara:rule:code_state",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let result: Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(result["summaries"][0]["passed"], 1, "{result:#}");
+    assert!(
+        result["records"].as_array().unwrap().iter().any(|record| {
+            record["kind"] == "edge"
+                && record["endpoint"]["reference"] == "code:src/check.rs"
+                && record["qualification"] == "passed"
+                && record["every"] == "passed"
+        }),
+        "{result:#}"
+    );
+}
+
+#[test]
+fn trace_matrix_cursor_detects_code_source_and_adapter_changes() {
+    let fixture = rule_fixture();
+    let root = fixture.path();
+    let schema_path = root.join(".mara/schema.yaml");
+    let mut schema: Value =
+        serde_saphyr::from_str(&fs::read_to_string(&schema_path).unwrap()).unwrap();
+    schema["relations"]["code_implements"] = json!({
+        "description":"Code implements a requirement.", "source":[],
+        "target":["requirement"], "code_source":true,
+        "inverse":"implemented_by_code"
+    });
+    fs::write(&schema_path, serde_saphyr::to_string(&schema).unwrap()).unwrap();
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(".mara");
+    let sample_config = fs::read_to_string(sample.join("project.toml")).unwrap();
+    let rust_language = sample_config
+        .split_once("\n[[code.languages]]")
+        .unwrap()
+        .1
+        .split("\n[[code.languages]]")
+        .next()
+        .unwrap();
+    let config_path = root.join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    fs::write(
+        &config_path,
+        format!(
+            "{}\n[[code.languages]]{rust_language}",
+            config.replacen("format_version = 2", "format_version = 3", 1)
+        ),
+    )
+    .unwrap();
+    fs::create_dir(root.join(".mara/code")).unwrap();
+    for extension in ["wasm", "scm"] {
+        let file = format!("rust.{extension}");
+        fs::copy(
+            sample.join("code").join(&file),
+            root.join(".mara/code").join(file),
+        )
+        .unwrap();
+    }
+    let source_path = root.join("check.rs");
+    let source = "// @mara code_implements REQ-A\nfn check() {}\n";
+    fs::write(&source_path, source).unwrap();
+    fs::write(
+        root.join("rules.yaml"),
+        "id: rule:code_state\ntargetClass: requirement\nproperty: [{path: {inversePath: code_implements}, minCount: 1}]\n",
+    )
+    .unwrap();
+    let args = [
+        "--format",
+        "json",
+        "trace",
+        "matrix",
+        "--id",
+        "REQ-A",
+        "--rule",
+        "urn:mara:rule:code_state",
+        "--limit",
+        "1",
+    ];
+    let first = mara(root, &args);
+    assert!(first.status.success(), "{}", stderr(&first));
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+    fs::write(&source_path, "// ordinary comment\nfn check() {}\n").unwrap();
+    let mut continued = args.to_vec();
+    continued.extend(["--cursor", cursor]);
+    let stale = mara(root, &continued);
+    let stale: Value = serde_json::from_slice(&stale.stdout).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_cursor", "{stale:#}");
+
+    fs::write(&source_path, source).unwrap();
+    let first = mara(root, &args);
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let query_path = root.join(".mara/code/rust.scm");
+    let mut query = fs::read_to_string(&query_path).unwrap();
+    query.push('\n');
+    fs::write(&query_path, query).unwrap();
+    let mut continued = args.to_vec();
+    continued.extend(["--cursor", cursor]);
+    let stale = mara(root, &continued);
+    let stale: Value = serde_json::from_slice(&stale.stdout).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_cursor", "{stale:#}");
 }
 
 #[test]
@@ -14605,6 +15892,7 @@ fn bounded_trace_chains_reject_excess_depth_and_finish_on_cycles() {
 }
 
 #[test]
+// @mara code_verifies REQ-RELATION-CARDINALITY
 fn structural_relation_policies_validate_normalized_edges_through_cli_and_mcp() {
     let fixture = TempDir::new().unwrap();
     let root = fixture.path();

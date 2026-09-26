@@ -316,8 +316,28 @@ impl OperationContext {
             for diagnostic in &source_diagnostics {
                 source_paths.insert(diagnostic.source().path().to_owned());
             }
+            for file in corpus.code().files() {
+                source_paths.insert(file.path.clone());
+            }
+            for path in corpus.code().assets() {
+                source_paths.insert(path.clone());
+            }
             for path in source_paths {
                 hash_file(&mut snapshot, &project.root().join(path));
+            }
+            for path in corpus.file_only_code_paths() {
+                snapshot.update(b"file-only-code");
+                let identity = path.as_os_str().as_encoded_bytes();
+                snapshot.update(identity.len().to_le_bytes());
+                snapshot.update(identity);
+                match corpus.code().file_only_bytes(&path) {
+                    Some(bytes) => {
+                        snapshot.update([1]);
+                        snapshot.update(bytes.len().to_le_bytes());
+                        snapshot.update(bytes);
+                    }
+                    None => snapshot.update([0]),
+                }
             }
             result.evaluation_complete &= corpus.is_complete();
             result.evaluation_complete &= corpus

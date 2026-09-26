@@ -174,32 +174,73 @@ pub fn get(
     reference: &str,
     cursor: Option<&str>,
 ) -> Result<GetResult, QueryError> {
-    let graph = corpus.discovery();
-    let node = graph.resolve(reference)?;
-    let item = match node.kind() {
-        DiscoveryNodeKind::Item(item) => ReadContent {
-            content: item.body(),
-            metadata: item.metadata(),
-        },
-        _ => {
-            let source = node.source();
-            let document = corpus
-                .documents()
-                .iter()
-                .find(|document| document.path() == source.path())
-                .expect("discovery node belongs to a loaded document");
-            ReadContent {
-                content: &document.source()[source.span().start_byte()..source.span().end_byte()],
-                metadata: &[],
-            }
-        }
+    let code = if reference.starts_with("code:") {
+        Some(
+            corpus
+                .code()
+                .resolve(reference)
+                .map_err(|error| page_error(&format!("code target {error:?}")))?,
+        )
+    } else {
+        None
     };
-    let fingerprint = fingerprint(corpus, schema, &("discovery-get-v2", reference))?;
+    let graph = corpus.discovery();
+    let node = if code.is_none() {
+        Some(graph.resolve(reference)?)
+    } else {
+        None
+    };
+    let (summary, item) = if let Some(code) = &code {
+        let content = code.content.as_deref().ok_or_else(|| {
+            page_error("code file is not UTF-8 text; get cannot read its content")
+        })?;
+        (
+            code.summary(),
+            ReadContent {
+                content,
+                metadata: &[],
+            },
+        )
+    } else {
+        let node = node.expect("non-code reference has a graph node");
+        let item = match node.kind() {
+            DiscoveryNodeKind::Item(item) => ReadContent {
+                content: item.body(),
+                metadata: item.metadata(),
+            },
+            _ => {
+                let source = node.source();
+                let document = corpus
+                    .documents()
+                    .iter()
+                    .find(|document| document.path() == source.path())
+                    .expect("discovery node belongs to a loaded document");
+                ReadContent {
+                    content: &document.source()
+                        [source.span().start_byte()..source.span().end_byte()],
+                    metadata: &[],
+                }
+            }
+        };
+        (node.summary(), item)
+    };
+    // Explicit file-only code targets need not be in the discovered language
+    // index. Bind their read content to the cursor as well as corpus sources.
+    let fingerprint = fingerprint(
+        corpus,
+        schema,
+        &(
+            "discovery-get-v2",
+            reference,
+            code.as_ref()
+                .and_then(|resolved| resolved.content.as_deref()),
+        ),
+    )?;
     let start = Position::read(cursor, &fingerprint, &item)?;
     let mut next = start;
     let mut result = GetResult {
         format_version: 2,
-        node: node.summary(),
+        node: summary,
         content: String::new(),
         content_range: TextRange::new(start.content, start.content, item.content.len()),
         metadata: Vec::new(),

@@ -269,7 +269,7 @@ struct GetToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Exact item ID/MID or a discovery handle returned by search, get, or related.
+    /// Exact item ID/MID, code:<path>[::<selector>], or a discovery handle returned by search, get, or related.
     reference: String,
     /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid. Portions follow content, then item metadata.
     #[serde(default)]
@@ -373,7 +373,7 @@ struct RelatedToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Exact item ID/MID or a discovery handle returned by search, get, or related.
+    /// Exact item ID/MID, code:<path>[::<selector>], or a discovery handle returned by search, get, or related.
     reference: String,
     /// Edge direction relative to the selected node: incoming, outgoing or symmetric. Omitted or null includes all, outgoing first. Incoming/outgoing exclude symmetric edges.
     #[serde(default)]
@@ -414,11 +414,11 @@ struct RelationToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Source item's exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
+    /// Item ID/MID; relation_get also accepts code:<path>[::<selector>] as canonical source. Mutation requires an item source.
     source: String,
     /// Schema-declared relation name or inverse alias; discover names with schema_list(kind="relation").
     relation: String,
-    /// Target item's exact human ID, canonical MID, or external:HTTP(S) URL.
+    /// Item ID/MID, external:HTTP(S), or code:<path>[::<selector>] with an item-authored inverse.
     target: String,
 }
 
@@ -639,7 +639,7 @@ impl MaraMcp {
 
     #[tool(
         name = "get",
-        description = "Read an item, section, Markdown block, or document in bounded consecutive portions. Discovery format_version: 2 returns node, content, content_range, metadata, and metadata_range. Sections and documents include contained source; items return their parsed body, then ordered metadata fragments; non-items have empty metadata. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged reference until has_more is false; restart after source/schema changes. Search again if a structural handle is stale. Enumerate neighbours with related; get has no limit."
+        description = "Read an item, section, Markdown block, document, or code endpoint in bounded consecutive portions. Discovery format_version: 2 returns node, content, content_range, metadata, and metadata_range. Sections and documents include contained source; items return their parsed body, then ordered metadata fragments; non-items have empty metadata. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged reference until has_more is false; restart after source/schema changes. Search again if a structural handle is stale. Enumerate neighbours with related; get has no limit."
     )]
     fn get(
         &self,
@@ -679,7 +679,7 @@ impl MaraMcp {
 
     #[tool(
         name = "related",
-        description = "Explore direct schema relations, mentions, and containment from any internal node. Discovery format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation_get. Internal neighbours have a reference for get/related; external neighbours have only kind and address and are terminal. Counts connections, not unique neighbours; traversal is caller-controlled. JSON uses contains with direction; its incoming view is displayed as contained_by in human CLI output. Select builtin:contains and incoming for the parent, then outgoing on that parent for its children. Continue with next_cursor and unchanged reference/options; restart after source/schema changes. Search again if a structural handle is stale."
+        description = "Explore direct schema relations, code backlinks, mentions, and containment from an item, code endpoint, or discovery node. Discovery format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation_get. Internal and code neighbours have a reference for get/related; external neighbours have only kind and address and are terminal. Counts connections, not unique neighbours; traversal is caller-controlled. JSON uses contains with direction; its incoming view is displayed as contained_by in human CLI output. Continue with next_cursor and unchanged reference/options; restart after source/schema changes."
     )]
     fn related(
         &self,
@@ -720,7 +720,7 @@ impl MaraMcp {
         )
     }
 
-    #[tool(name = "relation_add", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Add one metadata assertion using a canonical name or inverse alias. Reject an existing semantic edge, including inline and reverse symmetric assertions. Returns relationship format 1.")]
+    #[tool(name = "relation_add", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Add one metadata assertion using a canonical name or inverse alias. Code links require an item source and declared inverse; code source files are never modified. Returns relationship format 1.")]
     fn relation_add(
         &self,
         Parameters(params): Parameters<RelationToolParams>,
@@ -733,7 +733,7 @@ impl MaraMcp {
         )
     }
 
-    #[tool(name = "relation_remove", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Remove all assertions of a semantic relationship across included documents, or exactly one snapshot-bound occurrence. Demote inline internal assertions to bare mentions and external assertions to Markdown autolinks, preserving surrounding prose. Reject missing edges and stale or mismatched selectors. Returns relationship format 1.")]
+    #[tool(name = "relation_remove", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Remove item-authored assertions of a semantic relationship, or exactly one snapshot-bound item occurrence. For code links, code comments remain and may keep the edge present; code source files are never modified. Reject missing edges and stale or mismatched selectors. Returns relationship format 1.")]
     fn relation_remove(
         &self,
         Parameters(params): Parameters<RelationRemoveToolParams>,

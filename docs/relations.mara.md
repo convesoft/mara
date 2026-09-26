@@ -115,6 +115,9 @@ address only, with no MID, source document, fields or outgoing graph. Rules
 may test the presence/count of such edges, but attempts to inspect external
 status or traverse beyond the address are configuration errors. No network
 request, credential or external-system integration participates in validation.
+External targets use the same derived relation graph as item and code targets,
+with the exact authored address as their built-in node identity. The external
+endpoint constraints above still apply.
 :::
 
 :::mara design DES-RELATION-MUTATION
@@ -158,6 +161,12 @@ a bare mention, retaining its authored target spelling. Demote an external
 inline token to an ordinary Markdown autolink of its address. Preserve all
 bytes outside the selected lines/tokens, including surrounding prose, unrelated
 relations, code examples and existing mentions.
+
+For a code-to-item relation, mutation requires the declared inverse alias with
+the item as `source`. The no-selector remove deletes only assertions authored
+on that item; code comment assertions remain and may keep the edge present.
+An inline inverse becomes plain `code:` text when removed.
+This code-specific authoring boundary is defined in [[DES-CODE-TRACEABILITY]].
 
 An explicit `occurrence` selects exactly one assertion by an opaque token from
 relation inspection. It must belong to the requested edge and current project

@@ -79,8 +79,9 @@ Failures preserve user data and produce actionable diagnostics.
   `[[relation:target]]` under [[DES-RELATION-AUTHORING]]. Repeat either form
   for multiple targets.
 - Use only relation names whose meaning is defined by the project corpus.
-- Relations resolve target handles to MIDs. A declared inverse alias may author
-  the same edge from its opposite endpoint; symmetric declarations have no
+- Item relation targets resolve human IDs or MIDs to item MIDs; code and external
+  targets retain their exact kind-specific identities. A declared inverse alias
+  may author the same edge from its opposite endpoint; symmetric declarations have no
   semantic direction. Repeated assertions retain source occurrences but count
   as one edge. Reverse navigation never generates a second stored assertion.
 - Bare inline references remain mentions. Typed inline tokens produce only a

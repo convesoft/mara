@@ -258,7 +258,7 @@ fn verify_identities_and_references(
 }
 
 fn relation_identity<'a>(targets: &'a BTreeMap<String, String>, target: &'a str) -> &'a str {
-    if crate::external::address(target).is_some() {
+    if crate::external::address(target).is_some() || target.starts_with("code:") {
         target
     } else {
         targets

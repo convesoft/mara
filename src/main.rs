@@ -82,12 +82,12 @@ enum Command {
         ids: Vec<String>,
     },
 
-    /// Read an item, section, Markdown block, or document in bounded consecutive portions.
+    /// Read an item, section, Markdown block, document, or code endpoint in bounded consecutive portions.
     #[command(
         after_help = "Discovery JSON format_version: 2 returns node, content, content_range, metadata, and metadata_range. Items return their parsed body; sections and documents include contained Markdown source. Non-items have empty metadata. Reconstruct content and ordered metadata fragments using byte/index ranges until has_more is false. Get has no limit option and does not enumerate neighbours; use related. Search again if a structural handle is stale."
     )]
     Get {
-        /// Exact item ID/MID or a discovery handle returned by search, get, or related.
+        /// Exact item ID/MID, a code:<path>[::<selector>] reference, or a discovery handle.
         reference: String,
         #[arg(
             long,
@@ -96,12 +96,12 @@ enum Command {
         cursor: Option<String>,
     },
 
-    /// Explore direct schema relations, mentions, and containment with source evidence; read neighbours with get.
+    /// Explore direct schema relations, code backlinks, mentions, and containment with source evidence.
     #[command(
         after_help = "Discovery JSON format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation get. Internal neighbours have a reference for get/related; external neighbours have only kind and address and are terminal. JSON represents containment as contains with direction; human output displays its incoming view as contained_by. Use --relation builtin:contains --direction incoming for the parent, then outgoing on that parent for its children. Search again if a structural handle is stale."
     )]
     Related {
-        /// Exact item ID/MID or a discovery handle.
+        /// Exact item ID/MID, a code:<path>[::<selector>] reference, or a discovery handle.
         reference: String,
 
         /// Select edge direction relative to this node; omission includes incoming, outgoing and symmetric, outgoing first. Incoming/outgoing exclude symmetric edges.
@@ -353,11 +353,11 @@ enum ItemCommand {
 enum RelationCommand {
     /// Inspect a semantic edge and its authored source occurrences.
     Get {
-        /// Item expressing the relation: exact human ID or MID.
+        /// Item ID/MID or code:<path>[::<selector>] expressing the relation.
         source: String,
         /// Canonical relation name or declared inverse alias.
         relation: String,
-        /// Other endpoint: exact human ID, MID, or external:HTTP(S) URL.
+        /// Other endpoint: item ID/MID, code:<path>[::<selector>], or external:HTTP(S) URL.
         target: String,
         /// Maximum occurrences per page, 1 through 100; defaults to 20. The byte budget may return fewer.
         #[arg(long)]
@@ -366,22 +366,22 @@ enum RelationCommand {
         #[arg(long)]
         cursor: Option<String>,
     },
-    /// Add a schema-valid relation; rejects an existing edge.
+    /// Add a schema-valid relation. Code links require an item source and declared inverse; code files are never edited.
     Add {
-        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID).
+        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID); code sources are read-only.
         source: String,
         /// Schema-declared relation name; inspect with schema list relation.
         relation: String,
-        /// Target item's exact human ID, canonical MID, or external:HTTP(S) URL.
+        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<selector>] with an inverse alias.
         target: String,
     },
-    /// Remove all assertions of an existing semantic relation, demoting inline tokens to mentions or external links; rejects a missing edge.
+    /// Remove authored item assertions. For code links, code comment markers remain and may keep the edge present.
     Remove {
-        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID).
+        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID); code sources are read-only.
         source: String,
         /// Schema-declared relation name; inspect with schema list relation.
         relation: String,
-        /// Target item's exact human ID, canonical MID, or external:HTTP(S) URL.
+        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<selector>] with an inverse alias.
         target: String,
         /// Remove only this snapshot-bound occurrence from relation get.
         #[arg(long)]
@@ -1391,6 +1391,7 @@ fn display_relation_target(target: &mara::RelationEndpoint) -> String {
     match target {
         mara::RelationEndpoint::Item { id, .. } => id.clone(),
         mara::RelationEndpoint::External { address } => format!("external:{address}"),
+        mara::RelationEndpoint::Code { reference } => reference.clone(),
     }
 }
 

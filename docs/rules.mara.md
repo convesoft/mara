@@ -36,7 +36,8 @@ reuse a value; expanded constraints retain their authored occurrence/source
 mapping. Null is not a missing constraint parameter.
 
 Project configuration references explicit project-relative files; rule bodies
-are separate from vocabulary schema YAML. Enable sources with project format 2:
+are separate from vocabulary schema YAML. Enable sources with project format 2
+or 3:
 
 ```toml
 [rules]
@@ -189,11 +190,17 @@ but a self-edge appears once. Retain source occurrences outside the RDF set.
 Flavour, relation and field names are encoded as UTF-8 percent-escaped IRI suffixes
 when needed; do not normalize case or substitute alias names.
 
-External endpoints remain distinct terminal nodes keyed by the exact normalized
+External endpoints remain distinct terminal nodes keyed by the exact authored
 address from [[DES-CANONICAL-TRACE-RELATIONS]], using
 `urn:mara:external:` plus its percent-encoded address. They have no item flavour
 or custom field triples. Count them where the relation permits; do not traverse
 through them or interpret their URI as fetched RDF.
+
+Code endpoints are distinct nodes keyed by their exact code reference under
+[[DES-CODE-TRACEABILITY]], using `urn:mara:code:` plus its percent-encoded
+reference. Project code-to-item edges in canonical direction once, whether
+asserted by a code marker, an item inverse, or both. Code nodes have no item
+flavour or custom field triples; an association does not supply test results.
 
 Project schema-declared custom fields as RDF literals under their field
 predicates: strings/enums as `xsd:string`, booleans as `xsd:boolean`,
@@ -447,6 +454,10 @@ edges, independent of conditional rules in [[DES-TRACE-RULE-GRAMMAR]].
 Both declarations are active in the current checkout. Run `schema validate`
 to check configuration and `project validate` or `item validate` to evaluate
 the policy through CLI or MCP. No policy applies when these keys are absent.
+Code-source relations may constrain incoming cardinality on eligible item
+targets. Their code nodes have no flavour-based outgoing policy population;
+acyclic is invalid for these one-way code-to-item relations. Distinct canonical
+edges count once regardless of the number or location of assertions.
 
 ```yaml
 relations:
@@ -767,8 +778,9 @@ force an unbounded nested row:
 | `issue` | `diagnostic` preventing complete evaluation. |
 
 `evaluation` is `{kind:"rule",shape:"urn:mara:rule:approved_requirement"}`
-or `{kind:"check",shape:"urn:mara:rule:coverage"}`. `root` and item endpoints use discovery item descriptors;
-external endpoints use the relationship contract's external descriptor.
+or `{kind:"check",shape:"urn:mara:rule:coverage"}`. `root` and item endpoints
+use discovery item descriptors; external and code endpoints use their
+relationship endpoint descriptors.
 Every record carries `kind`. A check's `obligation.component` is a sorted array
 of SHACL constraint-component IRIs for its authored shape (empty for a shape
 with no constraints). Its `state` is the whole-shape outcome; it does not
@@ -791,10 +803,10 @@ identifiers, not durable item identities. They connect records across pages.
 Counts belong to the immediate check: include selected and qualifying totals,
 declared minimum/maximum, and every state where present. Counts are null
 when unavailable, not misleading zeros. Qualified literal-field counts use
-the native evaluator's selected and qualifying totals. External endpoints
-retain native qualifier/every outcomes when evaluated; they have no item
-status. An edge's `outside_selection` is true
-when its item endpoint was not selected as a root, or when it is external.
+the native evaluator's selected and qualifying totals. External and code
+endpoints retain native qualifier/every outcomes when evaluated; they have no
+item status. An edge's `outside_selection` is true when its item endpoint was
+not selected as a root, or when it is external or code.
 Local checks retain field paths and constraint parameters. Their `inspection`
 identifies the focus item and field, total authored value count, the first
 authored value (at most 256 characters), whether that value was truncated, and
@@ -844,7 +856,7 @@ implemented validation and matrices.
 |---|---|
 | Schema | Format 3 includes vocabulary/relationships and optional structural cardinality/acyclic declarations. Conditional rules are separate YAML shape files, not an embedded rules mapping in the vocabulary schema. Absent policies impose no obligations. |
 | Documents | No new marker or metadata syntax. Status and other rule inputs are ordinary project-defined fields. |
-| Project configuration | Continue accepting format 1 for projects without rule sources. Enabling YAML rule sources requires format 2 and the optional rules table in DES-TRACE-RULE-GRAMMAR; reject unknown/unsupported versions. No saved views. |
+| Project configuration | Continue accepting format 1 for projects without rule sources. Enabling YAML rule sources requires format 2 or 3 and the optional rules table in DES-TRACE-RULE-GRAMMAR; reject unknown/unsupported versions. No saved views. |
 | Rule binding | Start format_version 1 inside the rules table. It selects the supported YAML/SHACL Core profile, generated context and namespaces, field projection and host selection vocabulary. This is independent of W3C or crate release numbers. |
 | Validation JSON | Start format_version 1 for project/item/schema validation and operation errors, replacing unversioned results. Explicit completeness, codes, severities, counts and continuation require client updates. |
 | Trace JSON | Start a separate format_version 1 family for matrix results and errors. |

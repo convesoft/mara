@@ -107,6 +107,17 @@ pub fn related(
         ),
     )?;
     let start = cursor_position(filters.cursor.as_deref(), &fingerprint)?;
+    if reference.starts_with("code:") {
+        return related_code(
+            corpus,
+            schema,
+            reference,
+            filters,
+            &relations,
+            start,
+            &fingerprint,
+        );
+    }
     let graph = corpus.discovery();
     let node = graph.resolve(reference)?;
     if let DiscoveryNodeKind::Item(item) = node.kind() {
@@ -172,38 +183,112 @@ pub fn related(
         && filters.flavours.is_empty()
         && let DiscoveryNodeKind::Item(item) = node.kind()
     {
-        let mut externals = BTreeMap::<(String, String), usize>::new();
-        for relation in item.relations() {
-            let Some(address) = crate::external::address(relation.target()) else {
+        let mut external_connections = Vec::new();
+        for record in crate::relations::RelationGraph::new(corpus, schema).edges() {
+            let (
+                crate::RelationEndpoint::Item { mid, .. },
+                crate::RelationEndpoint::External { address },
+            ) = (&record.edge.source, &record.edge.target)
+            else {
                 continue;
             };
-            if !relations.is_empty()
-                && !relations.contains(&RelationName::Schema(&relation.canonical))
-            {
+            if item.mid() != Some(mid) {
                 continue;
             }
-            *externals
-                .entry((address.to_owned(), relation.canonical.clone()))
-                .or_default() += 1;
-        }
-        let mut external_connections = Vec::new();
-        for ((address, name), count) in externals {
-            let edge = crate::RelationEdge::external(schema, item, &name, &address)
-                .map_err(|error| page_error(&error.to_string()))?;
+            let name = &record.edge.relation;
+            if !relations.is_empty() && !relations.contains(&RelationName::Schema(name)) {
+                continue;
+            }
             external_connections.push(RelatedConnection {
-                relation: RelationName::Schema(&name).display(schema),
+                relation: RelationName::Schema(name).display(schema),
                 direction: RelationDirection::Outgoing,
                 neighbour: RelatedNeighbour::External {
                     kind: "external".into(),
-                    address,
+                    address: address.clone(),
                 },
                 source: None,
-                label: Some(name),
-                edge: Some(edge),
-                occurrence_count: Some(count),
+                label: Some(name.clone()),
+                edge: Some(record.edge.clone()),
+                occurrence_count: Some(record.occurrence_count),
             });
         }
+        external_connections.sort_by(|a, b| {
+            let RelatedNeighbour::External { address: left, .. } = &a.neighbour else {
+                unreachable!()
+            };
+            let RelatedNeighbour::External { address: right, .. } = &b.neighbour else {
+                unreachable!()
+            };
+            left.cmp(right).then_with(|| a.relation.cmp(&b.relation))
+        });
         all.splice(outgoing_count..outgoing_count, external_connections);
+    }
+    if filters
+        .direction
+        .is_none_or(|d| d == RelationDirection::Incoming)
+        && filters.flavours.is_empty()
+        && let DiscoveryNodeKind::Item(item) = node.kind()
+    {
+        let mut code_incoming = Vec::new();
+        for connection in code_connections(corpus, schema)
+            .into_iter()
+            .filter(|c| c.item.mid() == item.mid())
+        {
+            if !relations.is_empty()
+                && !relations.contains(&RelationName::Schema(&connection.edge.relation))
+            {
+                continue;
+            }
+            let definition = &schema.relations()[&connection.edge.relation];
+            code_incoming.push(RelatedConnection {
+                relation: RelationName::Schema(&connection.edge.relation).display(schema),
+                direction: RelationDirection::Incoming,
+                neighbour: RelatedNeighbour::Internal(connection.code.summary()),
+                source: None,
+                label: Some(
+                    definition
+                        .inverse
+                        .as_deref()
+                        .unwrap_or(&connection.edge.relation)
+                        .to_owned(),
+                ),
+                edge: Some(connection.edge),
+                occurrence_count: Some(connection.count),
+            });
+        }
+        let symmetric_start = all
+            .iter()
+            .position(|connection| connection.direction == RelationDirection::Symmetric)
+            .unwrap_or(all.len());
+        all.splice(symmetric_start..symmetric_start, code_incoming);
+        if let Some(incoming_start) = all
+            .iter()
+            .position(|connection| connection.direction == RelationDirection::Incoming)
+        {
+            let symmetric_start = all
+                .iter()
+                .position(|connection| connection.direction == RelationDirection::Symmetric)
+                .unwrap_or(all.len());
+            all[incoming_start..symmetric_start].sort_by(|left, right| {
+                match (&left.neighbour, &right.neighbour) {
+                    (
+                        RelatedNeighbour::Internal(left_node),
+                        RelatedNeighbour::Internal(right_node),
+                    ) => left_node
+                        .source
+                        .path()
+                        .cmp(right_node.source.path())
+                        .then_with(|| {
+                            left_node
+                                .source
+                                .start_byte()
+                                .cmp(&right_node.source.start_byte())
+                        })
+                        .then_with(|| left.relation.cmp(&right.relation)),
+                    _ => std::cmp::Ordering::Equal,
+                }
+            });
+        }
     }
     if filters.cursor.is_some() && (start == 0 || start >= all.len()) {
         return Err(page_error(
@@ -278,10 +363,208 @@ fn validate_authored_targets(
             if filters.direction.is_some_and(|d| d != direction) {
                 continue;
             }
-            if crate::external::address(relation.target()).is_none() {
+            if relation.target().starts_with("code:") {
+                if filters.flavours.is_empty() {
+                    corpus.code().resolve(relation.target()).map_err(|error| {
+                        page_error(&format!(
+                            "relation '{}' from '{}' references unavailable code target '{}': {error:?}",
+                            relation.name(),
+                            author.id(),
+                            relation.target()
+                        ))
+                    })?;
+                }
+            } else if crate::external::address(relation.target()).is_none() {
                 resolve_relation_target(corpus, author, relation.name(), relation.target())?;
             }
         }
     }
     Ok(())
+}
+
+struct CodeConnection<'a> {
+    edge: crate::RelationEdge,
+    item: &'a Item,
+    code: crate::code::CodeResolved,
+    count: usize,
+}
+
+fn code_connections<'a>(corpus: &'a Corpus, schema: &Schema) -> Vec<CodeConnection<'a>> {
+    let items = corpus
+        .items()
+        .filter_map(|item| item.mid().map(|mid| (mid, item)))
+        .collect::<BTreeMap<_, _>>();
+    let mut connections = crate::relations::RelationGraph::new(corpus, schema)
+        .edges()
+        .filter_map(|record| {
+            let (
+                crate::RelationEndpoint::Code { reference },
+                crate::RelationEndpoint::Item { mid, .. },
+            ) = (&record.edge.source, &record.edge.target)
+            else {
+                return None;
+            };
+            Some(CodeConnection {
+                edge: record.edge.clone(),
+                item: *items.get(mid.as_str())?,
+                code: corpus.code().resolve(reference).ok()?,
+                count: record.occurrence_count,
+            })
+        })
+        .collect::<Vec<_>>();
+    connections.sort_by(|a, b| {
+        a.code
+            .reference
+            .cmp(&b.code.reference)
+            .then_with(|| a.item.source().path().cmp(b.item.source().path()))
+            .then_with(|| {
+                a.item
+                    .source()
+                    .span()
+                    .start_byte()
+                    .cmp(&b.item.source().span().start_byte())
+            })
+            .then_with(|| a.edge.relation.cmp(&b.edge.relation))
+            .then_with(|| a.item.mid().cmp(&b.item.mid()))
+    });
+    connections
+}
+
+fn validate_code_markers(
+    corpus: &Corpus,
+    schema: &Schema,
+    reference: &str,
+    relations: &[RelationName<'_>],
+) -> Result<(), QueryError> {
+    for marker in corpus
+        .code()
+        .files()
+        .flat_map(|file| &file.markers)
+        .filter(|marker| marker.endpoint == reference)
+    {
+        let Some((name, definition, inverse)) = schema.resolve_relation(&marker.relation) else {
+            if relations.is_empty() {
+                return Err(page_error(&format!(
+                    "code marker at '{reference}' uses unknown relation '{}'",
+                    marker.relation
+                )));
+            }
+            continue;
+        };
+        if !relations.is_empty() && !relations.contains(&RelationName::Schema(name)) {
+            continue;
+        }
+        if inverse || !definition.code_source {
+            return Err(page_error(&format!(
+                "relation '{}' does not allow a code source marker at '{reference}'",
+                marker.relation
+            )));
+        }
+        let target = resolve_item(corpus, &marker.target).map_err(|error| match error {
+            QueryError::MissingItem { .. } => QueryError::MissingRelationTarget {
+                source: reference.to_owned(),
+                relation: name.to_owned(),
+                target: marker.target.clone(),
+            },
+            QueryError::AmbiguousItem { .. } | QueryError::AmbiguousMid { .. } => {
+                QueryError::AmbiguousRelationTarget {
+                    source: reference.to_owned(),
+                    relation: name.to_owned(),
+                    target: marker.target.clone(),
+                }
+            }
+            other => other,
+        })?;
+        if !definition
+            .target
+            .iter()
+            .any(|flavour| flavour == target.flavour())
+        {
+            return Err(page_error(&format!(
+                "relation '{name}' does not allow target flavour '{}' at '{reference}'",
+                target.flavour()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn related_code(
+    corpus: &Corpus,
+    schema: &Schema,
+    reference: &str,
+    filters: &RelatedFilters,
+    relations: &[RelationName<'_>],
+    start: usize,
+    fingerprint: &str,
+) -> Result<RelatedResult, QueryError> {
+    let limit = page_limit(filters.limit)?;
+    let code = corpus
+        .code()
+        .resolve(reference)
+        .map_err(|error| page_error(&format!("code target {error:?}")))?;
+    let graph = corpus.discovery();
+    let mut all = Vec::new();
+    if filters
+        .direction
+        .is_none_or(|d| d == RelationDirection::Outgoing)
+    {
+        validate_code_markers(corpus, schema, reference, relations)?;
+        for connection in code_connections(corpus, schema)
+            .into_iter()
+            .filter(|entry| entry.code.reference == reference)
+        {
+            if !relations.is_empty()
+                && !relations.contains(&RelationName::Schema(&connection.edge.relation))
+            {
+                continue;
+            }
+            if !filters.flavours.is_empty()
+                && !matches_name(&filters.flavours, connection.item.flavour())
+            {
+                continue;
+            }
+            all.push(RelatedConnection {
+                relation: RelationName::Schema(&connection.edge.relation).display(schema),
+                direction: RelationDirection::Outgoing,
+                neighbour: RelatedNeighbour::Internal(
+                    graph
+                        .resolve(connection.item.mid().unwrap_or(connection.item.id()))?
+                        .summary(),
+                ),
+                source: None,
+                label: Some(connection.edge.relation.clone()),
+                edge: Some(connection.edge),
+                occurrence_count: Some(connection.count),
+            });
+        }
+    }
+    if filters.cursor.is_some() && (start == 0 || start >= all.len()) {
+        return Err(page_error(
+            "invalid continuation position; restart from the first page",
+        ));
+    }
+    let mut page = RelatedResult {
+        format_version: 2,
+        node: code.summary(),
+        connections: vec![],
+        has_more: false,
+        next_cursor: None,
+    };
+    ensure_budget(&page)?;
+    for connection in all.iter().skip(start).take(limit) {
+        page.connections.push(connection.clone());
+        (page.has_more, page.next_cursor) =
+            continuation(start, page.connections.len(), all.len(), fingerprint);
+        if ensure_budget(&page).is_err() {
+            page.connections.pop();
+            if page.connections.is_empty() {
+                return Err(budget_error());
+            }
+            (page.has_more, page.next_cursor) =
+                continuation(start, page.connections.len(), all.len(), fingerprint);
+            break;
+        }
+    }
+    Ok(page)
 }

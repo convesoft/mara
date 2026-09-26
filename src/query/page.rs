@@ -212,6 +212,22 @@ pub(crate) fn fingerprint(
         document.path().hash(&mut hash);
         document.source().hash(&mut hash);
     }
+    for file in corpus.code().files() {
+        file.path.hash(&mut hash);
+        file.source.hash(&mut hash);
+    }
+    // Explicit file-only endpoints need no adapter, so they are absent from
+    // the code index. Their existence and contents can change related results.
+    for path in corpus.file_only_code_paths() {
+        path.hash(&mut hash);
+        corpus.code().file_only_bytes(&path).hash(&mut hash);
+    }
+    for path in corpus.code().assets() {
+        path.hash(&mut hash);
+        std::fs::read(corpus.code().root().join(path))
+            .unwrap_or_default()
+            .hash(&mut hash);
+    }
     Ok(format!("{:016x}", hash.finish()))
 }
 

@@ -431,32 +431,13 @@ struct EdgeEntry {
 }
 
 fn collect_edges(corpus: &Corpus, schema: &Schema) -> Result<Vec<EdgeEntry>, ValidationError> {
-    let mut unique = BTreeMap::<String, EdgeEntry>::new();
-    for author in corpus.items() {
-        for relation in author.relations() {
-            let edge = if let Some(address) = crate::external::address(relation.target()) {
-                RelationEdge::external(schema, author, relation.name(), address)
-                    .map_err(|e| ValidationError::invalid_argument(e.to_string()))
-            } else {
-                query::resolve_item(corpus, relation.target())
-                    .map_err(|e| ValidationError::invalid_argument(e.to_string()))
-                    .and_then(|target| {
-                        RelationEdge::new(schema, author, relation.name(), target)
-                            .map_err(|e| ValidationError::invalid_argument(e.to_string()))
-                    })
-            };
-            let Ok(edge) = edge else { continue };
-            let key = serde_json::to_string(&edge).expect("edge serializes");
-            unique
-                .entry(key)
-                .and_modify(|e| e.occurrences += 1)
-                .or_insert(EdgeEntry {
-                    edge,
-                    occurrences: 1,
-                });
-        }
-    }
-    Ok(unique.into_values().collect())
+    Ok(crate::relations::RelationGraph::new(corpus, schema)
+        .edges()
+        .map(|record| EdgeEntry {
+            edge: record.edge.clone(),
+            occurrences: record.occurrence_count,
+        })
+        .collect())
 }
 
 struct ExplainContext<'a> {
@@ -636,6 +617,7 @@ fn explain(
             let outside_selection = match endpoint {
                 RelationEndpoint::Item { mid, .. } => !ctx.selected_mids.contains(mid),
                 RelationEndpoint::External { .. } => true,
+                RelationEndpoint::Code { .. } => true,
             };
             output.records.push(record(
                 json!({"kind":"edge","check":reference,"edge":entry.edge,
@@ -648,6 +630,7 @@ fn explain(
                     "target":match &entry.edge.target {
                         RelationEndpoint::Item{id,..}=>id.clone(),
                         RelationEndpoint::External{address}=>format!("external:{address}"),
+                        RelationEndpoint::Code{reference}=>reference.clone(),
                     }}}),
             ));
             if let RelationEndpoint::Item { mid, .. } = endpoint
@@ -826,6 +809,7 @@ fn endpoint_descriptor(
     match endpoint {
         RelationEndpoint::Item { mid, .. } => descriptors[mid].clone(),
         RelationEndpoint::External { address } => json!({"kind":"external","address":address}),
+        RelationEndpoint::Code { reference } => json!({"kind":"code","reference":reference}),
     }
 }
 
@@ -833,6 +817,7 @@ fn endpoint_state_key(endpoint: &RelationEndpoint) -> String {
     match endpoint {
         RelationEndpoint::Item { mid, .. } => mid.clone(),
         RelationEndpoint::External { address } => format!("external:{address}"),
+        RelationEndpoint::Code { reference } => reference.clone(),
     }
 }
 
@@ -936,6 +921,33 @@ fn snapshot_id(
     for document in corpus.documents() {
         hash.update(document.path().as_os_str().as_encoded_bytes());
         hash.update(document.source().as_bytes());
+    }
+    for file in corpus.code().files() {
+        hash.update(b"code-file");
+        hash.update(file.path.as_os_str().as_encoded_bytes());
+        hash.update(file.source.as_bytes());
+    }
+    for path in corpus.code().assets() {
+        hash.update(b"code-asset");
+        hash.update(path.as_os_str().as_encoded_bytes());
+        match fs::read(project.root().join(path)) {
+            Ok(bytes) => {
+                hash.update([1]);
+                hash.update(bytes);
+            }
+            Err(_) => hash.update([0]),
+        }
+    }
+    for path in corpus.file_only_code_paths() {
+        hash.update(b"file-only-code");
+        hash.update(path.as_os_str().as_encoded_bytes());
+        match corpus.code().file_only_bytes(&path) {
+            Some(bytes) => {
+                hash.update([1]);
+                hash.update(bytes);
+            }
+            None => hash.update([0]),
+        }
     }
     let retained = corpus
         .documents()

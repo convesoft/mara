@@ -13,6 +13,7 @@ struct EdgeRecord {
     source: DiagnosticLocation,
 }
 
+// @mara code_implements REQ-RELATION-CARDINALITY
 pub(crate) fn evaluate(
     project: &Project,
     corpus: &Corpus,
@@ -48,35 +49,31 @@ pub(crate) fn evaluate(
         return;
     }
 
-    let mut items = BTreeMap::new();
-    for item in corpus.items() {
-        items.insert(item.id(), item);
-        items.insert(item.mid().expect("validated MID"), item);
-    }
     let mut edges: BTreeMap<(String, String, String), EdgeRecord> = BTreeMap::new();
-    for item in corpus.items() {
-        for relation in item.relations() {
-            let edge = if let Some(address) = crate::external::address(relation.target()) {
-                RelationEdge::external(schema, item, relation.name(), address)
-            } else {
-                let target = items[relation.target()];
-                RelationEdge::new(schema, item, relation.name(), target)
-            }
-            .expect("validated relation");
-            let RelationEndpoint::Item { mid: source, .. } = &edge.source else {
-                unreachable!()
-            };
-            let target = match &edge.target {
-                RelationEndpoint::Item { mid, .. } => format!("item:{mid}"),
-                RelationEndpoint::External { address } => format!("external:{address}"),
-            };
-            edges
-                .entry((edge.relation.clone(), source.clone(), target))
-                .or_insert_with(|| EdgeRecord {
-                    edge,
-                    source: DiagnosticLocation::source(relation.source()),
-                });
-        }
+    for record in crate::relations::RelationGraph::new(corpus, schema).edges() {
+        let source = match &record.edge.source {
+            RelationEndpoint::Item { mid, .. } => mid.clone(),
+            RelationEndpoint::Code { reference } => reference.clone(),
+            RelationEndpoint::External { .. } => continue,
+        };
+        let target = match &record.edge.target {
+            RelationEndpoint::Item { mid, .. } => format!("item:{mid}"),
+            RelationEndpoint::External { address } => format!("external:{address}"),
+            RelationEndpoint::Code { reference } => reference.clone(),
+        };
+        edges.insert(
+            (record.edge.relation.clone(), source, target),
+            EdgeRecord {
+                edge: record.edge.clone(),
+                source: DiagnosticLocation {
+                    path: Some(record.source.path().to_path_buf()),
+                    line: Some(record.source.start_line()),
+                    start_byte: Some(record.source.start_byte()),
+                    end_byte: Some(record.source.end_byte()),
+                    pointer: None,
+                },
+            },
+        );
     }
 
     for (name, declaration) in schema.relations() {
@@ -201,7 +198,14 @@ fn cycle_diagnostics(
         if relation != name {
             continue;
         }
-        if let Some(mid) = target.strip_prefix("item:") {
+        if let Some(mid) = target.strip_prefix("item:")
+            && matches!(
+                &edges[&(relation.clone(), source.clone(), target.clone())]
+                    .edge
+                    .source,
+                RelationEndpoint::Item { .. }
+            )
+        {
             adjacency
                 .entry(source.clone())
                 .or_default()
