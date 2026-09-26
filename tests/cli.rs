@@ -1,9 +1,11 @@
 use std::{
     collections::BTreeSet,
     fs,
-    io::Write,
+    io::{BufRead, BufReader, Write},
     path::Path,
     process::{Command, Stdio},
+    sync::mpsc,
+    time::Duration,
 };
 
 #[cfg(unix)]
@@ -95,12 +97,50 @@ fn mcp_exchange_with_arguments(
         .collect::<Vec<_>>()
         .join("\n")
         + "\n";
-    let output = mara_with_stdin(current_directory, arguments, &input);
+    let expected = requests
+        .iter()
+        .filter(|request| request.get("id").is_some())
+        .count();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mara"))
+        .current_dir(current_directory)
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run Mara MCP server");
+    let mut stdin = child.stdin.take().expect("capture Mara stdin");
+    stdin.write_all(input.as_bytes()).expect("write Mara stdin");
+    let stdout = child.stdout.take().expect("capture Mara stdout");
+    let (sender, receiver) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            if sender.send(line.expect("read MCP response")).is_err() {
+                break;
+            }
+        }
+    });
+    let mut responses = Vec::new();
+    while responses.len() < expected {
+        match receiver.recv_timeout(Duration::from_secs(120)) {
+            Ok(line) => responses.push(serde_json::from_str(&line).expect("MCP response is JSON")),
+            Err(error) => {
+                let _ = child.kill();
+                let output = child.wait_with_output().expect("read Mara MCP output");
+                reader.join().expect("read MCP stdout");
+                panic!(
+                    "received {} of {expected} MCP responses: {error}; {}",
+                    responses.len(),
+                    stderr(&output)
+                );
+            }
+        }
+    }
+    drop(stdin);
+    let output = child.wait_with_output().expect("read Mara MCP output");
+    reader.join().expect("read MCP stdout");
     assert!(output.status.success(), "{}", stderr(&output));
-    stdout(&output)
-        .lines()
-        .map(|line| serde_json::from_str(line).expect("MCP response is JSON"))
-        .collect()
+    responses
 }
 
 fn mcp_request(id: u64, method: &str, params: Value) -> Value {
