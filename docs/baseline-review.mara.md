@@ -138,3 +138,19 @@ omitting code discovery from listing would instead change compatibility and
 requires an explicit product decision. Under GOAL.md's broad-import gate, settle
 this dependency boundary before restoring these modules. Preserve the current
 schema checkpoint and all pending tests meanwhile.
+
+### Item-list review and distinct test obligations
+
+| Reviewed boundary | Retain/change/defer decision |
+|---|---|
+| Compact result | Retain ID, optional MID, flavour, title, document path and one-based line in document-path/source order. The list path has no ranking, body, neighbours or excerpts. Restore only list-specific result and filter code, not the entire query module. |
+| Exact selection | Retain declared-flavour/relation/field validation, relation-alias resolution, exact field values, OR within a filter category and AND across categories. Preserve directory-subtree component boundaries and exact-file selection. Keep the baseline retrieval path normalization; do not substitute stricter validation-reporting path syntax. |
+| Read prerequisites | Retain strict document parsing and code-discovery failures. Do not add project validation as a precondition: the baseline list does not evaluate required fields, MID completeness or current-state policy. Parsing and semantic conformance are separate obligations. |
+| Pagination | Retain default 20, limit 1–100, 65,536-byte serialized page limit, 256-scalar title truncation flag, deterministic continuation and explicit failure for indivisible oversized identity/location. Cursors cover source/schema/options plus the code inputs recorded above. |
+| Required code dependency | Review adapter asset confinement, required captures, extension assignment, source walking, comment-only markers, ownership and snapshot inputs. Exact symbol resolution, relation projection, code navigation and backlink behavior remain separate unless a concrete list-path call requires them. Do not restore the whole code capability under this dependency label. |
+| Preserved tests | Restore item-list branches of `directory_path_filters_preserve_boundaries_and_exact_files`, `bounded_search_and_list_continue_completely_with_cli_mcp_parity`, `item_list_and_search_return_deterministic_compact_filtered_summaries` and oversized-handle/invalid-page checks from `tests/pending/retrieval.rs.pending`. Preserve search, excerpt, get and related obligations for their own increments rather than deleting those branches from the reference. Add the demonstrated code-change/missing-adapter cases to listing tests if the coupled boundary is approved. |
+| Fixture setup | Materialize source documents directly in test-owned projects; item creation is not a prerequisite for testing a read. Copy required grammar/query assets into those fixtures. Do not add synthetic marked source to the canonical corpus. |
+
+This review makes the proposed restoration concrete; it does not resolve the
+pending broad-dependency decision or authorize importing the modules. The
+current candidate remains the verified project/schema checkpoint.
