@@ -5,7 +5,7 @@
 - Continue on `feature/mara-upgrade` in this worktree. The reset is complete;
   rebuild the product in a new thread, starting with intent and scenarios.
 - The engineering schema, enabled knowledge policies, coverage/execution checks,
-  and Rust/Python/JavaScript/TypeScript adapters are configured in `.mara/`.
+  and Rust/JavaScript adapters are configured in `.mara/`.
 - Agent/build/release tooling, licenses, template sources, and the Mara skill
   remain. Source, tests, and the previous corpus were deliberately removed.
   Cargo and packaging gates resume when their inputs are reintroduced.
@@ -25,6 +25,9 @@ git show 0b47b42:docs/engineering-workflow.mara.md
 git show 0b47b42:docs/index.mara.md
 ```
 
+The read-only POC example is `../mara-poc/crates/mara-test-support/src/lib.rs`
+(`ProjectSandbox`); reuse its isolation principles with small standard helpers.
+
 ## Rebuild checklist
 
 1. Establish concise goals/scenarios, then requirements, designs and verification
@@ -34,6 +37,9 @@ git show 0b47b42:docs/index.mara.md
 3. Restore or improve one working CLI/MCP slice at a time. Review its code and
    tests together; remove tests only when their distinct obligation is redundant
    or obsolete. Sound code can stay unchanged; there is no test-count target.
+   Follow the test and fixture isolation rules in `AGENTS.md`. Document selection
+   does not limit code scanning: materialize synthetic marked source only inside
+   disposable fixture projects.
 4. Add meaningful `implements` and `checks` links as code is reviewed. Run real
    checks and record evidence for the actual tested revision. Assess the selected
    scope with the configured matrices; an empty selection proves no coverage.
