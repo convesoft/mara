@@ -183,3 +183,21 @@ Initialize an engineering project, create each supported knowledge flavour, add 
 
 Fixtures live in disposable directories with their own configuration and Git state. Child processes use explicit working directories and isolated Git/configuration inputs. Pass only when real processes return the expected results and rejected requests preserve source. This checks project bootstrap and demonstrates the engineering authoring scenario; detailed mutation, retrieval, and rule-engine checks remain separate.
 :::
+
+:::mara evidence EVD-PROJECT-BOOTSTRAP
+:mid: 01M3FW77BBJ0RHY0CGEW6DF8N1
+:title: Bootstrap candidate passes real CLI and MCP checks
+:status: accepted
+:result: passed
+:captured_at: 2026-09-26T22:08:49Z
+:subject_revision: 82051082ad5ae7baa820d753f2dbe316fa94ee7f
+:evidences: VER-PROJECT-BOOTSTRAP
+
+The working tree tested was committed unchanged as `82051082ad5ae7baa820d753f2dbe316fa94ee7f`; Git reported a clean tree immediately afterward, before adding this evidence. Linux x86_64, Rust 1.97.1, local candidate binary `/tmp/mara72-target/debug/mara`. Build settings: `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
+
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 18 integration tests passed, none failed or ignored. These tests launch the freshly built CLI and real stdio MCP server in isolated temporary projects. They exercise initialization, schema discovery and guidance, project selection, file preservation, the engineering authoring workflow, and design/mixed-root realization coverage.
+
+The new realization regression failed before the template correction with `invalid_argument` and passed afterward, with missing links reported as failed coverage and valid links as passed coverage. Candidate CLI schema/project validation and matching installed-snapshot MCP validation returned complete, valid results with zero errors and warnings. Explicit MCP matrices covered 5 requirement origins, 7 requirement/design realizations, 7 verification definitions, and 3 scenario-validation methods: all selected roots passed, with every page consumed.
+
+This is local bootstrap evidence only. Other baseline integration tests and unit modules await their capability reviews. It does not establish complete product, package, release, or production readiness.
+:::
