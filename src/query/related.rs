@@ -416,10 +416,77 @@ fn code_connections<'a>(corpus: &'a Corpus, schema: &Schema) -> Vec<CodeConnecti
         a.code
             .reference
             .cmp(&b.code.reference)
+            .then_with(|| a.item.source().path().cmp(b.item.source().path()))
+            .then_with(|| {
+                a.item
+                    .source()
+                    .span()
+                    .start_byte()
+                    .cmp(&b.item.source().span().start_byte())
+            })
             .then_with(|| a.edge.relation.cmp(&b.edge.relation))
             .then_with(|| a.item.mid().cmp(&b.item.mid()))
     });
     connections
+}
+
+fn validate_code_markers(
+    corpus: &Corpus,
+    schema: &Schema,
+    reference: &str,
+    relations: &[RelationName<'_>],
+) -> Result<(), QueryError> {
+    for marker in corpus
+        .code()
+        .files()
+        .flat_map(|file| &file.markers)
+        .filter(|marker| marker.endpoint == reference)
+    {
+        let Some((name, definition, inverse)) = schema.resolve_relation(&marker.relation) else {
+            if relations.is_empty() {
+                return Err(page_error(&format!(
+                    "code marker at '{reference}' uses unknown relation '{}'",
+                    marker.relation
+                )));
+            }
+            continue;
+        };
+        if !relations.is_empty() && !relations.contains(&RelationName::Schema(name)) {
+            continue;
+        }
+        if inverse || !definition.code_source {
+            return Err(page_error(&format!(
+                "relation '{}' does not allow a code source marker at '{reference}'",
+                marker.relation
+            )));
+        }
+        let target = resolve_item(corpus, &marker.target).map_err(|error| match error {
+            QueryError::MissingItem { .. } => QueryError::MissingRelationTarget {
+                source: reference.to_owned(),
+                relation: name.to_owned(),
+                target: marker.target.clone(),
+            },
+            QueryError::AmbiguousItem { .. } | QueryError::AmbiguousMid { .. } => {
+                QueryError::AmbiguousRelationTarget {
+                    source: reference.to_owned(),
+                    relation: name.to_owned(),
+                    target: marker.target.clone(),
+                }
+            }
+            other => other,
+        })?;
+        if !definition
+            .target
+            .iter()
+            .any(|flavour| flavour == target.flavour())
+        {
+            return Err(page_error(&format!(
+                "relation '{name}' does not allow target flavour '{}' at '{reference}'",
+                target.flavour()
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn related_code(
@@ -442,6 +509,7 @@ fn related_code(
         .direction
         .is_none_or(|d| d == RelationDirection::Outgoing)
     {
+        validate_code_markers(corpus, schema, reference, relations)?;
         for connection in code_connections(corpus, schema)
             .into_iter()
             .filter(|entry| entry.code.reference == reference)

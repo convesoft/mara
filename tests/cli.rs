@@ -12157,6 +12157,78 @@ fn invalid_language_pack_does_not_return_partial_code_relations() {
     assert!(stderr(&related).contains("pair @name with @symbol"));
 }
 
+#[cfg(unix)]
+#[test]
+fn code_related_reports_missing_marker_targets_and_pages_by_item_source() {
+    let fixture = rust_code_fixture();
+    let root = fixture.path();
+    fs::write(
+        root.join("a.mara.md"),
+        ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02\n:title: A\n\nA.\n:::\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("z.mara.md"),
+        ":::mara requirement REQ-Z\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: Z\n\nZ.\n:::\n",
+    )
+    .unwrap();
+    let code_path = root.join("implementation.rs");
+    fs::write(
+        &code_path,
+        "fn run() {\n // @mara code_implements REQ-MISSING\n // @mara code_implements REQ-Z\n // @mara code_implements REQ-A\n}\n",
+    )
+    .unwrap();
+    let missing = mara(root, &["related", "code:implementation.rs::run"]);
+    assert!(!missing.status.success());
+    assert!(
+        stderr(&missing).contains("REQ-MISSING"),
+        "{}",
+        stderr(&missing)
+    );
+
+    fs::write(
+        &code_path,
+        "fn run() {\n // @mara code_implements REQ-Z\n // @mara code_implements REQ-A\n}\n",
+    )
+    .unwrap();
+    let first = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "related",
+            "code:implementation.rs::run",
+            "--relation",
+            "code_implements",
+            "--limit",
+            "1",
+        ],
+    );
+    assert!(first.status.success(), "{}", stderr(&first));
+    let first: Value = serde_json::from_slice(&first.stdout).unwrap();
+    assert_eq!(first["connections"][0]["neighbour"]["id"], "REQ-A");
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let second = mara(
+        root,
+        &[
+            "--format",
+            "json",
+            "related",
+            "code:implementation.rs::run",
+            "--relation",
+            "code_implements",
+            "--limit",
+            "1",
+            "--cursor",
+            cursor,
+        ],
+    );
+    assert!(second.status.success(), "{}", stderr(&second));
+    let second: Value = serde_json::from_slice(&second.stdout).unwrap();
+    assert_eq!(second["connections"][0]["neighbour"]["id"], "REQ-Z");
+    assert_eq!(second["has_more"], false);
+}
+
 #[test]
 fn code_traceability_resolves_four_languages_and_reports_changed_targets() {
     let fixture = TempDir::new().unwrap();
