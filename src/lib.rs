@@ -10,6 +10,8 @@ use globset::GlobBuilder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
+mod code;
+pub use code::{CodeFile, CodeIndex, CodeMarker, CodeProblem, CodeSymbol};
 mod corpus;
 mod diagnostics;
 pub use corpus::{
@@ -684,6 +686,10 @@ impl RelationDefinition {
 }
 
 impl Project {
+    pub(crate) fn code_languages(&self) -> &[LanguageConfig] {
+        &self.code_languages
+    }
+
     pub(crate) fn content_discovery_is_complete(&self) -> bool {
         self.content_discovery_complete
     }

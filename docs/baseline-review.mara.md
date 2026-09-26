@@ -176,3 +176,32 @@ load, existing CLI/MCP regression suites, formatting and Clippy, installed-tool
 knowledge validation and selected traceability, then exact-revision evidence.
 This is the user-approved internal dependency checkpoint, not an item-list or
 source-validation command release.
+
+## Staged code-discovery dependency review
+
+Selected capability: load local adapter assets and discover source files,
+native symbol selectors, comment markers and their source spans. The user-approved
+next dependency has no new CLI/MCP command. Listing will compose it with the
+completed document loader; symbol resolution and graph operations remain pending.
+
+| Area | Review and disposition |
+|---|---|
+| Adapter loading | Retain project-relative regular assets confined after canonicalization, UTF-8 queries, unique alphanumeric extension assignments, required symbol/name/comment captures and per-pattern name pairing. Build all adapters before walking; a bad pack yields a problem and no partial scan. Retain pinned Tree-sitter/Wasm versions; no network or project-code execution. |
+| Discovery | Retain local/parent Git ignores, hidden supported files, deterministic path order, regular files and internal file symlinks, no directory-symlink traversal or outside-file reads. Document content patterns do not filter code. Read/walk problems remain explicit while independently readable files remain available. |
+| Parsing and ownership | Retain native lexical qualification, computed-name exclusion, captured-comment-only marker parsing, full introducer and ID/MID grammar. Retain following declaration through modifiers/wrappers, deepest containing body, top-level file fallback, and explicit ambiguous/unsupported ownership. Keep source and content spans; semantic relation/target checks are not parser responsibilities. |
+| Dependency boundary | Restore the scanner and its read-only snapshot values as a library dependency. Expose loading, files and accepted asset paths for direct verification and later composition. Defer exact-reference parsing/resolution, file-only endpoint bytes, graph summaries, corpus composition and cursor hashing until their owning reads; do not import discovery or query types. |
+| Retained parser tests | Restore seven groups: nested selectors across four languages; block-comment markers; full introducer; body ownership boundary; unsupported nested/file fallback; modifier/wrapper attachment; modifier-inclusive content. Preserve the reference-path grammar test for later endpoint resolution. |
+| Fixture correction | Replace parser unit tests' live-repository adapter lookup with ordinary integration tests whose temporary projects own Git/configuration state and copied packs. Keep Python/TypeScript assets under test fixtures only; do not enable extra adapters in the self-hosted project. Real tests have code associations; synthetic markers exist only as string data or temporary files. |
+| Discovery test obligations | Add focused real-loader checks for ordering/ignore and content-pattern independence, malformed/unavailable packs and capture pairing, invalid marker and unreadable-source diagnostics, and asset/file symlink confinement. Preserve broader CLI validation/navigation tests in the baseline for their later capabilities. |
+
+Completion requires real scanner execution with supplied Wasm grammars, unchanged
+source bytes, existing candidate CLI/MCP regressions, formatting/Clippy, canonical
+validation and scoped traceability, and committed exact-revision evidence. A
+passing dependency suite does not establish code navigation or item listing.
+
+Scanner implementation retains baseline behavior; the public read-only library
+projection makes this dependency independently callable. Seven existing parser
+test groups now run through the real loader; six focused discovery groups cover
+file selection, bad packs, duplicate extension assignment, read/marker failures,
+symlink confinement and walk failures. Original code contract MIDs are retained;
+the method explicitly leaves endpoint/graph/transport verification pending.

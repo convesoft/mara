@@ -31,6 +31,7 @@ shacl = { version = "=0.3.21", default-features = false }
 rudof_rdf = { version = "=0.3.21", default-features = false }
 rudof_iri = "=0.3.21"
 
+tree-sitter = { version = "0.27", features = ["wasm"] }
 ignore = "0.4"
 rushdown = "0.18.0"
 ulid = "1"
