@@ -58,3 +58,29 @@ Run `cargo test --locked --test mid_recovery` and lock unit regressions. Use iso
 
 Check pending/active locks, rollback of existing and newly created files, schema-independent recovery, optional Unix modes, no-journal success and retryable partial restoration. Reject malformed/unsupported journals, manual edits, mismatched permissions and unsafe paths while preserving source/journal. Run prior suites, formatting and Clippy. Fixture journals verify recovery; they do not prove interrupted move/rename publication or in-process automatic rollback.
 :::
+
+:::mara evidence EVD-MID-AND-RECOVERY
+:mid: 01M3H3J8JEF2N9JVY8BECJAF1R
+:title: MID backfill and explicit rollback pass real transport checks
+:status: accepted
+:result: passed
+:captured_at: 2026-09-27T09:36:14Z
+:subject_revision: ad13ac689ad315aac5e7d536363e0ad6f84f23cb
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-ITEM-LIST
+:evidences: VER-UNIFIED-SEARCH
+:evidences: VER-BOUNDED-NODE-READ
+:evidences: VER-DOCUMENT-NAVIGATION
+:evidences: VER-RELATION-INSPECTION
+:evidences: VER-CORPUS-CONFORMANCE
+:evidences: VER-MID-AND-RECOVERY
+
+At `ad13ac689ad315aac5e7d536363e0ad6f84f23cb`, formatting, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets` passed: 184 tests, none failed or ignored. The final full run used unchanged repository source.
+
+Eight real CLI/MCP groups cover deliberate/idempotent backfill, typed preflight exclusions, unchanged non-MID bytes, result lines, LF/CRLF, existing identities/permissions, active and pending locks, schema-content-independent rollback, complete/already-restored journal states, optional Unix modes, malformed/unsafe journals, later manual edits and permission conflicts. Two lock unit regressions cover active locking and inherited-descriptor release. Existing capability suites pass. Recovery requires an existing configured schema path but does not read its contents. Portable journals preserve readonly; exact Unix permissions require recorded unix_mode.
+
+Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected authoring-tool intent passed two roots; realization and verification each passed four roots, consuming all pages. CLI help and MCP tools/list expose both restored operations. Journal fixtures prove rollback handling, not journal publication, interruption or automatic rollback of move/rename. Those operations, project/item validation transports and rule/graph execution remain pending.
+:::
