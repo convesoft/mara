@@ -5,19 +5,9 @@ use scip::{symbol, types};
 use sha2::{Digest, Sha256};
 use std::process::{Command, Stdio};
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct IndexerConfig {
-    name: String,
-    command: Vec<String>,
-    /// Compatibility for indexers predating SCIP's per-document position encoding.
-    #[serde(default)]
-    position_encoding: Option<Encoding>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
-enum Encoding {
+pub(super) enum Encoding {
     Utf8,
     Utf16,
     Utf32,
@@ -25,7 +15,7 @@ enum Encoding {
 
 type Snapshot = BTreeMap<PathBuf, Vec<u8>>;
 pub(super) struct Indexed {
-    config: IndexerConfig,
+    config: LanguageConfig,
     index: types::Index,
     inputs: Vec<PathBuf>,
 }
@@ -76,14 +66,9 @@ fn snapshot(project: &Project) -> Result<Snapshot, CodeProblem> {
 }
 
 pub(super) fn run(project: &Project) -> Result<Vec<Indexed>, CodeProblem> {
-    if project.code_indexers.is_empty() {
-        return Err(problem(
-            "code language bindings require a configured SCIP indexer",
-        ));
-    }
     let mut names = BTreeSet::new();
     let mut result = Vec::new();
-    for config in &project.code_indexers {
+    for config in project.code_languages() {
         if !crate::is_snake_name(&config.name)
             || !names.insert(config.name.clone())
             || config.command.is_empty()
@@ -96,7 +81,7 @@ pub(super) fn run(project: &Project) -> Result<Vec<Indexed>, CodeProblem> {
                 != 1
         {
             return Err(problem(
-                "SCIP indexers need a unique snake_case name and command with one {output} argument",
+                "code languages need a unique snake_case name and command with one {output} argument",
             ));
         }
         let before = snapshot(project)?;

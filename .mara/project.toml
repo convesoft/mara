@@ -9,29 +9,8 @@ include = ["**/*.mara.md"]
 
 [[code.languages]]
 name = "rust"
+command = ["rust-analyzer", "scip", ".", "--output", "{output}", "--num-threads", "2"]
+position_encoding = "utf8"
 extensions = ["rs"]
 grammar = ".mara/code/rust.wasm"
 query = ".mara/code/rust.scm"
-
-[[code.languages]]
-name = "python"
-extensions = ["py"]
-grammar = ".mara/code/python.wasm"
-query = ".mara/code/python.scm"
-
-[[code.languages]]
-name = "javascript"
-extensions = ["js", "mjs", "cjs"]
-grammar = ".mara/code/javascript.wasm"
-query = ".mara/code/javascript.scm"
-
-[[code.languages]]
-name = "typescript"
-extensions = ["ts", "mts", "cts"]
-grammar = ".mara/code/typescript.wasm"
-query = ".mara/code/typescript.scm"
-
-[[code.indexers]]
-name = "rust"
-command = ["rust-analyzer", "scip", ".", "--output", "{output}", "--num-threads", "2"]
-position_encoding = "utf8"

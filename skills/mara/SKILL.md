@@ -228,17 +228,18 @@ select explicit mentions, and `--cursor '<next_cursor>'` for continuation.
 
 ## Code endpoints
 
-Project format 4 configures external SCIP indexers in `[[code.indexers]]` with
+Project format 4 uses one `[[code.languages]]` entry per integration with
 `name` and `command` (executable/arguments, one standalone `{output}` placeholder).
 Mara invokes them automatically from the project root when loading the corpus;
 install indexers separately and only configure trusted commands. Commands may
 run build tools. Missing executables or invalid output fail the operation.
 Optional `position_encoding` supplies `utf8`, `utf16` or `utf32` for old indexers
-that omit their document encoding. Optional `[[code.languages]]` runtime
-Tree-sitter grammar/query assets attach comments and expand declaration content;
+that omit their document encoding. The same entry may include `extensions`,
+`grammar` and `query` together for runtime Tree-sitter assets that attach comments
+and expand declaration content;
 there is no `separator` setting or compiled language integration.
 
-Use exact `code:path::indexer::descriptor` references returned by navigation.
+Use exact `code:path::language::descriptor` references returned by navigation.
 Descriptors omit SCIP package metadata so version bumps preserve local links.
 Unsafe inline characters use uppercase UTF-8 percent escapes. Backticks remain
 literal: `` code:service.ts::typescript::`service.ts`/parse(). ``. Local SCIP symbols are

@@ -11,7 +11,6 @@ use serde::Deserialize;
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
 
 mod scip_index;
-pub(crate) use scip_index::IndexerConfig;
 
 use crate::{DiagnosticCode, Project, SourceLocation, corpus::location};
 
@@ -70,9 +69,14 @@ pub(crate) enum ResolveError {
 #[serde(deny_unknown_fields)]
 pub(crate) struct LanguageConfig {
     name: String,
+    command: Vec<String>,
+    /// Compatibility for indexers predating SCIP's per-document position encoding.
+    #[serde(default)]
+    position_encoding: Option<scip_index::Encoding>,
+    #[serde(default)]
     extensions: Vec<String>,
-    grammar: PathBuf,
-    query: PathBuf,
+    grammar: Option<PathBuf>,
+    query: Option<PathBuf>,
 }
 
 struct Adapter {
@@ -109,10 +113,23 @@ impl Adapter {
         let mut assets = vec![config_path.to_path_buf()];
         let mut assigned = std::collections::BTreeSet::new();
         for language in project.code_languages() {
+            if language.grammar.is_none()
+                && language.query.is_none()
+                && language.extensions.is_empty()
+            {
+                continue;
+            }
+            let (Some(grammar_path), Some(query_path)) = (&language.grammar, &language.query)
+            else {
+                return Err(fail(format!(
+                    "language {} must configure extensions, grammar and query together",
+                    language.name
+                )));
+            };
             if language.name.is_empty()
                 || language.extensions.is_empty()
-                || !valid_asset_path(&language.grammar)
-                || !valid_asset_path(&language.query)
+                || !valid_asset_path(grammar_path)
+                || !valid_asset_path(query_path)
                 || language.extensions.iter().any(|extension| {
                     extension.is_empty()
                         || !extension.chars().all(|ch| ch.is_ascii_alphanumeric())
@@ -124,28 +141,28 @@ impl Adapter {
                     language.name
                 )));
             }
-            let grammar = read_project_asset(project, &language.grammar)
-                .map_err(|e| fail(format!("{}: {e}", language.grammar.display())))?;
+            let grammar = read_project_asset(project, grammar_path)
+                .map_err(|e| fail(format!("{}: {e}", grammar_path.display())))?;
             let query_source = String::from_utf8(
-                read_project_asset(project, &language.query)
-                    .map_err(|e| fail(format!("{}: {e}", language.query.display())))?,
+                read_project_asset(project, query_path)
+                    .map_err(|e| fail(format!("{}: {e}", query_path.display())))?,
             )
-            .map_err(|e| fail(format!("{}: {e}", language.query.display())))?;
+            .map_err(|e| fail(format!("{}: {e}", query_path.display())))?;
             let engine = tree_sitter::wasmtime::Engine::default();
             let mut store =
                 tree_sitter::WasmStore::new(&engine).map_err(|e| fail(e.to_string()))?;
             let grammar = store
                 .load_language(&language.name, &grammar)
-                .map_err(|e| fail(format!("{}: {e}", language.grammar.display())))?;
+                .map_err(|e| fail(format!("{}: {e}", grammar_path.display())))?;
             let query = Query::new(&grammar, &query_source)
-                .map_err(|e| fail(format!("{}: {e}", language.query.display())))?;
+                .map_err(|e| fail(format!("{}: {e}", query_path.display())))?;
             if query.capture_index_for_name("name").is_none()
                 || query.capture_index_for_name("symbol").is_none()
                 || query.capture_index_for_name("comment").is_none()
             {
                 return Err(fail(format!(
                     "{} must capture @symbol, @name and @comment",
-                    language.query.display()
+                    query_path.display()
                 )));
             }
             let name_capture = query.capture_index_for_name("name").unwrap() as usize;
@@ -163,7 +180,7 @@ impl Adapter {
             }) {
                 return Err(fail(format!(
                     "{} must pair @name with @symbol or @scope in each declaration pattern",
-                    language.query.display()
+                    query_path.display()
                 )));
             }
             let mut parser = Parser::new();
@@ -178,7 +195,7 @@ impl Adapter {
                 parser,
                 query,
             });
-            assets.extend([language.grammar.clone(), language.query.clone()]);
+            assets.extend([grammar_path.clone(), query_path.clone()]);
         }
         Ok((adapters, assets))
     }
@@ -293,7 +310,7 @@ impl CodeIndex {
                 return (result, problems);
             }
         };
-        if adapters.is_empty() && project.code_indexers.is_empty() {
+        if project.code_languages().is_empty() {
             return (result, problems);
         }
         let indexes = match scip_index::run(project) {
@@ -715,7 +732,23 @@ mod tests {
 
     fn adapters() -> Vec<Adapter> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let project = crate::resolve_project(Some(root), root).unwrap();
+        let mut project = crate::resolve_project(Some(root), root).unwrap();
+        project.code_languages = [
+            ("rust", "rs"),
+            ("python", "py"),
+            ("javascript", "js"),
+            ("typescript", "ts"),
+        ]
+        .into_iter()
+        .map(|(name, extension)| LanguageConfig {
+            name: name.into(),
+            command: vec!["indexer".into(), "{output}".into()],
+            position_encoding: None,
+            extensions: vec![extension.into()],
+            grammar: Some(format!(".mara/code/{name}.wasm").into()),
+            query: Some(format!(".mara/code/{name}.scm").into()),
+        })
+        .collect();
         Adapter::load(&project).unwrap().0
     }
 

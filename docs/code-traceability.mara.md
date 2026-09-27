@@ -51,7 +51,7 @@ The canonical edge is `(relation, code endpoint, item MID)`. Code is a built-in
 node kind in the disposable relation graph, alongside item and external nodes.
 Each kind supplies its own graph identity; only items have persisted MIDs and
 schema-defined flavours. Code identity is the exact project-relative
-file path plus the configured indexer name and exact SCIP descriptor, or just the path for a
+file path plus the configured language name and exact SCIP descriptor, or just the path for a
 file-only endpoint. Identical assertions from either side count as one edge
 with distinct source occurrences. Code links are structural associations;
 `verifies` identifies a check definition and never claims a passing execution.
@@ -69,7 +69,7 @@ An item may assert the inverse in metadata or a typed inline reference:
 Implemented by [[implemented_by_code:code:src/graph_constraints.rs::rust::graph_constraints/evaluate().]].
 ```
 
-The target grammar is `code:<project-relative-path>[::<indexer>::<descriptor>]`.
+The target grammar is `code:<project-relative-path>[::<language>::<descriptor>]`.
 Paths use `/`, contain only ordinary relative components, and cannot escape the
 project through `..` or a symlink. Matching is case-sensitive. A file-only target
 resolves to an existing regular file without an indexer or grammar. Symbol paths
@@ -97,35 +97,36 @@ symbol selection are adapter responsibilities, not generic text heuristics.
 
 ## Indexer and grammar boundary
 
-Mara contains no compiled language integrations. Projects configure external
-SCIP indexers and optional Tree-sitter WebAssembly grammars independently in
-`.mara/project.toml` format 4. Mara owns invocation, standard SCIP protobuf
-reading, marker parsing, schema/item resolution, graph identity and navigation.
+Mara contains no compiled language integrations. Projects configure one
+`[[code.languages]]` entry per integration in `.mara/project.toml` format 4.
+Each entry combines a SCIP command with optional Tree-sitter WebAssembly assets.
+Mara owns invocation, standard SCIP protobuf reading, marker parsing, schema/item
+resolution, graph identity and navigation.
 Each indexer owns language support, project discovery, compilation requirements
 and descriptor generation. Adding a language does not require a Mara rebuild.
 
 ```toml
 format_version = 4
 
-[[code.indexers]]
+[[code.languages]]
 name = "rust"
 command = ["rust-analyzer", "scip", ".", "--output", "{output}"]
 position_encoding = "utf8"
 
 # Optional: declaration content and source comment attachment.
-[[code.languages]]
-name = "rust"
 extensions = ["rs"]
 grammar = ".mara/code/rust.wasm"
 query = ".mara/code/rust.scm"
 ```
 
-Each unique snake_case indexer name is persisted in links; renaming it breaks
+Each unique snake_case language name is persisted in links; renaming it breaks
 those links. `command` is an executable and argument array, with exactly one
 standalone `{output}` argument. Mara replaces that argument with a temporary
 output path and runs the command from the project root without an implicit shell.
-Install the executable and its language dependencies separately. Mara does not
-download indexers, compile grammars, or contain language-specific command defaults.
+The `command` is required. Configure `extensions`, `grammar` and `query` together,
+or omit all three for indexing without Tree-sitter. Install the executable and
+its language dependencies separately. Mara does not download indexers, compile
+grammars, or contain language-specific command defaults.
 Only enable commands trusted by the project: they can run compiler/build tooling
 and have the permissions and network access of the Mara process.
 
@@ -176,6 +177,9 @@ grammars with `tree-sitter build --wasm` and supply a matching capture query.
 Existing projects with code bindings must change project format 3 to 4, remove
 `separator`, install/configure indexers, and replace native selectors with exact
 file/indexer-scoped descriptors. Old selectors are never interpreted as aliases.
+Unreleased configurations with separate `[[code.indexers]]` entries must move
+their command and position encoding into the matching `[[code.languages]]` entry
+and remove the separate indexer entries. Project format remains 4.
 Keep existing schema format 3, item MIDs, relation names and grammar/query assets.
 Projects without code bindings may retain their existing project format.
 
@@ -231,7 +235,7 @@ Use project-configured external SCIP indexers for semantic identity and optional
 runtime Tree-sitter assets for source comment attachment. This keeps language
 integrations out of the Mara binary and delegates overload disambiguation to
 language maintainers. Scope descriptors by project-relative file and configured
-indexer name; omit package metadata so ordinary version bumps preserve links.
+language name; omit package metadata so ordinary version bumps preserve links.
 Reject collisions and unresolved descriptors without name or position fallback.
 Renames and moves may break links. Remove native selector separators because
 syntax grammars do not define cross-language semantic identity.

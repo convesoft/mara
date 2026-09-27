@@ -12229,7 +12229,7 @@ fn scip_code_fixture(language: &str) -> TempDir {
         "format_version = 4",
         1,
     );
-    config.push_str(&format!("\n[[code.indexers]]\nname = \"{language}\"\ncommand = [\"cp\", \".mara/{language}.scip\", \"{{output}}\"]\nposition_encoding = \"utf8\"\n"));
+    config.push_str(&format!("\n[[code.languages]]\nname = \"{language}\"\ncommand = [\"cp\", \".mara/{language}.scip\", \"{{output}}\"]\nposition_encoding = \"utf8\"\n"));
     if language != "cpp" {
         fs::create_dir(root.join(".mara/code")).unwrap();
         for extension in ["wasm", "scm"] {
@@ -12241,7 +12241,7 @@ fn scip_code_fixture(language: &str) -> TempDir {
             .unwrap();
         }
         let extension = if language == "rust" { "rs" } else { "ts" };
-        config.push_str(&format!("\n[[code.languages]]\nname = \"{language}\"\nextensions = [\"{extension}\"]\ngrammar = \".mara/code/{language}.wasm\"\nquery = \".mara/code/{language}.scm\"\n"));
+        config.push_str(&format!("\nextensions = [\"{extension}\"]\ngrammar = \".mara/code/{language}.wasm\"\nquery = \".mara/code/{language}.scm\"\n"));
     }
     fs::write(config_path, config).unwrap();
     let schema_path = root.join(".mara/schema.yaml");
@@ -12451,6 +12451,29 @@ fn scip_indexer_failures_do_not_return_partial_code_relations() {
     )
     .unwrap();
     assert_eq!(validation_with_parity(root, &[])["valid"], false);
+}
+
+#[cfg(unix)]
+#[test]
+fn scip_language_configuration_requires_command_and_complete_grammar_settings() {
+    let fixture = scip_code_fixture("rust");
+    let root = fixture.path();
+    let path = root.join(".mara/project.toml");
+    let original = fs::read_to_string(&path).unwrap();
+    for omitted in ["command =", "query ="] {
+        let candidate = original
+            .lines()
+            .filter(|line| !line.starts_with(omitted))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(&path, candidate).unwrap();
+        assert_eq!(validation_with_parity(root, &[])["valid"], false);
+        assert!(
+            !mara(root, &["get", "code:src/lib.rs::rust::run()."])
+                .status
+                .success()
+        );
+    }
 }
 
 #[cfg(unix)]
