@@ -432,8 +432,18 @@ navigation before and after correcting each gap. Exercise warning/error policy
 and bounded output without mistaking incomplete evaluation for a pass.
 
 Run the supported migration workflow on a customized copy and compare MIDs,
-unrelated content and links before/after. Keep code-pilot verification with its
-eventual language/workflow design.
+unrelated content and links before/after.
+
+For [[DES-CODE-TRACEABILITY]], place consecutive markers with intervening ordinary
+or documentation comments before declarations in the Rust, Python, JavaScript
+and TypeScript adapter fixtures. Include blank lines, attributes, decorators and
+exports. Assert exact symbol ownership, each original marker span and unchanged
+declaration content. Preserve enclosing-body, ambiguity, unsupported-owner and
+file fallback behavior across executable and declaration boundaries. Through the
+compiled candidate CLI and stdio MCP, compare requirement backlinks and relation
+occurrences against complete symbol endpoints and exact source spans/counts;
+confirm source bytes are unchanged. Validation alone cannot detect incorrect but
+valid file ownership.
 
 For relationship authoring, use the declarations in [[DES-RELATION-AUTHORING]]
 and requests in [[DES-RELATION-INTERFACES]]. Establish one edge through metadata,

@@ -12256,6 +12256,83 @@ fn scip_code_fixture(language: &str) -> TempDir {
     fixture
 }
 
+// @mara code_verifies REQ-CODE-TRACEABILITY
+// Exercise derived ownership through both public transports.
+#[cfg(unix)]
+#[test]
+fn scip_grouped_markers_preserve_exact_endpoints_and_occurrence_spans() {
+    let fixture = scip_code_fixture("rust");
+    let root = fixture.path();
+    let source_path = root.join("src/lib.rs");
+    let original = fs::read_to_string(&source_path).unwrap();
+    let prefix = "// @mara code_implements REQ-B\n/// Ordinary documentation.\n\n";
+    let source = format!("{prefix}{original}");
+    fs::write(&source_path, &source).unwrap();
+    let mut raw: Value = serde_json::from_str(include_str!("fixtures/scip/rust.json")).unwrap();
+    // Translate the captured index's locations with the prepended source lines.
+    for occurrence in raw["documents"][0]["occurrences"].as_array_mut().unwrap() {
+        for field in ["range", "enclosing_range"] {
+            if let Some(range) = occurrence[field].as_array_mut() {
+                range[0] = json!(range[0].as_u64().unwrap() + 3);
+                if range.len() == 4 {
+                    range[2] = json!(range[2].as_u64().unwrap() + 3);
+                }
+            }
+        }
+    }
+    write_scip_fixture(root, "rust", &raw);
+    let document_path = root.join("req.mara.md");
+    let mut document = fs::read_to_string(&document_path).unwrap();
+    document.push_str(
+        "\n:::mara requirement REQ-B\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: B\n\nB.\n:::\n",
+    );
+    fs::write(&document_path, &document).unwrap();
+    let reference = "code:src/lib.rs::rust::run().";
+    for target in ["REQ-A", "REQ-B"] {
+        let related = scip_retrieval_parity(
+            root,
+            &["related", target],
+            "related",
+            json!({"reference":target}),
+        );
+        let connections = related["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["neighbour"]["kind"] == "code")
+            .collect::<Vec<_>>();
+        assert_eq!(connections.len(), 1, "{related:#}");
+        assert_eq!(
+            connections[0]["neighbour"]["reference"], reference,
+            "{target}"
+        );
+        let edge = scip_retrieval_parity(
+            root,
+            &["relation", "get", target, "implemented_by_code", reference],
+            "relation_get",
+            json!({"source":target,"relation":"implemented_by_code","target":reference}),
+        );
+        assert_eq!(edge["occurrence_count"], 1, "{edge:#}");
+        let occurrences = edge["occurrences"].as_array().unwrap();
+        assert_eq!(occurrences.len(), 1);
+        let location = &occurrences[0]["source"];
+        let marker = format!("// @mara code_implements {target}");
+        let start = source.find(&marker).unwrap();
+        assert_eq!(location["path"], "src/lib.rs");
+        assert_eq!(location["start_byte"], start);
+        assert_eq!(location["end_byte"], start + marker.len());
+    }
+    let read = scip_retrieval_parity(
+        root,
+        &["get", reference],
+        "get",
+        json!({"reference":reference}),
+    );
+    assert_eq!(read["content"], "pub fn run() -> u32 { 42 }");
+    assert_eq!(fs::read_to_string(source_path).unwrap(), source);
+    assert_eq!(fs::read_to_string(document_path).unwrap(), document);
+}
+
 #[cfg(unix)]
 #[test]
 fn scip_symbols_roundtrip_markers_and_inverse_relations_through_cli_and_mcp() {

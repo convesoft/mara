@@ -88,12 +88,18 @@ one shared parser searches only their text for markers. It does not scan raw
 source as text. The relation must declare `code_source: true` and allow
 the target item's flavour. Rust `//`, `///`, and block comments; Python `#`;
 and JavaScript/TypeScript `//` and block comments are supported. A marker
-immediately preceding a named declaration, separated only by whitespace and
-declaration modifiers, attaches to that declaration. Otherwise a marker
-inside a declaration body attaches to the deepest containing named declaration;
-a top-level marker with no attached declaration attaches to the file. A marker
-whose ownership cannot be determined is unsupported. Comment placement and
-symbol selection are adapter responsibilities, not generic text heuristics.
+in a leading group of query-captured comments attaches to the following named
+declaration through its existing modifier/wrapper boundary. All markers in the
+group share that owner; ordinary and documentation comments may intervene,
+separated only by whitespace, including blank lines. Attachment cannot cross
+statements, unrelated declarations, unsupported constructs or lexical body
+boundaries. Otherwise a marker inside a declaration body attaches to the deepest
+containing named declaration; a top-level marker with no attached declaration
+attaches to the file. Ambiguous or unsupported ownership remains an error.
+Each marker retains its own original source span. Grouping does not extend
+returned declaration content to include leading comments; existing modifier and
+wrapper content coverage is unchanged. Comment recognition remains query-driven;
+Mara applies the shared attachment rules.
 
 ## Indexer and grammar boundary
 
@@ -157,9 +163,9 @@ Tree-sitter supplies declaration ranges and comment ownership, never symbol
 identity. Its query captures declarations with `@symbol` and `@name`, lexical
 containers with `@scope` and `@name`, and comments with `@comment`. Optional
 `@modifier` and `@wrapper` captures support attributes, decorators and exports.
-The deepest enclosing declaration or immediately following declaration owns a
-marker; its name span must match exactly one global SCIP identity. Otherwise the
-marker is unsupported. File-owned markers need no symbol. Invalid packs and
+The owning declaration, determined by the attachment rules above, must have a
+name span matching exactly one global SCIP identity. Otherwise the marker is
+unsupported. File-owned markers need no symbol. Invalid packs and
 duplicate extension assignments are diagnosed. Asset paths stay in the project.
 With no grammar, SCIP symbol links still work, using the indexer's enclosing
 range for content, or its definition token if no enclosing range is supplied.
@@ -182,6 +188,10 @@ their command and position encoding into the matching `[[code.languages]]` entry
 and remove the separate indexer entries. Project format remains 3; reset development configurations marked 4 to 3.
 Keep existing schema format 3, item MIDs, relation names and grammar/query assets.
 Projects without code bindings may retain their existing project format.
+
+Grouped-comment attachment changes earlier file/enclosing-owned markers in
+qualifying groups to declaration-owned markers. Their derived edges and affected
+navigation cursors change; authored source, link syntax and format versions do not.
 
 Real-indexer probes cover scip-typescript 0.4.0, scip-clang 0.4.0 and
 rust-analyzer 1.97.1. C++ overload descriptors remain distinct after body edits,

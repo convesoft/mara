@@ -200,9 +200,11 @@ impl Adapter {
         Ok((adapters, assets))
     }
 
+    // @mara code_implements REQ-CODE-TRACEABILITY
     fn attached_symbol<'a>(
         &self,
         comment: Node<'_>,
+        group_end: usize,
         source: &str,
         symbols: &'a [CodeSymbol],
     ) -> Result<Option<&'a CodeSymbol>, AttachmentError> {
@@ -219,9 +221,9 @@ impl Adapter {
                     .iter()
                     .copied()
                     .filter(|start| {
-                        *start >= comment.end_byte()
+                        *start >= group_end
                             && scope_end.is_none_or(|end| *start < end)
-                            && source[comment.end_byte()..*start].trim().is_empty()
+                            && source[group_end..*start].trim().is_empty()
                     })
                     .min()
                     .map(|start| (s, start))
@@ -555,7 +557,18 @@ fn parse_file(
         .map(|component| component.to_string_lossy())
         .collect::<Vec<_>>()
         .join("/");
-    for comment in comments {
+    for (index, &comment) in comments.iter().enumerate() {
+        // Extend ownership across captured comments only. Keep the original
+        // node for lexical scope and locations, and leave content spans alone.
+        let mut group_end = comment.end_byte();
+        for next in &comments[index + 1..] {
+            if next.start_byte() < group_end
+                || !source[group_end..next.start_byte()].trim().is_empty()
+            {
+                break;
+            }
+            group_end = next.end_byte();
+        }
         let raw = &source[comment.byte_range()];
         let mut offset = comment.start_byte();
         for line in raw.split_inclusive('\n') {
@@ -586,7 +599,7 @@ fn parse_file(
                             .map(|target| (*target).to_owned()),
                     });
                 } else {
-                    match adapter.attached_symbol(comment, &source, &symbols) {
+                    match adapter.attached_symbol(comment, group_end, &source, &symbols) {
                         Ok(symbol) => {
                             let endpoint = symbol.map_or_else(
                                 || format!("code:{reference_path}"),
@@ -802,6 +815,62 @@ mod tests {
         }
     }
 
+    // @mara code_verifies REQ-CODE-TRACEABILITY
+    #[test]
+    fn captured_comment_groups_share_an_owner_without_changing_spans() {
+        let cases = [
+            ("sample.rs", "//", "fn run() {}"),
+            ("sample.rs", "///", "#[test]\nfn run() {}"),
+            ("sample.py", "#", "@decorator\ndef run(): pass"),
+            ("sample.js", "//", "export function run() {}"),
+            ("sample.ts", "//", "export function run(): void {}"),
+        ];
+        let mut adapters = adapters();
+        for (path, prefix, declaration) in cases {
+            let first = format!("{prefix} @mara code_implements REQ-A");
+            let second = format!("{prefix} @mara code_implements REQ-B");
+            let source =
+                format!("{first}\n{prefix} Ordinary documentation.\n\n{second}\n{declaration}\n");
+            let adapter = adapters
+                .iter_mut()
+                .find(|a| a.accepts(Path::new(path)))
+                .unwrap();
+            let (file, problems) = parse_file(path.into(), source, adapter);
+            assert!(problems.is_empty(), "{path}: {problems:?}");
+            assert_eq!(file.markers.len(), 2, "{path}");
+            for (marker, original) in file.markers.iter().zip([first, second]) {
+                assert_eq!(marker.endpoint, format!("code:{path}::run"), "{path}");
+                let span = marker.source.span();
+                assert_eq!(
+                    span.start_byte(),
+                    file.source.find(&original).unwrap(),
+                    "{path}"
+                );
+                assert_eq!(
+                    &file.source[span.start_byte()..span.end_byte()],
+                    if prefix == "///" {
+                        format!("{original}\n")
+                    } else {
+                        original
+                    },
+                    "{path}"
+                );
+            }
+            let span = file
+                .symbols
+                .iter()
+                .find(|s| s.selector == "run")
+                .unwrap()
+                .content
+                .span();
+            assert_eq!(
+                &file.source[span.start_byte()..span.end_byte()],
+                declaration,
+                "{path}"
+            );
+        }
+    }
+
     #[test]
     fn shared_marker_parser_reads_block_comments_from_tree_sitter() {
         let mut adapters = adapters();
@@ -809,13 +878,20 @@ mod tests {
             .iter_mut()
             .find(|adapter| adapter.accepts(Path::new("sample.js")))
             .unwrap();
-        let (file, problems) = parse_file(
-            "sample.js".into(),
-            "/* @mara code_implements REQ-A */\nfunction run() {}\n".into(),
-            adapter,
-        );
-        assert!(problems.is_empty(), "{problems:?}");
-        assert_eq!(file.markers[0].endpoint, "code:sample.js::run");
+        for (source, count) in [
+            ("/* @mara code_implements REQ-A */\nfunction run() {}\n", 1),
+            (
+                "/* @mara code_implements REQ-A\n * @mara code_implements REQ-B */\nfunction run() {}\n",
+                2,
+            ),
+        ] {
+            let (file, problems) = parse_file("sample.js".into(), source.into(), adapter);
+            assert!(problems.is_empty(), "{problems:?}");
+            assert_eq!(file.markers.len(), count);
+            for marker in file.markers {
+                assert_eq!(marker.endpoint, "code:sample.js::run");
+            }
+        }
     }
 
     #[test]
@@ -845,13 +921,63 @@ mod tests {
             .unwrap();
         let (file, problems) = parse_file(
             "sample.py".into(),
-            "def first():\n    pass\n    # @mara code_implements REQ-A\ndef second(): pass\n"
+            "def first():\n    pass\n    # @mara code_implements REQ-A\n    # @mara code_implements REQ-B\ndef second(): pass\n"
                 .into(),
             adapter,
         );
         assert!(problems.is_empty(), "{problems:?}");
-        assert_eq!(file.markers.len(), 1);
+        assert_eq!(file.markers.len(), 2);
         assert_eq!(file.markers[0].endpoint, "code:sample.py::first");
+        assert_eq!(file.markers[1].endpoint, "code:sample.py::first");
+    }
+
+    #[test]
+    fn captured_comment_groups_do_not_cross_executable_or_declaration_boundaries() {
+        let cases = [
+            (
+                "// @mara code_implements REQ-A\n// ordinary\nconst value = 1;\nfunction run() {}",
+                "code:sample.js",
+            ),
+            (
+                "function first() {\n// @mara code_implements REQ-A\n// ordinary\nwork();\nfunction run() {}\n}",
+                "code:sample.js::first",
+            ),
+            (
+                "// @mara code_implements REQ-A\n// ordinary\nfunction first() {}\nfunction run() {}",
+                "code:sample.js::first",
+            ),
+        ];
+        let mut adapters = adapters();
+        let adapter = adapters
+            .iter_mut()
+            .find(|a| a.accepts(Path::new("sample.js")))
+            .unwrap();
+        for (source, endpoint) in cases {
+            let (file, problems) = parse_file("sample.js".into(), source.into(), adapter);
+            assert!(problems.is_empty(), "{problems:?}");
+            assert_eq!(file.markers.len(), 1);
+            assert_eq!(file.markers[0].endpoint, endpoint);
+        }
+    }
+
+    #[test]
+    fn captured_comment_groups_preserve_attachment_ambiguity() {
+        let mut adapters = adapters();
+        let adapter = adapters
+            .iter_mut()
+            .find(|a| a.accepts(Path::new("sample.rs")))
+            .unwrap();
+        let source = "// @mara code_implements REQ-A\n// ordinary\nfn run() {}";
+        let (mut file, problems) = parse_file("sample.rs".into(), source.into(), adapter);
+        assert!(problems.is_empty());
+        file.symbols.push(file.symbols[0].clone());
+        let tree = adapter.parser.parse(source, None).unwrap();
+        let comment = tree.root_node().named_child(0).unwrap();
+        let group_end = tree.root_node().named_child(1).unwrap().end_byte();
+        assert!(matches!(
+            adapter.attached_symbol(comment, group_end, source, &file.symbols),
+            Err(AttachmentError::Ambiguous)
+        ));
     }
 
     #[test]
@@ -863,7 +989,7 @@ mod tests {
             .unwrap();
         let (file, problems) = parse_file(
             "sample.js".into(),
-            "const run = () => { /* @mara code_implements REQ-A */ };\n".into(),
+            "const run = () => { /* @mara code_implements REQ-A */ /* ordinary */ };\n".into(),
             adapter,
         );
         assert!(file.markers.is_empty());
