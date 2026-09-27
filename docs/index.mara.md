@@ -10,6 +10,7 @@ Selection and interpretation of recorded results follow
 
 - [Safe schema and vocabulary editing](schema-evolution.mara.md)
 - [Engineering profile and workflow](engineering-template.mara.md)
+- [Release preparation and public guidance](release.mara.md)
 - [CLI packages and agent installation](distribution.mara.md)
 - [Project initialization and schema discovery](project.mara.md)
 - [Canonical source, document format and item identity](format.mara.md)
