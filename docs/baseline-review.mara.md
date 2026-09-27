@@ -7,7 +7,8 @@ review; it does not authorize removing behavior. Product contracts live in the
 linked capability documents rather than in this inventory.
 
 The active candidate now supports project initialization, schema inspection and
-definition validation, item listing, unified search, bounded get, direct navigation and relation inspection. Document/code discovery
+definition validation, item listing, unified search, bounded get, direct navigation, relation inspection, MID backfill and explicit
+journal rollback. Corpus conformance, document/code discovery
 and the document graph are reviewed dependencies. Earlier full-runtime test rows
 remain historical where their edit or validation transports
 have not yet been restored. The sections below identify current checkpoints.
@@ -410,3 +411,37 @@ complete-discovery gate as item relations; complete missing and resolved target
 counterparts pass. Code-problem association uses a malformed marker with a valid
 target; a top-level comment after a struct is valid file-level attribution, not
 an unsupported-owner fixture. No source rewrites or new dependencies were added.
+
+## MID backfill and explicit recovery review
+
+Selected increment: CLI/MCP MID backfill plus the rollback operation named by
+its pending-journal failure. Dependencies are the reviewed corpus conformance,
+ULID generator, per-file atomic replacement, and only the lock/journal-reading
+portion of the transaction module. Move/rename journal publication, transaction
+commit hooks, item creation/update and relation writes remain deferred.
+
+| Area | Review and disposition |
+|---|---|
+| Backfill | Retain complete source-conformance preflight except typed missing-MID diagnostics; preserve all existing identities and bytes, insert after openers using existing newline style, and report resulting one-based lines in path/source order. Parse every candidate before the first write. Reads and repeated backfill remain no-ops. |
+| Writes | Retain the baseline per-file atomic replacements and permission preservation. This operation does not create a multi-file journal or promise group rollback after a later I/O failure. Do not silently broaden its transaction semantics. |
+| Locking | Retain persistent OS advisory lock with explicit unlock on drop, including inherited descriptor regression. Active writer/recovery and any pending journal block backfill before content changes. Lock/journal paths cannot traverse symlinks. |
+| Recovery | Retain format-1 strict journal decoding, unique confined document paths, before/after and permission checks for every target before any restore, staged originals, removal of newly created destinations and journal removal only after success. Recheck each target during restoration; conflicts preserve source and journal. Recovery needs project configuration, not a valid schema/corpus. |
+| Tests | Restore deliberate/idempotent and false-message preflight backfill regressions through real CLI/MCP, using library conformance until project_validate returns. Retain CRLF, result lines, existing MIDs and permissions. Restore rollback through both transports, optional Unix mode, malformed entries, permission/manual-edit refusal, active/inherited locks and idempotence. Journal fixtures represent published format-1 states; interruption/publication tests remain pending with move/rename. |
+
+Completion requires these real CLI/MCP workflows, unchanged-source failures,
+all prior suites, formatting/Clippy, canonical validation, selected matrices and
+committed revision evidence. Neither fixture journals nor backfill establish
+completion of the deferred journal-producing mutations.
+
+Eight integration groups exercise both real transports; two restored unit
+regressions cover active and inherited-descriptor lock release. Journal fixtures
+cover fully published and already-restored states, optional Unix permissions,
+manual/permission conflicts, malformed entries and symlink refusal. Recovery
+requires resolvable project configuration: its configured schema path must exist,
+but the schema contents may be unreadable and are not loaded. The recovery test
+uses invalid UTF-8 schema contents to distinguish that boundary. The already-locked
+`tempfile` dependency moves from dev-only to runtime for atomic replacement;
+no dependency version changes. No production behavior correction was needed.
+The portable-mode recovery case asserts readonly preservation; exact Unix
+permission preservation is asserted when the journal records unix_mode. Omitting
+that field does not carry enough information to reconstruct Unix mode bits.

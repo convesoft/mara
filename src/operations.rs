@@ -1,4 +1,6 @@
-use crate::{Corpus, FieldFilter, ItemCollectionResult, ItemFilters, list_items, load_corpus};
+use crate::{
+    Corpus, FieldFilter, ItemCollectionResult, ItemFilters, backfill_mids, list_items, load_corpus,
+};
 use crate::{
     GetResult, RelatedFilters, RelatedResult, RelationDirection, SearchResult, get, related, search,
 };
@@ -62,6 +64,35 @@ impl OperationContext {
                 })?,
             template,
         )
+    }
+
+    pub fn project_mid_backfill(&self) -> Result<ProjectMidBackfillResult, String> {
+        let (project, schema) = self.load_project()?;
+        let result = backfill_mids(&project, &schema).map_err(|error| error.to_string())?;
+        Ok(ProjectMidBackfillResult {
+            project: project.root().to_path_buf(),
+            changed: result
+                .entries()
+                .iter()
+                .map(|entry| BackfilledMidResult {
+                    id: entry.id().to_owned(),
+                    mid: entry.mid().to_owned(),
+                    path: entry.path().to_path_buf(),
+                    line: entry.line(),
+                })
+                .collect(),
+        })
+    }
+
+    pub fn project_transaction_rollback(&self) -> Result<TransactionRollbackResult, String> {
+        // Recovery must work even when interrupted writes made the corpus invalid.
+        let project = resolve_project(self.selected.as_deref(), &self.current_directory)
+            .map_err(|error| error.to_string())?;
+        let result = crate::rollback_transaction(&project).map_err(|error| error.to_string())?;
+        Ok(TransactionRollbackResult {
+            project: project.root().to_path_buf(),
+            restored: result.restored,
+        })
     }
 
     // @mara implements REQ-SCHEMA-DISCOVERY
@@ -393,4 +424,24 @@ pub struct RelationParams {
     pub source: String,
     pub relation: String,
     pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct TransactionRollbackResult {
+    pub project: PathBuf,
+    pub restored: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProjectMidBackfillResult {
+    pub project: PathBuf,
+    pub changed: Vec<BackfilledMidResult>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct BackfilledMidResult {
+    pub id: String,
+    pub mid: String,
+    pub path: PathBuf,
+    pub line: usize,
 }

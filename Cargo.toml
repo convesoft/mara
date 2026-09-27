@@ -43,5 +43,4 @@ unicode-normalization = "0.1"
 unicode-segmentation = "1.13"
 url = "2.5"
 
-[dev-dependencies]
 tempfile = "3"

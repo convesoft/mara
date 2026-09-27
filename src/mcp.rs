@@ -1,10 +1,10 @@
-use mara::RelationParams;
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams};
 use mara::{GetParams, GetResult};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
     Template, ValidationResult,
 };
+use mara::{ProjectMidBackfillResult, RelationParams, TransactionRollbackResult};
 use mara::{RelatedParams, RelatedResult, RelationDirection, SearchParams};
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -15,6 +15,11 @@ use rmcp::{
 };
 use serde::Deserialize;
 use std::path::PathBuf;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ProjectParams {
+    project: Option<PathBuf>,
+}
 
 #[derive(Clone)]
 struct MaraMcp {
@@ -223,6 +228,32 @@ impl MaraMcp {
         self.for_project(project)?.item_list(params).map(Json)
     }
 
+    #[tool(
+        name = "project_mid_backfill",
+        description = "Deliberately add generated MIDs to every legacy item that lacks one after a validation preflight; preserve existing MIDs."
+    )]
+    fn project_mid_backfill(
+        &self,
+        Parameters(params): Parameters<ProjectParams>,
+    ) -> Result<Json<ProjectMidBackfillResult>, String> {
+        self.for_project(params.project)?
+            .project_mid_backfill()
+            .map(Json)
+    }
+
+    #[tool(
+        name = "project_transaction_rollback",
+        description = "Explicitly roll back a pending mutation journal to its original files. Stop other Mara writers first; conflicting manual edits are rejected. No journal is a no-op."
+    )]
+    fn project_transaction_rollback(
+        &self,
+        Parameters(params): Parameters<ProjectParams>,
+    ) -> Result<Json<TransactionRollbackResult>, String> {
+        self.for_project(params.project)?
+            .project_transaction_rollback()
+            .map(Json)
+    }
+
     fn for_project(&self, project: Option<PathBuf>) -> Result<OperationContext, String> {
         self.operations.for_project(project)
     }
@@ -283,7 +314,7 @@ impl MaraMcp {
 
 #[tool_handler(
     name = "mara",
-    instructions = "This rebuild checkpoint provides project_init, schema_get, schema_list and schema_validate. Pass an absolute project path per call, or omit it for execution-directory discovery. When the server starts with --project, omit request-level project selection, including for project_init. Initialization requires an explicit destination only when the server is unbound. Further capabilities await their implementation reviews."
+    instructions = "This rebuild checkpoint provides project initialization, schema inspection/definition validation, item listing, search, get, related, relation inspection, MID backfill and explicit transaction rollback. Pass an absolute project path per call, or omit it for execution-directory discovery. When the server starts with --project, omit request-level project selection, including for project_init. Initialization requires an explicit destination only when the server is unbound. Further capabilities await their implementation reviews."
 )]
 impl ServerHandler for MaraMcp {}
 

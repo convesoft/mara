@@ -1,5 +1,4 @@
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
-use mara::RelationParams;
 use mara::{
     EntryRange, GetParams, GetResult, RelatedConnection, RelatedParams, RelationDirection,
     SearchParams,
@@ -9,6 +8,7 @@ use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
     Template, ValidationOptions, ValidationResult, ValidationTargetKind, project_initialize,
 };
+use mara::{ProjectMidBackfillResult, RelationParams};
 use serde::Serialize;
 use std::{
     collections::BTreeMap,
@@ -25,7 +25,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation, item listing, unified search, bounded get, direct navigation and relation inspection. Further capabilities are pending their implementation reviews."
+    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation, item listing, unified search, bounded get, direct navigation, relation inspection, MID backfill and explicit transaction rollback. Further capabilities are pending their implementation reviews."
 )]
 struct Cli {
     /// Use this project root instead of ancestor discovery; selects the init target or binds MCP.
@@ -139,6 +139,30 @@ enum ProjectCommand {
         #[arg(long, value_enum, default_value_t)]
         template: CliTemplate,
     },
+    /// Recover a pending multi-file mutation.
+    Transaction {
+        #[command(subcommand)]
+        command: ProjectTransactionCommand,
+    },
+    /// Manage durable machine identities (MIDs).
+    Mid {
+        #[command(subcommand)]
+        command: ProjectMidCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectTransactionCommand {
+    /// Restore original files from a pending mutation journal; stop other writers first.
+    ///
+    /// Preserves later manual edits by refusing conflicting files. No journal is a no-op.
+    Rollback,
+}
+
+#[derive(Debug, Subcommand)]
+enum ProjectMidCommand {
+    /// Generate missing MIDs on legacy items after validation; preserve existing MIDs.
+    Backfill,
 }
 
 #[derive(Debug, Subcommand)]
@@ -417,6 +441,33 @@ fn run(cli: Cli) -> Result<bool, String> {
             emit(format, &result, print_item_collection)?;
         }
         Command::Mcp => mcp::run(project)?,
+        Command::Project {
+            command:
+                ProjectCommand::Mid {
+                    command: ProjectMidCommand::Backfill,
+                },
+        } => {
+            let result = OperationContext::from_environment(project)?.project_mid_backfill()?;
+            emit(format, &result, print_project_mid_backfill)?;
+        }
+        Command::Project {
+            command:
+                ProjectCommand::Transaction {
+                    command: ProjectTransactionCommand::Rollback,
+                },
+        } => {
+            let result =
+                OperationContext::from_environment(project)?.project_transaction_rollback()?;
+            emit(format, &result, |result| {
+                if result.restored.is_empty() {
+                    println!("no pending transaction");
+                }
+                for path in &result.restored {
+                    println!("rolled back {}", path.display());
+                }
+                Ok(())
+            })?;
+        }
         Command::Project {
             command: ProjectCommand::Init { path, template },
         } => {
@@ -946,4 +997,27 @@ fn display_relation_target(target: &mara::RelationEndpoint) -> String {
         mara::RelationEndpoint::External { address } => format!("external:{address}"),
         mara::RelationEndpoint::Code { reference } => reference.clone(),
     }
+}
+
+fn print_project_mid_backfill(result: &ProjectMidBackfillResult) -> Result<(), String> {
+    if result.changed.is_empty() {
+        println!("no missing MIDs in project at {}", result.project.display());
+        return Ok(());
+    }
+    println!(
+        "backfilled {} MID{} in project at {}",
+        result.changed.len(),
+        if result.changed.len() == 1 { "" } else { "s" },
+        result.project.display()
+    );
+    for entry in &result.changed {
+        println!(
+            "{}\t{}\t{}:{}",
+            entry.id,
+            entry.mid,
+            entry.path.display(),
+            entry.line
+        );
+    }
+    Ok(())
 }

@@ -727,6 +727,8 @@ fn bootstrap_advertises_only_its_available_operations() {
             "get",
             "item_list",
             "project_init",
+            "project_mid_backfill",
+            "project_transaction_rollback",
             "related",
             "relation_get",
             "schema_get",

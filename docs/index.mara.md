@@ -11,6 +11,7 @@ dispositions and remaining scope.
 - [Canonical source, document format and item identity](format.mara.md)
 - [Document structure, references and direct navigation](discovery.mara.md)
 - [Corpus conformance and validation](validation.mara.md)
+- [Source mutation and explicit recovery](editing.mara.md)
 - [Code adapters and traceability](code-traceability.mara.md)
 - [Item listing, search and bounded reads](retrieval.mara.md)
 

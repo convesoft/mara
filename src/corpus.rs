@@ -319,10 +319,20 @@ pub struct Diagnostic {
     applies_to_all_items: bool,
     code: DiagnosticCode,
     coordinates_available: bool,
+    kind: DiagnosticKind,
     message: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiagnosticKind {
+    Other,
+    MissingMid,
+}
+
 impl Diagnostic {
+    pub(crate) fn is_missing_mid(&self) -> bool {
+        self.kind == DiagnosticKind::MissingMid
+    }
     pub fn code(&self) -> DiagnosticCode {
         self.code
     }
@@ -381,6 +391,7 @@ fn load_documents_for_validation_with_schema(
                     applies_to_all_items: true,
                     code: DiagnosticCode::SourceInvalid,
                     coordinates_available: false,
+                    kind: DiagnosticKind::Other,
                     message: format!("could not read Mara document: {error}"),
                 });
                 continue;
@@ -404,6 +415,7 @@ fn load_documents_for_validation_with_schema(
             applies_to_all_items: false,
             code: error.code,
             coordinates_available: true,
+            kind: DiagnosticKind::Other,
             message: error.message,
         }));
         if retain_document {
@@ -431,6 +443,7 @@ pub(crate) fn diagnostic(
         applies_to_all_items: false,
         code,
         coordinates_available: true,
+        kind: DiagnosticKind::Other,
         message,
     });
 }
@@ -515,6 +528,7 @@ fn discover_for_validation(root: &Path, matcher: &GlobSet) -> (Vec<PathBuf>, Vec
                 applies_to_all_items: true,
                 code: DiagnosticCode::SourceInvalid,
                 coordinates_available: false,
+                kind: DiagnosticKind::Other,
                 message: format!("could not discover Mara documents: {error}"),
             }),
         }
@@ -1290,12 +1304,16 @@ pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
     for item in corpus.items() {
         let mids = mid_entries(item);
         match mids.as_slice() {
-            [] => diagnostic(
-                DiagnosticCode::IdentityInvalid,
-                &mut diagnostics,
-                item.source(),
-                format!("item '{}' is missing its MID", item.id()),
-            ),
+            [] => {
+                diagnostic(
+                    DiagnosticCode::IdentityInvalid,
+                    &mut diagnostics,
+                    item.source(),
+                    format!("item '{}' is missing its MID", item.id()),
+                );
+                diagnostics.last_mut().expect("diagnostic was added").kind =
+                    DiagnosticKind::MissingMid;
+            }
             [entry] => {
                 if !crate::is_mid(entry.value()) {
                     diagnostic(
@@ -1531,4 +1549,12 @@ pub fn load_corpus_syntax_for_validation(
         },
         diagnostics,
     ))
+}
+
+pub(crate) fn parse_document_source(
+    path: &Path,
+    source: &str,
+    schema: &Schema,
+) -> Result<Document, Error> {
+    parse_document(path.to_path_buf(), source.to_owned(), schema)
 }

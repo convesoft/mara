@@ -39,6 +39,10 @@ pub use query::{
     RelatedResult, RelationDirection, SearchExcerpt, SearchHit, SearchResult, TextRange, get,
     list_items, related, search,
 };
+mod mutation;
+pub use mutation::{
+    BackfilledMid, BackfilledMids, TransactionRollback, backfill_mids, rollback_transaction,
+};
 mod operations;
 mod rules;
 pub use diagnostics::{
@@ -46,10 +50,11 @@ pub use diagnostics::{
     DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
 };
 pub use operations::{
-    DeclarationSummary, FieldValue, GetParams, ItemFilterParams, OperationContext,
-    ProjectInitializationResult, ProjectSummary, RelatedParams, RelationParams, SchemaGetResult,
-    SchemaKind, SchemaListResult, SearchParams, ValidationDiagnostic, ValidationResult,
-    ValidationScope, ValidationTargetKind, project_initialize,
+    BackfilledMidResult, DeclarationSummary, FieldValue, GetParams, ItemFilterParams,
+    OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, ProjectSummary,
+    RelatedParams, RelationParams, SchemaGetResult, SchemaKind, SchemaListResult, SearchParams,
+    TransactionRollbackResult, ValidationDiagnostic, ValidationResult, ValidationScope,
+    ValidationTargetKind, project_initialize,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";
@@ -813,6 +818,9 @@ pub enum Error {
         path: PathBuf,
         message: String,
     },
+    InvalidMutation {
+        message: String,
+    },
     Io {
         action: &'static str,
         path: PathBuf,
@@ -863,6 +871,7 @@ impl fmt::Display for Error {
                     path.display()
                 )
             }
+            Self::InvalidMutation { message } => write!(formatter, "{message}"),
             Self::Io {
                 action,
                 path,
