@@ -16,8 +16,7 @@ fn summaries(graph: &DiscoveryGraph<'_>) -> Vec<Value> {
 
 // @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
-// This explicitly reads the real repository without writing its sources.
-fn every_repository_and_padded_table_node_has_a_reusable_source_reference() {
+fn every_padded_table_node_has_a_reusable_source_reference() {
     let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     fs::write(
@@ -25,17 +24,12 @@ fn every_repository_and_padded_table_node_has_a_reusable_source_reference() {
         "| A | B | C |\n|---|---|---|\n| One |\n",
     )
     .unwrap();
-    for project in [
-        project,
-        resolve_project(Some(Path::new(env!("CARGO_MANIFEST_DIR"))), ".").unwrap(),
-    ] {
-        let schema = load_schema(&project).unwrap();
-        let corpus = load_corpus(&project, &schema).unwrap();
-        let graph = corpus.discovery();
-        for node in graph.nodes() {
-            let resolved = graph.resolve(node.reference()).unwrap();
-            assert_eq!(node.summary(), resolved.summary());
-        }
+    let schema = load_schema(&project).unwrap();
+    let corpus = load_corpus(&project, &schema).unwrap();
+    let graph = corpus.discovery();
+    for node in graph.nodes() {
+        let resolved = graph.resolve(node.reference()).unwrap();
+        assert_eq!(node.summary(), resolved.summary());
     }
 }
 

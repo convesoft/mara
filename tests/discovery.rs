@@ -249,29 +249,17 @@ fn distinguishes_containment_mentions_and_schema_names_between_direct_neighbours
 // @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 // Explicit read-only self-hosting check.
-fn projects_repository_structure_deterministically_without_writing_sources() {
+fn projects_repository_structure_without_writing_sources() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let project = mara::resolve_project(Some(root), root).unwrap();
     let schema = load_schema(&project).unwrap();
     let corpus = load_corpus(&project, &schema).unwrap();
     let graph = corpus.discovery();
-    let snapshot = |graph: &DiscoveryGraph<'_>| {
-        graph
-            .nodes()
-            .map(|node| {
-                (
-                    format!("{:?}", std::mem::discriminant(&node.kind())),
-                    node.source().clone(),
-                    node.parent().map(|parent| parent.source().clone()),
-                )
-            })
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        snapshot(&graph),
-        snapshot(&load_corpus(&project, &schema).unwrap().discovery())
-    );
     for node in graph.nodes() {
+        assert_eq!(
+            node.summary(),
+            graph.resolve(node.reference()).unwrap().summary()
+        );
         let children = node.children();
         for child in &children {
             assert_eq!(child.parent().unwrap().source(), node.source());
@@ -291,6 +279,35 @@ fn projects_repository_structure_deterministically_without_writing_sources() {
             document.source()
         );
     }
+}
+
+// @mara checks DES-DOCUMENT-STRUCTURE
+#[test]
+fn projects_fixture_structure_deterministically() {
+    let fixture = support::fixture();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    fs::write(
+        fixture.path().join("structure.mara.md"),
+        "# Section\n\n:::mara requirement REQ-ONE\n:title: One\n\nBody.\n:::\n",
+    )
+    .unwrap();
+    let schema = load_schema(&project).unwrap();
+    let snapshot = |graph: &DiscoveryGraph<'_>| {
+        graph
+            .nodes()
+            .map(|node| {
+                (
+                    format!("{:?}", std::mem::discriminant(&node.kind())),
+                    node.source().clone(),
+                    node.parent().map(|parent| parent.source().clone()),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        snapshot(&load_corpus(&project, &schema).unwrap().discovery()),
+        snapshot(&load_corpus(&project, &schema).unwrap().discovery())
+    );
 }
 
 // @mara checks DES-DOCUMENT-STRUCTURE
