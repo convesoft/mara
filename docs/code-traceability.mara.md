@@ -249,4 +249,14 @@ language name; omit package metadata so ordinary version bumps preserve links.
 Reject collisions and unresolved descriptors without name or position fallback.
 Renames and moves may break links. Remove native selector separators because
 syntax grammars do not define cross-language semantic identity.
+
+Keep the indexer command and optional grammar assets in one language entry:
+they describe one integration, and separate name lists duplicate configuration
+and permit drift. Keep project format 3 during this unreleased alpha instead of
+requiring migration between development-only format numbers.
+
+Preserve literal SCIP backticks because Mara can parse them unambiguously and
+readable descriptors help authors inspect exact targets. Escape only characters
+that conflict with Mara's reference syntax; do not shorten or normalize semantic
+descriptors for appearance, which could collapse distinct identities.
 :::

@@ -236,8 +236,33 @@ run build tools. Missing executables or invalid output fail the operation.
 Optional `position_encoding` supplies `utf8`, `utf16` or `utf32` for old indexers
 that omit their document encoding. The same entry may include `extensions`,
 `grammar` and `query` together for runtime Tree-sitter assets that attach comments
-and expand declaration content;
-there is no `separator` setting or compiled language integration.
+and expand declaration content. Without these assets, symbol links still work;
+content uses the SCIP enclosing range, or the definition token when absent.
+There is no `separator` setting or compiled language integration.
+
+For example, with `rust-analyzer` installed and matching grammar assets present:
+
+```toml
+[[code.languages]]
+name = "rust"
+command = ["rust-analyzer", "scip", ".", "--output", "{output}"]
+position_encoding = "utf8"
+extensions = ["rs"]
+grammar = ".mara/code/rust.wasm"
+query = ".mara/code/rust.scm"
+```
+
+Remove all three asset fields for SCIP-only use. Commands and paths are
+project-owned; Mara supplies no per-language defaults.
+
+Source markers use `@mara <canonical-relation> <item-ID-or-MID>` within captured
+comments. All markers in a leading comment group attach to the following
+supported declaration through its modifier/wrapper boundary. Ordinary/doc
+comments and blank lines may intervene; statements and lexical body boundaries
+stop attachment. Original marker spans and declaration content remain separate.
+Otherwise retain deepest-enclosing ownership, valid file fallback, or an
+unsupported/ambiguous-owner diagnostic. Inspect exact endpoints with `related`
+and `relation get`: validation alone also accepts unintended file links.
 
 Use exact `code:path::language::descriptor` references returned by navigation.
 Descriptors omit SCIP package metadata so version bumps preserve local links.
@@ -247,7 +272,9 @@ unsupported. Distinct implementation overloads require distinct indexer identiti
 multiple declarations of one identity share a link. No name/position fallback is
 allowed. Renames/moves may break authored links. File-only `code:path` needs no
 language integration. Migrate project format 3 code bindings and native selectors
-explicitly; see `docs/code-traceability.mara.md` in the Mara repository.
+explicitly. Combine unreleased `code.indexers` entries into `code.languages`,
+retain project format 3, and reset development configurations marked 4 to 3.
+See `docs/code-traceability.mara.md` in the Mara repository.
 
 ## Inspect and change relationships
 
