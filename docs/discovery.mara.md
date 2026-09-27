@@ -246,3 +246,28 @@ Internal edge endpoints require MIDs. A code source uses a canonical relation pe
 
 Authored source occurrences remain in parsed documents/code; this navigation dependency exposes normalized identity and count. Occurrence inspection, tokens and mutation remain later checkpoints. No reverse assertion is written merely to provide incoming navigation.
 :::
+
+:::mara evidence EVD-DIRECT-NAVIGATION
+:mid: 01M3H21RWGXY9QRXCB1GGV1FSX
+:title: Direct navigation checkpoint verification
+:status: accepted
+:result: passed
+:captured_at: 2026-09-27T09:09:40Z
+:subject_revision: 7f701b11e1afc07bd3d0bd0ec00115822e0ed997
+:evidences: VER-DOCUMENT-NAVIGATION
+:evidences: VER-BOUNDED-NODE-READ
+:evidences: VER-UNIFIED-SEARCH
+:evidences: VER-ITEM-LIST
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+
+Tested revision `7f701b11e1afc07bd3d0bd0ec00115822e0ed997`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
+
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 155 tests (2 units, 13 code discovery, 31 corpus, 9 discovery, 4 handles, 10 get, 10 item list, 12 navigation, 17 bootstrap, 12 references, 20 schema, 15 search), none failed or ignored. Eight retained navigation groups verify real CLI/stdin MCP narrative-to-item-to-item reading, parent/children, exact source evidence, namespaces, retired interfaces, complete count/byte pages, human output and invalid/oversized requests. Four focused groups verify alias/inline/symmetric/self-edge normalization and counts before paging, exact terminal external endpoints, code-marker/item-inverse deduplication and binary file-only backlinks/invalidation, and selected missing/ambiguous item-target errors. Fixtures own identities, adapters and Git/configuration state; reads preserve source bytes.
+
+Read-only installed-baseline comparisons matched complete navigation JSON for three real-repository roots: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS (11 connections), an index narrative block (2) and code:src/query/related.rs::related (1), each one page. Multi-page completeness is established by the CLI/MCP fixtures. Installed full-baseline MCP schema/project validation completed with zero errors or warnings. Selected intent passed 3 requirements; realization and verification each passed 6 requirement/design roots with all pages consumed. Cargo.lock changes only Mara's direct URL dependency entry; no package versions changed.
+
+This checkpoint restores direct navigation and its read-only canonical semantic projection. Occurrence inspection, mutation, semantic validation and rule evaluation remain pending; the installed author's validation/matrices do not establish candidate implementations of those operations. Historical full-runtime evidence remains historical. The installed executable was not replaced.
+:::
