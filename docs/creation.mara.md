@@ -64,30 +64,3 @@ Run `cargo test --locked --test item_creation` through the candidate CLI and std
 
 Check existing link destinations across insertion, including duplicate-heading anchor shifts, and allow unrelated existing broken references. Run the full regression suite, formatting and Clippy against unchanged sources. Use library conformance checks to verify created sources. [[VER-PROJECT-VALIDATION]] owns validation transports; each mutation has its own verification method.
 :::
-
-:::mara evidence EVD-ITEM-CREATION
-:mid: 01M3H45434E7XS5ND26DFQ8N0S
-:title: Item creation and existing capability suites pass
-:status: retired
-:result: passed
-:captured_at: 2026-09-27T09:46:27Z
-:subject_revision: 3f9666e008c14b5f3f889bc2274a01aca250e19c
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-ITEM-LIST
-:evidences: VER-UNIFIED-SEARCH
-:evidences: VER-BOUNDED-NODE-READ
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-RELATION-INSPECTION
-:evidences: VER-CORPUS-CONFORMANCE
-:evidences: VER-MID-AND-RECOVERY
-:evidences: VER-ITEM-CREATION
-
-At `3f9666e008c14b5f3f889bc2274a01aca250e19c`, `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets` passed: 196 tests, none failed or ignored. The final run used unchanged repository source.
-
-Twelve creation groups exercise real CLI/stdin and MCP authoring, complete/scaffold/optional bodies, fields and generated identities, source/newline/permission preservation, safe insertion, body containment, discovery confinement, initial item/MID/self/inverse/external relations, semantic duplicate and invalid-edge refusal, get/related transport parity, shifted-heading link protection, independent old/new reference errors and mutation blocking. Candidate library conformance verified created sources; this run did not exercise candidate project/item validation transports.
-
-Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Installed-tool intent passed two selected roots; realization and verification each passed three roots, consuming all pages. CLI help and MCP tools/list expose creation. This execution does not establish relation editing, update/delete/move/rename, journal publication or rule/graph evaluation.
-:::

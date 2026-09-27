@@ -5,8 +5,8 @@ Start with [product intent and workflows](product.mara.md). Accepted items state
 intended behavior; they do not establish implementation or passing execution.
 
 Execution evidence applies to its recorded revision and verification scope.
-Assess definition changes before using a historical result; selection and evidence
-interpretation follow [[DES-TRACE-CHECK-BINDING]].
+Selection and interpretation of recorded results follow
+[[DES-TRACE-CHECK-BINDING]].
 
 - [Project initialization and schema discovery](project.mara.md)
 - [Canonical source, document format and item identity](format.mara.md)

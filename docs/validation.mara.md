@@ -46,31 +46,6 @@ Run `cargo test --locked --test corpus_validation` in isolated temporary project
 This method checks library source conformance. [[VER-PROJECT-VALIDATION]] checks validation transports, [[VER-POLICY-VALIDATION]] checks rules and graph policies, and [[VER-MID-AND-RECOVERY]] checks identity backfill and recovery writes.
 :::
 
-:::mara evidence EVD-CORPUS-CONFORMANCE
-:mid: 01M3H30DMNEMAPG8QKBHHF27AQ
-:title: Corpus conformance and prior capability regressions pass
-:status: retired
-:result: passed
-:captured_at: 2026-09-27T09:26:25Z
-:subject_revision: dc951880d771e9f3c679d17907142832b3bbc102
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-ITEM-LIST
-:evidences: VER-UNIFIED-SEARCH
-:evidences: VER-BOUNDED-NODE-READ
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-RELATION-INSPECTION
-:evidences: VER-CORPUS-CONFORMANCE
-
-At `dc951880d771e9f3c679d17907142832b3bbc102`, `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets` passed: 174 tests, none failed or ignored. Fourteen corpus-conformance groups cover identity diagnostics, independent schema/source recovery, typed fields, relation endpoints, source preservation and code-problem association. Existing real CLI/MCP tests remain passing.
-
-The targeted unreadable-document regression failed before the correction: a code marker reported its target missing while discovery was incomplete. It passes with complete-missing and resolved-target counterparts after applying the same completeness guard used by item relations.
-
-Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity with zero diagnostics. Installed-tool intent passed two selected roots; realization and verification each passed three selected roots, consuming all pages. These authoring/trace checks do not establish candidate project validation. This execution checked library conformance, not project/item validation transports, rule/graph evaluation, MID backfill or recovery writes.
-:::
-
 :::mara requirement REQ-RELATION-CARDINALITY
 :mid: 01M2FX4BS193R12Z27E3M7CQZQ
 :title: Check declared relationship cardinality
@@ -197,38 +172,4 @@ Run cargo test --locked --test project_validation in isolated temporary Git proj
 :verifies: DES-TRACE-GRAPH-CONSTRAINTS
 
 Run cargo test --locked --test policy_validation and the native engine nested-error regression. Exercise real CLI/MCP lifecycle and qualified relationship failures followed by repair; typed literals and nested class/path selection; messages, warning/error severity, invalid prerequisites and continuation; bounded multi-hop chains and allowed cycles; distinct semantic cardinality, aliases, symmetric/self/external edges and constrained cycle witnesses. Reuse standard fixture helpers with fixture-owned vocabulary/rules and isolated Git/configuration. Rule evaluation never dereferences external URLs. Corpus loading invokes trusted configured indexers under [[DES-CODE-TRACEABILITY]]; Mara does not write source. Keep definition-only regressions in schema_validation; matrix output remains separate. Run the full regression suite and selected traceability at the actual implementation revision.
-:::
-
-:::mara evidence EVD-PROJECT-POLICY-VALIDATION
-:mid: 01M3H7A7HMV3ZA1VQRS321M020
-:title: Full-context validation and native policy evaluation pass
-:status: retired
-:result: passed
-:captured_at: 2026-09-27T10:41:55Z
-:subject_revision: 7387584738ec86d2f810e73c2d0041317cb2fdc6
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-ITEM-LIST
-:evidences: VER-UNIFIED-SEARCH
-:evidences: VER-BOUNDED-NODE-READ
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-RELATION-INSPECTION
-:evidences: VER-CORPUS-CONFORMANCE
-:evidences: VER-MID-AND-RECOVERY
-:evidences: VER-ITEM-CREATION
-:evidences: VER-RELATION-MUTATION
-:evidences: VER-ITEM-UPDATE
-:evidences: VER-ITEM-DELETION
-:evidences: VER-ITEM-MOVEMENT
-:evidences: VER-ITEM-RENAME
-:evidences: VER-PROJECT-VALIDATION
-:evidences: VER-POLICY-VALIDATION
-
-At the subject revision, cargo test --locked --all-targets passed 332 tests across 24 suites with zero failures. Two ignored process helpers were each exercised at three interruption boundaries by passing parent tests. The new suites passed 52 project/item/source diagnostic groups and 17 policy groups; the native nested-error ledger regression also passed. Tests use disposable Git projects, fixture-owned rule/schema/configuration inputs and local adapters. The complete suite, including the read-only self-hosting check, ran without source/documentation changes.
-
-cargo fmt --all --check and cargo clippy --locked --all-targets -- -D warnings passed. The candidate CLI validated this complete repository and REQ-CURRENT-STATE-RULES with valid:true, evaluation_complete:true, zero errors/warnings and no remaining page. Real CLI/MCP fixture parity covers failures, repairs, item scope, source recovery, warning severity, native rule/graph outcomes, diagnostic filtering, stale cursors and output limits.
-
-Installed authoring-tool schema/project validation passed without diagnostics. Selected intent passed five roots across two pages; realization and verification each passed eight roots across three pages, consuming all continuation. This execution covers validation at the subject revision. It does not establish matrix operations, request-local bindings or packaging.
 :::

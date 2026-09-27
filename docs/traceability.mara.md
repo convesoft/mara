@@ -150,7 +150,7 @@ The reference code-endpoint Markdown defect was reproduced through CLI and MCP: 
 
 The candidate validated the self-hosted repository with valid:true, evaluation_complete:true, zero diagnostics and no remaining page. Candidate request-local intent passed all three matrix requirements on one page; realization and verification each passed all five matrix requirement/design roots across two pages, with every page consumed, exact counts and no unavailable results. These are candidate checks, not installed-tool substitutes.
 
-Environment: Linux x86_64, Rust/rust-analyzer 1.97.1, candidate /tmp/mara72-target/debug/mara; CARGO_TARGET_DIR=/tmp/mara72-target, CARGO_PROFILE_DEV_DEBUG=0, CARGO_PROFILE_TEST_DEBUG=0, CARGO_INCREMENTAL=0. This execution does not establish complete interface-guidance conformance, distribution, migration, public documentation or a published release.
+Environment: Linux x86_64, Rust/rust-analyzer 1.97.1, candidate /tmp/mara72-target/debug/mara; CARGO_TARGET_DIR=/tmp/mara72-target, CARGO_PROFILE_DEV_DEBUG=0, CARGO_PROFILE_TEST_DEBUG=0, CARGO_INCREMENTAL=0. This execution covers matrix behavior and the named regression suites at the subject revision. Interface guidance, packaging and release publication were not verified.
 
 After recording this result, the candidate execution matrix selected all twenty verification roots with subject_revision=1e57232f464a838bf34839840b2662d9ed7524e0. All roots passed with exact counts and complete evaluation across all thirty consumed pages. This checks the recorded evidence relationships for that revision; it does not rerun the tests.
 :::

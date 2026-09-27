@@ -60,32 +60,6 @@ Run `cargo test --locked --test mid_recovery` and lock unit regressions. Use iso
 Check pending/active locks, rollback of existing and newly created files, schema-independent recovery, optional Unix modes, no-journal success and retryable partial restoration. Reject malformed/unsupported journals, manual edits, mismatched permissions and unsafe paths while preserving source/journal. Run the full regression suite, formatting and Clippy. Fixture journals verify recovery; they do not prove interrupted move/rename publication or in-process automatic rollback.
 :::
 
-:::mara evidence EVD-MID-AND-RECOVERY
-:mid: 01M3H3J8JEF2N9JVY8BECJAF1R
-:title: MID backfill and explicit rollback pass real transport checks
-:status: retired
-:result: passed
-:captured_at: 2026-09-27T09:36:14Z
-:subject_revision: ad13ac689ad315aac5e7d536363e0ad6f84f23cb
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-ITEM-LIST
-:evidences: VER-UNIFIED-SEARCH
-:evidences: VER-BOUNDED-NODE-READ
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-RELATION-INSPECTION
-:evidences: VER-CORPUS-CONFORMANCE
-:evidences: VER-MID-AND-RECOVERY
-
-At `ad13ac689ad315aac5e7d536363e0ad6f84f23cb`, formatting, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets` passed: 184 tests, none failed or ignored. The final full run used unchanged repository source.
-
-Eight real CLI/MCP groups cover deliberate/idempotent backfill, typed preflight exclusions, unchanged non-MID bytes, result lines, LF/CRLF, existing identities/permissions, active and pending locks, schema-content-independent rollback, complete/already-restored journal states, optional Unix modes, malformed/unsafe journals, later manual edits and permission conflicts. Two lock unit regressions cover active locking and inherited-descriptor release. Existing capability suites pass. Recovery requires an existing configured schema path but does not read its contents. Portable journals preserve readonly; exact Unix permissions require recorded unix_mode.
-
-Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected authoring-tool intent passed two roots; realization and verification each passed four roots, consuming all pages. CLI help and MCP tools/list exposed both operations. Journal fixtures prove rollback handling, not journal publication, interruption or automatic rollback of move/rename. This run did not verify those publications, project/item validation transports or rule/graph execution.
-:::
-
 :::mara design DES-MUTATION-TRANSACTION
 :mid: 01M3H4H9HVG08YV6J7V5D8D9MW
 :title: Publish staged source changes with durable rollback information
@@ -153,35 +127,6 @@ Run `cargo test --locked --test item_update` and the single-file transaction reg
 Retain body-reference cases for explicit definition edits/literal contexts, relocated usages, intact section reordering, anchored paragraph replacement and duplicate/sibling target protection. Check typed inline relations and unchanged source on failure. Run the full regression suite, formatting/Clippy, canonical validation and selected traceability.
 :::
 
-:::mara evidence EVD-ITEM-UPDATE
-:mid: 01M3H54NJK5M5SCK9419R3MSAH
-:title: Partial item updates pass source and reference preservation checks
-:status: retired
-:result: passed
-:captured_at: 2026-09-27T10:03:45Z
-:subject_revision: fbc67b33d94547956e8c4958bb7bce9d3608afc3
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-ITEM-LIST
-:evidences: VER-UNIFIED-SEARCH
-:evidences: VER-BOUNDED-NODE-READ
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-RELATION-INSPECTION
-:evidences: VER-CORPUS-CONFORMANCE
-:evidences: VER-MID-AND-RECOVERY
-:evidences: VER-ITEM-CREATION
-:evidences: VER-RELATION-MUTATION
-:evidences: VER-ITEM-UPDATE
-
-At `fbc67b33d94547956e8c4958bb7bce9d3608afc3`, formatting, `cargo clippy --locked --all-targets --all-features -- -D warnings` and `cargo test --locked --all-targets` passed. The unchanged-source full run passed 230 tests across 19 suites with no failures; one ignored interruption helper was explicitly executed by its parent at three boundaries. The existing proc-macro-error2 future-compatibility notice remains.
-
-Twenty-one update integration groups cover repeated/cleared/empty fields, exact metadata whitespace, CRLF, permissions, identity and adjacent-source preservation, stdin/literal MCP dash/null, no-op inode preservation, scaffold warnings/completion, invalid requests, typed diagnostic exclusions, bound MCP context, typed inline relation authoring and existing relation-resolution refusal. Thirteen of these groups retain distinct surviving-link, reference-definition, literal-context, section and anchored-block regressions through both transports. Single-file publication tests preserve source on verification/preimage failures. All prior suites pass.
-
-Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected intent passed one root, and realization/verification each passed two roots, consuming every page. Both transports advertise and execute item update. Candidate assertions used library source conformance. This run did not establish project/item validation transports, delete/move/rename, rule evaluation or matrices.
-:::
-
 :::mara requirement REQ-ITEM-DELETION
 :mid: 01M1RTTGFNW3Y7K8CQW16FJKYV
 :title: Delete an item only when surviving references remain valid
@@ -222,36 +167,6 @@ Verify exactly one removed identity and every survivor's unchanged document path
 Run `cargo test --locked --test item_deletion`. Exercise CLI/MCP delete by ID/MID, exact result parity, loss of lookup and retained empty file, separator boundaries, mixed newlines, permissions and unchanged surviving blocks/documents. Require all incoming reference locations and unchanged source on refusal; allow removed self/outgoing references and literal examples.
 
 Cover duplicate heading retargeting, contained anchors, typed inline assertions and demoted mentions, external outgoing edges, code-marker targets, invalid/incomplete corpora and requests, active/pending locks. Retain the shared single-file preimage regression, run the full regression suite, formatting/Clippy, canonical validation and selected traceability.
-:::
-
-:::mara evidence EVD-ITEM-DELETION
-:mid: 01M3H5GQ7WBWE2MMY0705872S8
-:title: Item deletion passes source and surviving-reference checks
-:status: retired
-:result: passed
-:captured_at: 2026-09-27T10:10:19Z
-:subject_revision: 6b7f0540520ecf89a5b3e3f67a0782ff984b7b21
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-ITEM-LIST
-:evidences: VER-UNIFIED-SEARCH
-:evidences: VER-BOUNDED-NODE-READ
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-RELATION-INSPECTION
-:evidences: VER-CORPUS-CONFORMANCE
-:evidences: VER-MID-AND-RECOVERY
-:evidences: VER-ITEM-CREATION
-:evidences: VER-RELATION-MUTATION
-:evidences: VER-ITEM-UPDATE
-:evidences: VER-ITEM-DELETION
-
-At `6b7f0540520ecf89a5b3e3f67a0782ff984b7b21`, formatting, `cargo clippy --locked --all-targets --all-features -- -D warnings` and `cargo test --locked --all-targets` passed. The unchanged-source full run passed 239 tests across 20 suites with no failures; the ignored interruption helper was explicitly run at three boundaries by its parent. The existing proc-macro-error2 future-compatibility notice remains.
-
-Nine deletion groups cover CLI/MCP identity/result parity, exact source/separator/permission preservation, retained empty documents, failed lookup/empty list after deletion, all incoming reference locations, removed outgoing/self links and literal examples, invalid/incomplete corpus and request refusal, duplicate-heading/contained-anchor protection, inline demotion to blocking mentions, external outgoing assertions, active/pending locks and real Rust code-marker targets. Previous capabilities and single-file publication refusal regressions pass.
-
-Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected intent passed one root; realization and verification each passed two roots with all pages consumed. CLI/MCP advertise and execute deletion. Candidate assertions used library source conformance. This run did not establish project/item validation transports, move/rename, rule evaluation, matrices or packaging.
 :::
 
 :::mara requirement REQ-ITEM-MOVEMENT
@@ -298,37 +213,6 @@ Use [[DES-MUTATION-TRANSACTION]] to stage all changed paths with recorded preima
 Run `cargo test --locked --test item_movement` plus shared transaction failure/interruption regressions. Exercise cross-file and same-file CLI/MCP moves, ID/MID lookup and navigation after movement, original line coordinates, exact block/separator/newline/permission preservation, empty source/new destination and boundary moves.
 
 Reject invalid/hidden/symlink destinations, item interiors, incomplete/invalid corpora, active/pending writers and Markdown contexts that hide or retarget content. Preserve incoming/carried links and structural destinations, including reference definitions; allow identity-only references across a move. Check typed-inline/external assertions and subsequent relation inspection. Run the full regression suite, formatting/Clippy, canonical validation and selected traceability.
-:::
-
-:::mara evidence EVD-ITEM-MOVEMENT
-:mid: 01M3H5YH9QBGDF68Z4ZBMWTBF9
-:title: Journaled movement passes identity and reference preservation checks
-:status: retired
-:result: passed
-:captured_at: 2026-09-27T10:17:50Z
-:subject_revision: 9c9069891b056efc8cb6be9327a2a32693ab24f3
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-ITEM-LIST
-:evidences: VER-UNIFIED-SEARCH
-:evidences: VER-BOUNDED-NODE-READ
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-RELATION-INSPECTION
-:evidences: VER-CORPUS-CONFORMANCE
-:evidences: VER-MID-AND-RECOVERY
-:evidences: VER-ITEM-CREATION
-:evidences: VER-RELATION-MUTATION
-:evidences: VER-ITEM-UPDATE
-:evidences: VER-ITEM-DELETION
-:evidences: VER-ITEM-MOVEMENT
-
-At `9c9069891b056efc8cb6be9327a2a32693ab24f3`, formatting, `cargo clippy --locked --all-targets --all-features -- -D warnings` and `cargo test --locked --all-targets` passed. The unchanged-source full run passed 250 tests across 21 suites with no failures; the ignored interruption helper was explicitly executed at three publication boundaries by its parent. The existing proc-macro-error2 future-compatibility notice remains.
-
-Eleven movement groups cover CLI/MCP ID/MID parity, exact block transfer, permissions, retained source/new destination, original same-file line coordinates, missing final newline and boundary moves, safe destination/discovery/symlink refusal, read/navigation identity, incomplete corpus and active/pending writer refusal. Carried/incoming/definition links and shifted heading targets cannot silently retarget; identity/self links survive. Typed inline and external assertions preserve exact spelling and report their new source locations. Existing transaction tests cover preimage conflicts, automatic rollback, interrupted publication and explicit restart recovery; all prior suites pass.
-
-Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected intent, realization and verification each passed two roots, consuming all pages. Both transports advertise and execute movement. Boundary movement preserved bytes/location and could publish identical content. This run did not establish rename, project/item validation transports, rule evaluation, matrices or packaging.
 :::
 
 :::mara requirement REQ-ITEM-RENAME
@@ -382,34 +266,4 @@ Replace the current human-readable handle without retaining aliases. The immutab
 Run `cargo test --locked --test item_rename` and rename unit tests. Check CLI/MCP parity, old-ID absence/MID continuity, exact source/permissions, self/narrative/metadata/inline references, aliases/symmetry, unchanged MID/external/literal spellings, no-op and no Git commit. Reject invalid IDs/corpora, shifted heading destinations, human-ID code markers and active/pending writers without writes.
 
 Retain one-file and multi-file injected failure/rollback, manual-edit conflicts, patch preimage checks and real rename-process interruption at every publication boundary followed by explicit recovery. Run the full regression suite, formatting/Clippy, canonical validation and selected traceability.
-:::
-
-:::mara evidence EVD-ITEM-RENAME
-:mid: 01M3H6FHB7YY0J25PF634MXCQ6
-:title: Human-ID rename preserves identity, source and recovery
-:status: retired
-:result: passed
-:captured_at: 2026-09-27T10:27:14Z
-:subject_revision: 666e9c2271583e01020d1a7636a4c82ec6a500eb
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-ITEM-LIST
-:evidences: VER-UNIFIED-SEARCH
-:evidences: VER-BOUNDED-NODE-READ
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-RELATION-INSPECTION
-:evidences: VER-CORPUS-CONFORMANCE
-:evidences: VER-MID-AND-RECOVERY
-:evidences: VER-ITEM-CREATION
-:evidences: VER-RELATION-MUTATION
-:evidences: VER-ITEM-UPDATE
-:evidences: VER-ITEM-DELETION
-:evidences: VER-ITEM-MOVEMENT
-:evidences: VER-ITEM-RENAME
-
-At the subject revision, `cargo test --locked --all-targets` passed 262 tests across 22 suites with no failures. Two ignored subprocess helpers were each explicitly exercised at three interruption boundaries by their passing parent tests. Seven CLI/MCP rename groups cover byte/permission preservation, old-ID absence and stable MID navigation, narrative and typed references, inverse/symmetric/external assertions, heading-link protection, read-only code-marker behavior, no-op/writer gates and unchanged-source refusal. Five rename unit groups cover one-file publication, replacement failures, conflicting manual edits, process interruption/recovery and patch preimages.
-
-`cargo fmt --all --check`, `cargo clippy --locked --all-targets -- -D warnings` and candidate CLI schema validation passed. Installed-baseline MCP schema/project validation returned complete validity with zero errors or warnings. Selected intent, realization and verification checks each passed both selected roots with all pages consumed. Test projects own their files, adapters, configuration and Git state; the read-only self-hosting test passed. This execution did not establish project/item validation transports, rule/graph evaluation, matrices or packaging.
 :::

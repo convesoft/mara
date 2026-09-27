@@ -55,31 +55,3 @@ Run `cargo test --locked --test relation_mutation` and transaction unit tests. E
 
 Inject publisher failures before and after each replacement, reject changed preimages, preserve conflicts during incomplete rollback and terminate real subprocesses at each publication boundary. Recover after restart and verify original bytes, new-destination removal and journal cleanup. Run the full regression suite, formatting, Clippy, canonical validation and selected traceability. [[VER-ITEM-MOVEMENT]] and [[VER-ITEM-RENAME]] additionally exercise journal publication through those operations.
 :::
-
-:::mara evidence EVD-RELATION-MUTATION
-:mid: 01M3H4RXFSP67PXH70SS8C5PRJ
-:title: Journaled relation authoring passes real transport and recovery checks
-:status: retired
-:result: passed
-:captured_at: 2026-09-27T09:57:22Z
-:subject_revision: 9eb3d4c96bf8c8c1c29e73804f7d17ec506324f5
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-ITEM-LIST
-:evidences: VER-UNIFIED-SEARCH
-:evidences: VER-BOUNDED-NODE-READ
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-RELATION-INSPECTION
-:evidences: VER-CORPUS-CONFORMANCE
-:evidences: VER-MID-AND-RECOVERY
-:evidences: VER-ITEM-CREATION
-:evidences: VER-RELATION-MUTATION
-
-At `9eb3d4c96bf8c8c1c29e73804f7d17ec506324f5`, `cargo test --locked --all-targets` passed 208 tests with no failures across 18 suites. One ignored subprocess helper was explicitly executed three times by its interruption parent. The full run used unchanged repository source. Formatting and `cargo clippy --locked --all-targets --all-features -- -D warnings` passed; the existing proc-macro-error2 future-compatibility notice remains.
-
-Eight CLI/MCP groups cover canonical/alias/MID/symmetric and self edges, semantic duplicates, current/stale/mismatched selectors, whole-edge multi-file removal, CRLF and permissions, inline internal/external/code demotion, binary code targets, immutable code comments, endpoint/identity/reference refusal, incomplete items, alias-named custom fields and writer blocking. Four shared publisher unit groups cover automatic rollback at every replacement boundary, preimage conflicts, incomplete rollback preserving manual edits and actual subprocess interruption followed by explicit recovery. Previous capability suites pass.
-
-Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected intent passed two roots; realization and verification each passed three roots, with every page consumed. Both transports advertise and execute add/remove. This execution exercised journal publication through relation writes. It did not establish move/rename, other item edits, project/item validation transports, rule evaluation or matrices.
-:::

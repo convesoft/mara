@@ -172,27 +172,7 @@ not a CommonMark standard; this decision preserves the established item syntax.
 
 Run `cargo test --locked --test discovery --test discovery_handles --test references --test navigation` against the candidate. Structure/reference/handle checks preserve local scopes, Unicode/CRLF/EOF spans, exact link evidence, inert contexts, deterministic handles and unchanged source. Real CLI/stdin MCP searches narrative, pages its mentions, follows an item relation, reads the destination and navigates parent/children. Library projections alone do not establish this workflow.
 
-Navigation checks consume complete count/byte-limited pages, preserve compact Unicode summaries, reject stale/invalid requests, namespace ambiguity, retired interfaces and oversized mandatory entries, and retain source bytes. Verify alias/inline deduplication, canonical symmetric and self-edge identity before paging, exact terminal external addresses, shared code-marker/item-inverse edges, binary endpoints, file-only invalidation and selected code-marker/target failures. Use isolated fixture-owned identities and adapter packs. [[VER-RELATION-INSPECTION]], [[VER-CORPUS-CONFORMANCE]] and [[VER-POLICY-VALIDATION]] own occurrence, semantic and policy checks; mutation methods own source edits. Run the full regression suite, formatting and Clippy. Record candidate results from named read-only repository traversals at the tested revision.
-:::
-
-:::mara evidence EVD-DOCUMENT-NAVIGATION
-:mid: 01M3FX66JEF9DCJE2WZS7RZ7VD
-:title: Document navigation checkpoint passes restored suites
-:status: retired
-:result: passed
-:captured_at: 2026-09-26T22:25:26Z
-:subject_revision: 243c61417343d1422aa5486c9a9849e21e488663
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-SOURCE-AND-IDENTITY
-:evidences: VER-PROJECT-BOOTSTRAP
-
-The tested working tree was committed unchanged as `243c61417343d1422aa5486c9a9849e21e488663`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
-
-Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 89 tests passed (1 Markdown-container unit, 30 corpus, 10 discovery, 5 handles, 9 identity, 3 navigation, 18 bootstrap, 13 references), none failed or ignored. Candidate CLI and stdio MCP exercised the direct-navigation workflow with paged mention occurrences, backlinks, typed relations, parent/child context, destination reads and namespace disambiguation. Reference validation asserted stable classification and transport parity; real edits preserved item identity and invalidated structural handles as specified. Test projects and child processes used fixture-owned Git/configuration and working directories; named self-hosting checks were explicitly read-only.
-
-Candidate schema/project validation and explicit-project MCP validation completed with zero errors or warnings. Selected MCP intent (one requirement), realization and verification (the requirement and structural design) matrices passed, with all pages consumed.
-
-This execution covers navigation, source/identity and bootstrap methods at the subject revision. It does not establish full search ranking, retrieval bounds/continuation or mutation preflight.
+Navigation checks consume complete count/byte-limited pages, preserve compact Unicode summaries, reject stale/invalid requests, namespace ambiguity, unsupported operation names and options and oversized mandatory entries, and retain source bytes. Verify alias/inline deduplication, canonical symmetric and self-edge identity before paging, exact terminal external addresses, shared code-marker/item-inverse edges, binary endpoints, file-only invalidation and selected code-marker/target failures. Use isolated fixture-owned identities and adapter packs. [[VER-RELATION-INSPECTION]], [[VER-CORPUS-CONFORMANCE]] and [[VER-POLICY-VALIDATION]] own occurrence, semantic and policy checks; mutation methods own source edits. Run the full regression suite, formatting and Clippy. Record candidate results from named read-only repository traversals at the tested revision.
 :::
 
 :::mara design DES-DIRECT-NAVIGATION
@@ -248,31 +228,6 @@ Internal edge endpoints require MIDs. A code source uses a canonical relation pe
 Authored occurrences retain their parsed document/code source spans. [[DES-RELATION-INTERFACES]] exposes their locations and snapshot-bound selectors; [[DES-RELATION-MUTATION]] defines source edits. No reverse assertion is written merely to provide incoming navigation.
 :::
 
-:::mara evidence EVD-DIRECT-NAVIGATION
-:mid: 01M3H21RWGXY9QRXCB1GGV1FSX
-:title: Direct navigation checkpoint verification
-:status: retired
-:result: passed
-:captured_at: 2026-09-27T09:09:40Z
-:subject_revision: 7f701b11e1afc07bd3d0bd0ec00115822e0ed997
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-BOUNDED-NODE-READ
-:evidences: VER-UNIFIED-SEARCH
-:evidences: VER-ITEM-LIST
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-
-Tested revision `7f701b11e1afc07bd3d0bd0ec00115822e0ed997`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
-
-Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 155 tests (2 units, 13 code discovery, 31 corpus, 9 discovery, 4 handles, 10 get, 10 item list, 12 navigation, 17 bootstrap, 12 references, 20 schema, 15 search), none failed or ignored. Eight retained navigation groups verify real CLI/stdin MCP narrative-to-item-to-item reading, parent/children, exact source evidence, namespaces, retired interfaces, complete count/byte pages, human output and invalid/oversized requests. Four focused groups verify alias/inline/symmetric/self-edge normalization and counts before paging, exact terminal external endpoints, code-marker/item-inverse deduplication and binary file-only backlinks/invalidation, and selected missing/ambiguous item-target errors. Fixtures own identities, adapters and Git/configuration state; reads preserve source bytes.
-
-Read-only installed-baseline comparisons matched complete navigation JSON for three real-repository roots: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS (11 connections), an index narrative block (2) and code:src/query/related.rs::related (1), each one page. Multi-page completeness is established by the CLI/MCP fixtures. Installed full-baseline MCP schema/project validation completed with zero errors or warnings. Selected intent passed 3 requirements; realization and verification each passed 6 requirement/design roots with all pages consumed. Cargo.lock changes only Mara's direct URL dependency entry; no package versions changed.
-
-This execution covers direct navigation and its read-only semantic projection at the subject revision. It does not establish occurrence inspection, mutation, semantic validation or rule evaluation; installed-tool validation and matrices are separate authoring checks.
-:::
-
 :::mara design DES-RELATION-INTERFACES
 :mid: 01M2GC4PXK0MMANAW6AKGXAW7S
 :title: Expose canonical relationships and bounded occurrence inspection
@@ -309,32 +264,4 @@ An actor can inspect an existing canonical relationship through CLI and MCP and 
 :verifies: DES-RELATION-INTERFACES
 
 Run `cargo test --locked --test relation_inspection` against real CLI and stdio MCP with isolated, fixture-owned source, identities and adapters. Verify canonical/alias/ID/MID and symmetric equivalence, exact metadata/inline/code spans and spelling, external addresses, complete count/byte-limited pages, total counts, snapshot-bound selectors and unchanged source bytes. Reproduce a code path sorting before its item document; require global path/byte order before pagination. Check changed request/source/schema cursors, malformed positions, oversized occurrences, missing edges, invalid endpoints/limits and unknown parameters with equivalent structured errors. [[VER-RELATION-MUTATION]] owns source-write checks; [[VER-CORPUS-CONFORMANCE]] owns semantic validation. Run the full regression suite, formatting, Clippy, canonical validation and selected traceability. Inspect actual repository edge occurrences without modifying source.
-:::
-
-:::mara evidence EVD-RELATION-INSPECTION
-:mid: 01M3H2FGCZYSBMPRSZTF2C5APW
-:title: Relation occurrence inspection checkpoint verification
-:status: retired
-:result: passed
-:captured_at: 2026-09-27T09:17:11Z
-:subject_revision: 875c3ca8620aaff861361f9c1abab9900658576a
-:evidences: VER-RELATION-INSPECTION
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-BOUNDED-NODE-READ
-:evidences: VER-UNIFIED-SEARCH
-:evidences: VER-ITEM-LIST
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-
-Tested revision `875c3ca8620aaff861361f9c1abab9900658576a`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
-
-Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 160 tests (2 units, 13 code discovery, 31 corpus, 9 discovery, 4 handles, 10 get, 10 item list, 12 navigation, 17 bootstrap, 12 references, 5 relation inspection, 20 schema, 15 search), none failed or ignored. Five inspection groups execute real CLI/stdin MCP with isolated project-owned fixtures. They verify canonical/alias/ID/MID and symmetric identity, authored metadata/inline/code provenance, exact external spelling, 25-occurrence count continuation, byte-limited complete pages, source/schema/request invalidation, oversized failure, missing/invalid inputs, structured error parity and source preservation.
-
-The ordering reproduction failed before the fix: metadata/inline records at `zzz.mara.md:69,110` preceded a code comment at `aaa.rs:0`. Sorting at the inspection boundary now returns global path/start-byte order before page limits. Selector generation and mutation-facing collection remain unchanged. A schema-staleness fixture changes a parsed declaration; formatting-only schema differences are outside the existing semantic fingerprint.
-
-Read-only repository comparisons match the installed baseline's complete JSON for DES-RELATION-INTERFACES satisfies REQ-RELATION-INSPECTION and code:src/relations.rs::inspect implements DES-RELATION-INTERFACES, one occurrence/page each. The ordering correction is separately proven by its failed-then-passing regression. Installed full-baseline MCP schema/project validation completed with zero errors or warnings. Selected intent passed 1 requirement; realization and verification each passed the requirement and interface design with all pages consumed.
-
-This execution covers relation inspection at the subject revision. It does not establish relation/item mutations, identity recovery, semantic validation or rule evaluation. Installed-tool validation and matrices are separate authoring checks.
 :::

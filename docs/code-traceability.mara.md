@@ -169,7 +169,7 @@ identify the indexer without exposing its raw stdout/stderr. Input snapshots use
 unignored regular project files, excluding Mara mutation bookkeeping and staging
 files. Indexer-generated build artifacts should follow project ignore rules.
 
-Document positions follow SCIP's declared encoding. For older indexers that omit
+Document positions follow SCIP's declared encoding. For indexers that omit
 it, configure their documented `position_encoding` (`utf8`, `utf16`, or `utf32`).
 Without either declaration, ASCII is unambiguous; non-ASCII source is rejected.
 Only global definition occurrences are linkable. SCIP `local N` identities are
@@ -254,27 +254,6 @@ Check per-language empty/populated transitions, strict command/output failures, 
 Run a genuine end-to-end workflow with configured rust-analyzer 1.97.1 against a real Rust project, including exact symbol navigation and source-marker ownership. Run formatting, Clippy and the full relevant regression suite. Record evidence at the actual tested candidate revision; installed authoring checks and recorded fixtures alone do not establish candidate acceptance.
 :::
 
-:::mara evidence EVD-CODE-DISCOVERY
-:mid: 01M3G02YPBQPFD6G44N5FMVY1K
-:title: Code discovery dependency passes real adapter fixtures
-:status: retired
-:result: passed
-:captured_at: 2026-09-26T23:16:08Z
-:subject_revision: 44f0f6c74e035dee8b6fa2b535ba2e7aab368ece
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-
-The tested implementation was committed as `44f0f6c74e035dee8b6fa2b535ba2e7aab368ece`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
-
-Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 82 tests (1 parser unit, 13 code discovery, 31 corpus, 17 bootstrap, 20 schema), none failed or ignored. Seven retained parser groups exercise real Rust/Python/JavaScript/TypeScript Wasm adapters through the loader in isolated projects. Six discovery groups check ordering/ignore/filter independence, bad packs/captures, extension collisions, unreadable-source and marker problems, symlink confinement and walk errors. Source preservation assertions pass. Existing CLI and stdio MCP suites pass as regressions.
-
-Installed full-baseline MCP schema/project validation returned complete and valid with zero diagnostics. Selected intent passed one requirement; realization and verification each passed the requirement and design, consuming every page. These authoring checks use the installed full tool, not candidate graph operations. All dependency versions match the preserved lockfile.
-
-This execution covers the scanner and the initialization/schema/document operations listed above at the subject revision. It does not establish exact endpoint resolution, semantic code relations, navigation, corpus composition or item listing; passing coverage matrices are not execution evidence for those behaviors.
-:::
-
 :::mara design DES-CODE-READ
 :mid: 01M3H16WQK7734362HFZET92AT
 :title: Resolve local code references for bounded source reading
@@ -298,42 +277,4 @@ Use project-configured external SCIP indexers for semantic identity and optional
 Keep the command, source extensions and optional grammar assets in one language entry because they describe one integration. Extensions permit uniform empty-language detection without interpreting indexer errors. Failure remains explicit when source exists.
 
 Preserve literal SCIP backticks for readable, exact targets. Escape characters that conflict with Mara reference syntax, without shortening or normalizing semantic descriptors and risking collapsed identities.
-:::
-
-:::mara evidence EVD-SCIP-CODE-HANDLING
-:mid: 01M3HBDTXA12PPZTTJAJFZ3F8Z
-:title: SCIP code associations pass candidate and real-indexer workflows
-:status: retired
-:result: passed
-:captured_at: 2026-09-27T11:53:18Z
-:subject_revision: 3071796e99f0da2319496d7f3d4e986b75e13d1b
-:evidences: VER-PROJECT-INSPECTION
-:evidences: VER-SCHEMA-DEFINITIONS
-:evidences: VER-DOCUMENT-PARSING
-:evidences: VER-CODE-DISCOVERY
-:evidences: VER-ITEM-LIST
-:evidences: VER-UNIFIED-SEARCH
-:evidences: VER-BOUNDED-NODE-READ
-:evidences: VER-DOCUMENT-NAVIGATION
-:evidences: VER-RELATION-INSPECTION
-:evidences: VER-CORPUS-CONFORMANCE
-:evidences: VER-MID-AND-RECOVERY
-:evidences: VER-ITEM-CREATION
-:evidences: VER-RELATION-MUTATION
-:evidences: VER-ITEM-UPDATE
-:evidences: VER-ITEM-DELETION
-:evidences: VER-ITEM-MOVEMENT
-:evidences: VER-ITEM-RENAME
-:evidences: VER-PROJECT-VALIDATION
-:evidences: VER-POLICY-VALIDATION
-
-At subject revision 3071796e99f0da2319496d7f3d4e986b75e13d1b, `cargo test --locked --all-targets` passed 349 tests across 25 suites with zero failures. Two ignored subprocess helpers were each exercised at three interruption boundaries by passing parent tests. `cargo fmt --all -- --check` and `cargo clippy --locked --all-targets -- -D warnings` passed. The tree was clean after committing the tested source and before adding this evidence.
-
-Fourteen discovery groups and fourteen SCIP integration groups check exact descriptors, escaped punctuation and literal backticks, declared UTF-8/UTF-16/UTF-32 positions, absent non-ASCII encoding, local-symbol exclusion, shared declarations and identity collisions, grouped comment spans/content/lexical boundaries, confinement, empty/populated transitions and strict sanitized command/output failures. Focused regressions first reproduced false-valid results for incomplete owner-name spans and invalid enclosing ranges, then passed after correction. Existing retrieval, relation, mutation, recovery and validation suites pass with explicit isolated SCIP fixtures and unchanged source assertions.
-
-A genuine configured rust-analyzer 1.97.1 workflow, without recorded-index substitution, passed through the candidate CLI and stdio MCP in a disposable Rust package. Its exact run() endpoint remained stable after a body edit and package-version bump. Recorded scip-typescript 0.4.0 and scip-clang 0.4.0 fixtures separately cover shared callable identity, package metadata independence and distinct/deleted overloads; these protocol fixtures do not establish a fresh live TypeScript or C++ indexer run.
-
-The candidate CLI validated the self-hosted repository with valid:true, evaluation_complete:true, zero errors/warnings and no remaining page. REQ-CODE-TRACEABILITY exposed five exact Rust symbol neighbours and DES-CODE-TRACEABILITY exposed twenty-one; none fell back to a file endpoint. Reading code:src/code.rs::rust::code/impl#%5BCodeIndex%5Dload(). returned the actual loader declaration.
-
-Environment: Linux x86_64, Rust 1.97.1, candidate /tmp/mara72-target/debug/mara; CARGO_TARGET_DIR=/tmp/mara72-target, CARGO_PROFILE_DEV_DEBUG=0, CARGO_PROFILE_TEST_DEBUG=0, CARGO_INCREMENTAL=0. This revision did not include candidate matrix runtime. Installed-tool trace checks were authoring checks and do not establish candidate matrix behavior or code-endpoint rendering.
 :::
