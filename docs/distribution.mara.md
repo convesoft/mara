@@ -55,23 +55,3 @@ Run the installed CLI and real stdio MCP server, including bound/unbound project
 
 Inspect native manifest generation for all four supported targets. Execute native smoke on each corresponding host before release; one host run proves only that host. Review explicit MCP and separate npx skills setup guidance against the packaged files. Record the checked revision, host, artifact contents and actual workflow results. Package inspection alone does not establish runtime behavior or publication. [[implemented_by:code:scripts/smoke-npm.sh]]
 :::
-
-:::mara evidence EVD-NPM-DISTRIBUTION
-:mid: 01M3HJ8PWWCNKV9PTPFS1R445D
-:title: Packaged CLI, MCP and standalone skill pass the Linux x64 workflow
-:status: accepted
-:result: passed
-:captured_at: 2026-09-27T13:53:13Z
-:subject_revision: c9e3134eace6c559798ae1d8e2fcd89c2b16b85e
-:evidences: VER-NPM-DISTRIBUTION
-
-At subject revision `c9e3134eace6c559798ae1d8e2fcd89c2b16b85e`, scripts/smoke-npm.sh completed against the real candidate executable on Linux x86_64 with glibc 2.44, Node.js 26.7.0 and npm 11.19.0. The dispatcher and native package reported the Cargo workspace version 0.3.0-alpha.3. Packaging, cache, Git configuration and test projects used disposable storage; installation used local tarballs, offline mode and --ignore-scripts.
-
-The actual npm pack inventory for the main package was exactly bin/mara.cjs, skills/mara/SKILL.md, README.md, LICENSE-MIT, LICENSE-APACHE and package.json. The native package inventory was exactly bin/mara, README.md, both licenses and package.json. Assertions checked all four exact-version native optional dependencies and the absence of lifecycle scripts. Installed skill bytes matched the source skill.
-
-The installed CLI and real stdio MCP server passed version, initialization, explicit/bound and per-call/unbound project selection, minimal/empty/engineering templates, schema guidance and real item/relation authoring. With only Node on PATH, the packaged native executable completed narrative-to-item-to-verification navigation, cross-document links/backlinks and sibling navigation, every search/related continuation page, exact bounded Unicode block/section/document reconstruction and stale cursor/handle rejection followed by rediscovery. Custom-schema format and guidance rejection preserved source; in-place repair preserved declarations, repeated fields, relationships, IDs/MIDs and project settings, followed by successful MCP authoring.
-
-All four platform manifests were generated and inspected for names, version, os/cpu/libc constraints, files and lack of lifecycle scripts using an explicitly non-executable fixture payload. This metadata check does not execute other architectures. Native runtime execution here covers Linux x64 only; other supported hosts and protected release publication require their own checks.
-
-JavaScript and shell syntax checks and git diff --check passed. Manual review covered current setup guidance, exact artifact ownership, retained dispatcher behavior and the matching standalone skill path. Candidate schema/project validation completed with no diagnostics. Selected intent passed two roots over 1 page(s), realization two roots over 1 page(s), and verification three roots over 1 page(s); every continuation page was consumed. Exact-revision execution is checked after recording this result. Rust application source and the native dispatcher are unchanged from the verified interface implementation; this result records packaged workflows, not a new full Rust regression run or a published release.
-:::

@@ -320,22 +320,12 @@ tokens outside item bodies have no typed meaning. Unknown relations, malformed
 tokens and invalid targets in supported contexts fail validation. Use body
 creation/update to author inline assertions; relation add writes metadata.
 
-Schema and relation-vocabulary edits are manual. Save a Git commit or project
-copy, review the complete source diff, then require complete, valid schema and
-project validation with the matching executable. Mara has no schema-editing
-command; `project_transaction_rollback`
-does not undo manual edits. Preserve MIDs and unrelated declarations, fields,
-prose and links. A relation is directed unless its schema declaration makes it
-symmetric;
-aliases exist only when declared. Review typed tokens, alias collisions, all
-authored spellings and YAML rule paths before changing names.
-When removing an inverse alias, inspect the canonical edge, reauthor it on its
-canonical source if needed, remove inverse metadata, and demote inverse inline
-tokens to bare mentions when preserving prose navigation. Never replace an
-inverse name with the canonical name on the same item: that can reverse a
-directed edge while validation still passes. Verify the canonical endpoints
-after the edit. Do not treat a direction, endpoint or meaning change as a
-rename.
+Before manually changing schema or relation vocabulary, read the source-edit
+workflow in `docs/schema-evolution.mara.md` in the Mara repository. Use the
+selected executable to inspect declarations and canonical edge occurrences,
+then run complete schema/project validation and consume all pages. Preserve a
+source checkpoint for manual recovery; `project_transaction_rollback` handles
+only a pending structured mutation journal.
 
 ## Inspect trace coverage
 
