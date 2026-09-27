@@ -228,3 +228,27 @@ Opaque cursors bind exact reference, content/entry/value positions and shared so
 
 Run `cargo test --locked --test get` with disposable project-owned fixtures and real CLI/stdin MCP processes. Reconstruct complete content and ordered metadata from every page under the domain byte budget; include Unicode, escaped text, repeated keys, empty values, large headings and oversized identity failures. Verify exact lookup, stale handles/cursors, malformed positions, removed options and no neighbour expansion. Read items, sections, blocks, parent documents, file-only code and native symbols; verify source preservation, modifier/wrapper content, missing/ambiguous/unsupported targets, binary rejection and file-only cursor invalidation. Restore deferred exact-identity and full-title reads from search tests. Run prior suites, formatting and Clippy. A read-only installed-baseline comparison on named repository references checks full JSON parity. These checks do not establish related transports, code relation evaluation, validation or mutation.
 :::
+
+:::mara evidence EVD-BOUNDED-NODE-READ
+:mid: 01M3H1G0VMDXFBKE597MSSRTNR
+:title: Bounded node and code read checkpoint verification
+:status: accepted
+:result: passed
+:captured_at: 2026-09-27T09:00:00Z
+:subject_revision: 34325b681c6df44946594545448bf124ac5de6f9
+:evidences: VER-BOUNDED-NODE-READ
+:evidences: VER-UNIFIED-SEARCH
+:evidences: VER-ITEM-LIST
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+
+Tested revision `34325b681c6df44946594545448bf124ac5de6f9`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
+
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 143 tests (2 units, 13 code discovery, 31 corpus, 9 discovery, 4 handles, 10 get, 10 item list, 17 bootstrap, 12 references, 20 schema, 15 search), none failed or ignored. Seven restored get groups reconstruct item, section, block and document source through real CLI/stdin MCP pages, preserving Unicode, authored metadata order/repeated keys/empty values, complete fitting content and source bytes. Oversized identity, malformed/stale cursors, stale handles and removed interfaces fail as specified. Three code-read groups verify Rust/Python/JavaScript/TypeScript content including attributes/decorators/export wrappers, ignored file-only pagination and invalidation, binary rejection, missing/ambiguous/unsupported endpoints and project confinement. Search again verifies complete titles and exact-only get identity selection.
+
+Read-only candidate/installed-baseline comparisons matched complete JSON for six real-repository references: `REQ-DOCUMENT-CONTEXT-READ`, the index section and parent document handles, `code:src/query/get.rs`, `code:src/query/get.rs::get`, and `code:GOAL.md`. Each fit one page; oversized consecutive reads are covered by fixtures. Installed full-baseline MCP schema/project validation completed with zero errors or warnings. Selected intent passed 2 requirements; realization and verification each passed 4 requirement/design roots, consuming all pages.
+
+This restores bounded get and exact code resolution. Related transports, code-edge evaluation, mutation, semantic validation and remaining baseline capabilities are pending. Authoring validation/matrices use the installed full tool and do not establish candidate implementations of those operations. The installed executable was not replaced.
+:::
