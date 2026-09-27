@@ -132,6 +132,15 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum ProjectCommand {
+    /// Validate the whole project; paths select reporting only.
+    Validate {
+        #[arg(long = "path")]
+        paths: Vec<PathBuf>,
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
     /// Initialize the current or named directory without overwriting existing files.
     Init {
         /// Destination; omit to use --project or the current directory. Cannot combine with --project.
@@ -668,6 +677,25 @@ fn run(cli: Cli) -> Result<bool, String> {
                 .schema_validate_with_options(&ValidationOptions { limit, cursor });
             return emit_validation(format, result);
         }
+        Command::Project {
+            command:
+                ProjectCommand::Validate {
+                    paths,
+                    limit,
+                    cursor,
+                },
+        } => {
+            let result = OperationContext::from_environment(project)?
+                .project_validate_with_options(&paths, &ValidationOptions { limit, cursor });
+            return emit_validation(format, result);
+        }
+        Command::Item {
+            command: ItemCommand::Validate { id, limit, cursor },
+        } => {
+            let result = OperationContext::from_environment(project)?
+                .item_validate_with_options(&id, &ValidationOptions { limit, cursor });
+            return emit_validation(format, result);
+        }
         Command::Schema {
             command: SchemaCommand::Get { kind, name },
         } => {
@@ -844,6 +872,14 @@ fn print_validation(result: &ValidationResult) -> Result<(), String> {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
+    /// Validate one exact human ID or MID in full corpus context.
+    Validate {
+        id: String,
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        cursor: Option<String>,
+    },
     /// Rename a human ID and supported typed relations/wiki mentions in items and narrative across a valid project, preserving the MID. Markdown links are preserved, not rewritten.
     Rename {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).

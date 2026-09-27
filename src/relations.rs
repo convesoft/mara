@@ -63,6 +63,7 @@ pub(crate) enum NodeIdentity {
 #[derive(Debug, Clone)]
 pub(crate) struct GraphEdge {
     pub edge: RelationEdge,
+    pub source: ItemSource,
     pub occurrence_count: usize,
 }
 
@@ -90,7 +91,7 @@ impl RelationGraph {
                     relation.name(),
                     relation.target(),
                 ) {
-                    graph.insert(edge);
+                    graph.insert(edge, relation.source().into());
                 }
             }
         }
@@ -103,14 +104,14 @@ impl RelationGraph {
                     &marker.relation,
                     &marker.target,
                 ) {
-                    graph.insert(edge);
+                    graph.insert(edge, (&marker.source).into());
                 }
             }
         }
         graph
     }
 
-    fn insert(&mut self, edge: RelationEdge) {
+    fn insert(&mut self, edge: RelationEdge, source: ItemSource) {
         let from = edge.source.identity();
         let to = edge.target.identity();
         self.nodes.insert(from.clone(), edge.source.clone());
@@ -120,6 +121,7 @@ impl RelationGraph {
             .and_modify(|record| record.occurrence_count += 1)
             .or_insert(GraphEdge {
                 edge,
+                source,
                 occurrence_count: 1,
             });
     }

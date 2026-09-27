@@ -151,6 +151,11 @@ impl Item {
         &self.source
     }
 
+    /// Recovery may preserve identity while leaving checks unavailable.
+    pub(crate) fn validation_source_is_complete(&self) -> bool {
+        self.metadata_valid && self.title_valid && self.body_valid
+    }
+
     pub fn body_source(&self) -> &SourceLocation {
         &self.body_source
     }

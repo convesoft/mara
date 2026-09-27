@@ -211,6 +211,42 @@ impl SearchToolParams {
 #[tool_router]
 impl MaraMcp {
     #[tool(
+        name = "item_validate",
+        output_schema = rmcp::handler::server::common::schema_for_type::<ValidationResult>(),
+        description = "Validate one item in full corpus context. Validation format 1 reports codes/severity, summary and evaluation_complete before output pagination. Follow next_cursor with unchanged options. A complete warning-only result is valid; invalid/incomplete results have valid:false without a tool error."
+    )]
+    fn item_validate(
+        &self,
+        Parameters(params): Parameters<ItemIdToolParams>,
+    ) -> rmcp::model::CallToolResult {
+        validation_result(
+            self.for_project(params.project)
+                .map_err(mara::ValidationError::invalid_argument)
+                .and_then(|context| {
+                    context.item_validate_with_options(&params.id, &params.options)
+                }),
+        )
+    }
+
+    #[tool(
+        name = "project_validate",
+        output_schema = rmcp::handler::server::common::schema_for_type::<ValidationResult>(),
+        description = "Validate the complete configured Mara project. Optional paths select reported diagnostics only; project/schema diagnostics always appear. Validity still covers the whole project, including omitted diagnostics counted in selection.omitted_diagnostics. Validation format 1 reports stable codes/severity, full-target summary and evaluation_complete. Follow next_cursor with unchanged options; valid:false is a successful tool result, and warnings alone remain valid. Invalid arguments, stale cursors, I/O and output limits return structured operation errors."
+    )]
+    fn project_validate(
+        &self,
+        Parameters(params): Parameters<ProjectValidateParams>,
+    ) -> rmcp::model::CallToolResult {
+        validation_result(
+            self.for_project(params.project)
+                .map_err(mara::ValidationError::invalid_argument)
+                .and_then(|context| {
+                    context.project_validate_with_options(&params.paths, &params.options)
+                }),
+        )
+    }
+
+    #[tool(
         name = "item_rename",
         description = "Rename one human ID by exact MID or human ID, rewriting typed relations and supported wiki mentions in items and narrative across the valid corpus. Preserves the MID, Markdown links, and unrelated source; retains no alias. Uses recoverable file replacement."
     )]
@@ -679,4 +715,29 @@ struct ItemRenameToolParams {
     reference: String,
     /// New unique human ID with the item's flavour prefix. Preserves the MID; the old human ID is not kept as an alias. The current ID is a no-op.
     new_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ProjectValidateParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Exact documents or directory subtrees relative to the project root, combined with OR. No globs, absolute paths, .., empty path elements, . or ./; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"]. Selects reported diagnostics only; validity still covers the whole project.
+    #[serde(default)]
+    paths: Vec<PathBuf>,
+    #[serde(flatten)]
+    options: mara::ValidationOptions,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemIdToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
+    id: String,
+    #[serde(flatten)]
+    options: mara::ValidationOptions,
 }

@@ -1,6 +1,8 @@
 //! Project-owned current-state policy. YAML is converted with generated JSON-LD
 //! bindings and evaluated by the pinned native SHACL engine.
 mod bindings;
+mod engine;
+mod evaluate;
 mod yaml;
 use crate::{
     DiagnosticCode, DiagnosticLocation, Project, Schema, Severity, ValidationDiagnostic,

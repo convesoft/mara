@@ -668,8 +668,8 @@ fn bootstrap_advertises_only_its_available_operations() {
         ),
         (
             vec!["project", "--help"],
-            vec!["init"],
-            vec!["validate", "mid-backfill"],
+            vec!["init", "validate"],
+            vec!["mid-backfill"],
         ),
         (
             vec!["schema", "--help"],
@@ -683,8 +683,10 @@ fn bootstrap_advertises_only_its_available_operations() {
         ),
         (
             vec!["item", "--help"],
-            vec!["create", "delete", "list", "move", "rename", "update"],
-            vec!["get", "validate", "search"],
+            vec![
+                "create", "delete", "list", "move", "rename", "update", "validate",
+            ],
+            vec!["get", "search"],
         ),
     ] {
         let output = mara(fixture.path(), &args);
@@ -731,9 +733,11 @@ fn bootstrap_advertises_only_its_available_operations() {
             "item_move",
             "item_rename",
             "item_update",
+            "item_validate",
             "project_init",
             "project_mid_backfill",
             "project_transaction_rollback",
+            "project_validate",
             "related",
             "relation_add",
             "relation_get",

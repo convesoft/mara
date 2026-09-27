@@ -1,10 +1,14 @@
 use super::*;
 use crate::{
+    Diagnostic, load_corpus_for_validation, load_corpus_syntax_for_validation,
+    resolve_project_for_validation,
+};
+use crate::{
     DiagnosticCode, DiagnosticItem, DiagnosticLocation, DiagnosticObligation, Severity,
     ValidationError, ValidationOptions, ValidationSummary,
 };
 use sha2::{Digest, Sha256};
-use std::{fs, path::Path};
+use std::{collections::BTreeSet, fs, path::Path};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
@@ -73,6 +77,21 @@ impl ValidationDiagnostic {
             details: None,
         }
     }
+    pub(crate) fn from_source(diagnostic: &Diagnostic) -> Self {
+        let mut location = DiagnosticLocation::source(diagnostic.source());
+        if !diagnostic.coordinates_available() {
+            location.line = None;
+            location.start_byte = None;
+            location.end_byte = None;
+        }
+        Self::new(
+            diagnostic.code(),
+            Severity::Error,
+            ValidationScope::Document,
+            location,
+            diagnostic.message(),
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -130,11 +149,58 @@ pub struct ValidationSelection {
 }
 
 impl OperationContext {
+    pub fn project_validate(&self, paths: &[PathBuf]) -> Result<ValidationResult, String> {
+        self.project_validate_with_options(paths, &ValidationOptions::default())
+            .map_err(|e| e.to_string())
+    }
+    pub fn item_validate(&self, id: &str) -> Result<ValidationResult, String> {
+        self.item_validate_with_options(id, &ValidationOptions::default())
+            .map_err(|e| e.to_string())
+    }
+    pub fn schema_validate(&self) -> Result<ValidationResult, String> {
+        self.schema_validate_with_options(&ValidationOptions::default())
+            .map_err(|e| e.to_string())
+    }
+    pub fn project_validate_with_options(
+        &self,
+        paths: &[PathBuf],
+        options: &ValidationOptions,
+    ) -> Result<ValidationResult, ValidationError> {
+        let paths = crate::query::normalized_paths(paths)
+            .map_err(|e| ValidationError::invalid_argument(e.to_string()))?;
+        self.validate_target(
+            ValidationTarget {
+                kind: ValidationTargetKind::Project,
+                id: None,
+            },
+            paths,
+            options,
+        )
+    }
+    pub fn item_validate_with_options(
+        &self,
+        id: &str,
+        options: &ValidationOptions,
+    ) -> Result<ValidationResult, ValidationError> {
+        if !crate::is_item_id(id) && !crate::is_mid(id) {
+            return Err(ValidationError::invalid_argument(
+                "item must be an exact human ID or canonical MID",
+            ));
+        }
+        self.validate_target(
+            ValidationTarget {
+                kind: ValidationTargetKind::Item,
+                id: Some(id.into()),
+            },
+            vec![],
+            options,
+        )
+    }
+    // @mara implements DES-SCHEMA-VALIDATION
     pub fn schema_validate_with_options(
         &self,
         options: &ValidationOptions,
     ) -> Result<ValidationResult, ValidationError> {
-        // @mara implements DES-SCHEMA-VALIDATION
         // @mara implements REQ-SCHEMA-DISCOVERY
         self.validate_target(
             ValidationTarget {
@@ -152,6 +218,8 @@ impl OperationContext {
         paths: Vec<PathBuf>,
         options: &ValidationOptions,
     ) -> Result<ValidationResult, ValidationError> {
+        // @mara implements REQ-PROJECT-VALIDATION
+        // @mara implements DES-TRACE-DIAGNOSTIC-INTERFACE
         let limit = options.limit.unwrap_or(20);
         if !(1..=100).contains(&limit) {
             return Err(ValidationError::invalid_argument(
@@ -164,10 +232,8 @@ impl OperationContext {
             ));
         }
         let (project, project_errors, schema_available) =
-            match crate::resolve_project_for_validation(
-                self.selected.as_deref(),
-                &self.current_directory,
-            ) {
+            match resolve_project_for_validation(self.selected.as_deref(), &self.current_directory)
+            {
                 Ok(value) => value.into_parts(),
                 Err(error) => return Err(operation_error(error)),
             };
@@ -245,12 +311,102 @@ impl OperationContext {
             result.flavours = Some(Some(schema.flavours().len()));
             result.relations = Some(Some(schema.relations().len()));
         }
+        if !schema_only {
+            let (corpus, mut source_diagnostics) = match &schema {
+                Some(schema) => load_corpus_for_validation(&project, schema),
+                None => load_corpus_syntax_for_validation(&project),
+            }
+            .map_err(operation_error)?;
+            let mut source_paths = BTreeSet::new();
+            for document in corpus.documents() {
+                source_paths.insert(document.path().to_owned());
+            }
+            for diagnostic in &source_diagnostics {
+                source_paths.insert(diagnostic.source().path().to_owned());
+            }
+            for file in corpus.code().files() {
+                source_paths.insert(file.path.clone());
+            }
+            for path in corpus.code().assets() {
+                source_paths.insert(path.clone());
+            }
+            for path in source_paths {
+                hash_file(&mut snapshot, &project.root().join(path));
+            }
+            for path in corpus.file_only_code_paths() {
+                snapshot.update(b"file-only-code");
+                let identity = path.as_os_str().as_encoded_bytes();
+                snapshot.update(identity.len().to_le_bytes());
+                snapshot.update(identity);
+                match corpus.code().file_only_bytes(&path) {
+                    Some(bytes) => {
+                        snapshot.update([1]);
+                        snapshot.update(bytes.len().to_le_bytes());
+                        snapshot.update(bytes);
+                    }
+                    None => snapshot.update([0]),
+                }
+            }
+            result.evaluation_complete &= corpus.is_complete();
+            result.evaluation_complete &= corpus
+                .items()
+                .filter(|item| {
+                    result
+                        .target
+                        .id
+                        .as_deref()
+                        .is_none_or(|id| matches_handle(item, id))
+                })
+                .all(crate::Item::validation_source_is_complete);
+            source_diagnostics.extend(match &schema {
+                Some(schema) => crate::corpus::validate_corpus(&corpus, schema),
+                None => crate::corpus::validate_corpus_independent(&corpus),
+            });
+            let configuration_valid = result
+                .diagnostics
+                .iter()
+                .all(|d| !matches!(d.scope, ValidationScope::Project | ValidationScope::Schema));
+            if let (Some(rules), Some(schema)) = (&rules, &schema)
+                && rules.diagnostics.is_empty()
+                && configuration_valid
+            {
+                rules.evaluate(&corpus, schema, &source_diagnostics, &mut result);
+            }
+            if let Some(schema) = &schema
+                && configuration_valid
+            {
+                crate::graph_constraints::evaluate(
+                    &project,
+                    &corpus,
+                    schema,
+                    &source_diagnostics,
+                    &mut result,
+                );
+            }
+            collect_source_diagnostics(&corpus, source_diagnostics, &mut result);
+        }
         result.summarize();
         sort_diagnostics(&mut result.diagnostics);
         // Include diagnostics for unreadable sources and options as well as source bytes.
         snapshot
             .update(serde_json::to_vec(&(&result, &paths, limit)).expect("validation serializes"));
         let fingerprint = format!("{:x}", snapshot.finalize());
+        if !paths.is_empty() {
+            let total = result.diagnostics.len();
+            result.diagnostics.retain(|diagnostic| {
+                matches!(
+                    diagnostic.scope,
+                    ValidationScope::Project | ValidationScope::Schema
+                ) || diagnostic
+                    .path
+                    .as_ref()
+                    .is_none_or(|source| paths.iter().any(|path| source.starts_with(path)))
+            });
+            result.selection = Some(ValidationSelection {
+                paths,
+                omitted_diagnostics: total - result.diagnostics.len(),
+            });
+        }
         paginate(result, options.cursor.as_deref(), limit, &fingerprint)
     }
 }
@@ -292,6 +448,104 @@ fn hash_file(hash: &mut Sha256, path: &Path) {
             hash.update([0]);
             hash.update(format!("{:?}", error.kind()).as_bytes());
         }
+    }
+}
+
+fn matches_handle(item: &crate::Item, handle: &str) -> bool {
+    if crate::is_mid(handle) {
+        item.mid() == Some(handle)
+    } else {
+        item.id() == handle
+    }
+}
+
+fn contains(item: &crate::Item, diagnostic: &Diagnostic) -> bool {
+    item.source().path() == diagnostic.source().path()
+        && item.source().span().start_byte() <= diagnostic.source().span().start_byte()
+        && item.source().span().end_byte() >= diagnostic.source().span().end_byte()
+}
+
+fn collect_source_diagnostics(
+    corpus: &Corpus,
+    diagnostics: Vec<Diagnostic>,
+    result: &mut ValidationResult,
+) {
+    // A configured policy uses the entire corpus. When that prerequisite gate
+    // skips evaluation, retain the actual blockers even for an item request.
+    let corpus_prerequisites = result.diagnostics.iter().any(|d| {
+        d.code == DiagnosticCode::EvaluationUnavailable && d.scope == ValidationScope::Project
+    });
+    let selected = result.target.id.as_deref();
+    let missing = selected.is_some_and(|id| {
+        corpus.is_complete()
+            && !corpus.items().any(|item| matches_handle(item, id))
+            && !diagnostics.iter().any(|d| d.applies_to_item(id))
+    });
+    if let Some(selected) = selected
+        && !corpus.is_complete()
+    {
+        result.diagnostics.push(ValidationDiagnostic::new(
+            DiagnosticCode::EvaluationUnavailable,
+            Severity::Error,
+            ValidationScope::Item,
+            DiagnosticLocation::default(),
+            format!(
+                "item '{}' could not be fully validated because the project corpus is incomplete",
+                selected
+            ),
+        ));
+    }
+    if missing {
+        result.diagnostics.push(ValidationDiagnostic::new(
+            DiagnosticCode::ReferenceUnresolved,
+            Severity::Error,
+            ValidationScope::Item,
+            DiagnosticLocation::default(),
+            format!("item '{}' was not found", selected.unwrap()),
+        ));
+    }
+    for diagnostic in diagnostics {
+        if !corpus_prerequisites
+            && selected.is_some_and(|id| {
+                !diagnostic.applies_to_item(id)
+                    && !corpus
+                        .items()
+                        .any(|item| matches_handle(item, id) && contains(item, &diagnostic))
+            })
+        {
+            continue;
+        }
+        let mut entry = ValidationDiagnostic::from_source(&diagnostic);
+        let owners = corpus
+            .items()
+            .filter(|item| contains(item, &diagnostic))
+            .collect::<Vec<_>>();
+        if let [item] = owners.as_slice() {
+            let unique_id = corpus
+                .items()
+                .filter(|other| other.id() == item.id())
+                .count()
+                == 1;
+            let unique_mid = item.mid().is_some_and(|mid| {
+                corpus
+                    .items()
+                    .filter(|other| {
+                        other
+                            .metadata()
+                            .iter()
+                            .any(|e| e.key() == "mid" && e.value() == mid)
+                    })
+                    .count()
+                    == 1
+            });
+            if unique_id && (unique_mid || item.mid().is_none()) {
+                entry.item = Some(DiagnosticItem {
+                    id: item.id().to_owned(),
+                    mid: item.mid().map(str::to_owned),
+                });
+            }
+        }
+        result.diagnostics.push(entry);
     }
 }
 

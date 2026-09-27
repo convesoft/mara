@@ -44,6 +44,7 @@ pub use mutation::{
     BackfilledMid, BackfilledMids, TransactionRollback, backfill_mids, rollback_transaction,
 };
 pub use mutation::{InitialRelation, ItemCreation, ItemCreationRequest, create_item};
+mod graph_constraints;
 mod operations;
 mod rules;
 pub use diagnostics::{

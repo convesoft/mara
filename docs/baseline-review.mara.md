@@ -8,7 +8,8 @@ linked capability documents rather than in this inventory.
 
 The active candidate now supports project initialization, schema inspection and
 definition validation, item creation/update/deletion/movement/rename/listing, unified search, bounded get, direct navigation, relation inspection/add/remove, MID backfill and explicit
-journal rollback. Corpus conformance, document/code discovery
+journal rollback, project/item validation, current-state rules and structural
+relation policies. Corpus conformance, document/code discovery
 and the document graph are reviewed dependencies. Earlier full-runtime test rows
 remain historical where their edit or validation transports
 have not yet been restored. The sections below identify current checkpoints.
@@ -611,3 +612,35 @@ read-only code-marker boundary and unchanged-ID no-write behavior, including
 inode preservation. The heading-link fixture must begin its heading on a new
 line; correcting that fixture required no production behavior change or new
 dependency.
+
+## Project and item validation review
+
+Selected increment: real CLI/MCP project/item validation with complete diagnostic
+summaries, reporting-only path selection and continuation. Required dependencies
+are the reviewed recovering corpus and rule definitions, native rule evaluation,
+and structural relation policies. Request-local checks, matrix observations,
+parameter binding and matrix rendering remain deferred; no new dependency is needed.
+
+| Area | Review and disposition |
+|---|---|
+| Validation orchestration | Retain independent configuration/source recovery, exact ID/MID item selection, source-owned diagnostics and full-target summaries before filtering/pagination. Hash discovered source, file-only code, adapters, accepted rule inputs and request options. Preserve existing schema-only behavior and classification fixes. |
+| Policy prerequisites | Retain whole-corpus prerequisite gates even for item requests. Invalid definitions/source prevent apparent passes; retain actual blockers and explicit unavailability. Source mutation continues to use source conformance rather than lifecycle policies. |
+| Native evaluation | Retain typed RDF projection keyed by MID, normalized distinct semantic edges, both directions of symmetric edges, and terminal opaque code/external identities. Keep class/path/applicability selection, upstream constraint semantics and the nested-error ledger. Preserve one deterministic reported violation per item/rule with authored locations, severity, optional native counts and generated message fallback. Defer matrix-only observation/cache export. |
+| Graph policy | Retain eligible endpoint counts over canonical edges, distinct relation kinds, self-edge count once, and item focus filtering. Keep strongly connected components and deterministic authored cycle witnesses; external/code endpoints cannot close item cycles. No global acyclicity. |
+| Source and reporting tests | Restore real transport checks for independent source/configuration recovery, item identity association and absence proof, unreadable files, diagnostic codes/locations, full-target hidden failures, pagination/snapshot invalidation, operation errors and byte bounds. Their library counterparts do not replace envelope/exit-status obligations. |
+| Policy tests | Retain native nested-error regression; real lifecycle/qualified coverage, typed literals, nested endpoint classes, reserved names, same-flavour directions, finite depth/cycles, warning/error behavior, prerequisites, definition failures, authored messages and structural cardinality/cycle groups. Keep fixtures local, using standard Rust helpers and isolated child Git/configuration. Matrix-specific assertions remain with the deferred matrix checkpoint. |
+
+Completion requires both transports on valid and broken disposable projects,
+policy failure/repair, exact continuation and source preservation, all prior
+suites, formatting/Clippy, canonical validation and selected traceability, then
+evidence for the committed implementation revision.
+
+Review outcomes: retain 52 source/transport groups, 17 policy groups and the
+native nested-error regression. Existing schema-only tests own rejected
+vocabulary, rule-source selection and schema envelope obligations; retain nested
+field-type execution here to verify actual projected values. Three code-context
+groups cover discovery failure, selected marker diagnostics/internal symlinks,
+and rejection of partial results from invalid adapters. Fixture vocabulary/rules
+live under tests/fixtures and runtime configuration is fixture-owned. Restore
+only the small source-coordinate, item-completeness and first-edge-location
+helpers needed by diagnostic projection. Keep no matrix-only cache export.

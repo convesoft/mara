@@ -65,6 +65,16 @@ pub struct DiagnosticLocation {
 }
 
 impl DiagnosticLocation {
+    pub fn source(source: &crate::SourceLocation) -> Self {
+        Self {
+            path: Some(source.path().to_owned()),
+            line: Some(source.span().start_line()),
+            start_byte: Some(source.span().start_byte()),
+            end_byte: Some(source.span().end_byte()),
+            pointer: None,
+        }
+    }
+
     pub fn file(root: &Path, path: &Path) -> Self {
         Self {
             path: Some(path.strip_prefix(root).unwrap_or(path).to_owned()),
