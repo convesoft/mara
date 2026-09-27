@@ -71,6 +71,20 @@ struct FileMode {
 }
 
 impl FileMode {
+    fn from_permissions(permissions: Permissions) -> Self {
+        #[cfg(unix)]
+        let unix_mode = {
+            use std::os::unix::fs::PermissionsExt;
+            Some(permissions.mode())
+        };
+        #[cfg(not(unix))]
+        let unix_mode = None;
+        Self {
+            readonly: permissions.readonly(),
+            unix_mode,
+        }
+    }
+
     fn matches(&self, permissions: Permissions) -> bool {
         if self.readonly != permissions.readonly() {
             return false;
@@ -110,6 +124,30 @@ pub(super) struct Change {
 }
 
 impl Change {
+    pub(super) fn new(
+        project: &Project,
+        path: PathBuf,
+        before: Option<String>,
+        after: String,
+    ) -> Result<Self, Error> {
+        let absolute = safe_path(project, &path)?;
+        let mode = before
+            .as_ref()
+            .map(|_| {
+                io_at(&absolute, fs::metadata(&absolute))
+                    .map(|metadata| FileMode::from_permissions(metadata.permissions()))
+            })
+            .transpose()?;
+        let change = Self {
+            path,
+            before,
+            after,
+            mode,
+        };
+        change.verify(project, false)?;
+        Ok(change)
+    }
+
     fn verify(&self, project: &Project, allow_after: bool) -> Result<(), Error> {
         let absolute = safe_path(project, &self.path)?;
         let current = read_optional(&absolute)?;
@@ -183,6 +221,86 @@ pub fn rollback_transaction(project: &Project) -> Result<TransactionRollback, Er
             .map(|change| change.path)
             .collect(),
     })
+}
+
+// @mara implements DES-MUTATION-TRANSACTION
+// @mara implements REQ-RECOVERABLE-MUTATION
+pub(super) fn commit(
+    project: &Project,
+    changes: Vec<Change>,
+    verify: impl FnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
+    commit_with_hook(project, changes, verify, |_| Ok(()))
+}
+
+pub(super) fn commit_with_hook(
+    project: &Project,
+    changes: Vec<Change>,
+    verify: impl FnOnce() -> Result<(), Error>,
+    mut hook: impl FnMut(Option<usize>) -> Result<(), Error>,
+) -> Result<(), Error> {
+    let journal = Journal {
+        format_version: 1,
+        changes,
+    };
+    let mut staged = Vec::new();
+    for change in &journal.changes {
+        let path = safe_path(project, &change.path)?;
+        staged.push(stage(&path, &change.after, change.mode.as_ref())?);
+    }
+    verify()?;
+    for change in &journal.changes {
+        change.verify(project, false)?;
+    }
+    let journal_path = safe_path(project, Path::new(JOURNAL))?;
+    let source = serde_json::to_string(&journal).map_err(|error| Error::InvalidMutation {
+        message: format!("could not serialize transaction journal: {error}"),
+    })?;
+    // No originals can change before the journal's directory entry is durable.
+    publish_journal(&journal_path, &source)?;
+    let result: Result<(), Error> = (|| {
+        hook(None)?;
+        for (index, (change, temporary)) in journal.changes.iter().zip(staged).enumerate() {
+            change.verify(project, false)?;
+            let path = safe_path(project, &change.path)?;
+            persist(temporary, &path, change.before.is_some())?;
+            sync_parent(&path)?;
+            hook(Some(index))?;
+        }
+        clear_journal(project)
+    })();
+    if let Err(error) = result {
+        // A cleanup sync failure may occur after unlinking the journal. Restore
+        // recovery information before attempting rollback of any original.
+        let rollback = (|| {
+            if read_optional(&journal_path)?.is_none() {
+                publish_journal(&journal_path, &source)?;
+            }
+            restore(project, &journal)?;
+            clear_journal(project)
+        })();
+        if let Err(rollback_error) = rollback {
+            return invalid(format!(
+                "{error}; rollback incomplete: {rollback_error}; mutations blocked until 'mara project transaction rollback' succeeds"
+            ));
+        }
+        return invalid(format!(
+            "{error}; transaction rolled back; originals restored"
+        ));
+    }
+    Ok(())
+}
+
+fn publish_journal(path: &Path, source: &str) -> Result<(), Error> {
+    let temporary = stage(path, source, None)?;
+    io_at(
+        path,
+        temporary
+            .persist_noclobber(path)
+            .map(|_| ())
+            .map_err(|error| error.error),
+    )?;
+    sync_parent(path)
 }
 
 fn restore(project: &Project, journal: &Journal) -> Result<(), Error> {
@@ -307,12 +425,81 @@ fn io_at<T>(path: &Path, result: io::Result<T>) -> Result<T, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fixture() -> (tempfile::TempDir, Project) {
-        let directory = tempfile::tempdir().unwrap();
-        let project =
-            crate::initialize_project(directory.path(), crate::Template::Minimal).unwrap();
+    use crate::{Template, initialize_project};
+    use tempfile::TempDir;
+    fn fixture() -> (TempDir, Project) {
+        let directory = TempDir::new().unwrap();
+        let project = initialize_project(directory.path(), Template::Minimal).unwrap();
+        fs::write(directory.path().join("a.mara.md"), "original a\r\n").unwrap();
+        fs::write(directory.path().join("b.mara.md"), "original b\n").unwrap();
         (directory, project)
     }
+
+    fn changes(project: &Project, new_destination: bool) -> Vec<Change> {
+        let destination = if new_destination {
+            "new.mara.md"
+        } else {
+            "b.mara.md"
+        };
+        vec![
+            Change::new(
+                project,
+                "a.mara.md".into(),
+                Some("original a\r\n".into()),
+                "".into(),
+            )
+            .unwrap(),
+            Change::new(
+                project,
+                destination.into(),
+                (!new_destination).then(|| "original b\n".into()),
+                "moved a\r\n".into(),
+            )
+            .unwrap(),
+        ]
+    }
+
+    // @mara implements VER-RELATION-MUTATION
+    // @mara checks DES-MUTATION-TRANSACTION
+    // @mara checks REQ-RECOVERABLE-MUTATION
+    #[test]
+    fn write_failures_restore_every_original_and_remove_new_destinations() {
+        for new_destination in [false, true] {
+            for fail_at in [None, Some(0), Some(1)] {
+                let (_directory, project) = fixture();
+                let _lock = MutationLock::acquire(&project).unwrap();
+                let result = commit_with_hook(
+                    &project,
+                    changes(&project, new_destination),
+                    || Ok(()),
+                    |phase| {
+                        if phase == fail_at {
+                            invalid::<()>("injected write failure")
+                        } else {
+                            Ok(())
+                        }
+                    },
+                );
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("originals restored")
+                );
+                assert_eq!(
+                    fs::read_to_string(project.root().join("a.mara.md")).unwrap(),
+                    "original a\r\n"
+                );
+                assert_eq!(
+                    fs::read_to_string(project.root().join("b.mara.md")).unwrap(),
+                    "original b\n"
+                );
+                assert!(!project.root().join("new.mara.md").exists());
+                assert!(!project.root().join(JOURNAL).exists());
+            }
+        }
+    }
+
     #[test]
     fn active_mutation_lock_blocks_other_writers_and_recovery() {
         let (_directory, project) = fixture();
@@ -335,5 +522,126 @@ mod tests {
         let next = MutationLock::acquire(&project).unwrap();
         drop(inherited);
         drop(next);
+    }
+    #[test]
+    fn changed_preimages_abort_before_publication() {
+        let (_directory, project) = fixture();
+        let result = commit(&project, changes(&project, false), || {
+            fs::write(project.root().join("b.mara.md"), "manual edit").unwrap();
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read_to_string(project.root().join("a.mara.md")).unwrap(),
+            "original a\r\n"
+        );
+        assert_eq!(
+            fs::read_to_string(project.root().join("b.mara.md")).unwrap(),
+            "manual edit"
+        );
+        assert!(!project.root().join(JOURNAL).exists());
+    }
+
+    #[test]
+    fn failed_rollback_keeps_journal_and_later_edits_until_explicit_recovery() {
+        let (_directory, project) = fixture();
+        let result = commit_with_hook(
+            &project,
+            changes(&project, false),
+            || Ok(()),
+            |phase| {
+                if phase == Some(0) {
+                    fs::write(project.root().join("b.mara.md"), "manual edit").unwrap();
+                    invalid::<()>("injected failure")
+                } else {
+                    Ok(())
+                }
+            },
+        );
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("rollback incomplete")
+        );
+        assert!(MutationLock::acquire(&project).is_err());
+        assert!(rollback_transaction(&project).is_err());
+        assert_eq!(
+            fs::read_to_string(project.root().join("a.mara.md")).unwrap(),
+            ""
+        );
+        assert_eq!(
+            fs::read_to_string(project.root().join("b.mara.md")).unwrap(),
+            "manual edit"
+        );
+        fs::write(project.root().join("b.mara.md"), "original b\n").unwrap();
+        assert_eq!(rollback_transaction(&project).unwrap().restored.len(), 2);
+        assert_eq!(
+            fs::read_to_string(project.root().join("a.mara.md")).unwrap(),
+            "original a\r\n"
+        );
+        assert!(rollback_transaction(&project).unwrap().restored.is_empty());
+    }
+
+    // @mara checks DES-MUTATION-TRANSACTION
+    #[test]
+    fn interrupted_process_can_be_rolled_back_after_restart() {
+        let (_directory, project) = fixture();
+        for stop_after in ["prepared", "0", "1"] {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.current_dir(project.root());
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("GIT_") {
+                    child.env_remove(key);
+                }
+            }
+            child
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CEILING_DIRECTORIES", project.root())
+                .env("XDG_CONFIG_HOME", project.root().join(".test-config"));
+            let status = child
+                .args([
+                    "--exact",
+                    "mutation::transaction::tests::interruption_child",
+                    "--ignored",
+                ])
+                .env("MARA_TEST_TRANSACTION_PROJECT", project.root())
+                .env("MARA_TEST_STOP_AFTER", stop_after)
+                .status()
+                .unwrap();
+            assert_eq!(status.code(), Some(73));
+            assert!(MutationLock::acquire(&project).is_err());
+            assert_eq!(rollback_transaction(&project).unwrap().restored.len(), 2);
+            assert_eq!(
+                fs::read_to_string(project.root().join("a.mara.md")).unwrap(),
+                "original a\r\n"
+            );
+            assert!(!project.root().join("new.mara.md").exists());
+            assert!(!project.root().join(JOURNAL).exists());
+        }
+    }
+
+    #[test]
+    #[ignore = "subprocess helper for interruption coverage"]
+    fn interruption_child() {
+        let path = std::env::var_os("MARA_TEST_TRANSACTION_PROJECT").unwrap();
+        let project = crate::resolve_project(Some(Path::new(&path)), Path::new(&path)).unwrap();
+        let stop_after = std::env::var("MARA_TEST_STOP_AFTER").unwrap();
+        let _lock = MutationLock::acquire(&project).unwrap();
+        commit_with_hook(
+            &project,
+            changes(&project, true),
+            || Ok(()),
+            |phase| {
+                let phase = phase.map_or_else(|| "prepared".into(), |index| index.to_string());
+                if phase == stop_after {
+                    std::process::exit(73);
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        panic!("interruption point was not reached");
     }
 }

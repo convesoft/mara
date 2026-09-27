@@ -401,8 +401,9 @@ fn connections<'graph, 'corpus>(
 }
 
 /// Every byte retained in a surviving link must still resolve to its original
-/// destination during item creation.
+/// destination during source mutation.
 // @mara implements DES-ITEM-CREATION
+// @mara implements DES-RELATION-MUTATION
 pub(super) fn preflight(before: &Corpus, after: &Corpus) -> Result<(), Error> {
     let mut new_sources = sources(after);
     let maps = sources(before)

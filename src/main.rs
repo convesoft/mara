@@ -355,6 +355,46 @@ fn run(cli: Cli) -> Result<bool, String> {
                 },
             );
         }
+        Command::Relation {
+            command:
+                RelationCommand::Add {
+                    source,
+                    relation,
+                    target,
+                },
+        } => {
+            return emit_relation(
+                format,
+                OperationContext::from_environment(project)?.relation_add(RelationParams {
+                    source,
+                    relation,
+                    target,
+                }),
+                print_relation_mutation,
+            );
+        }
+        Command::Relation {
+            command:
+                RelationCommand::Remove {
+                    source,
+                    relation,
+                    target,
+                    occurrence,
+                },
+        } => {
+            return emit_relation(
+                format,
+                OperationContext::from_environment(project)?.relation_remove_occurrence(
+                    RelationParams {
+                        source,
+                        relation,
+                        target,
+                    },
+                    occurrence,
+                ),
+                print_relation_mutation,
+            );
+        }
         Command::Related {
             reference,
             direction,
@@ -1041,6 +1081,27 @@ enum RelationCommand {
         #[arg(long)]
         cursor: Option<String>,
     },
+    /// Add a schema-valid relation. Code links require an item source and declared inverse; code files are never edited.
+    Add {
+        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID); code sources are read-only.
+        source: String,
+        /// Schema-declared relation name; inspect with schema list relation.
+        relation: String,
+        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<selector>] with an inverse alias.
+        target: String,
+    },
+    /// Remove authored item assertions. For code links, code comment markers remain and may keep the edge present.
+    Remove {
+        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID); code sources are read-only.
+        source: String,
+        /// Schema-declared relation name; inspect with schema list relation.
+        relation: String,
+        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<selector>] with an inverse alias.
+        target: String,
+        /// Remove only this snapshot-bound occurrence from relation get.
+        #[arg(long)]
+        occurrence: Option<String>,
+    },
 }
 
 fn emit_relation<T: Serialize>(
@@ -1119,4 +1180,17 @@ fn read_body(body: Option<String>) -> Result<Option<String>, String> {
         }
         _ => Ok(body),
     }
+}
+
+fn print_relation_mutation(result: &mara::RelationMutationResult) -> Result<(), String> {
+    println!(
+        "{} relation '{}' from '{}' to '{}': {} changed, {} remaining",
+        result.action.past_tense(),
+        result.edge.relation,
+        result.edge.source.id(),
+        display_relation_target(&result.edge.target),
+        result.changed_occurrences,
+        result.remaining_occurrences
+    );
+    Ok(())
 }

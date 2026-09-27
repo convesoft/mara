@@ -797,3 +797,227 @@ fn insert_block(source: &str, position: usize, block: &str, newline: &str) -> St
     candidate.push_str(after);
     candidate
 }
+
+// @mara implements REQ-RELATION-MUTATION
+// @mara implements DES-RELATION-MUTATION
+pub(crate) fn mutate_semantic_relation(
+    project: &Project,
+    schema: &Schema,
+    params: &crate::RelationParams,
+    add: bool,
+    occurrence: Option<&str>,
+) -> Result<crate::RelationMutationResult, crate::RelationError> {
+    use crate::{RelationAction, RelationError};
+    if params.source.starts_with("code:") {
+        return Err(RelationError::new(
+            "unsupported_mutation",
+            "relation add/remove cannot modify code source files; use the declared inverse with an item source, or edit the code comment directly",
+        ));
+    }
+    let _lock = MutationLock::acquire(project)?;
+    let corpus = load_corpus(project, schema)?;
+    ensure_unambiguous_item_identities(&corpus, "mutate relations")?;
+    let edge = crate::relations::resolve_edge(
+        &corpus,
+        schema,
+        &params.source,
+        &params.relation,
+        &params.target,
+    )?;
+    let code_edge = matches!(edge.source, crate::RelationEndpoint::Code { .. });
+    let authored = crate::relations::occurrences(project, &corpus, schema, &edge)?;
+    let editable = authored
+        .iter()
+        .filter(|entry| !code_edge || matches!(entry.author, crate::RelationEndpoint::Item { .. }))
+        .collect::<Vec<_>>();
+    if add && !authored.is_empty() {
+        let description = if code_edge {
+            "code-to-item edge already exists"
+        } else {
+            "item already has relation"
+        };
+        return Err(RelationError::new(
+            "relation_exists",
+            format!(
+                "{description}; inspect with relation get {} {} {} ({} occurrences)",
+                params.source,
+                params.relation,
+                params.target,
+                authored.len()
+            ),
+        )
+        .on_edge(&edge, authored.len()));
+    }
+    // Validate selectors even when their previous edge no longer exists.
+    if let Some(token) = occurrence {
+        let snapshot = crate::query::page::fingerprint(
+            &corpus,
+            schema,
+            &("relation-occurrences-v1", project.root()),
+        )?;
+        let prefix = format!("occ-1-{snapshot}-");
+        if !token
+            .strip_prefix(&prefix)
+            .is_some_and(|tail| tail.len() == 16 && tail.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            return Err(RelationError::new(
+                "stale_occurrence",
+                "invalid or stale occurrence; inspect the relation again",
+            )
+            .on_edge(&edge, authored.len()));
+        }
+        if !authored.iter().any(|entry| entry.reference == token) {
+            return Err(RelationError::new(
+                "occurrence_mismatch",
+                "occurrence does not belong to the requested edge",
+            )
+            .on_edge(&edge, authored.len()));
+        }
+        if code_edge && !editable.iter().any(|entry| entry.reference == token) {
+            return Err(RelationError::new(
+                "unsupported_mutation",
+                "selected occurrence is a code comment; relation commands do not modify code source files",
+            )
+            .on_edge(&edge, authored.len()));
+        }
+    }
+    if !add && editable.is_empty() {
+        if code_edge && !authored.is_empty() {
+            return Err(RelationError::new(
+                "unsupported_mutation",
+                "no item-authored assertion remains; edit the code comment directly to remove this edge",
+            )
+            .on_edge(&edge, authored.len()));
+        }
+        return Err(
+            RelationError::new("relation_not_found", "relation does not exist").on_edge(&edge, 0),
+        );
+    }
+    let mut candidates = BTreeMap::new();
+    let changed;
+    if add {
+        let source = resolve_item(&corpus, &params.source, "source")?;
+        let target = if code_edge || crate::external::address(&params.target).is_some() {
+            None
+        } else {
+            Some(resolve_item(&corpus, &params.target, "target")?)
+        };
+        let document = corpus
+            .documents()
+            .iter()
+            .find(|d| d.path() == source.source().path())
+            .unwrap();
+        let insertion = source
+            .metadata()
+            .last()
+            .expect("title metadata")
+            .source()
+            .span()
+            .end_byte();
+        let mut candidate = document.source().to_owned();
+        candidate.insert_str(
+            insertion,
+            &format!(
+                "{}:{}: {}",
+                newline_style(document.source()),
+                params.relation,
+                target.map_or(params.target.as_str(), |item| item.id())
+            ),
+        );
+        candidates.insert(document.path().to_path_buf(), candidate);
+        changed = 1;
+    } else {
+        let selected = editable
+            .iter()
+            .filter(|entry| occurrence.is_none_or(|token| token == entry.reference))
+            .collect::<Vec<_>>();
+        changed = selected.len();
+        for entry in selected.into_iter().rev() {
+            let path = entry.source.path();
+            let candidate = candidates.entry(path.to_path_buf()).or_insert_with(|| {
+                corpus
+                    .documents()
+                    .iter()
+                    .find(|d| d.path() == path)
+                    .unwrap()
+                    .source()
+                    .to_owned()
+            });
+            if entry.kind == "inline" {
+                candidate.replace_range(
+                    entry.source.start_byte()..entry.source.end_byte(),
+                    &if entry.target.starts_with("code:") {
+                        entry.target.clone()
+                    } else if let Some(address) = crate::external::address(&entry.target) {
+                        format!("<{address}>")
+                    } else {
+                        format!("[[{}]]", entry.target)
+                    },
+                );
+            } else {
+                let end = full_line_end(candidate, entry.source.end_byte());
+                candidate.replace_range(entry.source.start_byte()..end, "");
+            }
+        }
+    }
+    let projected = corpus.with_replacements(&candidates, schema)?;
+    references::preflight(&corpus, &projected)?;
+    let changes = corpus
+        .documents()
+        .iter()
+        .filter_map(|document| {
+            candidates.get(document.path()).map(|after| {
+                transaction::Change::new(
+                    project,
+                    document.path().to_path_buf(),
+                    Some(document.source().to_owned()),
+                    after.clone(),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    transaction::commit(project, changes, || {
+        if crate::resolve_project(Some(project.root()), project.root())? != *project
+            || crate::load_schema(project)? != *schema
+            || load_corpus(project, schema)? != corpus
+        {
+            return invalid("project changed since relationship preflight; retry the operation");
+        }
+        Ok(())
+    })?;
+    let remaining = if add {
+        authored.len() + 1
+    } else {
+        authored.len() - changed
+    };
+    Ok(crate::RelationMutationResult {
+        format_version: 1,
+        action: if add {
+            RelationAction::Added
+        } else {
+            RelationAction::Removed
+        },
+        scope: if occurrence.is_some() {
+            "occurrence"
+        } else if code_edge {
+            "item"
+        } else {
+            "relationship"
+        }
+        .into(),
+        edge,
+        changed_occurrences: changed,
+        remaining_occurrences: remaining,
+        edge_exists: remaining > 0,
+    })
+}
+
+fn full_line_end(source: &str, end: usize) -> usize {
+    if source[end..].starts_with("\r\n") {
+        end + 2
+    } else if source.as_bytes().get(end) == Some(&b'\n') {
+        end + 1
+    } else {
+        end
+    }
+}

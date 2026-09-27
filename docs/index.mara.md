@@ -12,6 +12,7 @@ dispositions and remaining scope.
 - [Document structure, references and direct navigation](discovery.mara.md)
 - [Corpus conformance and validation](validation.mara.md)
 - [Item creation](creation.mara.md)
+- [Semantic relation authoring](relations.mara.md)
 - [Source mutation and explicit recovery](editing.mara.md)
 - [Code adapters and traceability](code-traceability.mara.md)
 - [Item listing, search and bounded reads](retrieval.mara.md)

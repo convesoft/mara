@@ -204,6 +204,36 @@ impl OperationContext {
         )
     }
 
+    pub fn relation_add(
+        &self,
+        params: RelationParams,
+    ) -> Result<RelationMutationResult, crate::RelationError> {
+        let (project, schema) = self.load_project()?;
+        crate::mutation::mutate_semantic_relation(&project, &schema, &params, true, None)
+    }
+
+    pub fn relation_remove(
+        &self,
+        params: RelationParams,
+    ) -> Result<RelationMutationResult, crate::RelationError> {
+        self.relation_remove_occurrence(params, None)
+    }
+
+    pub fn relation_remove_occurrence(
+        &self,
+        params: RelationParams,
+        occurrence: Option<String>,
+    ) -> Result<RelationMutationResult, crate::RelationError> {
+        let (project, schema) = self.load_project()?;
+        crate::mutation::mutate_semantic_relation(
+            &project,
+            &schema,
+            &params,
+            false,
+            occurrence.as_deref(),
+        )
+    }
+
     pub fn related(&self, params: RelatedParams) -> Result<RelatedResult, String> {
         let (corpus, schema) = self.load_query_project()?;
         let filters = RelatedFilters::new(params.direction, params.relations, params.flavours)
@@ -511,4 +541,31 @@ pub struct ItemCreationResult {
     pub line: usize,
     pub complete: bool,
     pub missing: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RelationAction {
+    Added,
+    Removed,
+}
+
+impl RelationAction {
+    pub const fn past_tense(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Removed => "removed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RelationMutationResult {
+    pub format_version: u8,
+    pub action: RelationAction,
+    pub scope: String,
+    pub edge: crate::RelationEdge,
+    pub changed_occurrences: usize,
+    pub remaining_occurrences: usize,
+    pub edge_exists: bool,
 }

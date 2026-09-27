@@ -1904,3 +1904,5 @@ pub(crate) fn is_mid(value: &str) -> bool {
         .parse::<ulid::Ulid>()
         .is_ok_and(|mid| mid.to_string() == value)
 }
+
+pub use operations::{RelationAction, RelationMutationResult};

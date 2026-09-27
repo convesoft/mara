@@ -678,8 +678,8 @@ fn bootstrap_advertises_only_its_available_operations() {
         ),
         (
             vec!["relation", "--help"],
-            vec!["get"],
-            vec!["add", "remove"],
+            vec!["get", "add", "remove"],
+            vec![],
         ),
         (
             vec!["item", "--help"],
@@ -731,7 +731,9 @@ fn bootstrap_advertises_only_its_available_operations() {
             "project_mid_backfill",
             "project_transaction_rollback",
             "related",
+            "relation_add",
             "relation_get",
+            "relation_remove",
             "schema_get",
             "schema_list",
             "schema_validate",

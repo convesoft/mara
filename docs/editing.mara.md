@@ -1,7 +1,8 @@
 # Source mutation and explicit recovery
 
-MID backfill and explicit rollback are the current write slice. Journal-producing
-move/rename and other item/relation edits remain pending review.
+MID backfill, item creation, relation edits and explicit rollback are restored.
+The shared journal publisher supports relation edits; move/rename and other item
+edits remain pending review.
 
 :::mara requirement REQ-RECOVERABLE-MUTATION
 :mid: 01M1RKZY3VJKYP7V8GNDKR84GT
@@ -40,7 +41,7 @@ Journal format 1 is UTF-8 JSON with `format_version:1` and a non-empty `changes`
 
 CLI `project transaction rollback` and MCP `project_transaction_rollback` take the exclusive lock and need resolvable project configuration, including an existing configured schema path, but do not read schema contents or require a valid corpus. Check all targets against their recorded preimage or candidate and permissions before restoring anything; stage all originals, recheck each target, restore existing files and remove new destinations. Compare readonly on all platforms and a supplied unix_mode on Unix. Sync staged files and, on Unix, affected parent directories. Remove the journal only after success. Recovery is retryable, including already-restored paths; no journal is a successful no-op. Return `{project,restored}` with absolute project root and relative restored paths.
 
-Reject later manual edits or permission changes and preserve the journal. Reconcile targets to a recorded version before retrying. Preserve malformed/unsupported journals and restore trusted backups before removing them. Reads remain available. Concurrent manual filesystem edits are not coordinated by the advisory lock. Journal publication and automatic rollback of failed move/rename writes remain separate implementation obligations.
+Reject later manual edits or permission changes and preserve the journal. Reconcile targets to a recorded version before retrying. Preserve malformed/unsupported journals and restore trusted backups before removing them. Reads remain available. Concurrent manual filesystem edits are not coordinated by the advisory lock. The shared publisher is specified by [[DES-MUTATION-TRANSACTION]]; move/rename workflows remain separate implementation obligations.
 :::
 
 :::mara verification VER-MID-AND-RECOVERY
@@ -83,4 +84,16 @@ At `ad13ac689ad315aac5e7d536363e0ad6f84f23cb`, formatting, `cargo clippy --locke
 Eight real CLI/MCP groups cover deliberate/idempotent backfill, typed preflight exclusions, unchanged non-MID bytes, result lines, LF/CRLF, existing identities/permissions, active and pending locks, schema-content-independent rollback, complete/already-restored journal states, optional Unix modes, malformed/unsafe journals, later manual edits and permission conflicts. Two lock unit regressions cover active locking and inherited-descriptor release. Existing capability suites pass. Recovery requires an existing configured schema path but does not read its contents. Portable journals preserve readonly; exact Unix permissions require recorded unix_mode.
 
 Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected authoring-tool intent passed two roots; realization and verification each passed four roots, consuming all pages. CLI help and MCP tools/list expose both restored operations. Journal fixtures prove rollback handling, not journal publication, interruption or automatic rollback of move/rename. Those operations, project/item validation transports and rule/graph execution remain pending.
+:::
+
+:::mara design DES-MUTATION-TRANSACTION
+:mid: 01M3H4H9HVG08YV6J7V5D8D9MW
+:title: Publish staged source changes with durable rollback information
+:status: accepted
+:kind: interface
+:satisfies: REQ-RECOVERABLE-MUTATION
+
+The shared journal publisher is used by relation mutations. Under the mutation lock, capture original bytes and permissions, stage every candidate, recheck operation-level project state and every preimage, then durably publish the format-1 journal defined by [[DES-MUTATION-RECOVERY]] before replacing any original. Sync staged files and, on Unix, affected parent directories; remove the journal only after all replacements succeed.
+
+On an in-process publication failure, restore recorded originals and remove newly created destinations. If rollback encounters later manual edits or another failure, preserve recovery information and refuse further writers until explicit rollback succeeds. A stopped process leaves a journal for restart recovery. Recheck each preimage before replacement; the advisory lock does not coordinate manual filesystem edits. Multi-file publication is recoverable, not an atomic snapshot for concurrent readers. Move/rename callers remain pending.
 :::

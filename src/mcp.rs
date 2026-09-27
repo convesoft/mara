@@ -210,6 +210,34 @@ impl SearchToolParams {
 
 #[tool_router]
 impl MaraMcp {
+    #[tool(name = "relation_add", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Add one metadata assertion using a canonical name or inverse alias. Code links require an item source and declared inverse; code source files are never modified. Returns relationship format 1.")]
+    fn relation_add(
+        &self,
+        Parameters(params): Parameters<RelationToolParams>,
+    ) -> rmcp::model::CallToolResult {
+        let (project, params) = params.into_parts();
+        relation_result(
+            self.for_project(project)
+                .map_err(mara::RelationError::from)
+                .and_then(|context| context.relation_add(params)),
+        )
+    }
+
+    #[tool(name = "relation_remove", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Remove item-authored assertions of a semantic relationship, or exactly one snapshot-bound item occurrence. For code links, code comments remain and may keep the edge present; code source files are never modified. Reject missing edges and stale or mismatched selectors. Returns relationship format 1.")]
+    fn relation_remove(
+        &self,
+        Parameters(params): Parameters<RelationRemoveToolParams>,
+    ) -> rmcp::model::CallToolResult {
+        let (project, relation) = params.edge.into_parts();
+        relation_result(
+            self.for_project(project)
+                .map_err(mara::RelationError::from)
+                .and_then(|context| {
+                    context.relation_remove_occurrence(relation, params.occurrence)
+                }),
+        )
+    }
+
     #[tool(name = "relation_get", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationInspection>(), description = "Inspect a semantic relationship and its authored occurrences. Alias and canonical names resolve the same edge. Follow next_cursor with unchanged arguments; selectors and cursors expire when project source or schema changes.")]
     fn relation_get(
         &self,
@@ -520,4 +548,14 @@ fn relation_result<T: serde::Serialize>(
     let mut response = rmcp::model::CallToolResult::structured(value);
     response.is_error = Some(failed);
     response
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RelationRemoveToolParams {
+    #[serde(flatten)]
+    edge: RelationToolParams,
+    /// Opaque selector returned by relation_get; omitted or null removes the whole relationship.
+    #[serde(default)]
+    occurrence: Option<String>,
 }

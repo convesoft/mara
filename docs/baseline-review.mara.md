@@ -7,7 +7,7 @@ review; it does not authorize removing behavior. Product contracts live in the
 linked capability documents rather than in this inventory.
 
 The active candidate now supports project initialization, schema inspection and
-definition validation, item creation/listing, unified search, bounded get, direct navigation, relation inspection, MID backfill and explicit
+definition validation, item creation/listing, unified search, bounded get, direct navigation, relation inspection/add/remove, MID backfill and explicit
 journal rollback. Corpus conformance, document/code discovery
 and the document graph are reviewed dependencies. Earlier full-runtime test rows
 remain historical where their edit or validation transports
@@ -475,3 +475,30 @@ publication. The schema allows requirement-to-requirement derives_from; the
 wrong-target fixture instead uses follows to an actual scenario. No production
 behavior correction was needed. The reference helper omits rename and edited-body
 parameters/exemptions; shared structural correspondence checks remain intact.
+
+## Relation mutation and journal publication review
+
+Selected increment: CLI/MCP relation add/remove, including whole-edge and
+snapshot-selected removal. Multi-document inverse/symmetric assertions require
+the shared journal publisher; existing recovery, corpus projection, source
+correspondence, edge resolution and occurrence inspection are retained dependencies.
+
+| Area | Review and disposition |
+|---|---|
+| Semantic writes | Retain canonical/alias endpoint resolution, global ID/MID uniqueness, semantic duplicate refusal, metadata insertion on the requested item and exact external spelling. Remove all item occurrences or one current selector; reject stale, mismatched and code-comment selectors. |
+| Source safety | Retain reverse-offset edits, full metadata-line deletion and inline demotion to internal mention, external autolink or plain code reference. Reuse surviving-reference preflight without rename/body-edit exemptions; no policy gate on removal. Preserve unrelated source and permissions. |
+| Transaction dependency | Restore permission capture, Change construction, staging, preimage/project rechecks, durable journal publication, per-file replacement and automatic rollback. Keep conflicts and recovery information when rollback cannot safely finish. Retain explicit recovery as the format owner. No move/rename or single-file commit helper is imported. |
+| Tests | Retain inverse/symmetric/MID duplicates, selectors, whole-edge multi-file removal, inline/external/code demotion, wrong endpoints, source-preserving failures and heading-target regression through CLI/MCP. Retain publisher failure hooks before/after each replacement, preimage conflicts, incomplete rollback and actual subprocess interruption/restart. Existing journal decoding/permission and lock regressions remain active rather than duplicated. Mixed update/move/rename/delete and policy tests remain pending with those capabilities. |
+
+Completion requires real transport workflows, source-preserving refusals,
+automatic and restart recovery, all prior tests, formatting/Clippy, canonical
+validation, selected traceability and evidence for the committed tested revision.
+
+Eight relation integration groups pass through both CLI and MCP, including binary
+file-only code targets, alias-named custom fields on ineligible flavours and
+removal from an incomplete item. Four publisher unit groups retain injected
+failures, preimage conflicts, incomplete automatic rollback and three real
+subprocess interruption boundaries. The intentionally ignored child test is run
+explicitly by its parent at each boundary. Existing lock tests stay active.
+No production behavior correction or new dependency was needed; the inherited
+reference preflight uses its existing two-argument entry point.
