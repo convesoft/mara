@@ -226,6 +226,28 @@ then `"${mara_cli[@]}" --project /absolute/project --format json get '<reference
 Use `related '<reference>'` for connections, `--relation builtin:mentions` to
 select explicit mentions, and `--cursor '<next_cursor>'` for continuation.
 
+## Code endpoints
+
+Project format 4 configures external SCIP indexers in `[[code.indexers]]` with
+`name` and `command` (executable/arguments, one standalone `{output}` placeholder).
+Mara invokes them automatically from the project root when loading the corpus;
+install indexers separately and only configure trusted commands. Commands may
+run build tools. Missing executables or invalid output fail the operation.
+Optional `position_encoding` supplies `utf8`, `utf16` or `utf32` for old indexers
+that omit their document encoding. Optional `[[code.languages]]` runtime
+Tree-sitter grammar/query assets attach comments and expand declaration content;
+there is no `separator` setting or compiled language integration.
+
+Use exact `code:path::indexer::descriptor` references returned by navigation.
+Descriptors omit SCIP package metadata so version bumps preserve local links.
+Unsafe inline characters use uppercase UTF-8 percent escapes, for example
+`code:service.ts::typescript::%60service.ts%60/parse().`. Local SCIP symbols are
+unsupported. Distinct implementation overloads require distinct indexer identities;
+multiple declarations of one identity share a link. No name/position fallback is
+allowed. Renames/moves may break authored links. File-only `code:path` needs no
+language integration. Migrate project format 3 code bindings and native selectors
+explicitly; see `docs/code-traceability.mara.md` in the Mara repository.
+
 ## Inspect and change relationships
 
 Schema lookup accepts inverse aliases and returns the canonical declaration,

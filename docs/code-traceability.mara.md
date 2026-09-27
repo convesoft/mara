@@ -1,6 +1,6 @@
 # Code traceability
 
-Accepted contract for MARA-71. This document owns production semantics.
+This document owns production code association and symbol identity semantics.
 
 :::mara requirement REQ-CODE-TRACEABILITY
 :mid: 01M3EQAFT3DPZ2VF1GWZBX2T6Y
@@ -10,12 +10,16 @@ A project can declare code-to-item relations, navigate the resulting source
 associations, and mutate item-authored inverse assertions through relation
 commands. Source code comments remain directly authored in code. Missing,
 ambiguous and unsupported code targets produce source-located diagnostics. A
-source association does not establish passing test evidence.
+source association does not establish passing test evidence. Symbol links use exact
+indexer identities: body edits, overload ordering, and package version bumps
+must not select another symbol. Renames, moves, or deletion may break links;
+Mara never falls back to a matching name or position. Language indexers own
+overload distinctions; declarations sharing one implementation may share an identity.
 :::
 
 :::mara design DES-CODE-TRACEABILITY
 :mid: 01M3EQAJBYC0Q2TAVD3KM6E11H
-:title: Resolve code endpoints through language adapters
+:title: Resolve code endpoints through pluggable SCIP indexers
 :satisfies: REQ-CODE-TRACEABILITY
 
 Schema format 3 accepts optional `code_source: true` on a directed relation.
@@ -47,7 +51,7 @@ The canonical edge is `(relation, code endpoint, item MID)`. Code is a built-in
 node kind in the disposable relation graph, alongside item and external nodes.
 Each kind supplies its own graph identity; only items have persisted MIDs and
 schema-defined flavours. Code identity is the exact project-relative
-file path plus the adapter's exact symbol selector, or just the path for a
+file path plus the configured indexer name and exact SCIP descriptor, or just the path for a
 file-only endpoint. Identical assertions from either side count as one edge
 with distinct source occurrences. Code links are structural associations;
 `verifies` identifies a check definition and never claims a passing execution.
@@ -60,19 +64,22 @@ multiple occurrences of one edge twice.
 An item may assert the inverse in metadata or a typed inline reference:
 
 ```markdown
-:implemented_by_code: code:src/graph_constraints.rs::evaluate
+:implemented_by_code: code:src/graph_constraints.rs::rust::graph_constraints/evaluate().
 
-Implemented by [[implemented_by_code:code:src/graph_constraints.rs::evaluate]].
+Implemented by [[implemented_by_code:code:src/graph_constraints.rs::rust::graph_constraints/evaluate().]].
 ```
 
-The target grammar is `code:<project-relative-path>[::<language-native-symbol-selector>]`.
-Split at the first `::` after `code:`; Rust selectors may contain further
-`::`. Paths use `/`, contain only ordinary relative components, and cannot
-escape the project through `..` or a symlink. Path and selector matching is
-case-sensitive. A file-only target resolves to an existing regular file even
-without a language adapter. A symbol target requires an adapter for that file.
-No absolute path, authored byte span, line number, or generated identity is
-part of the target spelling.
+The target grammar is `code:<project-relative-path>[::<indexer>::<descriptor>]`.
+Paths use `/`, contain only ordinary relative components, and cannot escape the
+project through `..` or a symlink. Matching is case-sensitive. A file-only target
+resolves to an existing regular file without an indexer or grammar. Symbol paths
+must be reported by the configured indexer. Descriptors retain SCIP's punctuation
+and disambiguators, omitting scheme and all package metadata. Whitespace and
+`%`, `[`, `]`, backtick, `<`, `>`, backslash and `|` are percent-escaped using
+uppercase UTF-8 byte values. Other characters are preserved. For example,
+`code:service.ts::typescript::%60service.ts%60/parse().` represents the descriptor
+`` `service.ts`/parse(). ``. These spellings are canonical, not URL aliases.
+No authored byte span or line number is part of the identity.
 
 A source comment marker is `@mara <canonical-relation> <item-ID-or-MID>` on
 its own comment line. Tree-sitter identifies comment nodes and source spans;
@@ -87,81 +94,104 @@ a top-level marker with no attached declaration attaches to the file. A marker
 whose ownership cannot be determined is unsupported. Comment placement and
 symbol selection are adapter responsibilities, not generic text heuristics.
 
-## Adapter and selector boundary
+## Indexer and grammar boundary
 
-Mara owns marker parsing of comment text, schema and item resolution, canonical edge identity,
-diagnostics, navigation, and backlinks. A project supplies Tree-sitter language
-bindings in `.mara/project.toml` format 3. Each entry maps extensions to a
-project-relative WebAssembly grammar, a Tree-sitter query file, and the native
-selector separator. The query captures declarations with `@symbol` and their
-`@name`, lexical containers that are not direct targets with `@scope` and
-`@name`, and comments with `@comment`. Optional `@modifier` captures mark
-modifiers that appear as preceding siblings or leading children of a declaration;
-optional `@wrapper` captures mark parent nodes containing a declaration and its
-modifiers. Markers may attach before a captured modifier or wrapper, or between
-a modifier and its declaration. Each pack describes its own attributes,
-decorators, and exports through these captures. Mara loads and checks these assets
-locally at runtime, uses the grammar and query to enumerate symbols and
-comments, and searches only captured comment text for markers. The deepest
-enclosing declaration body or immediately following declaration owns a marker.
-Invalid packs and duplicate extension assignments are diagnosed. Normal corpus
-operations fail when code indexing reports a problem, rather than returning a
-partial relation graph; validation reports the problem as a diagnostic. An absent
-pack leaves file-only endpoints usable. Adding another language or extension
-does not require a Mara rebuild. Language packs do not change the shared
-relation semantics or execute project code.
-
-The repository's packs for Rust, Python, JavaScript, and TypeScript demonstrate
-the contract. They are project assets, not language dependencies compiled into
-Mara. Extensions configured here are `.rs`, `.py`, `.js`/`.mjs`/`.cjs`, and
-`.ts`/`.mts`/`.cts`; projects may configure others, including JSX and TSX,
-with a suitable grammar and query. A grammar can be built with the Tree-sitter
-CLI's `tree-sitter build --wasm`; the generated file and query are supplied by
-the project. Mara does not fetch or compile grammars during validation.
-For example, one `.mara/project.toml` entry is:
+Mara contains no compiled language integrations. Projects configure external
+SCIP indexers and optional Tree-sitter WebAssembly grammars independently in
+`.mara/project.toml` format 4. Mara owns invocation, standard SCIP protobuf
+reading, marker parsing, schema/item resolution, graph identity and navigation.
+Each indexer owns language support, project discovery, compilation requirements
+and descriptor generation. Adding a language does not require a Mara rebuild.
 
 ```toml
-format_version = 3
+format_version = 4
+
+[[code.indexers]]
+name = "rust"
+command = ["rust-analyzer", "scip", ".", "--output", "{output}"]
+position_encoding = "utf8"
+
+# Optional: declaration content and source comment attachment.
 [[code.languages]]
 name = "rust"
 extensions = ["rs"]
 grammar = ".mara/code/rust.wasm"
 query = ".mara/code/rust.scm"
-separator = "::"
 ```
 
-The query uses standard Tree-sitter capture syntax, for example
-`(function_item name: (_) @name) @symbol` and
-`(line_comment) @comment`. Asset paths must remain inside the project.
-The bundled grammar assets were built from tree-sitter-rust 0.24.2,
-tree-sitter-python 0.25.0, tree-sitter-javascript 0.25.0, and
-tree-sitter-typescript 0.23.2; their MIT notices accompany the files.
+Each unique snake_case indexer name is persisted in links; renaming it breaks
+those links. `command` is an executable and argument array, with exactly one
+standalone `{output}` argument. Mara replaces that argument with a temporary
+output path and runs the command from the project root without an implicit shell.
+Install the executable and its language dependencies separately. Mara does not
+download indexers, compile grammars, or contain language-specific command defaults.
+Only enable commands trusted by the project: they can run compiler/build tooling
+and have the permissions and network access of the Mara process.
 
-Rust selectors use `::` qualification through named modules, types, traits,
-functions, and methods; implementation blocks supply their type as a lexical
-scope. Python and JavaScript/TypeScript selectors use `.`
-qualification through named classes, functions, and methods. Nested named
-functions use their lexical owners. Named declarations may be selected
-directly; computed names, anonymous constructs, macro-expanded declarations,
-and overloaded signatures without a unique native selector are unsupported.
-One selector must resolve to exactly one declaration. No adapter chooses the
-first of multiple matches.
+Mara invokes every configured indexer whenever it loads code for a corpus
+operation, including validation and reads; users need no pre-indexing step.
+It consumes fresh output and keeps no persistent SCIP cache. Nonzero exit,
+missing/malformed output, a different indexed project root, invalid source ranges,
+or changed project inputs during execution produce incomplete-validation errors;
+normal operations fail instead of returning a partial graph. Command diagnostics
+identify the indexer without exposing its raw stdout/stderr. Input snapshots use
+unignored regular project files, excluding Mara mutation bookkeeping and staging
+files. Indexer-generated build artifacts should follow project ignore rules.
 
-For the second-language proof, Python, JavaScript, and TypeScript fixtures
-each connect a requirement to a named implementation method and a nested
-verification function. They exercise the same canonical relation, marker,
-inverse-authoring, navigation, and diagnostic paths as the Rust workflow.
-The Rust workflow uses `REQ-RELATION-CARDINALITY`,
-`src/graph_constraints.rs::evaluate`, and its CLI/MCP verification in
-`tests/cli.rs`.
+Document positions follow SCIP's declared encoding. For older indexers that omit
+it, configure their documented `position_encoding` (`utf8`, `utf16`, or `utf32`).
+Without either declaration, ASCII is unambiguous; non-ASCII source is rejected.
+Only global definition occurrences are linkable. SCIP `local N` identities are
+unstable and excluded. Two different full symbols that collapse to the same
+file/indexer/descriptor cause an error. Multiple declarations of one full symbol
+share one endpoint, including TypeScript overload signatures and implementation.
+Independently implemented overloads remain distinct when the indexer supplies
+different descriptors. Mara does not invent signatures or choose among candidates.
+The guarantee relies on the indexer's descriptor stability: upstream identity
+reuse cannot be detected without persistent history. Changing indexer semantics
+may require explicit link migration.
+
+Tree-sitter supplies declaration ranges and comment ownership, never symbol
+identity. Its query captures declarations with `@symbol` and `@name`, lexical
+containers with `@scope` and `@name`, and comments with `@comment`. Optional
+`@modifier` and `@wrapper` captures support attributes, decorators and exports.
+The deepest enclosing declaration or immediately following declaration owns a
+marker; its name span must match exactly one global SCIP identity. Otherwise the
+marker is unsupported. File-owned markers need no symbol. Invalid packs and
+duplicate extension assignments are diagnosed. Asset paths stay in the project.
+With no grammar, SCIP symbol links still work, using the indexer's enclosing
+range for content, or its definition token if no enclosing range is supplied.
+Multiple declaration ranges of one identity are read as their enclosing source
+interval. No explicit separator is configured.
+
+The repository contains example runtime grammar/query assets built from
+tree-sitter-rust 0.24.2, tree-sitter-python 0.25.0,
+tree-sitter-javascript 0.25.0 and tree-sitter-typescript 0.23.2, with MIT notices.
+They do not supply semantic identities without a configured indexer. Build other
+grammars with `tree-sitter build --wasm` and supply a matching capture query.
+
+## Migration and verification
+
+Existing projects with code bindings must change project format 3 to 4, remove
+`separator`, install/configure indexers, and replace native selectors with exact
+file/indexer-scoped descriptors. Old selectors are never interpreted as aliases.
+Keep existing schema format 3, item MIDs, relation names and grammar/query assets.
+Projects without code bindings may retain their existing project format.
+
+Real-indexer probes cover scip-typescript 0.4.0, scip-clang 0.4.0 and
+rust-analyzer 1.97.1. C++ overload descriptors remain distinct after body edits,
+insertion and reordering; deletion or rename removes the old identity.
+TypeScript overloads share one callable descriptor, including after package
+version changes. Regression fixtures in `tests/fixtures/scip` preserve real
+indexer output and exercise CLI/MCP navigation, marker/inverse agreement,
+package version independence, absent-overload failure and indexer failure.
 
 ## Validation and navigation
 
 Missing file or symbol, ambiguous selector, and unsupported file/selector or
 comment attachment produce distinct stable error codes at the authored
 occurrence. Invalid relation permission and missing/ambiguous item markers
-remain relation/reference errors. Validation does not access the network or
-execute code. Moving, renaming, or deleting a symbol re-derives marker-owned
+remain relation/reference errors. Validation invokes the configured indexer commands as described above. Moving, renaming, or deleting a symbol re-derives marker-owned
 backlinks from current source; an old item-authored selector fails validation
 until edited. Equivalent marker and item-authored assertions deduplicate as
 one edge, while retaining both locations.
@@ -189,4 +219,19 @@ an explicit diagnostic: relation commands never modify code source files.
 Removing an item-authored inline code relation leaves its `code:` target as
 plain text in the item body.
 Code markers are added or removed by directly editing their source comments.
+:::
+
+:::mara decision ADR-SCIP-CODE-IDENTITY
+:mid: 01M3H5VS7R5JY96P7FH2JQBX2E
+:title: Delegate symbol identity to pluggable SCIP indexers
+:justifies: DES-CODE-TRACEABILITY
+
+Use project-configured external SCIP indexers for semantic identity and optional
+runtime Tree-sitter assets for source comment attachment. This keeps language
+integrations out of the Mara binary and delegates overload disambiguation to
+language maintainers. Scope descriptors by project-relative file and configured
+indexer name; omit package metadata so ordinary version bumps preserve links.
+Reject collisions and unresolved descriptors without name or position fallback.
+Renames and moves may break links. Remove native selector separators because
+syntax grammars do not define cross-language semantic identity.
 :::

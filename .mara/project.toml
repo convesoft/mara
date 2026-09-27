@@ -1,4 +1,4 @@
-format_version = 3
+format_version = 4
 
 [project]
 name = "mara"
@@ -12,25 +12,26 @@ name = "rust"
 extensions = ["rs"]
 grammar = ".mara/code/rust.wasm"
 query = ".mara/code/rust.scm"
-separator = "::"
 
 [[code.languages]]
 name = "python"
 extensions = ["py"]
 grammar = ".mara/code/python.wasm"
 query = ".mara/code/python.scm"
-separator = "."
 
 [[code.languages]]
 name = "javascript"
 extensions = ["js", "mjs", "cjs"]
 grammar = ".mara/code/javascript.wasm"
 query = ".mara/code/javascript.scm"
-separator = "."
 
 [[code.languages]]
 name = "typescript"
 extensions = ["ts", "mts", "cts"]
 grammar = ".mara/code/typescript.wasm"
 query = ".mara/code/typescript.scm"
-separator = "."
+
+[[code.indexers]]
+name = "rust"
+command = ["rust-analyzer", "scip", ".", "--output", "{output}", "--num-threads", "2"]
+position_encoding = "utf8"

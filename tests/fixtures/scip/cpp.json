@@ -1,0 +1,123 @@
+{
+  "metadata": {
+    "tool_info": {
+      "name": "scip-clang",
+      "version": "0.4.0",
+      "arguments": [
+        "/tmp/mara-scip-check.qb5tcM/scip-clang",
+        "--compdb-path",
+        "compile_commands.json",
+        "--index-output-path",
+        "index.scip",
+        "--no-progress-report",
+        "-j",
+        "1"
+      ]
+    },
+    "project_root": "file:///tmp/mara-scip-check.qb5tcM/cpp",
+    "text_document_encoding": 1
+  },
+  "documents": [
+    {
+      "language": "CPP",
+      "relative_path": "service.cpp",
+      "occurrences": [
+        {
+          "range": [
+            0,
+            0,
+            3
+          ],
+          "TypedRange": null,
+          "symbol": "cxx . . $ `<file>/service.cpp`/",
+          "symbol_roles": 1,
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            0,
+            4,
+            9
+          ],
+          "TypedRange": null,
+          "symbol": "cxx . . $ parse(7864480464b09eea).",
+          "symbol_roles": 1,
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            0,
+            14,
+            19
+          ],
+          "TypedRange": null,
+          "symbol": "local 0",
+          "symbol_roles": 1,
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            0,
+            30,
+            35
+          ],
+          "TypedRange": null,
+          "symbol": "local 0",
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            1,
+            4,
+            9
+          ],
+          "TypedRange": null,
+          "symbol": "cxx . . $ parse(620b9ac44d2573a6).",
+          "symbol_roles": 1,
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            1,
+            17,
+            22
+          ],
+          "TypedRange": null,
+          "symbol": "local 1",
+          "symbol_roles": 1,
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            1,
+            37,
+            42
+          ],
+          "TypedRange": null,
+          "symbol": "local 1",
+          "TypedEnclosingRange": null
+        }
+      ],
+      "symbols": [
+        {
+          "symbol": "cxx . . $ parse(7864480464b09eea).",
+          "documentation": [
+            "No documentation available."
+          ]
+        },
+        {
+          "symbol": "cxx . . $ `<file>/service.cpp`/",
+          "documentation": [
+            "File: service.cpp"
+          ]
+        },
+        {
+          "symbol": "cxx . . $ parse(620b9ac44d2573a6).",
+          "documentation": [
+            "No documentation available."
+          ]
+        }
+      ]
+    }
+  ]
+}

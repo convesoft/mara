@@ -168,6 +168,9 @@ Changing that line in place to `:follows: REQ-A` passes validation but means
   `format_version = 1`, and explicit project-relative files. Invalid rule
   definitions prevent successful adoption. No rule context or Turtle files
   are migrated; those development formats were never shipped.
+- Projects with code bindings require project format 4 and pluggable SCIP
+  indexers. Remove native separators and migrate symbol links using
+  [the code migration contract](code-traceability.mara.md#migration-and-verification).
 - Discovery JSON format 2, relationship JSON format 1, validation JSON format
   1 and trace JSON format 1 are separate client contracts. Clients must update
   their parsers and discard old cursors and structural handles. MIDs remain

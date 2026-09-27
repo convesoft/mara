@@ -1,0 +1,73 @@
+{
+  "metadata": {
+    "tool_info": {
+      "name": "rust-analyzer",
+      "version": "1.97.1 (8bab26f 2026-07-14)"
+    },
+    "project_root": "file:///tmp/mara-scip-check.qb5tcM/rust",
+    "text_document_encoding": 1
+  },
+  "documents": [
+    {
+      "language": "rust",
+      "relative_path": "src/lib.rs",
+      "occurrences": [
+        {
+          "range": [
+            0,
+            0,
+            2,
+            0
+          ],
+          "TypedRange": null,
+          "symbol": "rust-analyzer cargo mara-scip-probe 1.0.0 crate/",
+          "symbol_roles": 1,
+          "enclosing_range": [
+            0,
+            0,
+            2,
+            0
+          ],
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            1,
+            7,
+            10
+          ],
+          "TypedRange": null,
+          "symbol": "rust-analyzer cargo mara-scip-probe 1.0.0 run().",
+          "symbol_roles": 1,
+          "enclosing_range": [
+            0,
+            0,
+            1,
+            26
+          ],
+          "TypedEnclosingRange": null
+        }
+      ],
+      "symbols": [
+        {
+          "symbol": "rust-analyzer cargo mara-scip-probe 1.0.0 crate/",
+          "kind": 29,
+          "signature_documentation": {
+            "language": "rust",
+            "text": "extern crate mara_scip_probe"
+          }
+        },
+        {
+          "symbol": "rust-analyzer cargo mara-scip-probe 1.0.0 run().",
+          "kind": 17,
+          "display_name": "run",
+          "signature_documentation": {
+            "language": "rust",
+            "text": "pub fn run() -> u32"
+          }
+        }
+      ],
+      "position_encoding": 1
+    }
+  ]
+}

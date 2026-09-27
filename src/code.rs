@@ -10,6 +10,9 @@ use ignore::WalkBuilder;
 use serde::Deserialize;
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
 
+mod scip_index;
+pub(crate) use scip_index::IndexerConfig;
+
 use crate::{DiagnosticCode, Project, SourceLocation, corpus::location};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +33,7 @@ pub(crate) struct CodeFile {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CodeSymbol {
     pub selector: String,
+    identity: String,
     pub source: SourceLocation,
     pub content: SourceLocation,
     body_start: usize,
@@ -43,6 +47,7 @@ pub(crate) struct CodeMarker {
     pub target: String,
     pub endpoint: String,
     pub source: SourceLocation,
+    owner_start: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,12 +73,10 @@ pub(crate) struct LanguageConfig {
     extensions: Vec<String>,
     grammar: PathBuf,
     query: PathBuf,
-    separator: String,
 }
 
 struct Adapter {
     extensions: Vec<String>,
-    separator: String,
     parser: Parser,
     query: Query,
 }
@@ -108,7 +111,6 @@ impl Adapter {
         for language in project.code_languages() {
             if language.name.is_empty()
                 || language.extensions.is_empty()
-                || language.separator.is_empty()
                 || !valid_asset_path(&language.grammar)
                 || !valid_asset_path(&language.query)
                 || language.extensions.iter().any(|extension| {
@@ -173,7 +175,6 @@ impl Adapter {
                 .map_err(|e| fail(e.to_string()))?;
             adapters.push(Self {
                 extensions: language.extensions.clone(),
-                separator: language.separator.clone(),
                 parser,
                 query,
             });
@@ -292,9 +293,13 @@ impl CodeIndex {
                 return (result, problems);
             }
         };
-        if adapters.is_empty() {
+        if adapters.is_empty() && project.code_indexers.is_empty() {
             return (result, problems);
         }
+        let indexes = match scip_index::run(project) {
+            Ok(indexes) => indexes,
+            Err(problem) => return (result, vec![problem]),
+        };
         let mut walker = WalkBuilder::new(project.root());
         walker
             .hidden(false)
@@ -351,6 +356,7 @@ impl CodeIndex {
             problems.append(&mut file_problems);
             result.files.insert(path, file);
         }
+        scip_index::apply(project, indexes, &mut result, &mut problems);
         (result, problems)
     }
 
@@ -411,16 +417,19 @@ impl CodeIndex {
             .iter()
             .filter(|symbol| symbol.selector == selector);
         let symbol = matches.next().ok_or(ResolveError::MissingSymbol)?;
-        if matches.next().is_some() {
-            return Err(ResolveError::Ambiguous);
+        let mut start = symbol.content.span().start_byte();
+        let mut end = symbol.content.span().end_byte();
+        for declaration in matches {
+            if declaration.identity != symbol.identity {
+                return Err(ResolveError::Ambiguous);
+            }
+            start = start.min(declaration.content.span().start_byte());
+            end = end.max(declaration.content.span().end_byte());
         }
         Ok(CodeResolved {
             reference: reference.to_owned(),
             source: symbol.source.clone(),
-            content: Some(
-                file.source[symbol.content.span().start_byte()..symbol.content.span().end_byte()]
-                    .to_owned(),
-            ),
+            content: Some(file.source[start..end].to_owned()),
             symbol: Some(symbol.selector.clone()),
         })
     }
@@ -504,16 +513,10 @@ fn parse_file(
                 wrappers.insert(capture.node.id());
             }
         }
-        if let (Some((node, selectable)), Some(name_node)) = (declaration, name) {
-            if matches!(
-                name_node.kind(),
-                "computed_property_name" | "string" | "number"
-            ) {
-                continue;
-            }
-            if let Some(name) = source.get(name_node.byte_range()) {
-                declarations.insert(node.id(), (name.to_owned(), name_node, selectable));
-            }
+        if let (Some((node, selectable)), Some(name_node)) = (declaration, name)
+            && let Some(name) = source.get(name_node.byte_range())
+        {
+            declarations.insert(node.id(), (name.to_owned(), name_node, selectable));
         }
     }
     comments.sort_by_key(|node| (node.start_byte(), node.end_byte()));
@@ -524,7 +527,6 @@ fn parse_file(
         modifiers: &modifiers,
         wrappers: &wrappers,
         comments: &comment_ids,
-        separator: &adapter.separator,
         path: &path,
         lines: &lines,
     };
@@ -578,6 +580,7 @@ fn parse_file(
                                 target: parts[1].into(),
                                 endpoint,
                                 source: marker_source,
+                                owner_start: symbol.map(|symbol| symbol.source.span().start_byte()),
                             });
                         }
                         Err(error) => problems.push(CodeProblem {
@@ -614,7 +617,6 @@ struct CollectContext<'tree, 'data> {
     modifiers: &'data BTreeSet<usize>,
     wrappers: &'data BTreeSet<usize>,
     comments: &'data BTreeSet<usize>,
-    separator: &'data str,
     path: &'data Path,
     lines: &'data [usize],
 }
@@ -667,7 +669,8 @@ fn collect<'tree>(
                 .min()
                 .unwrap_or(node.start_byte());
             symbols.push(CodeSymbol {
-                selector: prefix.join(context.separator),
+                selector: prefix.join("/"),
+                identity: String::new(),
                 source: location(
                     context.path,
                     context.lines,
@@ -722,26 +725,26 @@ mod tests {
             (
                 "sample.rs",
                 "// @mara implements REQ-A\nmod outer { struct Worker; impl Worker { fn run() { // @mara verifies REQ-A\n fn check() {} } } }",
-                "outer::Worker::run",
-                "outer::Worker::run::check",
+                "outer/Worker/run",
+                "outer/Worker/run/check",
             ),
             (
                 "sample.py",
                 "class Outer:\n    # @mara implements REQ-A\n    def run(self):\n        # @mara verifies REQ-A\n        def check(): pass\n",
-                "Outer.run",
-                "Outer.run.check",
+                "Outer/run",
+                "Outer/run/check",
             ),
             (
                 "sample.js",
                 "class Outer { // @mara implements REQ-A\n run() { // @mara verifies REQ-A\n function check() {} } }",
-                "Outer.run",
-                "Outer.run.check",
+                "Outer/run",
+                "Outer/run/check",
             ),
             (
                 "sample.ts",
                 "class Outer { // @mara implements REQ-A\n run(): void { // @mara verifies REQ-A\n function check(): void {} } }",
-                "Outer.run",
-                "Outer.run.check",
+                "Outer/run",
+                "Outer/run/check",
             ),
         ];
         let mut adapters = adapters();
@@ -850,7 +853,7 @@ mod tests {
             (
                 "sample.rs",
                 "trait Api {\n    /// @mara code_implements REQ-A\n    fn run(&self);\n}\n",
-                "code:sample.rs::Api::run",
+                "code:sample.rs::Api/run",
             ),
             (
                 "sample.rs",

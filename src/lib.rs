@@ -89,6 +89,7 @@ pub struct Project {
     content_discovery_complete: bool,
     rule_files: Vec<PathBuf>,
     code_languages: Vec<code::LanguageConfig>,
+    code_indexers: Vec<code::IndexerConfig>,
 }
 
 #[derive(Debug)]
@@ -1432,6 +1433,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
                     content_discovery_complete: false,
                     rule_files: vec![],
                     code_languages: vec![],
+                    code_indexers: vec![],
                 },
                 errors: vec![diagnostic],
                 schema_available: false,
@@ -1469,10 +1471,10 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         };
     let mut rule_files = Vec::new();
     if configuration.contains_key("rules") {
-        if !matches!(format_version, Some(2 | 3)) {
+        if !matches!(format_version, Some(2..=4)) {
             errors.push(ConfigurationDiagnostic::project(
                 &["rules"],
-                "rule sources require project format 2 or 3".into(),
+                "rule sources require project format 2, 3 or 4".into(),
             ));
         }
         if let Some(mut rules) =
@@ -1498,29 +1500,39 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         }
     }
     let mut code_languages = Vec::new();
+    let mut code_indexers = Vec::new();
     if configuration.contains_key("code") {
-        if format_version != Some(3) {
+        if format_version != Some(4) {
             errors.push(ConfigurationDiagnostic::project(
                 &["code"],
-                "code language bindings require project format 3".into(),
+                "SCIP code bindings require project format 4; migrate native selectors and remove separator".into(),
             ));
         }
         if let Some(mut code) = take_project_table(&mut configuration, "code", "code", &mut errors)
         {
-            code_languages =
-                take_project_value(&mut code, "languages", "code.languages", &mut errors)
-                    .unwrap_or_default();
+            if code.contains_key("languages") {
+                code_languages =
+                    take_project_value(&mut code, "languages", "code.languages", &mut errors)
+                        .unwrap_or_default();
+            }
+            if code.contains_key("indexers") {
+                code_indexers =
+                    take_project_value(&mut code, "indexers", "code.indexers", &mut errors)
+                        .unwrap_or_default();
+            }
             unknown_project_keys(&code, "code", &mut errors);
         }
     }
     unknown_project_keys(&configuration, "", &mut errors);
 
-    if format_version.is_some_and(|version| version != 1 && version != 2 && version != 3) {
+    if format_version
+        .is_some_and(|version| version != 1 && version != 2 && version != 3 && version != 4)
+    {
         errors.push(ConfigurationDiagnostic::new(
             DiagnosticCode::FormatUnsupported,
             diagnostics::pointer(&["format_version"]),
             format!(
-                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. Supported formats are 1 (without rules or code), 2 (without code), and 3",
+                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. Supported formats are 1 (without rules or code), 2 (without code), 3 (legacy), and 4 (SCIP code)",
                 format_version.expect("format version is present")
             ),
         ));
@@ -1617,6 +1629,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
             content_discovery_complete,
             rule_files,
             code_languages,
+            code_indexers,
         },
         errors,
         schema_available,
