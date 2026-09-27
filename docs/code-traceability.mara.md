@@ -299,3 +299,41 @@ Keep the command, source extensions and optional grammar assets in one language 
 
 Preserve literal SCIP backticks for readable, exact targets. Escape characters that conflict with Mara reference syntax, without shortening or normalizing semantic descriptors and risking collapsed identities.
 :::
+
+:::mara evidence EVD-SCIP-CODE-HANDLING
+:mid: 01M3HBDTXA12PPZTTJAJFZ3F8Z
+:title: SCIP code associations pass candidate and real-indexer workflows
+:status: accepted
+:result: passed
+:captured_at: 2026-09-27T11:53:18Z
+:subject_revision: 3071796e99f0da2319496d7f3d4e986b75e13d1b
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-ITEM-LIST
+:evidences: VER-UNIFIED-SEARCH
+:evidences: VER-BOUNDED-NODE-READ
+:evidences: VER-DOCUMENT-NAVIGATION
+:evidences: VER-RELATION-INSPECTION
+:evidences: VER-CORPUS-CONFORMANCE
+:evidences: VER-MID-AND-RECOVERY
+:evidences: VER-ITEM-CREATION
+:evidences: VER-RELATION-MUTATION
+:evidences: VER-ITEM-UPDATE
+:evidences: VER-ITEM-DELETION
+:evidences: VER-ITEM-MOVEMENT
+:evidences: VER-ITEM-RENAME
+:evidences: VER-PROJECT-VALIDATION
+:evidences: VER-POLICY-VALIDATION
+
+At subject revision 3071796e99f0da2319496d7f3d4e986b75e13d1b, `cargo test --locked --all-targets` passed 349 tests across 25 suites with zero failures. Two ignored subprocess helpers were each exercised at three interruption boundaries by passing parent tests. `cargo fmt --all -- --check` and `cargo clippy --locked --all-targets -- -D warnings` passed. The tree was clean after committing the tested source and before adding this evidence.
+
+Fourteen discovery groups and fourteen SCIP integration groups check exact descriptors, escaped punctuation and literal backticks, declared UTF-8/UTF-16/UTF-32 positions, absent non-ASCII encoding, local-symbol exclusion, shared declarations and identity collisions, grouped comment spans/content/lexical boundaries, confinement, empty/populated transitions and strict sanitized command/output failures. Focused regressions first reproduced false-valid results for incomplete owner-name spans and invalid enclosing ranges, then passed after correction. Existing retrieval, relation, mutation, recovery and validation suites pass with explicit isolated SCIP fixtures and unchanged source assertions.
+
+A genuine configured rust-analyzer 1.97.1 workflow, without recorded-index substitution, passed through the candidate CLI and stdio MCP in a disposable Rust package. Its exact run() endpoint remained stable after a body edit and package-version bump. Recorded scip-typescript 0.4.0 and scip-clang 0.4.0 fixtures separately cover shared callable identity, package metadata independence and distinct/deleted overloads; these protocol fixtures do not establish a fresh live TypeScript or C++ indexer run.
+
+The candidate CLI validated the self-hosted repository with valid:true, evaluation_complete:true, zero errors/warnings and no remaining page. REQ-CODE-TRACEABILITY exposed five exact Rust symbol neighbours and DES-CODE-TRACEABILITY exposed twenty-one; none fell back to a file endpoint. Reading code:src/code.rs::rust::code/impl#%5BCodeIndex%5Dload(). returned the actual loader declaration.
+
+Environment: Linux x86_64, Rust 1.97.1, candidate /tmp/mara72-target/debug/mara; CARGO_TARGET_DIR=/tmp/mara72-target, CARGO_PROFILE_DEV_DEBUG=0, CARGO_PROFILE_TEST_DEBUG=0, CARGO_INCREMENTAL=0. The matrix contracts remain draft and matrix runtime is not part of this checkpoint. Installed-tool trace checks are authoring checks, separate from candidate execution; matrix implementation and its code-endpoint rendering verification remain the next increment.
+:::
