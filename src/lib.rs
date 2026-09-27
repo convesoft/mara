@@ -1469,10 +1469,10 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         };
     let mut rule_files = Vec::new();
     if configuration.contains_key("rules") {
-        if !matches!(format_version, Some(2..=4)) {
+        if !matches!(format_version, Some(2 | 3)) {
             errors.push(ConfigurationDiagnostic::project(
                 &["rules"],
-                "rule sources require project format 2, 3 or 4".into(),
+                "rule sources require project format 2 or 3".into(),
             ));
         }
         if let Some(mut rules) =
@@ -1499,10 +1499,10 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
     }
     let mut code_languages = Vec::new();
     if configuration.contains_key("code") {
-        if format_version != Some(4) {
+        if format_version != Some(3) {
             errors.push(ConfigurationDiagnostic::project(
                 &["code"],
-                "SCIP code bindings require project format 4; migrate native selectors and remove separator".into(),
+                "code language bindings require project format 3".into(),
             ));
         }
         if let Some(mut code) = take_project_table(&mut configuration, "code", "code", &mut errors)
@@ -1517,14 +1517,12 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
     }
     unknown_project_keys(&configuration, "", &mut errors);
 
-    if format_version
-        .is_some_and(|version| version != 1 && version != 2 && version != 3 && version != 4)
-    {
+    if format_version.is_some_and(|version| version != 1 && version != 2 && version != 3) {
         errors.push(ConfigurationDiagnostic::new(
             DiagnosticCode::FormatUnsupported,
             diagnostics::pointer(&["format_version"]),
             format!(
-                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. Supported formats are 1 (without rules or code), 2 (without code), 3 (legacy), and 4 (SCIP code)",
+                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. Supported formats are 1 (without rules or code), 2 (without code), and 3 (code language bindings)",
                 format_version.expect("format version is present")
             ),
         ));

@@ -12226,7 +12226,7 @@ fn scip_code_fixture(language: &str) -> TempDir {
     let config_path = root.join(".mara/project.toml");
     let mut config = fs::read_to_string(&config_path).unwrap().replacen(
         "format_version = 1",
-        "format_version = 4",
+        "format_version = 3",
         1,
     );
     config.push_str(&format!("\n[[code.languages]]\nname = \"{language}\"\ncommand = [\"cp\", \".mara/{language}.scip\", \"{{output}}\"]\nposition_encoding = \"utf8\"\n"));
@@ -12445,12 +12445,24 @@ fn scip_indexer_failures_do_not_return_partial_code_relations() {
     assert_eq!(invalid["valid"], false);
     assert_eq!(invalid["evaluation_complete"], false);
     assert!(!mara(root, &["related", "REQ-A"]).status.success());
-    fs::write(
-        &path,
-        original.replace("format_version = 4", "format_version = 3"),
-    )
-    .unwrap();
-    assert_eq!(validation_with_parity(root, &[])["valid"], false);
+    for version in [2, 4] {
+        fs::write(
+            &path,
+            original.replace("format_version = 3", &format!("format_version = {version}")),
+        )
+        .unwrap();
+        let invalid = validation_with_parity(root, &[]);
+        assert_eq!(invalid["valid"], false);
+        if version == 4 {
+            assert!(
+                invalid["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|d| d["code"] == "format_unsupported")
+            );
+        }
+    }
 }
 
 #[cfg(unix)]

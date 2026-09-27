@@ -228,7 +228,7 @@ select explicit mentions, and `--cursor '<next_cursor>'` for continuation.
 
 ## Code endpoints
 
-Project format 4 uses one `[[code.languages]]` entry per integration with
+Project format 3 uses one `[[code.languages]]` entry per integration with
 `name` and `command` (executable/arguments, one standalone `{output}` placeholder).
 Mara invokes them automatically from the project root when loading the corpus;
 install indexers separately and only configure trusted commands. Commands may

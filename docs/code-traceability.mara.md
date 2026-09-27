@@ -98,7 +98,7 @@ symbol selection are adapter responsibilities, not generic text heuristics.
 ## Indexer and grammar boundary
 
 Mara contains no compiled language integrations. Projects configure one
-`[[code.languages]]` entry per integration in `.mara/project.toml` format 4.
+`[[code.languages]]` entry per integration in `.mara/project.toml` format 3.
 Each entry combines a SCIP command with optional Tree-sitter WebAssembly assets.
 Mara owns invocation, standard SCIP protobuf reading, marker parsing, schema/item
 resolution, graph identity and navigation.
@@ -106,7 +106,7 @@ Each indexer owns language support, project discovery, compilation requirements
 and descriptor generation. Adding a language does not require a Mara rebuild.
 
 ```toml
-format_version = 4
+format_version = 3
 
 [[code.languages]]
 name = "rust"
@@ -174,12 +174,12 @@ grammars with `tree-sitter build --wasm` and supply a matching capture query.
 
 ## Migration and verification
 
-Existing projects with code bindings must change project format 3 to 4, remove
-`separator`, install/configure indexers, and replace native selectors with exact
+Projects with code bindings use project format 3. For existing native-selector
+bindings, remove `separator`, install/configure indexers, and replace selectors with exact
 file/indexer-scoped descriptors. Old selectors are never interpreted as aliases.
 Unreleased configurations with separate `[[code.indexers]]` entries must move
 their command and position encoding into the matching `[[code.languages]]` entry
-and remove the separate indexer entries. Project format remains 4.
+and remove the separate indexer entries. Project format remains 3; reset development configurations marked 4 to 3.
 Keep existing schema format 3, item MIDs, relation names and grammar/query assets.
 Projects without code bindings may retain their existing project format.
 
