@@ -25,11 +25,15 @@ pub use discovery::{
     ConnectionKind, DiscoveryConnection, DiscoveryContext, DiscoveryGraph, DiscoveryKind,
     DiscoveryNode, DiscoveryNodeKind, DiscoveryNodeSummary,
 };
+mod external;
+mod relations;
+pub use relations::{RelationEdge, RelationEndpoint, RelationError, RelationErrorDetail};
 mod query;
 pub use query::{
     EntryRange, FieldFilter, GetResult, ItemCollectionResult, ItemFilters, ItemSource, ItemSummary,
-    MetadataFragment, QueryError, RelationDirection, SearchExcerpt, SearchHit, SearchResult,
-    TextRange, get, list_items, search,
+    MetadataFragment, QueryError, RelatedConnection, RelatedFilters, RelatedNeighbour,
+    RelatedResult, RelationDirection, SearchExcerpt, SearchHit, SearchResult, TextRange, get,
+    list_items, related, search,
 };
 mod operations;
 mod rules;
@@ -39,9 +43,9 @@ pub use diagnostics::{
 };
 pub use operations::{
     DeclarationSummary, FieldValue, GetParams, ItemFilterParams, OperationContext,
-    ProjectInitializationResult, ProjectSummary, SchemaGetResult, SchemaKind, SchemaListResult,
-    SearchParams, ValidationDiagnostic, ValidationResult, ValidationScope, ValidationTargetKind,
-    project_initialize,
+    ProjectInitializationResult, ProjectSummary, RelatedParams, SchemaGetResult, SchemaKind,
+    SchemaListResult, SearchParams, ValidationDiagnostic, ValidationResult, ValidationScope,
+    ValidationTargetKind, project_initialize,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";

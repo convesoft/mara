@@ -7,9 +7,9 @@ review; it does not authorize removing behavior. Product contracts live in the
 linked capability documents rather than in this inventory.
 
 The active candidate now supports project initialization, schema inspection and
-definition validation, item listing, unified search and bounded get. Document/code discovery
+definition validation, item listing, unified search, bounded get and direct navigation. Document/code discovery
 and the document graph are reviewed dependencies. Earlier full-runtime test rows
-remain historical where their edit, validation or navigation transports
+remain historical where their edit or validation transports
 have not yet been restored. The sections below identify current checkpoints.
 
 | Baseline capability | Disposition and review boundary |
@@ -317,3 +317,35 @@ Resolver failures cover missing files/symbols, duplicates, unsupported selectors
 and paths outside the project. Search tests again read complete titles and
 reject misspelled exact identities. Source and pending mutation/graph tests remain
 intact; no production behavior change was needed.
+
+## Direct-neighbour checkpoint review
+
+Selected increment: top-level CLI/MCP `related` for document nodes and code
+endpoints. Complete the existing search → direct connection → get workflow,
+with bounded pages, exact filters and source evidence. The dependency is the
+read-only canonical relation projection plus external-address parsing, not
+relation editing/inspection, rule evaluation or project validation.
+
+| Area | Review and disposition |
+|---|---|
+| Semantic dependency | Retain item/code/external endpoint identity, inverse normalization, same-flavour and endpoint permission checks, MID-ordered symmetric pairs, and canonical-name/endpoint deduplication with occurrence counts. Restore only edge construction/resolution and the disposable graph; leave occurrence tokens, inspection and mutation helpers pending. |
+| External/code endpoints | Retain exact local-only HTTP(S) addresses with no fabricated item identity or network reads. Code references reuse the verified resolver; marker and item-inverse assertions contribute to one edge. Binary file-only endpoints remain navigable although get rejects their content. |
+| Navigation | Retain direct built-in connections and canonical schema edges. Namespace ambiguity is vocabulary-based. Alias filters do not reverse direction; flavour filters select item neighbours. Preserve selected unresolved-target errors and exact code-marker errors instead of presenting an incomplete selected traversal. |
+| Ordering/self edges | Retain outgoing, incoming, then symmetric groups; deterministic source order and external-address order. Directed self-edges appear once outgoing by default or in the requested orientation. Symmetric self-edges appear once only in omitted/symmetric direction. Mentions retain parallel source occurrences. |
+| Bounds | Retain 20-default/1–100 entry limits, 65,536-byte JSON budget, full mandatory summaries, and fingerprinted continuation after filtering/deduplication. Reject stale/invalid positions and oversized entries without skipping them. |
+| Tests | Restore three navigation groups and five related retrieval groups: evidence/parent-child workflow, namespaces/retired interface, oversized root, complete ordered pages, stale requests, Unicode byte bounds, oversized neighbour and human rendering. Replace backfill fixture setup with fixture-owned identities; preserve original mutation/validation assertions in pending references. Add focused semantic alias/symmetric/self, external-terminal, code-marker and binary-file-only navigation groups from the broader baseline relationship workflow. |
+| Contracts | Correct obsolete relation-occurrence pagination and double self-edge wording to the accepted format-2 semantic-edge contract. Preserve canonical relation design identity, but keep its mutation/inspection obligations pending. Scope current evidence to restored read operations. |
+
+Completion requires real CLI/MCP navigation and complete pages, source
+preservation, semantic endpoint/count checks, baseline parity, all prior tests,
+formatting/Clippy, canonical validation, selected traceability and committed
+exact-revision evidence. Existing historical navigation evidence does not prove
+this corrected-bootstrap revision.
+
+The navigation suite retains eight baseline read groups and adds four focused
+semantic/failure groups. Direct fixture MID assignment replaces backfill setup;
+source bytes are compared around read workflows. RelationGraph retains endpoint
+identity and occurrence counts; its unused first-occurrence source field is
+deferred until validation/inspection needs it, while parsed occurrence spans
+remain intact. The only added direct dependency is the already-locked baseline
+URL parser. No mutation, occurrence-inspection or policy evaluator is restored.

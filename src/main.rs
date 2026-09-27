@@ -1,5 +1,8 @@
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
-use mara::{EntryRange, GetParams, GetResult, SearchParams};
+use mara::{
+    EntryRange, GetParams, GetResult, RelatedConnection, RelatedParams, RelationDirection,
+    SearchParams,
+};
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams, ItemSummary};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
@@ -21,7 +24,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation, item listing, unified search and bounded get. Further capabilities are pending their implementation reviews."
+    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation, item listing, unified search, bounded get and direct navigation. Further capabilities are pending their implementation reviews."
 )]
 struct Cli {
     /// Use this project root instead of ancestor discovery; selects the init target or binds MCP.
@@ -64,6 +67,39 @@ enum Command {
         #[arg(
             long,
             help = "Opaque next_cursor from the previous page; keep reference unchanged until has_more is false. Omit to start or restart after source/schema changes. Empty strings are invalid"
+        )]
+        cursor: Option<String>,
+    },
+
+    /// Explore direct schema relations, code backlinks, mentions, and containment with source evidence.
+    #[command(
+        after_help = "Discovery JSON format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation get. Internal neighbours have a reference for get/related; external neighbours have only kind and address and are terminal. JSON represents containment as contains with direction; human output displays its incoming view as contained_by. Use --relation builtin:contains --direction incoming for the parent, then outgoing on that parent for its children. Search again if a structural handle is stale."
+    )]
+    Related {
+        /// Exact item ID/MID, a code:<path>[::<selector>] reference, or a discovery handle.
+        reference: String,
+
+        /// Select edge direction relative to this node; omission includes incoming, outgoing and symmetric, outgoing first. Incoming/outgoing exclude symmetric edges.
+        #[arg(long, value_enum)]
+        direction: Option<CliRelationDirection>,
+
+        /// Select relation names (schema:name or builtin:name; shorthand only when unambiguous) (repeatable, OR); intersects the neighbour flavour filter. Omission includes all.
+        #[arg(long)]
+        relation: Vec<String>,
+
+        /// Select exact neighbour flavours (repeatable, OR); nonempty selects item neighbours only, omission includes all.
+        #[arg(long)]
+        flavour: Vec<String>,
+
+        #[arg(
+            long,
+            help = "Maximum relation entries per page: 1 through 100 (default 20), not unique neighbours; the byte budget may return fewer"
+        )]
+        limit: Option<usize>,
+
+        #[arg(
+            long,
+            help = "Opaque next_cursor from the previous page; keep reference/options unchanged until has_more is false; omit to start or restart after source/schema changes. Empty strings are invalid"
         )]
         cursor: Option<String>,
     },
@@ -244,6 +280,28 @@ fn run(cli: Cli) -> Result<bool, String> {
         command,
     } = cli;
     match command {
+        Command::Related {
+            reference,
+            direction,
+            relation,
+            flavour,
+            limit,
+            cursor,
+        } => {
+            let result = OperationContext::from_environment(project)?.related(RelatedParams {
+                reference,
+                direction: direction.map(Into::into),
+                relations: relation,
+                flavours: flavour,
+                limit,
+                cursor,
+            })?;
+            emit(format, &result, |result| {
+                print_related_connections(&result.connections);
+                print_page_continuation(result.has_more, result.next_cursor.as_deref());
+                Ok(())
+            })?;
+        }
         Command::Get { reference, cursor } => {
             let result = OperationContext::from_environment(project)?
                 .get(GetParams { reference, cursor })?;
@@ -707,4 +765,87 @@ fn print_entry_range(label: &str, range: &EntryRange) {
         "{label}\tstart_index={}\tend_index={}\ttotal={}\tpartial={}",
         range.start_index, range.end_index, range.total, range.partial
     );
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliRelationDirection {
+    Incoming,
+    Outgoing,
+    Symmetric,
+}
+
+impl From<CliRelationDirection> for RelationDirection {
+    fn from(value: CliRelationDirection) -> Self {
+        match value {
+            CliRelationDirection::Incoming => Self::Incoming,
+            CliRelationDirection::Outgoing => Self::Outgoing,
+            CliRelationDirection::Symmetric => Self::Symmetric,
+        }
+    }
+}
+
+fn print_related_connections(connections: &[RelatedConnection]) {
+    for connection in connections {
+        let node = match &connection.neighbour {
+            mara::RelatedNeighbour::Internal(node) => node,
+            mara::RelatedNeighbour::External { address, .. } => {
+                println!(
+                    "{} → external:{}\toccurrences={}",
+                    connection.label.as_deref().unwrap_or(&connection.relation),
+                    address,
+                    connection.occurrence_count.unwrap_or_default()
+                );
+                continue;
+            }
+        };
+        if let Some(edge) = &connection.edge {
+            let label = connection.label.as_deref().unwrap_or(&edge.relation);
+            let prefix =
+                if connection.direction == RelationDirection::Incoming && label == edge.relation {
+                    "incoming "
+                } else {
+                    ""
+                };
+            println!(
+                "{prefix}{label} → {}\t{}{}\t{}:{}\toccurrences={}\treference={}",
+                node.id.as_deref().unwrap_or(&node.reference),
+                node.title.as_deref().unwrap_or_default(),
+                if node.title_truncated {
+                    " [title truncated]"
+                } else {
+                    ""
+                },
+                node.source.path().display(),
+                node.source.start_line(),
+                connection.occurrence_count.unwrap(),
+                node.reference
+            );
+        } else {
+            let relation = match (connection.relation.as_str(), connection.direction) {
+                ("contains", RelationDirection::Incoming) => "contained_by",
+                ("builtin:contains", RelationDirection::Incoming) => "builtin:contained_by",
+                (name, _) => name,
+            };
+            let source = connection.source.as_ref().expect("builtin source");
+            println!(
+                "{}\t{}\t{}\t{}\t{}{}\t{}:{}\tevidence={}:{}-{}\treference={}",
+                connection.direction.as_str(),
+                relation,
+                node.id.as_deref().unwrap_or(&node.reference),
+                format!("{:?}", node.kind).to_lowercase(),
+                node.title.as_deref().unwrap_or_default(),
+                if node.title_truncated {
+                    " [title truncated]"
+                } else {
+                    ""
+                },
+                node.source.path().display(),
+                node.source.start_line(),
+                source.path().display(),
+                source.start_line(),
+                source.end_line(),
+                node.reference
+            );
+        }
+    }
 }

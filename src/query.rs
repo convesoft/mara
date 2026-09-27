@@ -12,6 +12,8 @@ use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 mod get;
 pub use get::{EntryRange, GetResult, MetadataFragment, TextRange, get};
+mod related;
+pub use related::{RelatedConnection, RelatedNeighbour, RelatedResult, related};
 mod page;
 mod search;
 pub use page::ItemCollectionResult;
@@ -138,15 +140,46 @@ impl ItemFilters {
 #[derive(Debug)]
 pub enum QueryError {
     InvalidDiscoveryReference,
-    MissingItem { id: String },
-    AmbiguousItem { id: String },
-    AmbiguousMid { mid: String },
-    AmbiguousSearchRelationName { name: String },
-    InvalidPage { message: String },
-    UnknownFlavour { name: String },
-    UnknownField { name: String },
-    UnknownRelation { name: String },
-    InvalidPath { path: PathBuf },
+    MissingItem {
+        id: String,
+    },
+    AmbiguousItem {
+        id: String,
+    },
+    AmbiguousMid {
+        mid: String,
+    },
+    AmbiguousSearchRelationName {
+        name: String,
+    },
+    AmbiguousRelationName {
+        name: String,
+    },
+    InvalidPage {
+        message: String,
+    },
+    MissingRelationTarget {
+        source: String,
+        relation: String,
+        target: String,
+    },
+    AmbiguousRelationTarget {
+        source: String,
+        relation: String,
+        target: String,
+    },
+    UnknownFlavour {
+        name: String,
+    },
+    UnknownField {
+        name: String,
+    },
+    UnknownRelation {
+        name: String,
+    },
+    InvalidPath {
+        path: PathBuf,
+    },
 }
 impl fmt::Display for QueryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -157,6 +190,23 @@ impl fmt::Display for QueryError {
             Self::AmbiguousMid { mid } => write!(f,"item MID '{mid}' is ambiguous"),
             Self::AmbiguousSearchRelationName { name } => write!(f,"ambiguous relation '{name}'; search accepts schema relations only; use schema:{name}"),
             Self::InvalidPage { message } => f.write_str(message),
+            Self::MissingRelationTarget {
+                source,
+                relation,
+                target,
+            } => write!(
+                f,
+                "relation '{relation}' from '{source}' references missing item '{target}'"
+            ),
+            Self::AmbiguousRelationTarget {
+                source,
+                relation,
+                target,
+            } => write!(
+                f,
+                "relation '{relation}' from '{source}' references ambiguous item '{target}'"
+            ),
+            Self::AmbiguousRelationName { name } => write!(f, "ambiguous relation '{name}'; use schema:{name} or builtin:{name}"),
             Self::UnknownFlavour { name } => write!(f, "unknown flavour '{name}'"),
             Self::UnknownField { name } => write!(f, "unknown field '{name}'"),
             Self::UnknownRelation { name } => write!(f, "unknown relation '{name}'"),
@@ -456,4 +506,64 @@ pub(crate) fn resolve_item<'a>(corpus: &'a Corpus, id: &str) -> Result<&'a Item,
         return Err(QueryError::AmbiguousItem { id: id.to_owned() });
     }
     Ok(item)
+}
+
+fn relation_handle_can_target_item(handle: &str, item: &Item) -> bool {
+    if crate::is_mid(handle) {
+        item.mid() == Some(handle)
+    } else {
+        item.id() == handle
+    }
+}
+
+fn resolve_relation_target<'a>(
+    corpus: &'a Corpus,
+    source: &Item,
+    relation: &str,
+    target: &str,
+) -> Result<&'a Item, QueryError> {
+    match resolve_item(corpus, target) {
+        Ok(item) => Ok(item),
+        Err(QueryError::MissingItem { .. }) => Err(QueryError::MissingRelationTarget {
+            source: source.id().to_owned(),
+            relation: relation.to_owned(),
+            target: target.to_owned(),
+        }),
+        Err(QueryError::AmbiguousItem { .. }) => Err(QueryError::AmbiguousRelationTarget {
+            source: source.id().to_owned(),
+            relation: relation.to_owned(),
+            target: target.to_owned(),
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RelatedFilters {
+    direction: Option<RelationDirection>,
+    relations: Vec<String>,
+    flavours: Vec<String>,
+    limit: Option<usize>,
+    cursor: Option<String>,
+}
+
+impl RelatedFilters {
+    pub fn new(
+        direction: Option<RelationDirection>,
+        relations: Vec<String>,
+        flavours: Vec<String>,
+    ) -> Self {
+        Self {
+            direction,
+            relations,
+            flavours,
+            ..Self::default()
+        }
+    }
+
+    pub fn with_page(mut self, limit: Option<usize>, cursor: Option<String>) -> Self {
+        self.limit = limit;
+        self.cursor = cursor;
+        self
+    }
 }

@@ -1,8 +1,9 @@
 # Document structure and direct navigation
 
 Items, narrative, sections and documents share one disposable source-backed
-graph. These contracts own structure, references and node handles. Search selection and ranking follow the [retrieval contracts](retrieval.mara.md);
-complete node reads and navigation transports remain separate checkpoints.
+graph. These contracts own structure, references, node handles and direct
+navigation. Search selection, ranking and complete node reads follow the
+[retrieval contracts](retrieval.mara.md).
 
 :::mara requirement REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
 :mid: 01M232S32V718GRMEHSBPY46CQ
@@ -163,10 +164,14 @@ not a CommonMark standard; this decision preserves the established item syntax.
 :verifies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
 :verifies: DES-DOCUMENT-STRUCTURE
 :validates: SCN-READ-DOCUMENT-CONTEXT
+:verifies: REQ-ITEM-RELATED
+:verifies: REQ-RELATED-PAGINATION
+:verifies: DES-DIRECT-NAVIGATION
+:verifies: DES-CANONICAL-TRACE-RELATIONS
 
-Run `cargo test --locked --test discovery --test discovery_handles --test references --test navigation` against the candidate. Structure checks cover local heading scopes, interleaved content, Markdown containers, Unicode/CRLF/EOF spans, shared reference definitions and deterministic read-only self-hosting. Reference checks cover exact forward/backlink evidence, relative links, generated and explicit anchors, ambiguity, inert contexts and source preservation. Handle checks cover bounded summaries, process restarts, unrelated edits, stale documents and stable item identities through real CLI edits.
+Run `cargo test --locked --test discovery --test discovery_handles --test references --test navigation` against the candidate. Structure/reference/handle checks preserve local scopes, Unicode/CRLF/EOF spans, exact link evidence, inert contexts, deterministic handles and unchanged source. Real CLI/stdin MCP searches narrative, pages its mentions, follows an item relation, reads the destination and navigates parent/children. Library projections alone do not establish this workflow.
 
-The real CLI/stdin-stdout MCP workflow searches narrative, pages its direct references, follows an item relation, reads the destination and navigates parent/children. Compare transport responses, retain each occurrence and source span, reject namespace ambiguity and removed interfaces, and reject an oversized mandatory summary without omission. Pass only when all assertions succeed; library projections alone do not establish this workflow. Full search ranking, retrieval pagination and mutation preflight suites remain separate obligations.
+Navigation checks consume complete count/byte-limited pages, preserve compact Unicode summaries, reject stale/invalid requests, namespace ambiguity, retired interfaces and oversized mandatory entries, and retain source bytes. Verify alias/inline deduplication, canonical symmetric and self-edge identity before paging, exact terminal external addresses, shared code-marker/item-inverse edges, binary endpoints, file-only invalidation and selected code-marker/target failures. Use isolated fixture-owned identities and adapter packs. Real editing, occurrence inspection, semantic validation and rule checks remain separate pending methods. Run all restored suites, formatting and Clippy, then compare named read-only repository traversals with the installed baseline before recording revision-specific evidence.
 :::
 
 :::mara evidence EVD-DOCUMENT-NAVIGATION
@@ -187,4 +192,57 @@ Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-
 Candidate schema/project validation and explicit-project MCP validation completed with zero errors or warnings. Selected MCP intent (one requirement), realization and verification (the requirement and structural design) matrices passed, with all pages consumed. Sound baseline runtime behavior was retained; code changes add associations only.
 
 This execution covers the navigation, source/identity and bootstrap methods on this candidate. Full ranking, retrieval bounds and continuation, mutation preflight, and the remaining capability inventory are not claimed complete.
+:::
+
+:::mara design DES-DIRECT-NAVIGATION
+:mid: 01M3H1P241E4MZYGH75AA6JWGE
+:title: Navigate bounded direct document and semantic connections
+:status: accepted
+:kind: interface
+:satisfies: REQ-ITEM-RELATED
+:satisfies: REQ-RELATED-PAGINATION
+:satisfies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
+
+CLI `related <reference>` and MCP `related {reference}` accept exact item IDs/MIDs, structural handles and code references. Optional direction, relations, flavours, limit and cursor share CLI/MCP semantics. Return discovery format 2 with node, connections, has_more and next_cursor. Built-in connections retain relation/direction/neighbour/source; schema connections carry canonical relation, label, direction, neighbour, canonical edge and occurrence_count. Internal neighbours reuse [[DES-DOCUMENT-STRUCTURE]] summaries; external neighbours have only kind external and exact address. They cannot be get/related roots.
+
+Resolve canonical names and inverse aliases in the schema namespace; built-ins are contains and mentions. Accept schema:/builtin: qualification; reject ambiguous short names based on vocabulary even without matching edges. Alias selection never reverses direction. Relation choices are ORed; neighbour flavours are ORed and intersect other filters, selecting item neighbours only. Missing or ambiguous selected authored item/code targets and invalid selected code-source markers fail rather than silently completing the traversal.
+
+Order outgoing, incoming, then symmetric connections. Retain deterministic neighbour path/source order and built-in occurrence order; external outgoing targets sort by address/relation. Code incoming connections merge into source order; code outgoing targets sort by item source. Deduplicate schema/self edges under [[REQ-RELATED-PAGINATION]] before bounds. Incoming schema labels use the inverse alias when available; human output omits the incoming prefix then, otherwise displays it. Human built-in incoming containment displays contained_by; JSON keeps contains with incoming direction.
+
+Default limit 20, accepted range 1–100, counts connections rather than neighbours. Keep each JSON domain result within 65,536 UTF-8 bytes including cursor/escaping, excluding transport wrappers. Reject an oversized mandatory root/next connection without skipping it. Continuation binds reference, direction, original filter values, limit and shared source/schema/code invalidation under [[DES-ITEM-LIST]]. Reject changed, malformed, initial or out-of-range positions with a restart instruction. No hops, recursive expansion, item related or item_related. All navigation is read-only.
+:::
+
+:::mara requirement REQ-ITEM-RELATED
+:mid: 01M1PXP2KG97XHSEEB4KCZVTAP
+:title: Retrieve compact directly related items
+:status: accepted
+:kind: functional
+:derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
+
+CLI/MCP `related` returns a selected item's direct incoming, outgoing and symmetric semantic connections, with canonical relation, displayed label, neighbour and occurrence count. Include supported code backlinks and terminal external targets. Exact relation and neighbour-flavour filters combine with direction without expanding another hop. Schema and built-in connections stay distinct under [[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]]. Follow [[DES-DIRECT-NAVIGATION]] for bounded transport and [[DES-CANONICAL-TRACE-RELATIONS]] for identity.
+:::
+
+:::mara requirement REQ-RELATED-PAGINATION
+:mid: 01M1RY3MCMCZK45K50SS5TRYBX
+:title: Continue bounded direct-neighbour results
+:status: accepted
+:kind: functional
+:derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
+
+Return bounded direct-connection pages with explicit continuation. Filter and deduplicate semantic schema edges before bounds; distinct relation kinds remain separate entries and parallel built-in mentions retain their occurrences. Consume every page without omissions or duplicates. A directed self-edge appears once outgoing by default or once in the explicitly requested orientation; symmetric self-edges appear once only for omitted/symmetric direction. Preserve stable ordering and reject stale or invalid requests. Neighbour bodies require get. Bounds and cursor semantics follow [[DES-DIRECT-NAVIGATION]].
+:::
+
+:::mara design DES-CANONICAL-TRACE-RELATIONS
+:mid: 01M2FX575WG9SP8EZJSTEE7VG9
+:title: Normalize authoring forms while retaining their occurrences
+:status: accepted
+:kind: structure
+:satisfies: REQ-ITEM-RELATED
+:satisfies: REQ-CODE-TRACEABILITY
+
+Build a disposable semantic relation graph alongside [[DES-DOCUMENT-STRUCTURE]]. Endpoints are items identified by MID, code by exact project-relative code reference, and external targets by exact authored address. Canonical name and directed endpoints identify one edge; symmetric item endpoints sort by MID solely for stable identity. Different relation kinds stay distinct. Inverse aliases exchange authored endpoints before validating declared source/target/same-flavour constraints. Metadata, typed inline and code-marker equivalents contribute occurrence counts to one edge. Invalid assertions create no graph edge; validation remains a separate capability.
+
+Internal edge endpoints require MIDs. A code source uses a canonical relation permitting code and the target flavour; item-to-code assertions require its inverse alias and [[DES-CODE-READ]] resolution. External targets require a permitted canonical external relation and literal `external:` plus absolute HTTP(S) with a host, without credentials, whitespace/control characters, raw brackets/angle brackets or backslashes. Preserve exact address spelling; no fetching, URL normalization, synthetic MID/flavour or outgoing external graph.
+
+Authored source occurrences remain in parsed documents/code; this navigation dependency exposes normalized identity and count. Occurrence inspection, tokens and mutation remain later checkpoints. No reverse assertion is written merely to provide incoming navigation.
 :::

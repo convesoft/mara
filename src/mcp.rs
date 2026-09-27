@@ -1,10 +1,10 @@
-use mara::SearchParams;
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams};
 use mara::{GetParams, GetResult};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
     Template, ValidationResult,
 };
+use mara::{RelatedParams, RelatedResult, RelationDirection, SearchParams};
 use rmcp::{
     ServerHandler, ServiceExt,
     handler::server::wrapper::{Json, Parameters},
@@ -158,6 +158,18 @@ impl SearchToolParams {
 #[tool_router]
 impl MaraMcp {
     #[tool(
+        name = "related",
+        description = "Explore direct schema relations, code backlinks, mentions, and containment from an item, code endpoint, or discovery node. Discovery format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation_get. Internal and code neighbours have a reference for get/related; external neighbours have only kind and address and are terminal. Counts connections, not unique neighbours; traversal is caller-controlled. JSON uses contains with direction; its incoming view is displayed as contained_by in human CLI output. Continue with next_cursor and unchanged reference/options; restart after source/schema changes."
+    )]
+    fn related(
+        &self,
+        Parameters(params): Parameters<RelatedToolParams>,
+    ) -> Result<Json<RelatedResult>, String> {
+        let (project, params) = params.into_parts();
+        self.for_project(project)?.related(params).map(Json)
+    }
+
+    #[tool(
         name = "get",
         description = "Read an item, section, Markdown block, document, or code endpoint in bounded consecutive portions. Discovery format_version: 2 returns node, content, content_range, metadata, and metadata_range. Sections and documents include contained source; items return their parsed body, then ordered metadata fragments; non-items have empty metadata. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged reference until has_more is false; restart after source/schema changes. Search again if a structural handle is stale. Enumerate neighbours with related; get has no limit."
     )]
@@ -306,4 +318,45 @@ struct GetToolParams {
     /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid. Portions follow content, then item metadata.
     #[serde(default)]
     cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RelatedToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Exact item ID/MID, code:<path>[::<selector>], or a discovery handle returned by search, get, or related.
+    reference: String,
+    /// Edge direction relative to the selected node: incoming, outgoing or symmetric. Omitted or null includes all, outgoing first. Incoming/outgoing exclude symmetric edges.
+    #[serde(default)]
+    direction: Option<RelationDirection>,
+    /// Relation names (schema:name or builtin:name; shorthand only when unambiguous), combined with OR and intersected with the neighbour flavour filter. Omitted or [] includes all.
+    #[serde(default)]
+    relations: Vec<String>,
+    /// Exact neighbour flavour names, combined with OR. Nonempty selects item neighbours only; omitted or [] includes all.
+    #[serde(default)]
+    flavours: Vec<String>,
+    /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer. Counts relation entries, not unique neighbours.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid.
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+impl RelatedToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, RelatedParams) {
+        (
+            self.project,
+            RelatedParams {
+                reference: self.reference,
+                direction: self.direction,
+                relations: self.relations,
+                flavours: self.flavours,
+                limit: self.limit,
+                cursor: self.cursor,
+            },
+        )
+    }
 }

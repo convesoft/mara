@@ -1,5 +1,7 @@
 use crate::{Corpus, FieldFilter, ItemCollectionResult, ItemFilters, list_items, load_corpus};
-use crate::{GetResult, SearchResult, get, search};
+use crate::{
+    GetResult, RelatedFilters, RelatedResult, RelationDirection, SearchResult, get, related, search,
+};
 mod validation;
 use crate::{
     FlavourDefinition, Project, RelationDefinition, Schema, Template, initialize_project,
@@ -113,6 +115,13 @@ impl OperationContext {
                 .collect(),
         };
         Ok(SchemaListResult { kind, declarations })
+    }
+
+    pub fn related(&self, params: RelatedParams) -> Result<RelatedResult, String> {
+        let (corpus, schema) = self.load_query_project()?;
+        let filters = RelatedFilters::new(params.direction, params.relations, params.flavours)
+            .with_page(params.limit, params.cursor);
+        related(&corpus, &schema, &params.reference, &filters).map_err(|error| error.to_string())
     }
 
     pub fn get(&self, params: GetParams) -> Result<GetResult, String> {
@@ -340,6 +349,22 @@ impl SearchParams {
 #[serde(deny_unknown_fields)]
 pub struct GetParams {
     pub reference: String,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RelatedParams {
+    pub reference: String,
+    #[serde(default)]
+    pub direction: Option<RelationDirection>,
+    #[serde(default)]
+    pub relations: Vec<String>,
+    #[serde(default)]
+    pub flavours: Vec<String>,
+    #[serde(default)]
+    pub limit: Option<usize>,
     #[serde(default)]
     pub cursor: Option<String>,
 }
