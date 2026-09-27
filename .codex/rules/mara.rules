@@ -1,0 +1,35 @@
+# Allow read-only GitHub inspection for Mara delivery work.
+prefix_rule(
+    pattern = ["gh", "pr", ["view", "list", "checks", "diff"]],
+    decision = "allow",
+    justification = "Inspect Mara pull requests without repeated sandbox approvals",
+    match = [
+        "gh pr view 75 --json title,headRefOid",
+        "gh pr list --state open",
+        "gh pr checks 75",
+        "gh pr diff 75",
+    ],
+    not_match = [
+        "gh pr create --title example",
+        "gh pr comment 75 --body example",
+    ],
+)
+
+prefix_rule(
+    pattern = ["gh", "run", ["view", "list"]],
+    decision = "allow",
+    justification = "Inspect Mara CI runs without repeated sandbox approvals",
+    match = [
+        "gh run view 123 --log-failed",
+        "gh run list --limit 10",
+    ],
+    not_match = ["gh run rerun 123"],
+)
+
+prefix_rule(
+    pattern = ["gh", "release", "view"],
+    decision = "allow",
+    justification = "Inspect Mara releases without repeated sandbox approvals",
+    match = ["gh release view v0.3.0-alpha.0"],
+    not_match = ["gh release edit v0.3.0-alpha.0 --draft=false"],
+)
