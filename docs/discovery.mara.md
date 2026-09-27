@@ -309,3 +309,31 @@ An actor can inspect an existing canonical relationship through CLI and MCP and 
 
 Run `cargo test --locked --test relation_inspection` against real CLI and stdio MCP with isolated, fixture-owned source, identities and adapters. Verify canonical/alias/ID/MID and symmetric equivalence, exact metadata/inline/code spans and spelling, external addresses, complete count/byte-limited pages, total counts, snapshot-bound selectors and unchanged source bytes. Reproduce a code path sorting before its item document; require global path/byte order before pagination. Check changed request/source/schema cursors, malformed positions, oversized occurrences, missing edges, invalid endpoints/limits and unknown parameters with equivalent structured errors. Keep mutation and semantic validation assertions pending. Run prior suites, formatting and Clippy, canonical validation and selected traceability; compare unaffected read-only repository inspection output with the installed baseline.
 :::
+
+:::mara evidence EVD-RELATION-INSPECTION
+:mid: 01M3H2FGCZYSBMPRSZTF2C5APW
+:title: Relation occurrence inspection checkpoint verification
+:status: accepted
+:result: passed
+:captured_at: 2026-09-27T09:17:11Z
+:subject_revision: 875c3ca8620aaff861361f9c1abab9900658576a
+:evidences: VER-RELATION-INSPECTION
+:evidences: VER-DOCUMENT-NAVIGATION
+:evidences: VER-BOUNDED-NODE-READ
+:evidences: VER-UNIFIED-SEARCH
+:evidences: VER-ITEM-LIST
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+
+Tested revision `875c3ca8620aaff861361f9c1abab9900658576a`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
+
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 160 tests (2 units, 13 code discovery, 31 corpus, 9 discovery, 4 handles, 10 get, 10 item list, 12 navigation, 17 bootstrap, 12 references, 5 relation inspection, 20 schema, 15 search), none failed or ignored. Five inspection groups execute real CLI/stdin MCP with isolated project-owned fixtures. They verify canonical/alias/ID/MID and symmetric identity, authored metadata/inline/code provenance, exact external spelling, 25-occurrence count continuation, byte-limited complete pages, source/schema/request invalidation, oversized failure, missing/invalid inputs, structured error parity and source preservation.
+
+The ordering reproduction failed before the fix: metadata/inline records at `zzz.mara.md:69,110` preceded a code comment at `aaa.rs:0`. Sorting at the inspection boundary now returns global path/start-byte order before page limits. Selector generation and mutation-facing collection remain unchanged. A schema-staleness fixture changes a parsed declaration; formatting-only schema differences are outside the existing semantic fingerprint.
+
+Read-only repository comparisons match the installed baseline's complete JSON for DES-RELATION-INTERFACES satisfies REQ-RELATION-INSPECTION and code:src/relations.rs::inspect implements DES-RELATION-INTERFACES, one occurrence/page each. The ordering correction is separately proven by its failed-then-passing regression. Installed full-baseline MCP schema/project validation completed with zero errors or warnings. Selected intent passed 1 requirement; realization and verification each passed the requirement and interface design with all pages consumed.
+
+This restores relation get only. Relation mutation, item mutation/identity recovery, semantic validation, rule evaluation and other remaining repository capabilities still require their checkpoints. Installed-tool validation/matrices do not establish candidate implementations of those operations. The installed authoring executable was not replaced.
+:::
