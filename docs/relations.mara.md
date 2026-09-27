@@ -53,13 +53,13 @@ Demote inline assertions to their untyped navigation form rather than deleting s
 
 Run `cargo test --locked --test relation_mutation` and transaction unit tests. Exercise real CLI/MCP add/remove, canonical/alias/symmetric/MID identity, self-edges, duplicate refusal, snapshot selectors, whole-edge multi-file removal and inline internal/external/code demotion. Check unchanged bytes on endpoint, identity, reference and lock failures, plus permissions and unrelated prose preservation.
 
-Inject publisher failures before and after each replacement, reject changed preimages, preserve conflicts during incomplete rollback and terminate real subprocesses at each publication boundary. Recover after restart and verify original bytes, new-destination removal and journal cleanup. Run all prior suites, formatting and Clippy, canonical validation and selected traceability. Publisher tests establish the shared dependency, not unimplemented move/rename workflows.
+Inject publisher failures before and after each replacement, reject changed preimages, preserve conflicts during incomplete rollback and terminate real subprocesses at each publication boundary. Recover after restart and verify original bytes, new-destination removal and journal cleanup. Run the full regression suite, formatting, Clippy, canonical validation and selected traceability. [[VER-ITEM-MOVEMENT]] and [[VER-ITEM-RENAME]] additionally exercise journal publication through those operations.
 :::
 
 :::mara evidence EVD-RELATION-MUTATION
 :mid: 01M3H4RXFSP67PXH70SS8C5PRJ
 :title: Journaled relation authoring passes real transport and recovery checks
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-27T09:57:22Z
 :subject_revision: 9eb3d4c96bf8c8c1c29e73804f7d17ec506324f5
@@ -81,5 +81,5 @@ At `9eb3d4c96bf8c8c1c29e73804f7d17ec506324f5`, `cargo test --locked --all-target
 
 Eight CLI/MCP groups cover canonical/alias/MID/symmetric and self edges, semantic duplicates, current/stale/mismatched selectors, whole-edge multi-file removal, CRLF and permissions, inline internal/external/code demotion, binary code targets, immutable code comments, endpoint/identity/reference refusal, incomplete items, alias-named custom fields and writer blocking. Four shared publisher unit groups cover automatic rollback at every replacement boundary, preimage conflicts, incomplete rollback preserving manual edits and actual subprocess interruption followed by explicit recovery. Previous capability suites pass.
 
-Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected intent passed two roots; realization and verification each passed three roots, with every page consumed. Both transports advertise and execute add/remove. Journal publication is now exercised through relation writes; move/rename, other item edits, project/item validation transports, rule evaluation and matrices remain pending capabilities.
+Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected intent passed two roots; realization and verification each passed three roots, with every page consumed. Both transports advertise and execute add/remove. This execution exercised journal publication through relation writes. It did not establish move/rename, other item edits, project/item validation transports, rule evaluation or matrices.
 :::

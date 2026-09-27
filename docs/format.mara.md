@@ -123,9 +123,9 @@ Failures preserve user data and produce actionable diagnostics.
 - A MID is a raw canonical uppercase 26-character ULID with no prefix.
 - The MID is repository-wide unique and immutable for the item's lifetime.
 - Callers never provide, copy, edit, or update MIDs through item operations.
-- Do not create or copy placeholder MIDs by hand. Existing pre-alpha items
-  receive MIDs through one deliberate backfill before identity-dependent
-  editing is used.
+- Do not create or copy placeholder MIDs by hand. Items lacking a MID receive
+  one through deliberate backfill under [[REQ-MID-BACKFILL]] before
+  identity-dependent editing is used.
 
 ## References and relations
 
@@ -149,7 +149,9 @@ Failures preserve user data and produce actionable diagnostics.
 ## In-memory projection
 
 - Mara discovers project-relative `*.mara.md` files through the configured
-  content include patterns and reads those canonical files directly.
+  content include patterns and reads those canonical files directly. Discovery
+  respects local and parent Git ignore rules and does not follow document or
+  directory symlinks.
 - Documents are ordered by project-relative path and items remain in source
   order so repeated loads of unchanged files produce the same model.
 - Each item retains its ordered metadata, exact Markdown body, schema-defined
@@ -200,17 +202,17 @@ Mara-owned source and block projections form the public contract under [[DES-DOC
 :verifies: DES-DOCUMENT-FORMAT
 :verifies: DES-DURABLE-ITEM-IDENTITIES
 
-Run `cargo test --locked --test corpus --test identity` and the Markdown-container unit test against the candidate. Parser checks exercise document selection and ordering, item syntax, recovery, Markdown contexts, exact source spans and body preservation. The explicit read-only self-hosting check loads the real corpus twice without writing it; mutation fixtures use isolated temporary projects.
+Run `cargo test --locked --test corpus --test corpus_validation --test mid_recovery` and the Markdown-container unit test against the candidate. Parser checks exercise document selection and ordering, item syntax, recovery, Markdown contexts, exact source spans and body preservation. The explicit read-only self-hosting check loads the real corpus twice without writing it; mutation fixtures use isolated temporary projects.
 
 Real CLI/MCP checks reject malformed, missing, duplicate and misplaced identities, resolve a stable MID, and deliberately backfill legacy items. Reads must not backfill; successful backfill preserves pre-existing bytes and identities except for new MID lines; a rejected preflight changes nothing, including when user-controlled field text resembles a missing-MID diagnostic. Repeating backfill changes nothing.
 
-Pass only when these processes and parser checks meet their assertions. Rename/move identity preservation is also checked by the mutation capability's own tests; this method does not claim that pending review.
+Pass only when these processes and parser checks meet their assertions. [[VER-ITEM-RENAME]] and [[VER-ITEM-MOVEMENT]] check identity preservation across their respective mutations.
 :::
 
 :::mara evidence EVD-SOURCE-AND-IDENTITY
 :mid: 01M3FWPHJF68AGEWWKRZGNNZ8V
 :title: Source and identity checkpoint passes restored suites
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-26T22:16:47Z
 :subject_revision: 35a37fc2bddaec0ef5943322bab7ce3fd65a321a
@@ -223,7 +225,7 @@ Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-
 
 Candidate schema/project validation returned complete, valid results with zero diagnostics. Explicit MCP matrices passed for 3 requirement origins and 5 requirement/design realization and verification roots, consuming all pages. Backfill checks confirmed no writes during reads, unchanged existing MIDs, exact non-MID source preservation, idempotence, and source preservation after rejected validation. Duplicate-identity assertions used stable classification and actual source locations because ambiguous item identities are intentionally omitted from those diagnostic records.
 
-The result covers the source/identity and bootstrap methods on this candidate. Reference-resolution, schema-constraint, mutation-recovery and other remaining baseline reviews are not claimed complete.
+This execution covers source parsing, identity/backfill and bootstrap methods at the subject revision. It does not establish complete reference resolution, schema constraints or mutation recovery.
 :::
 
 :::mara verification VER-DOCUMENT-PARSING
@@ -239,13 +241,13 @@ Run `cargo test --locked --lib --test corpus` against the candidate library. Use
 
 Require strict document loading to reject malformed/unreadable source. Recovery retains independently readable documents and available diagnostics, marks incomplete discovery/parsing, and does not invent coordinates for unreadable bytes. Verify no read backfills MIDs or changes source. Keep the private-parser unit test that checks item containers own only Markdown body children.
 
-This is the staged document dependency method: `load_documents` and recovering variants return a document-only snapshot and do not load code adapters. A targeted fixture distinguishes that boundary from the later full corpus loader. No CLI/MCP document operation, code discovery, semantic identity/field validation, navigation, mutation or item-list completeness is claimed. Run existing CLI/MCP suites as regressions before committing.
+Check that `load_documents` and its recovering variants return document-only snapshots without loading code integrations. A fixture with unavailable code assets distinguishes this boundary from full corpus loading. [[VER-CODE-DISCOVERY]], [[VER-CORPUS-CONFORMANCE]] and [[VER-DOCUMENT-NAVIGATION]] own code loading, semantic conformance and navigation checks. Run the CLI/MCP regression suite alongside these library checks.
 :::
 
 :::mara evidence EVD-DOCUMENT-PARSING
 :mid: 01M3FZQJDFP199B2BSBMGW0PK1
 :title: Document dependency and existing transport checks pass
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-26T23:09:58Z
 :subject_revision: 06d14944c5f9d5e9dd4a8f4e66ffaee3cbf1340a
@@ -255,9 +257,9 @@ This is the staged document dependency method: `load_documents` and recovering v
 
 The tested implementation was committed as `06d14944c5f9d5e9dd4a8f4e66ffaee3cbf1340a`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1; candidate `/tmp/mara72-target/debug/mara`. Build settings: `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
 
-Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 69 tests (1 parser unit, 31 corpus, 17 bootstrap and 20 schema), none failed or ignored. The parser suite uses isolated fixtures and an explicit read-only real-repository load; that repository test also passed after the final contract edit. Existing CLI and stdio MCP tests passed as regressions. Targeted checks preserve readable documents beside invalid UTF-8 without fabricated coordinates or source writes, and distinguish document loading from the later code-adapter dependency.
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 69 tests (1 parser unit, 31 corpus, 17 bootstrap and 20 schema), none failed or ignored. The parser suite uses isolated fixtures and an explicit read-only real-repository load; that repository test also passed after the final contract edit. Existing CLI and stdio MCP tests passed as regressions. Targeted checks preserve readable documents beside invalid UTF-8 without fabricated coordinates or source writes, and distinguish document loading from code loading.
 
 Candidate `schema validate --format json` returned complete and valid with zero diagnostics. Installed full-baseline MCP project/schema validation also returned complete and valid with zero diagnostics; those authoring checks do not establish candidate project validation. Installed-tool intent passed one selected requirement; realization and verification each passed the selected requirement and design, consuming all pages.
 
-This evidence covers the document-only library dependency and existing bootstrap/schema surfaces. Code discovery, full corpus composition, semantic conformance and item listing remain pending. The three private parser files and all dependency versions match the preserved baseline; no parser rewrite or dependency upgrade is claimed.
+This execution covers document-only library loading and initialization/schema operations at the subject revision. It does not establish code discovery, full corpus composition, semantic conformance or item listing.
 :::

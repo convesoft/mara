@@ -1,9 +1,8 @@
 # Product intent and workflows
 
 Mara keeps project knowledge in readable, Git-tracked Markdown and exposes
-structured operations through CLI and MCP. These retained goals and scenarios
-keep their baseline IDs and MIDs. Accepted knowledge states intended behavior;
-implementation and execution evidence are assessed separately.
+structured operations through CLI and MCP. Goals and scenarios describe the
+outcomes and workflows that its contracts support.
 
 :::mara goal GOAL-UNIFIED-PROJECT-KNOWLEDGE
 :mid: 01M1PXP2KGBN9S4G5PC0SAE5P6
@@ -64,11 +63,7 @@ This advances [[GOAL-BOUNDED-AGENT-CONTEXT]].
 :status: accepted
 :contributes_to: GOAL-BOUNDED-AGENT-CONTEXT
 
-A user connects an installed Mara executable to the agent as an MCP server and
-installs its skill separately. A compatible client may instead install the
-optional complete Agent Plugin. The agent initializes an explicit project when
-needed, inspects its schema, and performs bounded operations against one
-selected project through MCP. This advances [[GOAL-BOUNDED-AGENT-CONTEXT]].
+A user configures an installed Mara executable as an MCP server and installs the standalone Mara skill separately through `npx skills`. The agent selects an explicit project, initializes it when needed, inspects its schema, and performs bounded operations through MCP. When MCP is unavailable, the skill guides equivalent structured CLI operations using the configured executable or exact npm version.
 :::
 
 :::mara scenario SCN-START-ENGINEERING-KNOWLEDGE
@@ -186,5 +181,5 @@ A move or rename is interrupted after a recoverable transaction starts. Mara blo
 :status: accepted
 :contributes_to: GOAL-UNIFIED-PROJECT-KNOWLEDGE
 
-An author declares code relations and configures language adapters when symbol resolution is needed, then associates a source file or declaration with a requirement, design, or verification method through a code comment or item-authored inverse link. Navigation resolves the source location; validation identifies missing, ambiguous, or unsupported targets. A coverage matrix distinguishes implementation and check definitions from separately recorded execution evidence.
+An author declares code relations and configures SCIP indexers for symbol resolution and optional Tree-sitter assets for comment ownership, then associates a source file or declaration with a requirement, design, or verification method through a code comment or item-authored inverse link. Navigation resolves the source location; validation identifies missing, ambiguous, or unsupported targets. A coverage matrix distinguishes implementation and check definitions from separately recorded execution evidence.
 :::

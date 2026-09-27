@@ -39,7 +39,7 @@ same-flavour, external, or code-to-code. It may declare incoming cardinality
 on eligible item targets; outgoing and symmetric cardinality and acyclic
 policies are invalid. A relation without `code_source` retains
 its current item/external behaviour. All names remain project-declared. For
-example, Mara's self-hosting project declares:
+example, a project can declare the following requirement associations:
 
 ```yaml
 relations:
@@ -106,9 +106,8 @@ statements, unrelated declarations, unsupported constructs or lexical body
 boundaries. Otherwise a marker inside a declaration body attaches to the deepest
 containing named declaration; a top-level marker with no attached declaration
 attaches to the file. Ambiguous or unsupported ownership remains an error.
-Each marker retains its own original source span. Grouping does not extend
-returned declaration content to include leading comments; existing modifier and
-wrapper content coverage is unchanged. Comment recognition remains query-driven;
+Each marker retains its own original source span. Returned declaration content excludes leading marker comments and includes
+captured modifiers and wrappers. Comment recognition remains query-driven;
 Mara applies the shared attachment rules.
 
 ## Indexer and grammar boundary
@@ -187,11 +186,12 @@ identity. Its query captures declarations with `@symbol` and `@name`, lexical
 containers with `@scope` and `@name`, and comments with `@comment`. Optional
 `@modifier` and `@wrapper` captures support attributes, decorators and exports.
 The owning declaration, determined by the attachment rules above, must have a
-name span matching exactly one global SCIP identity. Otherwise the marker is
+complete name span matching exactly one global SCIP identity. Otherwise the marker is
 unsupported. File-owned markers need no symbol. Invalid packs and
 duplicate extension assignments are diagnosed. Asset paths stay in the project.
 With no grammar, SCIP symbol links still work, using the indexer's enclosing
-range for content, or its definition token if no enclosing range is supplied.
+range for content, or its definition token if no enclosing range is supplied. A supplied invalid
+enclosing range is an error even when Tree-sitter provides declaration content.
 Multiple declaration ranges of one identity are read as their enclosing source
 interval.
 
@@ -245,11 +245,11 @@ Code markers are added or removed by directly editing their source comments.
 :verifies: REQ-CODE-TRACEABILITY
 :verifies: DES-CODE-TRACEABILITY
 
-Run `cargo test --locked --test code_discovery` and the affected CLI/MCP, retrieval, relation, mutation and validation suites in disposable projects with fixture-owned Git/configuration state. Use real supplied Wasm grammars where comment ownership is under test. Preserve provenance of recorded SCIP outputs; configured fixture-copy commands verify the protocol boundary, not language indexing.
+Run `cargo test --locked --test code_discovery --test code_scip` and the affected CLI/MCP, retrieval, relation, mutation and validation suites in disposable projects with fixture-owned Git/configuration state. Use real supplied Wasm grammars where comment ownership is under test. Preserve provenance of recorded SCIP outputs; configured fixture-copy commands verify the protocol boundary, not language indexing.
 
 Check exact language-scoped descriptors, canonical escaping and literal backticks, package-version and body-edit stability, supported overload distinctions and shared declarations, local-symbol exclusion, collisions, missing/removed/ambiguous identities and valid file-only references. Check declared/fallback UTF-8, UTF-16 and UTF-32 positions and invalid ranges. Check grouped comments, original marker spans, modifier/wrapper content, lexical boundaries, deepest owner and valid file fallback; assert the exact expected symbol endpoint.
 
-Check per-language empty/populated transitions, strict command/output failures, source and asset confinement, ignore behavior, document-filter independence, changed-input rejection and mutation-stage exclusions. Configuration/assets must validate even with no matching source. Normal operations reject partial indexes; validation reports incomplete evaluation. Check source preservation and agreement between marker and item-authored assertions through CLI/MCP get, related, occurrence inspection, mutation and graph policy. Matrix verification also checks these identities when the matrix capability is available.
+Check per-language empty/populated transitions, strict command/output failures, source and asset confinement, ignore behavior, document-filter independence, changed-input rejection and mutation-stage exclusions. Configuration/assets must validate even with no matching source. Normal operations reject partial indexes; validation reports incomplete evaluation. Check source preservation and agreement between marker and item-authored assertions through CLI/MCP get, related, occurrence inspection, mutation and graph policy. [[VER-TRACE-MATRIX]] checks the same endpoint identities and source links in matrix output.
 
 Run a genuine end-to-end workflow with configured rust-analyzer 1.97.1 against a real Rust project, including exact symbol navigation and source-marker ownership. Run formatting, Clippy and the full relevant regression suite. Record evidence at the actual tested candidate revision; installed authoring checks and recorded fixtures alone do not establish candidate acceptance.
 :::
@@ -272,7 +272,7 @@ Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-
 
 Installed full-baseline MCP schema/project validation returned complete and valid with zero diagnostics. Selected intent passed one requirement; realization and verification each passed the requirement and design, consuming every page. These authoring checks use the installed full tool, not candidate graph operations. All dependency versions match the preserved lockfile.
 
-The result covers the independently callable scanner and previously restored dependencies/surfaces. Exact endpoint resolution, semantic code relations, navigation, corpus composition and item listing remain pending; passing coverage matrices do not establish those behaviors.
+This execution covers the scanner and the initialization/schema/document operations listed above at the subject revision. It does not establish exact endpoint resolution, semantic code relations, navigation, corpus composition or item listing; passing coverage matrices are not execution evidence for those behaviors.
 :::
 
 :::mara design DES-CODE-READ
@@ -303,7 +303,7 @@ Preserve literal SCIP backticks for readable, exact targets. Escape characters t
 :::mara evidence EVD-SCIP-CODE-HANDLING
 :mid: 01M3HBDTXA12PPZTTJAJFZ3F8Z
 :title: SCIP code associations pass candidate and real-indexer workflows
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-27T11:53:18Z
 :subject_revision: 3071796e99f0da2319496d7f3d4e986b75e13d1b
@@ -335,5 +335,5 @@ A genuine configured rust-analyzer 1.97.1 workflow, without recorded-index subst
 
 The candidate CLI validated the self-hosted repository with valid:true, evaluation_complete:true, zero errors/warnings and no remaining page. REQ-CODE-TRACEABILITY exposed five exact Rust symbol neighbours and DES-CODE-TRACEABILITY exposed twenty-one; none fell back to a file endpoint. Reading code:src/code.rs::rust::code/impl#%5BCodeIndex%5Dload(). returned the actual loader declaration.
 
-Environment: Linux x86_64, Rust 1.97.1, candidate /tmp/mara72-target/debug/mara; CARGO_TARGET_DIR=/tmp/mara72-target, CARGO_PROFILE_DEV_DEBUG=0, CARGO_PROFILE_TEST_DEBUG=0, CARGO_INCREMENTAL=0. The matrix contracts remain draft and matrix runtime is not part of this checkpoint. Installed-tool trace checks are authoring checks, separate from candidate execution; matrix implementation and its code-endpoint rendering verification remain the next increment.
+Environment: Linux x86_64, Rust 1.97.1, candidate /tmp/mara72-target/debug/mara; CARGO_TARGET_DIR=/tmp/mara72-target, CARGO_PROFILE_DEV_DEBUG=0, CARGO_PROFILE_TEST_DEBUG=0, CARGO_INCREMENTAL=0. This revision did not include candidate matrix runtime. Installed-tool trace checks were authoring checks and do not establish candidate matrix behavior or code-endpoint rendering.
 :::

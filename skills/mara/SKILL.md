@@ -146,7 +146,7 @@ Run `schema_validate` to check definitions, then `project_validate` or
 The engineering template supplies `status: draft|accepted|retired` and accepted-knowledge policies; existing
 projects gain no policies automatically. Schema relation `cardinality` and `acyclic` declarations impose structural graph policies when
 present. Policy failures do not block structured edits.
-Invalid schemas now return the common envelope with `valid:false`, not an MCP
+Invalid schemas return the common envelope with `valid:false`, not an MCP
 tool error. Counts are null when the schema cannot load. Diagnostic `path` and
 `line` alias `location`; project-owned configuration paths are relative and
 unavailable coordinates are omitted.
@@ -320,10 +320,10 @@ tokens outside item bodies have no typed meaning. Unknown relations, malformed
 tokens and invalid targets in supported contexts fail validation. Use body
 creation/update to author inline assertions; relation add writes metadata.
 
-For a format-1/2 or relation-vocabulary migration, follow
-`docs/migration-0.3.mara.md` with the matching 0.3 executable. The supported
-workflow is manual: save a Git checkpoint or project copy, review the complete
-source diff, then require complete, valid schema and project validation. Mara
+For a format-1/2 or relation-vocabulary migration, use the matching 0.3
+executable. The supported workflow is manual: save a Git checkpoint or project
+copy, review the complete source diff, then require complete, valid schema and
+project validation. Mara
 has no schema migration preview/apply command; `project_transaction_rollback`
 does not undo manual edits. Preserve MIDs and unrelated declarations, fields,
 prose and links. Existing relations remain directed with no alias unless the

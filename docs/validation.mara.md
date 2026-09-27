@@ -1,7 +1,7 @@
 # Corpus conformance and validation
 
 Source-level checks are a shared prerequisite for validation and authoring.
-Project/item validation now combines independently recoverable source diagnostics
+Project/item validation combines independently recoverable source diagnostics
 with configured current-state rules and structural relation policies.
 
 :::mara requirement REQ-PROJECT-VALIDATION
@@ -26,7 +26,7 @@ Optional project-relative reporting paths select document diagnostics without na
 
 The recovering corpus loader composes document recovery with configured local code discovery. Preserve readable source and item context after independent errors; missing/unreadable source makes discovery incomplete. Without a usable schema, syntax-only recovery does not load code adapters.
 
-Source conformance checks identities, valid flavour/field declarations, required bodies, metadata, typed relations and discovery references. Check every valid authored MID, including repeated entries, so secondary duplicate identities remain visible. Use schema recovery flags to suppress only checks dependent on invalid declarations, and item recovery flags to avoid inventing missing fields or bodies. Proven ambiguity remains an error; report a missing item target only when discovery is complete, including targets authored in code comments.
+Source conformance checks identities, valid flavour/field declarations, required bodies, metadata, typed relations and discovery references. Numeric field values must be finite. Check every valid authored MID, including repeated entries, so secondary duplicate identities remain visible. Use schema recovery flags to suppress only checks dependent on invalid declarations, and item recovery flags to avoid inventing missing fields or bodies. Proven ambiguity remains an error; report a missing item target only when discovery is complete, including targets authored in code comments.
 
 Retain stable diagnostic codes and original source spans; order by path, line and message. Associate code problems with their target's exact human ID and MID when resolvable. Reads never repair source. These checks do not execute conditional rules or graph policies and cannot alone establish project validity.
 :::
@@ -43,13 +43,13 @@ Retain stable diagnostic codes and original source spans; order by path, line an
 
 Run `cargo test --locked --test corpus_validation` in isolated temporary projects with fixture-owned documents, Git state and adapters. Check identity format/placement/bijection and secondary MID diagnostics; field types/required/repeated values; schema and item recovery; item, inverse, external and code endpoints; complete versus incomplete missing-target behavior; and unchanged source bytes. Run existing CLI/MCP suites, formatting and Clippy as regressions.
 
-This method verifies the shared library prerequisite. It does not execute candidate project/item validation transports, conditional rules, graph policies, MID backfill or recovery writes. Preserve their baseline tests for later checkpoints.
+This method checks library source conformance. [[VER-PROJECT-VALIDATION]] checks validation transports, [[VER-POLICY-VALIDATION]] checks rules and graph policies, and [[VER-MID-AND-RECOVERY]] checks identity backfill and recovery writes.
 :::
 
 :::mara evidence EVD-CORPUS-CONFORMANCE
 :mid: 01M3H30DMNEMAPG8QKBHHF27AQ
 :title: Corpus conformance and prior capability regressions pass
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-27T09:26:25Z
 :subject_revision: dc951880d771e9f3c679d17907142832b3bbc102
@@ -68,7 +68,7 @@ At `dc951880d771e9f3c679d17907142832b3bbc102`, `cargo fmt --all -- --check`, `ca
 
 The targeted unreadable-document regression failed before the correction: a code marker reported its target missing while discovery was incomplete. It passes with complete-missing and resolved-target counterparts after applying the same completeness guard used by item relations.
 
-Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity with zero diagnostics. Installed-tool intent passed two selected roots; realization and verification each passed three selected roots, consuming all pages. These authoring/trace checks do not establish candidate project validation. The new implementation is a library prerequisite; project/item validation transports, rule/graph evaluation, MID backfill and write recovery remain pending.
+Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity with zero diagnostics. Installed-tool intent passed two selected roots; realization and verification each passed three selected roots, consuming all pages. These authoring/trace checks do not establish candidate project validation. This execution checked library conformance, not project/item validation transports, rule/graph evaluation, MID backfill or recovery writes.
 :::
 
 :::mara requirement REQ-RELATION-CARDINALITY
@@ -181,7 +181,7 @@ Select one reported violation deterministically by authored source location, sha
 :verifies: REQ-TRACE-DIAGNOSTICS
 :verifies: DES-TRACE-DIAGNOSTIC-INTERFACE
 
-Run cargo test --locked --test project_validation in isolated temporary Git projects. Preserve distinct recovery cases for malformed configuration/schema/items, title/metadata errors, identity ambiguity, missing-item proof, unreadable source and directory walks. Verify real CLI/MCP envelopes, human output, exit status, item context, stable codes/locations, full-target hidden failures, bounded pages, snapshot/option invalidation, operation errors and oversized records. Source must remain unchanged. Run prior schema/source/code and mutation suites as regressions; complete formatting, Clippy and canonical validation.
+Run cargo test --locked --test project_validation in isolated temporary Git projects. Preserve distinct recovery cases for malformed configuration/schema/items, title/metadata errors, identity ambiguity, missing-item proof, unreadable source and directory walks. Verify real CLI/MCP envelopes, human output, exit status, item context, stable codes/locations, full-target hidden failures, bounded pages, snapshot/option invalidation, operation errors and oversized records. Source must remain unchanged. Run the full regression suite as regressions; complete formatting, Clippy and canonical validation.
 :::
 
 :::mara verification VER-POLICY-VALIDATION
@@ -196,13 +196,13 @@ Run cargo test --locked --test project_validation in isolated temporary Git proj
 :verifies: DES-CURRENT-STATE-EVALUATION
 :verifies: DES-TRACE-GRAPH-CONSTRAINTS
 
-Run cargo test --locked --test policy_validation and the native engine nested-error regression. Exercise real CLI/MCP lifecycle and qualified relationship failures followed by repair; typed literals and nested class/path selection; messages, warning/error severity, invalid prerequisites and continuation; bounded multi-hop chains and allowed cycles; distinct semantic cardinality, aliases, symmetric/self/external edges and constrained cycle witnesses. Reuse standard fixture helpers with fixture-owned vocabulary/rules and isolated Git/configuration. Rule evaluation never dereferences external URLs. Corpus loading invokes trusted configured indexers under [[DES-CODE-TRACEABILITY]]; Mara does not write source. Keep definition-only regressions in schema_validation; matrix output remains separate. Run the full restored suite and selected traceability at the actual implementation revision.
+Run cargo test --locked --test policy_validation and the native engine nested-error regression. Exercise real CLI/MCP lifecycle and qualified relationship failures followed by repair; typed literals and nested class/path selection; messages, warning/error severity, invalid prerequisites and continuation; bounded multi-hop chains and allowed cycles; distinct semantic cardinality, aliases, symmetric/self/external edges and constrained cycle witnesses. Reuse standard fixture helpers with fixture-owned vocabulary/rules and isolated Git/configuration. Rule evaluation never dereferences external URLs. Corpus loading invokes trusted configured indexers under [[DES-CODE-TRACEABILITY]]; Mara does not write source. Keep definition-only regressions in schema_validation; matrix output remains separate. Run the full regression suite and selected traceability at the actual implementation revision.
 :::
 
 :::mara evidence EVD-PROJECT-POLICY-VALIDATION
 :mid: 01M3H7A7HMV3ZA1VQRS321M020
 :title: Full-context validation and native policy evaluation pass
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-27T10:41:55Z
 :subject_revision: 7387584738ec86d2f810e73c2d0041317cb2fdc6
@@ -230,5 +230,5 @@ At the subject revision, cargo test --locked --all-targets passed 332 tests acro
 
 cargo fmt --all --check and cargo clippy --locked --all-targets -- -D warnings passed. The candidate CLI validated this complete repository and REQ-CURRENT-STATE-RULES with valid:true, evaluation_complete:true, zero errors/warnings and no remaining page. Real CLI/MCP fixture parity covers failures, repairs, item scope, source recovery, warning severity, native rule/graph outcomes, diagnostic filtering, stale cursors and output limits.
 
-Installed authoring-tool schema/project validation passed without diagnostics. Selected intent passed five roots across two pages; realization and verification each passed eight roots across three pages, consuming all continuation. These results establish the restored validation capability; matrix operations, request-local binding and remaining baseline/library/tooling disposition remain separate work.
+Installed authoring-tool schema/project validation passed without diagnostics. Selected intent passed five roots across two pages; realization and verification each passed eight roots across three pages, consuming all continuation. This execution covers validation at the subject revision. It does not establish matrix operations, request-local bindings or packaging.
 :::

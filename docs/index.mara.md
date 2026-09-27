@@ -4,13 +4,15 @@ Mara keeps structured project knowledge in readable, Git-tracked Markdown.
 Start with [product intent and workflows](product.mara.md). Accepted items state
 intended behavior; they do not establish implementation or passing execution.
 
-The [baseline review](baseline-review.mara.md) records the rebuild's reviewed
-dispositions and remaining scope.
+Execution evidence applies to its recorded revision and verification scope.
+Assess definition changes before using a historical result; selection and evidence
+interpretation follow [[DES-TRACE-CHECK-BINDING]].
 
 - [Project initialization and schema discovery](project.mara.md)
 - [Canonical source, document format and item identity](format.mara.md)
 - [Document structure, references and direct navigation](discovery.mara.md)
 - [Corpus conformance and validation](validation.mara.md)
+- [Documentation review and execution evidence](verification.mara.md)
 - [Trace matrices and request-local checks](traceability.mara.md)
 - [Item creation](creation.mara.md)
 - [Semantic relation authoring](relations.mara.md)

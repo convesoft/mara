@@ -45,7 +45,7 @@ Publish one item and its initial outgoing relations in one validated atomic sour
 
 Hold the project mutation lock. Validate authored scalars, schema fields and identity, resolve initial targets to human IDs, and reject equivalent semantic assertions. Check the destination's confinement and discovery eligibility; render MID/title/fields/relations/body with destination separators, preserving untouched bytes and permissions.
 
-Build a disposable candidate corpus and check the created item's conformance, allowing only its deliberately missing required body. Check new references and compare surviving references against their original resolved destinations. Establish correspondence separately for each durable item and document narrative scope using a character diff; do not equate snapshot handles or generated anchors with durable identity. Structural content, containment and source correspondence prevent duplicate headings/blocks from impersonating an old target. Rename/body-update exemptions are separate later operations.
+Build a disposable candidate corpus and check the created item's conformance, allowing only its deliberately missing required body. Check new references and compare surviving references against their original resolved destinations. Establish correspondence separately for each durable item and document narrative scope using a character diff; do not equate snapshot handles or generated anchors with durable identity. Structural content, containment and source correspondence prevent duplicate headings/blocks from impersonating an old target. Rename and explicit body-update correspondence follow [[DES-ITEM-RENAME]] and [[DES-ITEM-UPDATE]].
 
 Publish one atomic source replacement after all checks. Return `{id,mid,path,line,complete,missing}` with relative path, one-based opener line and `missing:[]` or `["body"]`. Rejected requests do not create parents, partial items or edge fragments.
 :::
@@ -62,13 +62,13 @@ Publish one atomic source replacement after all checks. Return `{id,mid,path,lin
 
 Run `cargo test --locked --test item_creation` through the candidate CLI and stdio MCP in fixture-owned projects. Check complete/scaffold results, field validation, literal/stdin body semantics, exact MID placement, safe line insertion, LF/CRLF and permissions, discovery/path refusal and body containment. Create initial item/MID/self/inverse/external relations; reload get/related and compare transport results. Reject invalid/duplicate edges and broken new references without changing existing files or creating new ones.
 
-Check existing link destinations across insertion, including duplicate-heading anchor shifts, and allow unrelated existing broken references. Run the full existing suite, formatting and Clippy after authoring stops. Candidate project/item validation transports and other authoring mutations remain outside this method; use the reviewed library conformance checks for candidate assertions.
+Check existing link destinations across insertion, including duplicate-heading anchor shifts, and allow unrelated existing broken references. Run the full regression suite, formatting and Clippy against unchanged sources. Use library conformance checks to verify created sources. [[VER-PROJECT-VALIDATION]] owns validation transports; each mutation has its own verification method.
 :::
 
 :::mara evidence EVD-ITEM-CREATION
 :mid: 01M3H45434E7XS5ND26DFQ8N0S
 :title: Item creation and existing capability suites pass
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-27T09:46:27Z
 :subject_revision: 3f9666e008c14b5f3f889bc2274a01aca250e19c
@@ -87,7 +87,7 @@ Check existing link destinations across insertion, including duplicate-heading a
 
 At `3f9666e008c14b5f3f889bc2274a01aca250e19c`, `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets` passed: 196 tests, none failed or ignored. The final run used unchanged repository source.
 
-Twelve creation groups exercise real CLI/stdin and MCP authoring, complete/scaffold/optional bodies, fields and generated identities, source/newline/permission preservation, safe insertion, body containment, discovery confinement, initial item/MID/self/inverse/external relations, semantic duplicate and invalid-edge refusal, get/related transport parity, shifted-heading link protection, independent old/new reference errors and mutation blocking. Candidate library conformance verifies created sources; candidate project/item validation transports remain pending.
+Twelve creation groups exercise real CLI/stdin and MCP authoring, complete/scaffold/optional bodies, fields and generated identities, source/newline/permission preservation, safe insertion, body containment, discovery confinement, initial item/MID/self/inverse/external relations, semantic duplicate and invalid-edge refusal, get/related transport parity, shifted-heading link protection, independent old/new reference errors and mutation blocking. Candidate library conformance verified created sources; this run did not exercise candidate project/item validation transports.
 
-Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Installed-tool intent passed two selected roots; realization and verification each passed three roots, consuming all pages. CLI help and MCP tools/list expose creation. The reference dependency restores the baseline similar 3.2.0 package and omits rename/body-update exemptions. No production behavior correction was required. Relation editing, update/delete/move/rename, journal publication and rule/graph evaluation remain pending.
+Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Installed-tool intent passed two selected roots; realization and verification each passed three roots, consuming all pages. CLI help and MCP tools/list expose creation. This execution does not establish relation editing, update/delete/move/rename, journal publication or rule/graph evaluation.
 :::

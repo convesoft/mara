@@ -122,8 +122,9 @@ a node whose mandatory summary cannot fit the response budget.
 
 Item mutations must preserve the identity target of untouched surviving links.
 Rename rewrites supported item-ID mentions in narrative; incoming references
-block unsafe deletion. The full candidate-graph preflight and Markdown-link
-retargeting obligations remain assigned to the mutation capability review.
+block unsafe deletion. Candidate-graph preflight and Markdown-link retargeting follow
+[[DES-ITEM-CREATION]], [[DES-ITEM-UPDATE]], [[DES-ITEM-DELETION]],
+[[DES-ITEM-MOVEMENT]] and [[DES-ITEM-RENAME]].
 :::
 
 :::mara decision ADR-PETGRAPH-DISCOVERY
@@ -171,13 +172,13 @@ not a CommonMark standard; this decision preserves the established item syntax.
 
 Run `cargo test --locked --test discovery --test discovery_handles --test references --test navigation` against the candidate. Structure/reference/handle checks preserve local scopes, Unicode/CRLF/EOF spans, exact link evidence, inert contexts, deterministic handles and unchanged source. Real CLI/stdin MCP searches narrative, pages its mentions, follows an item relation, reads the destination and navigates parent/children. Library projections alone do not establish this workflow.
 
-Navigation checks consume complete count/byte-limited pages, preserve compact Unicode summaries, reject stale/invalid requests, namespace ambiguity, retired interfaces and oversized mandatory entries, and retain source bytes. Verify alias/inline deduplication, canonical symmetric and self-edge identity before paging, exact terminal external addresses, shared code-marker/item-inverse edges, binary endpoints, file-only invalidation and selected code-marker/target failures. Use isolated fixture-owned identities and adapter packs. Real editing, occurrence inspection, semantic validation and rule checks remain separate pending methods. Run all restored suites, formatting and Clippy, then compare named read-only repository traversals with the installed baseline before recording revision-specific evidence.
+Navigation checks consume complete count/byte-limited pages, preserve compact Unicode summaries, reject stale/invalid requests, namespace ambiguity, retired interfaces and oversized mandatory entries, and retain source bytes. Verify alias/inline deduplication, canonical symmetric and self-edge identity before paging, exact terminal external addresses, shared code-marker/item-inverse edges, binary endpoints, file-only invalidation and selected code-marker/target failures. Use isolated fixture-owned identities and adapter packs. [[VER-RELATION-INSPECTION]], [[VER-CORPUS-CONFORMANCE]] and [[VER-POLICY-VALIDATION]] own occurrence, semantic and policy checks; mutation methods own source edits. Run the full regression suite, formatting and Clippy. Record candidate results from named read-only repository traversals at the tested revision.
 :::
 
 :::mara evidence EVD-DOCUMENT-NAVIGATION
 :mid: 01M3FX66JEF9DCJE2WZS7RZ7VD
 :title: Document navigation checkpoint passes restored suites
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-26T22:25:26Z
 :subject_revision: 243c61417343d1422aa5486c9a9849e21e488663
@@ -189,9 +190,9 @@ The tested working tree was committed unchanged as `243c61417343d1422aa5486c9a98
 
 Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 89 tests passed (1 Markdown-container unit, 30 corpus, 10 discovery, 5 handles, 9 identity, 3 navigation, 18 bootstrap, 13 references), none failed or ignored. Candidate CLI and stdio MCP exercised the direct-navigation workflow with paged mention occurrences, backlinks, typed relations, parent/child context, destination reads and namespace disambiguation. Reference validation asserted stable classification and transport parity; real edits preserved item identity and invalidated structural handles as specified. Test projects and child processes used fixture-owned Git/configuration and working directories; named self-hosting checks were explicitly read-only.
 
-Candidate schema/project validation and explicit-project MCP validation completed with zero errors or warnings. Selected MCP intent (one requirement), realization and verification (the requirement and structural design) matrices passed, with all pages consumed. Sound baseline runtime behavior was retained; code changes add associations only.
+Candidate schema/project validation and explicit-project MCP validation completed with zero errors or warnings. Selected MCP intent (one requirement), realization and verification (the requirement and structural design) matrices passed, with all pages consumed.
 
-This execution covers the navigation, source/identity and bootstrap methods on this candidate. Full ranking, retrieval bounds and continuation, mutation preflight, and the remaining capability inventory are not claimed complete.
+This execution covers navigation, source/identity and bootstrap methods at the subject revision. It does not establish full search ranking, retrieval bounds/continuation or mutation preflight.
 :::
 
 :::mara design DES-DIRECT-NAVIGATION
@@ -244,13 +245,13 @@ Build a disposable semantic relation graph alongside [[DES-DOCUMENT-STRUCTURE]].
 
 Internal edge endpoints require MIDs. A code source uses a canonical relation permitting code and the target flavour; item-to-code assertions require its inverse alias and [[DES-CODE-READ]] resolution. External targets require a permitted canonical external relation and literal `external:` plus absolute HTTP(S) with a host, without credentials, whitespace/control characters, raw brackets/angle brackets or backslashes. Preserve exact address spelling; no fetching, URL normalization, synthetic MID/flavour or outgoing external graph.
 
-Authored source occurrences remain in parsed documents/code; this navigation dependency exposes normalized identity and count. Occurrence inspection, tokens and mutation remain later checkpoints. No reverse assertion is written merely to provide incoming navigation.
+Authored occurrences retain their parsed document/code source spans. [[DES-RELATION-INTERFACES]] exposes their locations and snapshot-bound selectors; [[DES-RELATION-MUTATION]] defines source edits. No reverse assertion is written merely to provide incoming navigation.
 :::
 
 :::mara evidence EVD-DIRECT-NAVIGATION
 :mid: 01M3H21RWGXY9QRXCB1GGV1FSX
 :title: Direct navigation checkpoint verification
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-27T09:09:40Z
 :subject_revision: 7f701b11e1afc07bd3d0bd0ec00115822e0ed997
@@ -269,7 +270,7 @@ Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-
 
 Read-only installed-baseline comparisons matched complete navigation JSON for three real-repository roots: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS (11 connections), an index narrative block (2) and code:src/query/related.rs::related (1), each one page. Multi-page completeness is established by the CLI/MCP fixtures. Installed full-baseline MCP schema/project validation completed with zero errors or warnings. Selected intent passed 3 requirements; realization and verification each passed 6 requirement/design roots with all pages consumed. Cargo.lock changes only Mara's direct URL dependency entry; no package versions changed.
 
-This checkpoint restores direct navigation and its read-only canonical semantic projection. Occurrence inspection, mutation, semantic validation and rule evaluation remain pending; the installed author's validation/matrices do not establish candidate implementations of those operations. Historical full-runtime evidence remains historical. The installed executable was not replaced.
+This execution covers direct navigation and its read-only semantic projection at the subject revision. It does not establish occurrence inspection, mutation, semantic validation or rule evaluation; installed-tool validation and matrices are separate authoring checks.
 :::
 
 :::mara design DES-RELATION-INTERFACES
@@ -285,7 +286,7 @@ Return relationship format 1 with `edge`, total `occurrence_count`, `occurrences
 
 Default limit 20, accepted range 1–100. Domain JSON including escaping/cursor must fit 65,536 UTF-8 bytes; transport wrappers are outside the budget. Never truncate fixed identity/location/spelling fields or silently skip an oversized occurrence; return a page_limit error if the next occurrence cannot fit. Missing edges return relation_not_found with the resolved edge and zero count. Other failures use the relationship error envelope `{format_version:1,error:{code,message},edge?,occurrence_count?}`; CLI exits unsuccessfully and MCP marks isError while retaining structured content.
 
-Occurrence selectors bind project root and source/schema/code snapshot while preserving each authored occurrence's identity within it. Continuation additionally binds source/relation/target spelling and limit; alias-equivalent requests must restart rather than exchange cursors. Reject stale, malformed, initial and out-of-range continuation with a restart instruction. Reinspection after source/schema changes produces new selectors. Selectors are not persisted identities. Their use for removal, and add/remove interfaces, remain separate mutation checkpoints; direct navigation follows [[DES-DIRECT-NAVIGATION]].
+Occurrence selectors bind project root and source/schema/code snapshot while preserving each authored occurrence's identity within it. Continuation additionally binds source/relation/target spelling and limit; alias-equivalent requests must restart rather than exchange cursors. Reject stale, malformed, initial and out-of-range continuation with a restart instruction. Reinspection after source/schema changes produces new selectors. Selectors are not persisted identities. Their use for removal and the add/remove interfaces follow [[DES-RELATION-MUTATION]]; direct navigation follows [[DES-DIRECT-NAVIGATION]].
 :::
 
 :::mara requirement REQ-RELATION-INSPECTION
@@ -307,13 +308,13 @@ An actor can inspect an existing canonical relationship through CLI and MCP and 
 :verifies: REQ-RELATION-INSPECTION
 :verifies: DES-RELATION-INTERFACES
 
-Run `cargo test --locked --test relation_inspection` against real CLI and stdio MCP with isolated, fixture-owned source, identities and adapters. Verify canonical/alias/ID/MID and symmetric equivalence, exact metadata/inline/code spans and spelling, external addresses, complete count/byte-limited pages, total counts, snapshot-bound selectors and unchanged source bytes. Reproduce a code path sorting before its item document; require global path/byte order before pagination. Check changed request/source/schema cursors, malformed positions, oversized occurrences, missing edges, invalid endpoints/limits and unknown parameters with equivalent structured errors. Keep mutation and semantic validation assertions pending. Run prior suites, formatting and Clippy, canonical validation and selected traceability; compare unaffected read-only repository inspection output with the installed baseline.
+Run `cargo test --locked --test relation_inspection` against real CLI and stdio MCP with isolated, fixture-owned source, identities and adapters. Verify canonical/alias/ID/MID and symmetric equivalence, exact metadata/inline/code spans and spelling, external addresses, complete count/byte-limited pages, total counts, snapshot-bound selectors and unchanged source bytes. Reproduce a code path sorting before its item document; require global path/byte order before pagination. Check changed request/source/schema cursors, malformed positions, oversized occurrences, missing edges, invalid endpoints/limits and unknown parameters with equivalent structured errors. [[VER-RELATION-MUTATION]] owns source-write checks; [[VER-CORPUS-CONFORMANCE]] owns semantic validation. Run the full regression suite, formatting, Clippy, canonical validation and selected traceability. Inspect actual repository edge occurrences without modifying source.
 :::
 
 :::mara evidence EVD-RELATION-INSPECTION
 :mid: 01M3H2FGCZYSBMPRSZTF2C5APW
 :title: Relation occurrence inspection checkpoint verification
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-27T09:17:11Z
 :subject_revision: 875c3ca8620aaff861361f9c1abab9900658576a
@@ -335,5 +336,5 @@ The ordering reproduction failed before the fix: metadata/inline records at `zzz
 
 Read-only repository comparisons match the installed baseline's complete JSON for DES-RELATION-INTERFACES satisfies REQ-RELATION-INSPECTION and code:src/relations.rs::inspect implements DES-RELATION-INTERFACES, one occurrence/page each. The ordering correction is separately proven by its failed-then-passing regression. Installed full-baseline MCP schema/project validation completed with zero errors or warnings. Selected intent passed 1 requirement; realization and verification each passed the requirement and interface design with all pages consumed.
 
-This restores relation get only. Relation mutation, item mutation/identity recovery, semantic validation, rule evaluation and other remaining repository capabilities still require their checkpoints. Installed-tool validation/matrices do not establish candidate implementations of those operations. The installed authoring executable was not replaced.
+This execution covers relation inspection at the subject revision. It does not establish relation/item mutations, identity recovery, semantic validation or rule evaluation. Installed-tool validation and matrices are separate authoring checks.
 :::

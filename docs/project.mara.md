@@ -1,7 +1,7 @@
 # Project initialization and schema discovery
 
-These contracts retain baseline behavior. The engineering profile is editable
-project data; its exact vocabulary and rules are shipped in `templates/`.
+Initialization creates project-owned configuration and schema. The optional
+engineering profile supplies editable vocabulary and knowledge policies.
 
 :::mara requirement REQ-PROJECT-INITIALIZATION
 :mid: 01M1PXP2KG7SDH3FRPXK9EN06C
@@ -177,7 +177,7 @@ Omitting a key, supplying the wrong type, using blank entries, or naming an unkn
 :validates: SCN-START-ENGINEERING-KNOWLEDGE
 :validates: SCN-CHOOSE-KNOWLEDGE-FLAVOUR
 
-Run `cargo test --locked --test project_bootstrap` against the candidate binary. Exercise current, named, and explicit initialization targets; default, empty, and engineering templates; refusal to overwrite project-owned files; nearest and explicit project selection; bound and unbound stdio MCP; and schema guidance inspection and rejection.
+Run `cargo test --locked --test project_bootstrap --test trace_matrix` against the candidate binary, then exercise the complete authoring flow below through real CLI and MCP requests. Exercise current, named, and explicit initialization targets; default, empty, and engineering templates; refusal to overwrite project-owned files; nearest and explicit project selection; bound and unbound stdio MCP; and schema guidance inspection and rejection.
 
 Initialize an engineering project, create each supported knowledge flavour, add valid typed relationships, inspect both directions through CLI and MCP, reject invalid endpoints without changing source, and validate the resulting project. Exercise the bundled realization check on design-only and mixed requirement/design selections, first without realization and then with a direct implementation of the design. Both cases must evaluate completely, with failed then passed coverage and equivalent CLI/MCP results.
 
@@ -187,7 +187,7 @@ Fixtures live in disposable directories with their own configuration and Git sta
 :::mara evidence EVD-PROJECT-BOOTSTRAP
 :mid: 01M3FW77BBJ0RHY0CGEW6DF8N1
 :title: Bootstrap candidate passes real CLI and MCP checks
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-26T22:08:49Z
 :subject_revision: 82051082ad5ae7baa820d753f2dbe316fa94ee7f
@@ -199,7 +199,7 @@ Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-
 
 The new realization regression failed before the template correction with `invalid_argument` and passed afterward, with missing links reported as failed coverage and valid links as passed coverage. Candidate CLI schema/project validation and matching installed-snapshot MCP validation returned complete, valid results with zero errors and warnings. Explicit MCP matrices covered 5 requirement origins, 7 requirement/design realizations, 7 verification definitions, and 3 scenario-validation methods: all selected roots passed, with every page consumed.
 
-This is local bootstrap evidence only. Other baseline integration tests and unit modules await their capability reviews. It does not establish complete product, package, release, or production readiness.
+This execution covers the bootstrap and engineering authoring workflows described above at the subject revision. It does not establish package, release or production readiness.
 :::
 
 :::mara verification VER-PROJECT-INSPECTION
@@ -218,15 +218,15 @@ This is local bootstrap evidence only. Other baseline integration tests and unit
 
 Run `cargo test --locked --test project_bootstrap` against the candidate CLI and real stdio MCP server in disposable projects with isolated Git/configuration state. Check current, named and explicit initialization targets; all three bundled templates; existing-file preservation and conflicting-target rejection; nearest and explicit discovery; and absolute per-call selection versus bound-server override rejection.
 
-Compare complete schema, flavour/relation lists and named declarations through both transports. Inspect configured schema paths and authoring guidance, and reject malformed guidance without rewriting source. Inspect CLI help and MCP tools/list against the current reviewed capability inventory; unreviewed operations must not be advertised.
+Compare complete schema, flavour/relation lists and named declarations through both transports. Inspect configured schema paths and authoring guidance, and reject malformed guidance without rewriting source. Inspect CLI help and MCP tools/list for the public operations and project-selection inputs under [[REQ-SURFACE-PARITY]].
 
-This method covers initialization and inspection. Definition validation now has its own method, [[VER-SCHEMA-DEFINITIONS]]. This method does not execute project_validate, engineering rules, mutations, retrieval or tracing. Links to the engineering template cover selected installation obligations, not full requirement completion. The broader VER-PROJECT-BOOTSTRAP remains a separate method pending restoration.
+This method covers initialization, template installation and schema inspection. [[VER-SCHEMA-DEFINITIONS]] checks definition validation; [[VER-PROJECT-BOOTSTRAP]] defines the broader engineering authoring workflow. Installation checks alone do not establish rule evaluation or full template behavior.
 :::
 
 :::mara evidence EVD-PROJECT-INSPECTION
 :mid: 01M3FXYH6J23J2YXZBVMA7R6YY
 :title: Reduced bootstrap passes CLI and MCP inspection checks
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-26T22:38:43Z
 :subject_revision: 7155e423ce51e7f6a557e26ad9936b98a0597650
@@ -238,7 +238,7 @@ Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-
 
 Installed-baseline MCP, with the absolute worktree selected, reported complete valid schema/project results without errors or warnings. Selected matrices passed two requirement origins, four initialization/discovery/design realizations and two verification definitions, consuming every page. These are authoring-tool checks, not candidate validation or tracing capabilities.
 
-The candidate now has five source files and nine runtime dependencies. Broader methods and historical execution evidence remain preserved; pending test files are neither executed nor claimed as passing. This result does not establish schema validation, engineering rule execution, source/navigation/retrieval, mutation, packaging or whole-product completion.
+This execution covers initialization and schema inspection at the subject revision. It does not establish schema validation, engineering rule execution, source navigation/retrieval, mutation or packaging.
 :::
 
 :::mara design DES-SCHEMA-RULE-DEFINITIONS
@@ -252,7 +252,7 @@ Project formats 2/3 may enable `[rules]` with `format_version = 1` and explicit 
 
 Each file contains one mapping or sequence of shape mappings with string keys and JSON-compatible values. Reject duplicate keys, merge keys, custom tags and invalid aliases. Keep authored YAML locations. Top-level shapes require `id`: `rule:name` expands to `urn:mara:rule:name`; other IDs must be absolute IRIs. Nested anonymous identities are tied to source snapshot and location. Merge compatible repeated named definitions; conflicting single-valued parameters fail, while property/class/targetClass lists combine distinct values. File order is not override precedence.
 
-Generate JSON-LD bindings in memory from declared fields, flavours and canonical relations. Reject authored contexts, raw JSON-LD keys, unsupported keys or parameter types before conversion. Compile with unmodified `shacl`, `rudof_rdf` and `rudof_iri` 0.3.21. This retains the baseline native language boundary; no second constraint evaluator is introduced.
+Generate JSON-LD bindings in memory from declared fields, flavours and canonical relations. Reject authored contexts, raw JSON-LD keys, unsupported keys or parameter types before conversion. Compile with unmodified `shacl`, `rudof_rdf` and `rudof_iri` 0.3.21. Mara validates its vocabulary before compilation; the native engine owns constraint semantics under [[ADR-NATIVE-SHACL-ADAPTER]].
 
 Supported shapes are NodeShape and PropertyShape (the latter requires path). Bind `targetClass`/`class` to declared flavours; property paths are declared field/canonical relation names or `{inversePath: relation}`. Use `field:`/`schema:` qualification for collisions; inverse paths require canonical relations. Support property, node, not, and, or, qualifiedValueShape, min/max and qualified min/max counts, datatype, pattern, hasValue, in, and name/description/message annotations. Datatypes are string/integer/double/boolean. Nonnegative counts must fit the supported integer range; qualified counts require qualifiedValueShape. Validate regular expressions before native compilation.
 
@@ -282,7 +282,7 @@ Sort by scope, path, byte/line, item MID, rule, obligation source/shape/componen
 
 CLI returns JSON or text diagnostics and exits 0 only for valid results. MCP returns invalid domain results with isError:false. Invalid options, stale continuation, I/O preventing a result and output limits return `{format_version:1,error:{code,message}}`, nonzero CLI status and MCP isError:true. Operation codes are invalid_argument, stale_cursor, io_error and output_limit.
 
-Project/item validation and rule conformance use the same baseline response family but remain separate capabilities.
+Project/item validation shares this response family under [[DES-TRACE-DIAGNOSTIC-INTERFACE]]; native rule evaluation follows [[DES-CURRENT-STATE-EVALUATION]].
 :::
 
 :::mara verification VER-SCHEMA-DEFINITIONS
@@ -298,13 +298,13 @@ Project/item validation and rule conformance use the same baseline response fami
 
 Run `cargo test --locked --test schema_validation` against the candidate CLI and real stdio MCP server in isolated temporary projects. Verify all bundled schemas/rule definitions; invalid schema vocabulary, structural names and guidance; configuration recovery, stable codes and authored locations; reusable and nested definition type checks; unsupported grammar, recursion and depth boundaries; and valid counterparts.
 
-Require identical domain envelopes and operation-error classifications across transports. Check full counts across pages, deterministic continuation, stale source/options, rejected outside rule sources, invalid limits/cursors, schema read errors and oversized diagnostics. Verify schema validation preserves source and succeeds despite unreadable corpus content. Review CLI help and tools/list for the added operation. These checks do not evaluate item conformance or establish graph/matrix behavior.
+Require identical domain envelopes and operation-error classifications across transports. Check full counts across pages, deterministic continuation, stale source/options, rejected outside rule sources, invalid limits/cursors, schema read errors and oversized diagnostics. Verify schema validation preserves source and succeeds despite unreadable corpus content. Review CLI help and tools/list for schema validation. These checks do not evaluate item conformance or establish graph/matrix behavior.
 :::
 
 :::mara evidence EVD-SCHEMA-DEFINITIONS
 :mid: 01M3FYFB45V90SGGMSNXXNSTA5
 :title: Schema definition validation passes through CLI and MCP
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-26T22:47:49Z
 :subject_revision: 0aed5b44268ca1f3c22cdc0869301f848bd6f12c
@@ -313,9 +313,9 @@ Require identical domain envelopes and operation-error classifications across tr
 
 The tested worktree was committed unchanged as `0aed5b44268ca1f3c22cdc0869301f848bd6f12c`; Git reported a clean tree before adding this evidence. Linux x86_64, Rust 1.97.1; candidate `/tmp/mara72-target/debug/mara`. Build settings: `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
 
-Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 17 bootstrap and 20 schema-validation integration tests, none failed or ignored. Real CLI/stdin MCP processes verified schema/rule definitions, guidance and declaration errors, typed diagnostics, file preservation, no corpus reads, complete counts across pages, stale continuation, invalid arguments, schema I/O errors, output bounds, definition merges and shape/relationship depth limits. Native dependency versions match the preserved checkpoint; no upgrade is included.
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 17 bootstrap and 20 schema-validation integration tests, none failed or ignored. Real CLI/stdin MCP processes verified schema/rule definitions, guidance and declaration errors, typed diagnostics, file preservation, no corpus reads, complete counts across pages, stale continuation, invalid arguments, schema I/O errors, output bounds, definition merges and shape/relationship depth limits.
 
 Candidate CLI schema validation of the explicit real repository returned valid:true, evaluation_complete:true, 11 flavours, 18 relations, and no diagnostics. Installed-baseline MCP project validation reported complete validity with no errors or warnings. Its selected matrices passed one schema requirement origin, three requirement/design realizations and three verification definitions, consuming every page. Those corpus/trace checks use the installed authoring tool, not candidate project validation or tracing.
 
-The active candidate adds only schema_validate to the prior three MCP tools and schema validate to the CLI. Rule applicability/evaluation, source loading, graph policies, mutations, retrieval, matrices and packaging remain outside this checkpoint. This evidence establishes definition checking and bootstrap regression coverage, not full rebuild completion.
+This execution covers definition checking and initialization/inspection regressions at the subject revision. It does not establish rule applicability/evaluation, source loading, graph policy, mutations, retrieval, matrices or packaging.
 :::

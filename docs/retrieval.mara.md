@@ -1,3 +1,5 @@
+# Item listing, search and bounded reads
+
 :::mara requirement REQ-ITEM-LIST
 :mid: 01M3G050JRX3RP7XW31JW54JWY
 :title: List compact items in canonical source order
@@ -17,15 +19,15 @@ Return bounded, complete continuations for unchanged sources/options; reject inv
 :kind: interface
 :satisfies: REQ-ITEM-LIST
 
-Compose `load_documents` with `CodeIndex::load` in strict `load_corpus`; return the first code problem as an operation error, preserving baseline read behavior. Do not run semantic graph/field/MID validation as a listing prerequisite.
+Compose `load_documents` with `CodeIndex::load` in strict `load_corpus`; return the first code problem as an operation error. Do not run semantic graph/field/MID validation as a listing prerequisite.
 
 Each summary contains ID, optional MID, flavour, title, project-relative path and one-based line. Summaries use document-path/source order and have no body, ranking, excerpts or neighbours. Filters accept declared flavours, custom fields and relation names/inverse aliases. Values match exactly without trimming; repeated values within a field key and within each filter category use OR, while different keys/categories intersect. Relations match canonical declarations among authored outgoing item occurrences; do not resolve target existence to filter.
 
-Paths match exact document paths or directory subtrees by components, including nested descendants but excluding similarly prefixed sibling directories. Reject empty, absolute, parent-containing and root-only values. Preserve baseline component normalization of leading/interior `.` and repeated/trailing separators; wildcard characters are not expanded. Omission selects all documents.
+Paths match exact document paths or directory subtrees by components, including nested descendants but excluding similarly prefixed sibling directories. Reject empty, absolute, parent-containing and root-only values. Normalize leading/interior `.` and repeated/trailing separators; wildcard characters are not expanded. Omission selects all documents.
 
 Return `{items, has_more, next_cursor}` with a null cursor exactly when no entries remain. Default limit is 20; accept 1–100. Limit the serialized domain result to 65,536 UTF-8 bytes including escaping and continuation; transport wrappers are outside that limit. Truncate titles at 256 Unicode scalars with `title_truncated: true`, appending `[title truncated]` in human output. Never truncate identity/location fields or silently omit an oversized item: fail with an actionable bounded error if it cannot fit alone. Human output finishes with a page continuation line.
 
-Preserve the baseline versioned stateless cursor and list request discriminator. Its position binds the unchanged filters/limit, schema, application version, document bytes, discovered code bytes, accepted adapter/configuration bytes, and bytes/existence of explicitly authored file-only code endpoints, including binary and unconfigured files. Those endpoints use ordinary relative path components and remain confined to regular files inside the project. Reject malformed, stale, zero or out-of-range continuation positions and instruct restarting. This change-detection cursor is not an authentication token.
+Use a versioned stateless cursor with a list request discriminator. Its position binds the unchanged filters/limit, schema, application version, document bytes, discovered code bytes, accepted adapter/configuration bytes, and bytes/existence of explicitly authored file-only code endpoints, including binary and unconfigured files. Those endpoints use ordinary relative path components and remain confined to regular files inside the project. Reject malformed, stale, zero or out-of-range continuation positions and instruct restarting. This change-detection cursor is not an authentication token.
 :::
 
 :::mara verification VER-ITEM-LIST
@@ -39,13 +41,13 @@ Preserve the baseline versioned stateless cursor and list request discriminator.
 
 Run `cargo test --locked --test item_list` against real CLI and stdio MCP processes in isolated temporary projects. Materialize documents directly; fixture creation does not require item mutation/backfill. Check compact deterministic source order, declared exact filters and relation aliases, directory component boundaries, complete count/byte pagination and title truncation. Check invalid declarations/paths/limits/cursors and oversized identities, preserving all source bytes and absent MIDs.
 
-Compare CLI/MCP domain results and error behavior. Continue every returned cursor to exhaustion with unchanged options and no duplicate/skipped identities. Change document/schema/request, unmarked code, adapter query/configuration and explicit file-only endpoint bytes to require stale-cursor rejection; a missing adapter or malformed document must fail even on a fresh read. Verify CLI help and MCP tools/list expose the restored list surface. Run prior suites as regressions and record the tested revision. Search, get, related, semantic project validation and code navigation remain separate methods.
+Compare CLI/MCP domain results and error behavior. Continue every returned cursor to exhaustion with unchanged options and no duplicate/skipped identities. Change document/schema/request, unmarked code, adapter query/configuration and explicit file-only endpoint bytes to require stale-cursor rejection; a missing adapter or malformed document must fail even on a fresh read. Verify CLI help and MCP tools/list describe item listing. Run the full regression suite and record the tested revision. Search, get, related, semantic project validation and code navigation remain separate methods.
 :::
 
 :::mara evidence EVD-ITEM-LIST
 :mid: 01M3G0FEJKRZFRTC8P7PZDTQ5Q
 :title: Composed item listing passes real CLI and MCP workflows
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-26T23:22:57Z
 :subject_revision: cf08aed2f09226d270635f656c8b5fb8735f5bf9
@@ -61,7 +63,7 @@ Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-
 
 A separate read-only self-hosting comparison traversed all 56 then-current repository items in three pages of at most 25, comparing the candidate and installed baseline JSON exactly, including continuation tokens. Installed full-baseline MCP schema/project validation returned complete and valid with zero diagnostics. Selected intent passed one requirement; realization and verification each passed the requirement and design with all pages consumed. Those authoring checks do not claim candidate graph validation.
 
-This is the restored item-list vertical slice composed from the separately verified document and code dependencies. Search, get, related, semantic project validation, code endpoint navigation, mutations and other baseline capabilities remain pending. The installed authoring binary was not replaced.
+This execution covers item listing and document/code loading at the subject revision. It does not establish search, get, related, semantic project validation, code navigation or mutations.
 :::
 
 :::mara requirement REQ-DOCUMENT-CONTEXT-DISCOVERY
@@ -125,7 +127,7 @@ Every distinct query term must match the result's own content. Results with exac
 
 ## Search selection
 
-Top-level CLI `search` and MCP `search` return discovery format 2. `item search`, `item_search`, optional excerpt flags and node-kind filters remain removed. Select owning items, section headings and outermost ordinary Markdown blocks from the complete discovery graph under [[DES-DOCUMENT-STRUCTURE]]. Documents are not search hits. Descendants of items or blocks contribute to their owner; a section matches its heading, not descendant text. Whole large blocks remain one result.
+Top-level CLI `search` and MCP `search` return discovery format 2. The operation has no item subcommand, optional excerpt flag or node-kind filter. Select owning items, section headings and outermost ordinary Markdown blocks from the complete discovery graph under [[DES-DOCUMENT-STRUCTURE]]. Documents are not search hits. Descendants of items or blocks contribute to their owner; a section matches its heading, not descendant text. Whole large blocks remain one result.
 
 Reuse exact field/flavour/path and canonical authored-relation filtering under [[DES-ITEM-LIST]]. Any ID/flavour/field/relation filter selects items only; path filters also permit narrative. Selected IDs/MIDs use OR and resolve exactly before intersecting other filters; missing/ambiguous IDs fail even if another filter would exclude them. Search relation filters accept `schema:` qualification; a name shared with built-in `contains` or `mentions` is ambiguous even when no conflicting edge is present. Search does not traverse built-in connections to find matches.
 
@@ -154,13 +156,13 @@ Run `cargo test --locked --test search --test discovery --test discovery_handles
 
 Require mixed item/section/owning-block results without inherited parent terms or duplicate body hits. Verify exact-all ranking, per-term field weights and stable ties; Unicode normalization, edit-distance boundaries and exact-only identities; exact field/path/relation and ID/MID selection, including empty queries and vocabulary ambiguity. Consume bounded pages with matching CLI/MCP domain results; verify count/byte limits, original-source excerpts and decoded-heading offsets, oversized result errors, stale cursors and rejection of retired options.
 
-Dependency checks preserve local graph scopes, exact UTF-8/CRLF/EOF spans, shared definitions, direct reference provenance/anchors, inert source contexts, summary bounds, deterministic handles across process restarts and edits to other documents. Keep source bytes unchanged. Validation-transport and real mutation assertions remain preserved for their respective checkpoints; these library checks do not establish those operations. Run all previously restored suites, formatting and Clippy before recording evidence.
+Dependency checks preserve local graph scopes, exact UTF-8/CRLF/EOF spans, shared definitions, direct reference provenance/anchors, inert source contexts, summary bounds, deterministic handles across process restarts and edits to other documents. Keep source bytes unchanged. [[VER-PROJECT-VALIDATION]] checks validation transports; mutation methods check real source edits. Run the full regression suite, formatting and Clippy before recording evidence.
 :::
 
 :::mara evidence EVD-UNIFIED-SEARCH
 :mid: 01M3H10FSE3TNZBTCE1TXXJ53T
 :title: Unified search checkpoint verification
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-27T08:51:34Z
 :subject_revision: bb389003cb16b743b9af3272f87f3df3dcc45bb9
@@ -173,11 +175,11 @@ Dependency checks preserve local graph scopes, exact UTF-8/CRLF/EOF spans, share
 
 Tested revision `bb389003cb16b743b9af3272f87f3df3dcc45bb9`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
 
-Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 133 tests (2 units, 13 code discovery, 31 corpus, 9 discovery, 4 handles, 10 item list, 17 bootstrap, 12 references, 20 schema, 15 search), none failed or ignored. Real CLI/stdin MCP fixtures cover mixed ownership, exact/fuzzy Unicode ranking, filters, original-source excerpts, complete bounded pages and stale cursors. The shared-filter regression rejects list continuation after selected IDs change. Fixture identities are created directly; mutation and validation-transport assertions remain pending. Dependency versions and sources remain within the preserved baseline lockfile.
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 133 tests (2 units, 13 code discovery, 31 corpus, 9 discovery, 4 handles, 10 item list, 17 bootstrap, 12 references, 20 schema, 15 search), none failed or ignored. Real CLI/stdin MCP fixtures cover mixed ownership, exact/fuzzy Unicode ranking, filters, original-source excerpts, complete bounded pages and stale cursors. The shared-filter regression rejects list continuation after selected IDs change. Fixture identities were created directly; this run did not exercise mutation or validation transports.
 
 A separate read-only real-repository comparison consumed every search page and matched candidate and installed-baseline JSON exactly, including excerpts and cursors: empty query 127 hits in 2 pages; `schema` 52, `validaton` 52 and `canonical source` 20 hits, each in 1 page. Installed full-baseline MCP schema/project validation completed with zero errors or warnings. Selected intent passed 4 requirements; realization and verification each passed 7 requirement/design roots, with all pages consumed. These authoring checks do not establish candidate project validation or trace matrices.
 
-This checkpoint restores search and its reviewed document graph dependency. Complete get/related transports, code endpoint navigation, mutations, semantic validation and remaining baseline capabilities are still pending. The installed authoring executable was not replaced.
+This execution covers search and its document graph at the subject revision. It does not establish complete get/related transports, code navigation, mutations or semantic validation.
 :::
 
 :::mara requirement REQ-PARTIAL-ITEM-READ
@@ -226,13 +228,13 @@ Opaque cursors bind exact reference, content/entry/value positions and shared so
 :verifies: DES-BOUNDED-NODE-READ
 :verifies: DES-CODE-READ
 
-Run `cargo test --locked --test get` with disposable project-owned fixtures and real CLI/stdin MCP processes. Reconstruct complete content and ordered metadata from every page under the domain byte budget; include Unicode, escaped text, repeated keys, empty values, large headings and oversized identity failures. Verify exact lookup, stale handles/cursors, malformed positions, removed options and no neighbour expansion. Read items, sections, blocks, parent documents, file-only code and exact SCIP symbols; verify source preservation, modifier/wrapper content, missing/ambiguous/unsupported targets, binary rejection and file-only cursor invalidation. Restore deferred exact-identity and full-title reads from search tests. Run prior suites, formatting and Clippy. Inspect exact indexed symbol endpoints in real repository reads; keep installed authoring checks separate from candidate acceptance. These checks do not establish related transports, code relation evaluation, validation or mutation.
+Run `cargo test --locked --test get` with disposable project-owned fixtures and real CLI/stdin MCP processes. Reconstruct complete content and ordered metadata from every page under the domain byte budget; include Unicode, escaped text, repeated keys, empty values, large headings and oversized identity failures. Verify exact lookup, stale handles/cursors, malformed positions, removed options and no neighbour expansion. Read items, sections, blocks, parent documents, file-only code and exact SCIP symbols; verify source preservation, modifier/wrapper content, missing/ambiguous/unsupported targets, binary rejection and file-only cursor invalidation. Check exact-identity lookup and full-title reads after search. Run the full regression suite, formatting and Clippy. Inspect exact indexed symbol endpoints in real repository reads; keep installed authoring checks separate from candidate acceptance. These checks do not establish related transports, code relation evaluation, validation or mutation.
 :::
 
 :::mara evidence EVD-BOUNDED-NODE-READ
 :mid: 01M3H1G0VMDXFBKE597MSSRTNR
 :title: Bounded node and code read checkpoint verification
-:status: accepted
+:status: retired
 :result: passed
 :captured_at: 2026-09-27T09:00:00Z
 :subject_revision: 34325b681c6df44946594545448bf124ac5de6f9
@@ -246,9 +248,9 @@ Run `cargo test --locked --test get` with disposable project-owned fixtures and 
 
 Tested revision `34325b681c6df44946594545448bf124ac5de6f9`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
 
-Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 143 tests (2 units, 13 code discovery, 31 corpus, 9 discovery, 4 handles, 10 get, 10 item list, 17 bootstrap, 12 references, 20 schema, 15 search), none failed or ignored. Seven restored get groups reconstruct item, section, block and document source through real CLI/stdin MCP pages, preserving Unicode, authored metadata order/repeated keys/empty values, complete fitting content and source bytes. Oversized identity, malformed/stale cursors, stale handles and removed interfaces fail as specified. Three code-read groups verify Rust/Python/JavaScript/TypeScript content including attributes/decorators/export wrappers, ignored file-only pagination and invalidation, binary rejection, missing/ambiguous/unsupported endpoints and project confinement. Search again verifies complete titles and exact-only get identity selection.
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 143 tests (2 units, 13 code discovery, 31 corpus, 9 discovery, 4 handles, 10 get, 10 item list, 17 bootstrap, 12 references, 20 schema, 15 search), none failed or ignored. Seven get groups reconstruct item, section, block and document source through real CLI/stdin MCP pages, preserving Unicode, authored metadata order/repeated keys/empty values, complete fitting content and source bytes. Oversized identity, malformed/stale cursors, stale handles and removed interfaces fail as specified. Three code-read groups verify Rust/Python/JavaScript/TypeScript content including attributes/decorators/export wrappers, ignored file-only pagination and invalidation, binary rejection, missing/ambiguous/unsupported endpoints and project confinement. Search again verifies complete titles and exact-only get identity selection.
 
-Read-only candidate/installed-baseline comparisons matched complete JSON for six real-repository references: `REQ-DOCUMENT-CONTEXT-READ`, the index section and parent document handles, `code:src/query/get.rs`, `code:src/query/get.rs::get`, and `code:GOAL.md`. Each fit one page; oversized consecutive reads are covered by fixtures. Installed full-baseline MCP schema/project validation completed with zero errors or warnings. Selected intent passed 2 requirements; realization and verification each passed 4 requirement/design roots, consuming all pages.
+Read-only candidate/installed-baseline comparisons matched complete JSON for six real-repository references: `REQ-DOCUMENT-CONTEXT-READ`, the index section and parent document handles, `code:src/query/get.rs`, `code:src/query/get.rs::get`, and an explicitly selected ignored local file. Each fit one page; oversized consecutive reads are covered by fixtures. Installed full-baseline MCP schema/project validation completed with zero errors or warnings. Selected intent passed 2 requirements; realization and verification each passed 4 requirement/design roots, consuming all pages.
 
-This restores bounded get and exact code resolution. Related transports, code-edge evaluation, mutation, semantic validation and remaining baseline capabilities are pending. Authoring validation/matrices use the installed full tool and do not establish candidate implementations of those operations. The installed executable was not replaced.
+This execution covers bounded get and the code resolution available at the subject revision. It does not establish related transports, code-edge evaluation, mutation or semantic validation. Installed-tool validation and matrices are authoring checks only.
 :::
