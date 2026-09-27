@@ -7,7 +7,7 @@ review; it does not authorize removing behavior. Product contracts live in the
 linked capability documents rather than in this inventory.
 
 The active candidate now supports project initialization, schema inspection and
-definition validation, item creation/update/deletion/listing, unified search, bounded get, direct navigation, relation inspection/add/remove, MID backfill and explicit
+definition validation, item creation/update/deletion/movement/listing, unified search, bounded get, direct navigation, relation inspection/add/remove, MID backfill and explicit
 journal rollback. Corpus conformance, document/code discovery
 and the document graph are reviewed dependencies. Earlier full-runtime test rows
 remain historical where their edit or validation transports
@@ -557,3 +557,30 @@ Rust code-marker targets. Direct exact lookup is equivalent after full source
 conformance, so no legacy read result was imported. No production behavior
 change or new dependency was needed. The temporary build directory hit a quota;
 cleaning only this package's generated artifacts allowed verification to resume.
+
+## Item movement review
+
+Selected increment: CLI/MCP movement within or between discovered documents.
+Dependencies are existing destination/insertion helpers, strict corpus/source
+conformance, source correspondence and the reviewed journal publisher/recovery.
+
+| Area | Review and disposition |
+|---|---|
+| Identity/destination | Retain complete source validation, exact ID/MID selection, confined discoverable regular destinations with existing parents, optional new document and original one-based line coordinates. Use direct identity resolution after conformance rather than the legacy retrieval result. |
+| Source | Retain exact parser block transfer, destination-style separators, same-document coordinate adjustment and unchanged-content boundary moves. Preserve empty source files and both existing modes. Reparse and verify item count, IDs/MIDs, metadata, bodies, recognized mentions and destination location. |
+| References/publication | Retain incoming/carried Markdown destination checks, structural anchor correspondence and unchanged typed edges without body-edit exemptions. Recheck project/schema/corpus/discovery before journaled publication. Reuse tested interruption/rollback behavior without duplicating journal format ownership. |
+| Tests | Retain six movement groups for cross-file bytes/permissions/graph identity, same-file original coordinates/new destinations, invalid destinations/context/corpus, CLI/MCP bound-context parity, missing final newline/boundary moves and symlinks. Extract carried/incoming/retargeted/definition-link and same-document heading regressions from the mixed suite, preserving removed-with-deletion tests in their existing checkpoint. Retain lock refusal and external/inline relation preservation; full mixed rename assertions remain pending. |
+
+Completion requires actual CLI/MCP moves and subsequent reads/navigation, exact
+source/identity on success and refusal, shared transaction regressions, all prior
+suites, formatting/Clippy, canonical validation, selected matrices and execution
+evidence for the committed revision.
+
+Eleven movement groups retain the six baseline workflows and five focused groups
+for carried/incoming/definition/shifted-heading links, identity/self links,
+same-file boundaries, writer/incomplete-source refusal and inline/external edge
+locations. The existing transaction tests still own publication failure and
+restart recovery. No production behavior change or new dependency was needed;
+exact lookup follows already-complete source validation. Boundary movement
+preserves bytes/location; the retained publisher may still replace identical
+content and does not promise the no-write behavior of item update.

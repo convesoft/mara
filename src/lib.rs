@@ -1911,3 +1911,6 @@ pub use mutation::{ItemUpdate, ItemUpdateWarning, update_item};
 pub use operations::ItemUpdateParams;
 
 pub use mutation::{ItemDeletion, delete_item};
+
+pub use mutation::{ItemLocation, ItemMove, move_item};
+pub use operations::ItemMoveParams;

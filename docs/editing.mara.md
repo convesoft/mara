@@ -1,8 +1,8 @@
 # Source mutation and explicit recovery
 
-MID backfill, item creation/update/deletion, relation edits and explicit rollback
-are restored. The shared journal publisher supports relation edits; move/rename
-remain pending review.
+MID backfill, item creation/update/deletion/movement, relation edits and explicit
+rollback are restored. The shared journal publisher supports relation edits and
+movement; rename remains pending review.
 
 :::mara requirement REQ-RECOVERABLE-MUTATION
 :mid: 01M1RKZY3VJKYP7V8GNDKR84GT
@@ -41,7 +41,7 @@ Journal format 1 is UTF-8 JSON with `format_version:1` and a non-empty `changes`
 
 CLI `project transaction rollback` and MCP `project_transaction_rollback` take the exclusive lock and need resolvable project configuration, including an existing configured schema path, but do not read schema contents or require a valid corpus. Check all targets against their recorded preimage or candidate and permissions before restoring anything; stage all originals, recheck each target, restore existing files and remove new destinations. Compare readonly on all platforms and a supplied unix_mode on Unix. Sync staged files and, on Unix, affected parent directories. Remove the journal only after success. Recovery is retryable, including already-restored paths; no journal is a successful no-op. Return `{project,restored}` with absolute project root and relative restored paths.
 
-Reject later manual edits or permission changes and preserve the journal. Reconcile targets to a recorded version before retrying. Preserve malformed/unsupported journals and restore trusted backups before removing them. Reads remain available. Concurrent manual filesystem edits are not coordinated by the advisory lock. The shared publisher is specified by [[DES-MUTATION-TRANSACTION]]; move/rename workflows remain separate implementation obligations.
+Reject later manual edits or permission changes and preserve the journal. Reconcile targets to a recorded version before retrying. Preserve malformed/unsupported journals and restore trusted backups before removing them. Reads remain available. Concurrent manual filesystem edits are not coordinated by the advisory lock. The shared publisher is specified by [[DES-MUTATION-TRANSACTION]]; rename remains a separate implementation obligation.
 :::
 
 :::mara verification VER-MID-AND-RECOVERY
@@ -93,9 +93,9 @@ Candidate CLI schema validation and installed-baseline MCP schema/project valida
 :kind: interface
 :satisfies: REQ-RECOVERABLE-MUTATION
 
-The shared journal publisher is used by relation mutations. Under the mutation lock, capture original bytes and permissions, stage every candidate, recheck operation-level project state and every preimage, then durably publish the format-1 journal defined by [[DES-MUTATION-RECOVERY]] before replacing any original. Sync staged files and, on Unix, affected parent directories; remove the journal only after all replacements succeed.
+The shared journal publisher is used by relation mutations and item movement. Under the mutation lock, capture original bytes and permissions, stage every candidate, recheck operation-level project state and every preimage, then durably publish the format-1 journal defined by [[DES-MUTATION-RECOVERY]] before replacing any original. Sync staged files and, on Unix, affected parent directories; remove the journal only after all replacements succeed.
 
-On an in-process publication failure, restore recorded originals and remove newly created destinations. If rollback encounters later manual edits or another failure, preserve recovery information and refuse further writers until explicit rollback succeeds. A stopped process leaves a journal for restart recovery. Recheck each preimage before replacement; the advisory lock does not coordinate manual filesystem edits. Multi-file publication is recoverable, not an atomic snapshot for concurrent readers. Move/rename callers remain pending.
+On an in-process publication failure, restore recorded originals and remove newly created destinations. If rollback encounters later manual edits or another failure, preserve recovery information and refuse further writers until explicit rollback succeeds. A stopped process leaves a journal for restart recovery. Recheck each preimage before replacement; the advisory lock does not coordinate manual filesystem edits. Multi-file publication is recoverable, not an atomic snapshot for concurrent readers. Rename callers remain pending.
 :::
 
 :::mara requirement REQ-ITEM-UPDATE
@@ -250,4 +250,50 @@ At `6b7f0540520ecf89a5b3e3f67a0782ff984b7b21`, formatting, `cargo clippy --locke
 Nine deletion groups cover CLI/MCP identity/result parity, exact source/separator/permission preservation, retained empty documents, failed lookup/empty list after deletion, all incoming reference locations, removed outgoing/self links and literal examples, invalid/incomplete corpus and request refusal, duplicate-heading/contained-anchor protection, inline demotion to blocking mentions, external outgoing assertions, active/pending locks and real Rust code-marker targets. Previous capabilities and single-file publication refusal regressions pass.
 
 Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected intent passed one root; realization and verification each passed two roots with all pages consumed. CLI/MCP advertise and execute deletion. Validation transport checks use reviewed library source conformance where project/item transports remain pending. Move/rename, rule evaluation, matrices and remaining repository/tooling scope are not completed by this checkpoint.
+:::
+
+:::mara requirement REQ-ITEM-MOVEMENT
+:mid: 01M1RKZY3F63775E1HM1N4T7QG
+:title: Move an item without changing its identity or authored content
+:status: accepted
+:kind: functional
+:derives_from: SCN-EDIT-CONNECTED-KNOWLEDGE
+
+CLI `item move` and MCP `item_move` relocate exactly one item by exact MID or human ID within or between discovered documents. Destination and optional original one-based line follow creation's confinement/insertion rules. Require source conformance before and after movement.
+
+Preserve MID, human ID, exact authored block bytes, metadata, body, line endings and typed relation endpoints. Surviving Markdown references, including incoming and carried links, must retain their destinations. Preserve unrelated bytes, other items and existing file permissions; retain empty source documents. Return identity and original/new path and opener line consistently across transports. Publish through the recoverable mutation transaction; do not rename, update content, delete the source file or commit to Git.
+:::
+
+:::mara design DES-ITEM-MOVEMENT
+:mid: 01M1RKZY478CMMT2Q67Y1CA1GP
+:title: Move source spans through a recoverable file transaction
+:status: accepted
+:kind: interface
+:satisfies: REQ-ITEM-MOVEMENT
+:satisfies: REQ-RECOVERABLE-MUTATION
+
+CLI accepts `item move REFERENCE FILE [--line LINE]`; MCP accepts `reference`, `file`, optional `line` and project selection. Return `{id,mid,old_location:{path,line},new_location:{path,line}}` using relative paths and one-based opener lines.
+
+Under the mutation lock, load/validate source conformance and resolve exact identity. Require a confined, discoverable regular `*.mara.md` destination with an existing parent; a missing destination is allowed. Check an existing destination against the loaded corpus. Insertion coordinates refer to the original destination, including same-file moves. Reject item interiors; the moved item's start/end boundaries preserve content. Adjust later same-file positions by removed byte length; omission appends.
+
+Transfer the parser's exact end-exclusive source slice through its closing line, removing only that slice. Preserve authored newline styles; add separators in the destination's first newline style (LF when empty), including a missing closing-line terminator when content follows. Do not coalesce existing surrounding blanks or remove the source document.
+
+Reparse all candidates and apply reference correspondence without body-edit exemptions. Preserve carried relative links, incoming links to contained nodes and shifted heading/block targets. Require candidate source conformance, unchanged item count/identities/metadata/body/recognized mentions and the selected identity at its destination.
+
+Use [[DES-MUTATION-TRANSACTION]] to stage all changed paths with recorded preimages and modes, recheck project/schema/corpus/discovery, publish the journal and replace files. Explicit recovery follows [[DES-MUTATION-RECOVERY]]. Source validation is independent of lifecycle/rule policies; journaled publication is recoverable rather than atomically visible across files.
+:::
+
+:::mara verification VER-ITEM-MOVEMENT
+:mid: 01M3H5R4W8K353AWDWKYDE3QKQ
+:title: Check identity-preserving moves and reference-safe publication
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-ITEM-MOVEMENT
+:verifies: DES-ITEM-MOVEMENT
+:verifies: REQ-RECOVERABLE-MUTATION
+
+Run `cargo test --locked --test item_movement` plus shared transaction failure/interruption regressions. Exercise cross-file and same-file CLI/MCP moves, ID/MID lookup and navigation after movement, original line coordinates, exact block/separator/newline/permission preservation, empty source/new destination and boundary moves.
+
+Reject invalid/hidden/symlink destinations, item interiors, incomplete/invalid corpora, active/pending writers and Markdown contexts that hide or retarget content. Preserve incoming/carried links and structural destinations, including reference definitions; allow identity-only references across a move. Check typed-inline/external assertions and subsequent relation inspection. Run all previous suites, formatting/Clippy, canonical validation and selected traceability.
 :::

@@ -211,6 +211,23 @@ impl SearchToolParams {
 #[tool_router]
 impl MaraMcp {
     #[tool(
+        name = "item_move",
+        description = "Move one item by exact MID or human ID within a valid project to a project-relative document. Preserve identity, content, and relations; keep the source document. Optional line is one-based in the original destination. Relative Markdown links carried with the item, incoming links to its contained nodes, and shifted heading anchors must keep their destinations. Resolve reported impacts before retrying; Markdown links are not automatically repaired."
+    )]
+    fn item_move(
+        &self,
+        Parameters(params): Parameters<ItemMoveToolParams>,
+    ) -> Result<Json<mara::ItemMove>, String> {
+        self.for_project(params.project)?
+            .item_move(mara::ItemMoveParams {
+                reference: params.reference,
+                file: params.file,
+                line: params.line,
+            })
+            .map(Json)
+    }
+
+    #[tool(
         name = "item_delete",
         description = "Delete one item by exact MID or human ID after validating the project. Refuses surviving incoming typed relations, wiki mentions, and Markdown links to the item or its contained nodes, reporting blocking source locations. Also rejects broken or retargeted surviving links from shifted heading anchors. Keeps the containing document. Resolve reported impacts before retrying; Markdown links are not automatically repaired."
     )]
@@ -622,4 +639,19 @@ struct ItemDeleteToolParams {
     project: Option<PathBuf>,
     /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
     reference: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemMoveToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
+    reference: String,
+    /// Destination project-relative *.mara.md path selected by project discovery; parent directory must exist. Creates the file if absent; no absolute paths or .. components.
+    file: PathBuf,
+    /// Insert before this one-based line in the original destination, including same-file moves; valid range is 1 through line_count + 1 (end of file). Omitted or null appends. Insertion inside an item is rejected; the moved item's boundaries are no-ops.
+    #[serde(default)]
+    line: Option<usize>,
 }

@@ -1025,3 +1025,207 @@ fn full_line_end(source: &str, end: usize) -> usize {
         end
     }
 }
+
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+pub struct ItemMove {
+    pub id: String,
+    pub mid: String,
+    pub old_location: ItemLocation,
+    pub new_location: ItemLocation,
+}
+
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+pub struct ItemLocation {
+    pub path: PathBuf,
+    pub line: usize,
+}
+
+// @mara implements REQ-ITEM-MOVEMENT
+// @mara implements DES-ITEM-MOVEMENT
+pub fn move_item(
+    project: &Project,
+    schema: &Schema,
+    reference: &str,
+    file: &Path,
+    line: Option<usize>,
+) -> Result<ItemMove, Error> {
+    let _lock = MutationLock::acquire(project)?;
+    let corpus = load_corpus(project, schema)?;
+    require_valid_move_corpus(&corpus, schema)?;
+    let item =
+        crate::query::resolve_item(&corpus, reference).map_err(|error| Error::InvalidMutation {
+            message: error.to_string(),
+        })?;
+    let source_path = item.source().path();
+    let source = corpus
+        .documents()
+        .iter()
+        .find(|document| document.path() == source_path)
+        .expect("item belongs to document");
+    let (destination_path, absolute, existed) = resolve_document_path(project, file)?;
+    if !document_is_discoverable(project, &destination_path)? {
+        return invalid(format!(
+            "destination file '{}' is excluded by project content discovery",
+            destination_path.display()
+        ));
+    }
+    let destination_source = if existed {
+        fs::read_to_string(&absolute).map_err(|source| Error::Io {
+            action: "read move destination",
+            path: absolute,
+            source,
+        })?
+    } else {
+        String::new()
+    };
+    if existed
+        && corpus
+            .documents()
+            .iter()
+            .find(|document| document.path() == destination_path)
+            .is_none_or(|document| document.source() != destination_source)
+    {
+        return invalid("destination changed since corpus preflight; retry the move");
+    }
+    let destination = parse_document_source(&destination_path, &destination_source, schema)?;
+    let position = insertion_position(&destination_source, line)?;
+    if let Some(containing) = destination.items().iter().find(|item| {
+        let span = item.source().span();
+        position > span.start_byte() && position < span.end_byte()
+    }) {
+        return invalid(format!(
+            "insertion point is inside item '{}'",
+            containing.id()
+        ));
+    }
+    let span = item.source().span();
+    let block = &source.source()[span.start_byte()..span.end_byte()];
+    let mut removed = source.source().to_owned();
+    removed.replace_range(span.start_byte()..span.end_byte(), "");
+    let same_document = source_path == destination_path;
+    let mut candidates = BTreeMap::new();
+    if same_document {
+        // Coordinates refer to the original document, as they do for creation.
+        let candidate = if position == span.start_byte() || position == span.end_byte() {
+            source.source().to_owned()
+        } else {
+            let position = if position > span.end_byte() {
+                position - block.len()
+            } else {
+                position
+            };
+            insert_block(
+                &removed,
+                position,
+                block,
+                newline_style(&destination_source),
+            )
+        };
+        candidates.insert(destination_path.clone(), candidate);
+    } else {
+        candidates.insert(source_path.to_path_buf(), removed);
+        candidates.insert(
+            destination_path.clone(),
+            insert_block(
+                &destination_source,
+                position,
+                block,
+                newline_style(&destination_source),
+            ),
+        );
+    }
+    let projected = corpus.with_replacements(&candidates, schema)?;
+    references::preflight(&corpus, &projected, None)?;
+    require_valid_move_corpus(&projected, schema)?;
+    // Validity alone cannot detect a block hidden by Markdown context or changed mentions.
+    if projected.items().count() != corpus.items().count() {
+        return invalid("move changes item recognition in the document's Markdown context");
+    }
+    for original in corpus.items() {
+        let Some(candidate) = projected
+            .items()
+            .find(|candidate| candidate.mid() == original.mid())
+        else {
+            return invalid("move would hide an existing item in Markdown context");
+        };
+        if candidate.id() != original.id()
+            || candidate.body() != original.body()
+            || candidate
+                .metadata()
+                .iter()
+                .map(|entry| (entry.key(), entry.value()))
+                .collect::<Vec<_>>()
+                != original
+                    .metadata()
+                    .iter()
+                    .map(|entry| (entry.key(), entry.value()))
+                    .collect::<Vec<_>>()
+            || candidate
+                .mentions()
+                .iter()
+                .map(|mention| mention.target())
+                .collect::<Vec<_>>()
+                != original
+                    .mentions()
+                    .iter()
+                    .map(|mention| mention.target())
+                    .collect::<Vec<_>>()
+        {
+            return invalid("move would change an item's content or references");
+        }
+    }
+    let moved = projected
+        .items()
+        .find(|candidate| candidate.mid() == item.mid())
+        .expect("item preservation checked");
+    if moved.source().path() != destination_path {
+        return invalid("moved item did not resolve in the destination");
+    }
+    let result = ItemMove {
+        id: item.id().to_owned(),
+        mid: item.mid().expect("validated MID").to_owned(),
+        old_location: ItemLocation {
+            path: source_path.to_path_buf(),
+            line: span.start_line(),
+        },
+        new_location: ItemLocation {
+            path: destination_path.clone(),
+            line: moved.source().span().start_line(),
+        },
+    };
+    let changes = candidates
+        .iter()
+        .map(|(path, after)| {
+            let before = corpus
+                .documents()
+                .iter()
+                .find(|document| document.path() == path)
+                .map(|document| document.source().to_owned());
+            transaction::Change::new(project, path.clone(), before, after.clone())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    transaction::commit(project, changes, || {
+        // Recheck the complete corpus and configuration after staging, before publication.
+        if crate::resolve_project(Some(project.root()), project.root())? != *project
+            || crate::load_schema(project)? != *schema
+            || load_corpus(project, schema)? != corpus
+            || !document_is_discoverable(project, &destination_path)?
+        {
+            return invalid("project changed since move preflight; retry the move");
+        }
+        require_valid_move_corpus(&projected, schema)
+    })?;
+    Ok(result)
+}
+
+fn require_valid_move_corpus(corpus: &Corpus, schema: &Schema) -> Result<(), Error> {
+    if let Some(diagnostic) = validate_corpus(corpus, schema).first() {
+        return invalid(format!(
+            "cannot move item while validation fails at {}:{}: {}",
+            diagnostic.source().path().display(),
+            diagnostic.source().span().start_line(),
+            diagnostic.message()
+        ));
+    }
+    Ok(())
+}

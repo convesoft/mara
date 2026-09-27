@@ -204,6 +204,18 @@ impl OperationContext {
         )
     }
 
+    pub fn item_move(&self, params: ItemMoveParams) -> Result<crate::ItemMove, String> {
+        let (project, schema) = self.load_project()?;
+        crate::move_item(
+            &project,
+            &schema,
+            &params.reference,
+            &params.file,
+            params.line,
+        )
+        .map_err(|error| error.to_string())
+    }
+
     pub fn item_delete(&self, reference: &str) -> Result<crate::ItemDeletion, String> {
         let (project, schema) = self.load_project()?;
         crate::delete_item(&project, &schema, reference).map_err(|error| error.to_string())
@@ -594,4 +606,13 @@ pub struct ItemUpdateParams {
     pub clear_fields: Vec<String>,
     #[serde(default)]
     pub body: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ItemMoveParams {
+    pub reference: String,
+    pub file: PathBuf,
+    #[serde(default)]
+    pub line: Option<usize>,
 }

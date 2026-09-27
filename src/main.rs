@@ -447,6 +447,33 @@ fn run(cli: Cli) -> Result<bool, String> {
                 Ok(())
             })?;
         }
+        Command::Item {
+            command:
+                ItemCommand::Move {
+                    reference,
+                    file,
+                    line,
+                },
+        } => {
+            let result =
+                OperationContext::from_environment(project)?.item_move(mara::ItemMoveParams {
+                    reference,
+                    file,
+                    line,
+                })?;
+            emit(format, &result, |result| {
+                println!(
+                    "moved item '{}' with MID {} from {}:{} to {}:{}",
+                    result.id,
+                    result.mid,
+                    result.old_location.path.display(),
+                    result.old_location.line,
+                    result.new_location.path.display(),
+                    result.new_location.line
+                );
+                Ok(())
+            })?;
+        }
         Command::Related {
             reference,
             direction,
@@ -801,6 +828,20 @@ fn print_validation(result: &ValidationResult) -> Result<(), String> {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
+    /// Move an item within a valid project without changing its identity, content, or relations; keep the source document.
+    #[command(
+        after_help = "ID/MID references retain item identity. Relative Markdown links carried with the item, incoming links to its contained nodes, and shifted heading anchors must keep their destinations. Resolve reported link impacts before retrying; Markdown links are not automatically repaired."
+    )]
+    Move {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
+        reference: String,
+        /// Destination project-relative *.mara.md file; parent must exist and discovery must include it. Creates the file if absent; no absolute paths or .. components.
+        file: PathBuf,
+        /// Insert before this one-based line in the original destination, including same-file moves; valid range is 1 through line_count + 1 (end of file). Omission appends. Insertion inside an item is rejected; the moved item's boundaries are no-ops.
+        #[arg(long)]
+        line: Option<usize>,
+    },
+
     /// Delete one item from a valid project only when no surviving typed relations, wiki mentions, or Markdown links refer to it or its contained nodes; keep the containing document.
     #[command(
         after_help = "Reject changes that break or retarget surviving internal links, including generated heading anchors affected elsewhere in the document. Resolve reported source locations before retrying; Markdown links are not automatically repaired."
