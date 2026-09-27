@@ -297,3 +297,34 @@ Run `cargo test --locked --test item_movement` plus shared transaction failure/i
 
 Reject invalid/hidden/symlink destinations, item interiors, incomplete/invalid corpora, active/pending writers and Markdown contexts that hide or retarget content. Preserve incoming/carried links and structural destinations, including reference definitions; allow identity-only references across a move. Check typed-inline/external assertions and subsequent relation inspection. Run all previous suites, formatting/Clippy, canonical validation and selected traceability.
 :::
+
+:::mara evidence EVD-ITEM-MOVEMENT
+:mid: 01M3H5YH9QBGDF68Z4ZBMWTBF9
+:title: Journaled movement passes identity and reference preservation checks
+:status: accepted
+:result: passed
+:captured_at: 2026-09-27T10:17:50Z
+:subject_revision: 9c9069891b056efc8cb6be9327a2a32693ab24f3
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-ITEM-LIST
+:evidences: VER-UNIFIED-SEARCH
+:evidences: VER-BOUNDED-NODE-READ
+:evidences: VER-DOCUMENT-NAVIGATION
+:evidences: VER-RELATION-INSPECTION
+:evidences: VER-CORPUS-CONFORMANCE
+:evidences: VER-MID-AND-RECOVERY
+:evidences: VER-ITEM-CREATION
+:evidences: VER-RELATION-MUTATION
+:evidences: VER-ITEM-UPDATE
+:evidences: VER-ITEM-DELETION
+:evidences: VER-ITEM-MOVEMENT
+
+At `9c9069891b056efc8cb6be9327a2a32693ab24f3`, formatting, `cargo clippy --locked --all-targets --all-features -- -D warnings` and `cargo test --locked --all-targets` passed. The unchanged-source full run passed 250 tests across 21 suites with no failures; the ignored interruption helper was explicitly executed at three publication boundaries by its parent. The existing proc-macro-error2 future-compatibility notice remains.
+
+Eleven movement groups cover CLI/MCP ID/MID parity, exact block transfer, permissions, retained source/new destination, original same-file line coordinates, missing final newline and boundary moves, safe destination/discovery/symlink refusal, read/navigation identity, incomplete corpus and active/pending writer refusal. Carried/incoming/definition links and shifted heading targets cannot silently retarget; identity/self links survive. Typed inline and external assertions preserve exact spelling and report their new source locations. Existing transaction tests cover preimage conflicts, automatic rollback, interrupted publication and explicit restart recovery; all prior suites pass.
+
+Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected intent, realization and verification each passed two roots, consuming all pages. Both transports advertise and execute movement. Boundary movement preserves bytes/location but retains baseline publication rather than promising no file replacement. Rename, project/item validation transports, rule evaluation, matrices and remaining tooling/corpus scope are still pending.
+:::
