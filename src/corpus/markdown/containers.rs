@@ -338,6 +338,7 @@ fn markdown_tree(
     (arena, root, ends, link_ends.take())
 }
 
+// @mara implements DES-DOCUMENT-FORMAT
 pub(super) fn populate(source: &str, document: &mut ParsedDocument) {
     // Parse ordinary content and item bodies together so Rushdown resolves
     // references against one document-wide definition context. Recognized item
@@ -786,6 +787,7 @@ fn heading_text(arena: &Arena, node: NodeRef, source: &str) -> (String, Vec<usiz
 mod tests {
     use super::*;
 
+    // @mara checks DES-DOCUMENT-FORMAT
     #[test]
     fn rushdown_item_is_a_container_with_only_markdown_body_children() {
         let source =

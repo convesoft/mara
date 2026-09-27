@@ -15,9 +15,12 @@ impl Rules {
         prerequisites: &[Diagnostic],
         result: &mut ValidationResult,
     ) {
+        // @mara implements DES-CURRENT-STATE-EVALUATION
+        // @mara implements REQ-CURRENT-STATE-RULES
         self.observe(corpus, schema, prerequisites, result, &self.roots, None);
     }
 
+    // @mara implements DES-TRACE-VIEW-INTERFACES
     pub(crate) fn observe(
         &self,
         corpus: &Corpus,

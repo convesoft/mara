@@ -82,6 +82,7 @@ pub struct DiscoveryConnection<'graph, 'corpus> {
 
 impl<'corpus> DiscoveryGraph<'corpus> {
     pub(crate) fn new(corpus: &'corpus Corpus) -> Self {
+        // @mara implements DES-DOCUMENT-STRUCTURE
         let mut result = Self {
             graph: DiGraph::new(),
             diagnostics: Vec::new(),

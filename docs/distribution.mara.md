@@ -1,189 +1,57 @@
-# Distribution and release
+# Distribution
 
-This document owns the durable distribution and release contract. Public
-installation instructions summarize it in `README.md`.
-
-:::mara scenario SCN-INSTALL-DISTRIBUTED-MARA
-:mid: 01M1PXP2KG35JD2VV6SBSXPDQW
-:title: Run Mara without a Rust toolchain
-
-On a supported host, a user runs an exact `@convesoft/mara` version through
-`npx`. The package runs the native Mara binary with inherited standard streams,
-so the same command serves the CLI and long-running stdio MCP workflows. This
-advances [[GOAL-UNIFIED-PROJECT-KNOWLEDGE]] and
-[[GOAL-BOUNDED-AGENT-CONTEXT]].
-:::
+Supported CLI and agent installation paths share the same native executable.
 
 :::mara requirement REQ-SCRIPT-FREE-NPM-DISTRIBUTION
-:mid: 01M1PXP2KGSGNZEYN88YWF7S2Y
-:title: Distribute supported native binaries through script-free npm packages
+:mid: 01M3HHZSB0M2NBM3D9J78GPZ8A
+:title: Run native Mara through script-free npm packages
+:status: accepted
+:kind: constraint
 :derives_from: SCN-INSTALL-DISTRIBUTED-MARA
 
-`@convesoft/mara` must install and launch without npm lifecycle scripts. Every
-release publishes the dispatcher and these native packages at one exact
-application version:
+Install and launch @convesoft/mara without npm lifecycle scripts or a Rust toolchain. The dispatcher and native packages use the exact Cargo workspace version. Support x64 and arm64 macOS, and x64 and arm64 GNU Linux compatible with the Ubuntu 22.04 glibc build baseline. Windows and musl Linux are unsupported. Missing or unsupported native packages fail with actionable diagnostics; installation does not download or compile executables through scripts.
 
-- `@convesoft/mara-linux-x64-gnu`
-- `@convesoft/mara-linux-arm64-gnu`
-- `@convesoft/mara-darwin-x64`
-- `@convesoft/mara-darwin-arm64`
-
-Linux support requires the GNU target and compatibility with the Ubuntu 22.04
-glibc baseline used to build release artifacts. Windows and musl Linux are
-unsupported for the first alpha. An unsupported or missing native package must
-fail with an actionable diagnostic instead of downloading or building code at
-install time.
+The main package contains its CLI dispatcher, matching standalone Mara skill, README and license texts. Native packages contain the compiled executable and public documentation/licenses. Preserve CLI arguments, inherited standard streams, exit status and termination signals. [[implemented_by:code:npm/mara.cjs]] [[implemented_by:code:scripts/package-npm.mjs]]
 :::
 
 :::mara requirement REQ-AGENT-INSTALLATION-MODES
-:mid: 01M1PXP2KGPHVWQQ8BGR9KDF12
-:title: Support manual and optional complete-plugin agent onboarding
+:mid: 01M3HJ05KD1FGPVNHSQCJYH58B
+:title: Configure MCP and install the standalone skill separately
+:status: accepted
+:kind: functional
 :derives_from: SCN-ONBOARD-MARA-AGENT
 
-The supported Codex path registers an installed Mara executable as an MCP server
-and installs the Mara skill separately. The Convesoft marketplace may also
-offer the complete package as an optional convenience. The two routes expose
-the same skill and MCP operations, but complete-plugin compatibility is not a
-release gate.
-:::
+Configure an installed executable or exact npm package version as a stdio MCP server. Project selection follows [[DES-OPERATION-PROJECT-CONTEXT]]. Install the matching standalone Mara skill separately through npx skills from a checkout or extracted npm package; select the intended client and scope. Skill installation does not install the executable. CLI fallback reuses the configured MCP launcher and exact version. Mara does not modify the project's AGENTS.md during onboarding.
 
-:::mara requirement REQ-REPRODUCIBLE-PUBLIC-RELEASE
-:mid: 01M1PXP2KGMG4DYF9JAN85XXMH
-:title: Publish one verified release from one approved revision
-:derives_from: SCN-INSTALL-DISTRIBUTED-MARA
-
-A release must build all supported binaries and npm packages from one commit on
-`main`; run formatting, lint, tests, project validation, package inspection, and
-clean-install CLI and MCP smoke tests; and verify that every artifact carries
-the Cargo workspace version. The committed changelog must be generated from
-Conventional Commit history with `git-cliff`.
-
-Publication requires approval through the protected GitHub `release`
-environment. The approved workflow creates an annotated `v<version>` tag at the
-verified commit, creates a draft GitHub release, publishes native npm packages
-before the dispatcher, verifies any already-published version by tarball digest
-on retry, and runs the public-registry smoke test before publishing the GitHub
-release. Prereleases use the npm `next` tag; stable releases use `latest`.
-:::
-
-:::mara requirement REQ-PUBLIC-REPOSITORY-GUIDANCE
-:mid: 01M1PXP2KG4VCF5PT6TTZ6QJ9W
-:title: Keep public project and release guidance discoverable
-
-The repository root must provide a concise README, dual-license texts, current
-roadmap through 0.4.0 and Later, security reporting guidance, and generated
-changelog. These conventional files must link to canonical Mara contracts
-instead of duplicating their detailed meaning.
+The [README](../README.md#configure-an-agent) gives the supported setup commands; the [skill](../skills/mara/SKILL.md) owns the agent authoring workflow.
 :::
 
 :::mara design DES-NPM-NATIVE-PACKAGES
-:mid: 01M1PXP2KG1AN1F4WE281BQ028
+:mid: 01M3HJ0HSHQY5TEY3717A8BFEE
 :title: Dispatch to an npm-selected native package
+:status: accepted
+:kind: interface
 :satisfies: REQ-SCRIPT-FREE-NPM-DISTRIBUTION
-:satisfies: REQ-PORTABLE-AGENT-ONBOARDING
 
-The script-free `@convesoft/mara` package exposes `mara` through a small Node.js
-dispatcher. Its exact-version `optionalDependencies` use npm `os`, `cpu`, and
-`libc` selection to install only the matching native package. Each native
-package contains the compiled Rust executable. The dispatcher selects the
-package from `process.platform` and `process.arch`, resolves its executable,
-forwards arguments and standard streams, and mirrors its exit status or signal.
+The main package exposes bin/mara.cjs and requires Node.js 18 or newer. Exact-version optionalDependencies select @convesoft/mara-linux-x64-gnu, @convesoft/mara-linux-arm64-gnu, @convesoft/mara-darwin-x64 or @convesoft/mara-darwin-arm64 using npm os, cpu and Linux libc constraints. Each platform package exposes bin/mara internally. The dispatcher resolves the matching installed package from process.platform and process.arch, spawns its executable with inherited streams, and forwards arguments, SIGINT, SIGTERM and SIGHUP.
 
-Package manifests and the packaged Agent Plugin version are assembled from
-repository templates and the version in `[workspace.package]`; they do not
-maintain an independent release version.
+scripts/package-npm.mjs derives all manifests from [workspace.package].version and copies the source skill into skills/mara/SKILL.md. Package generation uses an explicit disposable output directory. It does not run a build, fetch a runtime or publish packages. [[implemented_by:code:npm/mara.cjs]] [[implemented_by:code:scripts/package-npm.mjs]]
 :::
 
-:::mara design DES-CODEX-AGENT-DISTRIBUTION
-:mid: 01M1PXP2KGCASKQ0HAVTQMK4R4
-:title: Distribute manual and optional complete-plugin Codex onboarding
-:satisfies: REQ-AGENT-INSTALLATION-MODES
+:::mara verification VER-NPM-DISTRIBUTION
+:mid: 01M3HJ0XZVT1RTY03A9FWJCNBT
+:title: Verify installed CLI, skill and MCP packages
+:status: accepted
+:method: test
+:verifies: REQ-SCRIPT-FREE-NPM-DISTRIBUTION
+:verifies: REQ-AGENT-INSTALLATION-MODES
+:verifies: DES-NPM-NATIVE-PACKAGES
+:validates: SCN-INSTALL-DISTRIBUTED-MARA
+:validates: SCN-ONBOARD-MARA-AGENT
 
-The supported route registers the installed executable through Codex MCP
-configuration and installs the Mara skill independently. It does not create or
-link a Codex plugin-cache entry. The optional Convesoft marketplace is named
-`convesoft` and exposes plugin `mara` from the release channel used for
-`@convesoft/mara`: `next` during prereleases and `latest` after the stable
-release. Complete-plugin installation remains client-managed convenience
-behavior outside automated release verification.
-:::
+Build the candidate and run scripts/smoke-npm.sh with its executable path. Generate and pack the main and host-native packages in disposable storage. Inspect the real npm pack file inventory against the intended dispatcher, skill, README, license and manifest files. Require one workspace version, exact native optional-dependency versions and no lifecycle scripts. Install the local tarballs with --ignore-scripts into a disposable project and isolated npm cache.
 
-:::mara design DES-PROTECTED-RELEASE-WORKFLOW
-:mid: 01M1PXP2KGJBRNZHGGGJJ1GVA4
-:title: Build before approval and publish after approval
-:satisfies: REQ-REPRODUCIBLE-PUBLIC-RELEASE
+Run the installed CLI and real stdio MCP server, including bound/unbound project selection, all templates, schema guidance, item/relation authoring, validation and narrative-to-requirement-to-verification navigation. Compare actual CLI/MCP results, consume bounded continuation, reconstruct Unicode content and reject stale cursors. With only Node discoverable on PATH, require the installed dispatcher to run its bundled binary. Compare the installed skill bytes with source. Exercise unsupported schema formats and missing guidance without source writes, then repair the schema in place while preserving item identities, repeated fields, relations and project settings.
 
-A pull request becomes a release candidate only when it targets `main`, updates
-the generated `CHANGELOG.md`, carries the `release` label, and is merged. The
-`release.yml` workflow then derives the exact Cargo version from the merge
-commit. Unprivileged jobs validate that commit, build and smoke-test all target
-artifacts, and upload temporary workflow artifacts. The only job with
-`contents: write` and npm OIDC permission depends on those jobs and uses the
-protected `release` environment.
-
-The release job is retryable only for the captured commit and byte-identical npm
-tarballs. It refuses a tag at another commit or an existing package with a
-different registry tarball digest. Native packages must become visible in the
-public registry before the dispatcher is published, and the dispatcher must
-become visible before the final clean `npx` and GitHub release publication
-checks. Optional client plugin installation does not participate in the release
-transaction.
-:::
-
-:::mara decision ADR-NPM-NATIVE-DISTRIBUTION
-:mid: 01M1PXP2KGX9Z4Q22NMPF1BQBW
-:title: Use npm platform packages instead of an install-time downloader
-:justifies: DES-NPM-NATIVE-PACKAGES
-
-Mara uses a dispatcher plus npm-selected native packages because it provides a
-one-command `npx` path without a Rust toolchain or lifecycle scripts. An
-install-time binary downloader is rejected because blocked or restricted npm
-scripts would make the primary installation path unreliable, especially in
-enterprise environments.
-:::
-
-:::mara decision ADR-CLIENT-MANAGED-PLUGIN-INSTALLATION
-:mid: 01M1PXP2KGC95GEMT8MR00DWEN
-:title: Keep installed plugin state client-managed
-:justifies: DES-CODEX-AGENT-DISTRIBUTION
-
-Do not edit or symlink Codex plugin-cache entries to reuse another Mara package
-installation. Codex owns the plugin snapshot's validation, enablement, update,
-and removal, while npm owns the exact-version native runtime selected by its
-launcher. Users who want complete onboarding accept those managed artifacts;
-users who already installed Mara reuse it through MCP configuration and install
-only the small skill. This avoids a second native executable without depending
-on Codex's internal cache layout.
-:::
-
-:::mara decision ADR-FIRST-ALPHA-TARGETS
-:mid: 01M1PXP2KGV6WJSBS36FTBXXPM
-:title: Limit the first alpha to glibc Linux and macOS
-:justifies: REQ-SCRIPT-FREE-NPM-DISTRIBUTION
-
-The first alpha supports x64 and arm64 on glibc Linux and macOS. Windows and
-musl Linux remain explicit limitations until real usage justifies their build,
-packaging, and verification cost.
-:::
-
-:::mara decision ADR-DUAL-LICENSE
-:mid: 01M1PXP2KGM980VC45RM6VSEVB
-:title: License Mara under MIT or Apache-2.0
-:justifies: REQ-PUBLIC-REPOSITORY-GUIDANCE
-
-Recipients may use Mara under either the MIT License or Apache License 2.0.
-This preserves permissive use while providing Apache's explicit patent grant.
-Copyright notices name Aliaksei Raketski.
-:::
-
-:::mara decision ADR-TRUNK-BASED-RELEASES
-:mid: 01M1PXP2KG4AF9B3AB69M3HSZ7
-:title: Release from main through short-lived issue branches
-:justifies: DES-PROTECTED-RELEASE-WORKFLOW
-
-Mara uses `main` as its only long-lived branch. Work uses short-lived Linear
-issue branches and one squash-merged pull request per issue. Release preparation
-uses the same flow; there are no `develop` or release branches. After the
-release-preparation change is merged, the protected workflow tags the exact
-validated `main` revision only after deployment approval.
+Inspect native manifest generation for all four supported targets. Execute native smoke on each corresponding host before release; one host run proves only that host. Review explicit MCP and separate npx skills setup guidance against the packaged files. Record the checked revision, host, artifact contents and actual workflow results. Package inspection alone does not establish runtime behavior or publication. [[implemented_by:code:scripts/smoke-npm.sh]]
 :::

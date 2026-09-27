@@ -12,64 +12,22 @@ use ignore::{DirEntry, Error as WalkError, Walk, WalkBuilder};
 mod markdown;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Corpus {
+/// Disposable document-only source snapshot; code discovery is a separate dependency.
+pub struct DocumentSet {
     documents: Vec<Document>,
-    code: crate::code::CodeIndex,
     complete: bool,
 }
 
-impl Corpus {
+impl DocumentSet {
     pub fn documents(&self) -> &[Document] {
         &self.documents
     }
-
-    pub(crate) fn code(&self) -> &crate::code::CodeIndex {
-        &self.code
-    }
-
-    pub(crate) fn file_only_code_paths(&self) -> BTreeSet<PathBuf> {
-        self.items()
-            .flat_map(|item| item.relations())
-            .filter_map(|relation| {
-                let (path, selector) = crate::code::split_reference(relation.target()).ok()?;
-                selector.is_none().then_some(path)
-            })
-            .collect()
-    }
-
     pub fn items(&self) -> impl Iterator<Item = &Item> {
-        self.documents.iter().flat_map(|document| document.items())
+        self.documents.iter().flat_map(Document::items)
     }
-
-    /// Build disposable document structure and direct connections from this snapshot.
-    pub fn discovery(&self) -> crate::DiscoveryGraph<'_> {
-        crate::DiscoveryGraph::new(self)
-    }
-
+    /// Whether all selected document sources were discovered and parsed.
     pub fn is_complete(&self) -> bool {
         self.complete
-    }
-
-    pub(crate) fn with_replacements(
-        &self,
-        replacements: &BTreeMap<PathBuf, String>,
-        schema: &Schema,
-    ) -> Result<Self, Error> {
-        let mut documents = self.documents.clone();
-        for (path, source) in replacements {
-            let document = parse_document_source(path, source, schema)?;
-            if let Some(existing) = documents.iter_mut().find(|entry| entry.path() == path) {
-                *existing = document;
-            } else {
-                documents.push(document);
-            }
-        }
-        documents.sort_by(|left, right| left.path().cmp(right.path()));
-        Ok(Self {
-            documents,
-            code: self.code.clone(),
-            complete: self.complete,
-        })
     }
 }
 
@@ -193,21 +151,13 @@ impl Item {
         &self.source
     }
 
+    /// Recovery may preserve identity while leaving checks unavailable.
+    pub(crate) fn validation_source_is_complete(&self) -> bool {
+        self.metadata_valid && self.title_valid && self.body_valid
+    }
+
     pub fn body_source(&self) -> &SourceLocation {
         &self.body_source
-    }
-
-    fn metadata_is_valid(&self) -> bool {
-        self.metadata_valid
-    }
-
-    fn body_is_valid(&self) -> bool {
-        self.body_valid
-    }
-
-    /// Recovery can retain an item's identity while leaving some checks unavailable.
-    pub(crate) fn validation_source_is_complete(&self) -> bool {
-        self.metadata_is_valid() && self.title_valid && self.body_is_valid()
     }
 }
 
@@ -223,6 +173,9 @@ pub struct MarkdownBlock {
 }
 
 impl MarkdownBlock {
+    pub(crate) fn heading_source_offset(&self, byte: usize) -> Option<usize> {
+        self.heading_source_offsets.get(byte).copied()
+    }
     pub fn kind(&self) -> MarkdownBlockKind {
         self.kind
     }
@@ -234,11 +187,6 @@ impl MarkdownBlock {
     /// Parsed heading text without Markdown formatting; absent on other blocks.
     pub fn heading_text(&self) -> Option<&str> {
         self.heading_text.as_deref()
-    }
-
-    /// Map a byte offset in decoded heading text back to canonical source.
-    pub(crate) fn heading_source_offset(&self, byte: usize) -> Option<usize> {
-        self.heading_source_offsets.get(byte).copied()
     }
 
     pub fn children(&self) -> &[MarkdownBlock] {
@@ -374,9 +322,9 @@ pub struct Diagnostic {
     source: SourceLocation,
     item_ids: Vec<String>,
     applies_to_all_items: bool,
-    kind: DiagnosticKind,
     code: DiagnosticCode,
     coordinates_available: bool,
+    kind: DiagnosticKind,
     message: String,
 }
 
@@ -388,10 +336,16 @@ enum DiagnosticKind {
 }
 
 impl Diagnostic {
+    pub(crate) fn is_missing_body(&self) -> bool {
+        self.kind == DiagnosticKind::MissingBody
+    }
+    pub(crate) fn is_missing_mid(&self) -> bool {
+        self.kind == DiagnosticKind::MissingMid
+    }
     pub fn code(&self) -> DiagnosticCode {
         self.code
     }
-    pub(crate) fn coordinates_available(&self) -> bool {
+    pub fn coordinates_available(&self) -> bool {
         self.coordinates_available
     }
     pub fn source(&self) -> &SourceLocation {
@@ -403,591 +357,25 @@ impl Diagnostic {
     pub fn message(&self) -> &str {
         &self.message
     }
-    pub(crate) fn is_missing_body(&self) -> bool {
-        self.kind == DiagnosticKind::MissingBody
-    }
-
-    pub(crate) fn is_missing_mid(&self) -> bool {
-        self.kind == DiagnosticKind::MissingMid
-    }
 }
 
-pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
-    let mut diagnostics = validate_corpus_independent(corpus);
-    let ids = item_index(corpus);
-    let mids = mid_index(corpus);
-
-    for file in corpus.code().files() {
-        for marker in &file.markers {
-            let target_item = match resolve_indexed_item(&ids, &mids, &marker.target) {
-                IndexedItem::One(item) => Some(item),
-                _ => None,
-            };
-            let Some((canonical, definition, inverse)) = schema.resolve_relation(&marker.relation)
-            else {
-                diagnostic_for_target_item(
-                    DiagnosticCode::RelationInvalid,
-                    &mut diagnostics,
-                    &marker.source,
-                    target_item,
-                    format!("unknown code relation '{}'", marker.relation),
-                );
-                continue;
-            };
-            if inverse || !definition.code_source || !schema.relation_is_valid(canonical) {
-                diagnostic_for_target_item(
-                    DiagnosticCode::RelationInvalid,
-                    &mut diagnostics,
-                    &marker.source,
-                    target_item,
-                    format!(
-                        "relation '{}' does not allow code source markers",
-                        marker.relation
-                    ),
-                );
-                continue;
-            }
-            if let Err(error) = corpus.code().resolve(&marker.endpoint) {
-                let (code, message) = code_resolution_diagnostic(error);
-                diagnostic_for_target_item(
-                    code,
-                    &mut diagnostics,
-                    &marker.source,
-                    target_item,
-                    message,
-                );
-                continue;
-            }
-            match resolve_indexed_item(&ids, &mids, &marker.target) {
-                IndexedItem::One(target)
-                    if !definition.target.iter().any(|f| f == target.flavour()) =>
-                {
-                    diagnostic_for_target_item(
-                        DiagnosticCode::RelationInvalid,
-                        &mut diagnostics,
-                        &marker.source,
-                        Some(target),
-                        format!(
-                            "relation '{}' does not allow target flavour '{}'",
-                            marker.relation,
-                            target.flavour()
-                        ),
-                    )
-                }
-                IndexedItem::One(_) => {}
-                IndexedItem::Missing => diagnostic(
-                    DiagnosticCode::ReferenceUnresolved,
-                    &mut diagnostics,
-                    &marker.source,
-                    format!("code marker references missing item '{}'", marker.target),
-                ),
-                IndexedItem::Ambiguous => diagnostic(
-                    DiagnosticCode::ReferenceUnresolved,
-                    &mut diagnostics,
-                    &marker.source,
-                    format!("code marker references ambiguous item '{}'", marker.target),
-                ),
-            }
-        }
-    }
-
-    for item in corpus.items() {
-        let Some(flavour) = schema.flavour_for_validation(item.flavour()) else {
-            if !schema.flavour_is_declared(item.flavour()) {
-                diagnostic(
-                    DiagnosticCode::SourceInvalid,
-                    &mut diagnostics,
-                    item.source(),
-                    format!("unknown flavour '{}'", item.flavour()),
-                );
-            }
-            for relation in item.relations() {
-                if relation.target().starts_with("code:") {
-                    continue;
-                }
-                if let Some(address) = crate::external::address(relation.target()) {
-                    if !crate::external::valid_address(address) {
-                        diagnostic(
-                            DiagnosticCode::RelationInvalid,
-                            &mut diagnostics,
-                            relation.source(),
-                            "invalid external target address".into(),
-                        );
-                    }
-                    continue;
-                }
-                if schema.relation_is_valid(relation.name()) {
-                    match resolve_indexed_item(&ids, &mids, relation.target()) {
-                        IndexedItem::Missing if corpus.is_complete() => diagnostic(
-                            DiagnosticCode::ReferenceUnresolved,
-                            &mut diagnostics,
-                            relation.source(),
-                            format!(
-                                "relation '{}' references missing item '{}'",
-                                relation.name(),
-                                relation.target()
-                            ),
-                        ),
-                        IndexedItem::Missing | IndexedItem::One(_) => {}
-                        IndexedItem::Ambiguous => diagnostic(
-                            DiagnosticCode::ReferenceUnresolved,
-                            &mut diagnostics,
-                            relation.source(),
-                            format!(
-                                "relation '{}' references ambiguous item '{}'",
-                                relation.name(),
-                                relation.target()
-                            ),
-                        ),
-                    }
-                }
-            }
-            continue;
-        };
-        if schema.id_prefix_is_valid(item.flavour()) && !item.id().starts_with(&flavour.id_prefix) {
-            diagnostic(
-                DiagnosticCode::IdentityInvalid,
-                &mut diagnostics,
-                item.source(),
-                format!(
-                    "item ID '{}' must start with '{}' for flavour '{}'",
-                    item.id(),
-                    flavour.id_prefix,
-                    item.flavour()
-                ),
-            );
-        }
-        if item.body_is_valid()
-            && schema.body_is_valid(item.flavour())
-            && flavour.body == BodyRequirement::Required
-            && item.body().trim().is_empty()
-        {
-            diagnostic_with_kind(
-                &mut diagnostics,
-                item.body_source(),
-                DiagnosticKind::MissingBody,
-                DiagnosticCode::FieldInvalid,
-                "required body is empty".into(),
-            );
-        }
-
-        let mut fields: BTreeMap<&str, Vec<&MetadataEntry>> = BTreeMap::new();
-        for entry in item
-            .metadata()
-            .iter()
-            .filter(|entry| !matches!(entry.key(), "mid" | "title"))
-        {
-            if let Some(field) = flavour.fields.get(entry.key()) {
-                if schema.field_is_valid(item.flavour(), entry.key()) {
-                    fields.entry(entry.key()).or_default().push(entry);
-                    if schema.field_values_are_valid(item.flavour(), entry.key())
-                        && !valid_field_value(
-                            field.field_type,
-                            field.values.as_deref(),
-                            entry.value(),
-                        )
-                    {
-                        diagnostic(
-                            DiagnosticCode::FieldInvalid,
-                            &mut diagnostics,
-                            entry.source(),
-                            format!(
-                                "invalid {} value '{}' for field '{}'",
-                                field_type_name(field.field_type),
-                                entry.value(),
-                                entry.key()
-                            ),
-                        );
-                    }
-                }
-            } else if schema.field_is_declared(item.flavour(), entry.key()) {
-                continue;
-            } else if let Some((canonical, relation, inverse)) =
-                schema.resolve_relation(entry.key())
-            {
-                let endpoints = if inverse {
-                    &relation.target
-                } else {
-                    &relation.source
-                };
-                if schema.relation_is_valid(canonical)
-                    && (if inverse {
-                        schema.relation_target_is_valid(canonical)
-                    } else {
-                        schema.relation_source_is_valid(canonical)
-                    })
-                    && !endpoints.iter().any(|source| source == item.flavour())
-                {
-                    diagnostic(
-                        DiagnosticCode::RelationInvalid,
-                        &mut diagnostics,
-                        entry.source(),
-                        format!(
-                            "relation '{}' does not allow source flavour '{}'",
-                            entry.key(),
-                            item.flavour()
-                        ),
-                    );
-                }
-            } else if schema.relation_is_valid(entry.key()) {
-                diagnostic(
-                    DiagnosticCode::FieldInvalid,
-                    &mut diagnostics,
-                    entry.source(),
-                    format!("unknown metadata field '{}'", entry.key()),
-                );
-            }
-        }
-        for (name, field) in &flavour.fields {
-            if !schema.field_is_valid(item.flavour(), name) {
-                continue;
-            }
-            let entries = fields
-                .get(name.as_str())
-                .map(Vec::as_slice)
-                .unwrap_or_default();
-            if item.metadata_is_valid() && field.required && entries.is_empty() {
-                diagnostic(
-                    DiagnosticCode::FieldInvalid,
-                    &mut diagnostics,
-                    item.source(),
-                    format!("required field '{name}' is missing"),
-                );
-            }
-            if !field.repeatable && entries.len() > 1 {
-                for entry in &entries[1..] {
-                    diagnostic(
-                        DiagnosticCode::FieldInvalid,
-                        &mut diagnostics,
-                        entry.source(),
-                        format!("field '{name}' is not repeatable"),
-                    );
-                }
-            }
-        }
-        for relation in item.relations() {
-            if let Some((canonical, definition, inverse)) = schema.resolve_relation(relation.name())
-            {
-                if !schema.relation_is_valid(canonical) {
-                    continue;
-                }
-                let authors = if inverse {
-                    &definition.target
-                } else {
-                    &definition.source
-                };
-                if relation.inline
-                    && (if inverse {
-                        schema.relation_target_is_valid(canonical)
-                    } else {
-                        schema.relation_source_is_valid(canonical)
-                    })
-                    && !authors.iter().any(|flavour| flavour == item.flavour())
-                {
-                    diagnostic(
-                        DiagnosticCode::RelationInvalid,
-                        &mut diagnostics,
-                        relation.source(),
-                        format!(
-                            "relation '{}' does not allow source flavour '{}'",
-                            relation.name(),
-                            item.flavour()
-                        ),
-                    );
-                }
-                if let Some(address) = crate::external::address(relation.target()) {
-                    if !definition.external || !crate::external::valid_address(address) {
-                        diagnostic(
-                            DiagnosticCode::RelationInvalid,
-                            &mut diagnostics,
-                            relation.source(),
-                            format!(
-                                "relation '{}' does not allow this external target",
-                                relation.name()
-                            ),
-                        );
-                    }
-                    continue;
-                }
-                if relation.target().starts_with("code:") {
-                    if !inverse
-                        || !definition.code_source
-                        || !definition.target.iter().any(|f| f == item.flavour())
-                    {
-                        diagnostic(
-                            DiagnosticCode::RelationInvalid,
-                            &mut diagnostics,
-                            relation.source(),
-                            format!(
-                                "relation '{}' does not allow this code target",
-                                relation.name()
-                            ),
-                        );
-                    } else if let Err(error) = corpus.code().resolve(relation.target()) {
-                        let (code, message) = code_resolution_diagnostic(error);
-                        diagnostic(code, &mut diagnostics, relation.source(), message);
-                    }
-                    continue;
-                }
-                match resolve_indexed_item(&ids, &mids, relation.target()) {
-                    IndexedItem::One(target) => {
-                        let endpoints = if inverse {
-                            &definition.source
-                        } else {
-                            &definition.target
-                        };
-                        if (if inverse {
-                            schema.relation_source_is_valid(canonical)
-                        } else {
-                            schema.relation_target_is_valid(canonical)
-                        }) && !endpoints.iter().any(|flavour| flavour == target.flavour())
-                        {
-                            diagnostic(
-                                DiagnosticCode::RelationInvalid,
-                                &mut diagnostics,
-                                relation.source(),
-                                format!(
-                                    "relation '{}' does not allow target flavour '{}'",
-                                    relation.name(),
-                                    target.flavour()
-                                ),
-                            );
-                        }
-                        if definition.same_flavour
-                            && schema.same_flavour_is_valid(canonical)
-                            && target.flavour() != item.flavour()
-                        {
-                            diagnostic(
-                                DiagnosticCode::RelationInvalid,
-                                &mut diagnostics,
-                                relation.source(),
-                                format!(
-                                    "relation '{}' requires matching source and target flavours",
-                                    relation.name()
-                                ),
-                            );
-                        }
-                    }
-                    IndexedItem::Ambiguous => diagnostic(
-                        DiagnosticCode::ReferenceUnresolved,
-                        &mut diagnostics,
-                        relation.source(),
-                        format!(
-                            "relation '{}' references ambiguous item '{}'",
-                            relation.name(),
-                            relation.target()
-                        ),
-                    ),
-                    IndexedItem::Missing if corpus.is_complete() => diagnostic(
-                        DiagnosticCode::ReferenceUnresolved,
-                        &mut diagnostics,
-                        relation.source(),
-                        format!(
-                            "relation '{}' references missing item '{}'",
-                            relation.name(),
-                            relation.target()
-                        ),
-                    ),
-                    IndexedItem::Missing => {}
-                }
-            }
-        }
-    }
-    sort_diagnostics(&mut diagnostics);
-    diagnostics
-}
-
-pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
-    let mut diagnostics = corpus
-        .items()
-        .flat_map(|item| item.inline_diagnostics.clone())
-        .collect::<Vec<_>>();
-    let ids = item_index(corpus);
-    let mid_targets = mid_index(corpus);
-
-    for duplicates in ids.values().filter(|items| items.len() > 1) {
-        for item in duplicates {
-            diagnostic(
-                DiagnosticCode::IdentityInvalid,
-                &mut diagnostics,
-                item.source(),
-                format!("duplicate item ID '{}'", item.id()),
-            );
-        }
-    }
-
-    for (mid, duplicates) in mid_targets.iter().filter(|(_, items)| items.len() > 1) {
-        for item in duplicates {
-            if let Some(entry) = mid_entries(item)
-                .into_iter()
-                .find(|entry| entry.value() == *mid)
-            {
-                diagnostic(
-                    DiagnosticCode::IdentityInvalid,
-                    &mut diagnostics,
-                    entry.source(),
-                    format!("duplicate item MID '{mid}'"),
-                );
-            }
-        }
-    }
-
-    for item in corpus.items() {
-        let mids = mid_entries(item);
-        match mids.as_slice() {
-            [] => diagnostic_with_kind(
-                &mut diagnostics,
-                item.source(),
-                DiagnosticKind::MissingMid,
-                DiagnosticCode::IdentityInvalid,
-                format!("item '{}' is missing its MID", item.id()),
-            ),
-            [entry] => {
-                if !crate::is_mid(entry.value()) {
-                    diagnostic(
-                        DiagnosticCode::IdentityInvalid,
-                        &mut diagnostics,
-                        entry.source(),
-                        format!("invalid item MID '{}'", entry.value()),
-                    );
-                }
-                if entry.source().span().start_line() != item.source().span().start_line() + 1 {
-                    diagnostic(
-                        DiagnosticCode::IdentityInvalid,
-                        &mut diagnostics,
-                        entry.source(),
-                        format!(
-                            "item '{}' MID must immediately follow its opener",
-                            item.id()
-                        ),
-                    );
-                }
-            }
-            [first, rest @ ..] => {
-                if !crate::is_mid(first.value()) {
-                    diagnostic(
-                        DiagnosticCode::IdentityInvalid,
-                        &mut diagnostics,
-                        first.source(),
-                        format!("invalid item MID '{}'", first.value()),
-                    );
-                }
-                if first.source().span().start_line() != item.source().span().start_line() + 1 {
-                    diagnostic(
-                        DiagnosticCode::IdentityInvalid,
-                        &mut diagnostics,
-                        first.source(),
-                        format!(
-                            "item '{}' MID must immediately follow its opener",
-                            item.id()
-                        ),
-                    );
-                }
-                for entry in rest {
-                    diagnostic(
-                        DiagnosticCode::IdentityInvalid,
-                        &mut diagnostics,
-                        entry.source(),
-                        format!("item '{}' has more than one MID entry", item.id()),
-                    );
-                    if !crate::is_mid(entry.value()) {
-                        diagnostic(
-                            DiagnosticCode::IdentityInvalid,
-                            &mut diagnostics,
-                            entry.source(),
-                            format!("invalid item MID '{}'", entry.value()),
-                        );
-                    }
-                }
-            }
-        }
-    }
-    diagnostics.extend_from_slice(corpus.discovery().diagnostics());
-    sort_diagnostics(&mut diagnostics);
-    diagnostics
-}
-
-fn item_index(corpus: &Corpus) -> BTreeMap<&str, Vec<&Item>> {
-    let mut ids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
-    for item in corpus.items() {
-        ids.entry(item.id()).or_default().push(item);
-    }
-    ids
-}
-
-fn mid_index(corpus: &Corpus) -> BTreeMap<&str, Vec<&Item>> {
-    let mut mids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
-    for item in corpus.items() {
-        let mut seen = BTreeSet::new();
-        for entry in mid_entries(item)
-            .into_iter()
-            .filter(|entry| crate::is_mid(entry.value()))
-        {
-            if seen.insert(entry.value()) {
-                mids.entry(entry.value()).or_default().push(item);
-            }
-        }
-    }
-    mids
-}
-
-enum IndexedItem<'a> {
-    Missing,
-    One(&'a Item),
-    Ambiguous,
-}
-
-fn resolve_indexed_item<'a>(
-    ids: &BTreeMap<&str, Vec<&'a Item>>,
-    mids: &BTreeMap<&str, Vec<&'a Item>>,
-    handle: &str,
-) -> IndexedItem<'a> {
-    let matches = if crate::is_mid(handle) {
-        mids.get(handle)
-    } else {
-        ids.get(handle)
-    };
-    match matches.map(Vec::as_slice) {
-        Some([item]) => IndexedItem::One(item),
-        Some(_) => IndexedItem::Ambiguous,
-        None => IndexedItem::Missing,
-    }
-}
-
-fn mid_entries(item: &Item) -> Vec<&MetadataEntry> {
-    item.metadata()
-        .iter()
-        .filter(|entry| entry.key() == "mid")
-        .collect()
-}
-
-fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
-    diagnostics.sort_by(|a, b| {
-        (a.source.path(), a.source.span().start_line(), &a.message).cmp(&(
-            b.source.path(),
-            b.source.span().start_line(),
-            &b.message,
-        ))
-    });
-}
-
-pub fn load_corpus_for_validation(
+pub fn load_documents_for_validation(
     project: &Project,
     schema: &Schema,
-) -> Result<(Corpus, Vec<Diagnostic>), Error> {
-    load_corpus_for_validation_with_schema(project, Some(schema))
+) -> Result<(DocumentSet, Vec<Diagnostic>), Error> {
+    load_documents_for_validation_with_schema(project, Some(schema))
 }
 
-pub fn load_corpus_syntax_for_validation(
+pub fn load_documents_syntax_for_validation(
     project: &Project,
-) -> Result<(Corpus, Vec<Diagnostic>), Error> {
-    load_corpus_for_validation_with_schema(project, None)
+) -> Result<(DocumentSet, Vec<Diagnostic>), Error> {
+    load_documents_for_validation_with_schema(project, None)
 }
 
-fn load_corpus_for_validation_with_schema(
+fn load_documents_for_validation_with_schema(
     project: &Project,
     schema: Option<&Schema>,
-) -> Result<(Corpus, Vec<Diagnostic>), Error> {
+) -> Result<(DocumentSet, Vec<Diagnostic>), Error> {
     let matcher = content_matcher(project)?;
     let (paths, mut diagnostics) = discover_for_validation(project.root(), &matcher);
     let mut complete = project.content_discovery_is_complete() && diagnostics.is_empty();
@@ -1010,9 +398,9 @@ fn load_corpus_for_validation_with_schema(
                     },
                     item_ids: Vec::new(),
                     applies_to_all_items: true,
-                    kind: DiagnosticKind::Other,
                     code: DiagnosticCode::SourceInvalid,
                     coordinates_available: false,
+                    kind: DiagnosticKind::Other,
                     message: format!("could not read Mara document: {error}"),
                 });
                 continue;
@@ -1034,52 +422,18 @@ fn load_corpus_for_validation_with_schema(
             },
             item_ids: error.item_ids,
             applies_to_all_items: false,
-            kind: DiagnosticKind::Other,
             code: error.code,
             coordinates_available: true,
+            kind: DiagnosticKind::Other,
             message: error.message,
         }));
         if retain_document {
             documents.push(document);
         }
     }
-    let code = if schema.is_some() {
-        let (index, problems) = crate::code::CodeIndex::load(project);
-        for problem in problems {
-            if problem.code == DiagnosticCode::SourceInvalid {
-                complete = false;
-            }
-            let mut item_ids = Vec::new();
-            if let Some(target) = &problem.target {
-                item_ids.push(target.clone());
-                for item in documents.iter().flat_map(Document::items) {
-                    if item.id() == target || item.mid() == Some(target.as_str()) {
-                        item_ids.push(item.id().to_owned());
-                        if let Some(mid) = item.mid() {
-                            item_ids.push(mid.to_owned());
-                        }
-                    }
-                }
-            }
-            diagnostic(
-                problem.code,
-                &mut diagnostics,
-                &problem.source,
-                problem.message,
-            );
-            diagnostics
-                .last_mut()
-                .expect("diagnostic was added")
-                .item_ids = item_ids;
-        }
-        index
-    } else {
-        crate::code::CodeIndex::empty(project)
-    };
     Ok((
-        Corpus {
+        DocumentSet {
             documents,
-            code,
             complete,
         },
         diagnostics,
@@ -1092,86 +446,20 @@ pub(crate) fn diagnostic(
     source: &SourceLocation,
     message: String,
 ) {
-    diagnostic_with_kind(diagnostics, source, DiagnosticKind::Other, code, message);
-}
-
-fn diagnostic_for_target_item(
-    code: DiagnosticCode,
-    diagnostics: &mut Vec<Diagnostic>,
-    source: &SourceLocation,
-    item: Option<&Item>,
-    message: String,
-) {
-    diagnostic(code, diagnostics, source, message);
-    if let Some(item) = item {
-        let diagnostic = diagnostics.last_mut().expect("diagnostic was added");
-        diagnostic.item_ids.push(item.id().to_owned());
-        if let Some(mid) = item.mid() {
-            diagnostic.item_ids.push(mid.to_owned());
-        }
-    }
-}
-
-fn code_resolution_diagnostic(error: crate::code::ResolveError) -> (DiagnosticCode, String) {
-    match error {
-        crate::code::ResolveError::MissingFile => {
-            (DiagnosticCode::CodeMissing, "code file is missing".into())
-        }
-        crate::code::ResolveError::MissingSymbol => {
-            (DiagnosticCode::CodeMissing, "code symbol is missing".into())
-        }
-        crate::code::ResolveError::Ambiguous => (
-            DiagnosticCode::CodeAmbiguous,
-            "code selector is ambiguous".into(),
-        ),
-        crate::code::ResolveError::Unsupported => (
-            DiagnosticCode::CodeUnsupported,
-            "code path or selector is unsupported".into(),
-        ),
-    }
-}
-
-fn diagnostic_with_kind(
-    diagnostics: &mut Vec<Diagnostic>,
-    source: &SourceLocation,
-    kind: DiagnosticKind,
-    code: DiagnosticCode,
-    message: String,
-) {
     diagnostics.push(Diagnostic {
         source: source.clone(),
         item_ids: Vec::new(),
         applies_to_all_items: false,
-        kind,
         code,
         coordinates_available: true,
+        kind: DiagnosticKind::Other,
         message,
     });
 }
 
-fn valid_field_value(kind: FieldType, values: Option<&[String]>, value: &str) -> bool {
-    match kind {
-        FieldType::String => true,
-        FieldType::Integer => value.parse::<i64>().is_ok(),
-        FieldType::Number => value.parse::<f64>().is_ok_and(f64::is_finite),
-        FieldType::Boolean => matches!(value, "true" | "false"),
-        FieldType::Enum => {
-            values.is_some_and(|values| values.iter().any(|candidate| candidate == value))
-        }
-    }
-}
-
-fn field_type_name(kind: FieldType) -> &'static str {
-    match kind {
-        FieldType::String => "string",
-        FieldType::Integer => "integer",
-        FieldType::Number => "number",
-        FieldType::Boolean => "boolean",
-        FieldType::Enum => "enum",
-    }
-}
-
-pub fn load_corpus(project: &Project, schema: &Schema) -> Result<Corpus, Error> {
+// @mara implements REQ-CANONICAL-SOURCE
+// @mara implements DES-DOCUMENT-FORMAT
+pub fn load_documents(project: &Project, schema: &Schema) -> Result<DocumentSet, Error> {
     let matcher = content_matcher(project)?;
     let paths = discover(project.root(), &matcher)?;
 
@@ -1185,16 +473,8 @@ pub fn load_corpus(project: &Project, schema: &Schema) -> Result<Corpus, Error> 
         })?;
         documents.push(parse_document(relative_path, source, schema)?);
     }
-    let (code, problems) = crate::code::CodeIndex::load(project);
-    if let Some(problem) = problems.into_iter().next() {
-        return Err(Error::InvalidProject {
-            path: project.root().join(problem.source.path()),
-            message: problem.message,
-        });
-    }
-    Ok(Corpus {
+    Ok(DocumentSet {
         documents,
-        code,
         complete: true,
     })
 }
@@ -1255,9 +535,9 @@ fn discover_for_validation(root: &Path, matcher: &GlobSet) -> (Vec<PathBuf>, Vec
                 },
                 item_ids: Vec::new(),
                 applies_to_all_items: true,
-                kind: DiagnosticKind::Other,
                 code: DiagnosticCode::SourceInvalid,
                 coordinates_available: false,
+                kind: DiagnosticKind::Other,
                 message: format!("could not discover Mara documents: {error}"),
             }),
         }
@@ -1334,46 +614,6 @@ fn parse_document(path: PathBuf, source: String, schema: &Schema) -> Result<Docu
     let parsed =
         markdown::parse(&source).map_err(|error| invalid(&path, error.line, error.message))?;
     Ok(project_document(path, source, Some(schema), parsed))
-}
-
-pub(crate) fn parse_document_source(
-    path: &Path,
-    source: &str,
-    schema: &Schema,
-) -> Result<Document, Error> {
-    parse_document(path.to_path_buf(), source.to_owned(), schema)
-}
-
-pub(crate) fn document_is_discoverable(project: &Project, relative: &Path) -> Result<bool, Error> {
-    let content = content_matcher(project)?;
-    if !is_mara_document(relative) || !content.is_match(relative) {
-        return Ok(false);
-    }
-    let mut ancestor = project.root().to_path_buf();
-    for component in relative.parent().into_iter().flat_map(Path::components) {
-        ancestor.push(component.as_os_str());
-        let metadata = fs::symlink_metadata(&ancestor).map_err(|source| Error::Io {
-            action: "inspect document discovery path",
-            path: ancestor.clone(),
-            source,
-        })?;
-        if metadata.file_type().is_symlink() {
-            return Ok(false);
-        }
-    }
-    let mut matchers = walker_builder(project.root()).build_matchers();
-    let mut ignores = matchers
-        .pop()
-        .expect("a walker builder produces one matcher for its root");
-    let (matched, error) = ignores.matched_with_errors(relative, false);
-    if let Some(source) = error {
-        return Err(Error::Io {
-            action: "evaluate document discovery",
-            path: project.root().join(relative),
-            source: io::Error::other(source),
-        });
-    }
-    Ok(!matched.is_ignore())
 }
 
 fn parse_document_for_validation(
@@ -1601,4 +841,786 @@ fn invalid(path: &Path, line: usize, message: impl Into<String>) -> Error {
         line,
         message: message.into(),
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Corpus {
+    documents: DocumentSet,
+    code: crate::CodeIndex,
+}
+impl Corpus {
+    pub(crate) fn with_replacements(
+        &self,
+        replacements: &BTreeMap<PathBuf, String>,
+        schema: &Schema,
+    ) -> Result<Self, Error> {
+        let mut documents = self.documents.documents.clone();
+        for (path, source) in replacements {
+            let document = parse_document_source(path, source, schema)?;
+            if let Some(existing) = documents.iter_mut().find(|entry| entry.path() == path) {
+                *existing = document;
+            } else {
+                documents.push(document);
+            }
+        }
+        documents.sort_by(|left, right| left.path().cmp(right.path()));
+        Ok(Self {
+            documents: DocumentSet {
+                documents,
+                complete: self.documents.complete,
+            },
+            code: self.code.clone(),
+        })
+    }
+    pub fn discovery(&self) -> crate::DiscoveryGraph<'_> {
+        crate::DiscoveryGraph::new(self)
+    }
+    pub fn documents(&self) -> &[Document] {
+        self.documents.documents()
+    }
+    pub fn items(&self) -> impl Iterator<Item = &Item> {
+        self.documents.items()
+    }
+    pub fn is_complete(&self) -> bool {
+        self.documents.is_complete()
+    }
+    pub(crate) fn code(&self) -> &crate::CodeIndex {
+        &self.code
+    }
+    pub(crate) fn file_only_code_paths(&self) -> std::collections::BTreeSet<PathBuf> {
+        self.items()
+            .flat_map(Item::relations)
+            .filter_map(|relation| {
+                let (path, selector) = crate::code::split_reference(relation.target()).ok()?;
+                selector.is_none().then_some(path)
+            })
+            .collect()
+    }
+}
+
+pub fn load_corpus(project: &Project, schema: &Schema) -> Result<Corpus, Error> {
+    let documents = load_documents(project, schema)?;
+    let (code, problems) = crate::CodeIndex::load(project);
+    if let Some(problem) = problems.into_iter().next() {
+        return Err(Error::InvalidProject {
+            path: project.root().join(problem.source.path()),
+            message: problem.message,
+        });
+    }
+    Ok(Corpus { documents, code })
+}
+
+// @mara implements REQ-PROJECT-VALIDATION
+// @mara implements DES-CORPUS-CONFORMANCE
+pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
+    let mut diagnostics = validate_corpus_independent(corpus);
+    let ids = item_index(corpus);
+    let mids = mid_index(corpus);
+
+    for file in corpus.code().files() {
+        for marker in &file.markers {
+            let target_item = match resolve_indexed_item(&ids, &mids, &marker.target) {
+                IndexedItem::One(item) => Some(item),
+                _ => None,
+            };
+            let Some((canonical, definition, inverse)) = schema.resolve_relation(&marker.relation)
+            else {
+                diagnostic_for_target_item(
+                    DiagnosticCode::RelationInvalid,
+                    &mut diagnostics,
+                    &marker.source,
+                    target_item,
+                    format!("unknown code relation '{}'", marker.relation),
+                );
+                continue;
+            };
+            if inverse || !definition.code_source || !schema.relation_is_valid(canonical) {
+                diagnostic_for_target_item(
+                    DiagnosticCode::RelationInvalid,
+                    &mut diagnostics,
+                    &marker.source,
+                    target_item,
+                    format!(
+                        "relation '{}' does not allow code source markers",
+                        marker.relation
+                    ),
+                );
+                continue;
+            }
+            if let Err(error) = corpus.code().resolve(&marker.endpoint) {
+                let (code, message) = code_resolution_diagnostic(error);
+                diagnostic_for_target_item(
+                    code,
+                    &mut diagnostics,
+                    &marker.source,
+                    target_item,
+                    message,
+                );
+                continue;
+            }
+            match resolve_indexed_item(&ids, &mids, &marker.target) {
+                IndexedItem::One(target)
+                    if !definition.target.iter().any(|f| f == target.flavour()) =>
+                {
+                    diagnostic_for_target_item(
+                        DiagnosticCode::RelationInvalid,
+                        &mut diagnostics,
+                        &marker.source,
+                        Some(target),
+                        format!(
+                            "relation '{}' does not allow target flavour '{}'",
+                            marker.relation,
+                            target.flavour()
+                        ),
+                    )
+                }
+                IndexedItem::One(_) => {}
+                IndexedItem::Missing if corpus.is_complete() => diagnostic(
+                    DiagnosticCode::ReferenceUnresolved,
+                    &mut diagnostics,
+                    &marker.source,
+                    format!("code marker references missing item '{}'", marker.target),
+                ),
+                IndexedItem::Missing => {}
+                IndexedItem::Ambiguous => diagnostic(
+                    DiagnosticCode::ReferenceUnresolved,
+                    &mut diagnostics,
+                    &marker.source,
+                    format!("code marker references ambiguous item '{}'", marker.target),
+                ),
+            }
+        }
+    }
+
+    for item in corpus.items() {
+        let Some(flavour) = schema.flavour_for_validation(item.flavour()) else {
+            if !schema.flavour_is_declared(item.flavour()) {
+                diagnostic(
+                    DiagnosticCode::SourceInvalid,
+                    &mut diagnostics,
+                    item.source(),
+                    format!("unknown flavour '{}'", item.flavour()),
+                );
+            }
+            for relation in item.relations() {
+                if relation.target().starts_with("code:") {
+                    continue;
+                }
+                if let Some(address) = crate::external::address(relation.target()) {
+                    if !crate::external::valid_address(address) {
+                        diagnostic(
+                            DiagnosticCode::RelationInvalid,
+                            &mut diagnostics,
+                            relation.source(),
+                            "invalid external target address".into(),
+                        );
+                    }
+                    continue;
+                }
+                if schema.relation_is_valid(relation.name()) {
+                    match resolve_indexed_item(&ids, &mids, relation.target()) {
+                        IndexedItem::Missing if corpus.is_complete() => diagnostic(
+                            DiagnosticCode::ReferenceUnresolved,
+                            &mut diagnostics,
+                            relation.source(),
+                            format!(
+                                "relation '{}' references missing item '{}'",
+                                relation.name(),
+                                relation.target()
+                            ),
+                        ),
+                        IndexedItem::Missing | IndexedItem::One(_) => {}
+                        IndexedItem::Ambiguous => diagnostic(
+                            DiagnosticCode::ReferenceUnresolved,
+                            &mut diagnostics,
+                            relation.source(),
+                            format!(
+                                "relation '{}' references ambiguous item '{}'",
+                                relation.name(),
+                                relation.target()
+                            ),
+                        ),
+                    }
+                }
+            }
+            continue;
+        };
+        if schema.id_prefix_is_valid(item.flavour()) && !item.id().starts_with(&flavour.id_prefix) {
+            diagnostic(
+                DiagnosticCode::IdentityInvalid,
+                &mut diagnostics,
+                item.source(),
+                format!(
+                    "item ID '{}' must start with '{}' for flavour '{}'",
+                    item.id(),
+                    flavour.id_prefix,
+                    item.flavour()
+                ),
+            );
+        }
+        if item.body_valid
+            && schema.body_is_valid(item.flavour())
+            && flavour.body == BodyRequirement::Required
+            && item.body().trim().is_empty()
+        {
+            diagnostic(
+                DiagnosticCode::FieldInvalid,
+                &mut diagnostics,
+                item.body_source(),
+                "required body is empty".into(),
+            );
+            diagnostics.last_mut().expect("diagnostic was added").kind =
+                DiagnosticKind::MissingBody;
+        }
+
+        let mut fields: BTreeMap<&str, Vec<&MetadataEntry>> = BTreeMap::new();
+        for entry in item
+            .metadata()
+            .iter()
+            .filter(|entry| !matches!(entry.key(), "mid" | "title"))
+        {
+            if let Some(field) = flavour.fields.get(entry.key()) {
+                if schema.field_is_valid(item.flavour(), entry.key()) {
+                    fields.entry(entry.key()).or_default().push(entry);
+                    if schema.field_values_are_valid(item.flavour(), entry.key())
+                        && !valid_field_value(
+                            field.field_type,
+                            field.values.as_deref(),
+                            entry.value(),
+                        )
+                    {
+                        diagnostic(
+                            DiagnosticCode::FieldInvalid,
+                            &mut diagnostics,
+                            entry.source(),
+                            format!(
+                                "invalid {} value '{}' for field '{}'",
+                                field_type_name(field.field_type),
+                                entry.value(),
+                                entry.key()
+                            ),
+                        );
+                    }
+                }
+            } else if schema.field_is_declared(item.flavour(), entry.key()) {
+                continue;
+            } else if let Some((canonical, relation, inverse)) =
+                schema.resolve_relation(entry.key())
+            {
+                let endpoints = if inverse {
+                    &relation.target
+                } else {
+                    &relation.source
+                };
+                if schema.relation_is_valid(canonical)
+                    && (if inverse {
+                        schema.relation_target_is_valid(canonical)
+                    } else {
+                        schema.relation_source_is_valid(canonical)
+                    })
+                    && !endpoints.iter().any(|source| source == item.flavour())
+                {
+                    diagnostic(
+                        DiagnosticCode::RelationInvalid,
+                        &mut diagnostics,
+                        entry.source(),
+                        format!(
+                            "relation '{}' does not allow source flavour '{}'",
+                            entry.key(),
+                            item.flavour()
+                        ),
+                    );
+                }
+            } else if schema.relation_is_valid(entry.key()) {
+                diagnostic(
+                    DiagnosticCode::FieldInvalid,
+                    &mut diagnostics,
+                    entry.source(),
+                    format!("unknown metadata field '{}'", entry.key()),
+                );
+            }
+        }
+        for (name, field) in &flavour.fields {
+            if !schema.field_is_valid(item.flavour(), name) {
+                continue;
+            }
+            let entries = fields
+                .get(name.as_str())
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            if item.metadata_valid && field.required && entries.is_empty() {
+                diagnostic(
+                    DiagnosticCode::FieldInvalid,
+                    &mut diagnostics,
+                    item.source(),
+                    format!("required field '{name}' is missing"),
+                );
+            }
+            if !field.repeatable && entries.len() > 1 {
+                for entry in &entries[1..] {
+                    diagnostic(
+                        DiagnosticCode::FieldInvalid,
+                        &mut diagnostics,
+                        entry.source(),
+                        format!("field '{name}' is not repeatable"),
+                    );
+                }
+            }
+        }
+        for relation in item.relations() {
+            if let Some((canonical, definition, inverse)) = schema.resolve_relation(relation.name())
+            {
+                if !schema.relation_is_valid(canonical) {
+                    continue;
+                }
+                let authors = if inverse {
+                    &definition.target
+                } else {
+                    &definition.source
+                };
+                if relation.inline
+                    && (if inverse {
+                        schema.relation_target_is_valid(canonical)
+                    } else {
+                        schema.relation_source_is_valid(canonical)
+                    })
+                    && !authors.iter().any(|flavour| flavour == item.flavour())
+                {
+                    diagnostic(
+                        DiagnosticCode::RelationInvalid,
+                        &mut diagnostics,
+                        relation.source(),
+                        format!(
+                            "relation '{}' does not allow source flavour '{}'",
+                            relation.name(),
+                            item.flavour()
+                        ),
+                    );
+                }
+                if let Some(address) = crate::external::address(relation.target()) {
+                    if !definition.external || !crate::external::valid_address(address) {
+                        diagnostic(
+                            DiagnosticCode::RelationInvalid,
+                            &mut diagnostics,
+                            relation.source(),
+                            format!(
+                                "relation '{}' does not allow this external target",
+                                relation.name()
+                            ),
+                        );
+                    }
+                    continue;
+                }
+                if relation.target().starts_with("code:") {
+                    if !inverse
+                        || !definition.code_source
+                        || !definition.target.iter().any(|f| f == item.flavour())
+                    {
+                        diagnostic(
+                            DiagnosticCode::RelationInvalid,
+                            &mut diagnostics,
+                            relation.source(),
+                            format!(
+                                "relation '{}' does not allow this code target",
+                                relation.name()
+                            ),
+                        );
+                    } else if let Err(error) = corpus.code().resolve(relation.target()) {
+                        let (code, message) = code_resolution_diagnostic(error);
+                        diagnostic(code, &mut diagnostics, relation.source(), message);
+                    }
+                    continue;
+                }
+                match resolve_indexed_item(&ids, &mids, relation.target()) {
+                    IndexedItem::One(target) => {
+                        let endpoints = if inverse {
+                            &definition.source
+                        } else {
+                            &definition.target
+                        };
+                        if (if inverse {
+                            schema.relation_source_is_valid(canonical)
+                        } else {
+                            schema.relation_target_is_valid(canonical)
+                        }) && !endpoints.iter().any(|flavour| flavour == target.flavour())
+                        {
+                            diagnostic(
+                                DiagnosticCode::RelationInvalid,
+                                &mut diagnostics,
+                                relation.source(),
+                                format!(
+                                    "relation '{}' does not allow target flavour '{}'",
+                                    relation.name(),
+                                    target.flavour()
+                                ),
+                            );
+                        }
+                        if definition.same_flavour
+                            && schema.same_flavour_is_valid(canonical)
+                            && target.flavour() != item.flavour()
+                        {
+                            diagnostic(
+                                DiagnosticCode::RelationInvalid,
+                                &mut diagnostics,
+                                relation.source(),
+                                format!(
+                                    "relation '{}' requires matching source and target flavours",
+                                    relation.name()
+                                ),
+                            );
+                        }
+                    }
+                    IndexedItem::Ambiguous => diagnostic(
+                        DiagnosticCode::ReferenceUnresolved,
+                        &mut diagnostics,
+                        relation.source(),
+                        format!(
+                            "relation '{}' references ambiguous item '{}'",
+                            relation.name(),
+                            relation.target()
+                        ),
+                    ),
+                    IndexedItem::Missing if corpus.is_complete() => diagnostic(
+                        DiagnosticCode::ReferenceUnresolved,
+                        &mut diagnostics,
+                        relation.source(),
+                        format!(
+                            "relation '{}' references missing item '{}'",
+                            relation.name(),
+                            relation.target()
+                        ),
+                    ),
+                    IndexedItem::Missing => {}
+                }
+            }
+        }
+    }
+    sort_diagnostics(&mut diagnostics);
+    diagnostics
+}
+
+// @mara implements REQ-DURABLE-ITEM-IDENTITY
+pub fn validate_corpus_independent(corpus: &Corpus) -> Vec<Diagnostic> {
+    let mut diagnostics = corpus
+        .items()
+        .flat_map(|item| item.inline_diagnostics.clone())
+        .collect::<Vec<_>>();
+    let ids = item_index(corpus);
+    let mid_targets = mid_index(corpus);
+
+    for duplicates in ids.values().filter(|items| items.len() > 1) {
+        for item in duplicates {
+            diagnostic(
+                DiagnosticCode::IdentityInvalid,
+                &mut diagnostics,
+                item.source(),
+                format!("duplicate item ID '{}'", item.id()),
+            );
+        }
+    }
+
+    for (mid, duplicates) in mid_targets.iter().filter(|(_, items)| items.len() > 1) {
+        for item in duplicates {
+            if let Some(entry) = mid_entries(item)
+                .into_iter()
+                .find(|entry| entry.value() == *mid)
+            {
+                diagnostic(
+                    DiagnosticCode::IdentityInvalid,
+                    &mut diagnostics,
+                    entry.source(),
+                    format!("duplicate item MID '{mid}'"),
+                );
+            }
+        }
+    }
+
+    for item in corpus.items() {
+        let mids = mid_entries(item);
+        match mids.as_slice() {
+            [] => {
+                diagnostic(
+                    DiagnosticCode::IdentityInvalid,
+                    &mut diagnostics,
+                    item.source(),
+                    format!("item '{}' is missing its MID", item.id()),
+                );
+                diagnostics.last_mut().expect("diagnostic was added").kind =
+                    DiagnosticKind::MissingMid;
+            }
+            [entry] => {
+                if !crate::is_mid(entry.value()) {
+                    diagnostic(
+                        DiagnosticCode::IdentityInvalid,
+                        &mut diagnostics,
+                        entry.source(),
+                        format!("invalid item MID '{}'", entry.value()),
+                    );
+                }
+                if entry.source().span().start_line() != item.source().span().start_line() + 1 {
+                    diagnostic(
+                        DiagnosticCode::IdentityInvalid,
+                        &mut diagnostics,
+                        entry.source(),
+                        format!(
+                            "item '{}' MID must immediately follow its opener",
+                            item.id()
+                        ),
+                    );
+                }
+            }
+            [first, rest @ ..] => {
+                if !crate::is_mid(first.value()) {
+                    diagnostic(
+                        DiagnosticCode::IdentityInvalid,
+                        &mut diagnostics,
+                        first.source(),
+                        format!("invalid item MID '{}'", first.value()),
+                    );
+                }
+                if first.source().span().start_line() != item.source().span().start_line() + 1 {
+                    diagnostic(
+                        DiagnosticCode::IdentityInvalid,
+                        &mut diagnostics,
+                        first.source(),
+                        format!(
+                            "item '{}' MID must immediately follow its opener",
+                            item.id()
+                        ),
+                    );
+                }
+                for entry in rest {
+                    diagnostic(
+                        DiagnosticCode::IdentityInvalid,
+                        &mut diagnostics,
+                        entry.source(),
+                        format!("item '{}' has more than one MID entry", item.id()),
+                    );
+                    if !crate::is_mid(entry.value()) {
+                        diagnostic(
+                            DiagnosticCode::IdentityInvalid,
+                            &mut diagnostics,
+                            entry.source(),
+                            format!("invalid item MID '{}'", entry.value()),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    diagnostics.extend_from_slice(corpus.discovery().diagnostics());
+    sort_diagnostics(&mut diagnostics);
+    diagnostics
+}
+
+fn item_index(corpus: &Corpus) -> BTreeMap<&str, Vec<&Item>> {
+    let mut ids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
+    for item in corpus.items() {
+        ids.entry(item.id()).or_default().push(item);
+    }
+    ids
+}
+
+fn mid_index(corpus: &Corpus) -> BTreeMap<&str, Vec<&Item>> {
+    let mut mids: BTreeMap<&str, Vec<&Item>> = BTreeMap::new();
+    for item in corpus.items() {
+        let mut seen = BTreeSet::new();
+        for entry in mid_entries(item)
+            .into_iter()
+            .filter(|entry| crate::is_mid(entry.value()))
+        {
+            if seen.insert(entry.value()) {
+                mids.entry(entry.value()).or_default().push(item);
+            }
+        }
+    }
+    mids
+}
+
+enum IndexedItem<'a> {
+    Missing,
+    One(&'a Item),
+    Ambiguous,
+}
+
+fn resolve_indexed_item<'a>(
+    ids: &BTreeMap<&str, Vec<&'a Item>>,
+    mids: &BTreeMap<&str, Vec<&'a Item>>,
+    handle: &str,
+) -> IndexedItem<'a> {
+    let matches = if crate::is_mid(handle) {
+        mids.get(handle)
+    } else {
+        ids.get(handle)
+    };
+    match matches.map(Vec::as_slice) {
+        Some([item]) => IndexedItem::One(item),
+        Some(_) => IndexedItem::Ambiguous,
+        None => IndexedItem::Missing,
+    }
+}
+
+fn mid_entries(item: &Item) -> Vec<&MetadataEntry> {
+    item.metadata()
+        .iter()
+        .filter(|entry| entry.key() == "mid")
+        .collect()
+}
+
+fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
+    diagnostics.sort_by(|a, b| {
+        (a.source.path(), a.source.span().start_line(), &a.message).cmp(&(
+            b.source.path(),
+            b.source.span().start_line(),
+            &b.message,
+        ))
+    });
+}
+
+fn diagnostic_for_target_item(
+    code: DiagnosticCode,
+    diagnostics: &mut Vec<Diagnostic>,
+    source: &SourceLocation,
+    item: Option<&Item>,
+    message: String,
+) {
+    diagnostic(code, diagnostics, source, message);
+    if let Some(item) = item {
+        let diagnostic = diagnostics.last_mut().expect("diagnostic was added");
+        diagnostic.item_ids.push(item.id().to_owned());
+        if let Some(mid) = item.mid() {
+            diagnostic.item_ids.push(mid.to_owned());
+        }
+    }
+}
+
+fn code_resolution_diagnostic(error: crate::code::ReferenceError) -> (DiagnosticCode, String) {
+    match error {
+        crate::code::ReferenceError::MissingFile => {
+            (DiagnosticCode::CodeMissing, "code file is missing".into())
+        }
+        crate::code::ReferenceError::MissingSymbol => {
+            (DiagnosticCode::CodeMissing, "code symbol is missing".into())
+        }
+        crate::code::ReferenceError::Ambiguous => (
+            DiagnosticCode::CodeAmbiguous,
+            "code selector is ambiguous".into(),
+        ),
+        crate::code::ReferenceError::Unsupported => (
+            DiagnosticCode::CodeUnsupported,
+            "code path or selector is unsupported".into(),
+        ),
+    }
+}
+
+fn valid_field_value(kind: FieldType, values: Option<&[String]>, value: &str) -> bool {
+    match kind {
+        FieldType::String => true,
+        FieldType::Integer => value.parse::<i64>().is_ok(),
+        FieldType::Number => value.parse::<f64>().is_ok_and(f64::is_finite),
+        FieldType::Boolean => matches!(value, "true" | "false"),
+        FieldType::Enum => {
+            values.is_some_and(|values| values.iter().any(|candidate| candidate == value))
+        }
+    }
+}
+
+fn field_type_name(kind: FieldType) -> &'static str {
+    match kind {
+        FieldType::String => "string",
+        FieldType::Integer => "integer",
+        FieldType::Number => "number",
+        FieldType::Boolean => "boolean",
+        FieldType::Enum => "enum",
+    }
+}
+
+// @mara implements DES-CORPUS-CONFORMANCE
+pub fn load_corpus_for_validation(
+    project: &Project,
+    schema: &Schema,
+) -> Result<(Corpus, Vec<Diagnostic>), Error> {
+    let (mut documents, mut diagnostics) = load_documents_for_validation(project, schema)?;
+    let (code, problems) = crate::CodeIndex::load(project);
+    for problem in problems {
+        if problem.code == DiagnosticCode::SourceInvalid {
+            documents.complete = false;
+        }
+        let mut item_ids = Vec::new();
+        if let Some(target) = &problem.target {
+            item_ids.push(target.clone());
+            for item in documents.items() {
+                if item.id() == target || item.mid() == Some(target.as_str()) {
+                    item_ids.push(item.id().to_owned());
+                    if let Some(mid) = item.mid() {
+                        item_ids.push(mid.to_owned());
+                    }
+                }
+            }
+        }
+        diagnostic(
+            problem.code,
+            &mut diagnostics,
+            &problem.source,
+            problem.message,
+        );
+        diagnostics
+            .last_mut()
+            .expect("diagnostic was added")
+            .item_ids = item_ids;
+    }
+    Ok((Corpus { documents, code }, diagnostics))
+}
+
+pub fn load_corpus_syntax_for_validation(
+    project: &Project,
+) -> Result<(Corpus, Vec<Diagnostic>), Error> {
+    let (documents, diagnostics) = load_documents_syntax_for_validation(project)?;
+    Ok((
+        Corpus {
+            documents,
+            code: crate::CodeIndex::empty(project),
+        },
+        diagnostics,
+    ))
+}
+
+pub(crate) fn parse_document_source(
+    path: &Path,
+    source: &str,
+    schema: &Schema,
+) -> Result<Document, Error> {
+    parse_document(path.to_path_buf(), source.to_owned(), schema)
+}
+
+pub(crate) fn document_is_discoverable(project: &Project, relative: &Path) -> Result<bool, Error> {
+    let content = content_matcher(project)?;
+    if !is_mara_document(relative) || !content.is_match(relative) {
+        return Ok(false);
+    }
+    let mut ancestor = project.root().to_path_buf();
+    for component in relative.parent().into_iter().flat_map(Path::components) {
+        ancestor.push(component.as_os_str());
+        let metadata = fs::symlink_metadata(&ancestor).map_err(|source| Error::Io {
+            action: "inspect document discovery path",
+            path: ancestor.clone(),
+            source,
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Ok(false);
+        }
+    }
+    let mut matchers = walker_builder(project.root()).build_matchers();
+    let mut ignores = matchers
+        .pop()
+        .expect("a walker builder produces one matcher for its root");
+    let (matched, error) = ignores.matched_with_errors(relative, false);
+    if let Some(source) = error {
+        return Err(Error::Io {
+            action: "evaluate document discovery",
+            path: project.root().join(relative),
+            source: io::Error::other(source),
+        });
+    }
+    Ok(!matched.is_ignore())
 }

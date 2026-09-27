@@ -13,7 +13,9 @@ struct EdgeRecord {
     source: DiagnosticLocation,
 }
 
-// @mara code_implements REQ-RELATION-CARDINALITY
+// @mara implements DES-TRACE-GRAPH-CONSTRAINTS
+// @mara implements REQ-RELATION-CARDINALITY
+// @mara implements REQ-RELATION-CYCLE-POLICY
 pub(crate) fn evaluate(
     project: &Project,
     corpus: &Corpus,

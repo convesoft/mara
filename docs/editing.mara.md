@@ -1,375 +1,269 @@
-# Item editing and recovery
+# Source mutation and explicit recovery
 
-:::mara requirement REQ-ITEM-MOVEMENT
-:mid: 01M1RKZY3F63775E1HM1N4T7QG
-:title: Move an item without changing its identity or authored content
-
-`item move <reference> <file>` and MCP `item_move` relocate exactly one item
-resolved by exact MID or human ID. The destination and optional one-based
-`--line` follow [[REQ-ITEM-CREATION]] and [[REQ-ITEM-INSERTION-SAFETY]]. The
-complete project must validate before and after movement.
-
-Movement preserves the MID, human ID, exact authored item block bytes, existing
-line endings, metadata, body, mentions, and typed relation targets. It preserves
-all bytes outside the removed block and destination separators, other items,
-and existing file permissions. It leaves an emptied source document present.
-Mara never commits to Git or deletes the source document.
-
-Human output, CLI JSON, and MCP identify the same MID, human ID, old location,
-and new location. Same-document movement is supported; bulk movement, renaming,
-content update, and deletion are separate operations.
-:::
+Structured edits preserve item identity and surviving source references.
+Relation edits, movement and rename use a shared recoverable journal; explicit
+rollback restores recorded preimages without overwriting later manual edits.
 
 :::mara requirement REQ-RECOVERABLE-MUTATION
 :mid: 01M1RKZY3VJKYP7V8GNDKR84GT
 :title: Recover interrupted multi-file mutations without losing source data
+:status: accepted
+:kind: functional
+:derives_from: SCN-RECOVER-INTERRUPTED-EDIT
 
-Before replacing any original, movement and rename verify every planned edit
-against its preimage, stage every candidate, and validate the complete candidate
-corpus. Their journaled replacements record durable project-local recovery
-information first.
-An in-process replacement failure restores every original, including removing a
-new destination. An interrupted operation supports explicit rollback.
+Before replacing any original, movement and rename verify every planned edit against its preimage, stage every candidate and validate the complete candidate corpus. Journaled replacements record durable project-local recovery information first. An in-process replacement failure restores every original, including removal of a new destination; interruption supports explicit rollback.
 
-Active, pending, or unrecoverable transaction state blocks all further Mara
-content mutations. Recovery must not overwrite later manual edits. Failures
-identify the pending state and the next recovery action. Reads and validation
-remain available against the current files.
+Active, pending or unrecoverable transaction state blocks all further Mara content mutations. Recovery must not overwrite later manual edits. Failures identify the pending state and next recovery action. Reads and validation remain available against current files.
 :::
 
-:::mara design DES-ITEM-MOVEMENT
-:mid: 01M1RKZY478CMMT2Q67Y1CA1GP
-:title: Move source spans through a recoverable file transaction
-:satisfies: REQ-ITEM-MOVEMENT
+:::mara design DES-MID-BACKFILL
+:mid: 01M3H35NH6DHAPHV93FKDY8RSN
+:title: Insert missing MID lines after complete source preflight
+:status: accepted
+:kind: behavior
+:satisfies: REQ-MID-BACKFILL
+
+CLI `project mid backfill` and MCP `project_mid_backfill` hold the project mutation lock and reject a pending journal. Load the recovering corpus and reject every source-conformance diagnostic except the typed missing-MID condition; authored message text cannot grant an exception. Preserve existing MIDs and generate unique canonical ULIDs for missing identities.
+
+Insert each MID immediately after its opener, using the document's newline style. Preserve all other bytes and parse every candidate before writing. Replace each affected file atomically, retaining permissions. Backfill has no multi-file journal: earlier file replacements can remain if a later write fails. Repeating backfill inserts only identities still missing. Return `{project, changed:[{id,mid,path,line}]}` in path/source order, with absolute project root, relative document paths and resulting one-based MID lines.
+:::
+
+:::mara design DES-MUTATION-RECOVERY
+:mid: 01M3H35T7MPZKPTFE19W2XTV9R
+:title: Lock content writers and explicitly restore journaled preimages
+:status: accepted
+:kind: interface
 :satisfies: REQ-RECOVERABLE-MUTATION
 
-## Movement
+`.mara/mutation.lock` is a persistent advisory lock file. Its OS lock is released on operation end or process exit; never delete it to unlock a writer. Content writers reject an existing `.mara/transaction.json`. Both paths must stay inside the project without symlink traversal.
 
-Use the parser's end-exclusive item source span: the opener through the closing
-line, including its line terminator when present. Transfer that byte slice
-without rendering or normalizing it; remove only that slice from the source.
-A missing closing-line terminator is supplied as a separator when content
-follows at the destination. New separators follow the destination's existing
-newline style (LF when empty). Existing surrounding blank lines remain.
+Journal format 1 is UTF-8 JSON with `format_version:1` and a non-empty `changes` array. Each entry has a unique normalized project-relative regular `*.mara.md` path, `before` (UTF-8 source or null for a new file), `after` (candidate source), and `mode` (null for a new file, otherwise `readonly` and optional `unix_mode`). Reject unknown fields, unsupported versions and malformed entries without changing files.
 
-The insertion line refers to the original destination, including for same-file
-moves. Reject points inside any item, including the moved item. Its start and
-end boundaries in the same file are no-ops. Adjust later positions by the
-removed span's byte length. Default positioning appends. Check the complete
-candidate corpus and unchanged item identities, bodies, metadata, and references
-to reject insertion into Markdown contexts that hide or reinterpret items.
+CLI `project transaction rollback` and MCP `project_transaction_rollback` take the exclusive lock and need resolvable project configuration, including an existing configured schema path, but do not read schema contents or require a valid corpus. Check all targets against their recorded preimage or candidate and permissions before restoring anything; stage all originals, recheck each target, restore existing files and remove new destinations. Compare readonly on all platforms and a supplied unix_mode on Unix. Exact Unix mode restoration requires that mode to be recorded. Sync staged files and, on Unix, affected parent directories. Remove the journal only after success. Recovery is retryable, including already-restored paths; no journal is a successful no-op. Return `{project,restored}` with absolute project root and relative restored paths.
 
-Hold the project mutation lock, stage all candidates in their destination
-parents, then recheck source bytes, permissions, discovery, project configuration,
-schema, and the full corpus before publishing. Existing single-file creation,
-relation mutation, and MID backfill take the same lock and reject pending
-journals; their existing write semantics otherwise remain unchanged.
+Reject later manual edits or permission changes and preserve the journal. Reconcile targets to a recorded version before retrying. Preserve malformed/unsupported journals and restore trusted backups before removing them. Reads remain available. Concurrent manual filesystem edits are not coordinated by the advisory lock. The shared publisher is specified by [[DES-MUTATION-TRANSACTION]].
+:::
 
-## Journal format 1
+:::mara verification VER-MID-AND-RECOVERY
+:mid: 01M3H35Y1K0NBS2820QYW4TWTN
+:title: Check deliberate identity backfill and safe explicit rollback
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-MID-BACKFILL
+:verifies: REQ-RECOVERABLE-MUTATION
+:verifies: DES-MID-BACKFILL
+:verifies: DES-MUTATION-RECOVERY
 
-`.mara/mutation.lock` is a persistent advisory lock file. Its operating-system
-lock is released on process exit; do not delete this file to unlock a writer.
-It may be Git-ignored and is not product knowledge.
+Run `cargo test --locked --test mid_recovery` and lock unit regressions. Use isolated projects with fixture-owned documents and published-format journal states. Verify real CLI/MCP backfill results, exact preservation of non-MID bytes and existing MIDs, correct lines/newlines/permissions, idempotence and preflight refusal, including authored text resembling a missing-MID message.
 
-`.mara/transaction.json` is an immutable UTF-8 JSON recovery journal with
-`format_version: 1` and a non-empty `changes` array. Each entry contains a
-normalized project-relative `path`, `before` (original UTF-8 source or null for
-a new file), `after` (candidate source), and `mode` (null for a new file,
-otherwise `readonly` and optional `unix_mode`). Paths must be unique regular
-`*.mara.md` files within the project, without symlink traversal. Unknown fields,
-unsupported versions, or malformed entries prevent automatic recovery.
+Check pending/active locks, rollback of existing and newly created files, schema-independent recovery, optional Unix modes, no-journal success and retryable partial restoration. Reject malformed/unsupported journals, manual edits, mismatched permissions and unsafe paths while preserving source/journal. Run the full regression suite, formatting and Clippy. Fixture journals verify recovery; they do not prove interrupted move/rename publication or in-process automatic rollback.
+:::
 
-Sync every staged file, including preserved permissions. Publish the complete
-journal atomically without overwriting an existing journal before replacing any
-original. On Unix, sync its parent directory before replacements and each
-document parent after replacement. Windows flushes staged files; directory
-fsync is not available through this implementation. Individual replacements
-are atomic; the full set is recoverable, not atomically visible to readers.
-No external coordinator or Git operation participates.
+:::mara design DES-MUTATION-TRANSACTION
+:mid: 01M3H4H9HVG08YV6J7V5D8D9MW
+:title: Publish staged source changes with durable rollback information
+:status: accepted
+:kind: interface
+:satisfies: REQ-RECOVERABLE-MUTATION
 
-Remove the journal only after every replacement succeeds. A remaining journal
-always means rollback to the recorded preimages, even if all replacements had
-finished before interruption. No automatic roll-forward is attempted.
+The shared journal publisher is used by relation mutations, item movement and item rename. Under the mutation lock, capture original bytes and permissions, stage every candidate, recheck operation-level project state and every preimage, then durably publish the format-1 journal defined by [[DES-MUTATION-RECOVERY]] before replacing any original. Sync staged files and, on Unix, affected parent directories; remove the journal only after all replacements succeed.
 
-## Explicit recovery
+On an in-process publication failure, restore recorded originals and remove newly created destinations. If rollback encounters later manual edits or another failure, preserve recovery information and refuse further writers until explicit rollback succeeds. A stopped process leaves a journal for restart recovery. Recheck each preimage before replacement; the advisory lock does not coordinate manual filesystem edits. Multi-file publication is recoverable, not an atomic snapshot for concurrent readers.
 
-Stop other Mara writers, then run `mara project transaction rollback` (with
-`--project` when needed), or MCP `project_transaction_rollback`. Recovery takes
-the same exclusive lock and does not require a valid corpus or schema. It
-checks every current target against its recorded preimage or candidate and
-checks recorded permissions before restoring any file: compare `readonly` on
-all platforms, and compare `unix_mode` only on Unix when the journal supplies
-it. Stage all originals, restore existing files, remove destinations whose
-`before` was null, then remove the journal. Recovery can be retried after
-interruption; no journal is a successful no-op.
-
-If a target differs from both recorded versions, preserve the manual edits and
-journal, reconcile the file to its recorded preimage or candidate (including
-permissions), and retry. If the journal is malformed or unsupported, preserve
-it and restore affected files from a trusted backup before removing it. Never
-remove a journal merely to unblock mutations. Abrupt process exit may leave
-unpublished temporary files in destination directories; they are outside Mara
-discovery and can be removed after recovery. Concurrent manual filesystem edits
-during publication or recovery are not coordinated by the advisory lock.
-
-## Results
-
-Movement returns `{id, mid, old_location: {path, line}, new_location: {path, line}}`.
-Paths are project-relative and lines are one-based item opener locations in
-the corresponding original or resulting document. Rollback returns
-`{project, restored}` with the absolute project root and project-relative paths;
-`restored` is empty when no transaction is pending.
+Stage replacements with `.mara-stage-` filenames. Code input snapshots exclude these files and mutation bookkeeping so preflight indexing observes project inputs rather than Mara staging bytes.
 :::
 
 :::mara requirement REQ-ITEM-UPDATE
 :mid: 01M1RSQNH2J3Q3ZG1KHX3STH1Q
 :title: Update item content without changing identity
+:status: accepted
+:kind: functional
 :derives_from: SCN-AUTHOR-ITEM-FLEXIBLY
 
-`item update <reference>` and MCP `item_update` partially update exactly one
-item resolved by exact MID or human ID. Require at least one requested change:
-replace the title, replace all values of named custom fields, clear optional
-custom fields, or replace the body. Omitted properties remain unchanged.
+CLI `item update` and MCP `item_update` partially update exactly one item by exact MID or human ID. Require a title, custom field replacement/clear or body replacement; omitted properties remain unchanged. Preserve identity, flavour, metadata relations, untouched source and permissions. Body replacement may intentionally change typed inline assertions.
 
-Validate title, field types, repetition, requiredness, body structure, and the
-resulting project before writing. The only allowed remaining validation errors
-are unchanged missing required bodies on existing scaffolds; return each as an
-edit warning. Explicitly replacing a required body with empty or whitespace-only
-text fails, including on a scaffold. `item validate` and `project validate`
-continue to report missing required bodies as errors.
-
-Preserve MID, human ID, flavour, typed relations, unaffected metadata order and
-whitespace, untouched body Markdown, existing line endings, file permissions,
-and every byte outside the selected item. Reject invalid requests without
-changing source. Validate the candidate document and project, then publish one
-atomic file replacement under the project mutation lock. Pending recovery state
-blocks updates as described in [[REQ-RECOVERABLE-MUTATION]].
-
-Human output, CLI JSON, and MCP identify the same MID, human ID, changed fields,
-source path, and edit warnings. The operation does not rename, move, delete,
-change flavour or relations, commit to Git, or maintain history.
+Validate the complete candidate source corpus before one atomic file replacement. Permit only unchanged missing required bodies on existing scaffolds, reported as edit warnings; explicitly supplying an empty/blank required body fails. All other source-conformance errors block writing. Preserve surviving resolved references and refuse changes that hide items or retarget untouched links. Pending recovery blocks updates. Return the selected identity, relative path, actual changed fields and warnings consistently across CLI and MCP.
 :::
 
 :::mara design DES-ITEM-UPDATE
 :mid: 01M1RSQNHERJ070G06PK18A77K
 :title: Apply validated partial updates to source spans
+:status: accepted
+:kind: interface
 :satisfies: REQ-ITEM-UPDATE
-:satisfies: REQ-SURFACE-PARITY
 
-## Input
+CLI accepts `item update REFERENCE` with optional `--title`, repeated `--field KEY=VALUE`, repeated `--clear-field KEY` and `--body TEXT`; `--body -` reads stdin. MCP accepts the corresponding `reference`, `title`, `fields`, `clear_fields` and literal `body` (including `-`). Null title/body is omission.
 
-CLI: `item update <reference> [--title <title>] [--field <key=value>]`
-`[--clear-field <key>] [--body <text|->]`. Both field options are repeatable;
-`--body -` reads standard input. MCP accepts `reference`, optional `title`,
-`fields: [{key, value}]`, `clear_fields: [key]`, and `body`, plus the usual
-project selection. MCP body text is literal, including `-`. Omitted properties
-request no change; null `title` or `body` is equivalent to omission.
+Group fields by key in request order, replacing each complete sequence. Clear removes every occurrence of an optional field; clearing an absent field is a no-op. Reject structural/unknown/relation keys, set/clear conflicts, required-field removal and invalid scalars. Trim title/field values; distinguish an empty string value from removal. Reuse existing metadata slots and surrounding whitespace, remove surplus entries, append extra values after the last slot and new keys after metadata in lexical order. Leave semantically unchanged fields byte-identical. Preserve body boundaries and closing delimiter; normalize replacement body/new metadata to the document's first newline style and terminate nonempty bodies with a newline.
 
-Group supplied field values by key in request order. Each group replaces that
-field's complete value sequence. Clearing removes all entries of an optional
-custom field; clearing an absent optional field succeeds without a change.
-Reject unknown or structural field names, relation names, and any key both set
-and cleared. Trim title and field values using the existing scalar rules and
-reject embedded line breaks. An empty string value differs from clearing a
-field. Requiredness requires presence, and field types follow the schema.
+Require globally unambiguous identities and resolvable existing internal relations on the selected item before editing. This prerequisite also applies when a proposed body replacement would remove a broken selected-item relation. Parse the candidate, validate whole-corpus source conformance, and verify unchanged item count, identity, unrequested metadata and other items' bodies/mentions. Only typed missing-body diagnostics on unchanged, non-replaced scaffold bodies become warnings. This is source validation, not lifecycle/rule evaluation.
 
-## Source editing and validation
+Reference correspondence protects surviving targets, including relocated usages, duplicate headings and anchored blocks. Explicit body replacement may remove/literalize occurrences or edit a reference definition to a valid new destination; other surviving active links remain protected. Metadata-only edits have no body-edit exemption.
 
-Use parser metadata and body byte spans rather than rendering a new item block.
-Reuse existing field occurrences in order, retaining their surrounding value
-whitespace. Remove surplus occurrences and place extra values immediately after
-the last occurrence. Append newly introduced fields after existing metadata in
-key order. Leave semantically unchanged fields byte-identical. Preserve the
-blank metadata/body boundary and closing delimiter, including its terminator.
-Normalize replacement body LF/CRLF line endings and new metadata lines to the
-document's first newline style (LF by default). A nonempty replacement body
-receives a final newline if needed; an empty body becomes zero bytes.
-
-Require unambiguous existing identities. Reparse the candidate and validate the
-whole candidate corpus. Permit only typed missing-body diagnostics belonging to
-unchanged existing scaffold bodies when that body was not explicitly replaced.
-Every other validation diagnostic blocks writing. Verify unchanged item count,
-identities, and all metadata outside the request, exact replacement body
-recognition, and unchanged bodies and mentions on other items. Reject body
-content that escapes the item or hides another item in Markdown context.
-
-Stage the candidate in the original file's parent with preserved permissions.
-Before atomic replacement, recheck the original source and permissions, project
-configuration, schema, discovery, and corpus. Use the existing mutation lock and
-single-file staging without a multi-file journal. Concurrent manual filesystem
-edits during publication remain outside that advisory lock.
-
-## Result
-
-Return `{id, mid, path, changed_fields, warnings}`. `path` is project-relative;
-`changed_fields` contains actual changed custom keys and/or `title` and `body`,
-unique and sorted lexically. A request with no effective change succeeds with an
-empty list and no file replacement. `warnings` uses the update warning
-shape `{scope, path, line, message}` for each remaining scaffold body, including
-scaffolds in other documents; locations refer to the resulting corpus. Human
-output labels each as `warning` on stderr. CLI JSON and MCP return the same
-warning array, empty when the resulting corpus has no diagnostics.
+Under the mutation lock, stage one candidate with original permissions. Recheck project/schema/corpus/discovery and original bytes/permissions before atomic replacement; no multi-file journal is published. Return `{id,mid,path,changed_fields,warnings}` with sorted unique changed keys and warning `{scope,path,line,message}` entries in resulting source coordinates. No effective change returns an empty changed list without replacement. Human output prints warnings to stderr.
 :::
 
 :::mara decision ADR-DRAFT-ITEM-UPDATES
 :mid: 01M1RSQNHVC39H4Y9CCSTW1GQV
 :title: Allow continued drafting with explicit edit warnings
+:status: accepted
 :justifies: REQ-ITEM-UPDATE
 
-Permit structured title and field updates while an existing scaffold's required
-body remains missing. Requiring a fully valid project after every edit would
-block incremental drafting supported by item creation. Return the remaining
-missing-body diagnostics as warnings during update, while explicit validation
-continues to fail until the bodies are supplied. This exception does not allow
-new missing required bodies or other invalid state.
+Permit title and field edits while an existing scaffold's required body is missing. A requirement for fully complete knowledge after every edit would prevent incremental drafting. Return unchanged missing-body diagnostics as edit warnings while corpus validation still reports errors. Explicitly replacing a required body with empty text and every other source-conformance defect remain errors.
+:::
+
+:::mara verification VER-ITEM-UPDATE
+:mid: 01M3H4YREQW5Z46QVPMW218NJW
+:title: Check partial edits, drafting warnings and surviving references
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-ITEM-UPDATE
+:verifies: DES-ITEM-UPDATE
+
+Run `cargo test --locked --test item_update` and the single-file transaction regression. Exercise repeated/cleared/empty fields, title/body changes, stdin versus literal MCP body, CRLF, whitespace, permissions, unchanged adjacent documents/items and no-op publication. Check scaffold warnings/progression, typed diagnostic exemptions, invalid requests and ambiguous identity refusal through real transports.
+
+Retain body-reference cases for explicit definition edits/literal contexts, relocated usages, intact section reordering, anchored paragraph replacement and duplicate/sibling target protection. Check typed inline relations and unchanged source on failure. Run the full regression suite, formatting/Clippy, canonical validation and selected traceability.
 :::
 
 :::mara requirement REQ-ITEM-DELETION
 :mid: 01M1RTTGFNW3Y7K8CQW16FJKYV
 :title: Delete an item only when surviving references remain valid
+:status: accepted
+:kind: functional
+:derives_from: SCN-EDIT-CONNECTED-KNOWLEDGE
 
-`item delete <reference>` and MCP `item_delete` remove exactly one item
-resolved by exact MID or human ID. Require a valid complete project before
-editing and a valid complete surviving corpus before publication.
+CLI `item delete` and MCP `item_delete` remove exactly one item resolved by exact MID or human ID. Require complete source conformance before editing and in the surviving corpus. Refuse any surviving typed assertion, supported item/narrative mention, code marker or Markdown reference that would become invalid or change destination.
 
-Refuse deletion when any surviving typed relation or supported wiki mention in
-an item body or narrative resolves to the selected MID or human ID. Markdown
-links must retain their destinations under [[DES-DOCUMENT-STRUCTURE]]. Report every blocking
-occurrence with its source path, one-based line, and byte span. References
-inside the selected item, including self-references, disappear with it and do
-not block deletion. Supported mentions follow [[DES-DOCUMENT-FORMAT]].
-
-Remove only the selected block and minimally normalize adjacent empty lines.
-Preserve unrelated source bytes, surviving items and references, line-ending
-style, and file permissions. Keep the containing document even when empty.
-Validate before one atomic replacement under the existing mutation lock;
-pending recovery state blocks deletion under [[REQ-RECOVERABLE-MUTATION]].
-
-Human output, CLI JSON, and MCP identify the deleted MID, human ID, and source
-path. There is no cascade, force option, tombstone, alias, history record,
-document deletion, bulk operation, or Git operation.
+Report surviving item/narrative reference impacts with source paths, one-based lines and byte spans. References removed with the item, including self-references and outgoing assertions, do not block deletion. Remove only its block and minimally coalesce adjacent empty separators; preserve other source bytes, surviving items/references, line endings and permissions. Keep its document even if empty. Publish one atomic replacement under the mutation lock; pending recovery blocks deletion. Return the deleted identity and relative path without cascade, force, tombstone or Git operations.
 :::
 
 :::mara design DES-ITEM-DELETION
 :mid: 01M1RTTGG2S7CSTJTG2ES0K9RM
 :title: Preflight references before removing an item source span
+:status: accepted
+:kind: interface
 :satisfies: REQ-ITEM-DELETION
-:satisfies: REQ-SURFACE-PARITY
 
-CLI accepts `item delete <reference>`. MCP accepts `reference` and the usual
-optional project selection. Both use one shared operation and return
-`{id, mid, path}`, with the original project-relative document path.
+CLI `item delete REFERENCE` and MCP `item_delete {reference,project?}` use one operation and return `{id,mid,path}` with original project-relative path. Under the mutation lock, load a strict corpus, require source conformance and resolve one exact identity. This source gate includes missing required bodies and code-marker targets, but not lifecycle/rule evaluation.
 
-Load and validate the full corpus under the project mutation lock, then resolve
-one exact identity. Scan every surviving item's schema-defined typed relations
-and parser-recognized body mentions, resolving both human IDs and MIDs. Retain
-every blocking occurrence, ordered by document path and source byte offset.
-Invocation errors follow [[DES-COMMAND-SURFACE]]; a blocked deletion names the
-selected identities and lists each source item, relation name or mention,
-path, one-based line, and end-exclusive UTF-8 byte span. Authors must remove or
-redirect those references explicitly before retrying.
+Remove the complete parser item span, including a present closing-line terminator. When an empty LF/CRLF line precedes the span, remove at most the first following empty LF/CRLF line. Preserve whitespace-only lines, all other leading/trailing separators and surviving final-newline state; keep the file.
 
-Candidate-source preflight also checks narrative mentions and Markdown links,
-including links to sections or blocks inside the deleted item and generated
-anchors shifted by its removal. Report affected reference paths, one-based lines,
-and byte spans before writing. References removed with the item do not survive.
-Destination preservation follows [[DES-DOCUMENT-STRUCTURE]].
+Project the candidate and apply surviving-reference correspondence without body-edit exemptions. Report every item/narrative impact ordered by path and byte offset, naming selected identity and each source item/relation or mention where applicable. Protect links to contained headings/blocks and other anchors shifted by removal. Then validate candidate source conformance, including code markers that would lose their target. Authors must resolve reported impacts explicitly.
 
-Remove the parser's complete item span, including the closing line terminator
-when present. If removal joins an empty line before the block with an empty
-line after it, remove exactly the first following empty line. An empty line
-here contains only LF or CRLF. Preserve every other byte, including existing
-leading/trailing blank lines, whitespace-only lines, and the final-newline
-state of surviving content. Do not insert separators or delete the document.
+Verify exactly one removed identity and every survivor's unchanged document path, complete source block and recognized mentions. Stage one file with original permissions and recheck project configuration, schema, corpus, discovery, preimage and permissions before atomic replacement. Reuse the single-file publisher without a multi-file journal. Manual filesystem edits are outside the advisory lock.
+:::
 
-Reparse the candidate, validate the complete surviving corpus, and verify that
-exactly the selected item disappeared while every surviving block and its
-recognized mentions remain unchanged. Stage the candidate in the source parent
-with original permissions. Use the existing single-file transaction path to
-recheck source bytes, permissions, project configuration, schema, discovery,
-and the full corpus before atomic replacement, without a multi-file journal.
-Concurrent manual filesystem edits during publication remain outside the
-advisory lock, as described in [[DES-ITEM-MOVEMENT]].
+:::mara verification VER-ITEM-DELETION
+:mid: 01M3H5AHJX6GTADRXZGZJR3Y51
+:title: Check safe item deletion and surviving-reference refusal
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-ITEM-DELETION
+:verifies: DES-ITEM-DELETION
+
+Run `cargo test --locked --test item_deletion`. Exercise CLI/MCP delete by ID/MID, exact result parity, loss of lookup and retained empty file, separator boundaries, mixed newlines, permissions and unchanged surviving blocks/documents. Require all incoming reference locations and unchanged source on refusal; allow removed self/outgoing references and literal examples.
+
+Cover duplicate heading retargeting, contained anchors, typed inline assertions and demoted mentions, external outgoing edges, code-marker targets, invalid/incomplete corpora and requests, active/pending locks. Retain the shared single-file preimage regression, run the full regression suite, formatting/Clippy, canonical validation and selected traceability.
+:::
+
+:::mara requirement REQ-ITEM-MOVEMENT
+:mid: 01M1RKZY3F63775E1HM1N4T7QG
+:title: Move an item without changing its identity or authored content
+:status: accepted
+:kind: functional
+:derives_from: SCN-EDIT-CONNECTED-KNOWLEDGE
+
+CLI `item move` and MCP `item_move` relocate exactly one item by exact MID or human ID within or between discovered documents. Destination and optional original one-based line follow creation's confinement/insertion rules. Require source conformance before and after movement.
+
+Preserve MID, human ID, exact authored block bytes, metadata, body, line endings and typed relation endpoints. Surviving Markdown references, including incoming and carried links, must retain their destinations. Preserve unrelated bytes, other items and existing file permissions; retain empty source documents. Return identity and original/new path and opener line consistently across transports. Publish through the recoverable mutation transaction; do not rename, update content, delete the source file or commit to Git.
+:::
+
+:::mara design DES-ITEM-MOVEMENT
+:mid: 01M1RKZY478CMMT2Q67Y1CA1GP
+:title: Move source spans through a recoverable file transaction
+:status: accepted
+:kind: interface
+:satisfies: REQ-ITEM-MOVEMENT
+:satisfies: REQ-RECOVERABLE-MUTATION
+
+CLI accepts `item move REFERENCE FILE [--line LINE]`; MCP accepts `reference`, `file`, optional `line` and project selection. Return `{id,mid,old_location:{path,line},new_location:{path,line}}` using relative paths and one-based opener lines.
+
+Under the mutation lock, load/validate source conformance and resolve exact identity. Require a confined, discoverable regular `*.mara.md` destination with an existing parent; a missing destination is allowed. Check an existing destination against the loaded corpus. Insertion coordinates refer to the original destination, including same-file moves. Reject item interiors; the moved item's start/end boundaries preserve content. Adjust later same-file positions by removed byte length; omission appends. An unchanged-location move may still publish byte-identical source.
+
+Transfer the parser's exact end-exclusive source slice through its closing line, removing only that slice. Preserve authored newline styles; add separators in the destination's first newline style (LF when empty), including a missing closing-line terminator when content follows. Do not coalesce existing surrounding blanks or remove the source document.
+
+Reparse all candidates and apply reference correspondence without body-edit exemptions. Preserve carried relative links, incoming links to contained nodes and shifted heading/block targets. Require candidate source conformance, unchanged item count/identities/metadata/body/recognized mentions and the selected identity at its destination.
+
+Use [[DES-MUTATION-TRANSACTION]] to stage all changed paths with recorded preimages and modes, recheck project/schema/corpus/discovery, publish the journal and replace files. Explicit recovery follows [[DES-MUTATION-RECOVERY]]. Source validation is independent of lifecycle/rule policies; journaled publication is recoverable rather than atomically visible across files.
+:::
+
+:::mara verification VER-ITEM-MOVEMENT
+:mid: 01M3H5R4W8K353AWDWKYDE3QKQ
+:title: Check identity-preserving moves and reference-safe publication
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-ITEM-MOVEMENT
+:verifies: DES-ITEM-MOVEMENT
+:verifies: REQ-RECOVERABLE-MUTATION
+
+Run `cargo test --locked --test item_movement` plus shared transaction failure/interruption regressions. Exercise cross-file and same-file CLI/MCP moves, ID/MID lookup and navigation after movement, original line coordinates, exact block/separator/newline/permission preservation, empty source/new destination and boundary moves.
+
+Reject invalid/hidden/symlink destinations, item interiors, incomplete/invalid corpora, active/pending writers and Markdown contexts that hide or retarget content. Preserve incoming/carried links and structural destinations, including reference definitions; allow identity-only references across a move. Check typed-inline/external assertions and subsequent relation inspection. Run the full regression suite, formatting/Clippy, canonical validation and selected traceability.
 :::
 
 :::mara requirement REQ-ITEM-RENAME
 :mid: 01M1RW50QWRZSKHK5TP4B4QMFV
 :title: Rename human IDs without changing resolved identity
+:status: accepted
+:kind: functional
+:derives_from: SCN-EDIT-CONNECTED-KNOWLEDGE
 
-`item rename <reference> <new-id>` and MCP `item_rename` rename exactly one
-item resolved by exact MID or human ID. Require a valid complete project,
-a replacement matching the ID grammar and selected flavour prefix, and
-project-wide uniqueness. Preserve the MID and flavour.
+CLI `item rename` and MCP `item_rename` change exactly one human ID selected by exact ID or MID in a source-valid corpus. Require valid replacement syntax, the selected flavour's prefix and project-wide uniqueness. Preserve its MID, flavour and path; the new ID resolves to the original MID and the old ID no longer resolves.
 
-Rewrite only the opener ID and schema-defined typed-relation or supported
-wiki-mention targets in item bodies and narrative authored with the old human ID,
-including self-references.
-Supported mentions follow [[DES-DOCUMENT-FORMAT]]. Preserve MID-authored targets,
-labels, other metadata values, unrelated prose, code and raw contexts, metadata
-order, whitespace, Markdown layout, existing line endings, and file permissions.
-
-Validate the complete candidate corpus before publication; every relation and
-mention must retain its MID endpoints. Use [[REQ-RECOVERABLE-MUTATION]] for
-publication and recovery. On success, the new ID resolves to the original MID
-and the old ID no longer resolves. Requesting the current ID succeeds without
-writing and returns no affected paths.
-
-Human output, CLI JSON, and MCP identify the unchanged MID, old and new IDs,
-and affected paths. No alias, MID rename, flavour change, external or historical
-rewrite, bulk rename, history record, or Git operation is included.
+Rewrite supported current-corpus human-ID relation and wiki-mention targets, including self-references and narrative. Preserve MID-authored targets, unrelated source, whitespace, line endings and permissions. Surviving relations/mentions must retain their MID endpoints and Markdown links their destinations. Code files stay read-only; refuse rename when a remaining human-ID code marker would break. Publish through recoverable replacement. An unchanged ID succeeds without writes or affected paths. Return MID, old/new ID and affected paths consistently across transports; create no alias, history record or Git commit.
 :::
 
 :::mara design DES-ITEM-RENAME
 :mid: 01M1RW50RC4BK3RAH78AEJVR2T
 :title: Patch parsed ID targets through the recoverable transaction
+:status: accepted
+:kind: interface
 :satisfies: REQ-ITEM-RENAME
 :satisfies: REQ-RECOVERABLE-MUTATION
-:satisfies: REQ-SURFACE-PARITY
 
-CLI accepts `item rename <reference> <new-id>`. MCP accepts `reference`,
-`new_id`, and the usual optional project selection. Both invoke one operation
-and return `{mid, old_id, new_id, paths}`. Paths are unique project-relative
-changed document paths in lexical order, empty for an unchanged ID.
+CLI `item rename REFERENCE NEW_ID` and MCP `item_rename {reference,new_id,project?}` return `{mid,old_id,new_id,paths}` with unique changed relative document paths in lexical order. Under the mutation lock, require complete source conformance, exact identity and valid unique replacement ID. No-op returns empty paths without publication, but still requires valid source and the lock.
 
-Hold the project mutation lock and validate the full corpus before resolution
-and replacement-ID checks. Plan byte patches from the selected item's opener,
-schema-defined relation metadata spans, and parser-recognized mention spans in
-both item bodies and narrative Markdown.
-Check each opener, metadata scalar, and mention against its parsed preimage;
-replace only the human-ID token. Reject overlapping or mismatched patches and
-apply them in reverse byte order per file without rendering Markdown.
-Labelled wiki syntax is not introduced; unsupported syntax remains literal.
+Plan patches from the selected opener, schema metadata relation values, typed inline assertions and parser-recognized item/narrative wiki mentions authored with the old human ID. Check exact opener/token/scalar preimages and reject overlap. Replace only ID token bytes, applying patches backwards per file. Preserve metadata value spacing, MID references, unsupported labelled syntax, literal/code/raw examples and all unrelated text.
 
-Rewrite narrative human-ID mentions with the same parsed-token patches. Preserve
-MID-authored mentions and literal examples in code, escapes, or raw contexts.
-Candidate-source preflight checks unchanged Markdown links under
-[[DES-DOCUMENT-STRUCTURE]], including generated anchors changed by a rewritten
-mention inside a heading. Reject such impacts rather than repairing Markdown
-links automatically.
+Reparse candidates and apply source correspondence with the expected old/new ID substitution, preserving the target's MID. Do not grant a body-edit exemption. Protect unchanged Markdown links, including generated anchors affected by renamed mentions inside headings. Require complete candidate source conformance and unchanged item count, MIDs, expected IDs, flavours, paths and ordered relation/mention identities. External/code addresses remain authored strings; code comments are not rewritten, so human-ID markers can block rename while MID markers survive. Lifecycle/rule evaluation is separate from source conformance.
 
-Reparse all changed documents and validate the complete projected corpus.
-Verify the same item MIDs, expected human IDs, flavours, and document paths,
-and the same ordered relation names and resolved relation and mention MID
-endpoints. Stage every changed file with original permissions and recheck the
-project configuration, schema, discovery, corpus, and file preimages before
-replacing any original.
-
-Publish every nonempty rename through the journal format 1 transaction in
-[[DES-ITEM-MOVEMENT]], including a rename affecting only one document. Its
-rollback, interrupted-process recovery, pending-state blocking, manual-edit
-protection, and platform durability limits apply unchanged. No-op renames still
-require a valid corpus and an available mutation lock.
+Publish all nonempty changes through [[DES-MUTATION-TRANSACTION]], even for one file. Recheck project/schema/corpus and each preimage before replacement; explicit recovery follows [[DES-MUTATION-RECOVERY]].
 :::
 
 :::mara decision ADR-RENAME-WITHOUT-ALIASES
 :mid: 01M1RW50RVQY5MM2V2S7FQFCD1
 :title: Keep one current human handle per durable identity
+:status: accepted
 :justifies: REQ-ITEM-RENAME
 
-Rename replaces the current human-readable handle without retaining aliases.
-The immutable MID already provides a stable target when a reference must survive
-human-ID changes. Keeping alias state would add a second persisted naming
-contract and ambiguous future ID reuse. Rewrite supported current-corpus human
-references in the same recoverable transaction; external systems and historical
-revisions retain their authored text and are outside the rename boundary.
+Replace the current human-readable handle without retaining aliases. The immutable MID supplies stable reference identity across human-ID changes. Persisted aliases would add naming state and ambiguous future ID reuse. Rewrite supported human references in the current corpus through the same recoverable transaction; external systems and historical revisions retain their authored text.
+:::
+
+:::mara verification VER-ITEM-RENAME
+:mid: 01M3H666HKDNS4GS8RD33AR1QX
+:title: Check human-ID rename, stable references and recovery
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-ITEM-RENAME
+:verifies: DES-ITEM-RENAME
+:verifies: REQ-RECOVERABLE-MUTATION
+
+Run `cargo test --locked --test item_rename` and rename unit tests. Check CLI/MCP parity, old-ID absence/MID continuity, exact source/permissions, self/narrative/metadata/inline references, aliases/symmetry, unchanged MID/external/literal spellings, no-op and no Git commit. Reject invalid IDs/corpora, shifted heading destinations, human-ID code markers and active/pending writers without writes.
+
+Retain one-file and multi-file injected failure/rollback, manual-edit conflicts, patch preimage checks and real rename-process interruption at every publication boundary followed by explicit recovery. Run the full regression suite, formatting/Clippy, canonical validation and selected traceability.
 :::

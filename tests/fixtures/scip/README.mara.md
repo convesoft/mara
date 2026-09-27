@@ -11,4 +11,4 @@ the standard SCIP protobuf types. Their configured `cp` process checks Mara's
 invocation and consumption boundary deterministically; it is not a language
 indexer. Separate live probes exercised Mara with the actual indexers, including
 TypeScript package version changes and deletion of one C++ overload.
-The owning contract and migration are [[DES-CODE-TRACEABILITY]].
+The owning contract is DES-CODE-TRACEABILITY. These fixture documents are outside the canonical corpus.

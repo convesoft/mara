@@ -1,562 +1,270 @@
-# Unified knowledge discovery
+# Document structure and direct navigation
 
-Accepted 0.2 direction: search canonical documentation once, then inspect
-direct connections from items, sections, and ordinary Markdown blocks. These contracts
-extend the [guided-authoring scope](guided-authoring.mara.md); they are not
-implemented by the [0.1 retrieval contract](retrieval.mara.md).
-The [relationship contracts](relations.mara.md) supersede the 0.2 schema-edge
-representation and discovery format version for the current checkout.
-Builtin references and structural discovery retain the contracts below.
+Items, narrative, sections and documents share one disposable source-backed
+graph. These contracts own structure, references, node handles and direct
+navigation. Search selection, ranking and complete node reads follow the
+[retrieval contracts](retrieval.mara.md).
 
 :::mara requirement REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
 :mid: 01M232S32V718GRMEHSBPY46CQ
 :title: Explore direct connections from items and narrative Markdown blocks
+:status: accepted
+:kind: functional
 :derives_from: SCN-READ-DOCUMENT-CONTEXT
 
-In 0.2, an actor can start from an item, section, or Markdown block returned by
-search and inspect its direct outgoing and incoming connections through CLI or
-MCP. Return the connection kind, direction, neighbouring node, and source
-location so the actor can choose the next step and read the evidence.
+From an item, section or Markdown block returned by search, an actor can inspect
+direct outgoing and incoming connections through CLI `related` or MCP `related`.
+Return connection kind, direction, neighbour and source evidence. Preserve
+parallel mention occurrences and distinguish mentions, authored schema relations
+and structural containment. Narrative acquires neither a flavour nor neighbouring
+items' metadata or relations.
 
-Resolved explicit references from narrative produce `mentions` edges and
-derived incoming backlinks. Schema-defined typed relations remain authored on
-items; narrative does not acquire a flavour or inherit adjacent items' metadata
-or relations.
+Expose direct parent/child membership so actors can select sibling context through
+successive calls. Each call is bounded with explicit continuation; it must not
+expand another hop, assemble a path, or claim a complete trace. There is no `hops`
+parameter. A returned reference can be passed to `get` or another `related` call.
 
-Expose structural membership for item and Markdown block results. Actors can
-navigate direct parent/child connections through derived sections and documents
-to select possible sibling context. These built-in connections are distinct
-from authored semantic relations. Structure and item ownership follow
-[[DES-DOCUMENT-STRUCTURE]].
-
-Each call returns direct neighbours only, with bounded results and explicit
-continuation. There is no `hops` parameter, recursive expansion, automatic path
-assembly, or claim that returned neighbours form a complete trace. Actors may
-request another node's direct neighbours themselves. Richer graph analysis and
-traceability have separate planned 0.3 contracts in
-[traceability](traceability.mara.md).
-
-Verify a narrative search hit leading through a mention to an item and through
-that item's typed relation to another item, as successive calls. Verify the
-corresponding incoming connections and continuation without silently expanding
-an additional hop. Also verify an item's visible section membership and
-successive parent/child navigation to a sibling narrative Markdown block.
-:::
-
-:::mara design DES-UNIFIED-KNOWLEDGE-DISCOVERY
-:mid: 01M232SX5VJZ65J1ZGGKZ556S9
-:title: Search items and Markdown blocks through one discovery surface
-:satisfies: REQ-DOCUMENT-CONTEXT-DISCOVERY
-:satisfies: REQ-DOCUMENT-CONTEXT-READ
-:satisfies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
-
-Accepted direction for 0.2; not implemented by 0.1.
-
-Unified search is implemented by CLI `mara search` and MCP `search`, using the
-shared node summaries, ranking, excerpts, filters, and continuation below.
-The old CLI `item search`, MCP `item_search`, and optional excerpt flags are
-removed. Unified CLI/MCP `get` reads every node kind with consecutive content
-and metadata pages; the old `item get` / `item_get` names and relation-count
-limit are removed. Unified CLI/MCP `related` navigates every node kind through
-schema relations, mentions, and direct containment; the old `item related` /
-`item_related` names and MCP `id` argument are removed.
-
-| Concern | Contract |
-|---|---|
-| Entry point | Move CLI search to `mara search`, with equivalent unified MCP discovery. Search covers items, sections, and ordinary Markdown blocks in the selected project's canonical documents, including documents without items. Do not introduce a second document-search operation. |
-| Document structure | Follow [[DES-DOCUMENT-STRUCTURE]] for Rushdown item containers, derived sections, Markdown block selection, and owning-item search results. |
-| Result kinds | Return item, section, or Markdown block results, exposing the block's specific kind. All are addressable discovery nodes with excerpts and source locations. Items retain their IDs/MIDs; a Markdown block handle locates source in a particular revision and is not a permanent item identity. |
-| Filters | Project-relative path filters apply to all result kinds. Item ID, flavour, custom-field, and schema-relation filters select items only. Narrative never inherits item metadata. Omit node-kind filters (`--kind` or an MCP equivalent) in 0.2; keep node kinds in result output. |
-| Connections | Explicit resolved references create `mentions` edges, with incoming backlinks. Expose derived structural membership and direct parent/child connections under [[DES-DOCUMENT-STRUCTURE]]. Preserve source locations and distinguish structural connections, mentions, and schema-defined typed relations. |
-| Reading | Replace `mara item get` with `mara get <reference>` for items, sections, Markdown blocks, and documents, with equivalent MCP retrieval. Accept item IDs/MIDs and discovery handles. Return node kind, source location, structural context, bounded consecutive content, and item metadata when applicable. Provide continuation for complete reads; enumerate neighbours through `related`. File tools remain optional. |
-| Navigation | Replace CLI `mara item related` with `mara related <reference>` for items and structural discovery nodes, with equivalent unified MCP navigation. Accept item IDs/MIDs and returned discovery handles. Follow [[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]] from every result kind. Excerpts support selection; they are not a claim to include all connected context. |
-
-Keep `search`, `get`, and `related` at the CLI top level. Group them as
-"Discovery and reading" in help and documentation without adding a command
-namespace. Item creation, update, rename, move, deletion, list, and validation
-remain under `item` and accept items only. `relation add/remove` continue to
-author schema-defined relations between items; structural connections and
-mentions are derived from document structure and links.
-
-Markdown blocks can participate in the discovery graph without becoming
-schema-defined items. Graph membership does not infer semantic obligations or
-implementation claims from prose. Raw URLs and code links remain source content
-until their target-resolution contract exists. Code-symbol extraction and
-richer traceability are later work, not prerequisites for 0.2.
-
-Unified search matches heading text as section results, ordinary content
-outside items as Markdown block results, and content within items as owning
-item results, including their nested headings. A section hit identifies the
-whole section for reading and navigation; it does not match merely because a
-child block contains the query. This keeps heading discovery available without
-requiring actors to choose Markdown node types before searching.
-
-Discovery relation names distinguish `schema:` from `builtin:`. Resolve an
-unqualified name when it exists in exactly one namespace: `satisfies` resolves
-to `schema:satisfies`, and `contains` resolves to `builtin:contains` unless
-the schema also declares it. If both declare a name, reject the unqualified
-form and identify the fully qualified alternatives. Explicit names select their
-namespace. Resolve against the available vocabulary, not the connections
-present in a result, so shorthand meaning is stable across queries.
-
-Related retains direction, relation, and neighbour-flavour filters. Relation
-names within a filter are ORed; the flavour filter intersects them and selects
-item neighbours only. Omission includes every connection kind and node kind.
-Return outgoing connections first, then incoming, ordered within each direction
-by neighbour document path and structural source order, then authored evidence
-order. Preserve parallel connections and both views of self-connections.
-Selected unresolved authored relation targets remain traversal errors.
-
-Link and anchor resolution follows [[DES-DOCUMENT-STRUCTURE]].
-
-Generate versioned, opaque discovery handles deterministically from the
-project-relative document path, a hash of its current source contents, node
-kind, and start/end byte offsets. Apply this to blocks, sections, and documents;
-items retain durable MIDs. Handles require neither authored IDs nor persistent
-storage. Identical inputs produce identical handles across commands and
-restarts. Editing or moving the containing document invalidates its old
-handles; reject them and instruct the actor to search again. Use working-file
-contents, including uncommitted edits, rather than a Git commit.
-
-Changes to another document leave a node handle valid; its connections reflect
-the current corpus. Pagination cursors retain broader source/schema and request
-invalidation because other documents can change result membership and ordering.
-The token encoding and hash algorithm are implementation details; do not expose
-private graph indexes as handles. Source-identical structural nodes share a
-handle, including padded empty table cells with the same kind and byte range.
-
-## Ranking and response bounds
-
-Retain normalization and word-level typo tolerance under
-[[REQ-FUZZY-ITEM-SEARCH]]. Every distinct query term must match the result's own
-searchable content. Results matching every term exactly precede any result
-requiring typo tolerance. Within each group, sum each term's highest matching
-field weight: item ID, title, or heading = 3; body and other metadata = 1.
-Headings inside an item contribute to that item's score. Parent section titles
-provide context without making their child blocks match. Repeated occurrences
-add no weight. Break ties by document path and source order; give no score
-bonus for node kind, connection count, or document length.
-
-Carry forward [[REQ-RETRIEVAL-BOUNDS]] for 0.2 with these changes and extensions:
-
-| Area | 0.2 contract |
-|---|---|
-| Search and related pages | Default 20 entries; `limit` accepts 1 through 100. Related counts connections, including distinct relations to the same neighbour. |
-| Response bytes | At most 65,536 UTF-8 bytes per serialized JSON domain result, including escaping and continuation metadata; transport wrappers remain outside the budget. |
-| Search excerpts | Include one source excerpt of at most 240 Unicode scalar values per hit by default. Mark omitted content; use `get` for complete reading. This replaces 0.1's opt-in excerpts and maximum of three. |
-| Summary titles/headings | At most 256 Unicode scalar values; mark truncation. Complete text remains retrievable through `get`. |
-| Node reading | Return consecutive content and applicable metadata up to the response budget, then explicit continuation. Preserve complete handles and source locations. |
-
-Apply filters and ordering before pagination; the byte budget may shorten a
-page below its entry limit. Preserve the existing no-silent-skip rule when
-mandatory fields cannot fit. Large blocks remain single nodes: paginate their
-content, not their identity. Content and metadata fragments must reconstruct
-complete values without gaps or duplication, respecting Unicode boundaries.
-
-Remove the relation-count `--limit` option and equivalent MCP parameter from
-`get`, which no longer enumerates neighbours. Retain its continuation cursor;
-`search` and `related` retain both limit and cursor.
-
-Verify mixed-result ranking, exact-before-fuzzy order, equal title/heading
-weights including headings inside items, absence of ancestor-title inheritance
-and repetition bonuses, stable ties, default excerpts, byte-limited pages, and
-complete consecutive reads of oversized nodes.
-
-## Discovery response format
-
-CLI JSON and MCP use the same domain result with `format_version: 1`.
-Version this discovery response contract independently from schema and
-application versions. MCP tools are `search`, `get`, and `related`, matching
-the top-level CLI commands. MCP `get` and `related` accept `reference`
-instead of `id`; project selection remains unchanged.
-
-Use one node summary across operations:
-
-| Fields | Meaning |
-|---|---|
-| `reference`, `kind` | Reference accepted by get/related; kind is item, section, block, or document. |
-| `source` | Project-relative path, start/end byte offsets, and start/end lines for the complete node. |
-| `title`, `title_truncated` | Item title or section heading where applicable, with explicit truncation. |
-| `context` | `parent` is the direct parent reference; `section` is the nearest enclosing section reference, excluding the node itself. Omit absent references; never recursively expand context. |
-| `id`, `mid`, `flavour` | Items only. |
-| `block_kind` | Blocks only. |
-| `heading_level` | Sections only. |
-
-Omit fields that do not apply to the node kind. Always include
-`title_truncated` (false when no title applies). `reference` is the item's MID
-for valid items; legacy/recovery items without one use their human ID while
-validation continues to report the missing MID. Structural references identify
-source in the loaded document snapshot.
-
-All responses include `has_more` and `next_cursor`, null when no content
-remains. Their operation-specific fields are:
-
-| Operation | Fields |
-|---|---|
-| search | `results: [{node, excerpt}]` |
-| get | `node`, `content`, `content_range`, `metadata`, `metadata_range` |
-| related | `node`, `connections: [{relation, direction, neighbour, source}]` |
-
-For items, content is the parsed body; other nodes return their original
-Markdown span, including contained source for sections and documents.
-`content_range` uses the existing body-relative text-range shape, and metadata
-keeps the ordered fragment/range semantics of [[DES-RETRIEVAL-CONTINUATION]].
-Non-items have empty metadata. Excerpts retain source text, locations, and
-partial markers under the limits above.
-
-A connection's `relation` is one string using the same ambiguity rule as
-input: emit the short name if unique in the available vocabulary, otherwise
-`builtin:name` or `schema:name`. Direction is relative to the requested
-node; neighbour uses the shared summary, and source locates the connection's
-evidence. JSON uses canonical `contains` with direction; human output renders
-its incoming view as `contained_by`.
-
-## Migration from 0.1
-
-0.2 removes the old discovery names without aliases. Other item, relation,
-schema, and project command names remain unchanged.
-
-| Old usage | 0.2 replacement |
-|---|---|
-| CLI `item search/get/related`; MCP `item_search/item_get/item_related` | Top-level CLI and MCP `search/get/related` |
-| MCP get/related `id` argument | `reference` |
-| Search `--excerpts` / MCP `excerpts` | Remove; one excerpt is automatic |
-| Get `--limit` / MCP `limit` | Remove; neighbour limits belong to related |
-| Search `items`; related `items` | `results`; `connections` using shared node summaries |
-| Get `summary`, `body`, `body_range` | `node`, `content`, `content_range`; source is in node |
-| Get incoming/outgoing neighbour collections | Read through related |
-
-For example, CLI `mara item get REQ-RETRY` becomes
-`mara get REQ-RETRY`. The equivalent MCP invocation changes from
-`item_get({"id":"REQ-RETRY"})` to `get({"reference":"REQ-RETRY"})`.
-
-Discard old cursors on upgrade and update response parsers for mixed node
-kinds and the discovery format above. Keep the migration guide to this mapping,
-the CLI/MCP example, and the cursor note; link to the response contract instead
-of duplicating field definitions.
-
-The private in-memory graph backend follows [[ADR-PETGRAPH-DISCOVERY]]. The
-existing disposable-projection boundary remains: source documents own meaning,
-and parser/library node indexes must not become public identities.
-:::
-
-:::mara decision ADR-UNIFIED-KNOWLEDGE-DISCOVERY
-:mid: 01M232SX66VXH8FG5JW68G6R3S
-:title: Make narrative part of unified discovery and direct navigation
-:justifies: DES-UNIFIED-KNOWLEDGE-DISCOVERY
-:justifies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
-
-Use one search surface for structured items and ordinary narrative. Markdown
-blocks are first-class discovery nodes whose explicit references connect them
-to items and provide backlinks. Require no authored flavour or MID for
-narrative. Actors choose each next direct neighbour; 0.2 has no hop-count
-parameter or automatic traversal.
-
-An actor may find an explanation first, follow its mention to a requirement,
-then inspect a connected design or decision. Discovery must work from that
-entry point without requiring the actor to know which content kind contains the
-answer. Keep connection kinds and source locations so the actor can understand
-why each neighbour matters.
-
-Use top-level `search`, `get`, and `related` for discovery and reading.
-Bounded node retrieval lets actors search, read, inspect direct connections,
-and read a selected neighbour through Mara regardless of node kind. Requiring
-a switch to filesystem tools for Markdown content would interrupt this same
-workflow, especially for MCP-only actors. File tools remain an optional route.
-
-This replaces separate document/passage search and the earlier 0.2 decision
-requiring file tools for narrative reads. Lack of durable item identity does
-not exclude a Markdown block from the graph or bounded retrieval. Keep item
-authoring commands under `item` so that "item" consistently means an authored
-Mara item; another namespace for the primary read workflow adds no useful
-distinction.
-
-The 0.1 item-only contract remains unchanged. The POC's narrative-span and
-derived-mention concepts are useful precedent. The private backend is decided
-separately in [[ADR-PETGRAPH-DISCOVERY]]; the POC's multi-hop traversal and
-broader traceability contracts are not adopted here. Richer graph analysis and
-code traceability are addressed separately in the
-[0.3 scope and pilot boundary](traceability.mara.md).
-:::
-
-:::mara decision ADR-PETGRAPH-DISCOVERY
-:mid: 01M2335G69NFYNP2J5BBBEGFYY
-:title: Use petgraph for the private 0.2 discovery graph
-:justifies: DES-UNIFIED-KNOWLEDGE-DISCOVERY
-:justifies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
-
-Adopt petgraph when implementing the 0.2 discovery graph. Use a private
-directed representation for items, Markdown blocks, derived sections, and
-documents, with typed relations, resolved mentions, and structural connections
-under [[DES-DOCUMENT-STRUCTURE]]. Enumerate incoming and outgoing edge
-references for direct-neighbour queries; derive backlinks from those edges
-rather than authoring inverse links. Support distinct relation kinds between
-the same endpoints.
-
-The immediate need is shared adjacency storage and direct navigation across
-knowledge and structural nodes. Reuse the library's node/edge storage and
-directional iteration instead of maintaining an equivalent custom graph. Future
-graph algorithms reinforce this choice but are not the sole justification. The
-[petgraph Graph
-API](https://docs.rs/petgraph/0.8.3/petgraph/graph/struct.Graph.html) supports
-associated node/edge data, parallel edges, and directional edge iteration;
-dependency version selection belongs to implementation.
-
-Mara owns identity and reference resolution, connection meaning, source
-provenance, schema validation, deterministic result ordering, and pagination.
-Library node/edge indexes remain private and process-local. Adapt petgraph
-results to Mara-owned types at the boundary. Preserve the disposable projection
-of canonical sources; this decision introduces no persisted graph store.
-
-This dependency is justified by implementation reuse, not a measured speedup.
-Keyword matching, typo tolerance, and text ranking remain separate. A graph
-backend does not provide a full-text index or automatically improve relevance.
-0.2 remains direct-neighbour only, without a hops parameter; richer traversal,
-traceability, and code-symbol extraction retain their later scope. Add no
-runtime dependency or feature implementation to the 0.1 release preparation.
+Use `schema:` and `builtin:` to disambiguate relation names. Reject ambiguous
+unqualified filters based on the schema vocabulary, even when the selected node
+has no conflicting edges. Namespace qualification does not create a new edge.
 :::
 
 :::mara design DES-DOCUMENT-STRUCTURE
 :mid: 01M234WMS5522HC5HDV42NG886
 :title: Retain Markdown item containers and navigable section structure
-:satisfies: REQ-DOCUMENT-CONTEXT-DISCOVERY
+:status: accepted
+:kind: structure
 :satisfies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
 
-Accepted for 0.2. Keep Markdown syntax, derived document structure, and search
-result selection distinct.
+## Markdown projection
 
-## Item containers
+The parser adapter retains Mara items as containers with ordinary Markdown body
+children under [[DES-DOCUMENT-FORMAT]]. Delimiter and mention recognition uses
+whole-document Markdown context before container parsing; narrative and valid
+item bodies share reference definitions, regardless of definition placement.
+Heading scopes remain local to their item or Markdown container.
 
-Represent an entire Mara item as a custom Rushdown container block whose body
-contains ordinary Markdown AST children. Mara parses its opening identity,
-metadata, and closing delimiter; Rushdown parses the Markdown body. Preserve the
-current authoring syntax, exact source spans, code/raw-context handling, and
-rejection of nested items and malformed delimiters. Do not broaden allowed item
-placement as a side effect of changing the parser representation.
+`Document::blocks()` and `Item::body_blocks()` expose Mara-owned blocks, including
+GFM tables. Preserve nested children, heading levels, original source and UTF-8
+byte spans. Table rows cover authored lines; cell spans exclude surrounding
+separators/whitespace; padded cells have empty spans at the row content end. The
+table owns its separator row. Bound containers at siblings and scope ends,
+including the final line without a newline. Omit escaping children rather than
+assigning neighbouring bytes or truncating an escaping table to fit. Invalid
+metadata or incomplete item structure exposes no body blocks during recovery.
 
-The adapter first recognizes delimiters and mentions in full-document Markdown
-context so multiline code spans and raw blocks retain the existing syntax
-boundaries. It then parses each recognized item as a Rushdown container owning
-its identity, ordered metadata, body, and closing delimiter. Narrative and valid
-item bodies share one document-wide Markdown reference-definition context,
-including definitions before or after an item; heading scopes remain local.
-Ordinary body blocks, including GFM tables, are projected into Mara-owned `MarkdownBlock`
-values with block kind, source location, and nested block children, available
-through `Item::body_blocks()`. Headings retain their level. Table row spans
-cover their authored lines; cell spans cover their Markdown content without
-surrounding separators or whitespace. Padded cells in short rows have empty
-spans at the row's content end. The table owns its separator row; header and
-cell spans do not include it. Rushdown types stay private; reads and edits use
-the original source rather than rendered AST text. Bound container spans at
-following siblings; preserve the final line at EOF even without a trailing
-newline. Omit parser children positioned outside their enclosing
-source range rather than assigning neighbouring bytes to them. Apply these
-bounds to complete table spans too; do not truncate an escaping table into a
-valid-looking child. Use UTF-8 byte boundaries for every exposed source span.
-Validation recovery retains partial item data but exposes no body blocks for
-items with invalid metadata or incomplete structure.
+## Sections and graph
 
-## Derived sections
+A heading opens a section ending before the next heading of the same or higher
+importance, or at its scope's end. Lower headings open subsections; skipped
+levels create no invented parents. Item headings cannot close outer sections.
+Content before a heading belongs directly to its enclosing document or block.
+Section extent includes its content; the original heading retains its own span.
+Heading text decodes escapes and named/numeric entities once in ordinary text;
+inline code remains literal. Retain decoded-text offsets into original Markdown.
 
-Headings remain Markdown nodes. Derive sections from heading levels within their
-containing scope: a section ends before the next heading of the same or higher
-importance, or at the containing scope's end. Lower-importance headings open
-subsections. Accept skipped levels without inventing missing headings; H1 after
-H3 ends the H3 section rather than nesting inside it. An item's body has its own
-heading scope, so headings inside it cannot close outer document sections.
-Other Markdown container boundaries must likewise preserve their own children.
-Content before a heading belongs directly to its containing document or block.
+`Corpus::discovery()` builds a disposable petgraph graph in document-path and
+structural source order. Borrowed nodes expose kind, source, parent, children and
+directional connections; graph indexes never escape. `contains` joins direct
+parent to child; `contained_by` is its reverse view, with the same provenance.
+Structure is distinct from schema relations, needs no authored identity and
+implies no semantic dependency. Sibling navigation requires a parent call then a
+children call. No recursive or automatic sibling edges are added.
 
-A section carries its heading text, level, and source location. Heading text
-decodes Markdown backslash escapes and named/numeric character references once
-in ordinary text nodes; code spans retain their literal content. Preserve decoded
-heading byte-to-source offsets so bounded excerpts locate the matching word
-within long headings while returning original Markdown. Sections contain
-ordinary Markdown blocks, items, and subsections in source order. Prose before
-and after an item can belong to the same section. Add no abstract passage
-container around those blocks or special passage node for a heading.
+Link sources belong to their owning item, otherwise their outermost ordinary
+Markdown container. Destinations remain precise sections or blocks even inside
+items. `Document::references()` retains parsed mentions, link destinations and
+anchor declarations with exact locations, including unresolved references.
 
-The Rust projection retains narrative blocks through `Document::blocks()` and
-heading text through `MarkdownBlock::heading_text()`. `Corpus::discovery()` builds
-a disposable petgraph graph from that loaded snapshot. Borrowed `DiscoveryNode`
-values expose node kind, source, parent, children, and directional connections;
-sections retain their original heading block and a source span covering their
-full extent. Graph indexes stay private. Schema relations, resolved item and narrative
-references, and containment share this graph. `Document::references()` retains
-item mentions, Markdown link destinations, and explicit anchor declarations
-with precise source spans, including unresolved links. Link sources use their
-owning item or outermost ordinary Markdown block; link destinations retain
-sections and blocks inside items. `DiscoveryGraph::diagnostics()` reports broken
-internal references and ambiguous anchors; project validation includes these
-schema-independent diagnostics. `DiscoveryNode::reference()` and `summary()` expose
-reusable references and the shared projection under [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]];
-`DiscoveryGraph::resolve()` accepts those references and item IDs/MIDs against
-the loaded snapshot. Unified CLI/MCP search selects the owning result units
-below; unified CLI/MCP `get` reads those nodes and their structural context.
-Unified CLI/MCP `related` exposes the graph's direct connections, preserving
-source evidence and both directions under [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
+## Links and anchors
 
-## Discovery units
+Bare item mentions resolve exact human IDs or MIDs. Markdown links without a
+fragment resolve to documents; fragments resolve to sections or explicit anchors.
+Resolve relative paths from the linking document, including `.` and `..`; a
+leading slash selects a project-relative path. Decode path and fragment URL
+escapes once. URI schemes, network-path URLs and links to non-Mara assets remain
+source content without graph destinations or network reads.
 
-Return one of three result categories: item, section, or Markdown block. Expose
-the specific Markdown block kind. Retaining an AST child does not require
-returning that child as an independent search hit.
+Generated heading anchors lowercase decoded text, replace spaces with hyphens,
+remove punctuation except hyphen/underscore, and retain letters, numbers and
+combining marks. Allocate duplicate suffixes `-1`, `-2`, etc. across the whole
+document, including item headings; already allocated names remain reserved.
+Explicit anchors accept `<a name="value"></a>` with either quote style. Inline
+anchors target the containing discovery block. A standalone anchor immediately
+before a heading targets its section; before another block it targets that block.
+Do not attach across item/container boundaries or a section end. In a shared
+HTML block, placement is assessed for each declaration, not the whole block.
 
-| Match location | Result unit |
-|---|---|
-| Anywhere inside a Mara item, including its nested headings and sections | Owning item, with the actual match location. |
-| Section heading outside an item | Section. |
-| Standalone paragraph outside an item | Paragraph. |
-| List content, including nested lists | Outermost containing list. |
-| Table cell content | Whole table. |
-| Code-block content | Whole code block. |
-| Blockquote content | Whole blockquote. |
+Resolved references produce `mentions` and derived backlinks carrying the same
+source span. Ambiguous anchors and broken internal destinations produce
+`reference_unresolved` errors and no resolved edge; source remains unchanged.
+Mentions take precedence over Markdown reference definitions. Code, raw contexts
+and escaped reference openings remain inert under [[DES-DOCUMENT-FORMAT]].
 
-Item ownership takes precedence. Otherwise retain the outermost ordinary
-Markdown block container: for example, a list within a blockquote returns the
-blockquote. Do not duplicate the same match as both its child and enclosing
-result unit. Large blocks remain single nodes with bounded excerpts; size alone
-does not introduce synthetic passage nodes. Ranking and response bounds follow
-[[DES-UNIFIED-KNOWLEDGE-DISCOVERY]], which also defines response and continuation fields.
+## Reusable references and summaries
 
-## Item mutation and link safety
+An item reference is its MID; exact human IDs also resolve. Recovery items lacking
+a MID remain addressable by ID while validation reports the defect. Other nodes
+use opaque versioned handles derived from project-relative document path, current
+source hash, kind and byte span. They survive process restarts and unrelated
+document edits; any edit or move of their containing document invalidates them.
+Stale or malformed handles fail with a rediscovery instruction. Git commits and
+process-local graph indexes do not participate. Source-identical structural nodes
+such as padded empty cells may share a handle.
 
-In 0.2, preflight all item mutations against the candidate source structure.
-Reject operations that would break or silently retarget an untouched surviving
-link, and report affected source locations before writing any files. Explicitly
-edited links may change destination subject to validation; references removed
-with deleted content do not count as surviving links. Rename retains automatic
-rewriting of supported item-ID references while preserving their identity
-targets, including references in ordinary Markdown.
+The shared summary contains `reference`, `kind`, exact `source`,
+`title_truncated`, and `context` references to the direct parent and nearest
+enclosing section when present. Item summaries add ID/MID/flavour and title;
+sections add title/heading level; blocks add block kind. Omit inapplicable fields.
+Only titles truncate, at 256 Unicode scalars. Do not truncate identities, paths,
+locations or context references. Pagination must fail rather than silently omit
+a node whose mandatory summary cannot fit the response budget.
 
-Compare resolved connections in the original and candidate discovery graphs.
-Track item content by identity across paths and narrative content within its
-document; source correspondence is temporary and never persisted. Generated
-anchor strings and snapshot discovery handles alone cannot establish destination
-identity. Match surviving parsed links even when their source moves within a
-replacement body; absence from a text diff's equal ranges does not imply removal.
-Explicitly converting an occurrence inside the replacement body to code or
-escaped literal text removes that reference under [[DES-DOCUMENT-FORMAT]];
-retained source bytes alone do not make it a surviving link.
-Unchanged link usages remain protected unless the body update explicitly changes
-their reference-style destination definition. Validate such edited destinations;
-merely moving a usage into another definition context grants no exemption.
-Replacing an anchored paragraph's text, including all characters, preserves its
-destination when it remains in the same structural position. Partial text overlap,
-including shared punctuation, does not exempt rewritten blocks from this check.
-Even at the same position, reject a replacement when mapped non-whitespace
-content from the original target survives outside the candidate block. An intact
-original block surviving elsewhere must not be mistaken for that replacement.
-An intact pre-existing block moving into the deleted target's position is a different
-destination, not a rewrite of the target. A unique heading still requires source
-correspondence and checks for original direct
-content surviving elsewhere; renaming a section and adding another with its old
-heading must not retarget an unchanged link. Promoting or demoting subsections
-may change a surviving section's extent without changing its destination.
-Intact, uniquely identifiable sections or blocks retain their destinations through
-reordering even when the character diff does not retain their original first byte.
-Preserve the existing missing-body scaffold allowance while validating newly
-authored references. Creation validates reference diagnostics within the new item;
-unrelated pre-existing reference errors do not block it. The shared preflight
-still rejects regressions to previously resolved surviving links.
+Item mutations must preserve the identity target of untouched surviving links.
+Rename rewrites supported item-ID mentions in narrative; incoming references
+block unsafe deletion. Candidate-graph preflight and Markdown-link retargeting follow
+[[DES-ITEM-CREATION]], [[DES-ITEM-UPDATE]], [[DES-ITEM-DELETION]],
+[[DES-ITEM-MOVEMENT]] and [[DES-ITEM-RENAME]].
+:::
 
-Movement preserves ID/MID references because the item's identity is unchanged.
-Check incoming links to sections or blocks inside the moved item, relative or
-same-document links carried with it, and generated heading anchors affected in
-either document. Same-document moves can also change numbered heading anchors.
-Creation, update, and deletion must likewise preserve destinations of untouched
-surviving links when heading anchors shift.
+:::mara decision ADR-PETGRAPH-DISCOVERY
+:mid: 01M2335G69NFYNP2J5BBBEGFYY
+:title: Use petgraph for the private discovery graph
+:status: accepted
+:justifies: DES-DOCUMENT-STRUCTURE
 
-Do not automatically repair Markdown links as a side effect of these operations
-in 0.2. Authors must resolve reported link impacts before retrying. This extends
-the current [item editing](editing.mara.md) contracts for the new discovery
-model; it does not change the 0.1 implementation.
-
-## Connections and containment
-
-### Links and anchors
-
-Resolve item references to items, a Markdown link without a fragment to its
-document, and a heading fragment to its section. Section destinations cover
-their full structural extent without automatically retrieving children.
-Same-document fragments and cross-document links use the same anchor rules.
-Resolve relative paths from the linking document, including `./` and `../`:
-`[retry policy](./architecture.mara.md#retry-policy)` targets a section in
-another document in the project.
-
-Use [GitHub-compatible heading anchors](https://docs.github.com/en/get-started/writing-on-github/getting-started-with-writing-and-formatting-on-github/basic-writing-and-formatting-syntax#section-links):
-lowercase heading text, replace spaces with hyphens, remove punctuation and
-formatting, and number duplicate generated anchors with `-1`, `-2`, and so on.
-Allocate heading anchors across the whole document, including headings inside
-items; heading nesting remains scoped as specified above. Renaming or
-reordering headings can change these generated destinations.
-
-Support explicit anchors written as `<a name="retry-policy"></a>`.
-An anchor inside ordinary content targets its containing discovery block and
-retains its precise source location. A standalone anchor immediately before a
-heading targets that section; before another block it targets that block.
-Do not attach anchors across an item or section boundary. Explicit anchors
-provide a stable alternative to generated heading names. Search grouping and
-item ownership must not erase a link's precise destination.
-
-Resolved links produce `mentions` connections and derived incoming backlinks.
-Broken internal destinations and ambiguous anchors are validation errors;
-preserve the written link but create no resolved connection. External URLs
-remain source links without network validation. Code-link and other unresolved
-target categories retain the scope boundary in [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
-
-Verify same-document and relative cross-document section links, whole-document
-links, duplicate heading names including headings inside items, explicit anchor
-placement, and broken or ambiguous internal destinations.
-
-Documents and sections are addressable structural nodes. Results expose their
-structural parent and section context when present. Actors can inspect direct
-parent/child connections and select sibling context. Derive containment and its
-reverse view from source structure. Keep these built-in connections distinct
-from mentions and schema-authored typed relations. Require no authored IDs,
-flavours, metadata, or dedicated section/document authoring operations.
-
-Use `contains` from direct parent to child and `contained_by` for its reverse
-view. These are two directions of one derived structural connection, describing
-immediate containment rather than all descendants. The connection representation must distinguish
-built-in structural kinds from schema-defined relation names.
-
-Sibling discovery remains successive direct navigation: inspect the item's
-parent, then that parent's children. A shared parent indicates possible context,
-not a semantic dependency. Add no automatic sibling relation, recursive
-expansion, or hops parameter. Raw Markdown inline nodes need not become discovery
-graph nodes.
-
-Verify interleaved items and prose, nested lists/quotes, tables, headings inside
-items, skipped heading levels, heading-free content, direct containment in both
-directions, heading-link targets, and item ownership of nested matches,
-alongside existing format and editing contracts.
+Use petgraph's directed node/edge storage and directional iteration for shared
+adjacency across items, narrative, sections and documents. Parallel connection
+kinds and backlinks are immediate needs; a custom adjacency implementation would
+duplicate them. Mara owns identity, reference resolution, connection meaning,
+source provenance, deterministic ordering and pagination. Keep graph indexes
+private and adapt results to Mara-owned values; persist no graph store.
+This choice claims neither a measured speedup nor improved text-search relevance.
 :::
 
 :::mara decision ADR-MARKDOWN-STRUCTURAL-DISCOVERY
 :mid: 01M234WMSE4STR6JPWZYHGQC1R
 :title: Build discovery on Markdown containers and visible structural context
+:status: accepted
 :justifies: DES-DOCUMENT-STRUCTURE
 
-Treat Mara as a Markdown extension: model items as real container blocks and
-retain the Markdown structure inside and around them. Derive section hierarchy
-for context and navigation instead of treating each heading as a narrative
-Markdown block or attaching it only to the next prose fragment.
+Treat Mara as a Markdown extension with real item containers and derived section
+hierarchy. Interleaved prose and items need visible parentage so actors can select
+surrounding context without inventing authored section IDs or CRUD operations.
+Keep search matches inside an item owned by that item while retaining precise
+source locations and destinations within it. The `:::` grammar is Mara-owned,
+not a CommonMark standard; this decision preserves the established item syntax.
+:::
 
-Interleaved Markdown blocks and items share section context. An actor must be
-able to see that parentage and navigate to possible sibling context from either
-kind of search result. Sections are internal in the sense that they are derived
-and need no authored identities or CRUD operations; they are visible to actors
-through locations and structural connections.
+:::mara verification VER-DOCUMENT-NAVIGATION
+:mid: 01M3FWZWMH99GSRHKJ08RF1SZQ
+:title: Check document structure, references and direct navigation
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
+:verifies: DES-DOCUMENT-STRUCTURE
+:validates: SCN-READ-DOCUMENT-CONTEXT
+:verifies: REQ-ITEM-RELATED
+:verifies: REQ-RELATED-PAGINATION
+:verifies: DES-DIRECT-NAVIGATION
+:verifies: DES-CANONICAL-TRACE-RELATIONS
 
-The POC already specified Markdown item bodies and a complete hierarchy of
-sections, narrative blocks, and item placements. This decision accepts that
-structural direction for 0.2 without copying the POC's old item syntax or
-broader traceability scope. The `:::` form follows a fenced-container extension
-convention; it is not syntax standardized by CommonMark itself. Mara owns its
-exact grammar and restrictions.
+Run `cargo test --locked --test discovery --test discovery_handles --test references --test navigation --test authoring_documents` against the candidate. Structure/reference/handle checks preserve local scopes, Unicode/CRLF/EOF spans, exact link evidence, inert contexts, deterministic handles and unchanged source. Real CLI/stdin MCP searches narrative, pages its mentions, follows an item relation, reads the destination and navigates parent/children. Library projections alone do not establish this workflow.
 
-Keep search results focused on the owning item when content matches within its
-body, while retaining the actual source location and structural context. The
-0.1 implementation remains unchanged by this planning decision.
+Navigation checks consume complete count/byte-limited pages, preserve compact Unicode summaries, reject stale/invalid requests, namespace ambiguity, unsupported operation names and options and oversized mandatory entries, and retain source bytes. Verify alias/inline deduplication, canonical symmetric and self-edge identity before paging, exact terminal external addresses, shared code-marker/item-inverse edges, binary endpoints, file-only invalidation and selected code-marker/target failures. Use isolated fixture-owned identities and adapter packs. [[VER-RELATION-INSPECTION]], [[VER-CORPUS-CONFORMANCE]] and [[VER-POLICY-VALIDATION]] own occurrence, semantic and policy checks; mutation methods own source edits. Run the full regression suite, formatting and Clippy. Record candidate results from named read-only repository traversals at the tested revision.
+
+
+The authoring-document workflows create Unicode setext headings and tab-indented code, retain a final multiline reference title without a trailing newline, and round-trip nested Markdown through real create/update/move and CLI/MCP reads. Require exact source spans and unchanged body bytes. Discovery checks reload changed headings after actual updates, resolve the same MID after rename/move, reject stale structural handles, and retain incoming-code/item ordering before symmetric connections.
+:::
+
+:::mara design DES-DIRECT-NAVIGATION
+:mid: 01M3H1P241E4MZYGH75AA6JWGE
+:title: Navigate bounded direct document and semantic connections
+:status: accepted
+:kind: interface
+:satisfies: REQ-ITEM-RELATED
+:satisfies: REQ-RELATED-PAGINATION
+:satisfies: REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
+
+CLI `related <reference>` and MCP `related {reference}` accept exact item IDs/MIDs, structural handles and code references. Optional direction, relations, flavours, limit and cursor share CLI/MCP semantics. Return discovery format 2 with node, connections, has_more and next_cursor. Built-in connections retain relation/direction/neighbour/source; schema connections carry canonical relation, label, direction, neighbour, canonical edge and occurrence_count. Internal neighbours reuse [[DES-DOCUMENT-STRUCTURE]] summaries; external neighbours have only kind external and exact address. They cannot be get/related roots.
+
+Resolve canonical names and inverse aliases in the schema namespace; built-ins are contains and mentions. Accept schema:/builtin: qualification; reject ambiguous short names based on vocabulary even without matching edges. Alias selection never reverses direction. Relation choices are ORed; neighbour flavours are ORed and intersect other filters, selecting item neighbours only. Missing or ambiguous selected authored item/code targets and invalid selected code-source markers fail rather than silently completing the traversal.
+
+Order outgoing, incoming, then symmetric connections. Retain deterministic neighbour path/source order and built-in occurrence order; external outgoing targets sort by address/relation. Code incoming connections merge into source order; code outgoing targets sort by item source. Deduplicate schema/self edges under [[REQ-RELATED-PAGINATION]] before bounds. Incoming schema labels use the inverse alias when available; human output omits the incoming prefix then, otherwise displays it. Human built-in incoming containment displays contained_by; JSON keeps contains with incoming direction.
+
+Default limit 20, accepted range 1–100, counts connections rather than neighbours. Keep each JSON domain result within 65,536 UTF-8 bytes including cursor/escaping, excluding transport wrappers. Reject an oversized mandatory root/next connection without skipping it. Continuation binds reference, direction, original filter values, limit and shared source/schema/code invalidation under [[DES-ITEM-LIST]]. Reject changed, malformed, initial or out-of-range positions with a restart instruction. No hops, recursive expansion, item related or item_related. All navigation is read-only.
+:::
+
+:::mara requirement REQ-ITEM-RELATED
+:mid: 01M1PXP2KG97XHSEEB4KCZVTAP
+:title: Retrieve compact directly related items
+:status: accepted
+:kind: functional
+:derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
+
+CLI/MCP `related` returns a selected item's direct incoming, outgoing and symmetric semantic connections, with canonical relation, displayed label, neighbour and occurrence count. Include supported code backlinks and terminal external targets. Exact relation and neighbour-flavour filters combine with direction without expanding another hop. Schema and built-in connections stay distinct under [[REQ-DIRECT-KNOWLEDGE-NEIGHBOURS]]. Follow [[DES-DIRECT-NAVIGATION]] for bounded transport and [[DES-CANONICAL-TRACE-RELATIONS]] for identity.
+:::
+
+:::mara requirement REQ-RELATED-PAGINATION
+:mid: 01M1RY3MCMCZK45K50SS5TRYBX
+:title: Continue bounded direct-neighbour results
+:status: accepted
+:kind: functional
+:derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
+
+Return bounded direct-connection pages with explicit continuation. Filter and deduplicate semantic schema edges before bounds; distinct relation kinds remain separate entries and parallel built-in mentions retain their occurrences. Consume every page without omissions or duplicates. A directed self-edge appears once outgoing by default or once in the explicitly requested orientation; symmetric self-edges appear once only for omitted/symmetric direction. Preserve stable ordering and reject stale or invalid requests. Neighbour bodies require get. Bounds and cursor semantics follow [[DES-DIRECT-NAVIGATION]].
+:::
+
+:::mara design DES-CANONICAL-TRACE-RELATIONS
+:mid: 01M2FX575WG9SP8EZJSTEE7VG9
+:title: Normalize authoring forms while retaining their occurrences
+:status: accepted
+:kind: structure
+:satisfies: REQ-ITEM-RELATED
+:satisfies: REQ-CODE-TRACEABILITY
+
+Build a disposable semantic relation graph alongside [[DES-DOCUMENT-STRUCTURE]]. Endpoints are items identified by MID, code by exact project-relative code reference, and external targets by exact authored address. Canonical name and directed endpoints identify one edge; symmetric item endpoints sort by MID solely for stable identity. Different relation kinds stay distinct. Inverse aliases exchange authored endpoints before validating declared source/target/same-flavour constraints. Metadata, typed inline and code-marker equivalents contribute occurrence counts to one edge. Invalid assertions create no graph edge; validation remains a separate capability.
+
+Internal edge endpoints require MIDs. A code source uses a canonical relation permitting code and the target flavour; item-to-code assertions require its inverse alias and [[DES-CODE-READ]] resolution. External targets require a permitted canonical external relation and literal `external:` plus absolute HTTP(S) with a host, without credentials, whitespace/control characters, raw brackets/angle brackets or backslashes. Preserve exact address spelling; no fetching, URL normalization, synthetic MID/flavour or outgoing external graph.
+
+Authored occurrences retain their parsed document/code source spans. [[DES-RELATION-INTERFACES]] exposes their locations and snapshot-bound selectors; [[DES-RELATION-MUTATION]] defines source edits. No reverse assertion is written merely to provide incoming navigation.
+:::
+
+:::mara design DES-RELATION-INTERFACES
+:mid: 01M2GC4PXK0MMANAW6AKGXAW7S
+:title: Expose canonical relationships and bounded occurrence inspection
+:status: accepted
+:kind: interface
+:satisfies: REQ-RELATION-INSPECTION
+
+CLI `relation get SOURCE RELATION TARGET [--limit N] [--cursor TOKEN]` and MCP `relation_get {source,relation,target,limit?,cursor?}` resolve canonical edge identity under [[DES-CANONICAL-TRACE-RELATIONS]]. Accept internal IDs/MIDs, canonical code sources or item-side inverse code targets, and permitted external targets. No source mutation occurs. Unknown parameters are rejected.
+
+Return relationship format 1 with `edge`, total `occurrence_count`, `occurrences`, `has_more` and nullable `next_cursor`. Each occurrence contains opaque `reference`, `kind` (metadata, inline or code_comment), exact source path/byte/line location, authored endpoint, original relation spelling and original target scalar. Preserve aliases and ID/MID/external spelling. Sort all occurrences by source path then start byte before pagination, including code comments among document assertions. Derived reverse navigation does not create an occurrence.
+
+Default limit 20, accepted range 1–100. Domain JSON including escaping/cursor must fit 65,536 UTF-8 bytes; transport wrappers are outside the budget. Never truncate fixed identity/location/spelling fields or silently skip an oversized occurrence; return a page_limit error if the next occurrence cannot fit. Missing edges return relation_not_found with the resolved edge and zero count. Other failures use the relationship error envelope `{format_version:1,error:{code,message},edge?,occurrence_count?}`; CLI exits unsuccessfully and MCP marks isError while retaining structured content.
+
+Occurrence selectors bind project root and source/schema/code snapshot while preserving each authored occurrence's identity within it. Continuation additionally binds source/relation/target spelling and limit; alias-equivalent requests must restart rather than exchange cursors. Reject stale, malformed, initial and out-of-range continuation with a restart instruction. Reinspection after source/schema changes produces new selectors. Selectors are not persisted identities. Their use for removal and the add/remove interfaces follow [[DES-RELATION-MUTATION]]; direct navigation follows [[DES-DIRECT-NAVIGATION]].
+:::
+
+:::mara requirement REQ-RELATION-INSPECTION
+:mid: 01M3H27927R2KSCQ087RK317K1
+:title: Inspect every authored occurrence of a canonical relationship
+:status: accepted
+:kind: functional
+:derives_from: SCN-READ-DOCUMENT-CONTEXT
+
+An actor can inspect an existing canonical relationship through CLI and MCP and recover every authored occurrence without changing source. Equivalent canonical/inverse, ID/MID and symmetric requests identify the same edge. Preserve metadata, typed-inline and code-comment source locations, author identity, original relation spelling and target scalar. Return total count and bounded consecutive pages in source path/byte order; unchanged traversal has no omissions or duplicates. Missing edges and invalid requests are explicit structured errors. Format, bounds and snapshot-bound selectors follow [[DES-RELATION-INTERFACES]].
+:::
+
+:::mara verification VER-RELATION-INSPECTION
+:mid: 01M3H27DSGRH032NZFPCBKDERM
+:title: Verify relation inspection through CLI and MCP
+:status: accepted
+:level: system
+:method: test
+:verifies: REQ-RELATION-INSPECTION
+:verifies: DES-RELATION-INTERFACES
+
+Run `cargo test --locked --test relation_inspection` against real CLI and stdio MCP with isolated, fixture-owned source, identities and adapters. Verify canonical/alias/ID/MID and symmetric equivalence, exact metadata/inline/code spans and spelling, external addresses, complete count/byte-limited pages, total counts, snapshot-bound selectors and unchanged source bytes. Reproduce a code path sorting before its item document; require global path/byte order before pagination. Check changed request/source/schema cursors, malformed positions, oversized occurrences, missing edges, invalid endpoints/limits and unknown parameters with equivalent structured errors. [[VER-RELATION-MUTATION]] owns source-write checks; [[VER-CORPUS-CONFORMANCE]] owns semantic validation. Run the full regression suite, formatting, Clippy, canonical validation and selected traceability. Inspect actual repository edge occurrences without modifying source.
 :::

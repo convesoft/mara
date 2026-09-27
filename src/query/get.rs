@@ -168,6 +168,9 @@ struct ReadContent<'a> {
 }
 
 /// Read consecutive source content and metadata without expanding neighbours.
+// @mara implements REQ-PARTIAL-ITEM-READ
+// @mara implements REQ-DOCUMENT-CONTEXT-READ
+// @mara implements DES-BOUNDED-NODE-READ
 pub fn get(
     corpus: &Corpus,
     schema: &Schema,

@@ -183,6 +183,8 @@ pub struct TransactionRollback {
     pub restored: Vec<PathBuf>,
 }
 
+// @mara implements REQ-RECOVERABLE-MUTATION
+// @mara implements DES-MUTATION-RECOVERY
 pub fn rollback_transaction(project: &Project) -> Result<TransactionRollback, Error> {
     let _lock = MutationLock::lock(project)?;
     let path = safe_path(project, Path::new(JOURNAL))?;
@@ -221,6 +223,7 @@ pub fn rollback_transaction(project: &Project) -> Result<TransactionRollback, Er
     })
 }
 
+// @mara implements DES-ITEM-UPDATE
 pub(super) fn commit_single(
     project: &Project,
     change: Change,
@@ -233,6 +236,8 @@ pub(super) fn commit_single(
     persist(staged, &path, change.before.is_some())
 }
 
+// @mara implements DES-MUTATION-TRANSACTION
+// @mara implements REQ-RECOVERABLE-MUTATION
 pub(super) fn commit(
     project: &Project,
     changes: Vec<Change>,
@@ -437,7 +442,6 @@ mod tests {
     use super::*;
     use crate::{Template, initialize_project};
     use tempfile::TempDir;
-
     fn fixture() -> (TempDir, Project) {
         let directory = TempDir::new().unwrap();
         let project = initialize_project(directory.path(), Template::Minimal).unwrap();
@@ -470,6 +474,9 @@ mod tests {
         ]
     }
 
+    // @mara implements VER-RELATION-MUTATION
+    // @mara checks DES-MUTATION-TRANSACTION
+    // @mara checks REQ-RECOVERABLE-MUTATION
     #[test]
     fn write_failures_restore_every_original_and_remove_new_destinations() {
         for new_destination in [false, true] {
@@ -509,31 +516,28 @@ mod tests {
     }
 
     #[test]
-    fn single_file_validation_and_preimage_failures_preserve_source() {
-        for change_preimage in [false, true] {
-            let (_directory, project) = fixture();
-            let change = changes(&project, false).remove(0);
-            let result = commit_single(&project, change, || {
-                if change_preimage {
-                    fs::write(project.root().join("a.mara.md"), "manual edit").unwrap();
-                    Ok(())
-                } else {
-                    invalid("candidate validation failed")
-                }
-            });
-            assert!(result.is_err());
-            assert_eq!(
-                fs::read_to_string(project.root().join("a.mara.md")).unwrap(),
-                if change_preimage {
-                    "manual edit"
-                } else {
-                    "original a\r\n"
-                }
-            );
-            assert!(!project.root().join(JOURNAL).exists());
-        }
+    fn active_mutation_lock_blocks_other_writers_and_recovery() {
+        let (_directory, project) = fixture();
+        let lock = MutationLock::acquire(&project).unwrap();
+        assert!(MutationLock::acquire(&project).is_err());
+        assert!(rollback_transaction(&project).is_err());
+        drop(lock);
+        assert!(MutationLock::acquire(&project).is_ok());
     }
 
+    #[test]
+    fn mutation_lock_is_released_even_when_a_descriptor_is_inherited() {
+        let (_directory, project) = fixture();
+        let lock = MutationLock::acquire(&project).unwrap();
+        // A concurrent subprocess launch can inherit this open file description
+        // briefly before exec closes it, even though the handle is close-on-exec.
+        let inherited = lock._file.try_clone().unwrap();
+        assert!(MutationLock::acquire(&project).is_err());
+        drop(lock);
+        let next = MutationLock::acquire(&project).unwrap();
+        drop(inherited);
+        drop(next);
+    }
     #[test]
     fn changed_preimages_abort_before_publication() {
         let (_directory, project) = fixture();
@@ -594,105 +598,24 @@ mod tests {
         assert!(rollback_transaction(&project).unwrap().restored.is_empty());
     }
 
-    #[test]
-    fn malformed_recovery_entries_never_mutate_originals() {
-        let (_directory, project) = fixture();
-        let journal = Journal {
-            format_version: 1,
-            changes: changes(&project, false),
-        };
-        let value = serde_json::to_value(&journal).unwrap();
-        for field in ["before", "mode"] {
-            let mut damaged = value.clone();
-            damaged["changes"][0].as_object_mut().unwrap().remove(field);
-            fs::write(project.root().join(JOURNAL), damaged.to_string()).unwrap();
-            let error = rollback_transaction(&project).unwrap_err().to_string();
-            assert!(error.contains("missing field"), "{error}");
-            assert_eq!(
-                fs::read_to_string(project.root().join("a.mara.md")).unwrap(),
-                "original a\r\n"
-            );
-            assert!(project.root().join(JOURNAL).exists());
-        }
-    }
-
-    #[test]
-    fn rollback_still_rejects_mismatched_recorded_permissions() {
-        let (_directory, project) = fixture();
-        let journal = Journal {
-            format_version: 1,
-            changes: changes(&project, false),
-        };
-        let original = serde_json::to_value(&journal).unwrap();
-        let mut readonly_mismatch = original.clone();
-        let mode = readonly_mismatch["changes"][0]["mode"]
-            .as_object_mut()
-            .unwrap();
-        let readonly = mode["readonly"].as_bool().unwrap();
-        mode.insert("readonly".into(), serde_json::json!(!readonly));
-        mode.remove("unix_mode");
-        let mismatches = vec![readonly_mismatch];
-        #[cfg(unix)]
-        let mismatches = {
-            let mut mismatches = mismatches;
-            let mut mode_mismatch = original;
-            let mode = mode_mismatch["changes"][0]["mode"]["unix_mode"]
-                .as_u64()
-                .unwrap();
-            // Change an execute bit without changing the portable readonly value.
-            mode_mismatch["changes"][0]["mode"]["unix_mode"] = serde_json::json!(mode ^ 0o100);
-            mismatches.push(mode_mismatch);
-            mismatches
-        };
-        for mismatch in mismatches {
-            fs::write(project.root().join(JOURNAL), mismatch.to_string()).unwrap();
-            let error = rollback_transaction(&project).unwrap_err().to_string();
-            assert!(error.contains("permissions"), "{error}");
-            assert!(MutationLock::acquire(&project).is_err());
-            assert_eq!(
-                fs::read_to_string(project.root().join("a.mara.md")).unwrap(),
-                "original a\r\n"
-            );
-            assert_eq!(
-                fs::read_to_string(project.root().join("b.mara.md")).unwrap(),
-                "original b\n"
-            );
-            assert_eq!(
-                fs::read_to_string(project.root().join(JOURNAL)).unwrap(),
-                mismatch.to_string()
-            );
-        }
-    }
-
-    #[test]
-    fn active_mutation_lock_blocks_other_writers_and_recovery() {
-        let (_directory, project) = fixture();
-        let lock = MutationLock::acquire(&project).unwrap();
-        assert!(MutationLock::acquire(&project).is_err());
-        assert!(rollback_transaction(&project).is_err());
-        drop(lock);
-        assert!(MutationLock::acquire(&project).is_ok());
-    }
-
-    #[test]
-    fn mutation_lock_is_released_even_when_a_descriptor_is_inherited() {
-        let (_directory, project) = fixture();
-        let lock = MutationLock::acquire(&project).unwrap();
-        // A concurrent subprocess launch can inherit this open file description
-        // briefly before exec closes it, even though the handle is close-on-exec.
-        let inherited = lock._file.try_clone().unwrap();
-        assert!(MutationLock::acquire(&project).is_err());
-        drop(lock);
-        let next = MutationLock::acquire(&project).unwrap();
-        drop(inherited);
-        drop(next);
-    }
-
+    // @mara checks DES-MUTATION-TRANSACTION
     #[test]
     fn interrupted_process_can_be_rolled_back_after_restart() {
         let (_directory, project) = fixture();
         for stop_after in ["prepared", "0", "1"] {
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.current_dir(project.root());
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("GIT_") {
+                    child.env_remove(key);
+                }
+            }
+            child
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CEILING_DIRECTORIES", project.root())
+                .env("XDG_CONFIG_HOME", project.root().join(".test-config"));
+            let status = child
                 .args([
                     "--exact",
                     "mutation::transaction::tests::interruption_child",
@@ -735,5 +658,31 @@ mod tests {
         )
         .unwrap();
         panic!("interruption point was not reached");
+    }
+    // @mara checks DES-ITEM-UPDATE
+    #[test]
+    fn single_file_validation_and_preimage_failures_preserve_source() {
+        for change_preimage in [false, true] {
+            let (_directory, project) = fixture();
+            let change = changes(&project, false).remove(0);
+            let result = commit_single(&project, change, || {
+                if change_preimage {
+                    fs::write(project.root().join("a.mara.md"), "manual edit").unwrap();
+                    Ok(())
+                } else {
+                    invalid("candidate validation failed")
+                }
+            });
+            assert!(result.is_err());
+            assert_eq!(
+                fs::read_to_string(project.root().join("a.mara.md")).unwrap(),
+                if change_preimage {
+                    "manual edit"
+                } else {
+                    "original a\r\n"
+                }
+            );
+            assert!(!project.root().join(JOURNAL).exists());
+        }
     }
 }

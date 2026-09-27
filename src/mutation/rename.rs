@@ -11,6 +11,8 @@ pub struct ItemRename {
     pub paths: Vec<PathBuf>,
 }
 
+// @mara implements REQ-ITEM-RENAME
+// @mara implements DES-ITEM-RENAME
 pub fn rename_item(
     project: &Project,
     schema: &Schema,
@@ -30,13 +32,10 @@ fn rename_with_hook(
     let _lock = transaction::MutationLock::acquire(project)?;
     let corpus = load_corpus(project, schema)?;
     require_valid(&corpus, schema)?;
-    let resolved = crate::get_item(&corpus, reference).map_err(|error| Error::InvalidMutation {
-        message: error.to_string(),
-    })?;
-    let item = corpus
-        .items()
-        .find(|item| item.id() == resolved.summary().id())
-        .expect("resolved item belongs to corpus");
+    let item =
+        crate::query::resolve_item(&corpus, reference).map_err(|error| Error::InvalidMutation {
+            message: error.to_string(),
+        })?;
     if !crate::is_item_id(new_id) {
         return invalid(format!("invalid replacement item ID '{new_id}'"));
     }
@@ -299,7 +298,18 @@ mod tests {
             )
             .unwrap();
         }
-        crate::add_relation(&project, &schema, "REQ-OTHER", "depends_on", "REQ-OLD").unwrap();
+        crate::mutation::mutate_semantic_relation(
+            &project,
+            &schema,
+            &crate::RelationParams {
+                source: "REQ-OTHER".into(),
+                relation: "depends_on".into(),
+                target: "REQ-OLD".into(),
+            },
+            true,
+            None,
+        )
+        .unwrap();
         let before = load_corpus(&project, &schema)
             .unwrap()
             .documents()
@@ -319,6 +329,9 @@ mod tests {
         assert!(!project.root().join(".mara/transaction.json").exists());
     }
 
+    // @mara implements VER-ITEM-RENAME
+    // @mara checks REQ-ITEM-RENAME
+    // @mara checks DES-ITEM-RENAME
     #[test]
     fn rename_single_document_uses_recovery_and_noop_does_not_publish() {
         let (_directory, project, schema, before) = fixture();
@@ -360,6 +373,7 @@ mod tests {
         assert!(!project.root().join(".mara/transaction.json").exists());
     }
 
+    // @mara checks DES-ITEM-RENAME
     #[test]
     fn rename_replacement_failures_restore_every_original() {
         for stop in [None, Some(0), Some(1)] {
@@ -383,6 +397,7 @@ mod tests {
         }
     }
 
+    // @mara checks DES-ITEM-RENAME
     #[test]
     fn rename_incomplete_rollback_preserves_manual_edits_and_blocks_until_recovery() {
         let (_directory, project, schema, before) = fixture();
@@ -424,11 +439,24 @@ mod tests {
         assert_sources(&project, &before);
     }
 
+    // @mara checks DES-ITEM-RENAME
     #[test]
     fn rename_interrupted_process_rolls_back_after_restart() {
         let (_directory, project, schema, before) = fixture();
         for stop in ["prepared", "0", "1"] {
-            let status = std::process::Command::new(std::env::current_exe().unwrap())
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+            child.current_dir(project.root());
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("GIT_") {
+                    child.env_remove(key);
+                }
+            }
+            child
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CEILING_DIRECTORIES", project.root())
+                .env("XDG_CONFIG_HOME", project.root().join(".test-config"));
+            let status = child
                 .args([
                     "--exact",
                     "mutation::rename::tests::rename_interruption_child",
@@ -473,6 +501,7 @@ mod tests {
         panic!("interruption point was not reached");
     }
 
+    // @mara checks DES-ITEM-RENAME
     #[test]
     fn rename_rejects_mismatched_and_overlapping_parsed_patch_preimages() {
         assert!(

@@ -5,7 +5,11 @@ name = "mara"
 schema = ".mara/schema.yaml"
 
 [content]
-include = ["**/*.mara.md"]
+include = ["docs/**/*.mara.md"]
+
+[rules]
+format_version = 1
+files = [".mara/engineering-rules.yaml"]
 
 [[code.languages]]
 name = "rust"

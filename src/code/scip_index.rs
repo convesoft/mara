@@ -70,6 +70,7 @@ fn snapshot(project: &Project) -> Result<Snapshot, CodeProblem> {
     Ok(result)
 }
 
+// @mara implements DES-CODE-TRACEABILITY
 pub(super) fn run(project: &Project) -> Result<Vec<Indexed>, CodeProblem> {
     let mut names = BTreeSet::new();
     let mut result = Vec::new();
@@ -165,7 +166,7 @@ pub(super) fn run(project: &Project) -> Result<Vec<Indexed>, CodeProblem> {
 }
 
 // Escape only characters that conflict with Mara inline tokens or percent escapes.
-// The SCIP descriptor itself remains lossless and is never interpreted as a native selector.
+// Preserve the descriptor losslessly; identity comes from the indexer.
 fn escape_descriptor(descriptor: &str) -> String {
     let mut result = String::new();
     for ch in descriptor.chars() {
@@ -273,6 +274,7 @@ fn occurrence_range(occurrence: &types::Occurrence) -> Vec<i32> {
     }
 }
 
+// @mara implements REQ-CODE-TRACEABILITY
 pub(super) fn apply(
     project: &Project,
     indexes: Vec<Indexed>,
@@ -363,6 +365,17 @@ pub(super) fn apply(
                     ));
                     continue;
                 };
+                let enclosing = enclosing_range(&occurrence);
+                let enclosing_span = if enclosing.is_empty() {
+                    (start, end)
+                } else if let Some(range) = span(&source, &lines, &enclosing, encoding) {
+                    range
+                } else {
+                    problems.push(problem(
+                        "SCIP enclosing range is invalid for current source",
+                    ));
+                    continue;
+                };
                 let syntax_symbol = syntax.get(&path).and_then(|symbols| {
                     symbols.iter().find(|symbol| {
                         symbol.source.span().start_byte() == start
@@ -371,12 +384,7 @@ pub(super) fn apply(
                 });
                 let content = syntax_symbol
                     .map(|symbol| symbol.content.clone())
-                    .unwrap_or_else(|| {
-                        let (from, to) =
-                            span(&source, &lines, &enclosing_range(&occurrence), encoding)
-                                .unwrap_or((start, end));
-                        location(&path, &lines, from, to)
-                    });
+                    .unwrap_or_else(|| location(&path, &lines, enclosing_span.0, enclosing_span.1));
                 if file.symbols.iter().any(|symbol| {
                     symbol.selector == selector
                         && symbol.source.span().start_byte() == start
@@ -398,13 +406,18 @@ pub(super) fn apply(
     }
     for file in result.files.values_mut() {
         for marker in &mut file.markers {
-            let Some(owner) = marker.owner_start else {
+            let Some(owner) = marker.owner_span else {
                 continue;
             };
             let selectors = file
                 .symbols
                 .iter()
-                .filter(|symbol| symbol.source.span().start_byte() == owner)
+                .filter(|symbol| {
+                    (
+                        symbol.source.span().start_byte(),
+                        symbol.source.span().end_byte(),
+                    ) == owner
+                })
                 .map(|symbol| symbol.selector.as_str())
                 .collect::<BTreeSet<_>>();
             if selectors.len() == 1 {

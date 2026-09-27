@@ -1,4 +1,4 @@
-//! Canonical edge identity and snapshot-bound authored occurrence inspection.
+//! Read-only canonical relation identity and occurrence counts.
 use crate::query::{page::*, resolve_item};
 use crate::{Corpus, Item, ItemSource, Project, Relation, Schema};
 use schemars::JsonSchema;
@@ -76,6 +76,7 @@ pub(crate) struct RelationGraph {
 }
 
 impl RelationGraph {
+    // @mara implements DES-CANONICAL-TRACE-RELATIONS
     pub(crate) fn new(corpus: &Corpus, schema: &Schema) -> Self {
         let mut graph = Self::default();
         for item in corpus.items() {
@@ -447,6 +448,8 @@ pub(crate) fn occurrences(
     Ok(result)
 }
 
+// @mara implements REQ-RELATION-INSPECTION
+// @mara implements DES-RELATION-INTERFACES
 pub(crate) fn inspect(
     project: &Project,
     corpus: &Corpus,
@@ -463,7 +466,13 @@ pub(crate) fn inspect(
         &params.relation,
         &params.target,
     )?;
-    let occurrences = occurrences(project, corpus, schema, &edge)?;
+    let mut occurrences = occurrences(project, corpus, schema, &edge)?;
+    occurrences.sort_by(|left, right| {
+        left.source
+            .path()
+            .cmp(right.source.path())
+            .then_with(|| left.source.start_byte().cmp(&right.source.start_byte()))
+    });
     if occurrences.is_empty() {
         return Err(
             RelationError::new("relation_not_found", "relation does not exist").on_edge(&edge, 0),

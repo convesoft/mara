@@ -1,5 +1,9 @@
 use super::*;
 use crate::{
+    Diagnostic, load_corpus_for_validation, load_corpus_syntax_for_validation,
+    resolve_project_for_validation,
+};
+use crate::{
     DiagnosticCode, DiagnosticItem, DiagnosticLocation, DiagnosticObligation, Severity,
     ValidationError, ValidationOptions, ValidationSummary,
 };
@@ -153,7 +157,7 @@ impl OperationContext {
         self.item_validate_with_options(id, &ValidationOptions::default())
             .map_err(|e| e.to_string())
     }
-    pub fn schema_validate(&self) -> Result<SchemaValidationResult, String> {
+    pub fn schema_validate(&self) -> Result<ValidationResult, String> {
         self.schema_validate_with_options(&ValidationOptions::default())
             .map_err(|e| e.to_string())
     }
@@ -192,10 +196,12 @@ impl OperationContext {
             options,
         )
     }
+    // @mara implements DES-SCHEMA-VALIDATION
     pub fn schema_validate_with_options(
         &self,
         options: &ValidationOptions,
     ) -> Result<ValidationResult, ValidationError> {
+        // @mara implements REQ-SCHEMA-DISCOVERY
         self.validate_target(
             ValidationTarget {
                 kind: ValidationTargetKind::Schema,
@@ -212,6 +218,8 @@ impl OperationContext {
         paths: Vec<PathBuf>,
         options: &ValidationOptions,
     ) -> Result<ValidationResult, ValidationError> {
+        // @mara implements REQ-PROJECT-VALIDATION
+        // @mara implements DES-TRACE-DIAGNOSTIC-INTERFACE
         let limit = options.limit.unwrap_or(20);
         if !(1..=100).contains(&limit) {
             return Err(ValidationError::invalid_argument(

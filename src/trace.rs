@@ -136,6 +136,8 @@ pub struct TraceMatrixResult {
     pub markdown: Option<String>,
 }
 
+// @mara implements REQ-TRACE-MATRIX
+// @mara implements DES-TRACE-VIEW-INTERFACES
 pub(crate) fn matrix(
     project: &Project,
     schema: &Schema,
@@ -219,8 +221,8 @@ pub(crate) fn matrix(
         selection.paths.clone(),
         None,
     )
-    .with_search_options(selection.ids.clone(), false);
-    let selected = query::filtered_items(&corpus, schema, &filters, None)
+    .with_ids(selection.ids.clone());
+    let selected = query::filtered_items(&corpus, schema, &filters)
         .map_err(|e| ValidationError::invalid_argument(e.to_string()))?;
     let selected_mids = selected
         .iter()
@@ -482,6 +484,8 @@ struct ExplainRecords<'a> {
     records: &'a mut Vec<TraceRecord>,
 }
 
+// @mara implements REQ-TRACE-COVERAGE
+// @mara implements REQ-BOUNDED-TRACE-CHAINS
 fn explain(
     ctx: &ExplainContext<'_>,
     shape_id: &str,
@@ -1094,6 +1098,15 @@ pub fn markdown(result: &TraceMatrixResult) -> String {
                 let dest = if end["kind"] == "external" {
                     let address = end["address"].as_str().unwrap_or("");
                     format!("external [{address}](<{address}>) (terminal)")
+                } else if end["kind"] == "code" {
+                    let reference = end["reference"].as_str().unwrap_or("");
+                    let (path, _) = crate::code::split_reference(reference)
+                        .expect("matrix code endpoint has a validated reference");
+                    let label = md_cell(reference)
+                        .replace('`', "\\`")
+                        .replace('[', "\\[")
+                        .replace(']', "\\]");
+                    format!("[{label}](<{}>)", md_target(&path.to_string_lossy()))
                 } else {
                     let id = end["id"].as_str().unwrap_or("?");
                     let path = end["source"]["path"].as_str().unwrap_or("");

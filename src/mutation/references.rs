@@ -401,7 +401,11 @@ fn connections<'graph, 'corpus>(
 }
 
 /// Every byte retained in a surviving link must still resolve to its original
-/// destination. Rename may change an ID token, but not its resolved identity.
+/// destination during source mutation.
+// @mara implements DES-ITEM-CREATION
+// @mara implements DES-RELATION-MUTATION
+// @mara implements DES-ITEM-UPDATE
+// @mara implements DES-ITEM-RENAME
 pub(super) fn preflight(
     before: &Corpus,
     after: &Corpus,
@@ -466,6 +470,7 @@ pub(super) fn preflight(
         } else {
             raw.to_owned()
         };
+
         let mapped = point(&maps, source, location.1).and_then(|(path, start)| {
             let (end_path, last) = point(&maps, source, location.2 - 1)?;
             let document = after.documents().iter().find(|doc| doc.path() == path)?;

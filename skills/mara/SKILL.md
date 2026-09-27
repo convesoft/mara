@@ -15,9 +15,9 @@ discovery format 2, relationship format 1, validation format 1, and trace
 format 1. Typed inline relationships, inverse aliases, symmetric edges,
 external targets, graph policies, YAML current-state rules, and matrices are
 implemented. Use the skill shipped with the selected executable or
-the same source revision. If an older installation exposes a different
+the same source revision. If the selected installation exposes a different
 interface, report the mismatch and use its matching guidance; do not silently
-change the version pin or substitute removed commands.
+change the version pin or substitute unsupported commands.
 
 ## Resolve the CLI fallback
 
@@ -76,20 +76,20 @@ Use the selected project's declarations, including custom flavours. Keep
 supporting narrative as Markdown when it does not need an independent identity;
 search/get/related can still discover, read, and navigate it.
 
-Schema format 3 retains all four guidance keys directly on every flavour:
+Schema format 3 requires all four guidance keys directly on every flavour:
 a nonblank `description`, a nonempty list of nonblank `use_when` entries,
 an `avoid_when` list (`[]` is valid), and a `distinguish_from` mapping (`{}` is
 valid). Distinction targets must be other declared flavours with nonblank
-explanations. When asked to migrate format 1, edit the existing schema in place,
-set `format_version: 3`, and supply meaningful guidance. Preserve custom
-flavours, prefixes, fields, relations, document bytes, IDs, and MIDs; do not
+explanations. Edit the project schema in place with `format_version: 3` and
+meaningful guidance. Preserve custom flavours, prefixes, fields, relations,
+document bytes, IDs, and MIDs; do not
 reinitialize or replace the schema with a template. Require `valid:true` from
 both `schema_validate` and `project_validate` (CLI `schema validate` and
 `project validate`).
 
 For the engineering template, inspect `schema_get` relation declarations before
 connecting items. `verification` describes a repeatable check; `evidence`
-records its result. The added relations are `verifies` (verification →
+records its result. Engineering relations are `verifies` (verification →
 requirement/design), `validates` (verification → goal/scenario), `evidences`
 (evidence → verification), `realizes` (artifact → requirement/design), code `implements`
 (→ requirement/design/verification) and code `checks` (→ requirement/design),
@@ -100,7 +100,7 @@ do not gain these declarations automatically.
 
 New engineering items require `status`. Use `draft` while classifications and
 links are incomplete; `accepted` enables the bundled knowledge policies, and
-`retired` preserves history without qualifying for accepted coverage. Requirements
+`retired` excludes an item from accepted coverage. Requirements
 and designs need `kind` when accepted; verification needs `method`, evidence needs
 `result`, `captured_at` and `subject_revision`, and risk needs `treatment`. Inspect
 the schema for enum values and optional fields. A status of accepted does not
@@ -146,7 +146,7 @@ Run `schema_validate` to check definitions, then `project_validate` or
 The engineering template supplies `status: draft|accepted|retired` and accepted-knowledge policies; existing
 projects gain no policies automatically. Schema relation `cardinality` and `acyclic` declarations impose structural graph policies when
 present. Policy failures do not block structured edits.
-Invalid schemas now return the common envelope with `valid:false`, not an MCP
+Invalid schemas return the common envelope with `valid:false`, not an MCP
 tool error. Counts are null when the schema cannot load. Diagnostic `path` and
 `line` alias `location`; project-owned configuration paths are relative and
 unavailable coordinates are omitted.
@@ -216,7 +216,7 @@ different connections to the same neighbour. The byte budget may shorten pages.
 
 Unified discovery responses use `format_version: 2`, independently of schema
 format 3 and the application version. Inspect `node.kind` (item, section, block,
-or document); only items have ID/MID/flavour. Item list retains its item-only
+document, or code); only items have ID/MID/flavour. Item list retains its item-only
 response. On upgrade, discard old cursors and update parsers for the mixed
 `results`, consecutive `content`, and `connections` shapes above.
 
@@ -244,7 +244,7 @@ that omit their document encoding. The same entry may include `grammar` and
 `query` together for runtime Tree-sitter assets that attach comments
 and expand declaration content. Without these assets, symbol links still work;
 content uses the SCIP enclosing range, or the definition token when absent.
-There is no `separator` setting or compiled language integration.
+Language integrations are supplied by the project.
 
 For example, with `rust-analyzer` installed and matching grammar assets present:
 
@@ -277,10 +277,7 @@ literal: `` code:service.ts::typescript::`service.ts`/parse(). ``. Local SCIP sy
 unsupported. Distinct implementation overloads require distinct indexer identities;
 multiple declarations of one identity share a link. No name/position fallback is
 allowed. Renames/moves may break authored links. File-only `code:path` needs no
-language integration. Migrate project format 3 code bindings and native selectors
-explicitly. Combine unreleased `code.indexers` entries into `code.languages`,
-retain project format 3, and reset development configurations marked 4 to 3.
-See `docs/code-traceability.mara.md` in the Mara repository.
+language integration. See `docs/code-traceability.mara.md` in the Mara repository.
 
 ## Inspect and change relationships
 
@@ -323,22 +320,12 @@ tokens outside item bodies have no typed meaning. Unknown relations, malformed
 tokens and invalid targets in supported contexts fail validation. Use body
 creation/update to author inline assertions; relation add writes metadata.
 
-For a format-1/2 or relation-vocabulary migration, follow
-`docs/migration-0.3.mara.md` with the matching 0.3 executable. The supported
-workflow is manual: save a Git checkpoint or project copy, review the complete
-source diff, then require complete, valid schema and project validation. Mara
-has no schema migration preview/apply command; `project_transaction_rollback`
-does not undo manual edits. Preserve MIDs and unrelated declarations, fields,
-prose and links. Existing relations remain directed with no alias unless the
-schema explicitly changes. Review newly meaningful typed tokens, alias
-collisions, all authored spellings and YAML rule paths before changing names.
-When removing an inverse alias, inspect the canonical edge, reauthor it on its
-canonical source if needed, remove inverse metadata, and demote inverse inline
-tokens to bare mentions when preserving prose navigation. Never replace an
-inverse name with the canonical name on the same item: that can reverse a
-directed edge while validation still passes. Verify the canonical endpoints
-after migration. Do not treat a direction, endpoint or meaning change as a
-rename.
+Before manually changing schema or relation vocabulary, read the source-edit
+workflow in `docs/schema-evolution.mara.md` in the Mara repository. Use the
+selected executable to inspect declarations and canonical edge occurrences,
+then run complete schema/project validation and consume all pages. Preserve a
+source checkpoint for manual recovery; `project_transaction_rollback` handles
+only a pending structured mutation journal.
 
 ## Inspect trace coverage
 

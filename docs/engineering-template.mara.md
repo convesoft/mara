@@ -1,116 +1,24 @@
-# Engineering template
+# Engineering profile
 
-Follow the [intended engineering workflow](engineering-workflow.mara.md) from
-intent through implementation, candidate assessment and production verification.
+Use [the workflow](engineering-workflow.mara.md) to connect intent, implementation
+and genuine execution results for a selected change.
 
 :::mara design DES-ENGINEERING-PROFILE
-:mid: 01M3FNS3QT63PBXC7HB76A0S4S
-:title: Develop engineering knowledge incrementally with explicit coverage checks
+:mid: 01M3HJFYSTNV84CRRZF0YPXY76
+:title: Develop engineering knowledge with explicit coverage and execution checks
+:status: accepted
+:kind: data
 :satisfies: REQ-ENGINEERING-TEMPLATE
-:satisfies: REQ-ENGINEERING-TRACEABILITY
 
-The optional engineering template installs an editable project profile:
-`.mara/schema.yaml`, enabled `.mara/engineering-rules.yaml`, and request-local
-`.mara/engineering-checks.yaml` and `.mara/engineering-execution.yaml`, plus
-project configuration format 2. The
-[template sources](../templates/engineering-schema.yaml) own exact enum values,
-endpoints and inverse names; [policies](../templates/engineering-rules.yaml)
-and [coverage](../templates/engineering-checks.yaml) and
-[execution](../templates/engineering-execution.yaml) checks own executable constraints.
-Existing projects require an explicit reviewed migration; initialization never
-rewrites them. No starter items, language packs or report evidence are copied.
+The optional engineering profile is editable project-owned vocabulary and policy. Initialization assets and persisted formats follow [[REQ-ENGINEERING-TEMPLATE]]. The [bundled schema](../templates/engineering-schema.yaml) owns flavour guidance, fields, exact relation meanings, endpoints and inverse names. The generic engine evaluates these declarations; it does not hardcode engineering flavour or relation names.
 
-## Lifecycle and classifications
+Every flavour requires draft, accepted or retired status. Draft knowledge can have incomplete classifications and coverage, but authored fields, references and graph constraints must still be valid. Accepted means an agreed current knowledge record; it does not establish implementation or successful execution. Retired records remain addressable and cannot satisfy accepted-knowledge coverage. Supersession does not change either item's status automatically.
 
-Keep eleven flavours: term, actor, goal, scenario, requirement, design, decision,
-risk, verification, evidence and artifact. Supporting explanation stays narrative.
-Delivery tasks and releases stay in the delivery tracker.
+The [accepted-knowledge policies](../templates/engineering-rules.yaml) require classifications and meaningful connections when knowledge becomes accepted: scenarios contribute to goals; requirements identify an origin and a verification method or direct code check; designs satisfy requirements or refine designs; decisions justify knowledge; verifications check requirements/designs or validate goals/scenarios; evidence records a verification; risks identify affected knowledge and their treatment. Acceptance does not require implementation, a dedicated design, or passing execution evidence. Author only meaningful relationships. Use a verification item when the repeatable method needs its own identity; ordinary tests may use checks directly.
 
-Every item has a required `status`: `draft`, `accepted` or `retired`.
-Drafts may have incomplete classifications and coverage; their authored fields,
-references and graph constraints must still be valid. Accepted means the knowledge
-record is agreed and current. It does not mean the described behavior is
-implemented or that a verification passed. Retired records remain addressable
-history but do not qualify as accepted coverage. Supersession does not silently
-change either endpoint's status.
+The [coverage checks](../templates/engineering-checks.yaml) assess selected accepted roots: intent for requirements, realization and verification for requirements/designs, validation for goals/scenarios. Draft and retired roots fail an explicitly requested accepted-scope check. Related draft/retired knowledge cannot satisfy its accepted-item minimum. Select only the intended scope; these checks are request-local and are not always-on acceptance policy.
 
-| Flavour | Required when accepted | Optional classification |
-|---|---|---|
-| requirement | `kind`: functional, quality, constraint | Repeatable `concern` strings, such as security or performance |
-| design | `kind`: structure, behavior, interface, data, deployment | Repeatable `concern` strings |
-| verification | `method`: test, inspection, analysis, demonstration | `level`: unit, integration, system, acceptance, only with method test |
-| evidence | `result`: passed, failed, inconclusive; nonblank `captured_at` and `subject_revision` | External report through `reported_at` |
-| risk | `treatment`: open, mitigated, tolerated | `impact` and `likelihood`: low, medium, high |
-| Other flavours | No additional fields | None initially |
+The [execution check](../templates/engineering-execution.yaml) selects accepted verification methods with accepted passing evidence whose subject_revision exactly matches the supplied text. Record actual capture time and the checked revision or immutable artifact identity. Policy enforces required nonblank provenance, not timestamp parsing, Git resolution, authenticity or freshness. An accepted failed evidence record is valid knowledge. Implementation links and test definitions never count as execution. Inspect conflicting results, scope and environment alongside the matrix under [[DES-TRACE-CHECK-BINDING]].
 
-Record capture time as an ISO 8601 timestamp and the actual tested revision or
-immutable artifact identity as `subject_revision`. The current rules enforce
-presence and nonblank provenance, not timestamp parsing, Git resolution,
-authenticity or freshness. An accepted failed evidence record is valid knowledge.
-
-## Accepted knowledge policies
-
-| Item | Required connection |
-|---|---|
-| scenario | Contributes to an accepted goal; add involved actors where their identity matters |
-| requirement | Has an accepted origin or parent through contributes_to, derives_from or refines, or an external sourced_from authority; has an accepted verification definition or a direct code check |
-| design | Satisfies an accepted requirement or refines an accepted design |
-| decision | Justifies an accepted requirement, design or risk treatment |
-| verification | Verifies an accepted requirement/design or validates an accepted goal/scenario |
-| evidence | Evidences an accepted verification |
-| risk | Affects accepted knowledge; mitigated treatment has an accepted mitigation, tolerated treatment has an accepted justifying decision |
-
-Classifications become mandatory only on acceptance. Accepted requirements do not
-require implementation, passing evidence, or a dedicated design item. Ordinary
-automated tests can connect directly through `checks`; give a verification its
-own identity when the repeatable method needs independent traceability.
-`refines`, `derives_from` and `supersedes` are acyclic; no blanket cycle ban
-applies to `depends_on`. There is no obligation to invent missing items merely
-to fill a diagram.
-
-## Selected-scope assessments
-
-Run project validation before assessing a selected scope. These request-local
-checks do not become always-on project policy.
-
-| Shape IRI suffix after urn:mara:rule: | Roots | Qualifying connection |
-|---|---|---|
-| intent | Accepted requirements | Accepted origin/parent or external source |
-| realization | Accepted requirements/designs | Direct code implementation or accepted realizing artifact; a requirement may use one accepted satisfying design with such realization |
-| verification | Accepted requirements/designs | Accepted verification definition or direct code check |
-| validation | Accepted goals/scenarios | Accepted validation method |
-| execution | Accepted verifications | Accepted passing evidence for the requested subject_revision |
-
-Each check asserts its supported root flavour and accepted status. Draft or
-retired roots fail an explicitly requested assessment; select the intended scope
-with `--field status=accepted` when appropriate. Related draft or retired items
-never satisfy an accepted-item minimum. File-level code endpoints require no
-language adapter; symbol endpoints require project-configured language packs.
-
-For example, assess one requirement's implementation coverage:
-
-```sh
-mara trace matrix --id REQ-EXPORT \
-  --check-file .mara/engineering-checks.yaml \
-  --shape urn:mara:rule:realization
-```
-
-Execution uses `.mara/engineering-execution.yaml` separately so the other checks
-need no revision parameter. Select the verifications required for the candidate
-and supply its concrete tested identity using [[DES-TRACE-VIEW-INTERFACES]]:
-
-```sh
-mara trace matrix --id VER-EXPORT \
-  --check-file .mara/engineering-execution.yaml \
-  --shape urn:mara:rule:execution \
-  --param subject_revision=abc123
-```
-
-For a committed Git candidate, the caller may resolve `HEAD` with
-`git rev-parse HEAD` and supply that hash; Mara treats `HEAD` itself as literal
-text. Evidence must record the actual tested revision, including any build or
-working-tree differences. The same YAML applies to every candidate.
-A direct code check or implementation link never counts as execution evidence.
-A pass establishes that at least one qualifying record exists; assess conflicting
-results, environment and authenticity in the release workflow.
+The [engineering workflow](engineering-workflow.mara.md) applies these distinctions to one bounded change. [[implemented_by:code:templates/engineering-schema.yaml]] [[implemented_by:code:templates/engineering-rules.yaml]] [[implemented_by:code:templates/engineering-checks.yaml]] [[implemented_by:code:templates/engineering-execution.yaml]]
 :::

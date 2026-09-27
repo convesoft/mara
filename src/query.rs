@@ -1,71 +1,24 @@
+use crate::{Corpus, Item, Schema, SourceLocation};
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    error::Error,
     fmt,
     path::{Component, Path, PathBuf},
 };
-
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use unicode_casefold::UnicodeCaseFold;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
-
-use crate::{Corpus, Item, Schema, SourceLocation};
-
 mod get;
-pub(crate) mod page;
-mod related;
-mod search;
 pub use get::{EntryRange, GetResult, MetadataFragment, TextRange, get};
-pub use page::{ItemCollectionResult, RelatedItemsResult, SearchExcerpt};
+mod related;
 pub use related::{RelatedConnection, RelatedNeighbour, RelatedResult, related};
+pub(crate) mod page;
+mod search;
+pub use page::ItemCollectionResult;
+pub use page::SearchExcerpt;
 pub use search::{SearchHit, SearchResult, search};
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
-pub struct ItemSource {
-    path: PathBuf,
-    start_byte: usize,
-    end_byte: usize,
-    start_line: usize,
-    end_line: usize,
-}
-
-impl ItemSource {
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub const fn start_byte(&self) -> usize {
-        self.start_byte
-    }
-
-    pub const fn end_byte(&self) -> usize {
-        self.end_byte
-    }
-
-    pub const fn start_line(&self) -> usize {
-        self.start_line
-    }
-
-    pub const fn end_line(&self) -> usize {
-        self.end_line
-    }
-}
-
-impl From<&SourceLocation> for ItemSource {
-    fn from(source: &SourceLocation) -> Self {
-        let span = source.span();
-        Self {
-            path: source.path().to_path_buf(),
-            start_byte: span.start_byte(),
-            end_byte: span.end_byte(),
-            start_line: span.start_line(),
-            end_line: span.end_line(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct ItemSummary {
     id: String,
@@ -76,8 +29,6 @@ pub struct ItemSummary {
     line: usize,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     title_truncated: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    excerpts: Option<Vec<SearchExcerpt>>,
 }
 
 impl ItemSummary {
@@ -108,10 +59,6 @@ impl ItemSummary {
     pub const fn title_truncated(&self) -> bool {
         self.title_truncated
     }
-
-    pub fn excerpts(&self) -> Option<&[SearchExcerpt]> {
-        self.excerpts.as_deref()
-    }
 }
 
 impl From<&Item> for ItemSummary {
@@ -124,89 +71,7 @@ impl From<&Item> for ItemSummary {
             path: item.source().path().to_path_buf(),
             line: item.source().span().start_line(),
             title_truncated: false,
-            excerpts: None,
         }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
-pub struct MetadataValue {
-    key: String,
-    value: String,
-}
-
-impl MetadataValue {
-    pub fn key(&self) -> &str {
-        &self.key
-    }
-
-    pub fn value(&self) -> &str {
-        &self.value
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
-pub struct RelationSummary {
-    relation: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    item: Option<ItemSummary>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    external_address: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    code_reference: Option<String>,
-}
-
-impl RelationSummary {
-    pub fn relation(&self) -> &str {
-        &self.relation
-    }
-
-    pub fn item(&self) -> Option<&ItemSummary> {
-        self.item.as_ref()
-    }
-
-    pub fn external_address(&self) -> Option<&str> {
-        self.external_address.as_deref()
-    }
-
-    pub fn code_reference(&self) -> Option<&str> {
-        self.code_reference.as_deref()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
-pub struct ResolvedItem {
-    summary: ItemSummary,
-    source: ItemSource,
-    metadata: Vec<MetadataValue>,
-    body: String,
-    outgoing_relations: Vec<RelationSummary>,
-    incoming_relations: Vec<RelationSummary>,
-}
-
-impl ResolvedItem {
-    pub const fn summary(&self) -> &ItemSummary {
-        &self.summary
-    }
-
-    pub const fn source(&self) -> &ItemSource {
-        &self.source
-    }
-
-    pub fn metadata(&self) -> &[MetadataValue] {
-        &self.metadata
-    }
-
-    pub fn body(&self) -> &str {
-        &self.body
-    }
-
-    pub fn outgoing_relations(&self) -> &[RelationSummary] {
-        &self.outgoing_relations
-    }
-
-    pub fn incoming_relations(&self) -> &[RelationSummary] {
-        &self.incoming_relations
     }
 }
 
@@ -242,10 +107,13 @@ pub struct ItemFilters {
     limit: Option<usize>,
     cursor: Option<String>,
     ids: Vec<String>,
-    excerpts: bool,
 }
 
 impl ItemFilters {
+    pub fn with_ids(mut self, ids: Vec<String>) -> Self {
+        self.ids = ids;
+        self
+    }
     pub fn new(
         flavours: Vec<String>,
         fields: Vec<FieldFilter>,
@@ -267,89 +135,11 @@ impl ItemFilters {
         self.cursor = cursor;
         self
     }
-
-    pub fn with_search_options(mut self, ids: Vec<String>, excerpts: bool) -> Self {
-        self.ids = ids;
-        self.excerpts = excerpts;
-        self
-    }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-pub enum RelationDirection {
-    Incoming,
-    Outgoing,
-    Symmetric,
-}
-
-impl RelationDirection {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Incoming => "incoming",
-            Self::Outgoing => "outgoing",
-            Self::Symmetric => "symmetric",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct RelatedFilters {
-    direction: Option<RelationDirection>,
-    relations: Vec<String>,
-    flavours: Vec<String>,
-    limit: Option<usize>,
-    cursor: Option<String>,
-}
-
-impl RelatedFilters {
-    pub fn new(
-        direction: Option<RelationDirection>,
-        relations: Vec<String>,
-        flavours: Vec<String>,
-    ) -> Self {
-        Self {
-            direction,
-            relations,
-            flavours,
-            ..Self::default()
-        }
-    }
-
-    pub fn with_page(mut self, limit: Option<usize>, cursor: Option<String>) -> Self {
-        self.limit = limit;
-        self.cursor = cursor;
-        self
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
-pub struct RelatedItem {
-    direction: RelationDirection,
-    relation: String,
-    item: ItemSummary,
-}
-
-impl RelatedItem {
-    pub const fn direction(&self) -> RelationDirection {
-        self.direction
-    }
-
-    pub fn relation(&self) -> &str {
-        &self.relation
-    }
-
-    pub const fn item(&self) -> &ItemSummary {
-        &self.item
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum QueryError {
     InvalidDiscoveryReference,
-    InvalidPage {
-        message: String,
-    },
     MissingItem {
         id: String,
     },
@@ -358,6 +148,15 @@ pub enum QueryError {
     },
     AmbiguousMid {
         mid: String,
+    },
+    AmbiguousSearchRelationName {
+        name: String,
+    },
+    AmbiguousRelationName {
+        name: String,
+    },
+    InvalidPage {
+        message: String,
     },
     MissingRelationTarget {
         source: String,
@@ -375,12 +174,6 @@ pub enum QueryError {
     UnknownField {
         name: String,
     },
-    AmbiguousSearchRelationName {
-        name: String,
-    },
-    AmbiguousRelationName {
-        name: String,
-    },
     UnknownRelation {
         name: String,
     },
@@ -388,23 +181,21 @@ pub enum QueryError {
         path: PathBuf,
     },
 }
-
 impl fmt::Display for QueryError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidDiscoveryReference => formatter.write_str(
-                "invalid or stale discovery handle; the document may have changed or moved; search again to rediscover the node",
-            ),
-            Self::InvalidPage { message } => formatter.write_str(message),
-            Self::MissingItem { id } => write!(formatter, "item '{id}' was not found"),
-            Self::AmbiguousItem { id } => write!(formatter, "item ID '{id}' is ambiguous"),
-            Self::AmbiguousMid { mid } => write!(formatter, "item MID '{mid}' is ambiguous"),
+            Self::InvalidDiscoveryReference => f.write_str("invalid or stale discovery handle; the document may have changed or moved; search again to rediscover the node"),
+            Self::MissingItem { id } => write!(f,"item '{id}' was not found"),
+            Self::AmbiguousItem { id } => write!(f,"item ID '{id}' is ambiguous"),
+            Self::AmbiguousMid { mid } => write!(f,"item MID '{mid}' is ambiguous"),
+            Self::AmbiguousSearchRelationName { name } => write!(f,"ambiguous relation '{name}'; search accepts schema relations only; use schema:{name}"),
+            Self::InvalidPage { message } => f.write_str(message),
             Self::MissingRelationTarget {
                 source,
                 relation,
                 target,
             } => write!(
-                formatter,
+                f,
                 "relation '{relation}' from '{source}' references missing item '{target}'"
             ),
             Self::AmbiguousRelationTarget {
@@ -412,198 +203,48 @@ impl fmt::Display for QueryError {
                 relation,
                 target,
             } => write!(
-                formatter,
+                f,
                 "relation '{relation}' from '{source}' references ambiguous item '{target}'"
             ),
-            Self::UnknownFlavour { name } => write!(formatter, "unknown flavour '{name}'"),
-            Self::UnknownField { name } => write!(formatter, "unknown field '{name}'"),
-            Self::AmbiguousSearchRelationName { name } => write!(formatter, "ambiguous relation '{name}'; search accepts schema relations only; use schema:{name}"),
-            Self::AmbiguousRelationName { name } => write!(formatter, "ambiguous relation '{name}'; use schema:{name} or builtin:{name}"),
-            Self::UnknownRelation { name } => write!(formatter, "unknown relation '{name}'"),
+            Self::AmbiguousRelationName { name } => write!(f, "ambiguous relation '{name}'; use schema:{name} or builtin:{name}"),
+            Self::UnknownFlavour { name } => write!(f, "unknown flavour '{name}'"),
+            Self::UnknownField { name } => write!(f, "unknown field '{name}'"),
+            Self::UnknownRelation { name } => write!(f, "unknown relation '{name}'"),
             Self::InvalidPath { path } => write!(
-                formatter,
+                f,
                 "path filter must be a project-relative path: '{}'",
                 path.display()
             ),
         }
     }
 }
+impl std::error::Error for QueryError {}
 
-impl Error for QueryError {}
-
-pub fn get_item(corpus: &Corpus, id: &str) -> Result<ResolvedItem, QueryError> {
-    let item = resolve_item(corpus, id)?;
-    let outgoing_relations = item
-        .relations()
-        .iter()
-        .map(|relation| {
-            if let Some(address) = crate::external::address(relation.target()) {
-                Ok(RelationSummary {
-                    relation: relation.name().to_owned(),
-                    item: None,
-                    external_address: Some(address.to_owned()),
-                    code_reference: None,
-                })
-            } else if relation.target().starts_with("code:") {
-                Ok(RelationSummary {
-                    relation: relation.name().to_owned(),
-                    item: None,
-                    external_address: None,
-                    code_reference: Some(relation.target().to_owned()),
-                })
-            } else {
-                Ok(RelationSummary {
-                    relation: relation.name().to_owned(),
-                    item: Some(
-                        resolve_relation_target(corpus, item, relation.name(), relation.target())?
-                            .into(),
-                    ),
-                    external_address: None,
-                    code_reference: None,
-                })
-            }
-        })
-        .collect::<Result<_, QueryError>>()?;
-    let mut incoming_relations = Vec::new();
-    for source in corpus.items() {
-        for relation in source
-            .relations()
-            .iter()
-            .filter(|relation| relation_handle_can_target_item(relation.target(), item))
-        {
-            let target =
-                resolve_relation_target(corpus, source, relation.name(), relation.target())?;
-            if same_item_identity(target, item) {
-                incoming_relations.push(RelationSummary {
-                    relation: relation.name().to_owned(),
-                    item: Some(source.into()),
-                    external_address: None,
-                    code_reference: None,
-                });
-            }
-        }
-    }
-
-    Ok(ResolvedItem {
-        summary: item.into(),
-        source: item.source().into(),
-        metadata: item
-            .metadata()
-            .iter()
-            .map(|entry| MetadataValue {
-                key: entry.key().to_owned(),
-                value: entry.value().to_owned(),
-            })
-            .collect(),
-        body: item.body().to_owned(),
-        outgoing_relations,
-        incoming_relations,
-    })
-}
-
+// @mara implements REQ-ITEM-LIST
+// @mara implements DES-ITEM-LIST
 pub fn list_items(
     corpus: &Corpus,
     schema: &Schema,
     filters: &ItemFilters,
 ) -> Result<ItemCollectionResult, QueryError> {
-    page::filtered_page(corpus, schema, filters, None)
-}
-
-pub fn search_items(
-    corpus: &Corpus,
-    schema: &Schema,
-    query: &str,
-    filters: &ItemFilters,
-) -> Result<ItemCollectionResult, QueryError> {
-    page::filtered_page(corpus, schema, filters, Some(query))
-}
-
-pub fn related_items(
-    corpus: &Corpus,
-    schema: &Schema,
-    id: &str,
-    filters: &RelatedFilters,
-) -> Result<RelatedItemsResult, QueryError> {
-    page::related_page(corpus, schema, id, filters)
-}
-
-fn related_matches(
-    corpus: &Corpus,
-    schema: &Schema,
-    id: &str,
-    filters: &RelatedFilters,
-) -> Result<Vec<RelatedItem>, QueryError> {
-    validate_flavours(schema, &filters.flavours)?;
-    validate_relations(schema, &filters.relations)?;
-    let item = resolve_item(corpus, id)?;
-    let mut related = Vec::new();
-
-    if filters.direction != Some(RelationDirection::Incoming) {
-        for relation in item.relations() {
-            if !matches_name(&filters.relations, relation.name()) {
-                continue;
-            }
-            if crate::external::address(relation.target()).is_some()
-                || relation.target().starts_with("code:")
-            {
-                continue;
-            }
-            let neighbour =
-                resolve_relation_target(corpus, item, relation.name(), relation.target())?;
-            if matches_name(&filters.flavours, neighbour.flavour()) {
-                related.push(RelatedItem {
-                    direction: RelationDirection::Outgoing,
-                    relation: relation.name().to_owned(),
-                    item: neighbour.into(),
-                });
-            }
-        }
-    }
-
-    if filters.direction != Some(RelationDirection::Outgoing) {
-        for source in corpus.items() {
-            if !matches_name(&filters.flavours, source.flavour()) {
-                continue;
-            }
-            for relation in source.relations().iter().filter(|relation| {
-                matches_name(&filters.relations, relation.name())
-                    && relation_handle_can_target_item(relation.target(), item)
-            }) {
-                let target =
-                    resolve_relation_target(corpus, source, relation.name(), relation.target())?;
-                if !same_item_identity(target, item) {
-                    continue;
-                }
-                related.push(RelatedItem {
-                    direction: RelationDirection::Incoming,
-                    relation: relation.name().to_owned(),
-                    item: source.into(),
-                });
-            }
-        }
-    }
-
-    Ok(related)
+    page::filtered_page(corpus, schema, filters)
 }
 
 pub(crate) fn filtered_items<'a>(
     corpus: &'a Corpus,
     schema: &Schema,
     filters: &ItemFilters,
-    query: Option<&str>,
 ) -> Result<Vec<&'a Item>, QueryError> {
     validate_flavours(schema, &filters.flavours)?;
     validate_relations(schema, &filters.relations)?;
     validate_fields(schema, &filters.fields)?;
     let paths = normalized_paths(&filters.paths)?;
     let fields = grouped_fields(&filters.fields);
-    let query = query.map(keyword_terms);
     let selected = filters
         .ids
         .iter()
         .map(|id| resolve_item(corpus, id))
         .collect::<Result<Vec<_>, _>>()?;
-
     let items = corpus
         .items()
         .filter(|item| {
@@ -629,15 +270,7 @@ pub(crate) fn filtered_items<'a>(
             })
         })
         .filter(|item| matches_fields(item, &fields));
-    let Some(query) = query else {
-        return Ok(items.collect());
-    };
-    let mut ranked = items
-        .filter_map(|item| search_rank(item, &query).map(|rank| (rank, item)))
-        .collect::<Vec<_>>();
-    // Stable sorting retains document-path/source order for equal ranks.
-    ranked.sort_by_key(|(rank, _)| std::cmp::Reverse(*rank));
-    Ok(ranked.into_iter().map(|(_, item)| item).collect())
+    Ok(items.collect())
 }
 
 fn validate_flavours(schema: &Schema, names: &[String]) -> Result<(), QueryError> {
@@ -717,20 +350,77 @@ fn matches_fields(item: &Item, fields: &BTreeMap<&str, Vec<&str>>) -> bool {
     })
 }
 
-// The exact-match group dominates field weights, regardless of occurrences.
-fn search_rank(item: &Item, query: &BTreeSet<String>) -> Option<(bool, usize)> {
-    let mut fields = vec![(item.id(), 3, false), (item.body(), 1, true)];
-    for entry in item.metadata() {
-        fields.push((entry.key(), 1, true));
-        fields.push((
-            entry.value(),
-            if entry.key() == "title" { 3 } else { 1 },
-            entry.key() != "mid",
-        ));
-    }
-    rank_fields(fields, query)
+fn matches_name(names: &[String], candidate: &str) -> bool {
+    names.is_empty() || names.iter().any(|name| name == candidate)
 }
 
+fn matches_name_filter(names: &[String], predicate: impl Fn(&str) -> bool) -> bool {
+    names.is_empty() || names.iter().any(|name| predicate(name))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct ItemSource {
+    path: PathBuf,
+    start_byte: usize,
+    end_byte: usize,
+    start_line: usize,
+    end_line: usize,
+}
+
+impl ItemSource {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub const fn start_byte(&self) -> usize {
+        self.start_byte
+    }
+
+    pub const fn end_byte(&self) -> usize {
+        self.end_byte
+    }
+
+    pub const fn start_line(&self) -> usize {
+        self.start_line
+    }
+
+    pub const fn end_line(&self) -> usize {
+        self.end_line
+    }
+}
+
+impl From<&SourceLocation> for ItemSource {
+    fn from(source: &SourceLocation) -> Self {
+        let span = source.span();
+        Self {
+            path: source.path().to_path_buf(),
+            start_byte: span.start_byte(),
+            end_byte: span.end_byte(),
+            start_line: span.start_line(),
+            end_line: span.end_line(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RelationDirection {
+    Incoming,
+    Outgoing,
+    Symmetric,
+}
+
+impl RelationDirection {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Incoming => "incoming",
+            Self::Outgoing => "outgoing",
+            Self::Symmetric => "symmetric",
+        }
+    }
+}
+
+// @mara implements DES-DETERMINISTIC-KEYWORD-SEARCH
 fn rank_fields<'a>(
     fields: impl IntoIterator<Item = (&'a str, usize, bool)>,
     query: &BTreeSet<String>,
@@ -797,14 +487,6 @@ fn canonical_text(value: &str) -> String {
     value.nfc().case_fold().nfc().collect()
 }
 
-fn matches_name(names: &[String], candidate: &str) -> bool {
-    names.is_empty() || names.iter().any(|name| name == candidate)
-}
-
-fn matches_name_filter(names: &[String], predicate: impl Fn(&str) -> bool) -> bool {
-    names.is_empty() || names.iter().any(|name| predicate(name))
-}
-
 pub(crate) fn resolve_item<'a>(corpus: &'a Corpus, id: &str) -> Result<&'a Item, QueryError> {
     let by_mid = crate::is_mid(id);
     let mut matches = corpus.items().filter(|item| {
@@ -834,14 +516,7 @@ fn relation_handle_can_target_item(handle: &str, item: &Item) -> bool {
     }
 }
 
-fn same_item_identity(left: &Item, right: &Item) -> bool {
-    match (left.mid(), right.mid()) {
-        (Some(left_mid), Some(right_mid)) => left_mid == right_mid,
-        _ => left.id() == right.id(),
-    }
-}
-
-fn resolve_relation_target<'a>(
+pub(crate) fn resolve_relation_target<'a>(
     corpus: &'a Corpus,
     source: &Item,
     relation: &str,
@@ -860,5 +535,35 @@ fn resolve_relation_target<'a>(
             target: target.to_owned(),
         }),
         Err(error) => Err(error),
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RelatedFilters {
+    direction: Option<RelationDirection>,
+    relations: Vec<String>,
+    flavours: Vec<String>,
+    limit: Option<usize>,
+    cursor: Option<String>,
+}
+
+impl RelatedFilters {
+    pub fn new(
+        direction: Option<RelationDirection>,
+        relations: Vec<String>,
+        flavours: Vec<String>,
+    ) -> Self {
+        Self {
+            direction,
+            relations,
+            flavours,
+            ..Self::default()
+        }
+    }
+
+    pub fn with_page(mut self, limit: Option<usize>, cursor: Option<String>) -> Self {
+        self.limit = limit;
+        self.cursor = cursor;
+        self
     }
 }

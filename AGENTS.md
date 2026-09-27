@@ -65,9 +65,9 @@ Repository-wide instructions for humans and software agents.
 
 ## Documentation discipline
 
-- Start at [`docs/index.mara.md`](docs/index.mara.md). Follow
-  [`docs/format.mara.md`](docs/format.mara.md) for syntax and
-  [`docs/taxonomy.mara.md`](docs/taxonomy.mara.md) for flavour selection.
+- Start at [`docs/index.mara.md`](docs/index.mara.md). Use the
+  [Mara skill](skills/mara/SKILL.md) for authoring and the configured
+  [schema](.mara/schema.yaml) for flavour selection, fields, and relations.
 - Keep repository-owned documentation, including requirements, definitions,
   architecture, decisions, and specifications, in Git-tracked `*.mara.md`
   files. Tool-required metadata and this instruction file are exceptions, not
@@ -101,8 +101,8 @@ Repository-wide instructions for humans and software agents.
   the vocabulary gap instead of inventing one silently.
 - Add only relations that communicate useful meaning. Never create placeholder
   items or links merely to complete a traceability chain.
-- Initially require only flavour, human ID, and title. Add lifecycle fields,
-  classifications, or validation constraints only for a demonstrated workflow.
+- Follow the configured engineering schema and policies. Start new knowledge
+  in `draft`; add classifications and coverage as it becomes ready for acceptance.
 
 ## Implementation readiness and knowledge maintenance
 
@@ -145,6 +145,16 @@ Repository-wide instructions for humans and software agents.
   to the milestone. Cover the primary workflow and at most a few important,
   credible edge cases; do not pursue exhaustive combinations or speculative
   failure modes.
+- Run project-oriented tests in disposable projects outside the source checkout,
+  with test-owned configuration, fixture copies, and Git state. Set child-process
+  working directories and isolate inherited Git/configuration state; do not mutate
+  the developer's checkout, global configuration, or shared process environment.
+  Explicit read-only self-hosting checks may select the real repository.
+- Keep fixture documents and synthetic code assertions out of the self-hosted
+  corpus and traceability graph. Configure extra language adapters in fixture
+  projects only. Real test code remains traceable to the requirements it checks.
+  Keep test support proportional, using ordinary Rust tests and `tempfile` with
+  small helpers.
 - Prefer safe, observable failure over speculative handling of every possible
   state. Failures must preserve user data and emit actionable, sanitized
   diagnostics. Record unexpected failures in the backlog with reproduction

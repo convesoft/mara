@@ -68,6 +68,7 @@ impl Rules {
             .map(|shape| (&shape.value, &shape.source))
     }
 
+    // @mara implements DES-TRACE-CHECK-BINDING
     pub(crate) fn request_check(
         &mut self,
         shape: &str,
@@ -127,6 +128,7 @@ impl Rules {
         }
     }
     pub fn load(project: &Project, schema: &Schema) -> Self {
+        // @mara implements DES-SCHEMA-RULE-DEFINITIONS
         Self::load_files(project, schema, project.rule_files.clone())
     }
 
@@ -1002,6 +1004,7 @@ pub(crate) fn valid_parameter_name(name: &str) -> bool {
         && bytes.all(|b| matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_'))
 }
 
+// @mara implements DES-TRACE-CHECK-BINDING
 fn bind_literal(
     literal: &mut Value,
     bindings: &BTreeMap<String, String>,

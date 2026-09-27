@@ -4,8 +4,6 @@ use super::*;
 
 pub(crate) const PAGE_BYTES: usize = 65_536;
 const TITLE_CHARS: usize = 256;
-const EXCERPT_CHARS: usize = 240;
-const EXCERPT_COUNT: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct ItemCollectionResult {
@@ -14,55 +12,31 @@ pub struct ItemCollectionResult {
     pub next_cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
-pub struct RelatedItemsResult {
-    pub items: Vec<RelatedItem>,
-    pub has_more: bool,
-    pub next_cursor: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
-pub struct SearchExcerpt {
-    pub text: String,
-    pub start_byte: usize,
-    pub end_byte: usize,
-    pub start_line: usize,
-    pub end_line: usize,
-    pub partial: bool,
-}
-
 pub(crate) fn filtered_page(
     corpus: &Corpus,
     schema: &Schema,
     filters: &ItemFilters,
-    query: Option<&str>,
 ) -> Result<ItemCollectionResult, QueryError> {
     let limit = page_limit(filters.limit)?;
     let request = (
-        // Reject cursors created before path filters included directory subtrees.
-        if query.is_some() {
-            "search-ranked-subtrees-v1"
-        } else {
-            "items-subtrees-v1"
-        },
+        "items-subtrees-v1",
         &filters.flavours,
         &filters.fields,
         &filters.relations,
         &filters.paths,
         &filters.ids,
-        filters.excerpts,
-        query,
+        false,
+        None::<&str>,
         limit,
     );
     let fingerprint = fingerprint(corpus, schema, &request)?;
     let start = cursor_position(filters.cursor.as_deref(), &fingerprint)?;
-    let matches = filtered_items(corpus, schema, filters, query)?;
+    let matches = filtered_items(corpus, schema, filters)?;
     if filters.cursor.is_some() && (start == 0 || start >= matches.len()) {
         return Err(page_error(
             "invalid continuation position; restart from the first page",
         ));
     }
-    let terms = query.map(keyword_terms).unwrap_or_default();
     let mut page = ItemCollectionResult {
         items: Vec::new(),
         has_more: false,
@@ -71,14 +45,6 @@ pub(crate) fn filtered_page(
     for item in matches.iter().skip(start).take(limit) {
         let mut summary = ItemSummary::from(*item);
         truncate_title(&mut summary);
-        if filters.excerpts {
-            let document = corpus
-                .documents()
-                .iter()
-                .find(|document| document.path() == item.source().path())
-                .expect("matched item belongs to a corpus document");
-            summary.excerpts = Some(excerpts(document.source(), item, &terms));
-        }
         page.items.push(summary);
         set_continuation(&mut page, start, matches.len(), &fingerprint);
         if serde_json::to_vec(&page)
@@ -93,59 +59,6 @@ pub(crate) fn filtered_page(
                 ));
             }
             set_continuation(&mut page, start, matches.len(), &fingerprint);
-            break;
-        }
-    }
-    Ok(page)
-}
-
-pub(crate) fn related_page(
-    corpus: &Corpus,
-    schema: &Schema,
-    id: &str,
-    filters: &RelatedFilters,
-) -> Result<RelatedItemsResult, QueryError> {
-    let limit = page_limit(filters.limit)?;
-    let request = (
-        "related",
-        id,
-        filters.direction,
-        &filters.relations,
-        &filters.flavours,
-        limit,
-    );
-    let fingerprint = fingerprint(corpus, schema, &request)?;
-    let start = cursor_position(filters.cursor.as_deref(), &fingerprint)?;
-    let matches = related_matches(corpus, schema, id, filters)?;
-    let total = matches.len();
-    if filters.cursor.is_some() && (start == 0 || start >= total) {
-        return Err(page_error(
-            "invalid continuation position; restart from the first page",
-        ));
-    }
-    let mut page = RelatedItemsResult {
-        items: Vec::new(),
-        has_more: false,
-        next_cursor: None,
-    };
-    for mut entry in matches.into_iter().skip(start).take(limit) {
-        truncate_title(&mut entry.item);
-        page.items.push(entry);
-        (page.has_more, page.next_cursor) =
-            continuation(start, page.items.len(), total, &fingerprint);
-        if serde_json::to_vec(&page)
-            .map_err(|_| page_error("could not serialize related page"))?
-            .len()
-            > PAGE_BYTES
-        {
-            page.items.pop();
-            if page.items.is_empty() {
-                return Err(page_error(
-                    "a relation entry cannot fit the 65536-byte page budget; shorten oversized identity/location fields or relation names in the source",
-                ));
-            }
-            (page.has_more, page.next_cursor) =
-                continuation(start, page.items.len(), total, &fingerprint);
             break;
         }
     }
@@ -260,6 +173,16 @@ pub(crate) fn cursor_position(
     usize::from_str_radix(position, 16).map_err(|_| invalid())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct SearchExcerpt {
+    pub text: String,
+    pub start_byte: usize,
+    pub end_byte: usize,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub partial: bool,
+}
+
 pub(crate) fn excerpts(source: &str, item: &Item, terms: &BTreeSet<String>) -> Vec<SearchExcerpt> {
     if terms.is_empty() {
         return Vec::new();
@@ -365,3 +288,6 @@ pub(crate) fn matching_spans(
         })
         .collect()
 }
+
+const EXCERPT_CHARS: usize = 240;
+const EXCERPT_COUNT: usize = 3;

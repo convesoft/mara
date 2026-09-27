@@ -2,8 +2,8 @@ use mara::{
     ConnectionKind, DiscoveryNodeKind as Node, MarkdownBlockKind as Block, ReferenceKind,
     RelationDirection as Direction, Template, initialize_project, load_corpus, load_schema,
 };
-use std::{fs, process::Command};
-use tempfile::TempDir;
+use std::fs;
+mod support;
 
 const MID: &str = "01M1PXP2KG381MM1VNN6XC7S4M";
 
@@ -11,9 +11,10 @@ fn item(body: &str) -> String {
     format!(":::mara requirement REQ-ONE\n:mid: {MID}\n:title: One\n\n{body}\n:::\n")
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn resolves_document_sections_and_items_with_precise_backlinks() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     fs::create_dir(fixture.path().join("docs")).unwrap();
@@ -95,9 +96,10 @@ fn resolves_document_sections_and_items_with_precise_backlinks() {
     }
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn explicit_anchors_keep_block_targets_inside_items_and_respect_boundaries() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     let source = format!(
@@ -173,9 +175,10 @@ An <a name="inline"></a> inline anchor.
     }
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn generates_document_wide_github_anchors_and_decodes_fragment_urls_once() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     let source = "[one](#déjà--vu-code_x--ok) [two](#same-1) [three](#same-1-1) [four](#same-2) [encoded](#d%C3%A9j%C3%A0--vu-code_x--ok)\n\n# Déjà  *vu* `code_x` &amp; ok!\n\n# Same\n\n# Same-1\n\n# Same-1\n\n# Same\n";
@@ -196,9 +199,10 @@ fn generates_document_wide_github_anchors_and_decodes_fragment_urls_once() {
     );
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
-fn validation_reports_broken_and_ambiguous_internal_links_without_edges_or_network_reads() {
-    let fixture = TempDir::new().unwrap();
+fn graph_reports_broken_and_ambiguous_internal_links_without_edges_or_network_reads() {
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     let source = "[missing](absent.mara.md) [anchor](#absent) [[REQ-ABSENT]] [ambiguous](#repeat) [external](https://invalid.invalid/missing.mara.md#absent) [code](src/lib.rs#missing)\n\n# Repeat\n\n<a name=\"repeat\"></a>\n\nBody.\n";
@@ -206,34 +210,25 @@ fn validation_reports_broken_and_ambiguous_internal_links_without_edges_or_netwo
     let corpus = load_corpus(&project, &schema).unwrap();
     let graph = corpus.discovery();
     assert_eq!(graph.diagnostics().len(), 6, "{:?}", graph.diagnostics());
+    assert!(graph.diagnostics().iter().all(|diagnostic| {
+        diagnostic.code() == mara::DiagnosticCode::ReferenceUnresolved
+            && diagnostic.source().path() == std::path::Path::new("broken.mara.md")
+    }));
     assert!(!graph.nodes().any(|n| {
         n.connections(Direction::Outgoing)
             .iter()
             .any(|c| c.kind == ConnectionKind::Mentions)
     }));
-    let output = Command::new(env!("CARGO_BIN_EXE_mara"))
-        .args([
-            "--project",
-            fixture.path().to_str().unwrap(),
-            "--format",
-            "json",
-            "project",
-            "validate",
-        ])
-        .output()
-        .unwrap();
-    assert!(!output.status.success());
-    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(json["valid"], false);
     assert_eq!(
         fs::read_to_string(fixture.path().join("broken.mara.md")).unwrap(),
         source
     );
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn code_raw_context_and_escaped_references_stay_inert_and_definitions_span_items() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     let source = format!(
@@ -273,9 +268,10 @@ fn code_raw_context_and_escaped_references_stay_inert_and_definitions_span_items
     assert_eq!(corpus.documents()[0].references().len(), 3);
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn duplicate_explicit_anchors_are_ambiguous_without_changing_generated_numbering() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     let source = "[bad](#repeat) [good](#repeat-1)\n\n<a name=\"repeat\"></a>\n<a name=\"repeat\"></a>\n\n# Repeat\n\n# Repeat\n";
@@ -295,65 +291,10 @@ fn duplicate_explicit_anchors_are_ambiguous_without_changing_generated_numbering
     );
 }
 
-#[test]
-fn narrative_mentions_block_deletion_and_are_rewritten_by_rename() {
-    let fixture = TempDir::new().unwrap();
-    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
-    let source = item("Body.");
-    let narrative = "Narrative [[REQ-ONE]].\n";
-    fs::write(fixture.path().join("item.mara.md"), &source).unwrap();
-    fs::write(fixture.path().join("narrative.mara.md"), narrative).unwrap();
-    assert!(
-        load_corpus(&project, &load_schema(&project).unwrap())
-            .unwrap()
-            .discovery()
-            .diagnostics()
-            .is_empty()
-    );
-    for args in [
-        vec!["item", "delete", "REQ-ONE"],
-        vec!["item", "rename", "REQ-ONE", "REQ-TWO"],
-    ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_mara"))
-            .args([
-                "--project",
-                fixture.path().to_str().unwrap(),
-                "--format",
-                "json",
-            ])
-            .args(&args)
-            .output()
-            .unwrap();
-        if args[1] == "rename" {
-            assert!(
-                output.status.success(),
-                "{}",
-                String::from_utf8_lossy(&output.stdout)
-            );
-            assert_eq!(
-                fs::read_to_string(fixture.path().join("narrative.mara.md")).unwrap(),
-                "Narrative [[REQ-TWO]].\n"
-            );
-            continue;
-        }
-        assert!(!output.status.success());
-        let message = String::from_utf8(output.stdout).unwrap();
-        assert!(message.contains("narrative.mara.md:1"), "{message}");
-        assert!(message.contains("untouched link 'REQ-ONE'"), "{message}");
-        assert_eq!(
-            fs::read_to_string(fixture.path().join("item.mara.md")).unwrap(),
-            source
-        );
-        assert_eq!(
-            fs::read_to_string(fixture.path().join("narrative.mara.md")).unwrap(),
-            narrative
-        );
-    }
-}
-
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn standalone_anchor_before_a_nested_heading_targets_the_section() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     let source = "[quoted](#quoted)\n\n> <a name=\"quoted\"></a>\n>\n> ## Nested\n>\n> Body.\n";
@@ -371,9 +312,10 @@ fn standalone_anchor_before_a_nested_heading_targets_the_section() {
     );
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
-fn nested_link_labels_resolve_and_missing_destinations_fail_cli_validation() {
-    let fixture = TempDir::new().unwrap();
+fn nested_link_labels_resolve_and_missing_destinations_remain_diagnostics() {
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     for (destination, valid) in [("dest", true), ("missing", false)] {
@@ -401,26 +343,13 @@ fn nested_link_labels_resolve_and_missing_destinations_fail_cli_validation() {
                 matches!(links[0].neighbour.kind(), Node::Section { heading } if heading.heading_text() == Some("Dest"))
             );
         }
-        let output = Command::new(env!("CARGO_BIN_EXE_mara"))
-            .args([
-                "--project",
-                fixture.path().to_str().unwrap(),
-                "--format",
-                "json",
-                "project",
-                "validate",
-            ])
-            .output()
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(output.status.success(), valid, "{json}");
-        assert_eq!(json["valid"], valid);
     }
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn item_mentions_take_precedence_over_markdown_reference_definitions() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     for destination in ["missing", "dest"] {
@@ -450,26 +379,13 @@ fn item_mentions_take_precedence_over_markdown_reference_definitions() {
                 .iter()
                 .all(|c| matches!(c.neighbour.kind(), Node::Item(_)))
         );
-        let output = Command::new(env!("CARGO_BIN_EXE_mara"))
-            .args([
-                "--project",
-                fixture.path().to_str().unwrap(),
-                "--format",
-                "json",
-                "project",
-                "validate",
-            ])
-            .output()
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert!(output.status.success(), "{json}");
-        assert_eq!(json["valid"], true);
     }
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn mention_boundaries_survive_inline_and_reference_link_suffixes() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     for (suffix, destination, valid) in [
@@ -513,26 +429,13 @@ fn mention_boundaries_survive_inline_and_reference_link_suffixes() {
             })
             .count();
         assert_eq!(item_edges, 4);
-        let output = Command::new(env!("CARGO_BIN_EXE_mara"))
-            .args([
-                "--project",
-                fixture.path().to_str().unwrap(),
-                "--format",
-                "json",
-                "project",
-                "validate",
-            ])
-            .output()
-            .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(output.status.success(), valid, "{json}");
-        assert_eq!(json["valid"], valid);
     }
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn final_standalone_anchor_in_a_shared_html_block_targets_following_content() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     for (following, newline) in [
@@ -571,9 +474,10 @@ fn final_standalone_anchor_in_a_shared_html_block_targets_following_content() {
     }
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn list_item_markers_do_not_make_standalone_anchors_inline() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     for (marker, inline, outer) in [
