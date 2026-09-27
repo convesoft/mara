@@ -55,7 +55,7 @@ commit_preprocessors = [
 ]
 commit_parsers = [
   { message = "^docs: generate .+ changelog", skip = true },
-  { message = "^chore: release 0\\.3\\.0$", skip = true },
+  { message = "^chore: release 0\\.3\\.0[[:space:]]", skip = true },
   { message = "^feat", group = "Added" },
   { message = "^fix", group = "Fixed" },
   { message = "^perf", group = "Performance" },
