@@ -327,9 +327,13 @@ pub struct Diagnostic {
 enum DiagnosticKind {
     Other,
     MissingMid,
+    MissingBody,
 }
 
 impl Diagnostic {
+    pub(crate) fn is_missing_body(&self) -> bool {
+        self.kind == DiagnosticKind::MissingBody
+    }
     pub(crate) fn is_missing_mid(&self) -> bool {
         self.kind == DiagnosticKind::MissingMid
     }
@@ -840,6 +844,29 @@ pub struct Corpus {
     code: crate::CodeIndex,
 }
 impl Corpus {
+    pub(crate) fn with_replacements(
+        &self,
+        replacements: &BTreeMap<PathBuf, String>,
+        schema: &Schema,
+    ) -> Result<Self, Error> {
+        let mut documents = self.documents.documents.clone();
+        for (path, source) in replacements {
+            let document = parse_document_source(path, source, schema)?;
+            if let Some(existing) = documents.iter_mut().find(|entry| entry.path() == path) {
+                *existing = document;
+            } else {
+                documents.push(document);
+            }
+        }
+        documents.sort_by(|left, right| left.path().cmp(right.path()));
+        Ok(Self {
+            documents: DocumentSet {
+                documents,
+                complete: self.documents.complete,
+            },
+            code: self.code.clone(),
+        })
+    }
     pub fn discovery(&self) -> crate::DiscoveryGraph<'_> {
         crate::DiscoveryGraph::new(self)
     }
@@ -1037,6 +1064,8 @@ pub fn validate_corpus(corpus: &Corpus, schema: &Schema) -> Vec<Diagnostic> {
                 item.body_source(),
                 "required body is empty".into(),
             );
+            diagnostics.last_mut().expect("diagnostic was added").kind =
+                DiagnosticKind::MissingBody;
         }
 
         let mut fields: BTreeMap<&str, Vec<&MetadataEntry>> = BTreeMap::new();
@@ -1557,4 +1586,36 @@ pub(crate) fn parse_document_source(
     schema: &Schema,
 ) -> Result<Document, Error> {
     parse_document(path.to_path_buf(), source.to_owned(), schema)
+}
+
+pub(crate) fn document_is_discoverable(project: &Project, relative: &Path) -> Result<bool, Error> {
+    let content = content_matcher(project)?;
+    if !is_mara_document(relative) || !content.is_match(relative) {
+        return Ok(false);
+    }
+    let mut ancestor = project.root().to_path_buf();
+    for component in relative.parent().into_iter().flat_map(Path::components) {
+        ancestor.push(component.as_os_str());
+        let metadata = fs::symlink_metadata(&ancestor).map_err(|source| Error::Io {
+            action: "inspect document discovery path",
+            path: ancestor.clone(),
+            source,
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Ok(false);
+        }
+    }
+    let mut matchers = walker_builder(project.root()).build_matchers();
+    let mut ignores = matchers
+        .pop()
+        .expect("a walker builder produces one matcher for its root");
+    let (matched, error) = ignores.matched_with_errors(relative, false);
+    if let Some(source) = error {
+        return Err(Error::Io {
+            action: "evaluate document discovery",
+            path: project.root().join(relative),
+            source: io::Error::other(source),
+        });
+    }
+    Ok(!matched.is_ignore())
 }

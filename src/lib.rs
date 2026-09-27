@@ -43,6 +43,7 @@ mod mutation;
 pub use mutation::{
     BackfilledMid, BackfilledMids, TransactionRollback, backfill_mids, rollback_transaction,
 };
+pub use mutation::{InitialRelation, ItemCreation, ItemCreationRequest, create_item};
 mod operations;
 mod rules;
 pub use diagnostics::{
@@ -50,11 +51,11 @@ pub use diagnostics::{
     DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
 };
 pub use operations::{
-    BackfilledMidResult, DeclarationSummary, FieldValue, GetParams, ItemFilterParams,
-    OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, ProjectSummary,
-    RelatedParams, RelationParams, SchemaGetResult, SchemaKind, SchemaListResult, SearchParams,
-    TransactionRollbackResult, ValidationDiagnostic, ValidationResult, ValidationScope,
-    ValidationTargetKind, project_initialize,
+    BackfilledMidResult, DeclarationSummary, FieldValue, GetParams, ItemCreateParams,
+    ItemCreationResult, ItemFilterParams, OperationContext, ProjectInitializationResult,
+    ProjectMidBackfillResult, ProjectSummary, RelatedParams, RelationParams, SchemaGetResult,
+    SchemaKind, SchemaListResult, SearchParams, TransactionRollbackResult, ValidationDiagnostic,
+    ValidationResult, ValidationScope, ValidationTargetKind, project_initialize,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";

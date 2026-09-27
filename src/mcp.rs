@@ -1,5 +1,6 @@
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams};
 use mara::{GetParams, GetResult};
+use mara::{InitialRelation, ItemCreateParams, ItemCreationResult};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
     Template, ValidationResult,
@@ -19,6 +20,52 @@ use std::path::PathBuf;
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ProjectParams {
     project: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemCreateToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Schema-declared flavour; discover names with schema_list(kind="flavour"), then read selection guidance with schema_get(kind="flavour", name=NAME).
+    flavour: String,
+    /// New unique human ID with the flavour's prefix (for example REQ-EXAMPLE), not a MID. Mara generates the MID.
+    id: String,
+    /// Destination project-relative *.mara.md path selected by project discovery; parent directory must exist. Creates the file if absent; no absolute paths or .. components.
+    file: PathBuf,
+    /// Single-line title; surrounding whitespace is trimmed. Empty or whitespace-only titles and line breaks are rejected.
+    title: String,
+    /// Schema-declared custom fields only; excludes structural title/MID metadata and typed relations. Repeat keys only when schema-repeatable. Omitted or [] supplies none; required fields must be supplied. Values are schema-validated scalar text, trimmed, with line breaks rejected; empty values remain present when schema-valid. Use relations for initial edges or relation_add for later edits.
+    #[serde(default)]
+    fields: Vec<FieldValue>,
+    /// Initial schema-declared outgoing typed relations, created atomically with the item. Targets are exact human IDs, canonical MIDs, or external:HTTP(S) URLs; the new ID may target itself. Duplicate edges are rejected. Omitted or [] adds none; use relation_add/relation_remove for later edits.
+    #[serde(default)]
+    relations: Vec<InitialRelation>,
+    /// Literal Markdown body (- is literal; no stdin). Supports [[relation:ID]] and [[relation:MID]] typed assertions. An omitted, null, empty, or whitespace-only required body creates an incomplete scaffold.
+    #[serde(default)]
+    body: Option<String>,
+    /// Insert before this one-based destination line; valid range is 1 through line_count + 1 (end of file). Omitted or null appends. Insertion inside another item is rejected.
+    #[serde(default)]
+    line: Option<usize>,
+}
+
+impl ItemCreateToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, ItemCreateParams) {
+        (
+            self.project,
+            ItemCreateParams {
+                flavour: self.flavour,
+                id: self.id,
+                file: self.file,
+                title: self.title,
+                fields: self.fields,
+                relations: self.relations,
+                body: self.body,
+                line: self.line,
+            },
+        )
+    }
 }
 
 #[derive(Clone)]
@@ -254,6 +301,18 @@ impl MaraMcp {
             .map(Json)
     }
 
+    #[tool(
+        name = "item_create",
+        description = "Create one item with a generated MID and optional initial outgoing relations atomically in a project-relative Mara document; an omitted or blank required body creates an incomplete scaffold. Read schema_get flavour guidance and relation endpoints first. Newly authored references must resolve; reject changes that break or retarget surviving links, including shifted heading anchors."
+    )]
+    fn item_create(
+        &self,
+        Parameters(params): Parameters<ItemCreateToolParams>,
+    ) -> Result<Json<ItemCreationResult>, String> {
+        let (project, params) = params.into_parts();
+        self.for_project(project)?.item_create(params).map(Json)
+    }
+
     fn for_project(&self, project: Option<PathBuf>) -> Result<OperationContext, String> {
         self.operations.for_project(project)
     }
@@ -314,7 +373,7 @@ impl MaraMcp {
 
 #[tool_handler(
     name = "mara",
-    instructions = "This rebuild checkpoint provides project initialization, schema inspection/definition validation, item listing, search, get, related, relation inspection, MID backfill and explicit transaction rollback. Pass an absolute project path per call, or omit it for execution-directory discovery. When the server starts with --project, omit request-level project selection, including for project_init. Initialization requires an explicit destination only when the server is unbound. Further capabilities await their implementation reviews."
+    instructions = "This rebuild checkpoint provides project initialization, schema inspection/definition validation, item creation/listing, search, get, related, relation inspection, MID backfill and explicit transaction rollback. Pass an absolute project path per call, or omit it for execution-directory discovery. When the server starts with --project, omit request-level project selection, including for project_init. Initialization requires an explicit destination only when the server is unbound. Further capabilities await their implementation reviews."
 )]
 impl ServerHandler for MaraMcp {}
 

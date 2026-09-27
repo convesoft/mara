@@ -4,6 +4,7 @@ use crate::{
 use crate::{
     GetResult, RelatedFilters, RelatedResult, RelationDirection, SearchResult, get, related, search,
 };
+use crate::{InitialRelation, ItemCreationRequest, create_item};
 mod validation;
 use crate::{
     FlavourDefinition, Project, RelationDefinition, Schema, Template, initialize_project,
@@ -64,6 +65,43 @@ impl OperationContext {
                 })?,
             template,
         )
+    }
+
+    pub fn item_create(&self, request: ItemCreateParams) -> Result<ItemCreationResult, String> {
+        let (project, schema) = self.load_project()?;
+        let id = request.id.clone();
+        let created = create_item(
+            &project,
+            &schema,
+            ItemCreationRequest {
+                flavour: request.flavour,
+                id: request.id,
+                file: request.file,
+                title: request.title,
+                fields: request
+                    .fields
+                    .into_iter()
+                    .map(|field| (field.key, field.value))
+                    .collect(),
+                relations: request.relations,
+                body: request.body,
+                line: request.line,
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        let complete = created.is_complete();
+        Ok(ItemCreationResult {
+            id,
+            mid: created.mid().to_owned(),
+            path: created.path().to_path_buf(),
+            line: created.line(),
+            complete,
+            missing: if complete {
+                Vec::new()
+            } else {
+                vec!["body".into()]
+            },
+        })
     }
 
     pub fn project_mid_backfill(&self) -> Result<ProjectMidBackfillResult, String> {
@@ -444,4 +482,33 @@ pub struct BackfilledMidResult {
     pub mid: String,
     pub path: PathBuf,
     pub line: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ItemCreateParams {
+    pub flavour: String,
+    pub id: String,
+    pub file: PathBuf,
+    pub title: String,
+    /// Schema-declared custom fields only; excludes title, MID, and typed relations.
+    #[serde(default)]
+    pub fields: Vec<FieldValue>,
+    /// Initial outgoing edges, validated and created atomically. Omitted or empty adds none.
+    #[serde(default)]
+    pub relations: Vec<InitialRelation>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub line: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ItemCreationResult {
+    pub id: String,
+    pub mid: String,
+    pub path: PathBuf,
+    pub line: usize,
+    pub complete: bool,
+    pub missing: Vec<String>,
 }

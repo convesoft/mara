@@ -683,8 +683,8 @@ fn bootstrap_advertises_only_its_available_operations() {
         ),
         (
             vec!["item", "--help"],
-            vec!["list"],
-            vec!["get", "create", "validate", "search"],
+            vec!["create", "list"],
+            vec!["get", "validate", "search"],
         ),
     ] {
         let output = mara(fixture.path(), &args);
@@ -725,6 +725,7 @@ fn bootstrap_advertises_only_its_available_operations() {
         names,
         [
             "get",
+            "item_create",
             "item_list",
             "project_init",
             "project_mid_backfill",

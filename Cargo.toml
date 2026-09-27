@@ -44,3 +44,5 @@ unicode-segmentation = "1.13"
 url = "2.5"
 
 tempfile = "3"
+
+similar = { version = "3.2.0", default-features = false, features = ["text"] }

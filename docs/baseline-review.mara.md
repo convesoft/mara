@@ -7,7 +7,7 @@ review; it does not authorize removing behavior. Product contracts live in the
 linked capability documents rather than in this inventory.
 
 The active candidate now supports project initialization, schema inspection and
-definition validation, item listing, unified search, bounded get, direct navigation, relation inspection, MID backfill and explicit
+definition validation, item creation/listing, unified search, bounded get, direct navigation, relation inspection, MID backfill and explicit
 journal rollback. Corpus conformance, document/code discovery
 and the document graph are reviewed dependencies. Earlier full-runtime test rows
 remain historical where their edit or validation transports
@@ -445,3 +445,33 @@ no dependency version changes. No production behavior correction was needed.
 The portable-mode recovery case asserts readonly preservation; exact Unix
 permission preservation is asserted when the journal records unix_mode. Omitting
 that field does not carry enough information to reconstruct Unix mode bits.
+
+## Item creation review
+
+Selected increment: CLI/MCP item creation, including required-body scaffolds,
+explicit line insertion and initial outgoing relations. Dependencies are the
+existing corpus, conformance, relation projection and mutation lock/write helper;
+add projected document replacements and creation-only reference preflight.
+
+| Area | Review and disposition |
+|---|---|
+| Request/candidate | Retain scalar/field/prefix/uniqueness checks, generated MID, optional body/scaffold result, initial ID/MID/self/external edges, alias normalization and semantic duplicate rejection. Candidate conformance still rejects non-finite numbers even though the early numeric parser accepts them. |
+| Source/discovery | Retain confined regular-file destinations with existing parents, content/ignore/symlink discovery checks, one-based insertion coordinates, blank separators, line endings and existing permissions. Parse the candidate, require exactly one new item and exact rendered body, then publish once. |
+| Reference dependency | Retain character-diff correspondence by stable item identity or document narrative scope, structural target comparison and surviving occurrence matching. Preserve resolved targets when headings/anchors shift; validate newly authored references without requiring unrelated existing diagnostics to disappear. Restore only the creation entry point; rename-token and explicitly edited-body exemptions remain deferred. The baseline similar 3.2.0 text dependency provides this immediate correspondence requirement. |
+| Tests | Retain complete/scaffold, inline/stdin body, fields, insertion/source preservation, hidden destinations, body escape, initial edge success/refusal/self/scaffold and unrelated-reference-error groups. Preserve mixed validation/update/rename/delete tests for their checkpoints. Exercise duplicate heading retargeting and valid unchanged targets through creation, plus CLI/MCP create-read-related parity. |
+
+Completion requires real authoring workflows, candidate conformance, source/link
+preservation, all prior suites, formatting/Clippy, canonical validation, selected
+traceability and evidence for the committed revision. No relation editing,
+item update/delete/move/rename, rule evaluator or project validation transport is
+included.
+
+Twelve creation groups retain complete/scaffold and optional-body behavior,
+stdin versus MCP literal input, typed fields, safe line insertion, containment,
+discovery confinement, real create/get/related parity, initial-edge refusal,
+self/empty edges, heading-link protection, independent old/new reference errors
+and writer blocking. Candidate conformance rejects non-finite numbers before
+publication. The schema allows requirement-to-requirement derives_from; the
+wrong-target fixture instead uses follows to an actual scenario. No production
+behavior correction was needed. The reference helper omits rename and edited-body
+parameters/exemptions; shared structural correspondence checks remain intact.

@@ -4,6 +4,7 @@ use mara::{
     SearchParams,
 };
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams, ItemSummary};
+use mara::{InitialRelation, ItemCreateParams};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
     Template, ValidationOptions, ValidationResult, ValidationTargetKind, project_initialize,
@@ -14,7 +15,7 @@ use std::{
     collections::BTreeMap,
     env,
     ffi::OsString,
-    io::{self, Write},
+    io::{self, Read, Write},
     path::PathBuf,
     process::ExitCode,
 };
@@ -25,7 +26,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation, item listing, unified search, bounded get, direct navigation, relation inspection, MID backfill and explicit transaction rollback. Further capabilities are pending their implementation reviews."
+    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation, item creation/listing, unified search, bounded get, direct navigation, relation inspection, MID backfill and explicit transaction rollback. Further capabilities are pending their implementation reviews."
 )]
 struct Cli {
     /// Use this project root instead of ancestor discovery; selects the init target or binds MCP.
@@ -110,7 +111,7 @@ enum Command {
         #[command(subcommand)]
         command: RelationCommand,
     },
-    /// List compact item summaries.
+    /// Create and list structured items.
     Item {
         #[command(subcommand)]
         command: ItemCommand,
@@ -434,6 +435,46 @@ fn run(cli: Cli) -> Result<bool, String> {
         }
 
         Command::Item {
+            command:
+                ItemCommand::Create {
+                    flavour,
+                    id,
+                    file,
+                    title,
+                    fields,
+                    relations,
+                    body,
+                    line,
+                },
+        } => {
+            let body = read_body(body)?;
+            let result =
+                OperationContext::from_environment(project)?.item_create(ItemCreateParams {
+                    flavour,
+                    id,
+                    file,
+                    title,
+                    fields: fields.into_iter().map(Into::into).collect(),
+                    relations,
+                    body,
+                    line,
+                })?;
+            emit(format, &result, |result| {
+                println!(
+                    "created item '{}' with MID {} at {}:{}",
+                    result.id,
+                    result.mid,
+                    result.path.display(),
+                    result.line
+                );
+                println!("complete: {}", result.complete);
+                for missing in &result.missing {
+                    println!("missing: {missing}");
+                }
+                Ok(())
+            })?;
+        }
+        Command::Item {
             command: ItemCommand::List { filters },
         } => {
             let result =
@@ -668,6 +709,38 @@ fn print_validation(result: &ValidationResult) -> Result<(), String> {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
+    /// Create an item with a generated MID and optional initial relations, or a body scaffold.
+    #[command(
+        after_help = "Choose a flavour from schema get flavour <NAME>: description explains purpose, use_when gives selection criteria, avoid_when gives exclusions, and distinguish_from compares other flavours. These are schema guidance, not item fields. Inspect relation endpoints before adding initial edges. Newly authored references must resolve; creation rejects changes that break or retarget surviving links, including shifted heading anchors."
+    )]
+    Create {
+        /// Schema-declared flavour; discover names with schema list flavour, then read selection guidance with schema get flavour NAME.
+        flavour: String,
+        /// New unique human ID with the flavour's prefix (for example REQ-EXAMPLE); not a MID.
+        id: String,
+        /// Destination project-relative *.mara.md file; parent must exist and discovery must include it. Creates the file if absent; no absolute paths or .. components.
+        file: PathBuf,
+
+        /// Single-line item title; surrounding whitespace is trimmed. Empty or whitespace-only titles and line breaks are rejected.
+        #[arg(long)]
+        title: String,
+
+        #[arg(long = "field", value_parser = parse_field, help = "Schema-declared custom KEY=VALUE field; repeat only for repeatable keys. Values are schema-validated scalar text: surrounding whitespace is trimmed and line breaks are rejected. KEY= supplies an empty value when schema-valid; supply all required fields. Excludes title, MID, and typed relations; use --relation or relation add for edges")]
+        fields: Vec<CliField>,
+
+        #[arg(long = "relation", value_name = "NAME=TARGET", value_parser = parse_initial_relation,
+            help = "Initial schema-declared outgoing relation, created atomically with the item (repeatable). TARGET is an exact human ID, canonical MID, or external:HTTP(S) URL; the new ID may target itself. Duplicate edges are rejected; omission adds none. Later edits use relation add/remove")]
+        relations: Vec<InitialRelation>,
+
+        /// Body text, or - to read stdin; supports [[relation:ID]] and [[relation:MID]] assertions. An omitted, empty, or whitespace-only required body creates an incomplete scaffold.
+        #[arg(long)]
+        body: Option<String>,
+
+        /// Insert before this one-based line; valid range is 1 through line_count + 1 (end of file). Omission appends. Insertion inside another item is rejected.
+        #[arg(long)]
+        line: Option<usize>,
+    },
+
     /// List bounded item summaries in document-path and source order.
     List {
         #[command(flatten)]
@@ -1020,4 +1093,30 @@ fn print_project_mid_backfill(result: &ProjectMidBackfillResult) -> Result<(), S
         );
     }
     Ok(())
+}
+
+fn parse_initial_relation(value: &str) -> Result<InitialRelation, String> {
+    let (relation, target) = value
+        .split_once('=')
+        .ok_or_else(|| "relation must use NAME=TARGET".to_owned())?;
+    if relation.is_empty() || target.is_empty() {
+        return Err("relation name and target must not be empty".into());
+    }
+    Ok(InitialRelation {
+        relation: relation.to_owned(),
+        target: target.to_owned(),
+    })
+}
+
+fn read_body(body: Option<String>) -> Result<Option<String>, String> {
+    match body.as_deref() {
+        Some("-") => {
+            let mut body = String::new();
+            io::stdin()
+                .read_to_string(&mut body)
+                .map_err(|error| format!("could not read item body from stdin: {error}"))?;
+            Ok(Some(body))
+        }
+        _ => Ok(body),
+    }
 }
