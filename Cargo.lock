@@ -1537,6 +1537,7 @@ dependencies = [
  "clap",
  "globset",
  "ignore",
+ "petgraph",
  "rmcp",
  "rudof_iri",
  "rudof_rdf",
@@ -1547,11 +1548,15 @@ dependencies = [
  "serde_json",
  "sha2",
  "shacl",
+ "strsim",
  "tempfile",
  "tokio",
  "toml 1.1.4+spec-1.1.0",
  "tree-sitter",
  "ulid",
+ "unicode-casefold",
+ "unicode-normalization",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -3447,10 +3452,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
 
 [[package]]
+name = "unicode-casefold"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b7f66b1c8f8caa2ab31dc6d3f35386f16efdab89668f93411e565ac368908e8f"
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.25"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fd4f6878c9cb28d874b009da9e8d183b5abc80117c40bbd187a1fde336be6e8"
+dependencies = [
+ "tinyvec",
+]
+
+[[package]]
+name = "unicode-segmentation"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "unicode-width"

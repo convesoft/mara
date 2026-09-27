@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
+use mara::SearchParams;
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams, ItemSummary};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
@@ -20,7 +21,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation and item listing. Further capabilities are pending their implementation reviews."
+    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation, item listing and unified search. Further capabilities are pending their implementation reviews."
 )]
 struct Cli {
     /// Use this project root instead of ancestor discovery; selects the init target or binds MCP.
@@ -35,6 +36,24 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Search items and narrative with one source excerpt; exact matches rank first, then ID/title/heading weights. Item filters exclude narrative; ID/MID words and filters stay exact.
+    #[command(
+        after_help = "Discovery JSON format_version: 2 returns results: [{node, excerpt}]. Pass node.reference to get or related. Excerpts support selection; use get for complete content. Structural handles identify a document snapshot; search again after that document changes. Search has no node-kind filter."
+    )]
+    Search {
+        /// Unicode case-insensitive words to match across items, section headings, and ordinary Markdown blocks; every distinct word must match. An empty string or punctuation-only text matches all search units within the filters.
+        query: String,
+
+        #[command(flatten)]
+        filters: ItemFilterArgs,
+
+        #[arg(
+            long = "id",
+            help = "Select exact human IDs or canonical MIDs (uppercase 26-character ULIDs); repeat for OR, intersected with other filters. Omission adds no restriction"
+        )]
+        ids: Vec<String>,
+    },
+
     /// List compact item summaries.
     Item {
         #[command(subcommand)]
@@ -211,6 +230,55 @@ fn run(cli: Cli) -> Result<bool, String> {
         command,
     } = cli;
     match command {
+        Command::Search {
+            query,
+            filters,
+            ids,
+        } => {
+            let filters = filters.into_params();
+            let result = OperationContext::from_environment(project)?.search(SearchParams {
+                query,
+                flavours: filters.flavours,
+                fields: filters.fields,
+                relations: filters.relations,
+                paths: filters.paths,
+                limit: filters.limit,
+                cursor: filters.cursor,
+                ids,
+            })?;
+            emit(format, &result, |page| {
+                for hit in &page.results {
+                    let node = &hit.node;
+                    let kind = node.block_kind.map_or_else(
+                        || format!("{:?}", node.kind),
+                        |kind| format!("Block({kind:?})"),
+                    );
+                    println!(
+                        "{}\t{}\t{}:{}\t{}{}",
+                        node.id.as_deref().unwrap_or(&node.reference),
+                        kind,
+                        node.source.path().display(),
+                        node.source.start_line(),
+                        node.title.as_deref().unwrap_or_default(),
+                        if node.title_truncated {
+                            " [title truncated]"
+                        } else {
+                            ""
+                        }
+                    );
+                    println!(
+                        "excerpt\tpartial={}\t{}:{}\t{}",
+                        hit.excerpt.partial,
+                        node.source.path().display(),
+                        hit.excerpt.start_line,
+                        hit.excerpt.text
+                    );
+                }
+                print_page_continuation(page.has_more, page.next_cursor.as_deref());
+                Ok(())
+            })?;
+        }
+
         Command::Item {
             command: ItemCommand::List { filters },
         } => {
@@ -450,7 +518,7 @@ struct ItemFilterArgs {
     #[arg(long = "field", value_parser = parse_field)]
     fields: Vec<CliField>,
 
-    /// Select items with these exact authored outgoing schema relation names (repeatable, OR). Inverse aliases match their canonical declaration. Omission adds no restriction.
+    /// Select items with these exact authored outgoing schema relation names (repeatable, OR). Inverse aliases match their canonical declaration; search accepts schema:name for ambiguous built-in names. Omission adds no restriction.
     #[arg(long)]
     relation: Vec<String>,
 

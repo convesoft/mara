@@ -20,9 +20,15 @@ pub use corpus::{
     load_corpus, load_documents, load_documents_for_validation,
     load_documents_syntax_for_validation,
 };
+mod discovery;
+pub use discovery::{
+    ConnectionKind, DiscoveryConnection, DiscoveryContext, DiscoveryGraph, DiscoveryKind,
+    DiscoveryNode, DiscoveryNodeKind, DiscoveryNodeSummary,
+};
 mod query;
 pub use query::{
-    FieldFilter, ItemCollectionResult, ItemFilters, ItemSummary, QueryError, list_items,
+    FieldFilter, ItemCollectionResult, ItemFilters, ItemSource, ItemSummary, QueryError,
+    RelationDirection, SearchExcerpt, SearchHit, SearchResult, list_items, search,
 };
 mod operations;
 mod rules;
@@ -33,7 +39,7 @@ pub use diagnostics::{
 pub use operations::{
     DeclarationSummary, FieldValue, ItemFilterParams, OperationContext,
     ProjectInitializationResult, ProjectSummary, SchemaGetResult, SchemaKind, SchemaListResult,
-    ValidationDiagnostic, ValidationResult, ValidationScope, ValidationTargetKind,
+    SearchParams, ValidationDiagnostic, ValidationResult, ValidationScope, ValidationTargetKind,
     project_initialize,
 };
 

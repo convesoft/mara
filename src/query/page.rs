@@ -24,7 +24,7 @@ pub(crate) fn filtered_page(
         &filters.fields,
         &filters.relations,
         &filters.paths,
-        &Vec::<String>::new(),
+        &filters.ids,
         false,
         None::<&str>,
         limit,
@@ -172,3 +172,122 @@ pub(crate) fn cursor_position(
     }
     usize::from_str_radix(position, 16).map_err(|_| invalid())
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct SearchExcerpt {
+    pub text: String,
+    pub start_byte: usize,
+    pub end_byte: usize,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub partial: bool,
+}
+
+pub(crate) fn excerpts(source: &str, item: &Item, terms: &BTreeSet<String>) -> Vec<SearchExcerpt> {
+    if terms.is_empty() {
+        return Vec::new();
+    }
+    let mut values = Vec::new();
+    let opener_start = item.source().span().start_byte();
+    let opener = &source[opener_start..item.source().span().end_byte()];
+    // The ID is the last token on the opening line. Metadata values are trimmed
+    // scalars; locate their original bytes rather than reconstructing a line.
+    let id_offset = opener
+        .lines()
+        .next()
+        .expect("item opener")
+        .rfind(item.id())
+        .expect("item ID in opener");
+    values.push((opener_start + id_offset, item.id(), false));
+    for entry in item.metadata() {
+        let start = entry.source().span().start_byte();
+        let line = &source[start..entry.source().span().end_byte()];
+        values.push((start + 1, entry.key(), true));
+        let prefix = entry.key().len() + 2;
+        let after_key = &line[prefix..];
+        let whitespace = after_key.len() - after_key.trim_start().len();
+        values.push((
+            start + prefix + whitespace,
+            entry.value(),
+            entry.key() != "mid",
+        ));
+    }
+    values.push((item.body_source().span().start_byte(), item.body(), true));
+    let mut fragments = Vec::new();
+    for (base, value, fuzzy) in values {
+        let mut covered_until = 0;
+        for (start, _) in matching_spans(value, terms, fuzzy) {
+            if start < covered_until {
+                continue;
+            }
+            let context_start = value[..start]
+                .char_indices()
+                .rev()
+                .nth(59)
+                .map_or(0, |(offset, _)| offset);
+            let context_start = context_start.max(covered_until);
+            let end = value[context_start..]
+                .char_indices()
+                .nth(EXCERPT_CHARS)
+                .map_or(value.len(), |(offset, _)| context_start + offset);
+            covered_until = end;
+            let start_byte = base + context_start;
+            let end_byte = base + end;
+            fragments.push(SearchExcerpt {
+                text: source[start_byte..end_byte].to_owned(),
+                start_byte,
+                end_byte,
+                start_line: line_at(source, start_byte),
+                end_line: line_at(source, end_byte - 1),
+                partial: true,
+            });
+            if fragments.len() == EXCERPT_COUNT {
+                return fragments;
+            }
+        }
+    }
+    fragments
+}
+
+pub(crate) fn line_at(source: &str, byte: usize) -> usize {
+    source.as_bytes()[..byte]
+        .iter()
+        .filter(|b| **b == b'\n')
+        .count()
+        + 1
+}
+
+pub(crate) fn matching_spans(
+    value: &str,
+    terms: &BTreeSet<String>,
+    fuzzy: bool,
+) -> Vec<(usize, usize)> {
+    // Normalize whole grapheme clusters so composition and case-fold expansion
+    // retain a mapping to their original source bytes (e.g. cafe + accent, ß).
+    let mut canonical = String::new();
+    let mut mapping = Vec::new();
+    for (start, grapheme) in value.grapheme_indices(true) {
+        let normalized_start = canonical.len();
+        canonical.push_str(&canonical_text(grapheme));
+        mapping.push((
+            normalized_start,
+            canonical.len(),
+            start,
+            start + grapheme.len(),
+        ));
+    }
+    canonical
+        .unicode_word_indices()
+        .filter(|(_, word)| {
+            terms.contains(*word) || (fuzzy && terms.iter().any(|term| word_matches(term, word)))
+        })
+        .map(|(start, word)| {
+            let first = mapping.partition_point(|entry| entry.1 <= start);
+            let last = mapping.partition_point(|entry| entry.0 < start + word.len()) - 1;
+            (mapping[first].2, mapping[last].3)
+        })
+        .collect()
+}
+
+const EXCERPT_CHARS: usize = 240;
+const EXCERPT_COUNT: usize = 3;

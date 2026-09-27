@@ -1,8 +1,8 @@
 # Document structure and direct navigation
 
 Items, narrative, sections and documents share one disposable source-backed
-graph. These contracts own structure, references and node handles. Search ranking
-and full retrieval bounds are a separate capability under review.
+graph. These contracts own structure, references and node handles. Search selection and ranking follow the [retrieval contracts](retrieval.mara.md);
+complete node reads and navigation transports remain separate checkpoints.
 
 :::mara requirement REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
 :mid: 01M232S32V718GRMEHSBPY46CQ

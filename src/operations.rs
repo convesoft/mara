@@ -1,4 +1,5 @@
 use crate::{Corpus, FieldFilter, ItemCollectionResult, ItemFilters, list_items, load_corpus};
+use crate::{SearchResult, search};
 mod validation;
 use crate::{
     FlavourDefinition, Project, RelationDefinition, Schema, Template, initialize_project,
@@ -112,6 +113,18 @@ impl OperationContext {
                 .collect(),
         };
         Ok(SchemaListResult { kind, declarations })
+    }
+
+    pub fn search(&self, params: SearchParams) -> Result<SearchResult, String> {
+        let (corpus, schema) = self.load_query_project()?;
+        let (query, filters, ids) = params.into_parts();
+        search(
+            &corpus,
+            &schema,
+            &query,
+            &filters.into_domain().with_ids(ids),
+        )
+        .map_err(|error| error.to_string())
     }
 
     pub fn item_list(&self, filters: ItemFilterParams) -> Result<ItemCollectionResult, String> {
@@ -272,5 +285,42 @@ impl ItemFilterParams {
             self.limit,
         )
         .with_cursor(self.cursor)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SearchParams {
+    pub query: String,
+    #[serde(default)]
+    pub flavours: Vec<String>,
+    #[serde(default)]
+    pub fields: Vec<FieldValue>,
+    #[serde(default)]
+    pub relations: Vec<String>,
+    #[serde(default)]
+    pub paths: Vec<PathBuf>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub ids: Vec<String>,
+}
+
+impl SearchParams {
+    pub fn into_parts(self) -> (String, ItemFilterParams, Vec<String>) {
+        (
+            self.query,
+            ItemFilterParams {
+                flavours: self.flavours,
+                fields: self.fields,
+                relations: self.relations,
+                paths: self.paths,
+                limit: self.limit,
+                cursor: self.cursor,
+            },
+            self.ids,
+        )
     }
 }

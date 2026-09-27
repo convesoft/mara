@@ -6,6 +6,12 @@ means the implementation and its distinct verification obligations still need
 review; it does not authorize removing behavior. Product contracts live in the
 linked capability documents rather than in this inventory.
 
+The active candidate now supports project initialization, schema inspection and
+definition validation, item listing and unified search. Document/code discovery
+and the document graph are reviewed dependencies. Earlier full-runtime test rows
+remain historical where their edit, validation, read or navigation transports
+have not yet been restored. The sections below identify current checkpoints.
+
 | Baseline capability | Disposition and review boundary |
 |---|---|
 | Product intent and scenarios | Retain the two goals and eleven scenarios with their original identities in [product intent](product.mara.md). Add flows for connected editing, interrupted-edit recovery, and code associations from the existing baseline contracts. Remove obsolete release-relative wording from document-context discovery. No behavior change. |
@@ -25,8 +31,8 @@ linked capability documents rather than in this inventory.
 ## Runtime and remaining test obligations
 
 Commit `8205108` imported the complete baseline runtime before its capability
-reviews. This was not the agreed incremental rebuild. The current bootstrap must
-be corrected before advancing another capability; previously recorded results
+reviews. This was not the agreed incremental rebuild. The bootstrap correction
+was committed as `7155e42`; previously recorded results
 remain evidence for their exact revisions, not approval of the unreviewed runtime.
 The installed baseline executable remains an authoring tool, not the candidate.
 
@@ -44,13 +50,13 @@ candidate-corpus validation, link-preservation preflight and transaction recover
 Source/identity/navigation tests also exercise these operations. Preserving all
 those workflows in the active build would retain unreviewed dependencies.
 
-The user approved the narrow boundary on 2026-09-27. The active candidate now
-contains five source files: project/schema decoding and template publication,
+The user approved the narrow boundary on 2026-09-27. That correction checkpoint
+contained five source files: project/schema decoding and template publication,
 configuration diagnostics, operation wrappers, CLI dispatch, and stdio MCP.
-Only `project init`, `schema get/list`, and their three MCP tools are advertised.
+Only `project init`, `schema get/list`, and their three MCP tools were advertised.
 The full implementation remains preserved at `198a3aa` and in the original
 baseline. No history is rewritten. Prior reviewed rows above record historical
-work; source/identity/navigation/retrieval are not active in this checkpoint.
+work; source/identity/navigation/retrieval were inactive at that correction checkpoint.
 
 ### Bootstrap correction review
 
@@ -240,3 +246,44 @@ A read-only candidate/installed-baseline comparison traversed all 56 repository
 items in three pages with identical JSON, including continuation tokens. No
 listing behavior change was needed. The corrected path help describes behavior
 already accepted and tested in the preserved baseline.
+
+## Unified search checkpoint review
+
+Selected increment: top-level CLI/MCP `search`, preserving discovery format 2,
+item/section/outermost-block ownership, exact filters, ranked complete-word
+matching, source-backed excerpts and bounded continuation. The existing strict
+corpus loader already supplies document and code prerequisites. The remaining
+call path is search → full document discovery graph, source summaries and
+Unicode matching; no rule evaluation, mutation or code navigation is required.
+
+| Area | Review and disposition |
+|---|---|
+| Structure dependency | Retain the three discovery modules: local heading scopes, original section/container spans, canonical item-edge occurrences, reference/anchor resolution and source-backed summary/handle indexing. The constructor always builds direct links; keep its complete library projection. Private graph indexes never escape. Existing structure contracts remain canonical. |
+| Reference/handle failures | Retain source-only external/non-Mara links without network reads, percent decoding once, document-wide duplicate anchors, exact ID/MID resolution, ambiguity and stale-handle errors. Preserve current completeness gating on missing-reference diagnostics. Source reads never repair identities. |
+| Search units | Retain owning items, section headings and outermost ordinary blocks; descendants of items/blocks contribute to their owner, document roots are excluded. Item-specific filters exclude narrative. Parent headings provide context without inherited matches. |
+| Matching/ranking | Retain NFC/case-fold/NFC complete Unicode words, distinct-term AND, exact-only ID/MID fields, query-length edit budgets 0/1/2 and Damerau swaps. Exact-all matches lead; each term contributes its highest field weight, 3 for ID/title/heading and 1 otherwise. No repetition, node-kind or graph bonus; ties use source order. |
+| Excerpts/bounds | Retain one default original-source excerpt per hit, 240-scalar window and exact byte/line mapping through normalization and decoded headings. Reuse existing count/byte/cursor helpers. Preserve single large nodes and explicit oversized-summary failure. Search has format 2; remove obsolete format-1/release-relative prose when restoring its contract. |
+| Filtering/transport | Retain selected IDs resolved exactly before filtering, OR/AND field behavior and path normalization from listing. Search schema relations accept schema: qualification and reject ambiguous built-in names from vocabulary. Expose only top-level search; do not revive item_search or optional excerpt/kind controls. |
+| Dependency tests | Restore nine independent discovery groups; keep actual create/update reload test pending. Restore direct link/anchor/span/inert-context tests; keep mutation and validation transport assertions pending, retaining their original tests. Restore source-handle stability/bounds checks with direct isolated fixture creation; preserve edit-command checks for mutation review. |
+| Search tests | Retain distinct groups for mixed ownership/ranking, Unicode/exact identity matching, edit-distance boundaries, filters and selected IDs, directory/page composition, byte bounds, decoded-heading source offsets, removed options and stale cursors. Replace backfill-only fixture setup with fixture-owned identities; do not import editing to prepare read tests. |
+
+Completion requires real CLI/stdin MCP parity and complete pages, matching source
+spans, selected traceability and canonical validation, prior-suite regressions,
+formatting/Clippy, and exact-revision evidence. Restored graph library coverage
+must not be reported as completion of related/get or project validation.
+
+
+The restored search suite contains 14 retained groups and one shared-filter
+regression. Structure checks retain
+9 discovery, 4 handle and 12 reference groups. Direct fixture creation replaces
+create/backfill setup only. CLI create/update graph reload, mutation identity,
+rename/delete preservation, full-title get and validation-transport assertions
+remain unchanged in pending references; graph/span assertions from mixed tests
+run now. No production behavior change was needed. The installed-baseline
+comparison matched full JSON/cursors for empty, exact, misspelled and multi-term
+queries over the real repository, consuming every page.
+
+Restoring selected-ID state to the shared filters also requires restoring it in
+the list fingerprint. The new library regression changes selected identities
+between list pages and requires rejection; empty-ID CLI listing remains unchanged.
+This preserves the baseline request-binding invariant during composition.

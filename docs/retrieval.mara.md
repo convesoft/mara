@@ -63,3 +63,96 @@ A separate read-only self-hosting comparison traversed all 56 then-current repos
 
 This is the restored item-list vertical slice composed from the separately verified document and code dependencies. Search, get, related, semantic project validation, code endpoint navigation, mutations and other baseline capabilities remain pending. The installed authoring binary was not replaced.
 :::
+
+:::mara requirement REQ-DOCUMENT-CONTEXT-DISCOVERY
+:mid: 01M1XSKPPMJAFMZK0WD8243M4P
+:title: Discover canonical context outside item blocks
+:status: accepted
+:kind: functional
+:derives_from: SCN-READ-DOCUMENT-CONTEXT
+
+CLI `search` and MCP `search` discover matching items, sections, and ordinary Markdown blocks in one bounded surface, including narrative-only documents. Return explicit kinds, exact source locations, structural context and continuation. Narrative needs no authored identity or flavour. Do not duplicate item-body hits or add a separate document-search operation. Structure and reusable references follow [[DES-DOCUMENT-STRUCTURE]]; search selection follows [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]].
+:::
+
+:::mara requirement REQ-ITEM-SEARCH
+:mid: 01M1PXP2KGKART3Y9XWADR46F5
+:title: Search items deterministically with scope filters
+:status: accepted
+:kind: functional
+:derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
+
+Unified `search <text>` deterministically matches item ID, title, body, and metadata keys/values. Every distinct query term must match a complete word in the result's own searchable values, in any order and across fields. Scope filters and selected IDs are exact. Include fuzzy matches under [[REQ-FUZZY-ITEM-SEARCH]] and order results under [[REQ-SEARCH-RELEVANCE]]. Listing remains the separate compact operation under [[REQ-ITEM-LIST]].
+:::
+
+:::mara design DES-DETERMINISTIC-KEYWORD-SEARCH
+:mid: 01M1PXP2KGHS11B9YGCD35EP8S
+:title: Replaceable deterministic keyword matching
+:status: accepted
+:kind: behavior
+:satisfies: REQ-ITEM-SEARCH
+:satisfies: REQ-FUZZY-ITEM-SEARCH
+:satisfies: REQ-SEARCH-RELEVANCE
+
+Apply NFC normalization, full default Unicode case folding, NFC again, and Unicode word segmentation to queries and searchable values. Deduplicate query terms. Compare complete words with exact equality or the query-length limits in [[REQ-FUZZY-ITEM-SEARCH]], using `strsim` Damerau-Levenshtein distance. Retain originating fields for exact-only identity matching and the weights in [[REQ-SEARCH-RELEVANCE]]. Excerpt matching normalizes grapheme clusters while retaining their original byte ranges, preserving composition and case-fold expansion. This is a disposable projection over working sources; it writes no index or project data.
+:::
+
+:::mara requirement REQ-FUZZY-ITEM-SEARCH
+:mid: 01M1RY3ME6RSKJ8DBXYN7VYTBX
+:title: Recover word matches containing small spelling errors
+:status: accepted
+:kind: functional
+:derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
+
+Search always combines exact and typo-tolerant whole-word matches without a mode flag. ID and MID field values permit exact normalized word matches only; titles, body, metadata keys and other values permit typo tolerance, including text that resembles a handle. Empty-term queries match all eligible results. After normalization under [[DES-DETERMINISTIC-KEYWORD-SEARCH]], query words of 1–3 Unicode scalars permit zero edits, 4–7 permit one, and 8 or more permit two. Edits include insertions, deletions, substitutions and adjacent swaps. Apply the same matching to excerpt occurrences. This is not stemming, synonyms, substring or subsequence search.
+:::
+
+:::mara requirement REQ-SEARCH-RELEVANCE
+:mid: 01M1RY3MEY6HVP2Z8AFVE7YAH8
+:title: Rank search results reproducibly by relevance
+:status: accepted
+:kind: functional
+:derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
+
+Every distinct query term must match the result's own content. Results with exact matches for every term precede results needing typo tolerance. Within those groups, sum each term's highest matching field weight: ID/title/heading 3, body/other metadata 1. Headings inside an item contribute to that item. Repeated occurrences add no weight; parent titles, graph degree, node kind and document length add no bonus. Break ties by document path and source order, then apply bounds. Listing remains in source order.
+:::
+
+:::mara design DES-UNIFIED-KNOWLEDGE-DISCOVERY
+:mid: 01M232SX5VJZ65J1ZGGKZ556S9
+:title: Search items and Markdown blocks through one discovery surface
+:status: accepted
+:kind: behavior
+:satisfies: REQ-DOCUMENT-CONTEXT-DISCOVERY
+
+## Search selection
+
+Top-level CLI `search` and MCP `search` return discovery format 2. `item search`, `item_search`, optional excerpt flags and node-kind filters remain removed. Select owning items, section headings and outermost ordinary Markdown blocks from the complete discovery graph under [[DES-DOCUMENT-STRUCTURE]]. Documents are not search hits. Descendants of items or blocks contribute to their owner; a section matches its heading, not descendant text. Whole large blocks remain one result.
+
+Reuse exact field/flavour/path and canonical authored-relation filtering under [[DES-ITEM-LIST]]. Any ID/flavour/field/relation filter selects items only; path filters also permit narrative. Selected IDs/MIDs use OR and resolve exactly before intersecting other filters; missing/ambiguous IDs fail even if another filter would exclude them. Search relation filters accept `schema:` qualification; a name shared with built-in `contains` or `mentions` is ambiguous even when no conflicting edge is present. Search does not traverse built-in connections to find matches.
+
+## Results and continuation
+
+Use matching/ranking under [[DES-DETERMINISTIC-KEYWORD-SEARCH]] and [[REQ-SEARCH-RELEVANCE]]. Return `{format_version: 2, results: [{node, excerpt}], has_more, next_cursor}`. Nodes use the existing structural summary contract. Each hit includes one original-source excerpt of at most 240 Unicode scalars with byte/line ranges and a partial marker. Locate matches through normalized-word and decoded-heading source maps; never reconstruct displayed source. Item field excerpts conservatively report partial content. Without a field match, use a window from the owning source span.
+
+Search retains the same 20-default/1–100 limit and 65,536-byte domain-result budget as listing. Preserve identity/location/context fields and fail on an indivisible oversized result. Filters and ordering precede pagination. Reuse source/schema/code/adapter/file-only invalidation from [[DES-ITEM-LIST]], with a distinct search discriminator, query and selected IDs. Reject malformed/stale/out-of-range cursors with a restart instruction. CLI and stdio MCP expose the same domain results. Complete node reads and direct-neighbour transports remain separately verified capabilities.
+:::
+
+:::mara verification VER-UNIFIED-SEARCH
+:mid: 01M3H0MJBCNTCDT5FER1Q1AG0F
+:title: Search canonical items and narrative through real CLI and MCP
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-DOCUMENT-CONTEXT-DISCOVERY
+:verifies: REQ-ITEM-SEARCH
+:verifies: REQ-FUZZY-ITEM-SEARCH
+:verifies: REQ-SEARCH-RELEVANCE
+:verifies: DES-DETERMINISTIC-KEYWORD-SEARCH
+:verifies: DES-UNIFIED-KNOWLEDGE-DISCOVERY
+:verifies: DES-DOCUMENT-STRUCTURE
+
+Run `cargo test --locked --test search --test discovery --test discovery_handles --test references` against the candidate. Use disposable project-owned fixtures and actual CLI/stdin MCP processes; named repository checks are explicitly read-only. Direct fixture creation may assign fixture identities; it does not prove product mutation/backfill.
+
+Require mixed item/section/owning-block results without inherited parent terms or duplicate body hits. Verify exact-all ranking, per-term field weights and stable ties; Unicode normalization, edit-distance boundaries and exact-only identities; exact field/path/relation and ID/MID selection, including empty queries and vocabulary ambiguity. Consume bounded pages with matching CLI/MCP domain results; verify count/byte limits, original-source excerpts and decoded-heading offsets, oversized result errors, stale cursors and rejection of retired options.
+
+Dependency checks preserve local graph scopes, exact UTF-8/CRLF/EOF spans, shared definitions, direct reference provenance/anchors, inert source contexts, summary bounds, deterministic handles across process restarts and edits to other documents. Keep source bytes unchanged. Validation-transport and real mutation assertions remain preserved for their respective checkpoints; these library checks do not establish those operations. Run all previously restored suites, formatting and Clippy before recording evidence.
+:::

@@ -661,8 +661,8 @@ fn bootstrap_advertises_only_its_available_operations() {
     for (args, present, absent) in [
         (
             vec!["--help"],
-            vec!["project", "schema", "item", "mcp"],
-            vec!["search", "trace"],
+            vec!["project", "schema", "item", "mcp", "search"],
+            vec!["trace"],
         ),
         (
             vec!["project", "--help"],
@@ -721,7 +721,8 @@ fn bootstrap_advertises_only_its_available_operations() {
             "project_init",
             "schema_get",
             "schema_list",
-            "schema_validate"
+            "schema_validate",
+            "search"
         ]
     );
 }

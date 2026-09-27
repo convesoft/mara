@@ -1,3 +1,4 @@
+use mara::SearchParams;
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
@@ -104,8 +105,69 @@ impl ItemFilterToolParams {
     }
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SearchToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Unicode case-insensitive words matched across items, section headings, and ordinary Markdown blocks. Every distinct word must match; empty or punctuation-only text matches all search units within the filters.
+    query: String,
+    /// Exact flavour names, combined with OR and intersected with other filter categories. Omitted or [] selects all flavours.
+    #[serde(default)]
+    flavours: Vec<String>,
+    /// Exact schema-declared custom-field key/value filters; excludes title/MID and typed relations. Key and scalar text value match exactly, without trimming; an empty value matches an empty field value. OR within one key, AND across keys and other filter categories. Omitted or [] adds no restriction.
+    #[serde(default)]
+    fields: Vec<FieldValue>,
+    /// Exact authored outgoing schema relation names, combined with OR and intersected with other filters. Use schema:name to qualify; an unqualified name shared with a built-in is ambiguous. Omitted or [] adds no restriction.
+    #[serde(default)]
+    relations: Vec<String>,
+    /// Exact documents or directory subtrees relative to the project root, combined with OR. No glob expansion, absolute paths, .. or empty/root-only paths; dot components and repeated separators normalize; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
+    #[serde(default)]
+    paths: Vec<PathBuf>,
+    /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid.
+    #[serde(default)]
+    cursor: Option<String>,
+    /// Exact human IDs or canonical MIDs (uppercase 26-character ULIDs), combined with OR and intersected with other filters. Omitted or [] adds no restriction.
+    #[serde(default)]
+    ids: Vec<String>,
+}
+
+impl SearchToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, SearchParams) {
+        (
+            self.project,
+            SearchParams {
+                query: self.query,
+                ids: self.ids,
+                flavours: self.flavours,
+                fields: self.fields,
+                relations: self.relations,
+                paths: self.paths,
+                limit: self.limit,
+                cursor: self.cursor,
+            },
+        )
+    }
+}
+
 #[tool_router]
 impl MaraMcp {
+    #[tool(
+        name = "search",
+        description = "Search every distinct query word with typo tolerance, ranked by relevance before pagination. Exact matches rank first; ID/title/heading matches carry more weight. ID/MID field words and all filters stay exact. Search items, section headings, and outermost Markdown blocks. Discovery format_version: 2 returns results: [{node, excerpt}]. One bounded source excerpt is automatic; item filters exclude narrative, and there is no node-kind filter. Pass node.reference to get for complete content or related for direct connections. Follow next_cursor with unchanged inputs; restart after source/schema changes. Structural handles identify a document snapshot; search again after that document changes."
+    )]
+    fn search(
+        &self,
+        Parameters(params): Parameters<SearchToolParams>,
+    ) -> Result<Json<mara::SearchResult>, String> {
+        let (project, params) = params.into_parts();
+        self.for_project(project)?.search(params).map(Json)
+    }
+
     #[tool(
         name = "item_list",
         description = "List bounded item-summary pages in document-path and source order. Continue with next_cursor and unchanged options; restart after source/schema changes."

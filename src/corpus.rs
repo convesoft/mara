@@ -167,6 +167,9 @@ pub struct MarkdownBlock {
 }
 
 impl MarkdownBlock {
+    pub(crate) fn heading_source_offset(&self, byte: usize) -> Option<usize> {
+        self.heading_source_offsets.get(byte).copied()
+    }
     pub fn kind(&self) -> MarkdownBlockKind {
         self.kind
     }
@@ -822,6 +825,9 @@ pub struct Corpus {
     code: crate::CodeIndex,
 }
 impl Corpus {
+    pub fn discovery(&self) -> crate::DiscoveryGraph<'_> {
+        crate::DiscoveryGraph::new(self)
+    }
     pub fn documents(&self) -> &[Document] {
         self.documents.documents()
     }
