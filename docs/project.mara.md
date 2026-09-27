@@ -199,6 +199,7 @@ Fixtures live in disposable directories with their own configuration and Git sta
 :verifies: REQ-FLAVOUR-AUTHORING-GUIDANCE
 :verifies: DES-OPERATION-PROJECT-CONTEXT
 :verifies: DES-FLAVOUR-AUTHORING-GUIDANCE
+:verifies: DES-PROJECT-CONFIGURATION
 
 Run `cargo test --locked --test project_bootstrap` against the candidate CLI and real stdio MCP server in disposable projects with isolated Git/configuration state. Check current, named and explicit initialization targets; all three bundled templates; existing-file preservation and conflicting-target rejection; nearest and explicit discovery; and absolute per-call selection versus bound-server override rejection.
 
@@ -261,6 +262,8 @@ Project/item validation shares this response family under [[DES-TRACE-DIAGNOSTIC
 :verifies: REQ-FLAVOUR-AUTHORING-GUIDANCE
 :verifies: DES-SCHEMA-VALIDATION
 :verifies: DES-SCHEMA-RULE-DEFINITIONS
+:verifies: DES-PROJECT-CONFIGURATION
+:verifies: DES-SCHEMA-VOCABULARY
 
 Run `cargo test --locked --test schema_validation` against the candidate CLI and real stdio MCP server in isolated temporary projects. Verify all bundled schemas/rule definitions; invalid schema vocabulary, structural names and guidance; configuration recovery, stable codes and authored locations; reusable and nested definition type checks; unsupported grammar, recursion and depth boundaries; and valid counterparts.
 
@@ -279,4 +282,31 @@ Run `cargo test --locked --test interface --test project_bootstrap` against the 
 Check CLI argument-parse errors with JSON selection before and after the command, human error output, and help/version output. Require undeclared MCP arguments to fail before side effects, including MID backfill in a document with a missing MID; source must remain unchanged. Inspect all advertised tool schemas for rejection of undeclared top-level inputs.
 
 Review the actual help and tool descriptions for truthfulness and current scope. Run formatting, Clippy and the full relevant regression suite. Record the exact tested revision and concrete CLI/MCP results; inspecting schemas alone does not establish successful operation execution.
+:::
+
+:::mara design DES-PROJECT-CONFIGURATION
+:mid: 01M3HMWNYRY2251Z2YDV9SJGQX
+:title: Load strict project-owned configuration
+:status: accepted
+:kind: data
+:satisfies: REQ-PROJECT-DISCOVERY
+:satisfies: REQ-PROJECT-INITIALIZATION
+
+The project-root marker is .mara/project.toml. Its required [project] table contains a nonblank name and project-relative schema path; [content].include contains project-relative glob patterns. Absolute and parent-traversing schema paths or patterns are invalid. Normalize current-directory components in content patterns and match separators literally. Reject malformed values and unknown keys instead of silently accepting misspelled settings. Schema file availability and independent configuration failures are reported by [[DES-SCHEMA-VALIDATION]]. Document discovery and ignore behavior follow [[DES-DOCUMENT-FORMAT]].
+
+Supported project format_version values are 1, 2 and 3. Format 1 has no rules or code bindings; format 2 permits rules, and format 3 additionally permits code language bindings. Rule-source declarations follow [[DES-SCHEMA-RULE-DEFINITIONS]]; code settings follow [[DES-CODE-TRACEABILITY]]. Application, project, schema and public-result versions are independent contracts. Initialization chooses the bundled template settings under [[REQ-ENGINEERING-TEMPLATE]], derives the project name from its destination, and never replaces existing configuration. No persisted query index is required: requests read current project-owned source. [[implemented_by:code:src/lib.rs]]
+:::
+
+:::mara design DES-SCHEMA-VOCABULARY
+:mid: 01M3HMZMCWJQBNZVN4B47B9P67
+:title: Declare typed project vocabulary
+:status: accepted
+:kind: data
+:satisfies: REQ-SCHEMA-DISCOVERY
+
+A schema defines project-owned flavours and relations, with no hardcoded business taxonomy. Each flavour declares a lowercase snake_case name, an uppercase ID prefix ending in a hyphen, body: required or optional, and the selection guidance defined by [[DES-FLAVOUR-AUTHORING-GUIDANCE]]. fields is an optional mapping, empty when omitted. Unknown declaration keys and malformed values are invalid.
+
+Custom fields use lowercase snake_case names and flat string, integer, number, boolean or enum values. required and repeatable default to false. Enum fields require a nonempty list of unique nonempty values without surrounding whitespace; other field types cannot declare values. mid, flavour, id, title and body are reserved structural names and cannot be custom fields. Relation names cannot collide with a custom field on an eligible author flavour. Typed relationship declarations follow [[DES-CANONICAL-TRACE-RELATIONS]], rather than using custom fields for edges.
+
+Bundled minimal, empty and engineering schemas are editable starting points under [[REQ-ENGINEERING-TEMPLATE]]. Their exact flavour/relation inventories reside in the template files and are available through schema get; there is no second hand-maintained inventory. Item scalar conformance follows [[DES-CORPUS-CONFORMANCE]]. [[implemented_by:code:src/lib.rs]]
 :::

@@ -1003,3 +1003,29 @@ fn engineering_realization_accepts_requirements_and_designs() {
     check(&["DES-EXPORT"], 1);
     check(&["REQ-EXPORT", "DES-EXPORT"], 2);
 }
+
+// @mara implements VER-PROJECT-INSPECTION
+// @mara checks REQ-PROJECT-DISCOVERY
+#[test]
+fn current_directory_content_patterns_discover_project_documents() {
+    let fixture = fixture();
+    let init = mara(fixture.path(), &["project", "init"]);
+    assert!(init.status.success(), "{}", stderr(&init));
+    let project_file = fixture.path().join(".mara/project.toml");
+    let project = fs::read_to_string(&project_file).unwrap();
+    fs::write(
+        &project_file,
+        project.replace("**/*.mara.md", "./**/*.mara.md"),
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("included.mara.md"),
+        ":::mara requirement REQ-INCLUDED\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: Included\n\nBody.\n:::\n",
+    )
+    .unwrap();
+
+    let validate = mara(fixture.path(), &["item", "validate", "REQ-INCLUDED"]);
+
+    assert!(validate.status.success(), "{}", stderr(&validate));
+    assert!(stdout(&validate).contains("valid item 'REQ-INCLUDED'"));
+}

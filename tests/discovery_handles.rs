@@ -308,3 +308,63 @@ fn summaries_round_trip_across_process_restarts() {
         );
     }
 }
+
+fn cli(root: &Path, args: &[&str]) -> Value {
+    let output = support::command(root)
+        .args(["--format", "json"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+// @mara implements VER-DOCUMENT-NAVIGATION
+// @mara checks REQ-DURABLE-ITEM-IDENTITY
+#[test]
+fn item_mids_resolve_after_real_cli_update_rename_and_move() {
+    let fixture = support::fixture();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    cli(
+        fixture.path(),
+        &[
+            "item",
+            "create",
+            "requirement",
+            "REQ-ONE",
+            "item.mara.md",
+            "--title",
+            "One",
+            "--body",
+            "# Local\n\nBody.",
+        ],
+    );
+    let corpus = load_corpus(&project, &schema).unwrap();
+    let graph = corpus.discovery();
+    let item = graph.resolve("REQ-ONE").unwrap();
+    let mid = item.reference().to_owned();
+    assert_eq!(mid, corpus.items().next().unwrap().mid().unwrap());
+    let section_handle = item.children()[0].reference().to_owned();
+    cli(
+        fixture.path(),
+        &["item", "update", &mid, "--title", "Changed"],
+    );
+    cli(fixture.path(), &["item", "rename", &mid, "REQ-NEW"]);
+    cli(fixture.path(), &["item", "move", &mid, "moved.mara.md"]);
+    let corpus = load_corpus(&project, &schema).unwrap();
+    let graph = corpus.discovery();
+    let value = serde_json::to_value(graph.resolve(&mid).unwrap().summary()).unwrap();
+    assert_eq!(value["reference"], mid);
+    assert_eq!(value["id"], "REQ-NEW");
+    assert_eq!(value["title"], "Changed");
+    assert_eq!(value["source"]["path"], "moved.mara.md");
+    assert_eq!(graph.resolve("REQ-NEW").unwrap().reference(), mid);
+    assert!(graph.resolve("REQ-ONE").is_err());
+    assert!(graph.resolve(&section_handle).is_err());
+    assert_eq!(cli(fixture.path(), &["project", "validate"])["valid"], true);
+}

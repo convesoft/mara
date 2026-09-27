@@ -484,3 +484,70 @@ fn heading_text_decodes_markdown_text_once_and_preserves_code_literals() {
         assert_eq!(fs::read_to_string(&path).unwrap(), original);
     }
 }
+
+// @mara implements VER-DOCUMENT-NAVIGATION
+// @mara checks DES-DOCUMENT-STRUCTURE
+#[test]
+fn reloads_real_cli_authored_and_updated_items_into_the_graph() {
+    let fixture = support::fixture();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    let path = fixture.path().join("model.mara.md");
+    fs::write(&path, "# Model\n\nNarrative.\n").unwrap();
+    let invoke = |args: &[&str]| {
+        let output = support::command(fixture.path())
+            .args(["--format", "json"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    invoke(&[
+        "item",
+        "create",
+        "requirement",
+        "REQ-REAL",
+        "model.mara.md",
+        "--title",
+        "Real",
+        "--body",
+        "# First\n\nInitial body.",
+    ]);
+    let first = load_corpus(&project, &schema).unwrap();
+    let mid = first.items().next().unwrap().mid().unwrap().to_owned();
+    let graph = first.discovery();
+    assert_eq!(
+        section(&graph, "First").parent().unwrap().source(),
+        item(&graph, "REQ-REAL").source()
+    );
+    invoke(&[
+        "item",
+        "update",
+        "REQ-REAL",
+        "--body",
+        "Prelude.\n\n### Updated\n\n- Child",
+    ]);
+    invoke(&["project", "validate"]);
+    let second = load_corpus(&project, &schema).unwrap();
+    assert_eq!(second.items().next().unwrap().mid(), Some(mid.as_str()));
+    let graph = second.discovery();
+    let real = item(&graph, "REQ-REAL");
+    assert_eq!(
+        real.parent().unwrap().source(),
+        section(&graph, "Model").source()
+    );
+    assert_eq!(real.children().len(), 2);
+    assert_eq!(
+        section(&graph, "Updated").parent().unwrap().source(),
+        real.source()
+    );
+    assert!(!graph.nodes().any(|node| matches!(node.kind(), Node::Section { heading } if heading.heading_text() == Some("First"))));
+    assert_eq!(
+        fs::read_to_string(path).unwrap(),
+        second.documents()[0].source()
+    );
+}

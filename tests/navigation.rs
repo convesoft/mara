@@ -1058,3 +1058,39 @@ fn selected_missing_and_ambiguous_item_targets_fail_without_affecting_other_rela
         assert_eq!(excluded["connections"], json!([]));
     }
 }
+
+// @mara implements VER-DOCUMENT-NAVIGATION
+// @mara checks DES-DIRECT-NAVIGATION
+#[test]
+fn related_orders_incoming_code_before_symmetric_connections() {
+    let fixture = fixture();
+    mara::initialize_project(fixture.path(), mara::Template::Minimal).unwrap();
+    let schema_path = fixture.path().join(".mara/schema.yaml");
+    let schema = fs::read_to_string(&schema_path).unwrap()
+        + "\n  code_implements:\n    description: Code implements the requirement.\n    source: []\n    target: [requirement]\n    code_source: true\n    inverse: implemented_by_code\n  peer:\n    description: Requirements are peers.\n    source: [requirement]\n    target: [requirement]\n    symmetric: true\n";
+    fs::write(&schema_path, schema).unwrap();
+    fs::write(fixture.path().join("a.rs"), "fn run() {}\n").unwrap();
+    fs::write(
+        fixture.path().join("requirements.mara.md"),
+        ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:implemented_by_code: code:a.rs\n:peer: REQ-B\n\nA.\n:::\n\n:::mara requirement REQ-B\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F01\n:title: B\n\nB.\n:::\n\n:::mara requirement REQ-C\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F02\n:title: C\n:depends_on: REQ-A\n\nC.\n:::\n",
+    )
+    .unwrap();
+
+    let result = related_cli_mcp(fixture.path(), "REQ-A", &[]);
+    assert_eq!(result["has_more"], false);
+    let connections = result["connections"].as_array().unwrap();
+    let code = connections
+        .iter()
+        .position(|c| c["neighbour"]["reference"] == "code:a.rs")
+        .unwrap();
+    let incoming = connections
+        .iter()
+        .position(|c| c["direction"] == "incoming" && c["neighbour"]["id"] == "REQ-C")
+        .unwrap();
+    let symmetric = connections
+        .iter()
+        .position(|c| c["direction"] == "symmetric")
+        .unwrap();
+    assert_eq!(connections[code]["direction"], "incoming");
+    assert!(code < incoming && incoming < symmetric);
+}

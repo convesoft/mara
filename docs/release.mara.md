@@ -71,21 +71,3 @@ Review README commands, supported installation paths, license references, provis
 
 Record inspection results separately from release execution. For an actual release, require the workflow's successful source gates, corresponding-host artifact smoke, protected approval, matching tag/revision and registry/GitHub publication results. Local inspection cannot certify remote permissions, approval, other-host execution or publication.
 :::
-
-:::mara evidence EVD-RELEASE-PREPARATION
-:mid: 01M3HMPBPAW4AQYZG3VQBKGJNK
-:title: Release source and public guidance inspection passes
-:status: accepted
-:result: passed
-:captured_at: 2026-09-27T14:35:36Z
-:subject_revision: d9b9f977e203c7d4a698259e953ada7bb349e986
-:evidences: VER-RELEASE-PREPARATION
-
-At `d9b9f977e203c7d4a698259e953ada7bb349e986`, manual inspection of .github/workflows/release.yml, ci.yml, scripts/package-npm.mjs, scripts/smoke-npm.sh, Cargo/toolchain files and cliff.toml confirmed the documented captured-revision gates, four native host jobs, publish dependencies/permissions/environment, tag target and npm digest checks, native-before-dispatcher visibility and public smoke before GitHub publication. Maintainer candidate qualification and externally configured protection/trust are explicitly distinguished from repository automation. The staged retry boundary is documented.
-
-README, roadmap, security guidance and license references were reviewed against current distribution contracts. The generated changelog was inspected as historical release information; no new release was prepared. Installation guidance covers CLI/npm, explicit MCP configuration and separate skill installation. YAML parsing and bash -n passed for all 23 run steps across CI/release workflows; bash -n passed for smoke-npm.sh, and node --check passed for packaging and dispatcher files.
-
-Mara read the complete release section on one page. Candidate schema and project validation completed without diagnostics, one page each. Intent passed both selected requirements on one page; verification passed those requirements and the release design on one page. All continuation pages were consumed. Complete checks used disk-backed temporary storage.
-
-This is source and guidance inspection, not workflow execution. It does not establish remote environment protection, npm trust, approval, native execution on other hosts or publication. Actual packaged host execution is recorded separately at its tested revision.
-:::
