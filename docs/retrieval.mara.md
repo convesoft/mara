@@ -156,3 +156,26 @@ Require mixed item/section/owning-block results without inherited parent terms o
 
 Dependency checks preserve local graph scopes, exact UTF-8/CRLF/EOF spans, shared definitions, direct reference provenance/anchors, inert source contexts, summary bounds, deterministic handles across process restarts and edits to other documents. Keep source bytes unchanged. Validation-transport and real mutation assertions remain preserved for their respective checkpoints; these library checks do not establish those operations. Run all previously restored suites, formatting and Clippy before recording evidence.
 :::
+
+:::mara evidence EVD-UNIFIED-SEARCH
+:mid: 01M3H10FSE3TNZBTCE1TXXJ53T
+:title: Unified search checkpoint verification
+:status: accepted
+:result: passed
+:captured_at: 2026-09-27T08:51:34Z
+:subject_revision: bb389003cb16b743b9af3272f87f3df3dcc45bb9
+:evidences: VER-UNIFIED-SEARCH
+:evidences: VER-ITEM-LIST
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+
+Tested revision `bb389003cb16b743b9af3272f87f3df3dcc45bb9`; Git reported a clean tree before this evidence was added. Linux x86_64, Rust 1.97.1, candidate `/tmp/mara72-target/debug/mara`; build settings `CARGO_TARGET_DIR=/tmp/mara72-target CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_INCREMENTAL=0`.
+
+Passed `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets`: 133 tests (2 units, 13 code discovery, 31 corpus, 9 discovery, 4 handles, 10 item list, 17 bootstrap, 12 references, 20 schema, 15 search), none failed or ignored. Real CLI/stdin MCP fixtures cover mixed ownership, exact/fuzzy Unicode ranking, filters, original-source excerpts, complete bounded pages and stale cursors. The shared-filter regression rejects list continuation after selected IDs change. Fixture identities are created directly; mutation and validation-transport assertions remain pending. Dependency versions and sources remain within the preserved baseline lockfile.
+
+A separate read-only real-repository comparison consumed every search page and matched candidate and installed-baseline JSON exactly, including excerpts and cursors: empty query 127 hits in 2 pages; `schema` 52, `validaton` 52 and `canonical source` 20 hits, each in 1 page. Installed full-baseline MCP schema/project validation completed with zero errors or warnings. Selected intent passed 4 requirements; realization and verification each passed 7 requirement/design roots, with all pages consumed. These authoring checks do not establish candidate project validation or trace matrices.
+
+This checkpoint restores search and its reviewed document graph dependency. Complete get/related transports, code endpoint navigation, mutations, semantic validation and remaining baseline capabilities are still pending. The installed authoring executable was not replaced.
+:::
