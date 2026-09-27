@@ -1,5 +1,5 @@
-//! Disposable, local code projection. Adapters own syntax and symbol selection;
-//! the shared layer owns target grammar, marker meaning and endpoint identity.
+//! Disposable code projection: SCIP owns semantic identity; optional Tree-sitter
+//! assets supply declaration ranges and comment ownership.
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -7,7 +7,10 @@ use std::{
 };
 
 use ignore::WalkBuilder;
+use serde::Deserialize;
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
+
+mod scip_index;
 
 use crate::{DiagnosticCode, Project, SourceLocation, corpus::location};
 
@@ -29,6 +32,7 @@ pub struct CodeFile {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeSymbol {
     pub selector: String,
+    identity: String,
     pub source: SourceLocation,
     pub content: SourceLocation,
     body_start: usize,
@@ -42,6 +46,7 @@ pub struct CodeMarker {
     pub target: String,
     pub endpoint: String,
     pub source: SourceLocation,
+    owner_span: Option<(usize, usize)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,9 +57,30 @@ pub struct CodeProblem {
     pub target: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ReferenceError {
+    MissingFile,
+    MissingSymbol,
+    Ambiguous,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct LanguageConfig {
+    name: String,
+    command: Vec<String>,
+    /// Compatibility for indexers predating SCIP's per-document position encoding.
+    #[serde(default)]
+    position_encoding: Option<scip_index::Encoding>,
+    #[serde(default)]
+    extensions: Vec<String>,
+    grammar: Option<PathBuf>,
+    query: Option<PathBuf>,
+}
+
 struct Adapter {
     extensions: Vec<String>,
-    separator: String,
     parser: Parser,
     query: Query,
 }
@@ -64,15 +90,15 @@ enum AttachmentError {
     Unsupported,
 }
 
+fn matches_extension(path: &Path, extensions: &[String]) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extensions.iter().any(|candidate| candidate == extension))
+}
+
 impl Adapter {
     fn accepts(&self, path: &Path) -> bool {
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| {
-                self.extensions
-                    .iter()
-                    .any(|candidate| candidate == extension)
-            })
+        matches_extension(path, &self.extensions)
     }
 
     fn load(project: &Project) -> Result<(Vec<Self>, Vec<PathBuf>), CodeProblem> {
@@ -89,9 +115,6 @@ impl Adapter {
         for language in project.code_languages() {
             if language.name.is_empty()
                 || language.extensions.is_empty()
-                || language.separator.is_empty()
-                || !valid_asset_path(&language.grammar)
-                || !valid_asset_path(&language.query)
                 || language.extensions.iter().any(|extension| {
                     extension.is_empty()
                         || !extension.chars().all(|ch| ch.is_ascii_alphanumeric())
@@ -99,32 +122,48 @@ impl Adapter {
                 })
             {
                 return Err(fail(format!(
-                    "invalid or duplicate adapter configuration for {}",
+                    "language {} needs nonempty, unique alphanumeric source extensions",
                     language.name
                 )));
             }
-            let grammar = read_project_asset(project, &language.grammar)
-                .map_err(|e| fail(format!("{}: {e}", language.grammar.display())))?;
+            if language.grammar.is_none() && language.query.is_none() {
+                continue;
+            }
+            let (Some(grammar_path), Some(query_path)) = (&language.grammar, &language.query)
+            else {
+                return Err(fail(format!(
+                    "language {} must configure grammar and query together",
+                    language.name
+                )));
+            };
+            if !valid_asset_path(grammar_path) || !valid_asset_path(query_path) {
+                return Err(fail(format!(
+                    "invalid adapter asset path for {}",
+                    language.name
+                )));
+            }
+            let grammar = read_project_asset(project, grammar_path)
+                .map_err(|e| fail(format!("{}: {e}", grammar_path.display())))?;
             let query_source = String::from_utf8(
-                read_project_asset(project, &language.query)
-                    .map_err(|e| fail(format!("{}: {e}", language.query.display())))?,
+                read_project_asset(project, query_path)
+                    .map_err(|e| fail(format!("{}: {e}", query_path.display())))?,
             )
-            .map_err(|e| fail(format!("{}: {e}", language.query.display())))?;
+            .map_err(|e| fail(format!("{}: {e}", query_path.display())))?;
             let engine = tree_sitter::wasmtime::Engine::default();
             let mut store =
                 tree_sitter::WasmStore::new(&engine).map_err(|e| fail(e.to_string()))?;
             let grammar = store
                 .load_language(&language.name, &grammar)
-                .map_err(|e| fail(format!("{}: {e}", language.grammar.display())))?;
+                .map_err(|e| fail(format!("{}: {e}", grammar_path.display())))?;
             let query = Query::new(&grammar, &query_source)
-                .map_err(|e| fail(format!("{}: {e}", language.query.display())))?;
+                .map_err(|e| fail(format!("{}: {e}", query_path.display())))?;
             if query.capture_index_for_name("name").is_none()
                 || query.capture_index_for_name("symbol").is_none()
                 || query.capture_index_for_name("comment").is_none()
             {
                 return Err(fail(format!(
                     "{} must capture @symbol, @name and @comment",
-                    language.query.display()
+                    query_path.display()
                 )));
             }
             let name_capture = query.capture_index_for_name("name").unwrap() as usize;
@@ -142,7 +181,7 @@ impl Adapter {
             }) {
                 return Err(fail(format!(
                     "{} must pair @name with @symbol or @scope in each declaration pattern",
-                    language.query.display()
+                    query_path.display()
                 )));
             }
             let mut parser = Parser::new();
@@ -154,18 +193,19 @@ impl Adapter {
                 .map_err(|e| fail(e.to_string()))?;
             adapters.push(Self {
                 extensions: language.extensions.clone(),
-                separator: language.separator.clone(),
                 parser,
                 query,
             });
-            assets.extend([language.grammar.clone(), language.query.clone()]);
+            assets.extend([grammar_path.clone(), query_path.clone()]);
         }
         Ok((adapters, assets))
     }
 
+    // @mara implements REQ-CODE-TRACEABILITY
     fn attached_symbol<'a>(
         &self,
         comment: Node<'_>,
+        group_end: usize,
         source: &str,
         symbols: &'a [CodeSymbol],
     ) -> Result<Option<&'a CodeSymbol>, AttachmentError> {
@@ -182,9 +222,9 @@ impl Adapter {
                     .iter()
                     .copied()
                     .filter(|start| {
-                        *start >= comment.end_byte()
+                        *start >= group_end
                             && scope_end.is_none_or(|end| *start < end)
-                            && source[comment.end_byte()..*start].trim().is_empty()
+                            && source[group_end..*start].trim().is_empty()
                     })
                     .min()
                     .map(|start| (s, start))
@@ -216,6 +256,30 @@ impl Adapter {
     }
 }
 
+pub(crate) fn split_reference(reference: &str) -> Result<(PathBuf, Option<&str>), ReferenceError> {
+    let rest = reference
+        .strip_prefix("code:")
+        .ok_or(ReferenceError::Unsupported)?;
+    let (path, selector) = rest
+        .split_once("::")
+        .map_or((rest, None), |(p, s)| (p, Some(s)));
+    if path.is_empty()
+        || selector.is_some_and(str::is_empty)
+        || path.contains('\\')
+        || path.chars().any(char::is_whitespace)
+        || path
+            .split('/')
+            .any(|component| component.is_empty() || component == "." || component == "..")
+        || Path::new(path)
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+        || Path::new(path).is_absolute()
+    {
+        return Err(ReferenceError::Unsupported);
+    }
+    Ok((PathBuf::from(path), selector))
+}
+
 fn valid_asset_path(path: &Path) -> bool {
     !path.as_os_str().is_empty()
         && path
@@ -232,17 +296,8 @@ fn read_project_asset(project: &Project, path: &Path) -> Result<Vec<u8>, String>
 }
 
 impl CodeIndex {
-    pub(crate) fn empty(project: &Project) -> Self {
-        Self {
-            root: project.root().to_owned(),
-            files: BTreeMap::new(),
-            assets: vec![PathBuf::from(crate::PROJECT_FILE)],
-        }
-    }
-
-    /// Discover code with local configured adapters, retaining partial data and explicit problems.
+    // @mara implements DES-CODE-TRACEABILITY
     pub fn load(project: &Project) -> (Self, Vec<CodeProblem>) {
-        // @mara implements DES-CODE-TRACEABILITY
         let mut result = Self {
             root: project.root().to_owned(),
             files: BTreeMap::new(),
@@ -259,9 +314,13 @@ impl CodeIndex {
                 return (result, problems);
             }
         };
-        if adapters.is_empty() {
+        if project.code_languages().is_empty() {
             return (result, problems);
         }
+        let indexes = match scip_index::run(project) {
+            Ok(indexes) => indexes,
+            Err(problem) => return (result, vec![problem]),
+        };
         let mut walker = WalkBuilder::new(project.root());
         walker
             .hidden(false)
@@ -318,7 +377,16 @@ impl CodeIndex {
             problems.append(&mut file_problems);
             result.files.insert(path, file);
         }
+        scip_index::apply(project, indexes, &mut result, &mut problems);
         (result, problems)
+    }
+
+    pub(crate) fn empty(project: &Project) -> Self {
+        Self {
+            root: project.root().to_owned(),
+            files: BTreeMap::new(),
+            assets: vec![PathBuf::from(crate::PROJECT_FILE)],
+        }
     }
 
     pub fn assets(&self) -> impl Iterator<Item = &PathBuf> {
@@ -332,9 +400,15 @@ impl CodeIndex {
     pub fn files(&self) -> impl Iterator<Item = &CodeFile> {
         self.files.values()
     }
-}
 
-impl CodeIndex {
+    pub(crate) fn file_only_bytes(&self, path: &Path) -> Option<Vec<u8>> {
+        let canonical = fs::canonicalize(self.root.join(path)).ok()?;
+        if !canonical.starts_with(&self.root) || !canonical.is_file() {
+            return None;
+        }
+        fs::read(canonical).ok()
+    }
+
     // @mara implements DES-CODE-READ
     pub(crate) fn resolve(&self, reference: &str) -> Result<CodeResolved, ReferenceError> {
         let (path, selector) = split_reference(reference)?;
@@ -365,16 +439,19 @@ impl CodeIndex {
             .iter()
             .filter(|symbol| symbol.selector == selector);
         let symbol = matches.next().ok_or(ReferenceError::MissingSymbol)?;
-        if matches.next().is_some() {
-            return Err(ReferenceError::Ambiguous);
+        let mut start = symbol.content.span().start_byte();
+        let mut end = symbol.content.span().end_byte();
+        for declaration in matches {
+            if declaration.identity != symbol.identity {
+                return Err(ReferenceError::Ambiguous);
+            }
+            start = start.min(declaration.content.span().start_byte());
+            end = end.max(declaration.content.span().end_byte());
         }
         Ok(CodeResolved {
             reference: reference.to_owned(),
             source: symbol.source.clone(),
-            content: Some(
-                file.source[symbol.content.span().start_byte()..symbol.content.span().end_byte()]
-                    .to_owned(),
-            ),
+            content: Some(file.source[start..end].to_owned()),
             symbol: Some(symbol.selector.clone()),
         })
     }
@@ -459,15 +536,7 @@ fn parse_file(
             }
         }
         if let (Some((node, selectable)), Some(name_node)) = (declaration, name) {
-            if matches!(
-                name_node.kind(),
-                "computed_property_name" | "string" | "number"
-            ) {
-                continue;
-            }
-            if let Some(name) = source.get(name_node.byte_range()) {
-                declarations.insert(node.id(), (name.to_owned(), name_node, selectable));
-            }
+            declarations.insert(node.id(), (name_node, selectable));
         }
     }
     comments.sort_by_key(|node| (node.start_byte(), node.end_byte()));
@@ -478,11 +547,10 @@ fn parse_file(
         modifiers: &modifiers,
         wrappers: &wrappers,
         comments: &comment_ids,
-        separator: &adapter.separator,
         path: &path,
         lines: &lines,
     };
-    collect(tree.root_node(), &context, &mut Vec::new(), &mut symbols);
+    collect(tree.root_node(), &context, &mut symbols);
     let mut markers = Vec::new();
     let mut problems = Vec::new();
     let reference_path = path
@@ -490,7 +558,18 @@ fn parse_file(
         .map(|component| component.to_string_lossy())
         .collect::<Vec<_>>()
         .join("/");
-    for comment in comments {
+    for (index, &comment) in comments.iter().enumerate() {
+        // Extend ownership across captured comments only. Keep the original
+        // node for lexical scope and locations, and leave content spans alone.
+        let mut group_end = comment.end_byte();
+        for next in &comments[index + 1..] {
+            if next.start_byte() < group_end
+                || !source[group_end..next.start_byte()].trim().is_empty()
+            {
+                break;
+            }
+            group_end = next.end_byte();
+        }
         let raw = &source[comment.byte_range()];
         let mut offset = comment.start_byte();
         for line in raw.split_inclusive('\n') {
@@ -521,7 +600,7 @@ fn parse_file(
                             .map(|target| (*target).to_owned()),
                     });
                 } else {
-                    match adapter.attached_symbol(comment, &source, &symbols) {
+                    match adapter.attached_symbol(comment, group_end, &source, &symbols) {
                         Ok(symbol) => {
                             let endpoint = symbol.map_or_else(
                                 || format!("code:{reference_path}"),
@@ -532,6 +611,12 @@ fn parse_file(
                                 target: parts[1].into(),
                                 endpoint,
                                 source: marker_source,
+                                owner_span: symbol.map(|symbol| {
+                                    (
+                                        symbol.source.span().start_byte(),
+                                        symbol.source.span().end_byte(),
+                                    )
+                                }),
                             });
                         }
                         Err(error) => problems.push(CodeProblem {
@@ -564,11 +649,10 @@ fn parse_file(
 }
 
 struct CollectContext<'tree, 'data> {
-    declarations: &'data BTreeMap<usize, (String, Node<'tree>, bool)>,
+    declarations: &'data BTreeMap<usize, (Node<'tree>, bool)>,
     modifiers: &'data BTreeSet<usize>,
     wrappers: &'data BTreeSet<usize>,
     comments: &'data BTreeSet<usize>,
-    separator: &'data str,
     path: &'data Path,
     lines: &'data [usize],
 }
@@ -576,113 +660,67 @@ struct CollectContext<'tree, 'data> {
 fn collect<'tree>(
     node: Node<'tree>,
     context: &CollectContext<'tree, '_>,
-    prefix: &mut Vec<String>,
     symbols: &mut Vec<CodeSymbol>,
 ) {
     let declaration = context.declarations.get(&node.id());
-    if let Some((name, name_node, selectable)) = &declaration {
-        prefix.push(name.clone());
-        if *selectable {
-            let body = node.child_by_field_name("body");
-            let mut attach_starts = vec![node.start_byte()];
-            let mut outer = node;
-            while let Some(wrapper) = outer
-                .parent()
-                .filter(|p| context.wrappers.contains(&p.id()))
-            {
-                attach_starts.push(wrapper.start_byte());
-                outer = wrapper;
-            }
-            let mut previous = node.prev_named_sibling();
-            while let Some(sibling) = previous {
-                if context.modifiers.contains(&sibling.id()) {
-                    attach_starts.push(sibling.start_byte());
-                } else if !context.comments.contains(&sibling.id()) {
-                    break;
-                }
-                previous = sibling.prev_named_sibling();
-            }
-            let mut cursor = node.walk();
-            let mut has_leading_modifier = false;
-            for child in node.children(&mut cursor) {
-                if context.modifiers.contains(&child.id()) {
-                    attach_starts.push(child.start_byte());
-                    has_leading_modifier = true;
-                } else if !context.comments.contains(&child.id()) {
-                    if has_leading_modifier {
-                        attach_starts.push(child.start_byte());
-                    }
-                    break;
-                }
-            }
-            let content_start = attach_starts
-                .iter()
-                .copied()
-                .min()
-                .unwrap_or(node.start_byte());
-            symbols.push(CodeSymbol {
-                selector: prefix.join(context.separator),
-                source: location(
-                    context.path,
-                    context.lines,
-                    name_node.start_byte(),
-                    name_node.end_byte(),
-                ),
-                content: location(context.path, context.lines, content_start, outer.end_byte()),
-                body_start: body.map_or(node.start_byte(), |b| b.start_byte()),
-                body_end: body.map_or(node.end_byte(), |b| b.end_byte()),
-                attach_starts,
-            });
+    if let Some((name_node, selectable)) = &declaration
+        && *selectable
+    {
+        let body = node.child_by_field_name("body");
+        let mut attach_starts = vec![node.start_byte()];
+        let mut outer = node;
+        while let Some(wrapper) = outer
+            .parent()
+            .filter(|p| context.wrappers.contains(&p.id()))
+        {
+            attach_starts.push(wrapper.start_byte());
+            outer = wrapper;
         }
+        let mut previous = node.prev_named_sibling();
+        while let Some(sibling) = previous {
+            if context.modifiers.contains(&sibling.id()) {
+                attach_starts.push(sibling.start_byte());
+            } else if !context.comments.contains(&sibling.id()) {
+                break;
+            }
+            previous = sibling.prev_named_sibling();
+        }
+        let mut cursor = node.walk();
+        let mut has_leading_modifier = false;
+        for child in node.children(&mut cursor) {
+            if context.modifiers.contains(&child.id()) {
+                attach_starts.push(child.start_byte());
+                has_leading_modifier = true;
+            } else if !context.comments.contains(&child.id()) {
+                if has_leading_modifier {
+                    attach_starts.push(child.start_byte());
+                }
+                break;
+            }
+        }
+        let content_start = attach_starts
+            .iter()
+            .copied()
+            .min()
+            .unwrap_or(node.start_byte());
+        symbols.push(CodeSymbol {
+            selector: String::new(),
+            identity: String::new(),
+            source: location(
+                context.path,
+                context.lines,
+                name_node.start_byte(),
+                name_node.end_byte(),
+            ),
+            content: location(context.path, context.lines, content_start, outer.end_byte()),
+            body_start: body.map_or(node.start_byte(), |b| b.start_byte()),
+            body_end: body.map_or(node.end_byte(), |b| b.end_byte()),
+            attach_starts,
+        });
     }
     let mut cursor = node.walk();
     for child in node.named_children(&mut cursor) {
-        collect(child, context, prefix, symbols);
-    }
-    if declaration.is_some() {
-        prefix.pop();
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum ReferenceError {
-    MissingFile,
-    MissingSymbol,
-    Ambiguous,
-    Unsupported,
-}
-
-pub(crate) fn split_reference(reference: &str) -> Result<(PathBuf, Option<&str>), ReferenceError> {
-    let rest = reference
-        .strip_prefix("code:")
-        .ok_or(ReferenceError::Unsupported)?;
-    let (path, selector) = rest
-        .split_once("::")
-        .map_or((rest, None), |(p, s)| (p, Some(s)));
-    if path.is_empty()
-        || selector.is_some_and(str::is_empty)
-        || path.contains('\\')
-        || path.chars().any(char::is_whitespace)
-        || path
-            .split('/')
-            .any(|component| component.is_empty() || component == "." || component == "..")
-        || Path::new(path)
-            .components()
-            .any(|c| !matches!(c, Component::Normal(_)))
-        || Path::new(path).is_absolute()
-    {
-        return Err(ReferenceError::Unsupported);
-    }
-    Ok((PathBuf::from(path), selector))
-}
-
-impl CodeIndex {
-    pub(crate) fn file_only_bytes(&self, path: &Path) -> Option<Vec<u8>> {
-        let canonical = fs::canonicalize(self.root.join(path)).ok()?;
-        if !canonical.starts_with(&self.root) || !canonical.is_file() {
-            return None;
-        }
-        fs::read(canonical).ok()
+        collect(child, context, symbols);
     }
 }
 
@@ -692,16 +730,16 @@ mod reference_tests {
     #[test]
     fn code_references_require_raw_ordinary_path_components() {
         for reference in [
-            "code:src/./part.rs::run",
-            "code:src//part.rs::run",
-            "code:src/../part.rs::run",
-            "code:src/part.rs/::run",
+            "code:src/./part.rs::rust::run().",
+            "code:src//part.rs::rust::run().",
+            "code:src/../part.rs::rust::run().",
+            "code:src/part.rs/::rust::run().",
         ] {
             assert_eq!(split_reference(reference), Err(ReferenceError::Unsupported));
         }
         assert_eq!(
-            split_reference("code:src/.hidden.rs::run"),
-            Ok((PathBuf::from("src/.hidden.rs"), Some("run")))
+            split_reference("code:src/.hidden.rs::rust::run()."),
+            Ok((PathBuf::from("src/.hidden.rs"), Some("rust::run().")))
         );
     }
 }

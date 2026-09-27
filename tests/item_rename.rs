@@ -489,28 +489,13 @@ fn code_markers_stay_read_only_and_mid_targets_survive_rename() {
     for mcp in [false, true] {
         let (fixture, source, destination, mid) = rename_fixture();
         let root = fixture.path();
-        let config = root.join(".mara/project.toml");
-        let text = fs::read_to_string(&config).unwrap().replacen(
-            "format_version = 1",
-            "format_version = 3",
-            1,
-        ) + "\n[[code.languages]]\nname = \"rust\"\nextensions = [\"rs\"]\ngrammar = \".mara/code/rust.wasm\"\nquery = \".mara/code/rust.scm\"\nseparator = \"::\"\n";
-        fs::write(config, text).unwrap();
-        fs::create_dir(root.join(".mara/code")).unwrap();
-        for name in ["rust.wasm", "rust.scm"] {
-            fs::copy(
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join(".mara/code")
-                    .join(name),
-                root.join(".mara/code").join(name),
-            )
-            .unwrap();
-        }
+        code_index::configure(root, "rust", &["rs"], true);
         let schema = root.join(".mara/schema.yaml");
         fs::write(&schema,fs::read_to_string(&schema).unwrap()+"\n  code_check:\n    description: Checks requirement\n    source: []\n    target: [requirement]\n    code_source: true\n").unwrap();
         let path = root.join("check.rs");
         let code = "// @mara code_check REQ-MOVE\nfn check() {}\n";
         fs::write(&path, code).unwrap();
+        code_index::write_single(root, "rust", "check.rs", "check", "check().");
         valid(root);
         let error = rename(root, mcp, "REQ-MOVE", "REQ-NEW").unwrap_err();
         assert!(error.contains("check.rs:1"), "{error}");
@@ -525,6 +510,7 @@ fn code_markers_stay_read_only_and_mid_targets_survive_rename() {
         assert_eq!(fs::read_to_string(&path).unwrap(), code);
         let code = code.replace("REQ-MOVE", &mid);
         fs::write(&path, &code).unwrap();
+        code_index::write_single(root, "rust", "check.rs", "check", "check().");
         assert!(rename(root, mcp, "REQ-MOVE", "REQ-NEW").is_ok());
         assert_eq!(fs::read_to_string(&path).unwrap(), code);
         valid(root);
@@ -535,7 +521,7 @@ fn code_markers_stay_read_only_and_mid_targets_survive_rename() {
                 "json",
                 "relation",
                 "get",
-                "code:check.rs::check",
+                "code:check.rs::rust::check().",
                 "code_check",
                 "REQ-NEW",
             ],

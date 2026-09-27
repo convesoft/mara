@@ -61,10 +61,10 @@ enum Command {
 
     /// Read an item, section, Markdown block, document, or code endpoint in bounded consecutive portions.
     #[command(
-        after_help = "Discovery JSON format_version: 2 returns node, content, content_range, metadata, and metadata_range. Items return their parsed body; sections and documents include contained Markdown source. Non-items have empty metadata. Reconstruct content and ordered metadata fragments using byte/index ranges until has_more is false. Get has no limit option and does not enumerate neighbours; use related. Search again if a structural handle is stale."
+        after_help = "Discovery JSON format_version: 2 returns node, content, content_range, metadata, and metadata_range. Items return their parsed body; sections and documents include contained Markdown source. Non-items have empty metadata. Reconstruct content and ordered metadata fragments using byte/index ranges until has_more is false. Get has no limit option and does not enumerate neighbours; use related. Search again if a structural handle is stale. Code symbols use the configured language name and exact SCIP descriptor; copy references from related. No name/position fallback. Preserve literal backticks and single-quote code references in the shell. Project format 3 configures external SCIP commands in [[code.languages]]; corpus reads invoke them automatically when files match the required extensions list. No matches skips that indexer. Tree-sitter grammar/query assets are optional for comment attachment and declaration content."
     )]
     Get {
-        /// Exact item ID/MID, a code:<path>[::<selector>] reference, or a discovery handle.
+        /// Exact item ID/MID, a code:<path>[::<language>::<descriptor>] reference, or a discovery handle.
         reference: String,
         #[arg(
             long,
@@ -78,7 +78,7 @@ enum Command {
         after_help = "Discovery JSON format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation get. Internal neighbours have a reference for get/related; external neighbours have only kind and address and are terminal. JSON represents containment as contains with direction; human output displays its incoming view as contained_by. Use --relation builtin:contains --direction incoming for the parent, then outgoing on that parent for its children. Search again if a structural handle is stale."
     )]
     Related {
-        /// Exact item ID/MID, a code:<path>[::<selector>] reference, or a discovery handle.
+        /// Exact item ID/MID, a code:<path>[::<language>::<descriptor>] reference, or a discovery handle.
         reference: String,
 
         /// Select edge direction relative to this node; omission includes incoming, outgoing and symmetric, outgoing first. Incoming/outgoing exclude symmetric edges.
@@ -133,6 +133,9 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum ProjectCommand {
     /// Validate the whole project; paths select reporting only.
+    #[command(
+        after_help = "Configured [[code.languages]] entries require source extensions. SCIP commands run automatically from the project root during corpus loading, including validation, only when unignored source files match. Empty languages are skipped without invoking their command. Install indexers separately and configure trusted commands. Command or index failures make evaluation incomplete; a valid file link does not prove intended symbol attachment. Inspect code backlinks with related and relation get."
+    )]
     Validate {
         #[arg(long = "path")]
         paths: Vec<PathBuf>,
@@ -1253,11 +1256,11 @@ fn print_related_connections(connections: &[RelatedConnection]) {
 enum RelationCommand {
     /// Inspect a semantic edge and its authored source occurrences.
     Get {
-        /// Item ID/MID or code:<path>[::<selector>] expressing the relation.
+        /// Item ID/MID or code:<path>[::<language>::<descriptor>] expressing the relation.
         source: String,
         /// Canonical relation name or declared inverse alias.
         relation: String,
-        /// Other endpoint: item ID/MID, code:<path>[::<selector>], or external:HTTP(S) URL.
+        /// Other endpoint: item ID/MID, code:<path>[::<language>::<descriptor>], or external:HTTP(S) URL.
         target: String,
         /// Maximum occurrences per page, 1 through 100; defaults to 20. The byte budget may return fewer.
         #[arg(long)]
@@ -1272,7 +1275,7 @@ enum RelationCommand {
         source: String,
         /// Schema-declared relation name; inspect with schema list relation.
         relation: String,
-        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<selector>] with an inverse alias.
+        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<language>::<descriptor>] with an inverse alias.
         target: String,
     },
     /// Remove authored item assertions. For code links, code comment markers remain and may keep the edge present.
@@ -1281,7 +1284,7 @@ enum RelationCommand {
         source: String,
         /// Schema-declared relation name; inspect with schema list relation.
         relation: String,
-        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<selector>] with an inverse alias.
+        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<language>::<descriptor>] with an inverse alias.
         target: String,
         /// Remove only this snapshot-bound occurrence from relation get.
         #[arg(long)]

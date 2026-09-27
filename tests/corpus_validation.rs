@@ -16,23 +16,7 @@ fn validate(root: &Path) -> (mara::Corpus, Vec<Diagnostic>) {
     (corpus, diagnostics)
 }
 fn code_adapter(root: &Path) {
-    fs::create_dir(root.join(".mara/code")).unwrap();
-    for extension in ["wasm", "scm"] {
-        let name = format!("rust.{extension}");
-        fs::copy(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join(".mara/code")
-                .join(&name),
-            root.join(".mara/code").join(name),
-        )
-        .unwrap();
-    }
-    let path = root.join(".mara/project.toml");
-    let config =
-        fs::read_to_string(&path)
-            .unwrap()
-            .replacen("format_version = 1", "format_version = 3", 1);
-    fs::write(path, config + "\n[[code.languages]]\nname = \"rust\"\nextensions = [\"rs\"]\ngrammar = \".mara/code/rust.wasm\"\nquery = \".mara/code/rust.scm\"\nseparator = \"::\"\n").unwrap();
+    support::code_index::configure(root, "rust", &["rs"], true);
     let path = root.join(".mara/schema.yaml");
     let schema = fs::read_to_string(&path).unwrap();
     fs::write(path, schema + "\n  checks:\n    description: Code check\n    source: []\n    target: [requirement]\n    code_source: true\n    inverse: checked_by\n").unwrap();
@@ -51,6 +35,7 @@ fn incomplete_document_discovery_does_not_invent_missing_code_marker_targets() {
     code_adapter(root);
     let source = "// @mara checks REQ-TARGET\nfn check() {}\n";
     fs::write(root.join("check.rs"), source).unwrap();
+    support::code_index::write_single(root, "rust", "check.rs", "check", "check().");
     fs::write(root.join("target.mara.md"), [0xff]).unwrap();
     let (corpus, diagnostics) = validate(root);
     assert!(!corpus.is_complete());
@@ -581,8 +566,13 @@ fn code_endpoints_and_marker_permissions_have_stable_codes_and_target_associatio
     code_adapter(root);
     let source = "// @mara checks REQ-A\nfn run() {}\n";
     fs::write(root.join("source.rs"), source).unwrap();
+    support::code_index::write_single(root, "rust", "source.rs", "run", "run().");
     fs::write(root.join("binary"), [0xff]).unwrap();
-    for endpoint in ["code:source.rs", "code:source.rs::run", "code:binary"] {
+    for endpoint in [
+        "code:source.rs",
+        "code:source.rs::rust::run().",
+        "code:binary",
+    ] {
         fs::write(
             root.join("a.mara.md"),
             item("REQ-A", MID, &format!(":checked_by: {endpoint}\n"), "Body."),
@@ -592,7 +582,10 @@ fn code_endpoints_and_marker_permissions_have_stable_codes_and_target_associatio
     }
     for (endpoint, code) in [
         ("code:missing.rs", DiagnosticCode::CodeMissing),
-        ("code:source.rs::missing", DiagnosticCode::CodeMissing),
+        (
+            "code:source.rs::rust::missing().",
+            DiagnosticCode::CodeMissing,
+        ),
         ("code:../outside.rs", DiagnosticCode::CodeUnsupported),
     ] {
         fs::write(
@@ -608,6 +601,7 @@ fn code_endpoints_and_marker_permissions_have_stable_codes_and_target_associatio
     for relation in ["unknown", "checked_by", "derives_from"] {
         let code = format!("// @mara {relation} {MID}\nfn run() {{}}\n");
         fs::write(root.join("source.rs"), &code).unwrap();
+        support::code_index::write_single(root, "rust", "source.rs", "run", "run().");
         let (_, diagnostics) = validate(root);
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         let diagnostic = &diagnostics[0];
@@ -618,14 +612,29 @@ fn code_endpoints_and_marker_permissions_have_stable_codes_and_target_associatio
         assert_eq!(fs::read_to_string(root.join("source.rs")).unwrap(), code);
     }
     fs::write(root.join("source.rs"), "fn run() {}\nfn run() {}\n").unwrap();
+    support::code_index::write_index(
+        root,
+        "rust",
+        &[(
+            "source.rs",
+            &[(3, 6, "run().".into()), (15, 18, "run().".into())],
+        )],
+    );
     fs::write(
         root.join("a.mara.md"),
-        item("REQ-A", MID, ":checked_by: code:source.rs::run\n", "Body."),
+        item(
+            "REQ-A",
+            MID,
+            ":checked_by: code:source.rs::rust::run().\n",
+            "Body.",
+        ),
     )
     .unwrap();
     let (_, diagnostics) = validate(root);
-    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
-    assert_eq!(diagnostics[0].code(), DiagnosticCode::CodeAmbiguous);
+    assert!(
+        diagnostics.is_empty(),
+        "shared declarations: {diagnostics:?}"
+    );
 }
 
 // @mara checks DES-CORPUS-CONFORMANCE

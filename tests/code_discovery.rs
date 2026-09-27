@@ -7,29 +7,10 @@ use std::{
 };
 use tempfile::TempDir;
 
-fn fixture(language: &str, extensions: &[&str], separator: &str) -> TempDir {
+fn fixture(language: &str, extensions: &[&str]) -> TempDir {
     let fixture = support::fixture();
-    let root = fixture.path();
-    mara::initialize_project(root, mara::Template::Minimal).unwrap();
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let assets = if matches!(language, "python" | "typescript") {
-        manifest.join("tests/fixtures/code")
-    } else {
-        manifest.join(".mara/code")
-    };
-    fs::create_dir(root.join(".mara/code")).unwrap();
-    for extension in ["wasm", "scm"] {
-        let name = format!("{language}.{extension}");
-        fs::copy(assets.join(&name), root.join(".mara/code").join(name)).unwrap();
-    }
-    let config = root.join(".mara/project.toml");
-    let mut text = fs::read_to_string(&config).unwrap().replacen(
-        "format_version = 1",
-        "format_version = 3",
-        1,
-    );
-    text.push_str(&format!("\n[[code.languages]]\nname = {language:?}\nextensions = {extensions:?}\ngrammar = \".mara/code/{language}.wasm\"\nquery = \".mara/code/{language}.scm\"\nseparator = {separator:?}\n"));
-    fs::write(config, text).unwrap();
+    mara::initialize_project(fixture.path(), mara::Template::Minimal).unwrap();
+    support::code_index::configure(fixture.path(), language, extensions, true);
     fixture
 }
 
@@ -38,7 +19,11 @@ fn load(root: &Path) -> (CodeIndex, Vec<CodeProblem>) {
     CodeIndex::load(&project)
 }
 
-fn parse_file(path: PathBuf, source: String) -> (CodeFile, Vec<CodeProblem>) {
+fn parse_file(
+    path: PathBuf,
+    source: String,
+    definitions: &[(&str, &str)],
+) -> (CodeFile, Vec<CodeProblem>) {
     let extension = path.extension().unwrap().to_str().unwrap();
     let language = match extension {
         "rs" => "rust",
@@ -47,12 +32,17 @@ fn parse_file(path: PathBuf, source: String) -> (CodeFile, Vec<CodeProblem>) {
         "ts" => "typescript",
         _ => unreachable!(),
     };
-    let fixture = fixture(
-        language,
-        &[extension],
-        if language == "rust" { "::" } else { "." },
-    );
+    let fixture = fixture(language, &[extension]);
     fs::write(fixture.path().join(&path), &source).unwrap();
+    let definitions = definitions
+        .iter()
+        .map(|(name, descriptor)| support::code_index::definition(&source, name, descriptor))
+        .collect::<Vec<_>>();
+    support::code_index::write_index(
+        fixture.path(),
+        language,
+        &[(path.to_str().unwrap(), &definitions)],
+    );
     let (index, problems) = load(fixture.path());
     assert_eq!(
         fs::read_to_string(fixture.path().join(&path)).unwrap(),
@@ -76,30 +66,38 @@ fn adapters_attach_markers_to_methods_and_nested_functions() {
         (
             "sample.rs",
             "// @mara implements REQ-A\nmod outer { struct Worker; impl Worker { fn run() { // @mara verifies REQ-A\n fn check() {} } } }",
-            "outer::Worker::run",
-            "outer::Worker::run::check",
+            "rust::outer/Worker#run().",
+            "rust::outer/Worker#run().check().",
+            vec![
+                ("outer", "outer/"),
+                ("run", "outer/Worker#run()."),
+                ("check", "outer/Worker#run().check()."),
+            ],
         ),
         (
             "sample.py",
             "class Outer:\n    # @mara implements REQ-A\n    def run(self):\n        # @mara verifies REQ-A\n        def check(): pass\n",
-            "Outer.run",
-            "Outer.run.check",
+            "python::Outer#run().",
+            "python::Outer#run().check().",
+            vec![("run", "Outer#run()."), ("check", "Outer#run().check().")],
         ),
         (
             "sample.js",
             "class Outer { // @mara implements REQ-A\n run() { // @mara verifies REQ-A\n function check() {} } }",
-            "Outer.run",
-            "Outer.run.check",
+            "javascript::Outer#run().",
+            "javascript::Outer#run().check().",
+            vec![("run", "Outer#run()."), ("check", "Outer#run().check().")],
         ),
         (
             "sample.ts",
             "class Outer { // @mara implements REQ-A\n run(): void { // @mara verifies REQ-A\n function check(): void {} } }",
-            "Outer.run",
-            "Outer.run.check",
+            "typescript::Outer#run().",
+            "typescript::Outer#run().check().",
+            vec![("run", "Outer#run()."), ("check", "Outer#run().check().")],
         ),
     ];
-    for (path, source, method, nested) in cases {
-        let (file, problems) = parse_file(path.into(), source.into());
+    for (path, source, method, nested, definitions) in cases {
+        let (file, problems) = parse_file(path.into(), source.into(), &definitions);
         assert!(problems.is_empty(), "{path}: {problems:?}");
         assert!(
             file.symbols.iter().any(|s| s.selector == method),
@@ -121,9 +119,13 @@ fn shared_marker_parser_reads_block_comments_from_tree_sitter() {
     let (file, problems) = parse_file(
         "sample.js".into(),
         "/* @mara code_implements REQ-A */\nfunction run() {}\n".into(),
+        &[("run", "run().")],
     );
     assert!(problems.is_empty(), "{problems:?}");
-    assert_eq!(file.markers[0].endpoint, "code:sample.js::run");
+    assert_eq!(
+        file.markers[0].endpoint,
+        "code:sample.js::javascript::run()."
+    );
 }
 
 // @mara checks DES-CODE-TRACEABILITY
@@ -133,10 +135,14 @@ fn shared_marker_parser_requires_the_complete_introducer() {
         "sample.js".into(),
         "// @marathon is an ordinary comment\n// @mara code_implements REQ-A\nfunction run() {}\n"
             .into(),
+        &[("run", "run().")],
     );
     assert!(problems.is_empty(), "{problems:?}");
     assert_eq!(file.markers.len(), 1);
-    assert_eq!(file.markers[0].endpoint, "code:sample.js::run");
+    assert_eq!(
+        file.markers[0].endpoint,
+        "code:sample.js::javascript::run()."
+    );
 }
 
 // @mara checks DES-CODE-TRACEABILITY
@@ -145,10 +151,11 @@ fn body_marker_does_not_attach_to_the_next_top_level_declaration() {
     let (file, problems) = parse_file(
         "sample.py".into(),
         "def first():\n    pass\n    # @mara code_implements REQ-A\ndef second(): pass\n".into(),
+        &[("first", "first()."), ("second", "second().")],
     );
     assert!(problems.is_empty(), "{problems:?}");
     assert_eq!(file.markers.len(), 1);
-    assert_eq!(file.markers[0].endpoint, "code:sample.py::first");
+    assert_eq!(file.markers[0].endpoint, "code:sample.py::python::first().");
 }
 
 // @mara checks DES-CODE-TRACEABILITY
@@ -157,6 +164,7 @@ fn unowned_nested_marker_is_not_assigned_to_the_file() {
     let (file, problems) = parse_file(
         "sample.js".into(),
         "const run = () => { /* @mara code_implements REQ-A */ };\n".into(),
+        &[],
     );
     assert!(file.markers.is_empty());
     assert_eq!(problems.len(), 1);
@@ -166,6 +174,7 @@ fn unowned_nested_marker_is_not_assigned_to_the_file() {
     let (file, problems) = parse_file(
         "sample.js".into(),
         "// @mara code_implements REQ-A\nconst run = () => {};\n".into(),
+        &[],
     );
     assert!(problems.is_empty(), "{problems:?}");
     assert_eq!(file.markers[0].endpoint, "code:sample.js");
@@ -178,56 +187,63 @@ fn adapters_attach_markers_through_declaration_modifiers() {
         (
             "sample.rs",
             "trait Api {\n    /// @mara code_implements REQ-A\n    fn run(&self);\n}\n",
-            "code:sample.rs::Api::run",
+            "code:sample.rs::rust::Api#run().",
         ),
         (
             "sample.rs",
             "// @mara code_implements REQ-A\n#[test]\nfn run() {}\n",
-            "code:sample.rs::run",
+            "code:sample.rs::rust::run().",
         ),
         (
             "sample.rs",
             "#[test]\n// @mara code_implements REQ-A\nfn run() {}\n",
-            "code:sample.rs::run",
+            "code:sample.rs::rust::run().",
         ),
         (
             "sample.py",
             "# @mara code_implements REQ-A\n@decorator\ndef run(): pass\n",
-            "code:sample.py::run",
+            "code:sample.py::python::run().",
         ),
         (
             "sample.py",
             "@decorator\n# @mara code_implements REQ-A\ndef run(): pass\n",
-            "code:sample.py::run",
+            "code:sample.py::python::run().",
         ),
         (
             "sample.js",
             "// @mara code_implements REQ-A\nexport function run() {}\n",
-            "code:sample.js::run",
+            "code:sample.js::javascript::run().",
         ),
         (
             "sample.js",
             "// @mara code_implements REQ-A\n@sealed\nclass Service {}\n",
-            "code:sample.js::Service",
+            "code:sample.js::javascript::Service#",
         ),
         (
             "sample.ts",
             "// @mara code_implements REQ-A\nexport function run(): void {}\n",
-            "code:sample.ts::run",
+            "code:sample.ts::typescript::run().",
         ),
         (
             "sample.ts",
             "// @mara code_implements REQ-A\n@sealed\nclass Service {}\n",
-            "code:sample.ts::Service",
+            "code:sample.ts::typescript::Service#",
         ),
         (
             "sample.ts",
             "@sealed\n// @mara code_implements REQ-A\nclass Service {}\n",
-            "code:sample.ts::Service",
+            "code:sample.ts::typescript::Service#",
         ),
     ];
     for (path, source, endpoint) in cases {
-        let (file, problems) = parse_file(path.into(), source.into());
+        let (_, tail) = endpoint.split_once("::").unwrap();
+        let (_, descriptor) = tail.split_once("::").unwrap();
+        let name = if descriptor == "Service#" {
+            "Service"
+        } else {
+            "run"
+        };
+        let (file, problems) = parse_file(path.into(), source.into(), &[(name, descriptor)]);
         assert!(problems.is_empty(), "{path}: {problems:?}");
         assert!(
             file.symbols
@@ -269,12 +285,17 @@ fn symbol_content_includes_attached_modifiers() {
         ),
     ];
     for (path, source, selector, expected) in cases {
-        let (file, problems) = parse_file(path.into(), source.into());
+        let descriptor = if selector == "Service" {
+            "Service#"
+        } else {
+            "run()."
+        };
+        let (file, problems) = parse_file(path.into(), source.into(), &[(selector, descriptor)]);
         assert!(problems.is_empty(), "{path}: {problems:?}");
         let symbol = file
             .symbols
             .iter()
-            .find(|symbol| symbol.selector == selector)
+            .find(|symbol| symbol.selector.ends_with(&format!("::{descriptor}")))
             .unwrap();
         let content =
             &file.source[symbol.content.span().start_byte()..symbol.content.span().end_byte()];
@@ -284,7 +305,7 @@ fn symbol_content_includes_attached_modifiers() {
 // @mara checks DES-CODE-TRACEABILITY
 #[test]
 fn discovery_is_ordered_ignores_git_paths_and_is_independent_of_document_filters() {
-    let fixture = fixture("rust", &["rs"], "::");
+    let fixture = fixture("rust", &["rs"]);
     let root = fixture.path();
     let config = root.join(".mara/project.toml");
     fs::write(
@@ -315,17 +336,16 @@ fn discovery_is_ordered_ignores_git_paths_and_is_independent_of_document_filters
     );
     assert!(index.files().all(|file| file.markers.is_empty()));
     assert_eq!(index.root(), root);
-    assert_eq!(
-        index
-            .assets()
-            .map(|path| path.to_str().unwrap())
-            .collect::<Vec<_>>(),
-        [
-            ".mara/project.toml",
-            ".mara/code/rust.wasm",
-            ".mara/code/rust.scm"
-        ]
-    );
+    let assets = index.assets().collect::<Vec<_>>();
+    for path in [
+        ".mara/project.toml",
+        ".mara/code/rust.wasm",
+        ".mara/code/rust.scm",
+        "a.rs",
+    ] {
+        assert!(assets.contains(&&PathBuf::from(path)));
+    }
+    assert!(!assets.contains(&&PathBuf::from("ignored.rs")));
     let (again, problems) = load(root);
     assert!(problems.is_empty());
     assert_eq!(again, index);
@@ -334,7 +354,7 @@ fn discovery_is_ordered_ignores_git_paths_and_is_independent_of_document_filters
 // @mara checks DES-CODE-TRACEABILITY
 #[test]
 fn invalid_packs_prevent_partial_scans() {
-    let fixture = fixture("rust", &["rs"], "::");
+    let fixture = fixture("rust", &["rs"]);
     let root = fixture.path();
     fs::write(root.join("source.rs"), "fn run() {}\n").unwrap();
     let query = root.join(".mara/code/rust.scm");
@@ -362,7 +382,7 @@ fn invalid_packs_prevent_partial_scans() {
 // @mara checks DES-CODE-TRACEABILITY
 #[test]
 fn duplicate_extension_assignments_reject_all_adapters_before_scanning() {
-    let fixture = fixture("rust", &["rs"], "::");
+    let fixture = fixture("rust", &["rs"]);
     let root = fixture.path();
     fs::write(root.join("source.rs"), "fn run() {}\n").unwrap();
     let config = root.join(".mara/project.toml");
@@ -376,14 +396,14 @@ fn duplicate_extension_assignments_reject_all_adapters_before_scanning() {
     assert!(
         problems[0]
             .message
-            .contains("duplicate adapter configuration")
+            .contains("unique alphanumeric source extensions")
     );
 }
 
 // @mara checks DES-CODE-TRACEABILITY
 #[test]
 fn unreadable_sources_and_invalid_markers_preserve_independent_files() {
-    let fixture = fixture("rust", &["rs"], "::");
+    let fixture = fixture("rust", &["rs"]);
     let root = fixture.path();
     fs::write(root.join("bad.rs"), [0xff]).unwrap();
     let source = "// @mara implements\nfn run() {}\n";
@@ -414,7 +434,7 @@ fn unreadable_sources_and_invalid_markers_preserve_independent_files() {
 #[test]
 fn code_and_adapter_symlinks_stay_within_the_project() {
     use std::os::unix::fs::symlink;
-    let fixture = fixture("rust", &["rs"], "::");
+    let fixture = fixture("rust", &["rs"]);
     let root = fixture.path();
     let outside = tempfile::tempdir().unwrap();
     fs::write(root.join("source.rs"), "fn run() {}\n").unwrap();
@@ -430,7 +450,7 @@ fn code_and_adapter_symlinks_stay_within_the_project() {
             .collect::<Vec<_>>(),
         ["linked.rs", "source.rs"]
     );
-    assert_eq!(index.files().next().unwrap().symbols[0].selector, "run");
+    assert!(index.files().all(|file| file.symbols.is_empty()));
     let query = root.join(".mara/code/rust.scm");
     let outside_query = outside.path().join("rust.scm");
     fs::copy(&query, &outside_query).unwrap();
@@ -446,9 +466,9 @@ fn code_and_adapter_symlinks_stay_within_the_project() {
 // @mara checks DES-CODE-TRACEABILITY
 #[cfg(unix)]
 #[test]
-fn walk_failures_remain_explicit_beside_readable_code() {
+fn walk_failures_prevent_indexing_partial_inputs() {
     use std::os::unix::fs::PermissionsExt;
-    let fixture = fixture("rust", &["rs"], "::");
+    let fixture = fixture("rust", &["rs"]);
     let root = fixture.path();
     fs::write(root.join("source.rs"), "fn run() {}\n").unwrap();
     let unreadable = root.join("unreadable");
@@ -456,13 +476,65 @@ fn walk_failures_remain_explicit_beside_readable_code() {
     fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
     let (index, problems) = load(root);
     fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o755)).unwrap();
-    assert_eq!(index.files().count(), 1);
+    assert_eq!(index.files().count(), 0);
     assert_eq!(problems.len(), 1, "{problems:?}");
     assert_eq!(problems[0].code, DiagnosticCode::SourceInvalid);
-    assert_eq!(problems[0].source.path(), Path::new("unreadable"));
+    assert_eq!(problems[0].source.path(), Path::new(".mara/project.toml"));
     assert!(
         problems[0]
             .message
-            .contains("could not discover code files")
+            .contains("could not snapshot indexer inputs")
     );
+}
+
+// @mara checks DES-CODE-TRACEABILITY
+#[test]
+fn grouped_comments_preserve_markers_content_and_lexical_boundaries() {
+    for (path, comment, declaration, language) in [
+        ("sample.rs", "//", "#[test]\nfn run() {}", "rust"),
+        ("sample.py", "#", "@decorator\ndef run(): pass", "python"),
+        ("sample.js", "//", "export function run() {}", "javascript"),
+        (
+            "sample.ts",
+            "//",
+            "export function run(): void {}",
+            "typescript",
+        ),
+    ] {
+        let first = format!("{comment} @mara checks REQ-A");
+        let second = format!("{comment} @mara checks REQ-B");
+        let source = format!("{first}\n{comment} explanation\n\n{second}\n{declaration}\n");
+        let (file, problems) = parse_file(path.into(), source.clone(), &[("run", "run().")]);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(file.markers.len(), 2);
+        for (marker, authored) in file.markers.iter().zip([first, second]) {
+            assert_eq!(marker.endpoint, format!("code:{path}::{language}::run()."));
+            let span = marker.source.span();
+            assert_eq!(&source[span.start_byte()..span.end_byte()], authored);
+        }
+        let span = file.symbols[0].content.span();
+        assert_eq!(&source[span.start_byte()..span.end_byte()], declaration);
+    }
+    for (source, endpoint) in [
+        (
+            "// @mara checks REQ-A\n// ordinary\nconst value = 1;\nfunction run() {}",
+            "code:sample.js",
+        ),
+        (
+            "function first() {\n// @mara checks REQ-A\n// ordinary\nwork();\nfunction run() {}\n}",
+            "code:sample.js::javascript::first().",
+        ),
+        (
+            "// @mara checks REQ-A\n// ordinary\nfunction first() {}\nfunction run() {}",
+            "code:sample.js::javascript::first().",
+        ),
+    ] {
+        let mut definitions = vec![("run", "run().")];
+        if source.contains("first") {
+            definitions.push(("first", "first()."));
+        }
+        let (file, problems) = parse_file("sample.js".into(), source.into(), &definitions);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(file.markers[0].endpoint, endpoint);
+    }
 }

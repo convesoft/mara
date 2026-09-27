@@ -2209,23 +2209,7 @@ fn rust_code_fixture() -> TempDir {
     let fixture = fixture();
     let root = fixture.path();
     legacy_engineering_project(root);
-    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join(".mara");
-    let config_path = root.join(".mara/project.toml");
-    let config = fs::read_to_string(&config_path).unwrap().replacen(
-        "format_version = 1",
-        "format_version = 3",
-        1,
-    );
-    fs::write(config_path, config + "\n[[code.languages]]\nname = \"rust\"\nextensions = [\"rs\"]\ngrammar = \".mara/code/rust.wasm\"\nquery = \".mara/code/rust.scm\"\nseparator = \"::\"\n").unwrap();
-    fs::create_dir(root.join(".mara/code")).unwrap();
-    for extension in ["wasm", "scm"] {
-        let file = format!("rust.{extension}");
-        fs::copy(
-            sample.join("code").join(&file),
-            root.join(".mara/code").join(file),
-        )
-        .unwrap();
-    }
+    code_index::configure(root, "rust", &["rs"], true);
     let schema_path = root.join(".mara/schema.yaml");
     let mut schema = fs::read_to_string(&schema_path).unwrap();
     schema.push_str("  code_implements:\n    description: Code implements a requirement.\n    source: []\n    target: [requirement]\n    code_source: true\n    inverse: implemented_by_code\n");
@@ -2254,9 +2238,9 @@ fn code_discovery_walk_errors_make_validation_incomplete() {
             .iter()
             .any(|diagnostic| {
                 diagnostic["code"] == "source_invalid"
-                    && diagnostic["message"]
-                        .as_str()
-                        .is_some_and(|message| message.contains("could not discover code files"))
+                    && diagnostic["message"].as_str().is_some_and(|message| {
+                        message.contains("could not snapshot indexer inputs")
+                    })
             }),
         "{result:#}"
     );
@@ -2275,6 +2259,7 @@ fn item_validation_reports_invalid_code_markers_and_internal_symlinks_resolve() 
     fs::write(&item_path, item).unwrap();
     let code_path = root.join("implementation.rs");
     fs::write(&code_path, "// @mara unknown_relation REQ-A\nfn run() {}\n").unwrap();
+    code_index::write_single(root, "rust", "implementation.rs", "run", "run().");
     let project = validation_with_parity(root, &[]);
     assert_eq!(project["valid"], false);
     let selected: Value = serde_json::from_slice(
@@ -2296,6 +2281,7 @@ fn item_validation_reports_invalid_code_markers_and_internal_symlinks_resolve() 
         "{selected:#}"
     );
 
+    code_index::write_index(root, "rust", &[]);
     fs::write(
         &code_path,
         "const VALUE: () = {\n    // @mara code_implements REQ-A\n};\n",
@@ -2316,6 +2302,7 @@ fn item_validation_reports_invalid_code_markers_and_internal_symlinks_resolve() 
             .any(|diagnostic| diagnostic["code"] == "code_unsupported"),
         "{selected:#}"
     );
+    code_index::write_index(root, "rust", &[]);
     fs::write(
         &code_path,
         "const VALUE: () = {\n    // @mara code_implements 01ARZ3NDEKTSV4RRFFQ69G5F00\n};\n",
@@ -2337,17 +2324,22 @@ fn item_validation_reports_invalid_code_markers_and_internal_symlinks_resolve() 
 
     fs::write(&code_path, "fn run() {}\n").unwrap();
     std::os::unix::fs::symlink("implementation.rs", root.join("linked.rs")).unwrap();
+    code_index::write_single(root, "rust", "linked.rs", "run", "run().");
     fs::write(
         &item_path,
         item.replace(
             ":title: A\n",
-            ":title: A\n:implemented_by_code: code:linked.rs::run\n",
+            ":title: A\n:implemented_by_code: code:linked.rs::rust::run().\n",
         ),
     )
     .unwrap();
     assert_eq!(validation_with_parity(root, &[])["valid"], true);
     let get: Value = serde_json::from_slice(
-        &mara(root, &["--format", "json", "get", "code:linked.rs::run"]).stdout,
+        &mara(
+            root,
+            &["--format", "json", "get", "code:linked.rs::rust::run()."],
+        )
+        .stdout,
     )
     .unwrap();
     assert_eq!(get["content"], "fn run() {}");
@@ -2355,7 +2347,12 @@ fn item_validation_reports_invalid_code_markers_and_internal_symlinks_resolve() 
     let related: Value = serde_json::from_slice(
         &mara(
             root,
-            &["--format", "json", "related", "code:linked.rs::run"],
+            &[
+                "--format",
+                "json",
+                "related",
+                "code:linked.rs::rust::run().",
+            ],
         )
         .stdout,
     )
@@ -2380,6 +2377,7 @@ fn invalid_language_pack_does_not_return_partial_code_relations() {
         "// @mara code_implements REQ-A\nfn run() {}\n",
     )
     .unwrap();
+    code_index::write_single(root, "rust", "implementation.rs", "run", "run().");
     let related = mara(root, &["--format", "json", "related", "REQ-A"]);
     assert!(related.status.success(), "{}", stderr(&related));
     let related: Value = serde_json::from_slice(&related.stdout).unwrap();
@@ -2388,7 +2386,9 @@ fn invalid_language_pack_does_not_return_partial_code_relations() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|entry| { entry["neighbour"]["reference"] == "code:implementation.rs::run" })
+            .any(|entry| {
+                entry["neighbour"]["reference"] == "code:implementation.rs::rust::run()."
+            })
     );
 
     fs::write(root.join(".mara/code/rust.scm"), "(").unwrap();

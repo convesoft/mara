@@ -1067,7 +1067,7 @@ fn document_loading_is_a_separate_dependency_from_code_discovery() {
         "format_version = 3",
         1,
     );
-    fs::write(&config_path, format!("{config}\n[[code.languages]]\nname = \"rust\"\nextensions = [\"rs\"]\ngrammar = \"missing.wasm\"\nquery = \"missing.scm\"\nseparator = \"::\"\n")).unwrap();
+    fs::write(&config_path, format!("{config}\n[[code.languages]]\nname = \"rust\"\nextensions = [\"rs\"]\ngrammar = \"missing.wasm\"\nquery = \"missing.scm\"\ncommand = [\"false\", \"{{output}}\"]")).unwrap();
     write(fixture.path(), "notes.mara.md", "Canonical narrative.\n");
     let project = mara::resolve_project(Some(fixture.path()), fixture.path()).unwrap();
     let documents = load_documents(&project, &schema).unwrap();

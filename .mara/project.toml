@@ -13,14 +13,8 @@ files = [".mara/engineering-rules.yaml"]
 
 [[code.languages]]
 name = "rust"
+command = ["rust-analyzer", "scip", ".", "--output", "{output}", "--num-threads", "2"]
+position_encoding = "utf8"
 extensions = ["rs"]
 grammar = ".mara/code/rust.wasm"
 query = ".mara/code/rust.scm"
-separator = "::"
-
-[[code.languages]]
-name = "javascript"
-extensions = ["js", "mjs", "cjs"]
-grammar = ".mara/code/javascript.wasm"
-query = ".mara/code/javascript.scm"
-separator = "."

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["."]
 
 [workspace.package]
-version = "0.3.0-alpha.1"
+version = "0.3.0-alpha.3"
 edition = "2024"
 
 [package]
@@ -46,3 +46,6 @@ url = "2.5"
 tempfile = "3"
 
 similar = { version = "3.2.0", default-features = false, features = ["text"] }
+
+scip = "0.10.0"
+protobuf = "=3.7.2"

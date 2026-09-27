@@ -54,22 +54,23 @@ fn inspect(
 // @mara checks DES-RELATION-INTERFACES
 #[test]
 fn code_and_item_occurrences_are_globally_ordered_before_pagination() {
-    let fixture = code_fixture("rust", "rs", "::");
+    let fixture = code_fixture("rust", "rs");
     let root = fixture.path();
     let schema_path = root.join(".mara/schema.yaml");
     let schema = fs::read_to_string(&schema_path).unwrap()
         + "\n  code_check:\n    description: Code checks requirement\n    source: []\n    target: [requirement]\n    code_source: true\n    inverse: checked_by_code\n";
     fs::write(schema_path, schema).unwrap();
-    let item = ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:checked_by_code: code:aaa.rs::run\n\nAlso [[checked_by_code:code:aaa.rs::run]].\n:::\n";
+    let item = ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:checked_by_code: code:aaa.rs::rust::run().\n\nAlso [[checked_by_code:code:aaa.rs::rust::run().]].\n:::\n";
     let code = "// @mara code_check REQ-A\nfn run() {}\n";
     fs::write(root.join("zzz.mara.md"), item).unwrap();
     fs::write(root.join("aaa.rs"), code).unwrap();
+    code_index::write_single(root, "rust", "aaa.rs", "run", "run().");
     let mut cursor = None::<String>;
     let mut occurrences = Vec::new();
     loop {
         let page = inspect(
             root,
-            "code:aaa.rs::run",
+            "code:aaa.rs::rust::run().",
             "code_check",
             "REQ-A",
             Some(1),
@@ -102,7 +103,7 @@ fn code_and_item_occurrences_are_globally_ordered_before_pagination() {
         root,
         "REQ-A",
         "checked_by_code",
-        "code:aaa.rs::run",
+        "code:aaa.rs::rust::run().",
         None,
         None,
     );
@@ -111,32 +112,10 @@ fn code_and_item_occurrences_are_globally_ordered_before_pagination() {
     assert_eq!(fs::read_to_string(root.join("aaa.rs")).unwrap(), code);
 }
 
-fn code_fixture(language: &str, extension: &str, separator: &str) -> TempDir {
+fn code_fixture(language: &str, extension: &str) -> TempDir {
     let fixture = support::fixture();
     mara::initialize_project(fixture.path(), mara::Template::Minimal).unwrap();
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let assets = if matches!(language, "python" | "typescript") {
-        manifest.join("tests/fixtures/code")
-    } else {
-        manifest.join(".mara/code")
-    };
-    fs::create_dir(fixture.path().join(".mara/code")).unwrap();
-    for suffix in ["wasm", "scm"] {
-        let name = format!("{language}.{suffix}");
-        fs::copy(
-            assets.join(&name),
-            fixture.path().join(".mara/code").join(name),
-        )
-        .unwrap();
-    }
-    let config = fixture.path().join(".mara/project.toml");
-    let mut source = fs::read_to_string(&config).unwrap().replacen(
-        "format_version = 1",
-        "format_version = 3",
-        1,
-    );
-    source.push_str(&format!("\n[[code.languages]]\nname = {language:?}\nextensions = [{extension:?}]\ngrammar = \".mara/code/{language}.wasm\"\nquery = \".mara/code/{language}.scm\"\nseparator = {separator:?}\n"));
-    fs::write(config, source).unwrap();
+    code_index::configure(fixture.path(), language, &[extension], true);
     fixture
 }
 

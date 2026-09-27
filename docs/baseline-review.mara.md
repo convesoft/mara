@@ -1,6 +1,5 @@
 # Baseline review
 
-Reference: `0b47b42e31a9b1dedb71b1af5658a067c0a739a9` (`0.3.0-alpha.1`).
 This review accounts for retained, changed, and removed capabilities. Pending
 means the implementation and its distinct verification obligations still need
 review; it does not authorize removing behavior. Product contracts live in the
@@ -25,7 +24,7 @@ have not yet been restored. The sections below identify current checkpoints.
 | Validation, diagnostics and structural graph policies | Retain schema-only configuration recovery, format-1 diagnostics, output bounds and continuation under the schema definition review below. Project/item validation, reporting filters and graph evaluation remain pending. |
 | YAML rules and native evaluation | Retain the reviewed definition loader, vocabulary/type checks, finite definition paths and native compilation for schema validation. Applicability, item projection, native evaluation and matrices remain pending. |
 | Matrices, parameter binding and pagination | Pending: selected coverage, explanations, revision parameters, bounds, and matrix tests. |
-| Code endpoints, comment markers and language adapters | Pending: endpoint resolution and navigation; real code checks and isolated multi-language fixtures. |
+| Code endpoints, comment markers and language integrations | SCIP identity and association review below; candidate execution and exact-revision evidence remain pending. |
 | CLI/MCP interfaces and project context | Retain project context and bootstrap transport/parity behavior. Full command help, tool schemas, and remaining operation parity tests are pending. |
 | Packaging, installation, migration and releases | Pending: npm packaging and launchers, skill/plugin, migration, CI/release contracts, and real packaged CLI/MCP smoke. |
 | Public guidance and historical research/release documents | Pending: README, roadmap, security guidance, generated changelog, and useful historical knowledge. Retained license notices remain unchanged. |
@@ -185,34 +184,30 @@ knowledge validation and selected traceability, then exact-revision evidence.
 This is the user-approved internal dependency checkpoint, not an item-list or
 source-validation command release.
 
-## Staged code-discovery dependency review
+## Code identity and association review
 
-Selected capability: load local adapter assets and discover source files,
-native symbol selectors, comment markers and their source spans. The user-approved
-next dependency has no new CLI/MCP command. Listing will compose it with the
-completed document loader; symbol resolution and graph operations remain pending.
+Selected capability: exact SCIP endpoints throughout code discovery, graph loading,
+reads, relation inspection, item-authored mutations and validation. The contract is
+[[DES-CODE-TRACEABILITY]]; [[VER-CODE-DISCOVERY]] owns acceptance. Matrix integration
+is checked again with the matrix capability.
 
 | Area | Review and disposition |
 |---|---|
-| Adapter loading | Retain project-relative regular assets confined after canonicalization, UTF-8 queries, unique alphanumeric extension assignments, required symbol/name/comment captures and per-pattern name pairing. Build all adapters before walking; a bad pack yields a problem and no partial scan. Retain pinned Tree-sitter/Wasm versions; no network or project-code execution. |
-| Discovery | Retain local/parent Git ignores, hidden supported files, deterministic path order, regular files and internal file symlinks, no directory-symlink traversal or outside-file reads. Document content patterns do not filter code. Read/walk problems remain explicit while independently readable files remain available. |
-| Parsing and ownership | Retain native lexical qualification, computed-name exclusion, captured-comment-only marker parsing, full introducer and ID/MID grammar. Retain following declaration through modifiers/wrappers, deepest containing body, top-level file fallback, and explicit ambiguous/unsupported ownership. Keep source and content spans; semantic relation/target checks are not parser responsibilities. |
-| Dependency boundary | Restore the scanner and its read-only snapshot values as a library dependency. Expose loading, files and accepted asset paths for direct verification and later composition. Defer exact-reference parsing/resolution, file-only endpoint bytes, graph summaries, corpus composition and cursor hashing until their owning reads; do not import discovery or query types. |
-| Retained parser tests | Restore seven groups: nested selectors across four languages; block-comment markers; full introducer; body ownership boundary; unsupported nested/file fallback; modifier/wrapper attachment; modifier-inclusive content. Preserve the reference-path grammar test for later endpoint resolution. |
-| Fixture correction | Replace parser unit tests' live-repository adapter lookup with ordinary integration tests whose temporary projects own Git/configuration state and copied packs. Keep Python/TypeScript assets under test fixtures only; do not enable extra adapters in the self-hosted project. Real tests have code associations; synthetic markers exist only as string data or temporary files. |
-| Discovery test obligations | Add focused real-loader checks for ordering/ignore and content-pattern independence, malformed/unavailable packs and capture pairing, invalid marker and unreadable-source diagnostics, and asset/file symlink confinement. Preserve broader CLI validation/navigation tests in the baseline for their later capabilities. |
+| Configuration and invocation | Use one language entry with command, extensions, optional encoding and paired grammar/query. Validate assets even for empty languages; invoke only for matching unignored source. Keep explicit incomplete errors for failed commands and malformed output. Commands inherit process permissions. |
+| Identity | Retain standard SCIP protobuf parsing, global definitions, exact language/descriptor identity, package-independent spelling and collision refusal. Syntax declarations supply ranges only. Preserve literal backticks and canonical escaping. Shared declarations read as one enclosing interval. |
+| Source and snapshot | Retain ordinary relative paths, canonical project confinement, ignore behavior and deterministic ordering. Hash unignored inputs for command stability and cursor identity. Exclude mutation lock, journal and `.mara-stage-` files; transaction staging must use that prefix before preflight reloads code. |
+| Comment ownership | Retain query-captured comments, declaration name spans and modifier/wrapper content. Group adjacent captured comments through whitespace; retain individual marker spans, lexical boundaries, deepest owner and valid file fallback. Require one indexed global identity for a declaration-owned marker. |
+| Integration | Keep the public disposable CodeIndex projection and existing graph/query/mutation boundaries. Preserve canonical edge deduplication, globally ordered occurrence inspection, missing-target completeness gating, source-preserving item edits and explicit recovery. |
+| Verification | Retain discovery, confinement, marker grammar, content-span and transport regressions with explicit SCIP fixture identities. Replace syntax-name identity assertions with indexed identity assertions. Keep real-indexer fixture provenance; add genuine configured-indexer acceptance. Cover encoding, collisions, shared declarations, empty/populated transitions, strict failures and staging. |
 
-Completion requires real scanner execution with supplied Wasm grammars, unchanged
-source bytes, existing candidate CLI/MCP regressions, formatting/Clippy, canonical
-validation and scoped traceability, and committed exact-revision evidence. A
-passing dependency suite does not establish code navigation or item listing.
+The focused range regressions establish two required boundaries: marker ownership
+matches the complete definition name span, and a supplied invalid SCIP enclosing
+range is an error even when Tree-sitter supplies declaration content. The tests
+first reproduced false-valid results, then passed after targeted corrections.
 
-Scanner implementation retains baseline behavior; the public read-only library
-projection makes this dependency independently callable. Seven existing parser
-test groups now run through the real loader; six focused discovery groups cover
-file selection, bad packs, duplicate extension assignment, read/marker failures,
-symlink confinement and walk failures. Original code contract MIDs are retained;
-the method explicitly leaves endpoint/graph/transport verification pending.
+Completion requires formatting, Clippy, the relevant full suite, real CLI/MCP
+navigation and mutation, exact marker endpoint inspection and candidate traceability
+at the tested revision. Authoring-tool success is not candidate acceptance.
 
 ## Composed item-list checkpoint
 
@@ -300,7 +295,7 @@ code-edge evaluation, related transports and mutations remain separate.
 | Area | Review and disposition |
 |---|---|
 | Selection | Retain exact graph lookup and stale-handle errors. Items return parsed body and ordered authored metadata; other document nodes return their complete source span. Do not infer neighbours or repair source. |
-| Code dependency | Retain ordinary-path grammar and canonical project confinement. File-only reads accept local regular files without an adapter; selectors match exactly one indexed native symbol, including modifier/wrapper content. Preserve missing-file, missing-symbol, ambiguous and unsupported failures. Binary file content is not text-readable. No graph evaluator is required. |
+| Code dependency | Retain ordinary-path grammar and canonical project confinement. File-only reads accept local regular files without an adapter; references match exact SCIP identities with shared-declaration and modifier/wrapper content. Preserve missing-file, missing-symbol, ambiguous and unsupported failures. Binary file content is not text-readable. No graph evaluator is required. |
 | Paging | Retain discovery format 2 and the 65,536-byte serialized domain budget. Fill content before metadata; preserve repeated keys, empty values, entry order and UTF-8 boundaries. Fixed headers/keys cannot be dropped. Fail when a page cannot advance. |
 | Continuation | Retain content/entry/value offsets, exact reference and source/schema/code fingerprint, including explicit file-only bytes. Reject malformed, stale, non-boundary, initial, terminal and impossible positions. Structural handles stay document-local while cursors cover the corpus. |
 | Tests | Retain seven distinct get groups: item/human lookup failures, Unicode reconstruction, content priority, cursor rejection, oversized identity/neighbour exclusion, mixed-node source reconstruction and stale/removed-interface behavior. Restore full-title and exact-identity get assertions deferred from search. Add isolated code-file/symbol reads, failure classes and file-only cursor checks extracted from the broad baseline code workflow; keep its relation/mutation/validation assertions pending. |

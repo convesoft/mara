@@ -231,7 +231,7 @@ impl MaraMcp {
     #[tool(
         name = "project_validate",
         output_schema = rmcp::handler::server::common::schema_for_type::<ValidationResult>(),
-        description = "Validate the complete configured Mara project. Optional paths select reported diagnostics only; project/schema diagnostics always appear. Validity still covers the whole project, including omitted diagnostics counted in selection.omitted_diagnostics. Validation format 1 reports stable codes/severity, full-target summary and evaluation_complete. Follow next_cursor with unchanged options; valid:false is a successful tool result, and warnings alone remain valid. Invalid arguments, stale cursors, I/O and output limits return structured operation errors."
+        description = "Validate the complete configured Mara project. Configured [[code.languages]] entries require source extensions. Commands run automatically when unignored source files match; empty languages are skipped. Once sources exist, missing executables or invalid output make evaluation incomplete. Optional paths select reported diagnostics only; project/schema diagnostics always appear. Validity still covers the whole project, including omitted diagnostics counted in selection.omitted_diagnostics. Validation format 1 reports stable codes/severity, full-target summary and evaluation_complete. Follow next_cursor with unchanged options; valid:false is a successful tool result, and warnings alone remain valid. Invalid arguments, stale cursors, I/O and output limits return structured operation errors."
     )]
     fn project_validate(
         &self,
@@ -363,7 +363,7 @@ impl MaraMcp {
 
     #[tool(
         name = "get",
-        description = "Read an item, section, Markdown block, document, or code endpoint in bounded consecutive portions. Discovery format_version: 2 returns node, content, content_range, metadata, and metadata_range. Sections and documents include contained source; items return their parsed body, then ordered metadata fragments; non-items have empty metadata. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged reference until has_more is false; restart after source/schema changes. Search again if a structural handle is stale. Enumerate neighbours with related; get has no limit."
+        description = "Read an item, section, Markdown block, document, or code endpoint in bounded consecutive portions. Discovery format_version: 2 returns node, content, content_range, metadata, and metadata_range. Sections and documents include contained source; items return their parsed body, then ordered metadata fragments; non-items have empty metadata. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged reference until has_more is false; restart after source/schema changes. Search again if a structural handle is stale. Enumerate neighbours with related; get has no limit. Code symbols use code:<path>::<language>::<descriptor> with the exact SCIP descriptor returned by navigation, including literal backticks. There is no name/position fallback; renames or moves may break links."
     )]
     fn get(
         &self,
@@ -499,7 +499,7 @@ impl MaraMcp {
 
 #[tool_handler(
     name = "mara",
-    instructions = "This rebuild checkpoint provides project initialization, schema inspection/definition validation, item creation/listing, search, get, related, relation inspection, MID backfill and explicit transaction rollback. Pass an absolute project path per call, or omit it for execution-directory discovery. When the server starts with --project, omit request-level project selection, including for project_init. Initialization requires an explicit destination only when the server is unbound. Further capabilities await their implementation reviews."
+    instructions = "Structured Mara operations. Pass an absolute project path, or omit it for execution-directory discovery (project_init requires an explicit destination only when the server is unbound). When the server starts with --project, omit request-level project selection, including for project_init; overrides are rejected. Discovery and reading: search covers items and narrative; get and related also accept code endpoints. Item tools author, list, or validate items only. Project format 3 configures external SCIP commands in [[code.languages]]; every entry requires source extensions, independently of optional grammar assets. Corpus operations invoke an indexer only when unignored source files match; empty languages are skipped. Install indexers separately. Optional Tree-sitter grammar/query assets provide comment ownership and declaration content; no language integration is built in. Before authoring, inspect schema_get flavour selection guidance and relation endpoints. Schema format 3 requires description, use_when, avoid_when, and distinguish_from for each flavour. Upgrade guidance: https://github.com/convesoft/mara/blob/main/docs/relations.mara.md"
 )]
 impl ServerHandler for MaraMcp {}
 
@@ -543,7 +543,7 @@ struct GetToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Exact item ID/MID, code:<path>[::<selector>], or a discovery handle returned by search, get, or related.
+    /// Exact item ID/MID, code:<path>[::<language>::<descriptor>], or a discovery handle returned by search, get, or related.
     reference: String,
     /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid. Portions follow content, then item metadata.
     #[serde(default)]
@@ -556,7 +556,7 @@ struct RelatedToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Exact item ID/MID, code:<path>[::<selector>], or a discovery handle returned by search, get, or related.
+    /// Exact item ID/MID, code:<path>[::<language>::<descriptor>], or a discovery handle returned by search, get, or related.
     reference: String,
     /// Edge direction relative to the selected node: incoming, outgoing or symmetric. Omitted or null includes all, outgoing first. Incoming/outgoing exclude symmetric edges.
     #[serde(default)]
@@ -597,11 +597,11 @@ struct RelationToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Item ID/MID; relation_get also accepts code:<path>[::<selector>] as canonical source. Mutation requires an item source.
+    /// Item ID/MID; relation_get also accepts code:<path>[::<language>::<descriptor>] as canonical source. Mutation requires an item source.
     source: String,
     /// Schema-declared relation name or inverse alias; discover names with schema_list(kind="relation").
     relation: String,
-    /// Item ID/MID, external:HTTP(S), or code:<path>[::<selector>] with an item-authored inverse.
+    /// Item ID/MID, external:HTTP(S), or code:<path>[::<language>::<descriptor>] with an item-authored inverse.
     target: String,
 }
 

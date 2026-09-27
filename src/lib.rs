@@ -11,6 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 mod code;
+use code::LanguageConfig;
 pub use code::{CodeFile, CodeIndex, CodeMarker, CodeProblem, CodeSymbol};
 mod corpus;
 mod diagnostics;
@@ -81,16 +82,6 @@ pub struct Project {
     content_discovery_complete: bool,
     rule_files: Vec<PathBuf>,
     code_languages: Vec<LanguageConfig>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct LanguageConfig {
-    name: String,
-    extensions: Vec<String>,
-    grammar: PathBuf,
-    query: PathBuf,
-    separator: String,
 }
 
 #[derive(Debug)]
@@ -1513,9 +1504,11 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         }
         if let Some(mut code) = take_project_table(&mut configuration, "code", "code", &mut errors)
         {
-            code_languages =
-                take_project_value(&mut code, "languages", "code.languages", &mut errors)
-                    .unwrap_or_default();
+            if code.contains_key("languages") {
+                code_languages =
+                    take_project_value(&mut code, "languages", "code.languages", &mut errors)
+                        .unwrap_or_default();
+            }
             unknown_project_keys(&code, "code", &mut errors);
         }
     }
@@ -1526,7 +1519,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
             DiagnosticCode::FormatUnsupported,
             diagnostics::pointer(&["format_version"]),
             format!(
-                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. Supported formats are 1 (without rules or code), 2 (without code), and 3",
+                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. Supported formats are 1 (without rules or code), 2 (without code), and 3 (code language bindings)",
                 format_version.expect("format version is present")
             ),
         ));

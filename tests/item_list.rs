@@ -509,18 +509,7 @@ fn cursors_bind_source_schema_and_request_and_reject_invalid_positions() {
 }
 
 fn enable_rust(root: &Path) {
-    let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join(".mara/code");
-    fs::create_dir(root.join(".mara/code")).unwrap();
-    for name in ["rust.wasm", "rust.scm"] {
-        fs::copy(assets.join(name), root.join(".mara/code").join(name)).unwrap();
-    }
-    let path = root.join(".mara/project.toml");
-    let mut config =
-        fs::read_to_string(&path)
-            .unwrap()
-            .replacen("format_version = 1", "format_version = 3", 1);
-    config.push_str("\n[[code.languages]]\nname = \"rust\"\nextensions = [\"rs\"]\ngrammar = \".mara/code/rust.wasm\"\nquery = \".mara/code/rust.scm\"\nseparator = \"::\"\n");
-    fs::write(path, config).unwrap();
+    code_index::configure(root, "rust", &["rs"], true);
 }
 
 // @mara checks DES-ITEM-LIST

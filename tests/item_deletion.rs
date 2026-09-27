@@ -534,29 +534,14 @@ fn code_markers_prevent_target_deletion_without_editing_code() {
     for mcp in [false, true] {
         let (fixture, source, _, mid) = delete_fixture();
         let root = fixture.path();
-        let config = root.join(".mara/project.toml");
-        let text = fs::read_to_string(&config).unwrap().replacen(
-            "format_version = 1",
-            "format_version = 3",
-            1,
-        ) + "\n[[code.languages]]\nname = \"rust\"\nextensions = [\"rs\"]\ngrammar = \".mara/code/rust.wasm\"\nquery = \".mara/code/rust.scm\"\nseparator = \"::\"\n";
-        fs::write(config, text).unwrap();
-        fs::create_dir(root.join(".mara/code")).unwrap();
-        for name in ["rust.wasm", "rust.scm"] {
-            fs::copy(
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join(".mara/code")
-                    .join(name),
-                root.join(".mara/code").join(name),
-            )
-            .unwrap();
-        }
+        code_index::configure(root, "rust", &["rs"], true);
         let schema = root.join(".mara/schema.yaml");
         fs::write(&schema,fs::read_to_string(&schema).unwrap()+"\n  code_check:\n    description: Checks requirement\n    source: []\n    target: [requirement]\n    code_source: true\n").unwrap();
         let path = root.join("check.rs");
         for reference in ["REQ-DELETE", mid.as_str()] {
             let code = format!("// @mara code_check {reference}\nfn check() {{}}\n");
             fs::write(&path, &code).unwrap();
+            code_index::write_single(root, "rust", "check.rs", "check", "check().");
             valid(root);
             let error = delete(root, mcp, "REQ-DELETE").unwrap_err();
             assert!(error.contains("check.rs:1"), "{error}");
@@ -568,6 +553,7 @@ fn code_markers_prevent_target_deletion_without_editing_code() {
             assert!(!root.join(".mara/transaction.json").exists());
         }
         fs::write(&path, "fn check() {}\n").unwrap();
+        code_index::write_single(root, "rust", "check.rs", "check", "check().");
         assert!(delete(root, mcp, "REQ-DELETE").is_ok());
         valid(root);
     }

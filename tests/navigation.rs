@@ -915,32 +915,10 @@ fn external_neighbours_are_exact_terminal_endpoints() {
     assert_eq!(fs::read_to_string(path).unwrap(), source);
 }
 
-fn code_fixture(language: &str, extension: &str, separator: &str) -> TempDir {
+fn code_fixture(language: &str, extension: &str) -> TempDir {
     let fixture = support::fixture();
     mara::initialize_project(fixture.path(), mara::Template::Minimal).unwrap();
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let assets = if matches!(language, "python" | "typescript") {
-        manifest.join("tests/fixtures/code")
-    } else {
-        manifest.join(".mara/code")
-    };
-    fs::create_dir(fixture.path().join(".mara/code")).unwrap();
-    for suffix in ["wasm", "scm"] {
-        let name = format!("{language}.{suffix}");
-        fs::copy(
-            assets.join(&name),
-            fixture.path().join(".mara/code").join(name),
-        )
-        .unwrap();
-    }
-    let config = fixture.path().join(".mara/project.toml");
-    let mut source = fs::read_to_string(&config).unwrap().replacen(
-        "format_version = 1",
-        "format_version = 3",
-        1,
-    );
-    source.push_str(&format!("\n[[code.languages]]\nname = {language:?}\nextensions = [{extension:?}]\ngrammar = \".mara/code/{language}.wasm\"\nquery = \".mara/code/{language}.scm\"\nseparator = {separator:?}\n"));
-    fs::write(config, source).unwrap();
+    code_index::configure(fixture.path(), language, &[extension], true);
     fixture
 }
 
@@ -948,16 +926,17 @@ fn code_fixture(language: &str, extension: &str, separator: &str) -> TempDir {
 // @mara checks DES-DIRECT-NAVIGATION
 #[test]
 fn code_markers_and_inverse_assertions_share_edges_and_binary_endpoints() {
-    let fixture = code_fixture("rust", "rs", "::");
+    let fixture = code_fixture("rust", "rs");
     let root = fixture.path();
     extend_schema(
         root,
         "  code_implements:\n    description: Code implements requirement\n    source: []\n    target: [requirement]\n    code_source: true\n    inverse: implemented_by_code\n",
     );
-    let source = ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:implemented_by_code: code:run.rs::run\n:implemented_by_code: code:blob.bin\n\nA.\n:::\n";
+    let source = ":::mara requirement REQ-A\n:mid: 01ARZ3NDEKTSV4RRFFQ69G5F00\n:title: A\n:implemented_by_code: code:run.rs::rust::run().\n:implemented_by_code: code:blob.bin\n\nA.\n:::\n";
     fs::write(root.join("item.mara.md"), source).unwrap();
     let code = "// @mara code_implements REQ-A\nfn run() {}\n";
     fs::write(root.join("run.rs"), code).unwrap();
+    code_index::write_single(root, "rust", "run.rs", "run", "run().");
     fs::write(root.join("blob.bin"), [0xff, 0xfe]).unwrap();
     let incoming = related_cli_mcp(
         root,
@@ -979,7 +958,7 @@ fn code_markers_and_inverse_assertions_share_edges_and_binary_endpoints() {
         ],
     );
     assert_eq!(next["connections"][0]["occurrence_count"], 2);
-    let outgoing = related_cli_mcp(root, "code:run.rs::run", &[]);
+    let outgoing = related_cli_mcp(root, "code:run.rs::rust::run().", &[]);
     assert_eq!(
         outgoing["connections"][0]["edge"],
         next["connections"][0]["edge"]
@@ -1013,11 +992,13 @@ fn code_markers_and_inverse_assertions_share_edges_and_binary_endpoints() {
             format!("// @mara {marker}\nfn run() {{}}\n"),
         )
         .unwrap();
-        let failure = mara(root, &["related", "code:run.rs::run"]);
+        code_index::write_single(root, "rust", "run.rs", "run", "run().");
+        let failure = mara(root, &["related", "code:run.rs::rust::run()."]);
         assert!(!failure.status.success());
         assert!(stderr(&failure).contains(error), "{}", stderr(&failure));
     }
     fs::write(root.join("run.rs"), code).unwrap();
+    code_index::write_single(root, "rust", "run.rs", "run", "run().");
     assert_eq!(
         fs::read_to_string(root.join("item.mara.md")).unwrap(),
         source

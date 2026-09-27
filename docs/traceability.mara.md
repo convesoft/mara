@@ -6,7 +6,7 @@ policy or canonical source. Native evaluation follows [validation](validation.ma
 :::mara requirement REQ-TRACE-MATRIX
 :mid: 01M2FX4BTAHMMPEEPX6JK418ZS
 :title: Generate matrices that explain selected trace coverage
-:status: accepted
+:status: draft
 :kind: functional
 :derives_from: SCN-READ-TRACE-VIEW
 

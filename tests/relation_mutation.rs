@@ -58,32 +58,10 @@ fn valid(root: &Path) {
     let corpus = mara::load_corpus(&project, &schema).unwrap();
     assert!(mara::validate_corpus(&corpus, &schema).is_empty());
 }
-fn code_fixture(language: &str, extension: &str, separator: &str) -> TempDir {
+fn code_fixture(language: &str, extension: &str) -> TempDir {
     let fixture = support::fixture();
     mara::initialize_project(fixture.path(), mara::Template::Minimal).unwrap();
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let assets = if matches!(language, "python" | "typescript") {
-        manifest.join("tests/fixtures/code")
-    } else {
-        manifest.join(".mara/code")
-    };
-    fs::create_dir(fixture.path().join(".mara/code")).unwrap();
-    for suffix in ["wasm", "scm"] {
-        let name = format!("{language}.{suffix}");
-        fs::copy(
-            assets.join(&name),
-            fixture.path().join(".mara/code").join(name),
-        )
-        .unwrap();
-    }
-    let config = fixture.path().join(".mara/project.toml");
-    let mut source = fs::read_to_string(&config).unwrap().replacen(
-        "format_version = 1",
-        "format_version = 3",
-        1,
-    );
-    source.push_str(&format!("\n[[code.languages]]\nname = {language:?}\nextensions = [{extension:?}]\ngrammar = \".mara/code/{language}.wasm\"\nquery = \".mara/code/{language}.scm\"\nseparator = {separator:?}\n"));
-    fs::write(config, source).unwrap();
+    code_index::configure(fixture.path(), language, &[extension], true);
     fixture
 }
 
@@ -402,7 +380,7 @@ fn heading_link_retargeting_is_rejected_without_writes() {
 #[test]
 fn code_inverse_mutations_never_edit_comments_and_report_remaining_edge() {
     for mcp in [false, true] {
-        let fixture = code_fixture("rust", "rs", "::");
+        let fixture = code_fixture("rust", "rs");
         let root = fixture.path();
         let schema = root.join(".mara/schema.yaml");
         fs::write(&schema,fs::read_to_string(&schema).unwrap()+"\n  code_check:\n    description: Checks requirement\n    source: []\n    target: [requirement]\n    code_source: true\n    inverse: checked_by_code\n").unwrap();
@@ -412,22 +390,25 @@ fn code_inverse_mutations_never_edit_comments_and_report_remaining_edge() {
         fs::write(&path, item).unwrap();
         let code_path = root.join("code.rs");
         fs::write(&code_path, "fn run() {}\n").unwrap();
+        code_index::write_single(root, "rust", "code.rs", "run", "run().");
         let added = invoke(
             root,
             mcp,
             "add",
             "REQ-A",
             "checked_by_code",
-            "code:code.rs::run",
+            "code:code.rs::rust::run().",
             None,
         );
         assert_eq!(added["scope"], "item");
         assert_eq!(added["edge"]["source"]["kind"], "code");
         let code = "// @mara code_check REQ-A\nfn run() {}\n";
         fs::write(&code_path, code).unwrap();
-        let authored = fs::read_to_string(&path)
-            .unwrap()
-            .replace("A.\n", "Also [[checked_by_code:code:code.rs::run]].\n");
+        code_index::write_single(root, "rust", "code.rs", "run", "run().");
+        let authored = fs::read_to_string(&path).unwrap().replace(
+            "A.\n",
+            "Also [[checked_by_code:code:code.rs::rust::run().]].\n",
+        );
         fs::write(&path, &authored).unwrap();
         let inspected = invoke(
             root,
@@ -435,7 +416,7 @@ fn code_inverse_mutations_never_edit_comments_and_report_remaining_edge() {
             "get",
             "REQ-A",
             "checked_by_code",
-            "code:code.rs::run",
+            "code:code.rs::rust::run().",
             None,
         );
         assert_eq!(inspected["occurrence_count"], 3);
@@ -454,7 +435,7 @@ fn code_inverse_mutations_never_edit_comments_and_report_remaining_edge() {
                 "remove",
                 "REQ-A",
                 "checked_by_code",
-                "code:code.rs::run",
+                "code:code.rs::rust::run().",
                 Some(comment)
             )["error"]["code"],
             "unsupported_mutation"
@@ -465,7 +446,7 @@ fn code_inverse_mutations_never_edit_comments_and_report_remaining_edge() {
                     root,
                     mcp,
                     operation,
-                    "code:code.rs::run",
+                    "code:code.rs::rust::run().",
                     "code_check",
                     "REQ-A",
                     None
@@ -481,7 +462,7 @@ fn code_inverse_mutations_never_edit_comments_and_report_remaining_edge() {
                 "add",
                 "REQ-A",
                 "checked_by_code",
-                "code:code.rs::run",
+                "code:code.rs::rust::run().",
                 None
             )["error"]["code"],
             "relation_exists"
@@ -492,7 +473,7 @@ fn code_inverse_mutations_never_edit_comments_and_report_remaining_edge() {
             "remove",
             "REQ-A",
             "checked_by_code",
-            "code:code.rs::run",
+            "code:code.rs::rust::run().",
             None,
         );
         assert_eq!(removed["changed_occurrences"], 2);
@@ -501,8 +482,11 @@ fn code_inverse_mutations_never_edit_comments_and_report_remaining_edge() {
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
             authored
-                .replace(":checked_by_code: code:code.rs::run\n", "")
-                .replace("[[checked_by_code:code:code.rs::run]]", "code:code.rs::run")
+                .replace(":checked_by_code: code:code.rs::rust::run().\n", "")
+                .replace(
+                    "[[checked_by_code:code:code.rs::rust::run().]]",
+                    "code:code.rs::rust::run()."
+                )
         );
         assert_eq!(
             invoke(
@@ -511,7 +495,7 @@ fn code_inverse_mutations_never_edit_comments_and_report_remaining_edge() {
                 "remove",
                 "REQ-A",
                 "checked_by_code",
-                "code:code.rs::run",
+                "code:code.rs::rust::run().",
                 None
             )["error"]["code"],
             "unsupported_mutation"

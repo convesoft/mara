@@ -354,7 +354,9 @@ fn clear_journal(project: &Project) -> Result<(), Error> {
 fn stage(path: &Path, source: &str, mode: Option<&FileMode>) -> Result<NamedTempFile, Error> {
     let mut temporary = io_at(
         path,
-        NamedTempFile::new_in(path.parent().expect("target has parent")),
+        tempfile::Builder::new()
+            .prefix(".mara-stage-")
+            .tempfile_in(path.parent().expect("target has parent")),
     )?;
     io_at(path, temporary.write_all(source.as_bytes()))?;
     if let Some(mode) = mode {

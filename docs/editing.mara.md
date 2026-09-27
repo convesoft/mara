@@ -96,6 +96,8 @@ Candidate CLI schema validation and installed-baseline MCP schema/project valida
 The shared journal publisher is used by relation mutations, item movement and item rename. Under the mutation lock, capture original bytes and permissions, stage every candidate, recheck operation-level project state and every preimage, then durably publish the format-1 journal defined by [[DES-MUTATION-RECOVERY]] before replacing any original. Sync staged files and, on Unix, affected parent directories; remove the journal only after all replacements succeed.
 
 On an in-process publication failure, restore recorded originals and remove newly created destinations. If rollback encounters later manual edits or another failure, preserve recovery information and refuse further writers until explicit rollback succeeds. A stopped process leaves a journal for restart recovery. Recheck each preimage before replacement; the advisory lock does not coordinate manual filesystem edits. Multi-file publication is recoverable, not an atomic snapshot for concurrent readers.
+
+Stage replacements with `.mara-stage-` filenames. Code input snapshots exclude these files and mutation bookkeeping so preflight indexing observes project inputs rather than Mara staging bytes.
 :::
 
 :::mara requirement REQ-ITEM-UPDATE

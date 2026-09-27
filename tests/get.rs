@@ -488,75 +488,51 @@ fn unified_get_rejects_stale_handles_cursors_and_removed_interface() {
     }
 }
 
-fn code_fixture(language: &str, extension: &str, separator: &str) -> TempDir {
+fn code_fixture(language: &str, extension: &str) -> TempDir {
     let fixture = support::fixture();
     mara::initialize_project(fixture.path(), mara::Template::Minimal).unwrap();
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let assets = if matches!(language, "python" | "typescript") {
-        manifest.join("tests/fixtures/code")
-    } else {
-        manifest.join(".mara/code")
-    };
-    fs::create_dir(fixture.path().join(".mara/code")).unwrap();
-    for suffix in ["wasm", "scm"] {
-        let name = format!("{language}.{suffix}");
-        fs::copy(
-            assets.join(&name),
-            fixture.path().join(".mara/code").join(name),
-        )
-        .unwrap();
-    }
-    let config = fixture.path().join(".mara/project.toml");
-    let mut source = fs::read_to_string(&config).unwrap().replacen(
-        "format_version = 1",
-        "format_version = 3",
-        1,
-    );
-    source.push_str(&format!("\n[[code.languages]]\nname = {language:?}\nextensions = [{extension:?}]\ngrammar = \".mara/code/{language}.wasm\"\nquery = \".mara/code/{language}.scm\"\nseparator = {separator:?}\n"));
-    fs::write(config, source).unwrap();
+    code_index::configure(fixture.path(), language, &[extension], true);
     fixture
 }
 
 // @mara checks DES-CODE-READ
 #[test]
-fn get_reads_native_symbols_with_modifiers_and_preserves_sources() {
-    for (language, ext, separator, source, selector, expected) in [
+fn get_reads_indexed_symbols_with_modifiers_and_preserves_sources() {
+    for (language, ext, source, descriptor, expected) in [
         (
             "rust",
             "rs",
-            "::",
             "mod outer {\n#[test]\nfn run() {}\n}\n",
-            "outer::run",
+            "outer/run().",
             "#[test]\nfn run() {}",
         ),
         (
             "python",
             "py",
-            ".",
             "class Outer:\n    @decorator\n    def run(self): pass\n",
-            "Outer.run",
+            "Outer#run().",
             "@decorator\n    def run(self): pass",
         ),
         (
             "javascript",
             "js",
-            ".",
             "export function run() {}\n",
-            "run",
+            "run().",
             "export function run() {}",
         ),
         (
             "typescript",
             "ts",
-            ".",
             "export function run(): void {}\n",
-            "run",
+            "run().",
             "export function run(): void {}",
         ),
     ] {
-        let fixture = code_fixture(language, ext, separator);
+        let fixture = code_fixture(language, ext);
         let file = format!("sample.{ext}");
         fs::write(fixture.path().join(&file), source).unwrap();
+        code_index::write_single(fixture.path(), language, &file, "run", descriptor);
+        let selector = format!("{language}::{descriptor}");
         let reference = format!("code:{file}::{selector}");
         let pages = get_pages_with_cli_mcp_parity(fixture.path(), &reference);
         assert_eq!(pages.len(), 1);
@@ -628,8 +604,8 @@ fn get_pages_ignored_file_only_content_and_binds_it_to_cursors() {
 
 // @mara checks DES-CODE-READ
 #[test]
-fn get_code_rejects_missing_ambiguous_unsupported_and_binary_targets() {
-    let fixture = code_fixture("rust", "rs", "::");
+fn get_code_rejects_missing_unsupported_and_binary_targets() {
+    let fixture = code_fixture("rust", "rs");
     fs::write(
         fixture.path().join("sample.rs"),
         "fn duplicate() {}\nfn duplicate() {}\n",
@@ -639,8 +615,7 @@ fn get_code_rejects_missing_ambiguous_unsupported_and_binary_targets() {
     fs::write(fixture.path().join("binary.bin"), [0xff, 0xfe]).unwrap();
     for (reference, error) in [
         ("code:missing.txt", "MissingFile"),
-        ("code:sample.rs::missing", "MissingSymbol"),
-        ("code:sample.rs::duplicate", "Ambiguous"),
+        ("code:sample.rs::rust::missing().", "MissingSymbol"),
         ("code:notes.txt::thing", "Unsupported"),
         ("code:./notes.txt", "Unsupported"),
         ("code:../notes.txt", "Unsupported"),
