@@ -9,6 +9,7 @@ Selection and interpretation of recorded results follow
 [[DES-TRACE-CHECK-BINDING]].
 
 - [Safe schema and vocabulary editing](schema-evolution.mara.md)
+- [Migration to 0.3](migration-0.3.mara.md)
 - [Engineering profile and workflow](engineering-template.mara.md)
 - [Release preparation and public guidance](release.mara.md)
 - [CLI packages and agent installation](distribution.mara.md)

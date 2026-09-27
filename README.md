@@ -23,6 +23,7 @@ npx -y '@convesoft/mara@<version>' --help
 The npm package runs a prebuilt binary without install scripts or a Rust toolchain.
 Supported platforms and package contents are defined in
 [distribution](docs/distribution.mara.md).
+For existing projects and clients, follow the [0.3 migration guide](docs/migration-0.3.mara.md).
 
 ## Configure an agent
 

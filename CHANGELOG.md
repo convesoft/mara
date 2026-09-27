@@ -1,6 +1,25 @@
 # Changelog
 
 All notable changes to Mara are generated from Conventional Commit history.
+## [0.3.0]
+
+### Breaking changes and migration
+
+Schema format 3 is required. Review existing project vocabulary and authored
+relations before editing the schema; existing projects do not acquire the new
+engineering profile or its rules automatically. The Agent Plugin distribution
+has been removed; configure MCP explicitly and install the matching skill
+separately. Follow the [0.3 migration guide](https://github.com/convesoft/mara/blob/v0.3.0/docs/migration-0.3.mara.md)
+for source edits, validation, and client interface changes.
+
+
+### Added
+
+- Rebuild Mara around engineering traceability
+
+### Build
+
+- Drop Intel macOS and speed verification
 ## [0.3.0-alpha.0]
 
 ### Added
