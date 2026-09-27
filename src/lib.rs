@@ -1132,11 +1132,11 @@ pub fn load_schema_for_validation(
     let format_version_invalid = format_version.is_none();
     let format_version = format_version.unwrap_or_default();
     if !format_version_invalid && format_version != SCHEMA_FORMAT_VERSION {
-        errors.insert(0, ConfigurationDiagnostic::new(DiagnosticCode::FormatUnsupported, "/format_version".into(), if matches!(format_version, 1 | 2) {
-            format!("schema format version {format_version} requires explicit migration: migrate the existing schema to format_version: 3; format 1 also requires description, use_when, avoid_when, and distinguish_from on every flavour. Preserve custom declarations and item identities, do not reinitialize. See https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md")
-        } else {
-            format!("unsupported schema format version {format_version}; expected {SCHEMA_FORMAT_VERSION}; migrate the existing schema explicitly; see https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md")
-        }));
+        errors.insert(0, ConfigurationDiagnostic::new(
+            DiagnosticCode::FormatUnsupported,
+            "/format_version".into(),
+            format!("unsupported schema format version {format_version}; expected {SCHEMA_FORMAT_VERSION}. Edit the schema in place, preserving custom declarations and item identities. Every flavour requires description, use_when, avoid_when and distinguish_from; validate the schema and project after editing"),
+        ));
     }
     let flavour_values: Option<BTreeMap<String, SchemaValue>> =
         decode_schema_configuration_value(flavours, "flavours", &mut errors);
@@ -1524,7 +1524,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
             DiagnosticCode::FormatUnsupported,
             diagnostics::pointer(&["format_version"]),
             format!(
-                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. Supported formats are 1 (without rules or code), 2 (without code), and 3 (code language bindings)",
+                "unsupported project format version {}; supported formats are 1 (without rules or code), 2 (without code), and 3 (code language bindings). Preserve project settings when editing the configuration",
                 format_version.expect("format version is present")
             ),
         ));

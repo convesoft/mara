@@ -18,7 +18,10 @@ use serde::Deserialize;
 use std::path::PathBuf;
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct ProjectParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
     project: Option<PathBuf>,
 }
 
@@ -71,7 +74,7 @@ impl ItemCreateToolParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct TraceMatrixToolParams {
-    /// Absolute project root; omit when this server is bound with --project.
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
     project: Option<PathBuf>,
     /// Exact human IDs or MIDs, OR within the list and intersected with other root filters.
@@ -171,7 +174,7 @@ struct SchemaListParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct SchemaValidateParams {
-    /// Absolute project root; omit when this server is bound with --project.
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     project: Option<PathBuf>,
     #[serde(flatten)]
     options: mara::ValidationOptions,
@@ -192,7 +195,7 @@ struct ItemFilterToolParams {
     /// Exact authored relation name or inverse aliases, combined with OR and intersected with other filters. Omitted or [] adds no restriction.
     #[serde(default)]
     relations: Vec<String>,
-    /// Exact documents or directory subtrees relative to the project root, combined with OR. No glob expansion, absolute paths, .. or empty/root-only paths; dot components and repeated separators normalize; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
+    /// Exact documents or directory subtrees relative to the project root, combined with OR. No glob expansion, absolute paths, .., empty path elements, . or ./; interior dot components and repeated separators normalize; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
     #[serde(default)]
     paths: Vec<PathBuf>,
     /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer.
@@ -236,7 +239,7 @@ struct SearchToolParams {
     /// Exact authored outgoing schema relation names, combined with OR and intersected with other filters. Use schema:name to qualify; an unqualified name shared with a built-in is ambiguous. Omitted or [] adds no restriction.
     #[serde(default)]
     relations: Vec<String>,
-    /// Exact documents or directory subtrees relative to the project root, combined with OR. No glob expansion, absolute paths, .. or empty/root-only paths; dot components and repeated separators normalize; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
+    /// Exact documents or directory subtrees relative to the project root, combined with OR. No glob expansion, absolute paths, .., empty path elements, . or ./; interior dot components and repeated separators normalize; omit paths or use [] to select the whole project. Example: ["packages/query/docs/"].
     #[serde(default)]
     paths: Vec<PathBuf>,
     /// Maximum entries per page, 1 through 100; omitted or null defaults to 20. The response byte budget may return fewer.
@@ -486,7 +489,7 @@ impl MaraMcp {
 
     #[tool(
         name = "project_mid_backfill",
-        description = "Deliberately add generated MIDs to every legacy item that lacks one after a validation preflight; preserve existing MIDs."
+        description = "Deliberately add generated MIDs to every item that lacks one after a validation preflight; preserve existing MIDs and all other source bytes."
     )]
     fn project_mid_backfill(
         &self,
@@ -527,7 +530,7 @@ impl MaraMcp {
     }
     #[tool(
         name = "project_init",
-        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project. Templates create .mara/project.toml and .mara/schema.yaml with schema format 3 and flavour guidance. Engineering also installs .mara/engineering-rules.yaml (enabled policy) and .mara/engineering-checks.yaml and .mara/engineering-execution.yaml (request-local checks), with required item status; no starter documents or items. Customize the project-owned schema; migrate existing projects manually on a recoverable checkpoint instead of reinitializing. See https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md. Inspect declarations with schema_get, then run schema_validate and project_validate."
+        description = "Initialize a Mara project without overwriting existing content. Pass an absolute project path unless the server was started with --project. Templates create .mara/project.toml and .mara/schema.yaml with schema format 3 and flavour guidance. Engineering also installs .mara/engineering-rules.yaml (enabled policy) and .mara/engineering-checks.yaml and .mara/engineering-execution.yaml (request-local checks), with required item status; no starter documents or items. Customize the project-owned schema in place, preserving its declarations and item identities; initialization does not edit an existing project. Inspect declarations with schema_get, then run schema_validate and project_validate."
     )]
     fn project_init(
         &self,
@@ -540,7 +543,7 @@ impl MaraMcp {
 
     #[tool(
         name = "schema_get",
-        description = "Get the complete effective schema, or one named flavour or relation declaration. Before authoring, use description, use_when, avoid_when and distinguish_from to choose flavours; these are schema guidance, not item fields. Inspect id_prefix, body and fields for item constraints. Relation source/target, inverse, symmetric and external define endpoints and spelling; cardinality and acyclic are optional graph policies. Migrate existing projects manually and validate the result."
+        description = "Get the complete effective schema, or one named flavour or relation declaration. Before authoring, use description, use_when, avoid_when and distinguish_from to choose flavours; these are schema guidance, not item fields. Inspect id_prefix, body and fields for item constraints. Relation source/target, inverse, symmetric and external define endpoints and spelling; cardinality and acyclic are optional graph policies. Edit the project-owned schema in place and validate the result."
     )]
     fn schema_get(
         &self,
@@ -566,7 +569,7 @@ impl MaraMcp {
     #[tool(
         name = "schema_validate",
         output_schema = rmcp::handler::server::common::schema_for_type::<ValidationResult>(),
-        description = "Validate schema format 3 without validating item content. Every flavour requires nonblank description, nonempty use_when, avoid_when ([] is valid), and distinguish_from ({} is valid); entries must be nonblank and distinction targets declared. Migrate existing schemas manually in place, preserving declarations and item identities; see https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md. Corpus validation is pending its capability review. Returns validation format 1, with null declaration counts if the schema cannot load. Follow next_cursor with unchanged options; invalid schemas return valid:false without a tool error."
+        description = "Validate schema format 3 and configured YAML rule definitions without reading item or code content. Every flavour requires nonblank description, nonempty use_when, avoid_when ([] is valid), and distinguish_from ({} is valid); entries must be nonblank and distinction targets declared. Edit schema declarations in place, preserving custom vocabulary and item identities. Use project_validate to check corpus conformance and enabled policy. Returns validation format 1, with null declaration counts if the schema cannot load. Follow next_cursor with unchanged options; invalid schemas return valid:false without a tool error."
     )]
     fn schema_validate(
         &self,
@@ -582,10 +585,11 @@ impl MaraMcp {
 
 #[tool_handler(
     name = "mara",
-    instructions = "Structured Mara operations. Pass an absolute project path, or omit it for execution-directory discovery (project_init requires an explicit destination only when the server is unbound). When the server starts with --project, omit request-level project selection, including for project_init; overrides are rejected. Discovery and reading: search covers items and narrative; get and related also accept code endpoints. Item tools author, list, or validate items only. Project format 3 configures external SCIP commands in [[code.languages]]; every entry requires source extensions, independently of optional grammar assets. Corpus operations invoke an indexer only when unignored source files match; empty languages are skipped. Install indexers separately. Optional Tree-sitter grammar/query assets provide comment ownership and declaration content; no language integration is built in. Before authoring, inspect schema_get flavour selection guidance and relation endpoints. Schema format 3 requires description, use_when, avoid_when, and distinguish_from for each flavour. Upgrade guidance: https://github.com/convesoft/mara/blob/main/docs/relations.mara.md"
+    instructions = "Structured Mara operations. Pass an absolute project path, or omit it for execution-directory discovery (project_init requires an explicit destination only when the server is unbound). When the server starts with --project, omit request-level project selection, including for project_init; overrides are rejected. Discovery and reading: search covers items and narrative; get and related also accept code endpoints. Item tools author, list, or validate items only. Project format 3 configures external SCIP commands in [[code.languages]]; every entry requires source extensions, independently of optional grammar assets. Corpus operations invoke an indexer only when unignored source files match; empty languages are skipped. Install indexers separately. Optional Tree-sitter grammar/query assets provide comment ownership and declaration content; no language integration is built in. Before authoring, inspect schema_get flavour selection guidance and relation endpoints. Schema format 3 requires description, use_when, avoid_when, and distinguish_from for each flavour. Relationship authoring: https://github.com/convesoft/mara/blob/main/docs/relations.mara.md"
 )]
 impl ServerHandler for MaraMcp {}
 
+// @mara implements REQ-SURFACE-PARITY
 pub fn run(selected: Option<PathBuf>) -> Result<(), String> {
     let operations = OperationContext::from_environment(selected)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -783,7 +787,7 @@ struct ItemMoveToolParams {
     reference: String,
     /// Destination project-relative *.mara.md path selected by project discovery; parent directory must exist. Creates the file if absent; no absolute paths or .. components.
     file: PathBuf,
-    /// Insert before this one-based line in the original destination, including same-file moves; valid range is 1 through line_count + 1 (end of file). Omitted or null appends. Insertion inside an item is rejected; the moved item's boundaries are no-ops.
+    /// Insert before this one-based line in the original destination, including same-file moves; valid range is 1 through line_count + 1 (end of file). Omitted or null appends. Insertion inside an item is rejected; an unchanged-location move may publish byte-identical source.
     #[serde(default)]
     line: Option<usize>,
 }

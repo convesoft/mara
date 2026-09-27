@@ -26,10 +26,10 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation, item creation/listing, unified search, bounded get, direct navigation, relation inspection, MID backfill and explicit transaction rollback. Further capabilities are pending their implementation reviews."
+    after_help = "Start with project init, then inspect schema guidance before authoring. Search discovers items and narrative; get reads content and related explores direct connections. Item and relation commands edit canonical source. Schema, project and item validation report conformance; trace matrix inspects selected coverage. Use --project to select a project and --format json for structured CLI results. The mcp command serves these operations over stdio."
 )]
 struct Cli {
-    /// Use this project root instead of ancestor discovery; selects the init target or binds MCP.
+    /// Use an absolute or working-directory-relative project root instead of ancestor discovery; selects the init target or binds MCP.
     #[arg(long, global = true, value_name = "PATH")]
     project: Option<PathBuf>,
     /// Select human-readable or JSON output (does not affect MCP).
@@ -111,17 +111,17 @@ enum Command {
         #[command(subcommand)]
         command: RelationCommand,
     },
-    /// Create and list structured items.
+    /// Create, inspect, validate and edit structured items.
     Item {
         #[command(subcommand)]
         command: ItemCommand,
     },
-    /// Initialize a Mara project.
+    /// Initialize or validate a project, backfill MIDs, or recover a pending mutation.
     Project {
         #[command(subcommand)]
         command: ProjectCommand,
     },
-    /// Inspect the selected project's schema declarations.
+    /// Inspect or validate the selected project's schema declarations.
     Schema {
         #[command(subcommand)]
         command: SchemaCommand,
@@ -185,16 +185,19 @@ enum ProjectCommand {
         after_help = "Configured [[code.languages]] entries require source extensions. SCIP commands run automatically from the project root during corpus loading, including validation, only when unignored source files match. Empty languages are skipped without invoking their command. Install indexers separately and configure trusted commands. Command or index failures make evaluation incomplete; a valid file link does not prove intended symbol attachment. Inspect code backlinks with related and relation get."
     )]
     Validate {
+        /// Exact document or directory subtree relative to the project; repeat for OR. No globs, absolute paths, .., empty paths, . or ./; omit --path for the whole project. Selects reported diagnostics only; validity covers the whole project.
         #[arg(long = "path")]
         paths: Vec<PathBuf>,
+        /// Maximum diagnostics per page, 1 through 100 (default 20); the byte budget may return fewer.
         #[arg(long)]
         limit: Option<usize>,
+        /// Opaque next_cursor; repeat unchanged options until has_more is false. Restart after source/schema changes; empty strings are invalid.
         #[arg(long)]
         cursor: Option<String>,
     },
     /// Initialize the current or named directory without overwriting existing files.
     Init {
-        /// Destination; omit to use --project or the current directory. Cannot combine with --project.
+        /// Destination; omit to use --project, or the current directory only when --project is also omitted. Cannot combine with --project.
         path: Option<PathBuf>,
         /// Bundled schema: minimal (default), empty, or engineering with policy/check files.
         #[arg(long, value_enum, default_value_t)]
@@ -222,7 +225,7 @@ enum ProjectTransactionCommand {
 
 #[derive(Debug, Subcommand)]
 enum ProjectMidCommand {
-    /// Generate missing MIDs on legacy items after validation; preserve existing MIDs.
+    /// Generate MIDs for items that lack them after validation; preserve existing MIDs.
     Backfill,
 }
 
@@ -230,10 +233,10 @@ enum ProjectMidCommand {
 enum SchemaCommand {
     /// Validate schema declarations and configured YAML rule definitions without evaluating items.
     Validate {
-        /// Maximum diagnostics per page, 1 through 100; default 20.
+        /// Maximum diagnostics per page, 1 through 100 (default 20); the byte budget may return fewer.
         #[arg(long)]
         limit: Option<usize>,
-        /// Opaque continuation; repeat unchanged options or restart after configuration changes.
+        /// Opaque next_cursor; repeat unchanged options until has_more is false. Restart after source/schema changes; empty strings are invalid.
         #[arg(long)]
         cursor: Option<String>,
     },
@@ -248,6 +251,7 @@ enum SchemaCommand {
     },
     /// List canonical declaration names and descriptions; follow with get for full guidance.
     List {
+        /// Kind of declarations to list: flavour or relation.
         #[arg(value_enum)]
         kind: CliSchemaKind,
     },
@@ -293,6 +297,7 @@ enum OutputFormat {
     Json,
 }
 
+// @mara implements REQ-SURFACE-PARITY
 fn main() -> ExitCode {
     let arguments = env::args_os().collect::<Vec<_>>();
     let requested_format = requested_output_format(&arguments);
@@ -1037,9 +1042,12 @@ fn print_validation(result: &ValidationResult) -> Result<(), String> {
 enum ItemCommand {
     /// Validate one exact human ID or MID in full corpus context.
     Validate {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
         id: String,
+        /// Maximum diagnostics per page, 1 through 100 (default 20); the byte budget may return fewer.
         #[arg(long)]
         limit: Option<usize>,
+        /// Opaque next_cursor; repeat unchanged options until has_more is false. Restart after source/schema changes; empty strings are invalid.
         #[arg(long)]
         cursor: Option<String>,
     },
@@ -1060,7 +1068,7 @@ enum ItemCommand {
         reference: String,
         /// Destination project-relative *.mara.md file; parent must exist and discovery must include it. Creates the file if absent; no absolute paths or .. components.
         file: PathBuf,
-        /// Insert before this one-based line in the original destination, including same-file moves; valid range is 1 through line_count + 1 (end of file). Omission appends. Insertion inside an item is rejected; the moved item's boundaries are no-ops.
+        /// Insert before this one-based line in the original destination, including same-file moves; valid range is 1 through line_count + 1 (end of file). Omission appends. Insertion inside an item is rejected; an unchanged-location move may publish byte-identical source.
         #[arg(long)]
         line: Option<usize>,
     },
@@ -1166,7 +1174,7 @@ struct ItemFilterArgs {
 
     #[arg(
         long,
-        help = "Select an exact document or directory subtree (project-relative, repeatable OR), e.g. packages/query/docs/; no glob expansion, absolute paths, .. or empty/root-only paths; dot components and repeated separators normalize; omit --path for the whole project"
+        help = "Select an exact document or directory subtree (project-relative, repeatable OR), e.g. packages/query/docs/; no glob expansion, absolute paths, .., empty paths, . or ./; interior dot components and repeated separators normalize; omit --path for the whole project"
     )]
     path: Vec<PathBuf>,
 

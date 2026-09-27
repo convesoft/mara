@@ -684,7 +684,7 @@ fn schema_validation_reports_guidance_errors_with_stable_codes() {
     let accepted = mara(fixture.path(), &["schema", "validate"]);
     assert!(accepted.status.success(), "{}", stderr(&accepted));
     let cases = [
-        ("format_version: 3", "format_version: 1", "migrate"),
+        ("format_version: 3", "format_version: 1", "expected 3"),
         ("    description: A project note.\n", "", "description"),
         (
             "description: A project note.",

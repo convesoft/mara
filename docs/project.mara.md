@@ -51,18 +51,17 @@ Schema validation checks project/schema configuration and configured YAML rule d
 :::mara requirement REQ-SURFACE-PARITY
 :mid: 01M1PXP2KGA6GZQB9MCYMYVNJA
 :title: Expose the same operations through CLI and MCP
-:status: draft
+:status: accepted
 :derives_from: SCN-START-STRUCTURED-PROJECT
+:kind: functional
 
-CLI and MCP must share operation semantics and domain results. CLI defaults to
-human-readable output; global `--format json` returns stable agent-oriented
-data equivalent to MCP structured results.
+CLI and MCP share operation semantics and domain results. CLI defaults to human-readable output; global `--format json` returns agent-oriented data equivalent to MCP structured results. Transport wrappers and operation-error classification follow each owning operation contract.
 
-CLI help must describe every public command and its arguments/options. MCP
-tool descriptions and input schemas must expose equivalent invocation guidance,
-including identity and path conventions, omission/empty-value semantics, and
-applicable defaults. Verify the rendered help and the server's `tools/list`
-response; guidance must preserve the operation contracts below.
+CLI help describes every public command and its arguments/options. MCP tool descriptions and input schemas expose equivalent invocation guidance, including exact identities, paths, defaults, omission and empty values, repeated inputs and bounded continuation. State current behavior and supported formats. Project selection follows [[DES-OPERATION-PROJECT-CONTEXT]]; reads, mutations, validation and matrices retain their own contracts.
+
+Reject undeclared CLI options and MCP arguments before invoking an operation or changing project source. CLI argument-parse failures exit with status 2: human diagnostics use stderr, while JSON mode emits an error message object on stdout. Help and version requests remain human-readable successful responses even when JSON output was selected.
+
+Verify rendered help and real MCP initialization, tools/list and tools/call responses. Guidance must agree with executed behavior; advertised operations require working transport paths, and parameter schemas must describe nested inputs as well as top-level fields.
 :::
 
 :::mara decision ADR-EXPLICIT-INIT-TARGET
@@ -263,4 +262,18 @@ Project/item validation shares this response family under [[DES-TRACE-DIAGNOSTIC
 Run `cargo test --locked --test schema_validation` against the candidate CLI and real stdio MCP server in isolated temporary projects. Verify all bundled schemas/rule definitions; invalid schema vocabulary, structural names and guidance; configuration recovery, stable codes and authored locations; reusable and nested definition type checks; unsupported grammar, recursion and depth boundaries; and valid counterparts.
 
 Require identical domain envelopes and operation-error classifications across transports. Check full counts across pages, deterministic continuation, stale source/options, rejected outside rule sources, invalid limits/cursors, schema read errors and oversized diagnostics. Verify schema validation preserves source and succeeds despite unreadable corpus content. Review CLI help and tools/list for schema validation. These checks do not evaluate item conformance or establish graph/matrix behavior.
+:::
+
+:::mara verification VER-INTERFACE-PARITY
+:mid: 01M3HGMVWFXSA5XYAEWK8TVWP5
+:title: Verify CLI and MCP invocation contracts
+:status: accepted
+:method: test
+:verifies: REQ-SURFACE-PARITY
+
+Run `cargo test --locked --test interface --test project_bootstrap` against the candidate CLI and real stdio MCP server in disposable projects with isolated Git/configuration state. Traverse every command's rendered help and every MCP tool's input schema, including nested properties. Require actionable parameter guidance and the same identity, path, omission, empty-value, default and continuation conventions on both transports. Check current operation names and project-selection behavior; operation-specific suites own detailed domain semantics.
+
+Check CLI argument-parse errors with JSON selection before and after the command, human error output, and help/version output. Require undeclared MCP arguments to fail before side effects, including MID backfill in a document with a missing MID; source must remain unchanged. Inspect all advertised tool schemas for rejection of undeclared top-level inputs.
+
+Review the actual help and tool descriptions for truthfulness and current scope. Run formatting, Clippy and the full relevant regression suite. Record the exact tested revision and concrete CLI/MCP results; inspecting schemas alone does not establish successful operation execution.
 :::

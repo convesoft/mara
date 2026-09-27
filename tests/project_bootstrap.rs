@@ -252,7 +252,7 @@ fn schema_guidance_rejects_invalid_declarations_through_cli_and_mcp() {
     let accepted = mara(fixture.path(), &["schema", "get"]);
     assert!(accepted.status.success(), "{}", stderr(&accepted));
     let cases = [
-        ("format_version: 3", "format_version: 1", "migrate"),
+        ("format_version: 3", "format_version: 1", "expected 3"),
         ("    description: A project note.\n", "", "description"),
         (
             "description: A project note.",
