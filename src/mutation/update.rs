@@ -212,6 +212,7 @@ pub fn update_item(
     super::references::preflight(
         &corpus,
         &projected,
+        None,
         request.body.as_ref().map(|_| item.body_source()),
     )?;
     let warnings = validate_update(&corpus, &projected, schema, item, &request)?;

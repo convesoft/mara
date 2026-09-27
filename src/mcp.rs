@@ -211,6 +211,19 @@ impl SearchToolParams {
 #[tool_router]
 impl MaraMcp {
     #[tool(
+        name = "item_rename",
+        description = "Rename one human ID by exact MID or human ID, rewriting typed relations and supported wiki mentions in items and narrative across the valid corpus. Preserves the MID, Markdown links, and unrelated source; retains no alias. Uses recoverable file replacement."
+    )]
+    fn item_rename(
+        &self,
+        Parameters(params): Parameters<ItemRenameToolParams>,
+    ) -> Result<Json<mara::ItemRename>, String> {
+        self.for_project(params.project)?
+            .item_rename(&params.reference, &params.new_id)
+            .map(Json)
+    }
+
+    #[tool(
         name = "item_move",
         description = "Move one item by exact MID or human ID within a valid project to a project-relative document. Preserve identity, content, and relations; keep the source document. Optional line is one-based in the original destination. Relative Markdown links carried with the item, incoming links to its contained nodes, and shifted heading anchors must keep their destinations. Resolve reported impacts before retrying; Markdown links are not automatically repaired."
     )]
@@ -654,4 +667,16 @@ struct ItemMoveToolParams {
     /// Insert before this one-based line in the original destination, including same-file moves; valid range is 1 through line_count + 1 (end of file). Omitted or null appends. Insertion inside an item is rejected; the moved item's boundaries are no-ops.
     #[serde(default)]
     line: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemRenameToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
+    reference: String,
+    /// New unique human ID with the item's flavour prefix. Preserves the MID; the old human ID is not kept as an alias. The current ID is a no-op.
+    new_id: String,
 }

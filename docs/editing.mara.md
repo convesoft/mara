@@ -1,8 +1,8 @@
 # Source mutation and explicit recovery
 
-MID backfill, item creation/update/deletion/movement, relation edits and explicit
-rollback are restored. The shared journal publisher supports relation edits and
-movement; rename remains pending review.
+MID backfill, item creation/update/deletion/movement/rename, relation edits and
+explicit rollback are restored. The shared journal publisher supports relation
+edits, movement and rename.
 
 :::mara requirement REQ-RECOVERABLE-MUTATION
 :mid: 01M1RKZY3VJKYP7V8GNDKR84GT
@@ -41,7 +41,7 @@ Journal format 1 is UTF-8 JSON with `format_version:1` and a non-empty `changes`
 
 CLI `project transaction rollback` and MCP `project_transaction_rollback` take the exclusive lock and need resolvable project configuration, including an existing configured schema path, but do not read schema contents or require a valid corpus. Check all targets against their recorded preimage or candidate and permissions before restoring anything; stage all originals, recheck each target, restore existing files and remove new destinations. Compare readonly on all platforms and a supplied unix_mode on Unix. Sync staged files and, on Unix, affected parent directories. Remove the journal only after success. Recovery is retryable, including already-restored paths; no journal is a successful no-op. Return `{project,restored}` with absolute project root and relative restored paths.
 
-Reject later manual edits or permission changes and preserve the journal. Reconcile targets to a recorded version before retrying. Preserve malformed/unsupported journals and restore trusted backups before removing them. Reads remain available. Concurrent manual filesystem edits are not coordinated by the advisory lock. The shared publisher is specified by [[DES-MUTATION-TRANSACTION]]; rename remains a separate implementation obligation.
+Reject later manual edits or permission changes and preserve the journal. Reconcile targets to a recorded version before retrying. Preserve malformed/unsupported journals and restore trusted backups before removing them. Reads remain available. Concurrent manual filesystem edits are not coordinated by the advisory lock. The shared publisher is specified by [[DES-MUTATION-TRANSACTION]].
 :::
 
 :::mara verification VER-MID-AND-RECOVERY
@@ -93,9 +93,9 @@ Candidate CLI schema validation and installed-baseline MCP schema/project valida
 :kind: interface
 :satisfies: REQ-RECOVERABLE-MUTATION
 
-The shared journal publisher is used by relation mutations and item movement. Under the mutation lock, capture original bytes and permissions, stage every candidate, recheck operation-level project state and every preimage, then durably publish the format-1 journal defined by [[DES-MUTATION-RECOVERY]] before replacing any original. Sync staged files and, on Unix, affected parent directories; remove the journal only after all replacements succeed.
+The shared journal publisher is used by relation mutations, item movement and item rename. Under the mutation lock, capture original bytes and permissions, stage every candidate, recheck operation-level project state and every preimage, then durably publish the format-1 journal defined by [[DES-MUTATION-RECOVERY]] before replacing any original. Sync staged files and, on Unix, affected parent directories; remove the journal only after all replacements succeed.
 
-On an in-process publication failure, restore recorded originals and remove newly created destinations. If rollback encounters later manual edits or another failure, preserve recovery information and refuse further writers until explicit rollback succeeds. A stopped process leaves a journal for restart recovery. Recheck each preimage before replacement; the advisory lock does not coordinate manual filesystem edits. Multi-file publication is recoverable, not an atomic snapshot for concurrent readers. Rename callers remain pending.
+On an in-process publication failure, restore recorded originals and remove newly created destinations. If rollback encounters later manual edits or another failure, preserve recovery information and refuse further writers until explicit rollback succeeds. A stopped process leaves a journal for restart recovery. Recheck each preimage before replacement; the advisory lock does not coordinate manual filesystem edits. Multi-file publication is recoverable, not an atomic snapshot for concurrent readers.
 :::
 
 :::mara requirement REQ-ITEM-UPDATE
@@ -327,4 +327,57 @@ At `9c9069891b056efc8cb6be9327a2a32693ab24f3`, formatting, `cargo clippy --locke
 Eleven movement groups cover CLI/MCP ID/MID parity, exact block transfer, permissions, retained source/new destination, original same-file line coordinates, missing final newline and boundary moves, safe destination/discovery/symlink refusal, read/navigation identity, incomplete corpus and active/pending writer refusal. Carried/incoming/definition links and shifted heading targets cannot silently retarget; identity/self links survive. Typed inline and external assertions preserve exact spelling and report their new source locations. Existing transaction tests cover preimage conflicts, automatic rollback, interrupted publication and explicit restart recovery; all prior suites pass.
 
 Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected intent, realization and verification each passed two roots, consuming all pages. Both transports advertise and execute movement. Boundary movement preserves bytes/location but retains baseline publication rather than promising no file replacement. Rename, project/item validation transports, rule evaluation, matrices and remaining tooling/corpus scope are still pending.
+:::
+
+:::mara requirement REQ-ITEM-RENAME
+:mid: 01M1RW50QWRZSKHK5TP4B4QMFV
+:title: Rename human IDs without changing resolved identity
+:status: accepted
+:kind: functional
+:derives_from: SCN-EDIT-CONNECTED-KNOWLEDGE
+
+CLI `item rename` and MCP `item_rename` change exactly one human ID selected by exact ID or MID in a source-valid corpus. Require valid replacement syntax, the selected flavour's prefix and project-wide uniqueness. Preserve its MID, flavour and path; the new ID resolves to the original MID and the old ID no longer resolves.
+
+Rewrite supported current-corpus human-ID relation and wiki-mention targets, including self-references and narrative. Preserve MID-authored targets, unrelated source, whitespace, line endings and permissions. Surviving relations/mentions must retain their MID endpoints and Markdown links their destinations. Code files stay read-only; refuse rename when a remaining human-ID code marker would break. Publish through recoverable replacement. An unchanged ID succeeds without writes or affected paths. Return MID, old/new ID and affected paths consistently across transports; create no alias, history record or Git commit.
+:::
+
+:::mara design DES-ITEM-RENAME
+:mid: 01M1RW50RC4BK3RAH78AEJVR2T
+:title: Patch parsed ID targets through the recoverable transaction
+:status: accepted
+:kind: interface
+:satisfies: REQ-ITEM-RENAME
+:satisfies: REQ-RECOVERABLE-MUTATION
+
+CLI `item rename REFERENCE NEW_ID` and MCP `item_rename {reference,new_id,project?}` return `{mid,old_id,new_id,paths}` with unique changed relative document paths in lexical order. Under the mutation lock, require complete source conformance, exact identity and valid unique replacement ID. No-op returns empty paths without publication, but still requires valid source and the lock.
+
+Plan patches from the selected opener, schema metadata relation values, typed inline assertions and parser-recognized item/narrative wiki mentions authored with the old human ID. Check exact opener/token/scalar preimages and reject overlap. Replace only ID token bytes, applying patches backwards per file. Preserve metadata value spacing, MID references, unsupported labelled syntax, literal/code/raw examples and all unrelated text.
+
+Reparse candidates and apply source correspondence with the expected old/new ID substitution, preserving the target's MID. Do not grant a body-edit exemption. Protect unchanged Markdown links, including generated anchors affected by renamed mentions inside headings. Require complete candidate source conformance and unchanged item count, MIDs, expected IDs, flavours, paths and ordered relation/mention identities. External/code addresses remain authored strings; code comments are not rewritten, so human-ID markers can block rename while MID markers survive. Lifecycle/rule evaluation is separate from source conformance.
+
+Publish all nonempty changes through [[DES-MUTATION-TRANSACTION]], even for one file. Recheck project/schema/corpus and each preimage before replacement; explicit recovery follows [[DES-MUTATION-RECOVERY]].
+:::
+
+:::mara decision ADR-RENAME-WITHOUT-ALIASES
+:mid: 01M1RW50RVQY5MM2V2S7FQFCD1
+:title: Keep one current human handle per durable identity
+:status: accepted
+:justifies: REQ-ITEM-RENAME
+
+Replace the current human-readable handle without retaining aliases. The immutable MID supplies stable reference identity across human-ID changes. Persisted aliases would add naming state and ambiguous future ID reuse. Rewrite supported human references in the current corpus through the same recoverable transaction; external systems and historical revisions retain their authored text.
+:::
+
+:::mara verification VER-ITEM-RENAME
+:mid: 01M3H666HKDNS4GS8RD33AR1QX
+:title: Check human-ID rename, stable references and recovery
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-ITEM-RENAME
+:verifies: DES-ITEM-RENAME
+:verifies: REQ-RECOVERABLE-MUTATION
+
+Run `cargo test --locked --test item_rename` and rename unit tests. Check CLI/MCP parity, old-ID absence/MID continuity, exact source/permissions, self/narrative/metadata/inline references, aliases/symmetry, unchanged MID/external/literal spellings, no-op and no Git commit. Reject invalid IDs/corpora, shifted heading destinations, human-ID code markers and active/pending writers without writes.
+
+Retain one-file and multi-file injected failure/rollback, manual-edit conflicts, patch preimage checks and real rename-process interruption at every publication boundary followed by explicit recovery. Run all prior suites, formatting/Clippy, canonical validation and selected traceability.
 :::

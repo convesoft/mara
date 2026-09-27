@@ -474,6 +474,22 @@ fn run(cli: Cli) -> Result<bool, String> {
                 Ok(())
             })?;
         }
+        Command::Item {
+            command: ItemCommand::Rename { reference, new_id },
+        } => {
+            let result =
+                OperationContext::from_environment(project)?.item_rename(&reference, &new_id)?;
+            emit(format, &result, |result| {
+                println!(
+                    "renamed item '{}' to '{}' with MID {}",
+                    result.old_id, result.new_id, result.mid
+                );
+                for path in &result.paths {
+                    println!("updated {}", path.display());
+                }
+                Ok(())
+            })?;
+        }
         Command::Related {
             reference,
             direction,
@@ -828,6 +844,14 @@ fn print_validation(result: &ValidationResult) -> Result<(), String> {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
+    /// Rename a human ID and supported typed relations/wiki mentions in items and narrative across a valid project, preserving the MID. Markdown links are preserved, not rewritten.
+    Rename {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
+        reference: String,
+        /// New unique human ID with the flavour's prefix; the old ID is not kept as an alias. The current ID is a no-op.
+        new_id: String,
+    },
+
     /// Move an item within a valid project without changing its identity, content, or relations; keep the source document.
     #[command(
         after_help = "ID/MID references retain item identity. Relative Markdown links carried with the item, incoming links to its contained nodes, and shifted heading anchors must keep their destinations. Resolve reported link impacts before retrying; Markdown links are not automatically repaired."

@@ -405,9 +405,11 @@ fn connections<'graph, 'corpus>(
 // @mara implements DES-ITEM-CREATION
 // @mara implements DES-RELATION-MUTATION
 // @mara implements DES-ITEM-UPDATE
+// @mara implements DES-ITEM-RENAME
 pub(super) fn preflight(
     before: &Corpus,
     after: &Corpus,
+    rename: Option<(&str, &str)>,
     edited_body: Option<&SourceLocation>,
 ) -> Result<(), Error> {
     let mut new_sources = sources(after);
@@ -453,7 +455,22 @@ pub(super) fn preflight(
                 relation.inline,
             )
         };
-        let expected = document.source()[location.1..location.2].to_owned();
+        let raw = &document.source()[location.1..location.2];
+        let expected = if let Some((old, new)) = rename
+            && written_target == old
+            && (inline
+                || reference.is_some_and(|reference| {
+                    reference.kind() == ReferenceKind::Item && reference.target() == old
+                })) {
+            if inline {
+                format!("[[{}:{new}]]", relation_name.unwrap())
+            } else {
+                format!("[[{new}]]")
+            }
+        } else {
+            raw.to_owned()
+        };
+
         let mapped = point(&maps, source, location.1).and_then(|(path, start)| {
             let (end_path, last) = point(&maps, source, location.2 - 1)?;
             let document = after.documents().iter().find(|doc| doc.path() == path)?;

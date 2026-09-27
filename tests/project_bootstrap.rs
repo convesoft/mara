@@ -683,7 +683,7 @@ fn bootstrap_advertises_only_its_available_operations() {
         ),
         (
             vec!["item", "--help"],
-            vec!["create", "delete", "list", "move", "update"],
+            vec!["create", "delete", "list", "move", "rename", "update"],
             vec!["get", "validate", "search"],
         ),
     ] {
@@ -729,6 +729,7 @@ fn bootstrap_advertises_only_its_available_operations() {
             "item_delete",
             "item_list",
             "item_move",
+            "item_rename",
             "item_update",
             "project_init",
             "project_mid_backfill",

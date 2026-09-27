@@ -1914,3 +1914,5 @@ pub use mutation::{ItemDeletion, delete_item};
 
 pub use mutation::{ItemLocation, ItemMove, move_item};
 pub use operations::ItemMoveParams;
+
+pub use mutation::{ItemRename, rename_item};

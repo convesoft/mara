@@ -7,7 +7,7 @@ review; it does not authorize removing behavior. Product contracts live in the
 linked capability documents rather than in this inventory.
 
 The active candidate now supports project initialization, schema inspection and
-definition validation, item creation/update/deletion/movement/listing, unified search, bounded get, direct navigation, relation inspection/add/remove, MID backfill and explicit
+definition validation, item creation/update/deletion/movement/rename/listing, unified search, bounded get, direct navigation, relation inspection/add/remove, MID backfill and explicit
 journal rollback. Corpus conformance, document/code discovery
 and the document graph are reviewed dependencies. Earlier full-runtime test rows
 remain historical where their edit or validation transports
@@ -584,3 +584,30 @@ restart recovery. No production behavior change or new dependency was needed;
 exact lookup follows already-complete source validation. Boundary movement
 preserves bytes/location; the retained publisher may still replace identical
 content and does not promise the no-write behavior of item update.
+
+## Item rename review
+
+Selected increment: CLI/MCP human-ID rename preserving MID identity, supported
+references and source. Dependencies are reviewed source conformance, patch spans,
+identity resolution and journal publication; add only the rename-token mapping
+to reference correspondence, retaining the explicit-body gate separately.
+
+| Area | Review and disposition |
+|---|---|
+| Identity | Retain full source conformance, exact lookup, replacement grammar/prefix/uniqueness and unchanged-ID no-op. Resolve directly after validation instead of restoring the legacy retrieval result. Keep the baseline no-alias decision and stable MID. |
+| Source patches | Retain opener, schema metadata, typed inline and parsed item/narrative mention target patches; check exact preimages and overlap, then apply in reverse byte order. Preserve MID spellings, prose, labels/literals, whitespace, newlines, paths and permissions. |
+| Reference/publication | Allow expected human-ID token substitutions while comparing resolved destinations. Keep unchanged Markdown link/heading target protection and ordered MID endpoint checks. Every nonempty rename uses the journal, including one file; no-op still needs valid source and an available lock. Code files remain untouched: candidate validation rejects broken human-ID code markers, while MID markers survive. |
+| Tests | Retain three CLI/MCP groups for exact bytes/MID graph/permissions/no Git commit, parity/no-op/bound context, and invalid request/corpus refusal. Retain five rename unit groups for one-file/no-op publication, every injected replacement failure, conflicting manual edits, real process interruption and patch preimages. Extract narrative/heading and inverse/symmetric/inline/external cases from mixed suites; retain code-marker and writer refusal boundaries. Shared rollback format tests remain active without duplication. |
+
+Completion requires real rename/read/navigation through both transports, old-ID
+absence and MID continuity, unchanged-source failures and interruption recovery,
+all prior suites, formatting/Clippy, canonical validation, selected traceability
+and evidence for the committed revision.
+
+Seven integration groups and five unit groups exercise the reviewed rename
+obligations. Keep process interruption in real subprocesses with fixture-owned
+working directories and isolated Git/configuration. Preserve the baseline
+read-only code-marker boundary and unchanged-ID no-write behavior, including
+inode preservation. The heading-link fixture must begin its heading on a new
+line; correcting that fixture required no production behavior change or new
+dependency.
