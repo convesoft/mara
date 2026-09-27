@@ -45,3 +45,28 @@ Run `cargo test --locked --test corpus_validation` in isolated temporary project
 
 This method verifies the shared library prerequisite. It does not execute candidate project/item validation transports, conditional rules, graph policies, MID backfill or recovery writes. Preserve their baseline tests for later checkpoints.
 :::
+
+:::mara evidence EVD-CORPUS-CONFORMANCE
+:mid: 01M3H30DMNEMAPG8QKBHHF27AQ
+:title: Corpus conformance and prior capability regressions pass
+:status: accepted
+:result: passed
+:captured_at: 2026-09-27T09:26:25Z
+:subject_revision: dc951880d771e9f3c679d17907142832b3bbc102
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-ITEM-LIST
+:evidences: VER-UNIFIED-SEARCH
+:evidences: VER-BOUNDED-NODE-READ
+:evidences: VER-DOCUMENT-NAVIGATION
+:evidences: VER-RELATION-INSPECTION
+:evidences: VER-CORPUS-CONFORMANCE
+
+At `dc951880d771e9f3c679d17907142832b3bbc102`, `cargo fmt --all -- --check`, `cargo clippy --locked --all-targets --all-features -- -D warnings`, and `cargo test --locked --all-targets` passed: 174 tests, none failed or ignored. Fourteen corpus-conformance groups cover identity diagnostics, independent schema/source recovery, typed fields, relation endpoints, source preservation and code-problem association. Existing real CLI/MCP tests remain passing.
+
+The targeted unreadable-document regression failed before the correction: a code marker reported its target missing while discovery was incomplete. It passes with complete-missing and resolved-target counterparts after applying the same completeness guard used by item relations.
+
+Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity with zero diagnostics. Installed-tool intent passed two selected roots; realization and verification each passed three selected roots, consuming all pages. These authoring/trace checks do not establish candidate project validation. The new implementation is a library prerequisite; project/item validation transports, rule/graph evaluation, MID backfill and write recovery remain pending.
+:::
