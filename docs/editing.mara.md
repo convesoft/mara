@@ -221,3 +221,33 @@ Run `cargo test --locked --test item_deletion`. Exercise CLI/MCP delete by ID/MI
 
 Cover duplicate heading retargeting, contained anchors, typed inline assertions and demoted mentions, external outgoing edges, code-marker targets, invalid/incomplete corpora and requests, active/pending locks. Retain the shared single-file preimage regression, run all prior suites, formatting/Clippy, canonical validation and selected traceability.
 :::
+
+:::mara evidence EVD-ITEM-DELETION
+:mid: 01M3H5GQ7WBWE2MMY0705872S8
+:title: Item deletion passes source and surviving-reference checks
+:status: accepted
+:result: passed
+:captured_at: 2026-09-27T10:10:19Z
+:subject_revision: 6b7f0540520ecf89a5b3e3f67a0782ff984b7b21
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-ITEM-LIST
+:evidences: VER-UNIFIED-SEARCH
+:evidences: VER-BOUNDED-NODE-READ
+:evidences: VER-DOCUMENT-NAVIGATION
+:evidences: VER-RELATION-INSPECTION
+:evidences: VER-CORPUS-CONFORMANCE
+:evidences: VER-MID-AND-RECOVERY
+:evidences: VER-ITEM-CREATION
+:evidences: VER-RELATION-MUTATION
+:evidences: VER-ITEM-UPDATE
+:evidences: VER-ITEM-DELETION
+
+At `6b7f0540520ecf89a5b3e3f67a0782ff984b7b21`, formatting, `cargo clippy --locked --all-targets --all-features -- -D warnings` and `cargo test --locked --all-targets` passed. The unchanged-source full run passed 239 tests across 20 suites with no failures; the ignored interruption helper was explicitly run at three boundaries by its parent. The existing proc-macro-error2 future-compatibility notice remains. A temporary build quota was resolved by cleaning only generated Mara package artifacts and rebuilding.
+
+Nine deletion groups cover CLI/MCP identity/result parity, exact source/separator/permission preservation, retained empty documents, failed lookup/empty list after deletion, all incoming reference locations, removed outgoing/self links and literal examples, invalid/incomplete corpus and request refusal, duplicate-heading/contained-anchor protection, inline demotion to blocking mentions, external outgoing assertions, active/pending locks and real Rust code-marker targets. Previous capabilities and single-file publication refusal regressions pass.
+
+Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected intent passed one root; realization and verification each passed two roots with all pages consumed. CLI/MCP advertise and execute deletion. Validation transport checks use reviewed library source conformance where project/item transports remain pending. Move/rename, rule evaluation, matrices and remaining repository/tooling scope are not completed by this checkpoint.
+:::
