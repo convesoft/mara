@@ -11,7 +11,6 @@ binary=$(realpath "$1")
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64) target=x86_64-unknown-linux-gnu ;;
   Linux:aarch64) target=aarch64-unknown-linux-gnu ;;
-  Darwin:x86_64) target=x86_64-apple-darwin ;;
   Darwin:arm64) target=aarch64-apple-darwin ;;
   *)
     echo "unsupported smoke-test host: $(uname -s)/$(uname -m)" >&2
@@ -51,7 +50,7 @@ assert.deepEqual(files("platform-pack.json"), ["LICENSE-APACHE", "LICENSE-MIT", 
 const mainManifest = manifest(main), platformManifest = manifest(platform);
 assert.equal(mainManifest.version, platformManifest.version);
 assert.deepEqual(mainManifest.bin, { mara: "bin/mara.cjs" });
-assert.deepEqual(Object.keys(mainManifest.optionalDependencies).sort(), ["@convesoft/mara-linux-x64-gnu", "@convesoft/mara-linux-arm64-gnu", "@convesoft/mara-darwin-x64", "@convesoft/mara-darwin-arm64"].sort());
+assert.deepEqual(Object.keys(mainManifest.optionalDependencies).sort(), ["@convesoft/mara-linux-x64-gnu", "@convesoft/mara-linux-arm64-gnu", "@convesoft/mara-darwin-arm64"].sort());
 assert.ok(Object.values(mainManifest.optionalDependencies).every(v => v === mainManifest.version));
 assert.equal(mainManifest.scripts, undefined);
 assert.equal(platformManifest.scripts, undefined);

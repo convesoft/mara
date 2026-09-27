@@ -8,7 +8,6 @@ const { spawn } = require("node:child_process");
 const packages = new Map([
   ["linux:x64", "@convesoft/mara-linux-x64-gnu"],
   ["linux:arm64", "@convesoft/mara-linux-arm64-gnu"],
-  ["darwin:x64", "@convesoft/mara-darwin-x64"],
   ["darwin:arm64", "@convesoft/mara-darwin-arm64"],
 ]);
 
@@ -18,7 +17,7 @@ const packageName = packages.get(platform);
 if (packageName === undefined) {
   console.error(
     `Mara does not provide a binary for ${process.platform}/${process.arch}. ` +
-      "Supported targets are glibc Linux and macOS on x64 or arm64.",
+      "Supported targets are glibc Linux on x64 or arm64, and Apple Silicon macOS.",
   );
   process.exitCode = 1;
 } else {
