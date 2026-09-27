@@ -17,8 +17,9 @@ mod diagnostics;
 pub use corpus::{
     Corpus, Diagnostic, Document, DocumentReference, DocumentSet, Item, MarkdownBlock,
     MarkdownBlockKind, Mention, MetadataEntry, ReferenceKind, Relation, SourceLocation, SourceSpan,
-    load_corpus, load_documents, load_documents_for_validation,
-    load_documents_syntax_for_validation,
+    load_corpus, load_corpus_for_validation, load_corpus_syntax_for_validation, load_documents,
+    load_documents_for_validation, load_documents_syntax_for_validation, validate_corpus,
+    validate_corpus_independent,
 };
 mod discovery;
 pub use discovery::{
@@ -198,10 +199,67 @@ impl Schema {
         })
     }
 
+    fn flavour_for_validation(&self, name: &str) -> Option<&FlavourDefinition> {
+        (!self.validation.invalid_flavours.contains(name))
+            .then(|| self.flavours.get(name))
+            .flatten()
+    }
+
     fn flavour_is_declared(&self, name: &str) -> bool {
         self.validation.flavours_section_invalid
             || self.flavours.contains_key(name)
             || self.validation.invalid_flavours.contains(name)
+    }
+
+    fn id_prefix_is_valid(&self, flavour: &str) -> bool {
+        !self.validation.invalid_id_prefixes.contains(flavour)
+    }
+
+    fn body_is_valid(&self, flavour: &str) -> bool {
+        !self.validation.invalid_bodies.contains(flavour)
+    }
+
+    fn field_is_declared(&self, flavour: &str, field: &str) -> bool {
+        self.validation.invalid_field_sections.contains(flavour)
+            || self
+                .flavours
+                .get(flavour)
+                .is_some_and(|definition| definition.fields.contains_key(field))
+            || self
+                .validation
+                .invalid_fields
+                .contains(&(flavour.to_owned(), field.to_owned()))
+    }
+
+    fn field_is_valid(&self, flavour: &str, field: &str) -> bool {
+        !self
+            .validation
+            .invalid_fields
+            .contains(&(flavour.to_owned(), field.to_owned()))
+    }
+
+    fn field_values_are_valid(&self, flavour: &str, field: &str) -> bool {
+        !self
+            .validation
+            .invalid_field_values
+            .contains(&(flavour.to_owned(), field.to_owned()))
+    }
+
+    fn relation_is_valid(&self, relation: &str) -> bool {
+        !self.validation.relations_section_invalid
+            && !self.validation.invalid_relations.contains(relation)
+    }
+
+    fn relation_source_is_valid(&self, relation: &str) -> bool {
+        !self.validation.invalid_relation_sources.contains(relation)
+    }
+
+    fn relation_target_is_valid(&self, relation: &str) -> bool {
+        !self.validation.invalid_relation_targets.contains(relation)
+    }
+
+    fn same_flavour_is_valid(&self, relation: &str) -> bool {
+        !self.validation.invalid_same_flavour.contains(relation)
     }
 
     fn validation_errors(&mut self) -> Vec<ConfigurationDiagnostic> {

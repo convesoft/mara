@@ -10,6 +10,7 @@ dispositions and remaining scope.
 - [Project initialization and schema discovery](project.mara.md)
 - [Canonical source, document format and item identity](format.mara.md)
 - [Document structure, references and direct navigation](discovery.mara.md)
+- [Corpus conformance and validation](validation.mara.md)
 - [Code adapters and traceability](code-traceability.mara.md)
 - [Item listing, search and bounded reads](retrieval.mara.md)
 

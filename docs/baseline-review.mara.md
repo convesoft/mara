@@ -376,3 +376,37 @@ selector generation and mutation-facing collection remain unchanged. Five test
 groups retain alias/symmetric/external source evidence, code ordering, complete
 count/byte pages, stale/error envelopes and unchanged source. Schema staleness
 checks alter a parsed declaration, matching the existing semantic fingerprint.
+
+## Corpus conformance dependency review
+
+Selected increment: the recovering corpus loader and source-level conformance
+checks needed by validation and mutation preflight. Reuse reviewed document/code
+loaders, discovery diagnostics and schema recovery. Project/item validation
+transports, conditional rules, graph policies and mutation locks/writes remain
+pending; this checkpoint must not expose incomplete project validation.
+
+| Area | Review and disposition |
+|---|---|
+| Recovery | Compose the existing recovering DocumentSet with CodeIndex instead of duplicating discovery/parsing. Retain readable documents and independent diagnostics, propagate incomplete discovery, and associate code problems with human IDs and MIDs. Syntax-only recovery avoids code adapters when schema interpretation is unavailable. |
+| Identity | Retain missing, malformed, misplaced and repeated MID checks; index every valid authored MID, including secondary entries; diagnose both sides of duplicate human IDs/MIDs. Do not rewrite identities. |
+| Conformance | Retain independent flavour/prefix/body/typed-field checks, required/repeated fields, metadata and inline relation permissions, inverse/same-flavour endpoints, external syntax, and exact code resolution. Invalid declarations suppress only dependent checks. |
+| References | Retain discovery diagnostics and ambiguity checks. Missing targets require complete item discovery; review the code-marker branch against this invariant, because the baseline checks missing marker targets unconditionally. |
+| Diagnostics | Retain stable codes, authored spans and deterministic path/line/message order. Mutation-only missing-body/MID classifiers are deferred until their consuming operations; no message-based classification is introduced. |
+| Tests | Restore four identity groups from pending tests at the library boundary. Retain recovery obligations for independent schema/item errors, title/body and metadata recovery, unreadable sources, incomplete target suppression, typed fields, item/inverse/external/code endpoints and source preservation. Existing transport assertions and mutation setup remain in the preserved baseline/pending tests for their own checkpoints. |
+
+Completion requires isolated real-source library workflows, targeted reproduction
+of any confirmed invariant violation, all existing CLI/MCP regressions,
+formatting/Clippy, canonical validation, selected traceability and exact-revision
+evidence. A passing dependency suite does not establish project validation or MID
+backfill completion.
+
+Fourteen library groups now cover the retained identity, recovery, field and
+endpoint obligations. The recovered corpus composes existing loaders; the only
+additional schema dependency is access to the recovery flags already populated
+by definition validation. Existing strict reads and transports are unchanged.
+The regression reproduced a false `reference_unresolved` code-marker diagnostic
+beside an unreadable target document. The marker branch now applies the same
+complete-discovery gate as item relations; complete missing and resolved target
+counterparts pass. Code-problem association uses a malformed marker with a valid
+target; a top-level comment after a struct is valid file-level attribution, not
+an unsupported-owner fixture. No source rewrites or new dependencies were added.

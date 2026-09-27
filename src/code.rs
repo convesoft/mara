@@ -232,6 +232,14 @@ fn read_project_asset(project: &Project, path: &Path) -> Result<Vec<u8>, String>
 }
 
 impl CodeIndex {
+    pub(crate) fn empty(project: &Project) -> Self {
+        Self {
+            root: project.root().to_owned(),
+            files: BTreeMap::new(),
+            assets: vec![PathBuf::from(crate::PROJECT_FILE)],
+        }
+    }
+
     /// Discover code with local configured adapters, retaining partial data and explicit problems.
     pub fn load(project: &Project) -> (Self, Vec<CodeProblem>) {
         // @mara implements DES-CODE-TRACEABILITY
