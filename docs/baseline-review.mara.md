@@ -644,3 +644,24 @@ and rejection of partial results from invalid adapters. Fixture vocabulary/rules
 live under tests/fixtures and runtime configuration is fixture-owned. Restore
 only the small source-coordinate, item-completeness and first-edge-location
 helpers needed by diagnostic projection. Keep no matrix-only cache export.
+
+## Trace matrix review
+
+Selected increment: CLI/MCP matrices over explicit root selections and either
+persisted named rules or one request-local check, including exact-text revision
+bindings. Reuse reviewed corpus recovery, item filters, semantic edges, rule
+loading and native evaluation; restore only matrix projection/rendering,
+observations and check binding. No new dependency or saved view format is needed.
+
+| Area | Review and disposition |
+|---|---|
+| Selection and state | Retain normalized root filters or all:true, exclusive rule/check modes, expanded shape identities, rule applicability and full graph context outside root selection. A finite policy failure is matrix data; unavailable prerequisites retain issues and incomplete counts. |
+| Request checks | Retain targetless named shape/type compatibility checks and exact text substitutions only in hasValue/in. Reject malformed/missing/unused/non-text bindings and duplicate CLI names. Bind in memory; configured policies still reject placeholders. |
+| Explanation | Retain native observation/cache outcomes, source-linked reported obligations, immediate selected/qualifying counts, null unknowns, canonical edge context, per-evaluation summaries and bounded field inspection. Deduplicate authored edge occurrences without inventing item state on code/external endpoints. |
+| Output and cursors | Retain record-stream pages, shared 65,536-byte JSON/Markdown budget, indivisible-record errors, snapshot-bound check references and unchanged-request continuation. Include code, file-only code, adapters and excluded invalid sources in snapshot identity. |
+| Rendering finding | Baseline Markdown treats every non-external endpoint as an item, but code descriptors have only kind/reference. This renders a code edge as `[?](<>)`. Reproduce through real CLI/MCP Markdown before displaying its actual code reference and file link using the existing code-reference parser. Preserve external and item presentation. |
+| Tests | Retain 13 matrix groups for rule states/inspection/parity, schema I/O errors, native literal counts, literal every semantics, external/code predicate states, source/adapter/excluded-source cursor invalidation, invalid prerequisites, second-hop continuation, request-check terminals and revision binding failures/repair. Restore the engineering acceptance/coverage/execution workflow. Add focused selection/byte-bound coverage and the observed code Markdown regression; keep disposable fixture-owned configuration and standard helpers. |
+
+Completion requires real JSON/Markdown CLI/MCP parity and failures, complete
+continuation, exact revision binding without source edits, full regression suite,
+formatting/Clippy, canonical validation and candidate matrices over this corpus.
