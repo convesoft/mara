@@ -33,7 +33,7 @@ The repository provides a README with supported installation and primary authori
 
 Prepare a release through the repository's issue and pull-request flow in [AGENTS.md](../AGENTS.md). Select the workspace version manually, generate CHANGELOG.md with cliff.toml, target main and apply the release label. A merged candidate is eligible for approval. This qualification is a maintainer responsibility: release.yml triggers on a main push changing CHANGELOG.md and does not inspect the pull-request label.
 
-The prepare job captures github.sha, checks version/changelog consistency and an existing tag's target, and runs the required source gates. Four host jobs build and smoke the targets defined by [[DES-NPM-NATIVE-PACKAGES]], then upload temporary native archives and npm tarballs. The publish job depends on those jobs, uses the protected release environment, and alone holds contents-write and npm OIDC permissions. Configure environment protection and npm trusted publishing before using it; the YAML reference to an environment does not prove its server-side protection settings.
+The prepare job captures github.sha, checks version/changelog consistency and an existing tag's target, and runs the required source gates. Three host jobs build and smoke the targets defined by [[DES-NPM-NATIVE-PACKAGES]], then upload temporary native archives and npm tarballs. The publish job depends on those jobs, uses the protected release environment, and alone holds contents-write and npm OIDC permissions. Configure environment protection and npm trusted publishing before using it; the YAML reference to an environment does not prove its server-side protection settings.
 
 Publication assembles the dispatcher and checksums, creates or verifies the captured tag, and creates or updates the draft release assets. Native package publication checks existing registry tarball digests and refuses mismatches, then waits for native packages to become visible. The dispatcher is published or digest-verified last. After it is visible, clean npx execution must report the expected version before GitHub release publication. Retry only the captured revision and byte-identical npm artifacts; publication is staged, so a failed run may already have created a tag, uploaded assets or published some native packages. Inspect the completed stages before retrying. [[implemented_by:code:.github/workflows/release.yml]]
 :::
@@ -44,7 +44,7 @@ Publication assembles the dispatcher and checksums, creates or verifies the capt
 :status: accepted
 :justifies: DES-NPM-NATIVE-PACKAGES
 
-A dispatcher plus native optional dependencies supports one-command npx use without a Rust toolchain or npm lifecycle scripts. An install-time binary downloader would make the primary installation path depend on scripts that enterprise or restricted environments may disable. Supported host boundaries are owned by [[REQ-SCRIPT-FREE-NPM-DISTRIBUTION]]; additional platforms require demonstrated demand and corresponding build and smoke coverage.
+A dispatcher plus native optional dependencies supports one-command npx use without a Rust toolchain or npm lifecycle scripts. An install-time binary downloader would make the primary installation path depend on scripts that enterprise or restricted environments may disable. Keep macOS support to Apple Silicon and discontinue the separate Intel macOS release host; supported host boundaries are owned by [[REQ-SCRIPT-FREE-NPM-DISTRIBUTION]]. Additional platforms require demonstrated demand and corresponding build and smoke coverage.
 :::
 
 :::mara decision ADR-DUAL-LICENSE
@@ -65,7 +65,7 @@ Recipients may use Mara under either the [MIT License](../LICENSE-MIT) or [Apach
 :verifies: DES-PROTECTED-RELEASE-WORKFLOW
 :verifies: REQ-PUBLIC-REPOSITORY-GUIDANCE
 
-Inspect the workflow, packaging scripts, pinned toolchain, Cargo workspace version, changelog configuration and public guidance at the candidate revision. Check captured-revision propagation, all four native host jobs, version derivation, source and packaged-smoke gates, publish-job dependency/permissions/environment, tag-target and npm-digest refusal, native-before-dispatcher visibility and public smoke before GitHub publication. Distinguish maintainer release qualification from automated checks and repository YAML from externally configured protection/trust.
+Inspect the workflow, packaging scripts, pinned toolchain, Cargo workspace version, changelog configuration and public guidance at the candidate revision. Check captured-revision propagation, all three native host jobs, version derivation, source and packaged-smoke gates, publish-job dependency/permissions/environment, tag-target and npm-digest refusal, native-before-dispatcher visibility and public smoke before GitHub publication. Distinguish maintainer release qualification from automated checks and repository YAML from externally configured protection/trust.
 
 Review README commands, supported installation paths, license references, provisional roadmap and private security guidance for clarity and working repository links. Check shell/JavaScript syntax using their standard runtimes. Run complete schema/project validation and relevant intent/verification matrices, consuming every continuation page. [[VER-NPM-DISTRIBUTION]] owns actual local artifact and CLI/MCP execution.
 

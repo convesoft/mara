@@ -25,14 +25,6 @@ const targets = new Map([
     },
   ],
   [
-    "x86_64-apple-darwin",
-    {
-      name: "@convesoft/mara-darwin-x64",
-      os: ["darwin"],
-      cpu: ["x64"],
-    },
-  ],
-  [
     "aarch64-apple-darwin",
     {
       name: "@convesoft/mara-darwin-arm64",
