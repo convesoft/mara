@@ -8,6 +8,7 @@ Execution evidence applies to its recorded revision and verification scope.
 Selection and interpretation of recorded results follow
 [[DES-TRACE-CHECK-BINDING]].
 
+- [Engineering profile and workflow](engineering-template.mara.md)
 - [CLI packages and agent installation](distribution.mara.md)
 - [Project initialization and schema discovery](project.mara.md)
 - [Canonical source, document format and item identity](format.mara.md)

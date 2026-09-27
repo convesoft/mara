@@ -118,6 +118,8 @@ The bundled realization check supports accepted requirement and design roots,
 including mixed selections. Both can qualify through direct implementation;
 only a requirement can also qualify through an accepted satisfying design.
 Missing realization is a failed coverage result, not an invalid check request.
+
+Lifecycle, acceptance and selected-scope interpretation follow [[DES-ENGINEERING-PROFILE]].
 :::
 
 :::mara requirement REQ-FLAVOUR-AUTHORING-GUIDANCE
@@ -175,8 +177,9 @@ Omitting a key, supplying the wrong type, using blank entries, or naming an unkn
 :validates: SCN-START-STRUCTURED-PROJECT
 :validates: SCN-START-ENGINEERING-KNOWLEDGE
 :validates: SCN-CHOOSE-KNOWLEDGE-FLAVOUR
+:verifies: DES-ENGINEERING-PROFILE
 
-Run `cargo test --locked --test project_bootstrap --test trace_matrix` against the candidate binary, then exercise the complete authoring flow below through real CLI and MCP requests. Exercise current, named, and explicit initialization targets; default, empty, and engineering templates; refusal to overwrite project-owned files; nearest and explicit project selection; bound and unbound stdio MCP; and schema guidance inspection and rejection.
+Run `cargo test --locked --test project_bootstrap --test trace_matrix` against the candidate binary. The test run must exercise the complete authoring flow below through real CLI and MCP requests. Exercise current, named, and explicit initialization targets; default, empty, and engineering templates; refusal to overwrite project-owned files; nearest and explicit project selection; bound and unbound stdio MCP; and schema guidance inspection and rejection.
 
 Initialize an engineering project, create each supported knowledge flavour, add valid typed relationships, inspect both directions through CLI and MCP, reject invalid endpoints without changing source, and validate the resulting project. Exercise the bundled realization check on design-only and mixed requirement/design selections, first without realization and then with a direct implementation of the design. Both cases must evaluate completely, with failed then passed coverage and equivalent CLI/MCP results.
 
