@@ -117,6 +117,24 @@ impl OperationContext {
         Ok(SchemaListResult { kind, declarations })
     }
 
+    pub fn relation_get(
+        &self,
+        params: RelationParams,
+        limit: Option<usize>,
+        cursor: Option<String>,
+    ) -> Result<crate::RelationInspection, crate::RelationError> {
+        let (project, schema) = self.load_project()?;
+        let corpus = load_corpus(&project, &schema)?;
+        crate::relations::inspect(
+            &project,
+            &corpus,
+            &schema,
+            &params,
+            limit,
+            cursor.as_deref(),
+        )
+    }
+
     pub fn related(&self, params: RelatedParams) -> Result<RelatedResult, String> {
         let (corpus, schema) = self.load_query_project()?;
         let filters = RelatedFilters::new(params.direction, params.relations, params.flavours)
@@ -367,4 +385,12 @@ pub struct RelatedParams {
     pub limit: Option<usize>,
     #[serde(default)]
     pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RelationParams {
+    pub source: String,
+    pub relation: String,
+    pub target: String,
 }

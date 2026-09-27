@@ -1,6 +1,6 @@
 //! Read-only canonical relation identity and occurrence counts.
-use crate::query::resolve_item;
-use crate::{Corpus, Item, Schema};
+use crate::query::{page::*, resolve_item};
+use crate::{Corpus, Item, ItemSource, Project, Relation, Schema};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -35,6 +35,14 @@ impl RelationEndpoint {
             Self::Code { reference } => reference,
         }
     }
+    fn mid(&self) -> Option<&str> {
+        match self {
+            Self::Item { mid, .. } => Some(mid),
+            Self::External { .. } => None,
+            Self::Code { .. } => None,
+        }
+    }
+
     fn identity(&self) -> NodeIdentity {
         match self {
             Self::Item { mid, .. } => NodeIdentity::Item(mid.clone()),
@@ -236,6 +244,41 @@ impl RelationEdge {
             target: RelationEndpoint::new(target)?,
         })
     }
+    pub(crate) fn matches(&self, source: &Item, relation: &Relation, target: &Item) -> bool {
+        let (a, b) = if relation.inverse {
+            (target, source)
+        } else {
+            (source, target)
+        };
+        self.relation == relation.canonical
+            && ((self.source.mid() == a.mid() && self.target.mid() == b.mid())
+                || (self.symmetric && self.source.mid() == b.mid() && self.target.mid() == a.mid()))
+    }
+    pub(crate) fn matches_external(&self, source: &Item, relation: &Relation) -> bool {
+        self.relation == relation.canonical
+            && self.source.mid() == source.mid()
+            && matches!(&self.target, RelationEndpoint::External { address } if crate::external::address(relation.target()) == Some(address.as_str()))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RelationOccurrence {
+    pub reference: String,
+    pub kind: String,
+    pub source: ItemSource,
+    pub author: RelationEndpoint,
+    pub relation: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RelationInspection {
+    pub format_version: u8,
+    pub edge: RelationEdge,
+    pub occurrence_count: usize,
+    pub occurrences: Vec<RelationOccurrence>,
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -263,6 +306,11 @@ impl RelationError {
             edge: None,
             occurrence_count: None,
         }
+    }
+    pub(crate) fn on_edge(mut self, edge: &RelationEdge, count: usize) -> Self {
+        self.edge = Some(Box::new(edge.clone()));
+        self.occurrence_count = Some(count);
+        self
     }
 }
 impl std::fmt::Display for RelationError {
@@ -330,4 +378,159 @@ pub(crate) fn resolve_edge(
         RelationError::new("invalid_endpoint", format!("relation target {error}"))
     })?;
     RelationEdge::new(schema, source_item, relation, target_item)
+}
+
+pub(crate) fn occurrences(
+    project: &Project,
+    corpus: &Corpus,
+    schema: &Schema,
+    edge: &RelationEdge,
+) -> Result<Vec<RelationOccurrence>, RelationError> {
+    let snapshot = fingerprint(corpus, schema, &("relation-occurrences-v1", project.root()))?;
+    let mut result = Vec::new();
+    let mut index = 0;
+    for item in corpus.items() {
+        for relation in item.relations() {
+            let matches = if let RelationEndpoint::Code { reference } = &edge.source {
+                relation.inverse
+                    && relation.canonical == edge.relation
+                    && relation.target() == reference
+                    && item.mid() == edge.target.mid()
+            } else if crate::external::address(relation.target()).is_some() {
+                edge.matches_external(item, relation)
+            } else {
+                resolve_item(corpus, relation.target())
+                    .is_ok_and(|target| edge.matches(item, relation, target))
+            };
+            if matches {
+                result.push(RelationOccurrence {
+                    reference: format!("occ-1-{snapshot}-{index:016x}"),
+                    kind: if relation.inline {
+                        "inline"
+                    } else {
+                        "metadata"
+                    }
+                    .into(),
+                    source: relation.source().into(),
+                    author: RelationEndpoint::new(item)?,
+                    relation: relation.name().to_owned(),
+                    target: relation.target().to_owned(),
+                });
+            }
+            index += 1;
+        }
+    }
+    if let RelationEndpoint::Code { reference } = &edge.source {
+        for file in corpus.code().files() {
+            for marker in &file.markers {
+                if marker.endpoint == *reference
+                    && marker.relation == edge.relation
+                    && resolve_item(corpus, &marker.target)
+                        .is_ok_and(|item| item.mid() == edge.target.mid())
+                {
+                    result.push(RelationOccurrence {
+                        reference: format!("occ-1-{snapshot}-{index:016x}"),
+                        kind: "code_comment".into(),
+                        source: (&marker.source).into(),
+                        author: RelationEndpoint::Code {
+                            reference: reference.clone(),
+                        },
+                        relation: marker.relation.clone(),
+                        target: marker.target.clone(),
+                    });
+                }
+                index += 1;
+            }
+        }
+    }
+    Ok(result)
+}
+
+// @mara implements REQ-RELATION-INSPECTION
+// @mara implements DES-RELATION-INTERFACES
+pub(crate) fn inspect(
+    project: &Project,
+    corpus: &Corpus,
+    schema: &Schema,
+    params: &crate::RelationParams,
+    limit: Option<usize>,
+    cursor: Option<&str>,
+) -> Result<RelationInspection, RelationError> {
+    let limit = page_limit(limit)?;
+    let edge = resolve_edge(
+        corpus,
+        schema,
+        &params.source,
+        &params.relation,
+        &params.target,
+    )?;
+    let mut occurrences = occurrences(project, corpus, schema, &edge)?;
+    occurrences.sort_by(|left, right| {
+        left.source
+            .path()
+            .cmp(right.source.path())
+            .then_with(|| left.source.start_byte().cmp(&right.source.start_byte()))
+    });
+    if occurrences.is_empty() {
+        return Err(
+            RelationError::new("relation_not_found", "relation does not exist").on_edge(&edge, 0),
+        );
+    }
+    let snapshot = fingerprint(
+        corpus,
+        schema,
+        &(
+            "relation-get-v1",
+            project.root(),
+            &params.source,
+            &params.relation,
+            &params.target,
+            limit,
+        ),
+    )?;
+    let start = cursor_position(cursor, &snapshot)?;
+    if cursor.is_some() && (start == 0 || start >= occurrences.len()) {
+        return Err(RelationError::new(
+            "invalid_cursor",
+            "invalid continuation position; restart inspection",
+        ));
+    }
+    let mut page = RelationInspection {
+        format_version: 1,
+        edge,
+        occurrence_count: occurrences.len(),
+        occurrences: Vec::new(),
+        has_more: false,
+        next_cursor: None,
+    };
+    for occurrence in occurrences.into_iter().skip(start).take(limit) {
+        page.occurrences.push(occurrence);
+        (page.has_more, page.next_cursor) = continuation(
+            start,
+            page.occurrences.len(),
+            page.occurrence_count,
+            &snapshot,
+        );
+        if serde_json::to_vec(&page)
+            .expect("serializable inspection")
+            .len()
+            > PAGE_BYTES
+        {
+            page.occurrences.pop();
+            if page.occurrences.is_empty() {
+                return Err(RelationError::new(
+                    "page_limit",
+                    "an occurrence cannot fit the 65536-byte page budget; shorten oversized identity/location fields",
+                ));
+            }
+            (page.has_more, page.next_cursor) = continuation(
+                start,
+                page.occurrences.len(),
+                page.occurrence_count,
+                &snapshot,
+            );
+            break;
+        }
+    }
+    Ok(page)
 }

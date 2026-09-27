@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
+use mara::RelationParams;
 use mara::{
     EntryRange, GetParams, GetResult, RelatedConnection, RelatedParams, RelationDirection,
     SearchParams,
@@ -24,7 +25,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation, item listing, unified search, bounded get and direct navigation. Further capabilities are pending their implementation reviews."
+    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation, item listing, unified search, bounded get, direct navigation and relation inspection. Further capabilities are pending their implementation reviews."
 )]
 struct Cli {
     /// Use this project root instead of ancestor discovery; selects the init target or binds MCP.
@@ -104,6 +105,11 @@ enum Command {
         cursor: Option<String>,
     },
 
+    /// Inspect canonical relationships and their authored occurrences.
+    Relation {
+        #[command(subcommand)]
+        command: RelationCommand,
+    },
     /// List compact item summaries.
     Item {
         #[command(subcommand)]
@@ -280,6 +286,50 @@ fn run(cli: Cli) -> Result<bool, String> {
         command,
     } = cli;
     match command {
+        Command::Relation {
+            command:
+                RelationCommand::Get {
+                    source,
+                    relation,
+                    target,
+                    limit,
+                    cursor,
+                },
+        } => {
+            return emit_relation(
+                format,
+                OperationContext::from_environment(project)?.relation_get(
+                    RelationParams {
+                        source,
+                        relation,
+                        target,
+                    },
+                    limit,
+                    cursor,
+                ),
+                |result| {
+                    println!(
+                        "{} {} {}: {} occurrences",
+                        result.edge.source.id(),
+                        result.edge.relation,
+                        display_relation_target(&result.edge.target),
+                        result.occurrence_count
+                    );
+                    for entry in &result.occurrences {
+                        println!(
+                            "{}:{} {} {} selector={}",
+                            entry.source.path().display(),
+                            entry.source.start_line(),
+                            entry.relation,
+                            entry.target,
+                            entry.reference
+                        );
+                    }
+                    print_page_continuation(result.has_more, result.next_cursor.as_deref());
+                    Ok(())
+                },
+            );
+        }
         Command::Related {
             reference,
             direction,
@@ -847,5 +897,53 @@ fn print_related_connections(connections: &[RelatedConnection]) {
                 node.reference
             );
         }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum RelationCommand {
+    /// Inspect a semantic edge and its authored source occurrences.
+    Get {
+        /// Item ID/MID or code:<path>[::<selector>] expressing the relation.
+        source: String,
+        /// Canonical relation name or declared inverse alias.
+        relation: String,
+        /// Other endpoint: item ID/MID, code:<path>[::<selector>], or external:HTTP(S) URL.
+        target: String,
+        /// Maximum occurrences per page, 1 through 100; defaults to 20. The byte budget may return fewer.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Continue with next_cursor and unchanged arguments until has_more is false; restart after source/schema changes; empty strings are invalid.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+}
+
+fn emit_relation<T: Serialize>(
+    format: OutputFormat,
+    result: Result<T, mara::RelationError>,
+    human: impl FnOnce(&T) -> Result<(), String>,
+) -> Result<bool, String> {
+    match result {
+        Ok(result) => {
+            emit(format, &result, human)?;
+            Ok(true)
+        }
+        Err(error) => {
+            if matches!(format, OutputFormat::Json) {
+                write_json(&error)?;
+            } else {
+                eprintln!("error: {error}");
+            }
+            Ok(false)
+        }
+    }
+}
+
+fn display_relation_target(target: &mara::RelationEndpoint) -> String {
+    match target {
+        mara::RelationEndpoint::Item { id, .. } => id.clone(),
+        mara::RelationEndpoint::External { address } => format!("external:{address}"),
+        mara::RelationEndpoint::Code { reference } => reference.clone(),
     }
 }

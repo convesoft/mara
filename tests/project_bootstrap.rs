@@ -662,7 +662,7 @@ fn bootstrap_advertises_only_its_available_operations() {
         (
             vec!["--help"],
             vec![
-                "project", "schema", "item", "mcp", "search", "get", "related",
+                "project", "schema", "item", "mcp", "search", "get", "related", "relation",
             ],
             vec!["trace"],
         ),
@@ -675,6 +675,11 @@ fn bootstrap_advertises_only_its_available_operations() {
             vec!["schema", "--help"],
             vec!["get", "list", "validate"],
             vec![],
+        ),
+        (
+            vec!["relation", "--help"],
+            vec!["get"],
+            vec!["add", "remove"],
         ),
         (
             vec!["item", "--help"],
@@ -723,6 +728,7 @@ fn bootstrap_advertises_only_its_available_operations() {
             "item_list",
             "project_init",
             "related",
+            "relation_get",
             "schema_get",
             "schema_list",
             "schema_validate",

@@ -271,3 +271,41 @@ Read-only installed-baseline comparisons matched complete navigation JSON for th
 
 This checkpoint restores direct navigation and its read-only canonical semantic projection. Occurrence inspection, mutation, semantic validation and rule evaluation remain pending; the installed author's validation/matrices do not establish candidate implementations of those operations. Historical full-runtime evidence remains historical. The installed executable was not replaced.
 :::
+
+:::mara design DES-RELATION-INTERFACES
+:mid: 01M2GC4PXK0MMANAW6AKGXAW7S
+:title: Expose canonical relationships and bounded occurrence inspection
+:status: accepted
+:kind: interface
+:satisfies: REQ-RELATION-INSPECTION
+
+CLI `relation get SOURCE RELATION TARGET [--limit N] [--cursor TOKEN]` and MCP `relation_get {source,relation,target,limit?,cursor?}` resolve canonical edge identity under [[DES-CANONICAL-TRACE-RELATIONS]]. Accept internal IDs/MIDs, canonical code sources or item-side inverse code targets, and permitted external targets. No source mutation occurs. Unknown parameters are rejected.
+
+Return relationship format 1 with `edge`, total `occurrence_count`, `occurrences`, `has_more` and nullable `next_cursor`. Each occurrence contains opaque `reference`, `kind` (metadata, inline or code_comment), exact source path/byte/line location, authored endpoint, original relation spelling and original target scalar. Preserve aliases and ID/MID/external spelling. Sort all occurrences by source path then start byte before pagination, including code comments among document assertions. Derived reverse navigation does not create an occurrence.
+
+Default limit 20, accepted range 1–100. Domain JSON including escaping/cursor must fit 65,536 UTF-8 bytes; transport wrappers are outside the budget. Never truncate fixed identity/location/spelling fields or silently skip an oversized occurrence; return a page_limit error if the next occurrence cannot fit. Missing edges return relation_not_found with the resolved edge and zero count. Other failures use the relationship error envelope `{format_version:1,error:{code,message},edge?,occurrence_count?}`; CLI exits unsuccessfully and MCP marks isError while retaining structured content.
+
+Occurrence selectors bind project root and source/schema/code snapshot while preserving each authored occurrence's identity within it. Continuation additionally binds source/relation/target spelling and limit; alias-equivalent requests must restart rather than exchange cursors. Reject stale, malformed, initial and out-of-range continuation with a restart instruction. Reinspection after source/schema changes produces new selectors. Selectors are not persisted identities. Their use for removal, and add/remove interfaces, remain separate mutation checkpoints; direct navigation follows [[DES-DIRECT-NAVIGATION]].
+:::
+
+:::mara requirement REQ-RELATION-INSPECTION
+:mid: 01M3H27927R2KSCQ087RK317K1
+:title: Inspect every authored occurrence of a canonical relationship
+:status: accepted
+:kind: functional
+:derives_from: SCN-READ-DOCUMENT-CONTEXT
+
+An actor can inspect an existing canonical relationship through CLI and MCP and recover every authored occurrence without changing source. Equivalent canonical/inverse, ID/MID and symmetric requests identify the same edge. Preserve metadata, typed-inline and code-comment source locations, author identity, original relation spelling and target scalar. Return total count and bounded consecutive pages in source path/byte order; unchanged traversal has no omissions or duplicates. Missing edges and invalid requests are explicit structured errors. Format, bounds and snapshot-bound selectors follow [[DES-RELATION-INTERFACES]].
+:::
+
+:::mara verification VER-RELATION-INSPECTION
+:mid: 01M3H27DSGRH032NZFPCBKDERM
+:title: Verify relation inspection through CLI and MCP
+:status: accepted
+:level: system
+:method: test
+:verifies: REQ-RELATION-INSPECTION
+:verifies: DES-RELATION-INTERFACES
+
+Run `cargo test --locked --test relation_inspection` against real CLI and stdio MCP with isolated, fixture-owned source, identities and adapters. Verify canonical/alias/ID/MID and symmetric equivalence, exact metadata/inline/code spans and spelling, external addresses, complete count/byte-limited pages, total counts, snapshot-bound selectors and unchanged source bytes. Reproduce a code path sorting before its item document; require global path/byte order before pagination. Check changed request/source/schema cursors, malformed positions, oversized occurrences, missing edges, invalid endpoints/limits and unknown parameters with equivalent structured errors. Keep mutation and semantic validation assertions pending. Run prior suites, formatting and Clippy, canonical validation and selected traceability; compare unaffected read-only repository inspection output with the installed baseline.
+:::

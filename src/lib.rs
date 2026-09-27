@@ -27,7 +27,10 @@ pub use discovery::{
 };
 mod external;
 mod relations;
-pub use relations::{RelationEdge, RelationEndpoint, RelationError, RelationErrorDetail};
+pub use relations::{
+    RelationEdge, RelationEndpoint, RelationError, RelationErrorDetail, RelationInspection,
+    RelationOccurrence,
+};
 mod query;
 pub use query::{
     EntryRange, FieldFilter, GetResult, ItemCollectionResult, ItemFilters, ItemSource, ItemSummary,
@@ -43,9 +46,9 @@ pub use diagnostics::{
 };
 pub use operations::{
     DeclarationSummary, FieldValue, GetParams, ItemFilterParams, OperationContext,
-    ProjectInitializationResult, ProjectSummary, RelatedParams, SchemaGetResult, SchemaKind,
-    SchemaListResult, SearchParams, ValidationDiagnostic, ValidationResult, ValidationScope,
-    ValidationTargetKind, project_initialize,
+    ProjectInitializationResult, ProjectSummary, RelatedParams, RelationParams, SchemaGetResult,
+    SchemaKind, SchemaListResult, SearchParams, ValidationDiagnostic, ValidationResult,
+    ValidationScope, ValidationTargetKind, project_initialize,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";

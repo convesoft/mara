@@ -14,7 +14,7 @@ mod get;
 pub use get::{EntryRange, GetResult, MetadataFragment, TextRange, get};
 mod related;
 pub use related::{RelatedConnection, RelatedNeighbour, RelatedResult, related};
-mod page;
+pub(crate) mod page;
 mod search;
 pub use page::ItemCollectionResult;
 pub use page::SearchExcerpt;

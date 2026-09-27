@@ -7,7 +7,7 @@ review; it does not authorize removing behavior. Product contracts live in the
 linked capability documents rather than in this inventory.
 
 The active candidate now supports project initialization, schema inspection and
-definition validation, item listing, unified search, bounded get and direct navigation. Document/code discovery
+definition validation, item listing, unified search, bounded get, direct navigation and relation inspection. Document/code discovery
 and the document graph are reviewed dependencies. Earlier full-runtime test rows
 remain historical where their edit or validation transports
 have not yet been restored. The sections below identify current checkpoints.
@@ -349,3 +349,30 @@ identity and occurrence counts; its unused first-occurrence source field is
 deferred until validation/inspection needs it, while parsed occurrence spans
 remain intact. The only added direct dependency is the already-locked baseline
 URL parser. No mutation, occurrence-inspection or policy evaluator is restored.
+
+## Relation-occurrence inspection review
+
+Selected increment: CLI `relation get` and MCP `relation_get`. Resolve an exact
+canonical semantic edge and page its authored metadata, inline and code-comment
+occurrences, preserving spelling and source spans. Reuse the reviewed resolver,
+source loaders and bounded cursor helpers; no mutation/validation dependency.
+
+| Area | Review and disposition |
+|---|---|
+| Identity and matching | Retain canonical/inverse, ID/MID, symmetric, code and external resolution. Inspect one semantic edge and preserve each author's identity, relation spelling and target. Missing edges return a structured error with zero count, not a fabricated empty success. |
+| Tokens and bounds | Retain project/schema/corpus-bound occurrence selectors and request-bound continuation, 20-default/1–100 limits and the 65,536-byte domain budget. Full total count repeats on each page; oversized mandatory occurrences fail without skipping. Selectors are read evidence now; mutation consumption remains pending. |
+| Ordering finding | The accepted interface requires source path/byte order. Baseline occurrence collection appends code comments after all item assertions, so a code path sorting before its item document can violate that order. Reproduce through real inspection before correcting ordering at the inspection boundary; preserve selector identity and mutation helper behavior. |
+| Tests | Retain inspection obligations from mixed relationship tests: canonical/alias and symmetric equivalence, exact metadata/inline spans, code/item occurrences, external spelling, 25-occurrence continuation and stale requests. Materialize fixture sources directly; retain add/remove/rename/move/validation assertions for later checkpoints. Cover count/byte bounds, missing/invalid inputs and structured CLI/MCP errors. |
+| Transport/knowledge | Restore only relation-get command/tool, parameters and result/error envelopes. Keep schema-edge navigation in its current design; inspection owns occurrence records/selectors. Reconcile the existing interface design identity without claiming unreviewed mutation operations. |
+
+Completion requires real CLI/MCP inspection and source preservation, the ordering
+regression, complete pages and stale/error cases, prior suites, formatting/Clippy,
+canonical validation, selected traceability and exact-revision evidence.
+
+The real CLI/MCP ordering regression failed on baseline collection with
+`zzz.mara.md` metadata/inline entries before an `aaa.rs` code comment. Inspection
+now sorts the collected records by path/start byte before applying page limits;
+selector generation and mutation-facing collection remain unchanged. Five test
+groups retain alias/symmetric/external source evidence, code ordering, complete
+count/byte pages, stale/error envelopes and unchanged source. Schema staleness
+checks alter a parsed declaration, matching the existing semantic fingerprint.

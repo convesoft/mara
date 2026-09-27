@@ -1,3 +1,4 @@
+use mara::RelationParams;
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams};
 use mara::{GetParams, GetResult};
 use mara::{
@@ -157,6 +158,19 @@ impl SearchToolParams {
 
 #[tool_router]
 impl MaraMcp {
+    #[tool(name = "relation_get", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationInspection>(), description = "Inspect a semantic relationship and its authored occurrences. Alias and canonical names resolve the same edge. Follow next_cursor with unchanged arguments; selectors and cursors expire when project source or schema changes.")]
+    fn relation_get(
+        &self,
+        Parameters(params): Parameters<RelationGetToolParams>,
+    ) -> rmcp::model::CallToolResult {
+        let (project, relation) = params.edge.into_parts();
+        relation_result(
+            self.for_project(project)
+                .map_err(mara::RelationError::from)
+                .and_then(|context| context.relation_get(relation, params.limit, params.cursor)),
+        )
+    }
+
     #[tool(
         name = "related",
         description = "Explore direct schema relations, code backlinks, mentions, and containment from an item, code endpoint, or discovery node. Discovery format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation_get. Internal and code neighbours have a reference for get/related; external neighbours have only kind and address and are terminal. Counts connections, not unique neighbours; traversal is caller-controlled. JSON uses contains with direction; its incoming view is displayed as contained_by in human CLI output. Continue with next_cursor and unchanged reference/options; restart after source/schema changes."
@@ -359,4 +373,61 @@ impl RelatedToolParams {
             },
         )
     }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RelationToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Item ID/MID; relation_get also accepts code:<path>[::<selector>] as canonical source. Mutation requires an item source.
+    source: String,
+    /// Schema-declared relation name or inverse alias; discover names with schema_list(kind="relation").
+    relation: String,
+    /// Item ID/MID, external:HTTP(S), or code:<path>[::<selector>] with an item-authored inverse.
+    target: String,
+}
+
+impl RelationToolParams {
+    fn into_parts(self) -> (Option<PathBuf>, RelationParams) {
+        (
+            self.project,
+            RelationParams {
+                source: self.source,
+                relation: self.relation,
+                target: self.target,
+            },
+        )
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RelationGetToolParams {
+    #[serde(flatten)]
+    edge: RelationToolParams,
+    /// Maximum occurrences per page, 1 through 100; omitted or null defaults to 20. The byte budget may return fewer.
+    #[serde(default)]
+    limit: Option<usize>,
+    /// Opaque next_cursor from inspection; repeat unchanged arguments until has_more is false. Restart after source/schema changes; empty strings are invalid. Omit or null on the first page.
+    #[serde(default)]
+    cursor: Option<String>,
+}
+fn relation_result<T: serde::Serialize>(
+    result: Result<T, mara::RelationError>,
+) -> rmcp::model::CallToolResult {
+    let (value, failed) = match result {
+        Ok(value) => (
+            serde_json::to_value(value).expect("serializable relationship result"),
+            false,
+        ),
+        Err(error) => (
+            serde_json::to_value(error).expect("serializable relationship error"),
+            true,
+        ),
+    };
+    let mut response = rmcp::model::CallToolResult::structured(value);
+    response.is_error = Some(failed);
+    response
 }
