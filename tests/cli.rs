@@ -12377,7 +12377,7 @@ fn scip_cpp_overloads_are_distinct_and_missing_identity_never_falls_back() {
 fn scip_typescript_shared_callable_survives_package_version_change() {
     let fixture = scip_code_fixture("typescript");
     let root = fixture.path();
-    let reference = "code:service.ts::typescript::%60service.ts%60/parse().";
+    let reference = "code:service.ts::typescript::`service.ts`/parse().";
     let added = mara(
         root,
         &["relation", "add", "REQ-A", "implemented_by_code", reference],
@@ -12418,6 +12418,19 @@ fn scip_typescript_shared_callable_survives_package_version_change() {
         json!({"source":"REQ-A","relation":"implemented_by_code","target":reference}),
     );
     assert_eq!(edge["occurrence_count"], 2);
+    let related = scip_retrieval_parity(
+        root,
+        &["related", "REQ-A"],
+        "related",
+        json!({"reference":"REQ-A"}),
+    );
+    assert!(
+        related["connections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|connection| connection["neighbour"]["reference"] == reference)
+    );
 }
 
 #[cfg(unix)]

@@ -75,9 +75,10 @@ project through `..` or a symlink. Matching is case-sensitive. A file-only targe
 resolves to an existing regular file without an indexer or grammar. Symbol paths
 must be reported by the configured indexer. Descriptors retain SCIP's punctuation
 and disambiguators, omitting scheme and all package metadata. Whitespace and
-`%`, `[`, `]`, backtick, `<`, `>`, backslash and `|` are percent-escaped using
-uppercase UTF-8 byte values. Other characters are preserved. For example,
-`code:service.ts::typescript::%60service.ts%60/parse().` represents the descriptor
+`%`, `[`, `]`, `<`, `>`, backslash and `|` are percent-escaped using
+uppercase UTF-8 byte values. Other characters, including backticks, are preserved
+in metadata and typed inline references. For example,
+`` code:service.ts::typescript::`service.ts`/parse(). `` represents the descriptor
 `` `service.ts`/parse(). ``. These spellings are canonical, not URL aliases.
 No authored byte span or line number is part of the identity.
 

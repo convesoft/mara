@@ -173,7 +173,7 @@ pub(super) fn run(project: &Project) -> Result<Vec<Indexed>, CodeProblem> {
 fn escape_descriptor(descriptor: &str) -> String {
     let mut result = String::new();
     for ch in descriptor.chars() {
-        if ch.is_whitespace() || matches!(ch, '%' | '[' | ']' | '`' | '<' | '>' | '\\' | '|') {
+        if ch.is_whitespace() || matches!(ch, '%' | '[' | ']' | '<' | '>' | '\\' | '|') {
             let mut bytes = [0; 4];
             for byte in ch.encode_utf8(&mut bytes).bytes() {
                 result.push_str(&format!("%{byte:02X}"));
@@ -442,10 +442,7 @@ mod tests {
             "scip-typescript npm demo 1.0.0 `service.ts`/parse().",
         )
         .unwrap();
-        assert_eq!(
-            first.as_deref(),
-            Some("typescript::%60service.ts%60/parse().")
-        );
+        assert_eq!(first.as_deref(), Some("typescript::`service.ts`/parse()."));
         assert_eq!(
             first,
             selector(

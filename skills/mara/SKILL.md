@@ -240,8 +240,8 @@ there is no `separator` setting or compiled language integration.
 
 Use exact `code:path::indexer::descriptor` references returned by navigation.
 Descriptors omit SCIP package metadata so version bumps preserve local links.
-Unsafe inline characters use uppercase UTF-8 percent escapes, for example
-`code:service.ts::typescript::%60service.ts%60/parse().`. Local SCIP symbols are
+Unsafe inline characters use uppercase UTF-8 percent escapes. Backticks remain
+literal: `` code:service.ts::typescript::`service.ts`/parse(). ``. Local SCIP symbols are
 unsupported. Distinct implementation overloads require distinct indexer identities;
 multiple declarations of one identity share a link. No name/position fallback is
 allowed. Renames/moves may break authored links. File-only `code:path` needs no
