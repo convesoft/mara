@@ -21,6 +21,17 @@ Use the matching executable and skill, refresh MCP tools, and discard old cursor
 Follow the [0.2 migration guide](https://github.com/convesoft/mara/blob/v0.2.0/docs/migration-0.2.mara.md)
 for schema examples, command/response mapping, and reference validation changes.
 {% endif %}\
+{% if version == "v0.3.0" %}
+### Breaking changes and migration
+
+Schema format 3 is required. Review existing project vocabulary and authored
+relations before editing the schema; existing projects do not acquire the new
+engineering profile or its rules automatically. The Agent Plugin distribution
+has been removed; configure MCP explicitly and install the matching skill
+separately. Follow the [0.3 migration guide](https://github.com/convesoft/mara/blob/v0.3.0/docs/migration-0.3.mara.md)
+for source edits, validation, and client interface changes.
+
+{% endif %}\
 {% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group | striptags | trim | upper_first }}
 
@@ -44,6 +55,7 @@ commit_preprocessors = [
 ]
 commit_parsers = [
   { message = "^docs: generate .+ changelog", skip = true },
+  { message = "^chore: release 0\\.3\\.0[[:space:]]", skip = true },
   { message = "^feat", group = "Added" },
   { message = "^fix", group = "Fixed" },
   { message = "^perf", group = "Performance" },
