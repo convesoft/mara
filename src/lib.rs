@@ -1909,3 +1909,5 @@ pub use operations::{RelationAction, RelationMutationResult};
 
 pub use mutation::{ItemUpdate, ItemUpdateWarning, update_item};
 pub use operations::ItemUpdateParams;
+
+pub use mutation::{ItemDeletion, delete_item};

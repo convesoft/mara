@@ -7,7 +7,7 @@ review; it does not authorize removing behavior. Product contracts live in the
 linked capability documents rather than in this inventory.
 
 The active candidate now supports project initialization, schema inspection and
-definition validation, item creation/update/listing, unified search, bounded get, direct navigation, relation inspection/add/remove, MID backfill and explicit
+definition validation, item creation/update/deletion/listing, unified search, bounded get, direct navigation, relation inspection/add/remove, MID backfill and explicit
 journal rollback. Corpus conformance, document/code discovery
 and the document graph are reviewed dependencies. Earlier full-runtime test rows
 remain historical where their edit or validation transports
@@ -531,3 +531,29 @@ because each distinguishes permitted target edits from a different retargeting
 failure. Project/item validation transport assertions use existing library
 source conformance until those transports are reviewed. Two additional groups
 cover typed-inline body authoring and literal MCP dash/null/no-op behavior.
+
+## Item deletion review
+
+Selected increment: delete exactly one item through CLI/MCP while preserving
+surviving source and references. Dependencies are already reviewed corpus
+conformance, identity resolution, projected documents, reference correspondence,
+mutation locking and single-file publication. No additional runtime is needed.
+
+| Area | Review and disposition |
+|---|---|
+| Preconditions | Retain complete source-conformance validation before selection and after projection; incomplete scaffolds also block deletion. Use the existing exact ID/MID resolver after conformance instead of restoring the old retrieval result; relation targets are already validated. Lifecycle/rule evaluation is outside this source gate. |
+| References | Retain all surviving metadata/inline assertions and item/narrative mentions plus Markdown heading/block destination protection, with ordered source locations for reference-preflight impacts. Removed outgoing/self references do not block deletion. Remaining code markers are protected by candidate conformance; do not edit code sources. |
+| Source/publication | Remove the parser's complete item span and at most one following empty LF/CRLF line when joining empty separators. Keep all other bytes and the document itself, even empty. Verify exactly one removed identity and byte-identical surviving blocks/mentions, preserve permissions and recheck project/schema/discovery/corpus/preimage before atomic replacement. |
+| Tests | Retain four deletion groups for source/separator/permissions/empty-file preservation, all-occurrence diagnostics with transport parity, outgoing/self/literal exemptions, and invalid corpus/request refusal. Extract deletion-only heading/anchor regressions from the mixed reference suite; retain typed-inline demotion/deletion blocking and external-only deletion obligations. Add real code-marker refusal coverage and writer blocking using existing helpers. Move/rename portions stay pending. |
+
+Completion requires real delete/get/list outcomes, exact bytes on success and
+refusal, all prior suites, formatting/Clippy, canonical validation, selected
+traceability and execution evidence for the committed revision.
+
+Nine focused deletion groups retain the four baseline groups and add bounded
+checks for structural target protection, inline demotion to blocking mentions,
+external outgoing assertions/whitespace-only lines, writer exclusion and real
+Rust code-marker targets. Direct exact lookup is equivalent after full source
+conformance, so no legacy read result was imported. No production behavior
+change or new dependency was needed. The temporary build directory hit a quota;
+cleaning only this package's generated artifacts allowed verification to resume.

@@ -211,6 +211,19 @@ impl SearchToolParams {
 #[tool_router]
 impl MaraMcp {
     #[tool(
+        name = "item_delete",
+        description = "Delete one item by exact MID or human ID after validating the project. Refuses surviving incoming typed relations, wiki mentions, and Markdown links to the item or its contained nodes, reporting blocking source locations. Also rejects broken or retargeted surviving links from shifted heading anchors. Keeps the containing document. Resolve reported impacts before retrying; Markdown links are not automatically repaired."
+    )]
+    fn item_delete(
+        &self,
+        Parameters(params): Parameters<ItemDeleteToolParams>,
+    ) -> Result<Json<mara::ItemDeletion>, String> {
+        self.for_project(params.project)?
+            .item_delete(&params.reference)
+            .map(Json)
+    }
+
+    #[tool(
         name = "item_update",
         description = "Partially update one item by exact MID or human ID. Requires a title, custom field replacement or clear, or body. Preserves identity, relations, and untouched source. Validate newly authored references; reject changes that break or retarget surviving internal links, including links to headings or blocks inside the item. Resolve reported impacts before retrying; Markdown links are not automatically repaired."
     )]
@@ -599,4 +612,14 @@ struct ItemUpdateToolParams {
     /// Replacement literal Markdown body (- is literal), including [[relation:ID]] or [[relation:MID]] typed assertions. Omitted or null leaves it unchanged; an empty string clears an optional body. Empty or whitespace-only replacement of a required body is rejected.
     #[serde(default)]
     body: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemDeleteToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
+    reference: String,
 }

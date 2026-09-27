@@ -433,6 +433,20 @@ fn run(cli: Cli) -> Result<bool, String> {
                 Ok(())
             })?;
         }
+        Command::Item {
+            command: ItemCommand::Delete { reference },
+        } => {
+            let result = OperationContext::from_environment(project)?.item_delete(&reference)?;
+            emit(format, &result, |result| {
+                println!(
+                    "deleted item '{}' with MID {} from {}",
+                    result.id,
+                    result.mid,
+                    result.path.display()
+                );
+                Ok(())
+            })?;
+        }
         Command::Related {
             reference,
             direction,
@@ -787,6 +801,15 @@ fn print_validation(result: &ValidationResult) -> Result<(), String> {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
+    /// Delete one item from a valid project only when no surviving typed relations, wiki mentions, or Markdown links refer to it or its contained nodes; keep the containing document.
+    #[command(
+        after_help = "Reject changes that break or retarget surviving internal links, including generated heading anchors affected elsewhere in the document. Resolve reported source locations before retrying; Markdown links are not automatically repaired."
+    )]
+    Delete {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
+        reference: String,
+    },
+
     /// Partially update title, custom fields, or body while preserving identity.
     Update {
         /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).

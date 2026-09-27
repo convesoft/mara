@@ -8,6 +8,8 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 use tempfile::NamedTempFile;
+mod delete;
+pub use delete::{ItemDeletion, delete_item};
 mod references;
 mod transaction;
 mod update;

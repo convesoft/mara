@@ -1,8 +1,8 @@
 # Source mutation and explicit recovery
 
-MID backfill, item creation/update, relation edits and explicit rollback are restored.
-The shared journal publisher supports relation edits; move/rename and other item
-edits remain pending review.
+MID backfill, item creation/update/deletion, relation edits and explicit rollback
+are restored. The shared journal publisher supports relation edits; move/rename
+remain pending review.
 
 :::mara requirement REQ-RECOVERABLE-MUTATION
 :mid: 01M1RKZY3VJKYP7V8GNDKR84GT
@@ -178,4 +178,46 @@ At `fbc67b33d94547956e8c4958bb7bce9d3608afc3`, formatting, `cargo clippy --locke
 Twenty-one update integration groups cover repeated/cleared/empty fields, exact metadata whitespace, CRLF, permissions, identity and adjacent-source preservation, stdin/literal MCP dash/null, no-op inode preservation, scaffold warnings/completion, invalid requests, typed diagnostic exclusions, bound MCP context, typed inline relation authoring and existing relation-resolution refusal. Thirteen of these groups retain distinct surviving-link, reference-definition, literal-context, section and anchored-block regressions through both transports. Single-file publication tests preserve source on verification/preimage failures. All prior suites pass.
 
 Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected intent passed one root, and realization/verification each passed two roots, consuming every page. Both transports advertise and execute item update. Project/item validation transport assertions use reviewed library source conformance; those transports, remaining item mutations, rule evaluation and matrices remain pending.
+:::
+
+:::mara requirement REQ-ITEM-DELETION
+:mid: 01M1RTTGFNW3Y7K8CQW16FJKYV
+:title: Delete an item only when surviving references remain valid
+:status: accepted
+:kind: functional
+:derives_from: SCN-EDIT-CONNECTED-KNOWLEDGE
+
+CLI `item delete` and MCP `item_delete` remove exactly one item resolved by exact MID or human ID. Require complete source conformance before editing and in the surviving corpus. Refuse any surviving typed assertion, supported item/narrative mention, code marker or Markdown reference that would become invalid or change destination.
+
+Report surviving item/narrative reference impacts with source paths, one-based lines and byte spans. References removed with the item, including self-references and outgoing assertions, do not block deletion. Remove only its block and minimally coalesce adjacent empty separators; preserve other source bytes, surviving items/references, line endings and permissions. Keep its document even if empty. Publish one atomic replacement under the mutation lock; pending recovery blocks deletion. Return the deleted identity and relative path without cascade, force, tombstone or Git operations.
+:::
+
+:::mara design DES-ITEM-DELETION
+:mid: 01M1RTTGG2S7CSTJTG2ES0K9RM
+:title: Preflight references before removing an item source span
+:status: accepted
+:kind: interface
+:satisfies: REQ-ITEM-DELETION
+
+CLI `item delete REFERENCE` and MCP `item_delete {reference,project?}` use one operation and return `{id,mid,path}` with original project-relative path. Under the mutation lock, load a strict corpus, require source conformance and resolve one exact identity. This source gate includes missing required bodies and code-marker targets, but not lifecycle/rule evaluation.
+
+Remove the complete parser item span, including a present closing-line terminator. When an empty LF/CRLF line precedes the span, remove at most the first following empty LF/CRLF line. Preserve whitespace-only lines, all other leading/trailing separators and surviving final-newline state; keep the file.
+
+Project the candidate and apply surviving-reference correspondence without body-edit exemptions. Report every item/narrative impact ordered by path and byte offset, naming selected identity and each source item/relation or mention where applicable. Protect links to contained headings/blocks and other anchors shifted by removal. Then validate candidate source conformance, including code markers that would lose their target. Authors must resolve reported impacts explicitly.
+
+Verify exactly one removed identity and every survivor's unchanged document path, complete source block and recognized mentions. Stage one file with original permissions and recheck project configuration, schema, corpus, discovery, preimage and permissions before atomic replacement. Reuse the single-file publisher without a multi-file journal. Manual filesystem edits are outside the advisory lock.
+:::
+
+:::mara verification VER-ITEM-DELETION
+:mid: 01M3H5AHJX6GTADRXZGZJR3Y51
+:title: Check safe item deletion and surviving-reference refusal
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-ITEM-DELETION
+:verifies: DES-ITEM-DELETION
+
+Run `cargo test --locked --test item_deletion`. Exercise CLI/MCP delete by ID/MID, exact result parity, loss of lookup and retained empty file, separator boundaries, mixed newlines, permissions and unchanged surviving blocks/documents. Require all incoming reference locations and unchanged source on refusal; allow removed self/outgoing references and literal examples.
+
+Cover duplicate heading retargeting, contained anchors, typed inline assertions and demoted mentions, external outgoing edges, code-marker targets, invalid/incomplete corpora and requests, active/pending locks. Retain the shared single-file preimage regression, run all prior suites, formatting/Clippy, canonical validation and selected traceability.
 :::
