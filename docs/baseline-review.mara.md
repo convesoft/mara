@@ -7,9 +7,9 @@ review; it does not authorize removing behavior. Product contracts live in the
 linked capability documents rather than in this inventory.
 
 The active candidate now supports project initialization, schema inspection and
-definition validation, item listing and unified search. Document/code discovery
+definition validation, item listing, unified search and bounded get. Document/code discovery
 and the document graph are reviewed dependencies. Earlier full-runtime test rows
-remain historical where their edit, validation, read or navigation transports
+remain historical where their edit, validation or navigation transports
 have not yet been restored. The sections below identify current checkpoints.
 
 | Baseline capability | Disposition and review boundary |
@@ -287,3 +287,33 @@ Restoring selected-ID state to the shared filters also requires restoring it in
 the list fingerprint. The new library regression changes selected identities
 between list pages and requires rejection; empty-ID CLI listing remains unchanged.
 This preserves the baseline request-binding invariant during composition.
+
+## Bounded get checkpoint review
+
+Selected increment: CLI/MCP `get` for exact item IDs/MIDs, structural handles,
+and explicit code references. Reuse the reviewed strict corpus, graph summaries,
+source spans and fingerprint. Add only the get pager and exact code resolver;
+code-edge evaluation, related transports and mutations remain separate.
+
+| Area | Review and disposition |
+|---|---|
+| Selection | Retain exact graph lookup and stale-handle errors. Items return parsed body and ordered authored metadata; other document nodes return their complete source span. Do not infer neighbours or repair source. |
+| Code dependency | Retain ordinary-path grammar and canonical project confinement. File-only reads accept local regular files without an adapter; selectors match exactly one indexed native symbol, including modifier/wrapper content. Preserve missing-file, missing-symbol, ambiguous and unsupported failures. Binary file content is not text-readable. No graph evaluator is required. |
+| Paging | Retain discovery format 2 and the 65,536-byte serialized domain budget. Fill content before metadata; preserve repeated keys, empty values, entry order and UTF-8 boundaries. Fixed headers/keys cannot be dropped. Fail when a page cannot advance. |
+| Continuation | Retain content/entry/value offsets, exact reference and source/schema/code fingerprint, including explicit file-only bytes. Reject malformed, stale, non-boundary, initial, terminal and impossible positions. Structural handles stay document-local while cursors cover the corpus. |
+| Tests | Retain seven distinct get groups: item/human lookup failures, Unicode reconstruction, content priority, cursor rejection, oversized identity/neighbour exclusion, mixed-node source reconstruction and stale/removed-interface behavior. Restore full-title and exact-identity get assertions deferred from search. Add isolated code-file/symbol reads, failure classes and file-only cursor checks extracted from the broad baseline code workflow; keep its relation/mutation/validation assertions pending. |
+| Contracts | Preserve requirement identities; replace retired item_get/limit/neighbour wording with current top-level get semantics. Keep read-specific fragmentation in one design and link shared summaries/handles instead of duplicating them. |
+
+Completion requires complete source reconstruction through real CLI/MCP pages,
+read-only source preservation, code resolution and failure checks, all prior
+suites, formatting/Clippy, selected traceability, canonical validation and
+evidence for the committed tested revision.
+
+The get suite restores seven document-read groups and three code-read groups.
+Four language fixtures own copied adapters; the candidate reads captured
+modifiers and wrappers through CLI and MCP. File-only reads cover ignored text,
+complete Unicode pages, binary rejection and changed-content cursor rejection.
+Resolver failures cover missing files/symbols, duplicates, unsupported selectors
+and paths outside the project. Search tests again read complete titles and
+reject misspelled exact identities. Source and pending mutation/graph tests remain
+intact; no production behavior change was needed.

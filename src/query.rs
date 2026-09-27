@@ -10,6 +10,8 @@ use std::{
 use unicode_casefold::UnicodeCaseFold;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
+mod get;
+pub use get::{EntryRange, GetResult, MetadataFragment, TextRange, get};
 mod page;
 mod search;
 pub use page::ItemCollectionResult;

@@ -225,10 +225,10 @@ fn search_excerpts_preserve_unicode_source_positions_and_exact_selection() {
     fs::write(fixture.path().join("docs/passage.mara.md"), &source).unwrap();
     add_fixture_mids(fixture.path());
     let source = fs::read_to_string(fixture.path().join("docs/passage.mara.md")).unwrap();
-    let mid = source
-        .lines()
-        .find_map(|line| line.strip_prefix(":mid: "))
-        .unwrap();
+    let got = mara(fixture.path(), &["--format", "json", "get", "REQ-PASSAGE"]);
+    let got: Value = serde_json::from_slice(&got.stdout).unwrap();
+    let mid = got["node"]["mid"].as_str().unwrap();
+    assert_eq!(got["metadata"][1]["value"], title);
     let output = mara(
         fixture.path(),
         &[
@@ -990,6 +990,17 @@ fn typo_tolerant_search_preserves_exact_matches_filters_excerpts_and_pages() {
         }
     }
 
+    let get = mara(fixture.path(), &["get", "REQ-EXACX"]);
+    assert!(!get.status.success());
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, "get", json!({"reference":"REQ-EXACX"})),
+        ],
+    );
+    assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
     assert_eq!(fs::read_to_string(&path).unwrap(), source);
 }
 

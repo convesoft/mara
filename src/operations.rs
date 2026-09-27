@@ -1,5 +1,5 @@
 use crate::{Corpus, FieldFilter, ItemCollectionResult, ItemFilters, list_items, load_corpus};
-use crate::{SearchResult, search};
+use crate::{GetResult, SearchResult, get, search};
 mod validation;
 use crate::{
     FlavourDefinition, Project, RelationDefinition, Schema, Template, initialize_project,
@@ -113,6 +113,17 @@ impl OperationContext {
                 .collect(),
         };
         Ok(SchemaListResult { kind, declarations })
+    }
+
+    pub fn get(&self, params: GetParams) -> Result<GetResult, String> {
+        let (corpus, schema) = self.load_query_project()?;
+        get(
+            &corpus,
+            &schema,
+            &params.reference,
+            params.cursor.as_deref(),
+        )
+        .map_err(|error| error.to_string())
     }
 
     pub fn search(&self, params: SearchParams) -> Result<SearchResult, String> {
@@ -323,4 +334,12 @@ impl SearchParams {
             self.ids,
         )
     }
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GetParams {
+    pub reference: String,
+    #[serde(default)]
+    pub cursor: Option<String>,
 }

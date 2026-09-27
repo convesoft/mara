@@ -326,6 +326,83 @@ impl CodeIndex {
     }
 }
 
+impl CodeIndex {
+    // @mara implements DES-CODE-READ
+    pub(crate) fn resolve(&self, reference: &str) -> Result<CodeResolved, ReferenceError> {
+        let (path, selector) = split_reference(reference)?;
+        let absolute = self.root.join(&path);
+        let canonical = fs::canonicalize(&absolute).map_err(|_| ReferenceError::MissingFile)?;
+        if !canonical.starts_with(&self.root) || !canonical.is_file() {
+            return Err(ReferenceError::Unsupported);
+        }
+        let Some(selector) = selector else {
+            let content = fs::read(&absolute)
+                .map_err(|_| ReferenceError::Unsupported)
+                .map(|bytes| String::from_utf8(bytes).ok())?;
+            let lines = content
+                .as_deref()
+                .map(line_starts)
+                .unwrap_or_else(|| vec![0]);
+            let length = content.as_ref().map_or(0, String::len);
+            return Ok(CodeResolved {
+                reference: reference.to_owned(),
+                source: location(&path, &lines, 0, length),
+                content,
+                symbol: None,
+            });
+        };
+        let file = self.files.get(&path).ok_or(ReferenceError::Unsupported)?;
+        let mut matches = file
+            .symbols
+            .iter()
+            .filter(|symbol| symbol.selector == selector);
+        let symbol = matches.next().ok_or(ReferenceError::MissingSymbol)?;
+        if matches.next().is_some() {
+            return Err(ReferenceError::Ambiguous);
+        }
+        Ok(CodeResolved {
+            reference: reference.to_owned(),
+            source: symbol.source.clone(),
+            content: Some(
+                file.source[symbol.content.span().start_byte()..symbol.content.span().end_byte()]
+                    .to_owned(),
+            ),
+            symbol: Some(symbol.selector.clone()),
+        })
+    }
+}
+
+pub(crate) struct CodeResolved {
+    pub reference: String,
+    pub source: SourceLocation,
+    pub content: Option<String>,
+    pub symbol: Option<String>,
+}
+
+impl CodeResolved {
+    pub(crate) fn summary(&self) -> crate::DiscoveryNodeSummary {
+        crate::DiscoveryNodeSummary {
+            reference: self.reference.clone(),
+            kind: crate::DiscoveryKind::Code,
+            source: (&self.source).into(),
+            title: self
+                .symbol
+                .clone()
+                .or_else(|| Some(self.source.path().display().to_string())),
+            title_truncated: false,
+            context: crate::DiscoveryContext {
+                parent: None,
+                section: None,
+            },
+            id: None,
+            mid: None,
+            flavour: None,
+            block_kind: None,
+            heading_level: None,
+        }
+    }
+}
+
 fn line_starts(source: &str) -> Vec<usize> {
     std::iter::once(0)
         .chain(source.match_indices('\n').map(|(i, _)| i + 1))
@@ -561,6 +638,9 @@ fn collect<'tree>(
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ReferenceError {
+    MissingFile,
+    MissingSymbol,
+    Ambiguous,
     Unsupported,
 }
 

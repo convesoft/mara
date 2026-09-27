@@ -233,3 +233,15 @@ Installed full-baseline MCP schema/project validation returned complete and vali
 
 The result covers the independently callable scanner and previously restored dependencies/surfaces. Exact endpoint resolution, semantic code relations, navigation, corpus composition and item listing remain pending; passing coverage matrices do not establish those behaviors.
 :::
+
+:::mara design DES-CODE-READ
+:mid: 01M3H16WQK7734362HFZET92AT
+:title: Resolve local code references for bounded source reading
+:status: accepted
+:kind: interface
+:satisfies: REQ-CODE-TRACEABILITY
+
+Resolve `code:<project-relative-path>[::<native-symbol-selector>]` for get under the grammar and adapter ownership in [[DES-CODE-TRACEABILITY]]. Require an existing regular file canonically inside the project. File-only references need no adapter and can name ignored files; report binary bytes as unreadable text. Selectors match exactly one indexed native symbol. Preserve distinct missing-file, missing-symbol, ambiguous and unsupported failures.
+
+Code summaries use the authored reference, source location and path/selector title, with no item identity or structural context. Symbol content uses the adapter content span including captured modifiers/wrappers; location remains the symbol span. Feed UTF-8 content and empty metadata to [[DES-BOUNDED-NODE-READ]]. Explicit file-only content invalidates cursors even outside the discovered language index. Resolution makes no network requests, executes no code and writes no source. Code relation evaluation and mutation remain separate.
+:::

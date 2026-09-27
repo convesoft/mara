@@ -179,3 +179,52 @@ A separate read-only real-repository comparison consumed every search page and m
 
 This checkpoint restores search and its reviewed document graph dependency. Complete get/related transports, code endpoint navigation, mutations, semantic validation and remaining baseline capabilities are still pending. The installed authoring executable was not replaced.
 :::
+
+:::mara requirement REQ-PARTIAL-ITEM-READ
+:mid: 01M1RY3MDC8V9YE7744Z4CRY0Y
+:title: Read large items in consecutive portions
+:status: accepted
+:derives_from: SCN-RETRIEVE-BOUNDED-KNOWLEDGE
+:kind: functional
+
+Top-level CLI/MCP `get` returns an item's complete parsed body when it fits, otherwise consecutive portions. Follow with ordered authored metadata, preserving repeated keys, empty values and complete values across fragments. Ranges and explicit continuation reconstruct original parsed values without gaps or duplication, including Unicode and oversized values. Do not enumerate neighbours. Preserve source bytes and identity. Bounds and fragments follow [[DES-BOUNDED-NODE-READ]].
+:::
+
+:::mara requirement REQ-DOCUMENT-CONTEXT-READ
+:mid: 01M1XSKPPTZCGKHDSYW0SKMB6B
+:title: Read discovered nodes through bounded Mara retrieval
+:status: accepted
+:derives_from: SCN-READ-DOCUMENT-CONTEXT
+:kind: functional
+
+Read an item, section, Markdown block or document by exact item ID/MID or discovery handle through CLI and MCP. Return kind, source location, structural context and consecutive content, with ordered metadata for items. Reconstruct complete oversized nodes; excerpts do not replace consecutive reads. Items return parsed body; other document nodes return exact source spans, including contained source. Use [[DES-DOCUMENT-STRUCTURE]] for handles/summaries and [[DES-BOUNDED-NODE-READ]] for paging. Direct connections remain separate.
+:::
+
+:::mara design DES-BOUNDED-NODE-READ
+:mid: 01M3H16RZ59C4WZ7115PZ3105S
+:title: Read source content and ordered metadata in consecutive pages
+:status: accepted
+:kind: interface
+:satisfies: REQ-PARTIAL-ITEM-READ
+:satisfies: REQ-DOCUMENT-CONTEXT-READ
+
+CLI `get <reference> [--cursor TOKEN]` and MCP `get {reference,cursor?}` accept exact item IDs/MIDs, structural handles and code references under [[DES-CODE-READ]]. Return discovery format 2 with `node`, `content`, `content_range`, `metadata`, `metadata_range`, `has_more`, `next_cursor` and `format_version`. Reuse [[DES-DOCUMENT-STRUCTURE]] summaries/stale-handle errors. Non-items have empty metadata. No limit, neighbours, `item get` or `item_get`.
+
+Serialized JSON domain results, including escaping and continuation, fit 65,536 UTF-8 bytes; transport wrappers are outside the budget. Fill whole remaining content first when possible, otherwise the largest fitting prefix on Unicode scalar boundaries. Then fill metadata in authored order. Fragments have `{index,key,value,range}`; text ranges have `{start_byte,end_byte,total_bytes,partial}` relative to the original body/value. Metadata ranges have `{start_index,end_index,total,partial}` and mark fragmented values partial. Preserve repeated keys, empty values and fixed identity/location/metadata-key fields. Fail with an actionable size error if headers or the next fragment cannot fit; never skip content or emit a non-advancing page.
+
+Opaque cursors bind exact reference, content/entry/value positions and shared source/schema/code invalidation under [[DES-ITEM-LIST]], plus explicit file-only content. Repeat reference unchanged. Reject stale, malformed, initial, terminal, out-of-bounds, non-UTF-8-boundary and impossible-order positions with a restart instruction. ID and MID reads may have different cursors while returning equivalent content. Reads never write source or repair identity.
+:::
+
+:::mara verification VER-BOUNDED-NODE-READ
+:mid: 01M3H17ZAZYA3KE2JZ8Q3TXH7B
+:title: Reconstruct bounded node and code reads through CLI and MCP
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-PARTIAL-ITEM-READ
+:verifies: REQ-DOCUMENT-CONTEXT-READ
+:verifies: DES-BOUNDED-NODE-READ
+:verifies: DES-CODE-READ
+
+Run `cargo test --locked --test get` with disposable project-owned fixtures and real CLI/stdin MCP processes. Reconstruct complete content and ordered metadata from every page under the domain byte budget; include Unicode, escaped text, repeated keys, empty values, large headings and oversized identity failures. Verify exact lookup, stale handles/cursors, malformed positions, removed options and no neighbour expansion. Read items, sections, blocks, parent documents, file-only code and native symbols; verify source preservation, modifier/wrapper content, missing/ambiguous/unsupported targets, binary rejection and file-only cursor invalidation. Restore deferred exact-identity and full-title reads from search tests. Run prior suites, formatting and Clippy. A read-only installed-baseline comparison on named repository references checks full JSON parity. These checks do not establish related transports, code relation evaluation, validation or mutation.
+:::

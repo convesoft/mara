@@ -1,5 +1,5 @@
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
-use mara::SearchParams;
+use mara::{EntryRange, GetParams, GetResult, SearchParams};
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams, ItemSummary};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
@@ -21,7 +21,7 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation, item listing and unified search. Further capabilities are pending their implementation reviews."
+    after_help = "This rebuild checkpoint supports project initialization, schema inspection, definition validation, item listing, unified search and bounded get. Further capabilities are pending their implementation reviews."
 )]
 struct Cli {
     /// Use this project root instead of ancestor discovery; selects the init target or binds MCP.
@@ -52,6 +52,20 @@ enum Command {
             help = "Select exact human IDs or canonical MIDs (uppercase 26-character ULIDs); repeat for OR, intersected with other filters. Omission adds no restriction"
         )]
         ids: Vec<String>,
+    },
+
+    /// Read an item, section, Markdown block, document, or code endpoint in bounded consecutive portions.
+    #[command(
+        after_help = "Discovery JSON format_version: 2 returns node, content, content_range, metadata, and metadata_range. Items return their parsed body; sections and documents include contained Markdown source. Non-items have empty metadata. Reconstruct content and ordered metadata fragments using byte/index ranges until has_more is false. Get has no limit option and does not enumerate neighbours; use related. Search again if a structural handle is stale."
+    )]
+    Get {
+        /// Exact item ID/MID, a code:<path>[::<selector>] reference, or a discovery handle.
+        reference: String,
+        #[arg(
+            long,
+            help = "Opaque next_cursor from the previous page; keep reference unchanged until has_more is false. Omit to start or restart after source/schema changes. Empty strings are invalid"
+        )]
+        cursor: Option<String>,
     },
 
     /// List compact item summaries.
@@ -230,6 +244,14 @@ fn run(cli: Cli) -> Result<bool, String> {
         command,
     } = cli;
     match command {
+        Command::Get { reference, cursor } => {
+            let result = OperationContext::from_environment(project)?
+                .get(GetParams { reference, cursor })?;
+            emit(format, &result, |item| {
+                print_get(item);
+                Ok(())
+            })?;
+        }
         Command::Search {
             query,
             filters,
@@ -609,4 +631,80 @@ fn print_item_summary(item: &ItemSummary) {
             item.line()
         );
     }
+}
+
+fn print_get(item: &GetResult) {
+    let node = &item.node;
+    let kind = node.block_kind.map_or_else(
+        || format!("{:?}", node.kind),
+        |kind| format!("Block({kind:?})"),
+    );
+    println!(
+        "{}\t{}\t{}{}",
+        node.reference,
+        kind,
+        node.title.as_deref().unwrap_or(""),
+        if node.title_truncated {
+            " [title truncated]"
+        } else {
+            ""
+        }
+    );
+    if let Some(id) = &node.id {
+        println!("id\t{id}");
+    }
+    if let Some(flavour) = &node.flavour {
+        println!("flavour\t{flavour}");
+    }
+    if let Some(level) = node.heading_level {
+        println!("heading_level\t{level}");
+    }
+    if let Some(parent) = &node.context.parent {
+        println!("parent\t{parent}");
+    }
+    if let Some(section) = &node.context.section {
+        println!("section\t{section}");
+    }
+    let source = &node.source;
+    println!(
+        "source\t{}\tstart_byte={}\tend_byte={}\tstart_line={}\tend_line={}",
+        source.path().display(),
+        source.start_byte(),
+        source.end_byte(),
+        source.start_line(),
+        source.end_line()
+    );
+    println!("metadata");
+    for entry in &item.metadata {
+        println!("{}\t{}", entry.key, entry.value);
+        println!(
+            "metadata_fragment\tindex={}\tstart_byte={}\tend_byte={}\ttotal_bytes={}\tpartial={}",
+            entry.index,
+            entry.range.start_byte,
+            entry.range.end_byte,
+            entry.range.total_bytes,
+            entry.range.partial
+        );
+    }
+    print_entry_range("metadata_range", &item.metadata_range);
+    println!("content");
+    print!("{}", item.content);
+    if !item.content.ends_with('\n') {
+        println!();
+    }
+    println!(
+        "content_range\tstart_byte={}\tend_byte={}\ttotal_bytes={}\tpartial={}",
+        item.content_range.start_byte,
+        item.content_range.end_byte,
+        item.content_range.total_bytes,
+        item.content_range.partial
+    );
+    print_page_continuation(item.has_more, item.next_cursor.as_deref());
+}
+
+fn print_entry_range(label: &str, range: &EntryRange) {
+    println!(
+        "{label}\tstart_index={}\tend_index={}\ttotal={}\tpartial={}",
+        range.start_index, range.end_index, range.total, range.partial
+    );
 }

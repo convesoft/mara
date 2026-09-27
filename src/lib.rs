@@ -27,8 +27,9 @@ pub use discovery::{
 };
 mod query;
 pub use query::{
-    FieldFilter, ItemCollectionResult, ItemFilters, ItemSource, ItemSummary, QueryError,
-    RelationDirection, SearchExcerpt, SearchHit, SearchResult, list_items, search,
+    EntryRange, FieldFilter, GetResult, ItemCollectionResult, ItemFilters, ItemSource, ItemSummary,
+    MetadataFragment, QueryError, RelationDirection, SearchExcerpt, SearchHit, SearchResult,
+    TextRange, get, list_items, search,
 };
 mod operations;
 mod rules;
@@ -37,7 +38,7 @@ pub use diagnostics::{
     DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
 };
 pub use operations::{
-    DeclarationSummary, FieldValue, ItemFilterParams, OperationContext,
+    DeclarationSummary, FieldValue, GetParams, ItemFilterParams, OperationContext,
     ProjectInitializationResult, ProjectSummary, SchemaGetResult, SchemaKind, SchemaListResult,
     SearchParams, ValidationDiagnostic, ValidationResult, ValidationScope, ValidationTargetKind,
     project_initialize,

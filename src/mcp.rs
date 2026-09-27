@@ -1,5 +1,6 @@
 use mara::SearchParams;
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams};
+use mara::{GetParams, GetResult};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
     Template, ValidationResult,
@@ -157,6 +158,22 @@ impl SearchToolParams {
 #[tool_router]
 impl MaraMcp {
     #[tool(
+        name = "get",
+        description = "Read an item, section, Markdown block, document, or code endpoint in bounded consecutive portions. Discovery format_version: 2 returns node, content, content_range, metadata, and metadata_range. Sections and documents include contained source; items return their parsed body, then ordered metadata fragments; non-items have empty metadata. Byte ranges are relative to each value; metadata indices preserve repeated keys. Follow next_cursor with unchanged reference until has_more is false; restart after source/schema changes. Search again if a structural handle is stale. Enumerate neighbours with related; get has no limit."
+    )]
+    fn get(
+        &self,
+        Parameters(params): Parameters<GetToolParams>,
+    ) -> Result<Json<GetResult>, String> {
+        self.for_project(params.project)?
+            .get(GetParams {
+                reference: params.reference,
+                cursor: params.cursor,
+            })
+            .map(Json)
+    }
+
+    #[tool(
         name = "search",
         description = "Search every distinct query word with typo tolerance, ranked by relevance before pagination. Exact matches rank first; ID/title/heading matches carry more weight. ID/MID field words and all filters stay exact. Search items, section headings, and outermost Markdown blocks. Discovery format_version: 2 returns results: [{node, excerpt}]. One bounded source excerpt is automatic; item filters exclude narrative, and there is no node-kind filter. Pass node.reference to get for complete content or related for direct connections. Follow next_cursor with unchanged inputs; restart after source/schema changes. Structural handles identify a document snapshot; search again after that document changes."
     )]
@@ -276,4 +293,17 @@ fn validation_result(
     let mut response = rmcp::model::CallToolResult::structured(value);
     response.is_error = Some(failed);
     response
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct GetToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Exact item ID/MID, code:<path>[::<selector>], or a discovery handle returned by search, get, or related.
+    reference: String,
+    /// Opaque next_cursor from the previous response; keep all other inputs unchanged until has_more is false. Omit or null for the first page; restart after source/schema changes. Empty strings are invalid. Portions follow content, then item metadata.
+    #[serde(default)]
+    cursor: Option<String>,
 }

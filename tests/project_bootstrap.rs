@@ -661,7 +661,7 @@ fn bootstrap_advertises_only_its_available_operations() {
     for (args, present, absent) in [
         (
             vec!["--help"],
-            vec!["project", "schema", "item", "mcp", "search"],
+            vec!["project", "schema", "item", "mcp", "search", "get"],
             vec!["trace"],
         ),
         (
@@ -717,6 +717,7 @@ fn bootstrap_advertises_only_its_available_operations() {
     assert_eq!(
         names,
         [
+            "get",
             "item_list",
             "project_init",
             "schema_get",
