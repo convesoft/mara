@@ -445,6 +445,14 @@ occurrences against complete symbol endpoints and exact source spans/counts;
 confirm source bytes are unchanged. Validation alone cannot detect incorrect but
 valid file ownership.
 
+For both grammar-backed and SCIP-only integrations, verify that empty source
+sets skip the indexer and allow complete CLI/MCP validation and document reads.
+Ignored and unrelated files must not activate indexing; an in-project source
+symlink must. Add the first matching source and verify indexing starts, including
+a failing command producing incomplete evaluation. Remove the last source and
+verify the language becomes empty again. Reject missing or invalid extensions
+even when no sources exist.
+
 For relationship authoring, use the declarations in [[DES-RELATION-AUTHORING]]
 and requests in [[DES-RELATION-INTERFACES]]. Establish one edge through metadata,
 inverse metadata and inline source; inspect three occurrences and one semantic

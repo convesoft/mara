@@ -90,15 +90,15 @@ enum AttachmentError {
     Unsupported,
 }
 
+fn matches_extension(path: &Path, extensions: &[String]) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extensions.iter().any(|candidate| candidate == extension))
+}
+
 impl Adapter {
     fn accepts(&self, path: &Path) -> bool {
-        path.extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| {
-                self.extensions
-                    .iter()
-                    .any(|candidate| candidate == extension)
-            })
+        matches_extension(path, &self.extensions)
     }
 
     fn load(project: &Project) -> Result<(Vec<Self>, Vec<PathBuf>), CodeProblem> {
@@ -113,23 +113,8 @@ impl Adapter {
         let mut assets = vec![config_path.to_path_buf()];
         let mut assigned = std::collections::BTreeSet::new();
         for language in project.code_languages() {
-            if language.grammar.is_none()
-                && language.query.is_none()
-                && language.extensions.is_empty()
-            {
-                continue;
-            }
-            let (Some(grammar_path), Some(query_path)) = (&language.grammar, &language.query)
-            else {
-                return Err(fail(format!(
-                    "language {} must configure extensions, grammar and query together",
-                    language.name
-                )));
-            };
             if language.name.is_empty()
                 || language.extensions.is_empty()
-                || !valid_asset_path(grammar_path)
-                || !valid_asset_path(query_path)
                 || language.extensions.iter().any(|extension| {
                     extension.is_empty()
                         || !extension.chars().all(|ch| ch.is_ascii_alphanumeric())
@@ -137,7 +122,23 @@ impl Adapter {
                 })
             {
                 return Err(fail(format!(
-                    "invalid or duplicate adapter configuration for {}",
+                    "language {} needs nonempty, unique alphanumeric source extensions",
+                    language.name
+                )));
+            }
+            if language.grammar.is_none() && language.query.is_none() {
+                continue;
+            }
+            let (Some(grammar_path), Some(query_path)) = (&language.grammar, &language.query)
+            else {
+                return Err(fail(format!(
+                    "language {} must configure grammar and query together",
+                    language.name
+                )));
+            };
+            if !valid_asset_path(grammar_path) || !valid_asset_path(query_path) {
+                return Err(fail(format!(
+                    "invalid adapter asset path for {}",
                     language.name
                 )));
             }

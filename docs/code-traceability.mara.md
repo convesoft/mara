@@ -15,6 +15,10 @@ indexer identities: body edits, overload ordering, and package version bumps
 must not select another symbol. Renames, moves, or deletion may break links;
 Mara never falls back to a matching name or position. Language indexers own
 overload distinctions; declarations sharing one implementation may share an identity.
+
+Configured language integrations must support projects with no matching source
+files without preventing documentation operations, and activate automatically
+when matching sources appear. Once sources exist, indexer failures remain errors.
 :::
 
 :::mara design DES-CODE-TRACEABILITY
@@ -105,7 +109,8 @@ Mara applies the shared attachment rules.
 
 Mara contains no compiled language integrations. Projects configure one
 `[[code.languages]]` entry per integration in `.mara/project.toml` format 3.
-Each entry combines a SCIP command with optional Tree-sitter WebAssembly assets.
+Each entry declares source extensions and a SCIP command, with optional
+Tree-sitter WebAssembly assets.
 Mara owns invocation, standard SCIP protobuf reading, marker parsing, schema/item
 resolution, graph identity and navigation.
 Each indexer owns language support, project discovery, compilation requirements
@@ -118,9 +123,9 @@ format_version = 3
 name = "rust"
 command = ["rust-analyzer", "scip", ".", "--output", "{output}"]
 position_encoding = "utf8"
+extensions = ["rs"]
 
 # Optional: declaration content and source comment attachment.
-extensions = ["rs"]
 grammar = ".mara/code/rust.wasm"
 query = ".mara/code/rust.scm"
 ```
@@ -129,16 +134,29 @@ Each unique snake_case language name is persisted in links; renaming it breaks
 those links. `command` is an executable and argument array, with exactly one
 standalone `{output}` argument. Mara replaces that argument with a temporary
 output path and runs the command from the project root without an implicit shell.
-The `command` is required. Configure `extensions`, `grammar` and `query` together,
-or omit all three for indexing without Tree-sitter. Install the executable and
+The `command` and nonempty `extensions` are required for every integration.
+Extensions are case-sensitive alphanumeric suffixes without dots, unique across
+language entries. Configure `grammar` and `query` together, or omit both for
+indexing without Tree-sitter. Install the executable and
 its language dependencies separately. Mara does not download indexers, compile
 grammars, or contain language-specific command defaults.
 Only enable commands trusted by the project: they can run compiler/build tooling
 and have the permissions and network access of the Mara process.
 
-Mara invokes every configured indexer whenever it loads code for a corpus
-operation, including validation and reads; users need no pre-indexing step.
-It consumes fresh output and keeps no persistent SCIP cache. Nonzero exit,
+Mara checks each integration for matching source files whenever it loads code
+for a corpus operation, including validation and reads. Matching respects the
+project ignore rules and accepts regular files or file symlinks resolving within
+the project. With no matches, Mara skips that indexer and treats the language as
+empty; documentation operations remain available. Adding the first matching file
+automatically activates indexing; removing the last skips it again. This rule
+applies to every indexer independently of optional grammar assets. Configuration
+and declared grammar assets must remain valid even when no source files match.
+
+Once matching files exist, Mara invokes the configured command; users need no
+pre-indexing step. The indexer still owns discovery within its project. Mara
+consumes fresh output and keeps no persistent SCIP cache. A valid SCIP index
+with metadata and zero documents is accepted. A failed command or missing output
+is never interpreted as an empty language. Nonzero exit,
 missing/malformed output, a different indexed project root, invalid source ranges,
 or changed project inputs during execution produce incomplete-validation errors;
 normal operations fail instead of returning a partial graph. Command diagnostics
@@ -186,7 +204,9 @@ file/indexer-scoped descriptors. Old selectors are never interpreted as aliases.
 Unreleased configurations with separate `[[code.indexers]]` entries must move
 their command and position encoding into the matching `[[code.languages]]` entry
 and remove the separate indexer entries. Project format remains 3; reset development configurations marked 4 to 3.
-Keep existing schema format 3, item MIDs, relation names and grammar/query assets.
+Add source `extensions` to any SCIP-only integration that omitted them; grammar
+and query remain optional. Keep existing schema format 3, item MIDs, relation
+names and grammar/query assets.
 Projects without code bindings may retain their existing project format.
 
 Grouped-comment attachment changes earlier file/enclosing-owned markers in
@@ -259,4 +279,9 @@ Preserve literal SCIP backticks because Mara can parse them unambiguously and
 readable descriptors help authors inspect exact targets. Escape only characters
 that conflict with Mara's reference syntax; do not shorten or normalize semantic
 descriptors for appearance, which could collapse distinct identities.
+
+Require source extensions independently of grammar assets so Mara can skip empty
+languages uniformly without built-in language detection or indexer-specific
+error interpretation. Explicit source matching distinguishes an empty workspace
+from a failed indexer; failure handling remains strict once source files exist.
 :::

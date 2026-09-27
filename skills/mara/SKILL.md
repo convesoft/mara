@@ -229,13 +229,19 @@ select explicit mentions, and `--cursor '<next_cursor>'` for continuation.
 ## Code endpoints
 
 Project format 3 uses one `[[code.languages]]` entry per integration with
-`name` and `command` (executable/arguments, one standalone `{output}` placeholder).
-Mara invokes them automatically from the project root when loading the corpus;
+`name`, nonempty `extensions`, and `command` (executable/arguments, one standalone
+`{output}` placeholder). Extensions are case-sensitive suffixes without dots,
+unique across language entries. Mara invokes an indexer automatically from the
+project root only when unignored source files match its extensions. With no
+matches it skips that indexer, so empty projects can use documentation operations.
+Adding the first matching file activates indexing; removing the last skips it again.
+This applies with or without Tree-sitter and never suppresses failures once source
+files exist. Configuration and any declared grammar assets must still be valid;
 install indexers separately and only configure trusted commands. Commands may
 run build tools. Missing executables or invalid output fail the operation.
 Optional `position_encoding` supplies `utf8`, `utf16` or `utf32` for old indexers
-that omit their document encoding. The same entry may include `extensions`,
-`grammar` and `query` together for runtime Tree-sitter assets that attach comments
+that omit their document encoding. The same entry may include `grammar` and
+`query` together for runtime Tree-sitter assets that attach comments
 and expand declaration content. Without these assets, symbol links still work;
 content uses the SCIP enclosing range, or the definition token when absent.
 There is no `separator` setting or compiled language integration.
@@ -252,7 +258,7 @@ grammar = ".mara/code/rust.wasm"
 query = ".mara/code/rust.scm"
 ```
 
-Remove all three asset fields for SCIP-only use. Commands and paths are
+Omit `grammar` and `query` for SCIP-only use; keep `extensions`. Commands and paths are
 project-owned; Mara supplies no per-language defaults.
 
 Source markers use `@mara <canonical-relation> <item-ID-or-MID>` within captured

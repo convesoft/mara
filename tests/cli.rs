@@ -12242,6 +12242,8 @@ fn scip_code_fixture(language: &str) -> TempDir {
         }
         let extension = if language == "rust" { "rs" } else { "ts" };
         config.push_str(&format!("\nextensions = [\"{extension}\"]\ngrammar = \".mara/code/{language}.wasm\"\nquery = \".mara/code/{language}.scm\"\n"));
+    } else {
+        config.push_str("extensions = [\"cpp\", \"h\"]\n");
     }
     fs::write(config_path, config).unwrap();
     let schema_path = root.join(".mara/schema.yaml");
@@ -12542,6 +12544,87 @@ fn scip_indexer_failures_do_not_return_partial_code_relations() {
     }
 }
 
+// @mara code_verifies REQ-CODE-TRACEABILITY
+#[cfg(unix)]
+#[test]
+fn scip_indexers_skip_empty_languages_and_resume_when_sources_appear() {
+    for (language, path, reference) in [
+        ("rust", "src/lib.rs", "code:src/lib.rs::rust::run()."),
+        (
+            "cpp",
+            "service.cpp",
+            "code:service.cpp::cpp::parse(7864480464b09eea).",
+        ),
+    ] {
+        let fixture = scip_code_fixture(language);
+        let root = fixture.path();
+        let source = fs::read(root.join(path)).unwrap();
+        fs::remove_file(root.join(path)).unwrap();
+        let config = root.join(".mara/project.toml");
+        let original = fs::read_to_string(&config).unwrap();
+        fs::write(&config, original.replace("\"cp\"", "\"false\"")).unwrap();
+        fs::create_dir(root.join("ignored")).unwrap();
+        fs::write(
+            root.join("ignored")
+                .join(Path::new(path).file_name().unwrap()),
+            &source,
+        )
+        .unwrap();
+        fs::write(root.join(".gitignore"), "/ignored/\n").unwrap();
+        fs::write(
+            root.join("notes.txt"),
+            "Unrelated files do not activate a language.\n",
+        )
+        .unwrap();
+        let empty = validation_with_parity(root, &[]);
+        assert_eq!(empty["valid"], true, "{language}: {empty:#}");
+        assert_eq!(empty["evaluation_complete"], true);
+        let related = scip_retrieval_parity(
+            root,
+            &["related", "REQ-A"],
+            "related",
+            json!({"reference":"REQ-A"}),
+        );
+        assert!(
+            related["connections"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|c| c["neighbour"]["kind"] != "code")
+        );
+        assert!(!mara(root, &["get", reference]).status.success());
+
+        // An in-project file symlink is a source even if its backing path is ignored.
+        std::os::unix::fs::symlink(
+            root.join("ignored")
+                .join(Path::new(path).file_name().unwrap()),
+            root.join(path),
+        )
+        .unwrap();
+        let linked = validation_with_parity(root, &[]);
+        assert_eq!(linked["evaluation_complete"], false);
+        fs::remove_file(root.join(path)).unwrap();
+
+        fs::write(root.join(path), &source).unwrap();
+        let failed = validation_with_parity(root, &[]);
+        assert_eq!(failed["valid"], false);
+        assert_eq!(failed["evaluation_complete"], false);
+        fs::write(&config, &original).unwrap();
+        assert_eq!(validation_with_parity(root, &[])["valid"], true);
+        scip_retrieval_parity(
+            root,
+            &["get", reference],
+            "get",
+            json!({"reference":reference}),
+        );
+
+        fs::remove_file(root.join(path)).unwrap();
+        let empty_again = validation_with_parity(root, &[]);
+        assert_eq!(empty_again["valid"], true);
+        assert_eq!(empty_again["evaluation_complete"], true);
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn scip_language_configuration_requires_command_and_complete_grammar_settings() {
@@ -12549,7 +12632,9 @@ fn scip_language_configuration_requires_command_and_complete_grammar_settings() 
     let root = fixture.path();
     let path = root.join(".mara/project.toml");
     let original = fs::read_to_string(&path).unwrap();
-    for omitted in ["command =", "query ="] {
+    let source_path = root.join("src/lib.rs");
+    let source = fs::read(&source_path).unwrap();
+    for omitted in ["command =", "extensions =", "query ="] {
         let candidate = original
             .lines()
             .filter(|line| !line.starts_with(omitted))
@@ -12562,6 +12647,9 @@ fn scip_language_configuration_requires_command_and_complete_grammar_settings() 
                 .status
                 .success()
         );
+        fs::remove_file(&source_path).unwrap();
+        assert_eq!(validation_with_parity(root, &[])["valid"], false);
+        fs::write(&source_path, &source).unwrap();
     }
 }
 

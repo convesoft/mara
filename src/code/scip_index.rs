@@ -42,7 +42,12 @@ fn snapshot(project: &Project) -> Result<Snapshot, CodeProblem> {
         .follow_links(false);
     for entry in walk.build() {
         let entry = entry.map_err(|_| problem("could not snapshot indexer inputs"))?;
-        if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+        let supported_file = entry.file_type().is_some_and(|kind| kind.is_file())
+            || entry.file_type().is_some_and(|kind| kind.is_symlink())
+                && fs::canonicalize(entry.path()).is_ok_and(|canonical| {
+                    canonical.starts_with(project.root()) && canonical.is_file()
+                });
+        if !supported_file {
             continue;
         }
         let path = entry
@@ -85,6 +90,12 @@ pub(super) fn run(project: &Project) -> Result<Vec<Indexed>, CodeProblem> {
             ));
         }
         let before = snapshot(project)?;
+        if !before
+            .keys()
+            .any(|path| matches_extension(path, &config.extensions))
+        {
+            continue;
+        }
         let output = tempfile::NamedTempFile::new()
             .map_err(|_| problem("could not create temporary SCIP output"))?;
         let status = Command::new(&config.command[0])

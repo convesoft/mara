@@ -84,7 +84,7 @@ enum Command {
 
     /// Read an item, section, Markdown block, document, or code endpoint in bounded consecutive portions.
     #[command(
-        after_help = "Discovery JSON format_version: 2 returns node, content, content_range, metadata, and metadata_range. Items return their parsed body; sections and documents include contained Markdown source. Non-items have empty metadata. Reconstruct content and ordered metadata fragments using byte/index ranges until has_more is false. Get has no limit option and does not enumerate neighbours; use related. Search again if a structural handle is stale. Code symbols use the configured language name and exact SCIP descriptor; copy references from related. No name/position fallback. Preserve literal backticks and single-quote code references in the shell. Project format 3 configures external SCIP commands in [[code.languages]]; corpus reads invoke them automatically. Tree-sitter grammar/query assets are optional for comment attachment and declaration content."
+        after_help = "Discovery JSON format_version: 2 returns node, content, content_range, metadata, and metadata_range. Items return their parsed body; sections and documents include contained Markdown source. Non-items have empty metadata. Reconstruct content and ordered metadata fragments using byte/index ranges until has_more is false. Get has no limit option and does not enumerate neighbours; use related. Search again if a structural handle is stale. Code symbols use the configured language name and exact SCIP descriptor; copy references from related. No name/position fallback. Preserve literal backticks and single-quote code references in the shell. Project format 3 configures external SCIP commands in [[code.languages]]; corpus reads invoke them automatically when files match the required extensions list. No matches skips that indexer. Tree-sitter grammar/query assets are optional for comment attachment and declaration content."
     )]
     Get {
         /// Exact item ID/MID, a code:<path>[::<language>::<descriptor>] reference, or a discovery handle.
@@ -217,7 +217,7 @@ enum ProjectCommand {
     },
     /// Validate the whole project, optionally selecting which diagnostics are shown.
     #[command(
-        after_help = "Configured [[code.languages]] SCIP commands run automatically from the project root during corpus loading, including validation. Install indexers separately and configure trusted commands. Command or index failures make evaluation incomplete; a valid file link does not prove intended symbol attachment. Inspect code backlinks with related and relation get."
+        after_help = "Configured [[code.languages]] entries require source extensions. SCIP commands run automatically from the project root during corpus loading, including validation, only when unignored source files match. Empty languages are skipped without invoking their command. Install indexers separately and configure trusted commands. Command or index failures make evaluation incomplete; a valid file link does not prove intended symbol attachment. Inspect code backlinks with related and relation get."
     )]
     Validate {
         #[arg(
