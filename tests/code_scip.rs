@@ -865,3 +865,26 @@ fn scip_ambiguous_marker_identity_never_selects_the_first_symbol() {
     );
     assert!(!mara(fixture.path(), &["get", "REQ-A"]).status.success());
 }
+
+// @mara checks DES-TRACE-DIAGNOSTIC-INTERFACE
+#[test]
+fn scip_code_cursor_detects_source_changes() {
+    let fixture = scip_code_fixture("rust");
+    let root = fixture.path();
+    let args = ["--format", "json", "project", "validate", "--limit", "1"];
+    // Two unresolved links produce a continuation that must expire on source changes.
+    let item = root.join("req.mara.md");
+    let source = fs::read_to_string(&item).unwrap();
+    fs::write(&item, source.replace(":title: A\n", ":title: A\n:implemented_by_code: code:missing.rs\n:implemented_by_code: code:other.rs\n")).unwrap();
+    let first: Value = serde_json::from_slice(&mara(root, &args).stdout).unwrap();
+    let cursor = first["next_cursor"].as_str().unwrap();
+    let mut continued = args.to_vec();
+    continued.extend(["--cursor", cursor]);
+    fs::write(
+        root.join("src/lib.rs"),
+        "// @mara code_implements REQ-A\npub fn run() -> u32 { 43 }\n",
+    )
+    .unwrap();
+    let stale: Value = serde_json::from_slice(&mara(root, &continued).stdout).unwrap();
+    assert_eq!(stale["error"]["code"], "stale_cursor", "{stale:#}");
+}

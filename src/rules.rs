@@ -44,19 +44,117 @@ pub(crate) struct Rules {
     pub diagnostics: Vec<ValidationDiagnostic>,
     ir: Option<IRSchema>,
     source_fingerprints: BTreeMap<PathBuf, String>,
+    parameter_bindings: Option<BTreeMap<String, String>>,
+    parameter_uses: BTreeMap<String, BTreeSet<String>>,
+    binding_error: Option<String>,
 }
 
+pub(crate) struct RuleObservation {
+    pub mid: String,
+    pub root: String,
+    pub state: &'static str,
+    pub diagnostic: Option<ValidationDiagnostic>,
+    pub counts: BTreeMap<(String, String, String), (usize, Option<usize>)>,
+    pub states: BTreeMap<(String, String), bool>,
+}
 impl Rules {
+    pub(crate) fn root_ids(&self) -> &[String] {
+        &self.roots
+    }
+
+    pub(crate) fn shape(&self, id: &str) -> Option<(&Value, &DiagnosticLocation)> {
+        self.shapes
+            .get(id)
+            .map(|shape| (&shape.value, &shape.source))
+    }
+
+    // @mara implements DES-TRACE-CHECK-BINDING
+    pub(crate) fn request_check(
+        &mut self,
+        shape: &str,
+        schema: &Schema,
+        flavours: &[String],
+    ) -> Result<String, String> {
+        if self.diagnostics.is_empty() {
+            let selected = expand_id(shape)?;
+            if selected != shape {
+                return Err("request check shape must be an expanded IRI".into());
+            }
+            let Some(definition) = self.shapes.get(&selected) else {
+                return Err(format!("unknown request check shape '{shape}'"));
+            };
+            let value = &definition.value;
+            if value.get("path").is_some()
+                || value.get("targetClass").is_some()
+                || value.get("whenShape").is_some()
+                || value.get("paths").is_some()
+            {
+                return Err(
+                    "request check must be a targetless node shape without whenShape or paths"
+                        .into(),
+                );
+            }
+            self.compatible(
+                &selected,
+                flavours,
+                &ValueKind::Nodes,
+                schema,
+                &mut BTreeSet::new(),
+            )
+            .map_err(|(_, message)| message)?;
+            if let Some(bindings) = &self.parameter_bindings {
+                let mut pending = vec![selected.clone()];
+                let mut visited = BTreeSet::new();
+                let mut used = BTreeSet::new();
+                while let Some(id) = pending.pop() {
+                    if !visited.insert(id.clone()) {
+                        continue;
+                    }
+                    if let Some(names) = self.parameter_uses.get(&id) {
+                        used.extend(names.iter().cloned());
+                    }
+                    if let Some(shape) = self.shapes.get(&id) {
+                        pending.extend(references(&shape.value).into_iter().map(str::to_owned));
+                    }
+                }
+                if let Some(name) = bindings.keys().find(|name| !used.contains(*name)) {
+                    return Err(format!("unused check parameter '{name}'"));
+                }
+            }
+            self.roots = vec![selected.clone()];
+            Ok(selected)
+        } else {
+            Err("invalid request check definition".into())
+        }
+    }
     pub fn load(project: &Project, schema: &Schema) -> Self {
         // @mara implements DES-SCHEMA-RULE-DEFINITIONS
         Self::load_files(project, schema, project.rule_files.clone())
     }
 
     pub(crate) fn load_files(project: &Project, schema: &Schema, files: Vec<PathBuf>) -> Self {
-        Self::load_files_with_parameters(project, schema, files)
+        Self::load_files_with_parameters(project, schema, files, None)
     }
 
-    fn load_files_with_parameters(project: &Project, schema: &Schema, files: Vec<PathBuf>) -> Self {
+    pub(crate) fn load_check_files(
+        project: &Project,
+        schema: &Schema,
+        files: Vec<PathBuf>,
+        parameters: BTreeMap<String, String>,
+    ) -> Result<Self, String> {
+        let rules = Self::load_files_with_parameters(project, schema, files, Some(parameters));
+        match &rules.binding_error {
+            Some(error) => Err(error.clone()),
+            None => Ok(rules),
+        }
+    }
+
+    fn load_files_with_parameters(
+        project: &Project,
+        schema: &Schema,
+        files: Vec<PathBuf>,
+        parameter_bindings: Option<BTreeMap<String, String>>,
+    ) -> Self {
         let mut rules = Self {
             shapes: BTreeMap::new(),
             roots: vec![],
@@ -64,6 +162,9 @@ impl Rules {
             diagnostics: vec![],
             ir: None,
             source_fingerprints: BTreeMap::new(),
+            parameter_bindings,
+            parameter_uses: BTreeMap::new(),
+            binding_error: None,
         };
         let schema_value = serde_json::to_value(schema).expect("schema serializes");
         let mut seen = BTreeSet::new();
@@ -386,6 +487,27 @@ impl Rules {
         {
             *s = expanded;
         }
+        if let Some(bindings) = &self.parameter_bindings {
+            let mut used = BTreeSet::new();
+            let binding = (|| {
+                if let Some(literal) = map.get_mut("hasValue") {
+                    bind_literal(literal, bindings, &mut used)?;
+                }
+                if let Some(Value::Array(literals)) = map.get_mut("in") {
+                    for literal in literals {
+                        bind_literal(literal, bindings, &mut used)?;
+                    }
+                }
+                Ok::<(), String>(())
+            })();
+            if let Err(error) = binding {
+                self.binding_error.get_or_insert(error);
+            }
+            self.parameter_uses
+                .entry(id.clone())
+                .or_default()
+                .extend(used);
+        }
         map.insert("id".into(), json!(id));
         let _ = schema;
         if let Some(previous) = self.shapes.get_mut(&id) {
@@ -535,7 +657,7 @@ impl Rules {
                 }
                 "paths" if root => {
                     if strings(v).len() != v.as_array().map_or(1, Vec::len)
-                        || normalized_paths(
+                        || crate::query::normalized_paths(
                             &strings(v).iter().map(PathBuf::from).collect::<Vec<_>>(),
                         )
                         .is_err()
@@ -876,6 +998,38 @@ fn check_literal(v: &Value) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn valid_parameter_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
+        && bytes.all(|b| matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_'))
+}
+
+// @mara implements DES-TRACE-CHECK-BINDING
+fn bind_literal(
+    literal: &mut Value,
+    bindings: &BTreeMap<String, String>,
+    used: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    let Some(object) = literal.as_object() else {
+        return Ok(());
+    };
+    let Some(parameter) = object.get("parameter") else {
+        return Ok(());
+    };
+    let Some(name) = parameter.as_str() else {
+        return Err("check parameter placeholder must have a text name".into());
+    };
+    if object.len() != 1 || !valid_parameter_name(name) {
+        return Err(format!("invalid check parameter placeholder '{name}'"));
+    }
+    let Some(value) = bindings.get(name) else {
+        return Err(format!("missing check parameter '{name}'"));
+    };
+    used.insert(name.to_owned());
+    *literal = Value::String(value.clone());
+    Ok(())
+}
+
 fn datatype_name(t: crate::FieldType) -> &'static str {
     match t {
         crate::FieldType::String | crate::FieldType::Enum => "string",
@@ -883,33 +1037,4 @@ fn datatype_name(t: crate::FieldType) -> &'static str {
         crate::FieldType::Number => "double",
         crate::FieldType::Boolean => "boolean",
     }
-}
-
-fn normalized_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, ()> {
-    paths
-        .iter()
-        .map(|path| {
-            if path.as_os_str().is_empty()
-                || path.is_absolute()
-                || path.components().any(|component| {
-                    matches!(
-                        component,
-                        std::path::Component::ParentDir
-                            | std::path::Component::RootDir
-                            | std::path::Component::Prefix(_)
-                    )
-                })
-            {
-                return Err(());
-            }
-            let normalized = path
-                .components()
-                .filter(|component| *component != std::path::Component::CurDir)
-                .collect::<PathBuf>();
-            if normalized.as_os_str().is_empty() {
-                return Err(());
-            }
-            Ok(normalized)
-        })
-        .collect()
 }

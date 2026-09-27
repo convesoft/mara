@@ -17,11 +17,25 @@ impl Rules {
     ) {
         // @mara implements DES-CURRENT-STATE-EVALUATION
         // @mara implements REQ-CURRENT-STATE-RULES
+        self.observe(corpus, schema, prerequisites, result, &self.roots, None);
+    }
+
+    // @mara implements DES-TRACE-VIEW-INTERFACES
+    pub(crate) fn observe(
+        &self,
+        corpus: &Corpus,
+        schema: &Schema,
+        prerequisites: &[Diagnostic],
+        result: &mut ValidationResult,
+        roots: &[String],
+        selected_mids: Option<&BTreeSet<String>>,
+    ) -> Vec<RuleObservation> {
+        let mut observations = Vec::new();
         let Some(ir) = &self.ir else {
-            return;
+            return observations;
         };
-        if self.roots.is_empty() {
-            return;
+        if roots.is_empty() {
+            return observations;
         }
         // Policy uses the complete graph, including for item validation. Reject
         // invalid prerequisites before projecting them into apparent absence.
@@ -33,13 +47,13 @@ impl Rules {
                 result,
                 "rule evaluation skipped: fix the corpus source, identity, field or reference diagnostics first",
             );
-            return;
+            return observations;
         }
         let mut graph = Vec::new();
         for item in corpus.items() {
             let Some(mid) = item.mid() else {
                 project_unavailable(result, "rule evaluation requires valid item identities");
-                return;
+                return observations;
             };
             let mut node = json!({"@id":format!("urn:mara:mid:{mid}"),"@type":format!("{FLAVOUR}{}",item.flavour())});
             if let Some(flavour) = schema.flavours.get(item.flavour()) {
@@ -50,7 +64,7 @@ impl Rules {
                                 result,
                                 "rule evaluation requires representable typed field values",
                             );
-                            return;
+                            return observations;
                         };
                         push(&mut node, &format!("{FIELD}{}", field.key()), value);
                     }
@@ -84,7 +98,7 @@ impl Rules {
                     result,
                     "could not project typed item data for rule evaluation",
                 );
-                return;
+                return observations;
             }
         };
         let selected = result.target.id.clone();
@@ -92,15 +106,30 @@ impl Rules {
             selected
                 .as_deref()
                 .is_none_or(|id| i.id() == id || i.mid() == Some(id))
+                && selected_mids.is_none_or(|mids| i.mid().is_some_and(|mid| mids.contains(mid)))
         }) {
-            for root in &self.roots {
+            for root in roots {
                 let shape = &self.shapes[root];
-                let mid = item.mid().expect("validated identity");
+                let mid = item.mid().expect("validated identity").to_owned();
+                let record = |state, diagnostic, counts, states| RuleObservation {
+                    mid: mid.clone(),
+                    root: root.clone(),
+                    state,
+                    diagnostic,
+                    counts,
+                    states,
+                };
                 if !shape.value["targetClass"].is_null()
                     && !strings(&shape.value["targetClass"])
                         .iter()
                         .any(|f| f == item.flavour())
                 {
+                    observations.push(record(
+                        "not_applicable",
+                        None,
+                        BTreeMap::new(),
+                        BTreeMap::new(),
+                    ));
                     continue;
                 }
                 let paths = crate::query::normalized_paths(
@@ -111,6 +140,12 @@ impl Rules {
                 )
                 .expect("validated scope paths");
                 if !paths.is_empty() && !paths.iter().any(|p| item.source().path().starts_with(p)) {
+                    observations.push(record(
+                        "not_applicable",
+                        None,
+                        BTreeMap::new(),
+                        BTreeMap::new(),
+                    ));
                     continue;
                 }
                 let focus =
@@ -134,6 +169,12 @@ impl Rules {
                     match run(condition, &mut engine) {
                         Ok(outcome) if !engine.failed.get() => {
                             if !outcome.conforms() {
+                                observations.push(record(
+                                    "not_applicable",
+                                    None,
+                                    BTreeMap::new(),
+                                    BTreeMap::new(),
+                                ));
                                 continue;
                             }
                         }
@@ -144,6 +185,12 @@ impl Rules {
                                 root,
                                 "native SHACL applicability evaluation failed",
                             );
+                            observations.push(record(
+                                "unavailable",
+                                None,
+                                BTreeMap::new(),
+                                BTreeMap::new(),
+                            ));
                             continue;
                         }
                     }
@@ -158,10 +205,18 @@ impl Rules {
                             root,
                             "native SHACL obligation evaluation failed",
                         );
+                        observations.push(record(
+                            "unavailable",
+                            None,
+                            BTreeMap::new(),
+                            BTreeMap::new(),
+                        ));
                         continue;
                     }
                 };
                 if outcome.conforms() {
+                    let states = cached_states(&engine, ir, &self.shapes, &relations);
+                    observations.push(record("passed", None, engine.counts, states));
                     continue;
                 }
                 // Select a stable reported violation, without claiming an
@@ -248,9 +303,17 @@ impl Rules {
                     }
                 }
                 diagnostic.details = Some(details);
+                let states = cached_states(&engine, ir, &self.shapes, &relations);
+                observations.push(record(
+                    "failed",
+                    Some(diagnostic.clone()),
+                    engine.counts,
+                    states,
+                ));
                 result.diagnostics.push(diagnostic);
             }
         }
+        observations
     }
     fn unavailable(&self, result: &mut ValidationResult, item: &Item, root: &str, message: &str) {
         result.evaluation_complete = false;
@@ -282,6 +345,35 @@ fn relation_iri(endpoint: &crate::RelationEndpoint) -> String {
             url::form_urlencoded::byte_serialize(address.as_bytes()).collect::<String>()
         ),
     }
+}
+fn cached_states(
+    engine: &RuleEngine,
+    ir: &shacl::ir::IRSchema,
+    shapes: &BTreeMap<String, Shape>,
+    relations: &crate::relations::RelationGraph,
+) -> BTreeMap<(String, String), bool> {
+    use shacl::validator::engine::Engine;
+    let mut states = BTreeMap::new();
+    for id in shapes.keys() {
+        let Ok(iri) = IriS::new(id) else { continue };
+        let Some(idx) = ir.get_idx(&Object::iri(iri)) else {
+            continue;
+        };
+        for endpoint in relations.nodes.values() {
+            let Ok(focus) = IriS::new(&relation_iri(endpoint)) else {
+                continue;
+            };
+            if let Some(outcome) = engine.get_cached_outcome(&Object::iri(focus), *idx) {
+                let key = match endpoint {
+                    crate::RelationEndpoint::Item { mid, .. } => mid.clone(),
+                    crate::RelationEndpoint::Code { reference } => reference.clone(),
+                    crate::RelationEndpoint::External { address } => format!("external:{address}"),
+                };
+                states.insert((id.clone(), key), outcome.conforms());
+            }
+        }
+    }
+    states
 }
 fn project_unavailable(result: &mut ValidationResult, message: &str) {
     result.evaluation_complete = false;

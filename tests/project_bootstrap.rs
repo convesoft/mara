@@ -662,9 +662,9 @@ fn bootstrap_advertises_only_its_available_operations() {
         (
             vec!["--help"],
             vec![
-                "project", "schema", "item", "mcp", "search", "get", "related", "relation",
+                "project", "schema", "item", "mcp", "search", "get", "related", "relation", "trace",
             ],
-            vec!["trace"],
+            vec![],
         ),
         (
             vec!["project", "--help"],
@@ -745,7 +745,8 @@ fn bootstrap_advertises_only_its_available_operations() {
             "schema_get",
             "schema_list",
             "schema_validate",
-            "search"
+            "search",
+            "trace_matrix"
         ]
     );
 }

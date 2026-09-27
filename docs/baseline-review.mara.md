@@ -23,8 +23,8 @@ have not yet been restored. The sections below identify current checkpoints.
 | Typed relations, aliases, symmetry, inline assertions and external targets | Pending: relation contracts; semantic-edge identity, occurrence inspection, mutation, and terminal external-target tests. |
 | Validation, diagnostics and structural graph policies | Retain schema-only configuration recovery, format-1 diagnostics, output bounds and continuation under the schema definition review below. Project/item validation, reporting filters and graph evaluation remain pending. |
 | YAML rules and native evaluation | Retain the reviewed definition loader, vocabulary/type checks, finite definition paths and native compilation for schema validation. Applicability, item projection, native evaluation and matrices remain pending. |
-| Matrices, parameter binding and pagination | Pending: selected coverage, explanations, revision parameters, bounds, and matrix tests. |
-| Code endpoints, comment markers and language integrations | SCIP identity and association review below; candidate execution and exact-revision evidence remain pending. |
+| Matrices, parameter binding and pagination | Retain the reviewed shared evaluator, request checks and bounded record projection; correct exact code-reference Markdown links. The matrix review below records the distinct tests and candidate checks. |
+| Code endpoints, comment markers and language integrations | Verified SCIP identity and association checkpoint; see [[EVD-SCIP-CODE-HANDLING]]. Matrix integration follows the matrix review. |
 | CLI/MCP interfaces and project context | Retain project context and bootstrap transport/parity behavior. Full command help, tool schemas, and remaining operation parity tests are pending. |
 | Packaging, installation, migration and releases | Pending: npm packaging and launchers, skill/plugin, migration, CI/release contracts, and real packaged CLI/MCP smoke. |
 | Public guidance and historical research/release documents | Pending: README, roadmap, security guidance, generated changelog, and useful historical knowledge. Retained license notices remain unchanged. |
@@ -660,3 +660,20 @@ observations and check binding. No new dependency or saved view format is needed
 Completion requires real JSON/Markdown CLI/MCP parity and failures, complete
 continuation, exact revision binding without source edits, full regression suite,
 formatting/Clippy, canonical validation and candidate matrices over this corpus.
+
+
+Matrix review outcomes: all sixteen matrix groups pass, including the genuine
+engineering authoring/coverage/execution workflow. The code-link regression
+first reproduced `[?](<>)` on both CLI and MCP, then passed with exact file and
+SCIP descriptor labels, literal backticks and source links. Selection tests cover
+intersection, empty valid results and rejected ambiguous requests. Byte-budget
+tests consume every page without losing results and reject an indivisible
+oversized identity. Retain the separate SCIP source-change validation-cursor
+regression. Reuse the current item-filter API and preserve its established
+selection behavior; retain existing native-engine failure tracking unchanged.
+
+The combined checkpoint passes 366 tests across 26 suites, formatting and
+Clippy with all targets/features. Two ignored subprocess helpers are exercised
+by their parent recovery tests. Candidate corpus/matrix checks and exact-revision
+evidence complete the checkpoint; the remaining interface, distribution and
+public-guidance review remains separate.

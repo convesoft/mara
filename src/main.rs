@@ -126,8 +126,56 @@ enum Command {
         #[command(subcommand)]
         command: SchemaCommand,
     },
+    /// Render read-only trace views from an explicit item selection.
+    Trace {
+        #[command(subcommand)]
+        command: TraceCommand,
+    },
     /// Serve the available operations over stdio MCP; resolve projects per call.
     Mcp,
+}
+
+#[derive(Debug, Subcommand)]
+enum TraceCommand {
+    /// Generate a bounded, read-only coverage matrix using enabled rule IRIs or a request-local YAML check.
+    #[command(
+        after_help = "Select roots with --all or one or more --id, --flavour, --field and --path filters. Use --rule for enabled root rules, or --check-file with --shape for a request-only check; do not mix them. Example for a check containing hasValue: {parameter: subject_revision}: mara trace matrix --id REQ-A --check-file rules/revision.yaml --shape urn:mara:rule:revision_evidence --param subject_revision=abc123. Parameters are exact text values and may also occur in in lists. Default output is Markdown; --format json returns trace format 1. Read result states, checks, edges, summaries and evaluation_complete; follow --cursor with unchanged inputs until has_more is false. The view does not change project policy or source files."
+    )]
+    Matrix {
+        /// Exact human ID or MID for a root item; repeat for OR and intersect with other root filters.
+        #[arg(long = "id")]
+        ids: Vec<String>,
+        /// Exact schema flavour for root items; repeat for OR and intersect with other root filters.
+        #[arg(long = "flavour")]
+        flavours: Vec<String>,
+        /// Exact custom KEY=VALUE root filter without trimming; an empty value matches an empty value. Excludes title/MID and typed relations.
+        #[arg(long = "field", value_name = "KEY=VALUE")]
+        fields: Vec<String>,
+        /// Project-relative document or directory subtree for root items; no globs, absolute paths, .., empty paths, . or ./.
+        #[arg(long = "path")]
+        paths: Vec<PathBuf>,
+        /// Explicitly select all root items; cannot be combined with filters.
+        #[arg(long)]
+        all: bool,
+        /// Expanded IRI of an enabled root rule; repeat for OR. Cannot combine with a request check.
+        #[arg(long = "rule")]
+        rules: Vec<String>,
+        /// Project-relative YAML file for a request-local check; repeat to supply reusable shapes.
+        #[arg(long = "check-file")]
+        check_files: Vec<PathBuf>,
+        /// Expanded IRI of a named targetless node shape from the request check files.
+        #[arg(long)]
+        shape: Option<String>,
+        /// Named text literal for a request check, as NAME=VALUE; repeat for different names.
+        #[arg(long = "param", value_name = "NAME=VALUE")]
+        parameters: Vec<String>,
+        /// Maximum records per page, 1 through 100 (default 20); the byte budget may return fewer.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Opaque next_cursor; keep options unchanged until has_more is false; restart after source/schema changes; empty strings are invalid.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -323,6 +371,109 @@ fn run(cli: Cli) -> Result<bool, String> {
         command,
     } = cli;
     match command {
+        Command::Trace {
+            command:
+                TraceCommand::Matrix {
+                    ids,
+                    flavours,
+                    fields,
+                    paths,
+                    all,
+                    rules,
+                    check_files,
+                    shape,
+                    parameters,
+                    limit,
+                    cursor,
+                },
+        } => {
+            let fields = fields
+                .into_iter()
+                .map(|field| {
+                    let (key, value) = field.split_once('=').ok_or_else(|| {
+                        mara::ValidationError::invalid_argument("--field must use KEY=VALUE")
+                    })?;
+                    Ok(mara::TraceField {
+                        key: key.into(),
+                        value: value.into(),
+                    })
+                })
+                .collect::<Result<Vec<_>, mara::ValidationError>>();
+            let fields = match fields {
+                Ok(fields) => fields,
+                Err(error) => return emit_trace_error(format, error),
+            };
+            let mut bindings = std::collections::BTreeMap::new();
+            for parameter in parameters {
+                let Some((name, value)) = parameter.split_once('=') else {
+                    return emit_trace_error(
+                        format,
+                        mara::ValidationError::invalid_argument("--param must use NAME=VALUE"),
+                    );
+                };
+                if bindings
+                    .insert(name.to_owned(), serde_json::json!(value))
+                    .is_some()
+                {
+                    return emit_trace_error(
+                        format,
+                        mara::ValidationError::invalid_argument(format!(
+                            "duplicate check parameter '{name}'"
+                        )),
+                    );
+                }
+            }
+            if check_files.is_empty() && shape.is_none() && !bindings.is_empty() {
+                return emit_trace_error(
+                    format,
+                    mara::ValidationError::invalid_argument(
+                        "--param requires --check-file and --shape",
+                    ),
+                );
+            }
+            let check = if check_files.is_empty() && shape.is_none() && bindings.is_empty() {
+                None
+            } else {
+                Some(mara::TraceCheck {
+                    files: check_files,
+                    shape: shape.unwrap_or_default(),
+                    parameters: bindings,
+                })
+            };
+            let params = mara::TraceMatrixParams {
+                selection: mara::TraceSelection {
+                    ids,
+                    flavours,
+                    fields,
+                    paths,
+                    all,
+                },
+                rules,
+                check,
+                limit,
+                cursor,
+                render: matches!(format, OutputFormat::Human).then(|| "markdown".into()),
+            };
+            return match OperationContext::from_environment(project)?.trace_matrix(&params) {
+                Ok(result) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&result)?
+                    } else {
+                        print!("{}", result.markdown.as_deref().unwrap_or(""))
+                    }
+                    Ok(result.evaluation_complete)
+                }
+                Err(error) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&error.envelope())?
+                    } else {
+                        eprintln!("error: {error}")
+                    }
+                    Ok(false)
+                }
+            };
+        }
+
         Command::Relation {
             command:
                 RelationCommand::Get {
@@ -714,6 +865,15 @@ fn run(cli: Cli) -> Result<bool, String> {
         }
     }
     Ok(true)
+}
+
+fn emit_trace_error(format: OutputFormat, error: mara::ValidationError) -> Result<bool, String> {
+    if matches!(format, OutputFormat::Json) {
+        write_json(&error.envelope())?
+    } else {
+        eprintln!("error: {error}")
+    }
+    Ok(false)
 }
 
 fn emit<T: Serialize>(

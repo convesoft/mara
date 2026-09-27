@@ -48,6 +48,7 @@ pub use mutation::{InitialRelation, ItemCreation, ItemCreationRequest, create_it
 mod graph_constraints;
 mod operations;
 mod rules;
+mod trace;
 pub use diagnostics::{
     ConfigurationDiagnostic, DiagnosticCode, DiagnosticItem, DiagnosticLocation,
     DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
@@ -57,7 +58,11 @@ pub use operations::{
     ItemCreationResult, ItemFilterParams, OperationContext, ProjectInitializationResult,
     ProjectMidBackfillResult, ProjectSummary, RelatedParams, RelationParams, SchemaGetResult,
     SchemaKind, SchemaListResult, SearchParams, TransactionRollbackResult, ValidationDiagnostic,
-    ValidationResult, ValidationScope, ValidationTargetKind, project_initialize,
+    ValidationResult, ValidationScope, ValidationTarget, ValidationTargetKind, project_initialize,
+};
+pub use trace::{
+    TraceCheck, TraceField, TraceMatrixParams, TraceMatrixResult, TraceMatrixSummary,
+    TraceSelection,
 };
 
 pub const PROJECT_FILE: &str = ".mara/project.toml";

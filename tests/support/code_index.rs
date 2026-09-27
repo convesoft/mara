@@ -6,11 +6,13 @@ use std::{fs, path::Path};
 
 pub fn configure(root: &Path, language: &str, extensions: &[&str], grammar: bool) {
     let config_path = root.join(".mara/project.toml");
-    let mut config = fs::read_to_string(&config_path).unwrap().replacen(
-        "format_version = 1",
-        "format_version = 3",
-        1,
-    );
+    let existing = fs::read_to_string(&config_path).unwrap();
+    let (version, rest) = existing.split_once('\n').unwrap();
+    assert!(matches!(
+        version,
+        "format_version = 1" | "format_version = 2" | "format_version = 3"
+    ));
+    let mut config = format!("format_version = 3\n{rest}");
     config.push_str(&format!("\n[[code.languages]]\nname = {language:?}\ncommand = [\"cp\", \".mara/{language}.scip\", \"{{output}}\"]\nposition_encoding = \"utf8\"\nextensions = {extensions:?}\n"));
     if grammar {
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
