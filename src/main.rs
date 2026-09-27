@@ -1,3 +1,16 @@
+use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
+use mara::{
+    EntryRange, GetParams, GetResult, RelatedConnection, RelatedParams, RelationDirection,
+    SearchParams,
+};
+use mara::{FieldValue, ItemCollectionResult, ItemFilterParams, ItemSummary};
+use mara::{InitialRelation, ItemCreateParams, ItemUpdateParams};
+use mara::{
+    OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
+    Template, ValidationOptions, ValidationResult, ValidationTargetKind, project_initialize,
+};
+use mara::{ProjectMidBackfillResult, RelationParams};
+use serde::Serialize;
 use std::{
     collections::BTreeMap,
     env,
@@ -6,18 +19,6 @@ use std::{
     path::PathBuf,
     process::ExitCode,
 };
-
-use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
-use mara::{
-    EntryRange, FieldValue, GetParams, GetResult, InitialRelation, ItemCollectionResult,
-    ItemCreateParams, ItemFilterParams, ItemMoveParams, ItemSummary, ItemUpdateParams,
-    OperationContext, ProjectInitializationResult, ProjectMidBackfillResult, RelatedConnection,
-    RelatedParams, RelationDirection, RelationMutationResult, RelationParams, SchemaGetResult,
-    SchemaKind, SchemaListResult, SearchParams, Template, ValidationResult, ValidationTargetKind,
-    project_initialize,
-};
-use serde::Serialize;
-
 mod mcp;
 
 #[derive(Debug, Parser)]
@@ -25,41 +26,17 @@ mod mcp;
     name = "mara",
     version,
     about = "Structured project knowledge",
-    after_help = "Discovery and reading: mara search <QUERY> discovers items, sections, and Markdown blocks; mara get <REFERENCE> reads any discovery node; mara related <REFERENCE> explores direct connections.\n\nAuthoring: inspect flavour guidance and relation endpoints with mara schema get before creating items. Validate project-owned rules and graph policies with mara project validate; inspect selected coverage with mara trace matrix --help.\n\n0.3 migration is manual on a Git checkpoint or project copy; review the diff and validate the result. See https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md"
+    after_help = "Start with project init, then inspect schema guidance before authoring. Search discovers items and narrative; get reads content and related explores direct connections. Item and relation commands edit canonical source. Schema, project and item validation report conformance; trace matrix inspects selected coverage. Use --project to select a project and --format json for structured CLI results. The mcp command serves these operations over stdio."
 )]
 struct Cli {
-    #[arg(
-        long,
-        global = true,
-        value_name = "PATH",
-        help = "Use this project root (absolute or relative to the working directory) instead of ancestor discovery; selects the init target or binds mcp"
-    )]
+    /// Use an absolute or working-directory-relative project root instead of ancestor discovery; selects the init target or binds MCP.
+    #[arg(long, global = true, value_name = "PATH")]
     project: Option<PathBuf>,
-
-    /// Select operation output as human-readable text or JSON (does not affect MCP).
+    /// Select human-readable or JSON output (does not affect MCP).
     #[arg(long, global = true, value_enum, default_value_t)]
     format: OutputFormat,
-
     #[command(subcommand)]
     command: Command,
-}
-
-#[derive(Debug, Args)]
-struct ValidationArgs {
-    /// Maximum diagnostics per page, 1 through 100 (default 20); the serialized byte budget (65536 bytes) may return fewer.
-    #[arg(long)]
-    limit: Option<usize>,
-    /// Opaque next_cursor; continue until has_more is false and repeat unchanged target, paths and limit. Omit to start or restart after source/schema/configuration changes. Empty strings are invalid.
-    #[arg(long)]
-    cursor: Option<String>,
-}
-impl From<ValidationArgs> for mara::ValidationOptions {
-    fn from(value: ValidationArgs) -> Self {
-        Self {
-            limit: value.limit,
-            cursor: value.cursor,
-        }
-    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -84,10 +61,10 @@ enum Command {
 
     /// Read an item, section, Markdown block, document, or code endpoint in bounded consecutive portions.
     #[command(
-        after_help = "Discovery JSON format_version: 2 returns node, content, content_range, metadata, and metadata_range. Items return their parsed body; sections and documents include contained Markdown source. Non-items have empty metadata. Reconstruct content and ordered metadata fragments using byte/index ranges until has_more is false. Get has no limit option and does not enumerate neighbours; use related. Search again if a structural handle is stale."
+        after_help = "Discovery JSON format_version: 2 returns node, content, content_range, metadata, and metadata_range. Items return their parsed body; sections and documents include contained Markdown source. Non-items have empty metadata. Reconstruct content and ordered metadata fragments using byte/index ranges until has_more is false. Get has no limit option and does not enumerate neighbours; use related. Search again if a structural handle is stale. Code symbols use the configured language name and exact SCIP descriptor; copy references from related. No name/position fallback. Preserve literal backticks and single-quote code references in the shell. Project format 3 configures external SCIP commands in [[code.languages]]; corpus reads invoke them automatically when files match the required extensions list. No matches skips that indexer. Tree-sitter grammar/query assets are optional for comment attachment and declaration content."
     )]
     Get {
-        /// Exact item ID/MID, a code:<path>[::<selector>] reference, or a discovery handle.
+        /// Exact item ID/MID, a code:<path>[::<language>::<descriptor>] reference, or a discovery handle.
         reference: String,
         #[arg(
             long,
@@ -101,7 +78,7 @@ enum Command {
         after_help = "Discovery JSON format_version: 2 returns node and connections: schema edges have relation, label, direction, neighbour, edge and occurrence_count; builtin connections retain source. Inspect authored locations with relation get. Internal neighbours have a reference for get/related; external neighbours have only kind and address and are terminal. JSON represents containment as contains with direction; human output displays its incoming view as contained_by. Use --relation builtin:contains --direction incoming for the parent, then outgoing on that parent for its children. Search again if a structural handle is stale."
     )]
     Related {
-        /// Exact item ID/MID, a code:<path>[::<selector>] reference, or a discovery handle.
+        /// Exact item ID/MID, a code:<path>[::<language>::<descriptor>] reference, or a discovery handle.
         reference: String,
 
         /// Select edge direction relative to this node; omission includes incoming, outgoing and symmetric, outgoing first. Incoming/outgoing exclude symmetric edges.
@@ -129,32 +106,32 @@ enum Command {
         cursor: Option<String>,
     },
 
-    /// Initialize, validate, or recover a Mara project.
-    Project {
+    /// Inspect canonical relationships and their authored occurrences.
+    Relation {
         #[command(subcommand)]
-        command: ProjectCommand,
+        command: RelationCommand,
     },
-    /// Inspect and validate the effective project schema.
-    Schema {
-        #[command(subcommand)]
-        command: SchemaCommand,
-    },
-    /// Author, list, and validate items; use top-level search/get/related for discovery and reading.
+    /// Create, inspect, validate and edit structured items.
     Item {
         #[command(subcommand)]
         command: ItemCommand,
     },
-    /// Add or remove authored typed relations between items.
-    Relation {
+    /// Initialize or validate a project, backfill MIDs, or recover a pending mutation.
+    Project {
         #[command(subcommand)]
-        command: RelationCommand,
+        command: ProjectCommand,
+    },
+    /// Inspect or validate the selected project's schema declarations.
+    Schema {
+        #[command(subcommand)]
+        command: SchemaCommand,
     },
     /// Render read-only trace views from an explicit item selection.
     Trace {
         #[command(subcommand)]
         command: TraceCommand,
     },
-    /// Start a stdio MCP server, optionally bound with --project.
+    /// Serve the available operations over stdio MCP; resolve projects per call.
     Mcp,
 }
 
@@ -162,7 +139,7 @@ enum Command {
 enum TraceCommand {
     /// Generate a bounded, read-only coverage matrix using enabled rule IRIs or a request-local YAML check.
     #[command(
-        after_help = "Select roots with --all or one or more --id, --flavour, --field and --path filters. Use --rule for enabled root rules, or --check-file with --shape for a request-only check; do not mix them. Default output is Markdown; --format json returns trace format 1. Read result states, checks, edges, summaries and evaluation_complete; follow --cursor with unchanged inputs until has_more is false. The view does not change project policy or source files."
+        after_help = "Select roots with --all or one or more --id, --flavour, --field and --path filters. Use --rule for enabled root rules, or --check-file with --shape for a request-only check; do not mix them. Example for a check containing hasValue: {parameter: subject_revision}: mara trace matrix --id REQ-A --check-file rules/revision.yaml --shape urn:mara:rule:revision_evidence --param subject_revision=abc123. Parameters are exact text values and may also occur in in lists. Default output is Markdown; --format json returns trace format 1. Read result states, checks, edges, summaries and evaluation_complete; follow --cursor with unchanged inputs until has_more is false. The view does not change project policy or source files."
     )]
     Matrix {
         /// Exact human ID or MID for a root item; repeat for OR and intersect with other root filters.
@@ -189,6 +166,9 @@ enum TraceCommand {
         /// Expanded IRI of a named targetless node shape from the request check files.
         #[arg(long)]
         shape: Option<String>,
+        /// Named text literal for a request check, as NAME=VALUE; repeat for different names.
+        #[arg(long = "param", value_name = "NAME=VALUE")]
+        parameters: Vec<String>,
         /// Maximum records per page, 1 through 100 (default 20); the byte budget may return fewer.
         #[arg(long)]
         limit: Option<usize>,
@@ -200,28 +180,28 @@ enum TraceCommand {
 
 #[derive(Debug, Subcommand)]
 enum ProjectCommand {
-    /// Initialize a Mara project without overwriting existing content; rejects an existing Mara project.
+    /// Validate the whole project; paths select reporting only.
     #[command(
-        after_help = "All templates create only .mara/project.toml and .mara/schema.yaml, with schema format 3 and flavour guidance; no starter documents or items. Edit the resulting project-owned schema to customize it. For an existing project, follow the manual workflow in docs/migration-0.3.mara.md on a recoverable checkpoint; do not reinitialize or replace it with a template. Use schema get to inspect declarations, then schema validate and project validate."
+        after_help = "Configured [[code.languages]] entries require source extensions. SCIP commands run automatically from the project root during corpus loading, including validation, only when unignored source files match. Empty languages are skipped without invoking their command. Install indexers separately and configure trusted commands. Command or index failures make evaluation incomplete; a valid file link does not prove intended symbol attachment. Inspect code backlinks with related and relation get."
     )]
+    Validate {
+        /// Exact document or directory subtree relative to the project; repeat for OR. No globs, absolute paths, .., empty paths, . or ./; omit --path for the whole project. Selects reported diagnostics only; validity covers the whole project.
+        #[arg(long = "path")]
+        paths: Vec<PathBuf>,
+        /// Maximum diagnostics per page, 1 through 100 (default 20); the byte budget may return fewer.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Opaque next_cursor; repeat unchanged options until has_more is false. Restart after source/schema changes; empty strings are invalid.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Initialize the current or named directory without overwriting existing files.
     Init {
-        /// Destination directory (absolute or relative to the working directory), created if missing. Defaults to the working directory only when --project is also omitted. Cannot combine PATH with --project.
+        /// Destination; omit to use --project, or the current directory only when --project is also omitted. Cannot combine with --project.
         path: Option<PathBuf>,
-
-        /// Initial schema: minimal (default) includes common flavours and relations; empty declares none; engineering adds the full engineering vocabulary and traceability relations.
+        /// Bundled schema: minimal (default), empty, or engineering with policy/check files.
         #[arg(long, value_enum, default_value_t)]
         template: CliTemplate,
-    },
-    /// Validate the whole project, optionally selecting which diagnostics are shown.
-    Validate {
-        #[arg(
-            long = "path",
-            value_name = "PATH",
-            help = "Show diagnostics for an exact document or directory subtree (project-relative, repeatable OR); no globs, absolute paths, .., empty paths, . or ./; omit --path for the whole project. Project/schema errors always appear; validity and exit status still cover the whole project"
-        )]
-        paths: Vec<PathBuf>,
-        #[command(flatten)]
-        options: ValidationArgs,
     },
     /// Recover a pending multi-file mutation.
     Transaction {
@@ -245,253 +225,35 @@ enum ProjectTransactionCommand {
 
 #[derive(Debug, Subcommand)]
 enum ProjectMidCommand {
-    /// Generate missing MIDs on legacy items after validation; preserve existing MIDs.
+    /// Generate MIDs for items that lack them after validation; preserve existing MIDs.
     Backfill,
 }
 
 #[derive(Debug, Subcommand)]
-enum ItemCommand {
-    /// Rename a human ID and supported typed relations/wiki mentions in items and narrative across a valid project, preserving the MID. Markdown links are preserved, not rewritten.
-    Rename {
-        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
-        reference: String,
-        /// New unique human ID with the flavour's prefix; the old ID is not kept as an alias. The current ID is a no-op.
-        new_id: String,
-    },
-    /// Delete one item from a valid project only when no surviving typed relations, wiki mentions, or Markdown links refer to it or its contained nodes; keep the containing document.
-    #[command(
-        after_help = "Reject changes that break or retarget surviving internal links, including generated heading anchors affected elsewhere in the document. Resolve reported source locations before retrying; Markdown links are not automatically repaired."
-    )]
-    Delete {
-        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
-        reference: String,
-    },
-    /// Partially update an item's title, custom fields, or body; supply at least one change.
-    #[command(
-        after_help = "Validate newly authored internal references and preserve destinations of surviving links, including links to headings or blocks inside the item. Changes that break or silently retarget them are rejected before writing. Resolve reported link impacts before retrying; Markdown links are not automatically repaired."
-    )]
-    Update {
-        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
-        reference: String,
-        /// Replacement single-line title; surrounding whitespace is trimmed. Empty or whitespace-only titles and line breaks are rejected; omission leaves it unchanged.
-        #[arg(long)]
-        title: Option<String>,
-        /// Replace all values of a custom KEY=VALUE field; repeat for schema-repeatable keys.
-        /// KEY= keeps an empty value; use --clear-field KEY to remove the field.
-        /// Values are schema-validated scalar text: surrounding whitespace is trimmed and line breaks are rejected. Omission leaves fields unchanged.
-        /// Excludes title, MID, and typed relations; use relation add/remove for edges.
-        #[arg(long = "field", value_parser = parse_field)]
-        fields: Vec<CliField>,
-        /// Remove all values of an optional custom field (repeatable); cannot also set that key. Excludes title/MID and typed relations. Omission clears nothing; an absent optional field is a no-op.
-        #[arg(long = "clear-field")]
-        clear_fields: Vec<String>,
-        #[arg(
-            long,
-            help = "Replace body text; - reads stdin, an empty string clears an optional body, omission leaves it unchanged. Empty or whitespace-only replacements of required bodies are rejected"
-        )]
-        body: Option<String>,
-    },
-    /// Move an item within a valid project without changing its identity, content, or relations; keep the source document.
-    #[command(
-        after_help = "ID/MID references retain item identity. Relative Markdown links carried with the item, incoming links to its contained nodes, and shifted heading anchors must keep their destinations. Resolve reported link impacts before retrying; Markdown links are not automatically repaired."
-    )]
-    Move {
-        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
-        reference: String,
-        /// Destination project-relative *.mara.md file; parent must exist and discovery must include it. Creates the file if absent; no absolute paths or .. components.
-        file: PathBuf,
-        /// Insert before this one-based line in the original destination, including same-file moves; valid range is 1 through line_count + 1 (end of file). Omission appends. Insertion inside an item is rejected; the moved item's boundaries are no-ops.
-        #[arg(long)]
-        line: Option<usize>,
-    },
-    /// Create an item with a generated MID and optional initial relations, or a body scaffold.
-    #[command(
-        after_help = "Choose a flavour from schema get flavour <NAME>: description explains purpose, use_when gives selection criteria, avoid_when gives exclusions, and distinguish_from compares other flavours. These are schema guidance, not item fields. Inspect relation endpoints before adding initial edges. Newly authored references must resolve; creation rejects changes that break or retarget surviving links, including shifted heading anchors."
-    )]
-    Create {
-        /// Schema-declared flavour; discover names with schema list flavour, then read selection guidance with schema get flavour NAME.
-        flavour: String,
-        /// New unique human ID with the flavour's prefix (for example REQ-EXAMPLE); not a MID.
-        id: String,
-        /// Destination project-relative *.mara.md file; parent must exist and discovery must include it. Creates the file if absent; no absolute paths or .. components.
-        file: PathBuf,
-
-        /// Single-line item title; surrounding whitespace is trimmed. Empty or whitespace-only titles and line breaks are rejected.
-        #[arg(long)]
-        title: String,
-
-        #[arg(long = "field", value_parser = parse_field, help = "Schema-declared custom KEY=VALUE field; repeat only for repeatable keys. Values are schema-validated scalar text: surrounding whitespace is trimmed and line breaks are rejected. KEY= supplies an empty value when schema-valid; supply all required fields. Excludes title, MID, and typed relations; use --relation or relation add for edges")]
-        fields: Vec<CliField>,
-
-        #[arg(long = "relation", value_name = "NAME=TARGET", value_parser = parse_initial_relation,
-            help = "Initial schema-declared outgoing relation, created atomically with the item (repeatable). TARGET is an exact human ID, canonical MID, or external:HTTP(S) URL; the new ID may target itself. Duplicate edges are rejected; omission adds none. Later edits use relation add/remove")]
-        relations: Vec<InitialRelation>,
-
-        /// Body text, or - to read stdin; supports [[relation:ID]] and [[relation:MID]] assertions. An omitted, empty, or whitespace-only required body creates an incomplete scaffold.
-        #[arg(long)]
-        body: Option<String>,
-
-        /// Insert before this one-based line; valid range is 1 through line_count + 1 (end of file). Omission appends. Insertion inside another item is rejected.
-        #[arg(long)]
-        line: Option<usize>,
-    },
-    /// List compact item summaries in document-path and source order, with exact filters.
-    List {
-        #[command(flatten)]
-        filters: ItemFilterArgs,
-    },
-    /// Report all discoverable validation diagnostics applicable to one item.
+enum SchemaCommand {
+    /// Validate schema declarations and configured YAML rule definitions without evaluating items.
     Validate {
-        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
-        id: String,
-        #[command(flatten)]
-        options: ValidationArgs,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum RelationCommand {
-    /// Inspect a semantic edge and its authored source occurrences.
-    Get {
-        /// Item ID/MID or code:<path>[::<selector>] expressing the relation.
-        source: String,
-        /// Canonical relation name or declared inverse alias.
-        relation: String,
-        /// Other endpoint: item ID/MID, code:<path>[::<selector>], or external:HTTP(S) URL.
-        target: String,
-        /// Maximum occurrences per page, 1 through 100; defaults to 20. The byte budget may return fewer.
+        /// Maximum diagnostics per page, 1 through 100 (default 20); the byte budget may return fewer.
         #[arg(long)]
         limit: Option<usize>,
-        /// Continue with next_cursor and unchanged arguments until has_more is false; restart after source/schema changes; empty strings are invalid.
+        /// Opaque next_cursor; repeat unchanged options until has_more is false. Restart after source/schema changes; empty strings are invalid.
         #[arg(long)]
         cursor: Option<String>,
     },
-    /// Add a schema-valid relation. Code links require an item source and declared inverse; code files are never edited.
-    Add {
-        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID); code sources are read-only.
-        source: String,
-        /// Schema-declared relation name; inspect with schema list relation.
-        relation: String,
-        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<selector>] with an inverse alias.
-        target: String,
-    },
-    /// Remove authored item assertions. For code links, code comment markers remain and may keep the edge present.
-    Remove {
-        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID); code sources are read-only.
-        source: String,
-        /// Schema-declared relation name; inspect with schema list relation.
-        relation: String,
-        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<selector>] with an inverse alias.
-        target: String,
-        /// Remove only this snapshot-bound occurrence from relation get.
-        #[arg(long)]
-        occurrence: Option<String>,
-    },
-}
-
-#[derive(Debug, Clone)]
-struct CliField {
-    key: String,
-    value: String,
-}
-
-impl From<CliField> for FieldValue {
-    fn from(value: CliField) -> Self {
-        Self {
-            key: value.key,
-            value: value.value,
-        }
-    }
-}
-
-#[derive(Debug, Args)]
-struct ItemFilterArgs {
-    /// Select exact flavours (repeatable, OR); distinct filter categories combine with AND. Omission selects all flavours.
-    #[arg(long)]
-    flavour: Vec<String>,
-
-    /// Exact schema-declared custom-field KEY=VALUE filter; excludes title/MID and typed relations. Key and scalar text value match exactly, without trimming; KEY= matches an empty value. OR within one key, AND across keys and other filter categories (repeatable). Omission adds no restriction.
-    #[arg(long = "field", value_parser = parse_field)]
-    fields: Vec<CliField>,
-
-    /// Select items with these exact authored outgoing schema relation names (repeatable, OR). Search accepts schema:name to disambiguate a name shared with a built-in; item list uses schema names directly. Omission adds no restriction.
-    #[arg(long)]
-    relation: Vec<String>,
-
-    #[arg(
-        long,
-        help = "Select an exact document or directory subtree (project-relative, repeatable OR), e.g. packages/query/docs/; no globs, absolute paths, .., empty paths, . or ./; omit --path for the whole project"
-    )]
-    path: Vec<PathBuf>,
-
-    #[arg(
-        long,
-        help = "Maximum entries per page: 1 through 100 (default 20); the byte budget may return fewer"
-    )]
-    limit: Option<usize>,
-
-    #[arg(
-        long,
-        help = "Opaque next_cursor from the previous page; keep all other inputs unchanged until has_more is false; omit to start or restart after source/schema changes. Empty strings are invalid"
-    )]
-    cursor: Option<String>,
-}
-
-impl ItemFilterArgs {
-    fn into_params(self) -> ItemFilterParams {
-        ItemFilterParams {
-            flavours: self.flavour,
-            fields: self.fields.into_iter().map(Into::into).collect(),
-            relations: self.relation,
-            paths: self.path,
-            limit: self.limit,
-            cursor: self.cursor,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-enum CliRelationDirection {
-    Incoming,
-    Outgoing,
-    Symmetric,
-}
-
-impl From<CliRelationDirection> for RelationDirection {
-    fn from(value: CliRelationDirection) -> Self {
-        match value {
-            CliRelationDirection::Incoming => Self::Incoming,
-            CliRelationDirection::Outgoing => Self::Outgoing,
-            CliRelationDirection::Symmetric => Self::Symmetric,
-        }
-    }
-}
-
-#[derive(Debug, Subcommand)]
-enum SchemaCommand {
-    /// Get the complete effective schema, or one declaration with flavour selection guidance or relation endpoints.
-    #[command(
-        after_help = "Read flavour guidance before authoring: description explains purpose; use_when identifies suitable knowledge; avoid_when excludes unsuitable content; distinguish_from compares confusable flavours. Inspect id_prefix, body, and fields for item constraints; relation source/target, inverse, symmetric, external, cardinality and acyclic define relationship meaning and policy. Guidance belongs to the schema, not item --field metadata.\n\nSchema format 3 requires description, use_when, avoid_when and distinguish_from on every flavour. Migrate manually in place on a recoverable checkpoint, preserving custom declarations and item identities; follow https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md and validate schema and project."
-    )]
+    /// Get the full effective schema or one named flavour/relation declaration, including authoring guidance.
     Get {
-        /// Declaration kind; supply with NAME, or omit both for the complete schema.
+        /// Supply KIND and NAME together, or omit both for the complete schema.
         #[arg(value_enum, requires = "name")]
         kind: Option<CliSchemaKind>,
-
-        /// Exact declaration name; requires KIND.
+        /// Exact declaration name; relation inverse aliases are resolved to their canonical declaration.
         #[arg(requires = "kind")]
         name: Option<String>,
     },
-    /// List declaration names and descriptions for one schema kind; use schema get for full guidance and constraints.
+    /// List canonical declaration names and descriptions; follow with get for full guidance.
     List {
-        /// Kind of schema declarations to list.
+        /// Kind of declarations to list: flavour or relation.
         #[arg(value_enum)]
         kind: CliSchemaKind,
-    },
-    /// Validate schema format 3, including required flavour guidance, without validating item content; use project validate for the corpus.
-    Validate {
-        #[command(flatten)]
-        options: ValidationArgs,
     },
 }
 
@@ -535,6 +297,7 @@ enum OutputFormat {
     Json,
 }
 
+// @mara implements REQ-SURFACE-PARITY
 fn main() -> ExitCode {
     let arguments = env::args_os().collect::<Vec<_>>();
     let requested_format = requested_output_format(&arguments);
@@ -624,6 +387,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                     rules,
                     check_files,
                     shape,
+                    parameters,
                     limit,
                     cursor,
                 },
@@ -644,12 +408,41 @@ fn run(cli: Cli) -> Result<bool, String> {
                 Ok(fields) => fields,
                 Err(error) => return emit_trace_error(format, error),
             };
-            let check = if check_files.is_empty() && shape.is_none() {
+            let mut bindings = std::collections::BTreeMap::new();
+            for parameter in parameters {
+                let Some((name, value)) = parameter.split_once('=') else {
+                    return emit_trace_error(
+                        format,
+                        mara::ValidationError::invalid_argument("--param must use NAME=VALUE"),
+                    );
+                };
+                if bindings
+                    .insert(name.to_owned(), serde_json::json!(value))
+                    .is_some()
+                {
+                    return emit_trace_error(
+                        format,
+                        mara::ValidationError::invalid_argument(format!(
+                            "duplicate check parameter '{name}'"
+                        )),
+                    );
+                }
+            }
+            if check_files.is_empty() && shape.is_none() && !bindings.is_empty() {
+                return emit_trace_error(
+                    format,
+                    mara::ValidationError::invalid_argument(
+                        "--param requires --check-file and --shape",
+                    ),
+                );
+            }
+            let check = if check_files.is_empty() && shape.is_none() && bindings.is_empty() {
                 None
             } else {
                 Some(mara::TraceCheck {
                     files: check_files,
                     shape: shape.unwrap_or_default(),
+                    parameters: bindings,
                 })
             };
             let params = mara::TraceMatrixParams {
@@ -666,7 +459,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                 cursor,
                 render: matches!(format, OutputFormat::Human).then(|| "markdown".into()),
             };
-            match operations(project)?.trace_matrix(&params) {
+            return match OperationContext::from_environment(project)?.trace_matrix(&params) {
                 Ok(result) => {
                     if matches!(format, OutputFormat::Json) {
                         write_json(&result)?
@@ -683,92 +476,92 @@ fn run(cli: Cli) -> Result<bool, String> {
                     }
                     Ok(false)
                 }
-            }
-        }
-        Command::Mcp => {
-            mcp::run(project)?;
-            Ok(true)
-        }
-        Command::Project {
-            command: ProjectCommand::Init { path, template },
-        } => {
-            let target = match (project, path) {
-                (Some(project), None) => project,
-                (None, Some(path)) => path,
-                (None, None) => PathBuf::from("."),
-                (Some(_), Some(_)) => {
-                    return Err("--project and project init PATH cannot be used together".into());
-                }
             };
-            let result = project_initialize(target, template.into())?;
-            emit(format, &result, print_project_initialization)?;
-            Ok(true)
         }
-        Command::Project {
-            command: ProjectCommand::Validate { paths, options },
-        } => {
-            let result =
-                operations(project)?.project_validate_with_options(&paths, &options.into());
-            emit_validation(format, result)
-        }
-        Command::Project {
+
+        Command::Relation {
             command:
-                ProjectCommand::Mid {
-                    command: ProjectMidCommand::Backfill,
+                RelationCommand::Get {
+                    source,
+                    relation,
+                    target,
+                    limit,
+                    cursor,
                 },
         } => {
-            let result = operations(project)?.project_mid_backfill()?;
-            emit(format, &result, print_project_mid_backfill)?;
-            Ok(true)
+            return emit_relation(
+                format,
+                OperationContext::from_environment(project)?.relation_get(
+                    RelationParams {
+                        source,
+                        relation,
+                        target,
+                    },
+                    limit,
+                    cursor,
+                ),
+                |result| {
+                    println!(
+                        "{} {} {}: {} occurrences",
+                        result.edge.source.id(),
+                        result.edge.relation,
+                        display_relation_target(&result.edge.target),
+                        result.occurrence_count
+                    );
+                    for entry in &result.occurrences {
+                        println!(
+                            "{}:{} {} {} selector={}",
+                            entry.source.path().display(),
+                            entry.source.start_line(),
+                            entry.relation,
+                            entry.target,
+                            entry.reference
+                        );
+                    }
+                    print_page_continuation(result.has_more, result.next_cursor.as_deref());
+                    Ok(())
+                },
+            );
         }
-        Command::Project {
+        Command::Relation {
             command:
-                ProjectCommand::Transaction {
-                    command: ProjectTransactionCommand::Rollback,
+                RelationCommand::Add {
+                    source,
+                    relation,
+                    target,
                 },
         } => {
-            let result = operations(project)?.project_transaction_rollback()?;
-            emit(format, &result, |result| {
-                if result.restored.is_empty() {
-                    println!("no pending transaction");
-                }
-                for path in &result.restored {
-                    println!("rolled back {}", path.display());
-                }
-                Ok(())
-            })?;
-            Ok(true)
+            return emit_relation(
+                format,
+                OperationContext::from_environment(project)?.relation_add(RelationParams {
+                    source,
+                    relation,
+                    target,
+                }),
+                print_relation_mutation,
+            );
         }
-        Command::Item {
-            command: ItemCommand::Rename { reference, new_id },
+        Command::Relation {
+            command:
+                RelationCommand::Remove {
+                    source,
+                    relation,
+                    target,
+                    occurrence,
+                },
         } => {
-            let result = operations(project)?.item_rename(&reference, &new_id)?;
-            emit(format, &result, |result| {
-                println!(
-                    "renamed item '{}' to '{}' with MID {}",
-                    result.old_id, result.new_id, result.mid
-                );
-                for path in &result.paths {
-                    println!("updated {}", path.display());
-                }
-                Ok(())
-            })?;
-            Ok(true)
-        }
-        Command::Item {
-            command: ItemCommand::Delete { reference },
-        } => {
-            let result = operations(project)?.item_delete(&reference)?;
-            emit(format, &result, |result| {
-                println!(
-                    "deleted item '{}' with MID {} from {}",
-                    result.id,
-                    result.mid,
-                    result.path.display()
-                );
-                Ok(())
-            })?;
-            Ok(true)
+            return emit_relation(
+                format,
+                OperationContext::from_environment(project)?.relation_remove_occurrence(
+                    RelationParams {
+                        source,
+                        relation,
+                        target,
+                    },
+                    occurrence,
+                ),
+                print_relation_mutation,
+            );
         }
         Command::Item {
             command:
@@ -781,13 +574,14 @@ fn run(cli: Cli) -> Result<bool, String> {
                 },
         } => {
             let body = read_body(body)?;
-            let result = operations(project)?.item_update(ItemUpdateParams {
-                reference,
-                title,
-                fields: fields.into_iter().map(Into::into).collect(),
-                clear_fields,
-                body,
-            })?;
+            let result =
+                OperationContext::from_environment(project)?.item_update(ItemUpdateParams {
+                    reference,
+                    title,
+                    fields: fields.into_iter().map(Into::into).collect(),
+                    clear_fields,
+                    body,
+                })?;
             emit(format, &result, |result| {
                 println!(
                     "updated item '{}' with MID {} at {}",
@@ -806,7 +600,20 @@ fn run(cli: Cli) -> Result<bool, String> {
                 }
                 Ok(())
             })?;
-            Ok(true)
+        }
+        Command::Item {
+            command: ItemCommand::Delete { reference },
+        } => {
+            let result = OperationContext::from_environment(project)?.item_delete(&reference)?;
+            emit(format, &result, |result| {
+                println!(
+                    "deleted item '{}' with MID {} from {}",
+                    result.id,
+                    result.mid,
+                    result.path.display()
+                );
+                Ok(())
+            })?;
         }
         Command::Item {
             command:
@@ -816,11 +623,12 @@ fn run(cli: Cli) -> Result<bool, String> {
                     line,
                 },
         } => {
-            let result = operations(project)?.item_move(ItemMoveParams {
-                reference,
-                file,
-                line,
-            })?;
+            let result =
+                OperationContext::from_environment(project)?.item_move(mara::ItemMoveParams {
+                    reference,
+                    file,
+                    line,
+                })?;
             emit(format, &result, |result| {
                 println!(
                     "moved item '{}' with MID {} from {}:{} to {}:{}",
@@ -833,68 +641,52 @@ fn run(cli: Cli) -> Result<bool, String> {
                 );
                 Ok(())
             })?;
-            Ok(true)
         }
         Command::Item {
-            command:
-                ItemCommand::Create {
-                    flavour,
-                    id,
-                    file,
-                    title,
-                    fields,
-                    relations,
-                    body,
-                    line,
-                },
+            command: ItemCommand::Rename { reference, new_id },
         } => {
-            let body = read_body(body)?;
-            let result = operations(project)?.item_create(ItemCreateParams {
-                flavour,
-                id,
-                file,
-                title,
-                fields: fields.into_iter().map(Into::into).collect(),
-                relations,
-                body,
-                line,
-            })?;
+            let result =
+                OperationContext::from_environment(project)?.item_rename(&reference, &new_id)?;
             emit(format, &result, |result| {
                 println!(
-                    "created item '{}' with MID {} at {}:{}",
-                    result.id,
-                    result.mid,
-                    result.path.display(),
-                    result.line
+                    "renamed item '{}' to '{}' with MID {}",
+                    result.old_id, result.new_id, result.mid
                 );
-                println!("complete: {}", result.complete);
-                for missing in &result.missing {
-                    println!("missing: {missing}");
+                for path in &result.paths {
+                    println!("updated {}", path.display());
                 }
                 Ok(())
             })?;
-            Ok(true)
         }
-        Command::Item {
-            command: ItemCommand::Validate { id, options },
+        Command::Related {
+            reference,
+            direction,
+            relation,
+            flavour,
+            limit,
+            cursor,
         } => {
-            let result = operations(project)?.item_validate_with_options(&id, &options.into());
-            emit_validation(format, result)
+            let result = OperationContext::from_environment(project)?.related(RelatedParams {
+                reference,
+                direction: direction.map(Into::into),
+                relations: relation,
+                flavours: flavour,
+                limit,
+                cursor,
+            })?;
+            emit(format, &result, |result| {
+                print_related_connections(&result.connections);
+                print_page_continuation(result.has_more, result.next_cursor.as_deref());
+                Ok(())
+            })?;
         }
         Command::Get { reference, cursor } => {
-            let result = operations(project)?.get(GetParams { reference, cursor })?;
+            let result = OperationContext::from_environment(project)?
+                .get(GetParams { reference, cursor })?;
             emit(format, &result, |item| {
                 print_get(item);
                 Ok(())
             })?;
-            Ok(true)
-        }
-        Command::Item {
-            command: ItemCommand::List { filters },
-        } => {
-            let result = operations(project)?.item_list(filters.into_params())?;
-            emit(format, &result, print_item_collection)?;
-            Ok(true)
         }
         Command::Search {
             query,
@@ -902,7 +694,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             ids,
         } => {
             let filters = filters.into_params();
-            let result = operations(project)?.search(SearchParams {
+            let result = OperationContext::from_environment(project)?.search(SearchParams {
                 query,
                 flavours: filters.flavours,
                 fields: filters.fields,
@@ -943,123 +735,141 @@ fn run(cli: Cli) -> Result<bool, String> {
                 print_page_continuation(page.has_more, page.next_cursor.as_deref());
                 Ok(())
             })?;
-            Ok(true)
         }
-        Command::Related {
-            reference,
-            direction,
-            relation,
-            flavour,
-            limit,
-            cursor,
+
+        Command::Item {
+            command:
+                ItemCommand::Create {
+                    flavour,
+                    id,
+                    file,
+                    title,
+                    fields,
+                    relations,
+                    body,
+                    line,
+                },
         } => {
-            let result = operations(project)?.related(RelatedParams {
-                reference,
-                direction: direction.map(Into::into),
-                relations: relation,
-                flavours: flavour,
-                limit,
-                cursor,
-            })?;
+            let body = read_body(body)?;
+            let result =
+                OperationContext::from_environment(project)?.item_create(ItemCreateParams {
+                    flavour,
+                    id,
+                    file,
+                    title,
+                    fields: fields.into_iter().map(Into::into).collect(),
+                    relations,
+                    body,
+                    line,
+                })?;
             emit(format, &result, |result| {
-                print_related_connections(&result.connections);
-                print_page_continuation(result.has_more, result.next_cursor.as_deref());
+                println!(
+                    "created item '{}' with MID {} at {}:{}",
+                    result.id,
+                    result.mid,
+                    result.path.display(),
+                    result.line
+                );
+                println!("complete: {}", result.complete);
+                for missing in &result.missing {
+                    println!("missing: {missing}");
+                }
                 Ok(())
             })?;
-            Ok(true)
         }
-        Command::Relation { command } => match command {
-            RelationCommand::Get {
-                source,
-                relation,
-                target,
-                limit,
-                cursor,
-            } => emit_relation(
+        Command::Item {
+            command: ItemCommand::List { filters },
+        } => {
+            let result =
+                OperationContext::from_environment(project)?.item_list(filters.into_params())?;
+            emit(format, &result, print_item_collection)?;
+        }
+        Command::Mcp => mcp::run(project)?,
+        Command::Project {
+            command:
+                ProjectCommand::Mid {
+                    command: ProjectMidCommand::Backfill,
+                },
+        } => {
+            let result = OperationContext::from_environment(project)?.project_mid_backfill()?;
+            emit(format, &result, print_project_mid_backfill)?;
+        }
+        Command::Project {
+            command:
+                ProjectCommand::Transaction {
+                    command: ProjectTransactionCommand::Rollback,
+                },
+        } => {
+            let result =
+                OperationContext::from_environment(project)?.project_transaction_rollback()?;
+            emit(format, &result, |result| {
+                if result.restored.is_empty() {
+                    println!("no pending transaction");
+                }
+                for path in &result.restored {
+                    println!("rolled back {}", path.display());
+                }
+                Ok(())
+            })?;
+        }
+        Command::Project {
+            command: ProjectCommand::Init { path, template },
+        } => {
+            let target = match (project, path) {
+                (Some(project), None) => project,
+                (None, Some(path)) => path,
+                (None, None) => PathBuf::from("."),
+                (Some(_), Some(_)) => {
+                    return Err("--project and project init PATH cannot be used together".into());
+                }
+            };
+            emit(
                 format,
-                operations(project)?.relation_get(
-                    RelationParams {
-                        source,
-                        relation,
-                        target,
-                    },
+                &project_initialize(target, template.into())?,
+                print_project_initialization,
+            )?;
+        }
+        Command::Schema {
+            command: SchemaCommand::Validate { limit, cursor },
+        } => {
+            let result = OperationContext::from_environment(project)?
+                .schema_validate_with_options(&ValidationOptions { limit, cursor });
+            return emit_validation(format, result);
+        }
+        Command::Project {
+            command:
+                ProjectCommand::Validate {
+                    paths,
                     limit,
                     cursor,
-                ),
-                |result| {
-                    println!(
-                        "{} {} {}: {} occurrences",
-                        result.edge.source.id(),
-                        result.edge.relation,
-                        display_relation_target(&result.edge.target),
-                        result.occurrence_count
-                    );
-                    for entry in &result.occurrences {
-                        println!(
-                            "{}:{} {} {} selector={}",
-                            entry.source.path().display(),
-                            entry.source.start_line(),
-                            entry.relation,
-                            entry.target,
-                            entry.reference
-                        );
-                    }
-                    print_page_continuation(result.has_more, result.next_cursor.as_deref());
-                    Ok(())
                 },
-            ),
-            RelationCommand::Add {
-                source,
-                relation,
-                target,
-            } => emit_relation(
-                format,
-                operations(project)?.relation_add(RelationParams {
-                    source,
-                    relation,
-                    target,
-                }),
-                print_relation_mutation,
-            ),
-            RelationCommand::Remove {
-                source,
-                relation,
-                target,
-                occurrence,
-            } => emit_relation(
-                format,
-                operations(project)?.relation_remove_occurrence(
-                    RelationParams {
-                        source,
-                        relation,
-                        target,
-                    },
-                    occurrence,
-                ),
-                print_relation_mutation,
-            ),
-        },
+        } => {
+            let result = OperationContext::from_environment(project)?
+                .project_validate_with_options(&paths, &ValidationOptions { limit, cursor });
+            return emit_validation(format, result);
+        }
+        Command::Item {
+            command: ItemCommand::Validate { id, limit, cursor },
+        } => {
+            let result = OperationContext::from_environment(project)?
+                .item_validate_with_options(&id, &ValidationOptions { limit, cursor });
+            return emit_validation(format, result);
+        }
         Command::Schema {
             command: SchemaCommand::Get { kind, name },
         } => {
-            let result = operations(project)?.schema_get(kind.map(Into::into), name)?;
+            let result = OperationContext::from_environment(project)?
+                .schema_get(kind.map(Into::into), name)?;
             emit(format, &result, print_schema_get)?;
-            Ok(true)
         }
         Command::Schema {
             command: SchemaCommand::List { kind },
         } => {
-            let result = operations(project)?.schema_list(kind.into())?;
+            let result = OperationContext::from_environment(project)?.schema_list(kind.into())?;
             emit(format, &result, print_schema_list)?;
-            Ok(true)
-        }
-        Command::Schema {
-            command: SchemaCommand::Validate { options },
-        } => {
-            let result = operations(project)?.schema_validate_with_options(&options.into());
-            emit_validation(format, result)
         }
     }
+    Ok(true)
 }
 
 fn emit_trace_error(format: OutputFormat, error: mara::ValidationError) -> Result<bool, String> {
@@ -1069,36 +879,6 @@ fn emit_trace_error(format: OutputFormat, error: mara::ValidationError) -> Resul
         eprintln!("error: {error}")
     }
     Ok(false)
-}
-
-fn operations(selected: Option<PathBuf>) -> Result<OperationContext, String> {
-    OperationContext::from_environment(selected)
-}
-
-fn parse_initial_relation(value: &str) -> Result<InitialRelation, String> {
-    let (relation, target) = value
-        .split_once('=')
-        .ok_or_else(|| "relation must use NAME=TARGET".to_owned())?;
-    if relation.is_empty() || target.is_empty() {
-        return Err("relation name and target must not be empty".into());
-    }
-    Ok(InitialRelation {
-        relation: relation.to_owned(),
-        target: target.to_owned(),
-    })
-}
-
-fn parse_field(value: &str) -> Result<CliField, String> {
-    let (key, value) = value
-        .split_once('=')
-        .ok_or_else(|| "field must use KEY=VALUE".to_owned())?;
-    if key.is_empty() {
-        return Err("field key must not be empty".into());
-    }
-    Ok(CliField {
-        key: key.to_owned(),
-        value: value.to_owned(),
-    })
 }
 
 fn emit<T: Serialize>(
@@ -1131,268 +911,47 @@ fn print_project_initialization(result: &ProjectInitializationResult) -> Result<
     Ok(())
 }
 
-fn print_project_mid_backfill(result: &ProjectMidBackfillResult) -> Result<(), String> {
-    if result.changed.is_empty() {
-        println!("no missing MIDs in project at {}", result.project.display());
-        return Ok(());
-    }
-    println!(
-        "backfilled {} MID{} in project at {}",
-        result.changed.len(),
-        if result.changed.len() == 1 { "" } else { "s" },
-        result.project.display()
-    );
-    for entry in &result.changed {
-        println!(
-            "{}\t{}\t{}:{}",
-            entry.id,
-            entry.mid,
-            entry.path.display(),
-            entry.line
-        );
-    }
-    Ok(())
-}
-
-fn print_get(item: &GetResult) {
-    let node = &item.node;
-    let kind = node.block_kind.map_or_else(
-        || format!("{:?}", node.kind),
-        |kind| format!("Block({kind:?})"),
-    );
-    println!(
-        "{}\t{}\t{}{}",
-        node.reference,
-        kind,
-        node.title.as_deref().unwrap_or(""),
-        if node.title_truncated {
-            " [title truncated]"
-        } else {
-            ""
-        }
-    );
-    if let Some(id) = &node.id {
-        println!("id\t{id}");
-    }
-    if let Some(flavour) = &node.flavour {
-        println!("flavour\t{flavour}");
-    }
-    if let Some(level) = node.heading_level {
-        println!("heading_level\t{level}");
-    }
-    if let Some(parent) = &node.context.parent {
-        println!("parent\t{parent}");
-    }
-    if let Some(section) = &node.context.section {
-        println!("section\t{section}");
-    }
-    let source = &node.source;
-    println!(
-        "source\t{}\tstart_byte={}\tend_byte={}\tstart_line={}\tend_line={}",
-        source.path().display(),
-        source.start_byte(),
-        source.end_byte(),
-        source.start_line(),
-        source.end_line()
-    );
-    println!("metadata");
-    for entry in &item.metadata {
-        println!("{}\t{}", entry.key, entry.value);
-        println!(
-            "metadata_fragment\tindex={}\tstart_byte={}\tend_byte={}\ttotal_bytes={}\tpartial={}",
-            entry.index,
-            entry.range.start_byte,
-            entry.range.end_byte,
-            entry.range.total_bytes,
-            entry.range.partial
-        );
-    }
-    print_entry_range("metadata_range", &item.metadata_range);
-    println!("content");
-    print!("{}", item.content);
-    if !item.content.ends_with('\n') {
-        println!();
-    }
-    println!(
-        "content_range\tstart_byte={}\tend_byte={}\ttotal_bytes={}\tpartial={}",
-        item.content_range.start_byte,
-        item.content_range.end_byte,
-        item.content_range.total_bytes,
-        item.content_range.partial
-    );
-    print_page_continuation(item.has_more, item.next_cursor.as_deref());
-}
-
-fn print_entry_range(label: &str, range: &EntryRange) {
-    println!(
-        "{label}\tstart_index={}\tend_index={}\ttotal={}\tpartial={}",
-        range.start_index, range.end_index, range.total, range.partial
-    );
-}
-
-fn print_item_collection(result: &ItemCollectionResult) -> Result<(), String> {
-    for item in &result.items {
-        print_item_summary(item);
-        if let Some(excerpts) = item.excerpts() {
-            for excerpt in excerpts {
-                println!(
-                    "excerpt\tpartial=true\t{}:{}-{}\tbytes={}-{}\t{}",
-                    item.path().display(),
-                    excerpt.start_line,
-                    excerpt.end_line,
-                    excerpt.start_byte,
-                    excerpt.end_byte,
-                    serde_json::to_string(&excerpt.text).map_err(|error| error.to_string())?
-                );
-            }
-        }
-    }
-    print_page_continuation(result.has_more, result.next_cursor.as_deref());
-    Ok(())
-}
-
-fn print_page_continuation(has_more: bool, next_cursor: Option<&str>) {
-    print!("page\thas_more={has_more}");
-    if let Some(cursor) = next_cursor {
-        print!("\tnext_cursor={cursor}");
-    }
-    println!();
-}
-
-fn print_item_summary(item: &ItemSummary) {
-    let title = if item.title_truncated() {
-        format!("{} [title truncated]", item.title())
-    } else {
-        item.title().to_owned()
-    };
-    if let Some(mid) = item.mid() {
-        println!(
-            "{}\t{}\t{}\t{}\t{}:{}",
-            item.id(),
-            mid,
-            item.flavour(),
-            title,
-            item.path().display(),
-            item.line()
-        );
-    } else {
-        println!(
-            "{}\t{}\t{}\t{}:{}",
-            item.id(),
-            item.flavour(),
-            title,
-            item.path().display(),
-            item.line()
-        );
-    }
-}
-
-fn print_related_connections(connections: &[RelatedConnection]) {
-    for connection in connections {
-        let node = match &connection.neighbour {
-            mara::RelatedNeighbour::Internal(node) => node,
-            mara::RelatedNeighbour::External { address, .. } => {
-                println!(
-                    "{} → external:{}\toccurrences={}",
-                    connection.label.as_deref().unwrap_or(&connection.relation),
-                    address,
-                    connection.occurrence_count.unwrap_or_default()
-                );
-                continue;
-            }
-        };
-        if let Some(edge) = &connection.edge {
-            let label = connection.label.as_deref().unwrap_or(&edge.relation);
-            let prefix =
-                if connection.direction == RelationDirection::Incoming && label == edge.relation {
-                    "incoming "
-                } else {
-                    ""
-                };
-            println!(
-                "{prefix}{label} → {}\t{}{}\t{}:{}\toccurrences={}\treference={}",
-                node.id.as_deref().unwrap_or(&node.reference),
-                node.title.as_deref().unwrap_or_default(),
-                if node.title_truncated {
-                    " [title truncated]"
-                } else {
-                    ""
-                },
-                node.source.path().display(),
-                node.source.start_line(),
-                connection.occurrence_count.unwrap(),
-                node.reference
-            );
-        } else {
-            let relation = match (connection.relation.as_str(), connection.direction) {
-                ("contains", RelationDirection::Incoming) => "contained_by",
-                ("builtin:contains", RelationDirection::Incoming) => "builtin:contained_by",
-                (name, _) => name,
-            };
-            let source = connection.source.as_ref().expect("builtin source");
-            println!(
-                "{}\t{}\t{}\t{}\t{}{}\t{}:{}\tevidence={}:{}-{}\treference={}",
-                connection.direction.as_str(),
-                relation,
-                node.id.as_deref().unwrap_or(&node.reference),
-                format!("{:?}", node.kind).to_lowercase(),
-                node.title.as_deref().unwrap_or_default(),
-                if node.title_truncated {
-                    " [title truncated]"
-                } else {
-                    ""
-                },
-                node.source.path().display(),
-                node.source.start_line(),
-                source.path().display(),
-                source.start_line(),
-                source.end_line(),
-                node.reference
-            );
-        }
-    }
-}
-
-fn emit_relation<T: Serialize>(
-    format: OutputFormat,
-    result: Result<T, mara::RelationError>,
-    human: impl FnOnce(&T) -> Result<(), String>,
-) -> Result<bool, String> {
+fn print_schema_get(result: &SchemaGetResult) -> Result<(), String> {
     match result {
-        Ok(result) => {
-            emit(format, &result, human)?;
-            Ok(true)
-        }
-        Err(error) => {
-            if matches!(format, OutputFormat::Json) {
-                write_json(&error)?;
-            } else {
-                eprintln!("error: {error}");
-            }
-            Ok(false)
-        }
+        SchemaGetResult::Schema { schema } => print_yaml(schema),
+        SchemaGetResult::Flavour { name, definition } => print_named_yaml(name, definition),
+        SchemaGetResult::Relation {
+            name, definition, ..
+        } => print_named_yaml(name, definition),
     }
 }
 
-fn print_relation_mutation(result: &RelationMutationResult) -> Result<(), String> {
-    println!(
-        "{} relation '{}' from '{}' to '{}': {} changed, {} remaining",
-        result.action.past_tense(),
-        result.edge.relation,
-        result.edge.source.id(),
-        display_relation_target(&result.edge.target),
-        result.changed_occurrences,
-        result.remaining_occurrences
-    );
+fn print_schema_list(result: &SchemaListResult) -> Result<(), String> {
+    for declaration in &result.declarations {
+        println!(
+            "{}\t{}{}{}",
+            declaration.name,
+            declaration.description,
+            declaration
+                .inverse
+                .as_ref()
+                .map(|alias| format!("\tinverse={alias}"))
+                .unwrap_or_default(),
+            if declaration.symmetric == Some(true) {
+                "\tsymmetric"
+            } else {
+                ""
+            }
+        );
+    }
     Ok(())
 }
 
-fn display_relation_target(target: &mara::RelationEndpoint) -> String {
-    match target {
-        mara::RelationEndpoint::Item { id, .. } => id.clone(),
-        mara::RelationEndpoint::External { address } => format!("external:{address}"),
-        mara::RelationEndpoint::Code { reference } => reference.clone(),
-    }
+fn print_named_yaml<T: Serialize>(name: &str, definition: &T) -> Result<(), String> {
+    let declarations = BTreeMap::from([(name, definition)]);
+    print_yaml(&declarations)
+}
+
+fn print_yaml(value: &impl Serialize) -> Result<(), String> {
+    let source = serde_saphyr::to_string(value)
+        .map_err(|error| format!("could not render schema: {error}"))?;
+    print!("{source}");
+    Ok(())
 }
 
 fn emit_validation(
@@ -1479,47 +1038,491 @@ fn print_validation(result: &ValidationResult) -> Result<(), String> {
     Ok(())
 }
 
-fn print_schema_get(result: &SchemaGetResult) -> Result<(), String> {
-    match result {
-        SchemaGetResult::Schema { schema } => print_yaml(schema),
-        SchemaGetResult::Flavour { name, definition } => print_named_yaml(name, definition),
-        SchemaGetResult::Relation {
-            name, definition, ..
-        } => print_named_yaml(name, definition),
+#[derive(Debug, Subcommand)]
+enum ItemCommand {
+    /// Validate one exact human ID or MID in full corpus context.
+    Validate {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
+        id: String,
+        /// Maximum diagnostics per page, 1 through 100 (default 20); the byte budget may return fewer.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Opaque next_cursor; repeat unchanged options until has_more is false. Restart after source/schema changes; empty strings are invalid.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Rename a human ID and supported typed relations/wiki mentions in items and narrative across a valid project, preserving the MID. Markdown links are preserved, not rewritten.
+    Rename {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
+        reference: String,
+        /// New unique human ID with the flavour's prefix; the old ID is not kept as an alias. The current ID is a no-op.
+        new_id: String,
+    },
+
+    /// Move an item within a valid project without changing its identity, content, or relations; keep the source document.
+    #[command(
+        after_help = "ID/MID references retain item identity. Relative Markdown links carried with the item, incoming links to its contained nodes, and shifted heading anchors must keep their destinations. Resolve reported link impacts before retrying; Markdown links are not automatically repaired."
+    )]
+    Move {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
+        reference: String,
+        /// Destination project-relative *.mara.md file; parent must exist and discovery must include it. Creates the file if absent; no absolute paths or .. components.
+        file: PathBuf,
+        /// Insert before this one-based line in the original destination, including same-file moves; valid range is 1 through line_count + 1 (end of file). Omission appends. Insertion inside an item is rejected; an unchanged-location move may publish byte-identical source.
+        #[arg(long)]
+        line: Option<usize>,
+    },
+
+    /// Delete one item from a valid project only when no surviving typed relations, wiki mentions, or Markdown links refer to it or its contained nodes; keep the containing document.
+    #[command(
+        after_help = "Reject changes that break or retarget surviving internal links, including generated heading anchors affected elsewhere in the document. Resolve reported source locations before retrying; Markdown links are not automatically repaired."
+    )]
+    Delete {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
+        reference: String,
+    },
+
+    /// Partially update title, custom fields, or body while preserving identity.
+    Update {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
+        reference: String,
+        /// Replacement single-line title; surrounding whitespace is trimmed. Empty or whitespace-only titles and line breaks are rejected; omission leaves it unchanged.
+        #[arg(long)]
+        title: Option<String>,
+        /// Replace all values of a custom KEY=VALUE field; repeat for schema-repeatable keys.
+        /// KEY= keeps an empty value; use --clear-field KEY to remove the field.
+        /// Values are schema-validated scalar text: surrounding whitespace is trimmed and line breaks are rejected. Omission leaves fields unchanged.
+        /// Excludes title, MID, and typed relations; use relation add/remove for edges.
+        #[arg(long = "field", value_parser = parse_field)]
+        fields: Vec<CliField>,
+        /// Remove all values of an optional custom field (repeatable); cannot also set that key. Excludes title/MID and typed relations. Omission clears nothing; an absent optional field is a no-op.
+        #[arg(long = "clear-field")]
+        clear_fields: Vec<String>,
+        #[arg(
+            long,
+            help = "Replace body text; - reads stdin, an empty string clears an optional body, omission leaves it unchanged. Empty or whitespace-only replacements of required bodies are rejected"
+        )]
+        body: Option<String>,
+    },
+
+    /// Create an item with a generated MID and optional initial relations, or a body scaffold.
+    #[command(
+        after_help = "Choose a flavour from schema get flavour <NAME>: description explains purpose, use_when gives selection criteria, avoid_when gives exclusions, and distinguish_from compares other flavours. These are schema guidance, not item fields. Inspect relation endpoints before adding initial edges. Newly authored references must resolve; creation rejects changes that break or retarget surviving links, including shifted heading anchors."
+    )]
+    Create {
+        /// Schema-declared flavour; discover names with schema list flavour, then read selection guidance with schema get flavour NAME.
+        flavour: String,
+        /// New unique human ID with the flavour's prefix (for example REQ-EXAMPLE); not a MID.
+        id: String,
+        /// Destination project-relative *.mara.md file; parent must exist and discovery must include it. Creates the file if absent; no absolute paths or .. components.
+        file: PathBuf,
+
+        /// Single-line item title; surrounding whitespace is trimmed. Empty or whitespace-only titles and line breaks are rejected.
+        #[arg(long)]
+        title: String,
+
+        #[arg(long = "field", value_parser = parse_field, help = "Schema-declared custom KEY=VALUE field; repeat only for repeatable keys. Values are schema-validated scalar text: surrounding whitespace is trimmed and line breaks are rejected. KEY= supplies an empty value when schema-valid; supply all required fields. Excludes title, MID, and typed relations; use --relation or relation add for edges")]
+        fields: Vec<CliField>,
+
+        #[arg(long = "relation", value_name = "NAME=TARGET", value_parser = parse_initial_relation,
+            help = "Initial schema-declared outgoing relation, created atomically with the item (repeatable). TARGET is an exact human ID, canonical MID, or external:HTTP(S) URL; the new ID may target itself. Duplicate edges are rejected; omission adds none. Later edits use relation add/remove")]
+        relations: Vec<InitialRelation>,
+
+        /// Body text, or - to read stdin; supports [[relation:ID]] and [[relation:MID]] assertions. An omitted, empty, or whitespace-only required body creates an incomplete scaffold.
+        #[arg(long)]
+        body: Option<String>,
+
+        /// Insert before this one-based line; valid range is 1 through line_count + 1 (end of file). Omission appends. Insertion inside another item is rejected.
+        #[arg(long)]
+        line: Option<usize>,
+    },
+
+    /// List bounded item summaries in document-path and source order.
+    List {
+        #[command(flatten)]
+        filters: ItemFilterArgs,
+    },
+}
+#[derive(Debug, Clone)]
+struct CliField {
+    key: String,
+    value: String,
+}
+
+impl From<CliField> for FieldValue {
+    fn from(value: CliField) -> Self {
+        Self {
+            key: value.key,
+            value: value.value,
+        }
     }
 }
 
-fn print_schema_list(result: &SchemaListResult) -> Result<(), String> {
-    for declaration in &result.declarations {
+#[derive(Debug, Args)]
+struct ItemFilterArgs {
+    /// Select exact flavours (repeatable, OR); distinct filter categories combine with AND. Omission selects all flavours.
+    #[arg(long)]
+    flavour: Vec<String>,
+
+    /// Exact schema-declared custom-field KEY=VALUE filter; excludes title/MID and typed relations. Key and scalar text value match exactly, without trimming; KEY= matches an empty value. OR within one key, AND across keys and other filter categories (repeatable). Omission adds no restriction.
+    #[arg(long = "field", value_parser = parse_field)]
+    fields: Vec<CliField>,
+
+    /// Select items with these exact authored outgoing schema relation names (repeatable, OR). Inverse aliases match their canonical declaration; search accepts schema:name for ambiguous built-in names. Omission adds no restriction.
+    #[arg(long)]
+    relation: Vec<String>,
+
+    #[arg(
+        long,
+        help = "Select an exact document or directory subtree (project-relative, repeatable OR), e.g. packages/query/docs/; no glob expansion, absolute paths, .., empty paths, . or ./; interior dot components and repeated separators normalize; omit --path for the whole project"
+    )]
+    path: Vec<PathBuf>,
+
+    #[arg(
+        long,
+        help = "Maximum entries per page: 1 through 100 (default 20); the byte budget may return fewer"
+    )]
+    limit: Option<usize>,
+
+    #[arg(
+        long,
+        help = "Opaque next_cursor from the previous page; keep all other inputs unchanged until has_more is false; omit to start or restart after source/schema changes. Empty strings are invalid"
+    )]
+    cursor: Option<String>,
+}
+
+impl ItemFilterArgs {
+    fn into_params(self) -> ItemFilterParams {
+        ItemFilterParams {
+            flavours: self.flavour,
+            fields: self.fields.into_iter().map(Into::into).collect(),
+            relations: self.relation,
+            paths: self.path,
+            limit: self.limit,
+            cursor: self.cursor,
+        }
+    }
+}
+
+fn parse_field(value: &str) -> Result<CliField, String> {
+    let (key, value) = value
+        .split_once('=')
+        .ok_or_else(|| "field must use KEY=VALUE".to_owned())?;
+    if key.is_empty() {
+        return Err("field key must not be empty".into());
+    }
+    Ok(CliField {
+        key: key.to_owned(),
+        value: value.to_owned(),
+    })
+}
+
+fn print_item_collection(result: &ItemCollectionResult) -> Result<(), String> {
+    for item in &result.items {
+        print_item_summary(item);
+    }
+    print_page_continuation(result.has_more, result.next_cursor.as_deref());
+    Ok(())
+}
+
+fn print_page_continuation(has_more: bool, next_cursor: Option<&str>) {
+    print!("page\thas_more={has_more}");
+    if let Some(cursor) = next_cursor {
+        print!("\tnext_cursor={cursor}");
+    }
+    println!();
+}
+
+fn print_item_summary(item: &ItemSummary) {
+    let title = if item.title_truncated() {
+        format!("{} [title truncated]", item.title())
+    } else {
+        item.title().to_owned()
+    };
+    if let Some(mid) = item.mid() {
         println!(
-            "{}\t{}{}{}",
-            declaration.name,
-            declaration.description,
-            declaration
-                .inverse
-                .as_ref()
-                .map(|alias| format!("\tinverse={alias}"))
-                .unwrap_or_default(),
-            if declaration.symmetric == Some(true) {
-                "\tsymmetric"
-            } else {
-                ""
+            "{}\t{}\t{}\t{}\t{}:{}",
+            item.id(),
+            mid,
+            item.flavour(),
+            title,
+            item.path().display(),
+            item.line()
+        );
+    } else {
+        println!(
+            "{}\t{}\t{}\t{}:{}",
+            item.id(),
+            item.flavour(),
+            title,
+            item.path().display(),
+            item.line()
+        );
+    }
+}
+
+fn print_get(item: &GetResult) {
+    let node = &item.node;
+    let kind = node.block_kind.map_or_else(
+        || format!("{:?}", node.kind),
+        |kind| format!("Block({kind:?})"),
+    );
+    println!(
+        "{}\t{}\t{}{}",
+        node.reference,
+        kind,
+        node.title.as_deref().unwrap_or(""),
+        if node.title_truncated {
+            " [title truncated]"
+        } else {
+            ""
+        }
+    );
+    if let Some(id) = &node.id {
+        println!("id\t{id}");
+    }
+    if let Some(flavour) = &node.flavour {
+        println!("flavour\t{flavour}");
+    }
+    if let Some(level) = node.heading_level {
+        println!("heading_level\t{level}");
+    }
+    if let Some(parent) = &node.context.parent {
+        println!("parent\t{parent}");
+    }
+    if let Some(section) = &node.context.section {
+        println!("section\t{section}");
+    }
+    let source = &node.source;
+    println!(
+        "source\t{}\tstart_byte={}\tend_byte={}\tstart_line={}\tend_line={}",
+        source.path().display(),
+        source.start_byte(),
+        source.end_byte(),
+        source.start_line(),
+        source.end_line()
+    );
+    println!("metadata");
+    for entry in &item.metadata {
+        println!("{}\t{}", entry.key, entry.value);
+        println!(
+            "metadata_fragment\tindex={}\tstart_byte={}\tend_byte={}\ttotal_bytes={}\tpartial={}",
+            entry.index,
+            entry.range.start_byte,
+            entry.range.end_byte,
+            entry.range.total_bytes,
+            entry.range.partial
+        );
+    }
+    print_entry_range("metadata_range", &item.metadata_range);
+    println!("content");
+    print!("{}", item.content);
+    if !item.content.ends_with('\n') {
+        println!();
+    }
+    println!(
+        "content_range\tstart_byte={}\tend_byte={}\ttotal_bytes={}\tpartial={}",
+        item.content_range.start_byte,
+        item.content_range.end_byte,
+        item.content_range.total_bytes,
+        item.content_range.partial
+    );
+    print_page_continuation(item.has_more, item.next_cursor.as_deref());
+}
+
+fn print_entry_range(label: &str, range: &EntryRange) {
+    println!(
+        "{label}\tstart_index={}\tend_index={}\ttotal={}\tpartial={}",
+        range.start_index, range.end_index, range.total, range.partial
+    );
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CliRelationDirection {
+    Incoming,
+    Outgoing,
+    Symmetric,
+}
+
+impl From<CliRelationDirection> for RelationDirection {
+    fn from(value: CliRelationDirection) -> Self {
+        match value {
+            CliRelationDirection::Incoming => Self::Incoming,
+            CliRelationDirection::Outgoing => Self::Outgoing,
+            CliRelationDirection::Symmetric => Self::Symmetric,
+        }
+    }
+}
+
+fn print_related_connections(connections: &[RelatedConnection]) {
+    for connection in connections {
+        let node = match &connection.neighbour {
+            mara::RelatedNeighbour::Internal(node) => node,
+            mara::RelatedNeighbour::External { address, .. } => {
+                println!(
+                    "{} → external:{}\toccurrences={}",
+                    connection.label.as_deref().unwrap_or(&connection.relation),
+                    address,
+                    connection.occurrence_count.unwrap_or_default()
+                );
+                continue;
             }
+        };
+        if let Some(edge) = &connection.edge {
+            let label = connection.label.as_deref().unwrap_or(&edge.relation);
+            let prefix =
+                if connection.direction == RelationDirection::Incoming && label == edge.relation {
+                    "incoming "
+                } else {
+                    ""
+                };
+            println!(
+                "{prefix}{label} → {}\t{}{}\t{}:{}\toccurrences={}\treference={}",
+                node.id.as_deref().unwrap_or(&node.reference),
+                node.title.as_deref().unwrap_or_default(),
+                if node.title_truncated {
+                    " [title truncated]"
+                } else {
+                    ""
+                },
+                node.source.path().display(),
+                node.source.start_line(),
+                connection.occurrence_count.unwrap(),
+                node.reference
+            );
+        } else {
+            let relation = match (connection.relation.as_str(), connection.direction) {
+                ("contains", RelationDirection::Incoming) => "contained_by",
+                ("builtin:contains", RelationDirection::Incoming) => "builtin:contained_by",
+                (name, _) => name,
+            };
+            let source = connection.source.as_ref().expect("builtin source");
+            println!(
+                "{}\t{}\t{}\t{}\t{}{}\t{}:{}\tevidence={}:{}-{}\treference={}",
+                connection.direction.as_str(),
+                relation,
+                node.id.as_deref().unwrap_or(&node.reference),
+                format!("{:?}", node.kind).to_lowercase(),
+                node.title.as_deref().unwrap_or_default(),
+                if node.title_truncated {
+                    " [title truncated]"
+                } else {
+                    ""
+                },
+                node.source.path().display(),
+                node.source.start_line(),
+                source.path().display(),
+                source.start_line(),
+                source.end_line(),
+                node.reference
+            );
+        }
+    }
+}
+
+#[derive(Debug, Subcommand)]
+enum RelationCommand {
+    /// Inspect a semantic edge and its authored source occurrences.
+    Get {
+        /// Item ID/MID or code:<path>[::<language>::<descriptor>] expressing the relation.
+        source: String,
+        /// Canonical relation name or declared inverse alias.
+        relation: String,
+        /// Other endpoint: item ID/MID, code:<path>[::<language>::<descriptor>], or external:HTTP(S) URL.
+        target: String,
+        /// Maximum occurrences per page, 1 through 100; defaults to 20. The byte budget may return fewer.
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Continue with next_cursor and unchanged arguments until has_more is false; restart after source/schema changes; empty strings are invalid.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Add a schema-valid relation. Code links require an item source and declared inverse; code files are never edited.
+    Add {
+        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID); code sources are read-only.
+        source: String,
+        /// Schema-declared relation name; inspect with schema list relation.
+        relation: String,
+        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<language>::<descriptor>] with an inverse alias.
+        target: String,
+    },
+    /// Remove authored item assertions. For code links, code comment markers remain and may keep the edge present.
+    Remove {
+        /// Source item's exact human ID or canonical MID (uppercase 26-character ULID); code sources are read-only.
+        source: String,
+        /// Schema-declared relation name; inspect with schema list relation.
+        relation: String,
+        /// Target item's exact human ID, canonical MID, external:HTTP(S) URL, or code:<path>[::<language>::<descriptor>] with an inverse alias.
+        target: String,
+        /// Remove only this snapshot-bound occurrence from relation get.
+        #[arg(long)]
+        occurrence: Option<String>,
+    },
+}
+
+fn emit_relation<T: Serialize>(
+    format: OutputFormat,
+    result: Result<T, mara::RelationError>,
+    human: impl FnOnce(&T) -> Result<(), String>,
+) -> Result<bool, String> {
+    match result {
+        Ok(result) => {
+            emit(format, &result, human)?;
+            Ok(true)
+        }
+        Err(error) => {
+            if matches!(format, OutputFormat::Json) {
+                write_json(&error)?;
+            } else {
+                eprintln!("error: {error}");
+            }
+            Ok(false)
+        }
+    }
+}
+
+fn display_relation_target(target: &mara::RelationEndpoint) -> String {
+    match target {
+        mara::RelationEndpoint::Item { id, .. } => id.clone(),
+        mara::RelationEndpoint::External { address } => format!("external:{address}"),
+        mara::RelationEndpoint::Code { reference } => reference.clone(),
+    }
+}
+
+fn print_project_mid_backfill(result: &ProjectMidBackfillResult) -> Result<(), String> {
+    if result.changed.is_empty() {
+        println!("no missing MIDs in project at {}", result.project.display());
+        return Ok(());
+    }
+    println!(
+        "backfilled {} MID{} in project at {}",
+        result.changed.len(),
+        if result.changed.len() == 1 { "" } else { "s" },
+        result.project.display()
+    );
+    for entry in &result.changed {
+        println!(
+            "{}\t{}\t{}:{}",
+            entry.id,
+            entry.mid,
+            entry.path.display(),
+            entry.line
         );
     }
     Ok(())
 }
 
-fn print_named_yaml<T: Serialize>(name: &str, definition: &T) -> Result<(), String> {
-    let declarations = BTreeMap::from([(name, definition)]);
-    print_yaml(&declarations)
-}
-
-fn print_yaml(value: &impl Serialize) -> Result<(), String> {
-    let source = serde_saphyr::to_string(value)
-        .map_err(|error| format!("could not render schema: {error}"))?;
-    print!("{source}");
-    Ok(())
+fn parse_initial_relation(value: &str) -> Result<InitialRelation, String> {
+    let (relation, target) = value
+        .split_once('=')
+        .ok_or_else(|| "relation must use NAME=TARGET".to_owned())?;
+    if relation.is_empty() || target.is_empty() {
+        return Err("relation name and target must not be empty".into());
+    }
+    Ok(InitialRelation {
+        relation: relation.to_owned(),
+        target: target.to_owned(),
+    })
 }
 
 fn read_body(body: Option<String>) -> Result<Option<String>, String> {
@@ -1535,85 +1538,15 @@ fn read_body(body: Option<String>) -> Result<Option<String>, String> {
     }
 }
 
-#[cfg(test)]
-mod validation_tests {
-    use super::*;
-    use mara::{
-        DiagnosticCode, DiagnosticLocation, Severity, ValidationDiagnostic, ValidationScope,
-    };
-
-    #[test]
-    fn validation_renderer_uses_shared_policy_validity_for_exit_status() {
-        // This tests the shared policy, not a configured rule evaluator (MARA-63/64).
-        let directory = tempfile::tempdir().unwrap();
-        mara::initialize_project(directory.path(), Template::Empty).unwrap();
-        let operations =
-            OperationContext::from_environment(Some(directory.path().to_owned())).unwrap();
-        let mut result = operations.project_validate(&[]).unwrap();
-        let mut diagnostic = ValidationDiagnostic::new(
-            DiagnosticCode::RuleFailed,
-            Severity::Warning,
-            ValidationScope::Item,
-            DiagnosticLocation::default(),
-            "required verification is absent",
-        );
-        diagnostic.rule = Some("urn:mara:rule:verification".into());
-        diagnostic.obligation = Some(mara::DiagnosticObligation {
-            shape: "urn:mara:rule:verification_count".into(),
-            component: "http://www.w3.org/ns/shacl#MinCountConstraintComponent".into(),
-            source: DiagnosticLocation {
-                path: Some("rules/coverage.yaml".into()),
-                pointer: Some("/0/property/0/minCount".into()),
-                ..Default::default()
-            },
-        });
-        diagnostic.details = Some(
-            serde_json::json!({"kind":"minimum","selected_count":0,"qualifying_count":0,"min":1}),
-        );
-        result.diagnostics.push(diagnostic);
-        result.summarize();
-        assert!(result.valid);
-        assert_eq!(result.summary.warnings, 1);
-        assert_eq!(result.summary.errors, 0);
-        assert!(emit_validation(OutputFormat::Json, Ok(result.clone())).unwrap());
-        assert!(emit_validation(OutputFormat::Human, Ok(result.clone())).unwrap());
-        let encoded = serde_json::to_value(&result).unwrap();
-        assert_eq!(
-            encoded["diagnostics"][0]["rule"],
-            "urn:mara:rule:verification"
-        );
-        assert_eq!(
-            encoded["diagnostics"][0]["obligation"]["source"]["pointer"],
-            "/0/property/0/minCount"
-        );
-        result.diagnostics[0].severity = Severity::Error;
-        result.summarize();
-        assert!(!emit_validation(OutputFormat::Json, Ok(result.clone())).unwrap());
-        assert_eq!(result.summary.errors, 1);
-        assert_eq!(result.summary.warnings, 0);
-        result.diagnostics[0].severity = Severity::Warning;
-        result.evaluation_complete = false;
-        result.summarize();
-        assert!(!result.valid);
-        assert!(!result.summary.counts_exact);
-        for code in [
-            DiagnosticCode::ProjectInvalid,
-            DiagnosticCode::SchemaInvalid,
-            DiagnosticCode::FormatUnsupported,
-            DiagnosticCode::SourceInvalid,
-            DiagnosticCode::IdentityInvalid,
-            DiagnosticCode::FieldInvalid,
-            DiagnosticCode::ReferenceUnresolved,
-            DiagnosticCode::RelationInvalid,
-            DiagnosticCode::RuleInvalid,
-            DiagnosticCode::EvaluationUnavailable,
-        ] {
-            result.diagnostics[0].code = code;
-            result.diagnostics[0].severity = Severity::Warning;
-            result.evaluation_complete = true;
-            result.summarize();
-            assert_eq!(result.diagnostics[0].severity, Severity::Error);
-            assert!(!result.valid);
-        }
-    }
+fn print_relation_mutation(result: &mara::RelationMutationResult) -> Result<(), String> {
+    println!(
+        "{} relation '{}' from '{}' to '{}': {} changed, {} remaining",
+        result.action.past_tense(),
+        result.edge.relation,
+        result.edge.source.id(),
+        display_relation_target(&result.edge.target),
+        result.changed_occurrences,
+        result.remaining_occurrences
+    );
+    Ok(())
 }

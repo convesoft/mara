@@ -1,26 +1,11 @@
-use std::{collections::BTreeSet, fs, path::Path, process::Command};
+use std::{collections::BTreeSet, fs, path::Path};
 
 use mara::{
     ConnectionKind, DiscoveryGraph, DiscoveryNodeKind, RelationDirection, Template,
     initialize_project, load_corpus, load_schema, resolve_project,
 };
-use serde_json::{Value, json};
-use tempfile::TempDir;
-
-fn cli(root: &Path, args: &[&str]) -> Value {
-    let output = Command::new(env!("CARGO_BIN_EXE_mara"))
-        .current_dir(root)
-        .args(["--format", "json"])
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    serde_json::from_slice(&output.stdout).unwrap()
-}
+use serde_json::Value;
+mod support;
 
 fn summaries(graph: &DiscoveryGraph<'_>) -> Vec<Value> {
     graph
@@ -29,9 +14,11 @@ fn summaries(graph: &DiscoveryGraph<'_>) -> Vec<Value> {
         .collect()
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
+// This explicitly reads the real repository without writing its sources.
 fn every_repository_and_padded_table_node_has_a_reusable_source_reference() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     fs::write(
         fixture.path().join("padded.mara.md"),
@@ -52,9 +39,10 @@ fn every_repository_and_padded_table_node_has_a_reusable_source_reference() {
     }
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn shared_summaries_preserve_full_sources_and_bounded_context() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     let title = "é🙂".repeat(160);
@@ -64,20 +52,13 @@ fn shared_summaries_preserve_full_sources_and_bounded_context() {
         format!("# {title}\n\n> ### Local\n>\n> - é🙂\n\n").replace('\n', "\r\n"),
     )
     .unwrap();
-    cli(
-        fixture.path(),
-        &[
-            "item",
-            "create",
-            "requirement",
-            "REQ-ONE",
-            &filename,
-            "--title",
-            &title,
-            "--body",
-            "## Inside\n\nBody.",
-        ],
+    let item_source = format!(
+        ":::mara requirement REQ-ONE\n:mid: {}\n:title: {title}\n\n## Inside\n\nBody.\n:::\n",
+        ulid::Ulid::new()
     );
+    let file = fixture.path().join(&filename);
+    let source = fs::read_to_string(&file).unwrap() + &item_source;
+    fs::write(file, source).unwrap();
     fs::write(fixture.path().join("empty.mara.md"), "").unwrap();
     let corpus = load_corpus(&project, &schema).unwrap();
     let graph = corpus.discovery();
@@ -175,9 +156,10 @@ fn shared_summaries_preserve_full_sources_and_bounded_context() {
     assert_eq!(references.len(), graph.nodes().count());
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn handles_survive_unrelated_edits_but_reject_containing_edits_and_moves() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     let source = "# Target\n\nNarrative.\n";
@@ -257,9 +239,95 @@ fn handles_survive_unrelated_edits_but_reject_containing_edits_and_moves() {
     }
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
+#[test]
+fn summaries_round_trip_across_process_restarts() {
+    const ROOT_ENV: &str = "MARA_HANDLE_RESTART_FIXTURE";
+    if let Some(root) = std::env::var_os(ROOT_ENV) {
+        let root = Path::new(&root);
+        let project = resolve_project(Some(root), root).unwrap();
+        let schema = load_schema(&project).unwrap();
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let graph = corpus.discovery();
+        let expected: Vec<Value> =
+            serde_json::from_slice(&fs::read(root.join("expected.json")).unwrap()).unwrap();
+        assert_eq!(summaries(&graph), expected);
+        for value in expected {
+            assert_eq!(
+                serde_json::to_value(
+                    graph
+                        .resolve(value["reference"].as_str().unwrap())
+                        .unwrap()
+                        .summary()
+                )
+                .unwrap(),
+                value
+            );
+        }
+        return;
+    }
+    let fixture = support::fixture();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    fs::write(
+        fixture.path().join("restart.mara.md"),
+        "# Heading\n\n- One\n  - Two\n\n| A | B |\n|---|---|\n| é | 🙂 |\n",
+    )
+    .unwrap();
+    let file = fixture.path().join("restart.mara.md");
+    let source = fs::read_to_string(&file).unwrap()
+        + &format!(
+            "\n:::mara requirement REQ-ONE\n:mid: {}\n:title: One\n\nBody.\n:::\n",
+            ulid::Ulid::new()
+        );
+    fs::write(file, source).unwrap();
+    let corpus = load_corpus(&project, &schema).unwrap();
+    fs::write(
+        fixture.path().join("expected.json"),
+        serde_json::to_vec(&summaries(&corpus.discovery())).unwrap(),
+    )
+    .unwrap();
+    for _ in 0..2 {
+        let output = support::isolated_command(
+            std::env::current_exe().unwrap().to_str().unwrap(),
+            fixture.path(),
+        )
+        .args([
+            "--exact",
+            "summaries_round_trip_across_process_restarts",
+            "--nocapture",
+        ])
+        .env(ROOT_ENV, fixture.path())
+        .output()
+        .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+fn cli(root: &Path, args: &[&str]) -> Value {
+    let output = support::command(root)
+        .args(["--format", "json"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+// @mara implements VER-DOCUMENT-NAVIGATION
+// @mara checks REQ-DURABLE-ITEM-IDENTITY
 #[test]
 fn item_mids_resolve_after_real_cli_update_rename_and_move() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     cli(
@@ -299,81 +367,4 @@ fn item_mids_resolve_after_real_cli_update_rename_and_move() {
     assert!(graph.resolve("REQ-ONE").is_err());
     assert!(graph.resolve(&section_handle).is_err());
     assert_eq!(cli(fixture.path(), &["project", "validate"])["valid"], true);
-}
-
-#[test]
-fn summaries_round_trip_across_process_restarts() {
-    const ROOT_ENV: &str = "MARA_HANDLE_RESTART_FIXTURE";
-    if let Some(root) = std::env::var_os(ROOT_ENV) {
-        let root = Path::new(&root);
-        let project = resolve_project(Some(root), root).unwrap();
-        let schema = load_schema(&project).unwrap();
-        let corpus = load_corpus(&project, &schema).unwrap();
-        let graph = corpus.discovery();
-        let expected: Vec<Value> =
-            serde_json::from_slice(&fs::read(root.join("expected.json")).unwrap()).unwrap();
-        assert_eq!(summaries(&graph), expected);
-        for value in expected {
-            assert_eq!(
-                serde_json::to_value(
-                    graph
-                        .resolve(value["reference"].as_str().unwrap())
-                        .unwrap()
-                        .summary()
-                )
-                .unwrap(),
-                value
-            );
-        }
-        return;
-    }
-    let fixture = TempDir::new().unwrap();
-    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
-    let schema = load_schema(&project).unwrap();
-    fs::write(
-        fixture.path().join("restart.mara.md"),
-        "# Heading\n\n- One\n  - Two\n\n| A | B |\n|---|---|\n| é | 🙂 |\n",
-    )
-    .unwrap();
-    cli(
-        fixture.path(),
-        &[
-            "item",
-            "create",
-            "requirement",
-            "REQ-ONE",
-            "restart.mara.md",
-            "--title",
-            "One",
-            "--body",
-            "Body.",
-        ],
-    );
-    let corpus = load_corpus(&project, &schema).unwrap();
-    fs::write(
-        fixture.path().join("expected.json"),
-        serde_json::to_vec(&summaries(&corpus.discovery())).unwrap(),
-    )
-    .unwrap();
-    for _ in 0..2 {
-        let output = Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "summaries_round_trip_across_process_restarts",
-                "--nocapture",
-            ])
-            .env(ROOT_ENV, fixture.path())
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    assert_eq!(
-        cli(fixture.path(), &["project", "validate"])["valid"],
-        json!(true)
-    );
 }

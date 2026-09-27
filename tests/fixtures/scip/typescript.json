@@ -1,0 +1,200 @@
+{
+  "metadata": {
+    "tool_info": {
+      "name": "scip-typescript",
+      "version": "0.4.0"
+    },
+    "project_root": "file:///tmp/mara-scip-check.qb5tcM/typescript",
+    "text_document_encoding": 1
+  },
+  "documents": [
+    {
+      "relative_path": "service.ts",
+      "occurrences": [
+        {
+          "range": [
+            0,
+            0,
+            0
+          ],
+          "TypedRange": null,
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/",
+          "symbol_roles": 1,
+          "enclosing_range": [
+            0,
+            0,
+            5,
+            0
+          ],
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            0,
+            16,
+            21
+          ],
+          "TypedRange": null,
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().",
+          "symbol_roles": 1,
+          "enclosing_range": [
+            0,
+            0,
+            45
+          ],
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            0,
+            22,
+            27
+          ],
+          "TypedRange": null,
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().(value)",
+          "symbol_roles": 1,
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            1,
+            16,
+            21
+          ],
+          "TypedRange": null,
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().",
+          "symbol_roles": 1,
+          "enclosing_range": [
+            1,
+            0,
+            45
+          ],
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            1,
+            22,
+            27
+          ],
+          "TypedRange": null,
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().(value)",
+          "symbol_roles": 1,
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            2,
+            16,
+            21
+          ],
+          "TypedRange": null,
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().",
+          "symbol_roles": 1,
+          "enclosing_range": [
+            2,
+            0,
+            4,
+            1
+          ],
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            2,
+            22,
+            27
+          ],
+          "TypedRange": null,
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().(value)",
+          "symbol_roles": 1,
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            3,
+            16,
+            21
+          ],
+          "TypedRange": null,
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().(value)",
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            3,
+            37,
+            42
+          ],
+          "TypedRange": null,
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().(value)",
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            3,
+            43,
+            49
+          ],
+          "TypedRange": null,
+          "symbol": "scip-typescript npm typescript 5.9.3 lib/`lib.es5.d.ts`/String#length.",
+          "TypedEnclosingRange": null
+        },
+        {
+          "range": [
+            3,
+            52,
+            57
+          ],
+          "TypedRange": null,
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().(value)",
+          "TypedEnclosingRange": null
+        }
+      ],
+      "symbols": [
+        {
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/",
+          "documentation": [
+            "```ts\nmodule \"service.ts\"\n```"
+          ]
+        },
+        {
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().",
+          "documentation": [
+            "```ts\nfunction parse(value: string): number\n```"
+          ]
+        },
+        {
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().(value)",
+          "documentation": [
+            "```ts\n(parameter) value: string\n```"
+          ]
+        },
+        {
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().",
+          "documentation": [
+            "```ts\nfunction parse(value: string): number\n```"
+          ]
+        },
+        {
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().(value)",
+          "documentation": [
+            "```ts\n(parameter) value: number\n```"
+          ]
+        },
+        {
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().",
+          "documentation": [
+            "```ts\nfunction parse(value: string): number\n```"
+          ]
+        },
+        {
+          "symbol": "scip-typescript npm mara-scip-probe 1.0.0 `service.ts`/parse().(value)",
+          "documentation": [
+            "```ts\n(parameter) value: string | number\n```"
+          ]
+        }
+      ]
+    }
+  ]
+}

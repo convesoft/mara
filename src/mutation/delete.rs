@@ -10,6 +10,8 @@ pub struct ItemDeletion {
     pub path: PathBuf,
 }
 
+// @mara implements REQ-ITEM-DELETION
+// @mara implements DES-ITEM-DELETION
 pub fn delete_item(
     project: &Project,
     schema: &Schema,
@@ -18,13 +20,10 @@ pub fn delete_item(
     let _lock = transaction::MutationLock::acquire(project)?;
     let corpus = load_corpus(project, schema)?;
     require_valid_corpus(&corpus, schema)?;
-    let resolved = crate::get_item(&corpus, reference).map_err(|error| Error::InvalidMutation {
-        message: error.to_string(),
-    })?;
-    let item = corpus
-        .items()
-        .find(|item| item.id() == resolved.summary().id())
-        .expect("resolved item belongs to corpus");
+    let item =
+        crate::query::resolve_item(&corpus, reference).map_err(|error| Error::InvalidMutation {
+            message: error.to_string(),
+        })?;
     let mid = item.mid().expect("validated identity");
     let path = item.source().path().to_path_buf();
     let document = corpus

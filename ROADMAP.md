@@ -1,121 +1,30 @@
 # Roadmap
 
-This roadmap states Mara's current development intention. It is updated as
-evidence and priorities change; detailed behavior becomes canonical in
-`docs/*.mara.md` when a milestone begins.
+Mara's supported behavior is defined in the [product documentation](docs/index.mara.md).
+The following development intentions are provisional, not implementation promises.
 
-## Toward 0.1.0
-
-### 0.1.0-alpha.0 — Distributable core
-
-- Publish the existing single-project CLI and MCP workflow.
-- Add essential public documentation, licensing, and the roadmap.
-- Ship script-free npm dispatch and native platform packages.
-- Generate the changelog and automate CI, packaging, and protected releases.
-- Verify clean CLI and stdio MCP use without a local Rust installation.
-
-### 0.1.0-alpha.1 — Agent-ready onboarding
-
-- Ship a Mara skill and clear MCP onboarding guidance with the existing npm
-  package.
-- Let one MCP connection initialize or select one project per operation while
-  retaining execution-directory discovery.
-- Verify the primary Codex workflow through manual MCP registration and
-  separate skill installation. Keep complete-plugin installation optional.
-
-### 0.1.0-alpha.2 — Durable identity and editing
-
-- Introduce immutable machine identities with deliberate backfill.
-- Add safe structured update, move, rename, and delete operations.
-- Preserve relation and validation integrity throughout lifecycle changes.
-- Clarify the alpha.3 retrieval scope in canonical documents before release.
-
-### 0.1.0-alpha.3 — Enhanced deterministic retrieval (published)
-
-- Paginate search/list results and bound summaries; offer opt-in search excerpts
-  and selected-item filtering.
-- Filter search/list to exact documents or package directory subtrees.
-- Filter validation diagnostics by directory while retaining whole-project
-  context and status; see [validation reporting](docs/alpha.mara.md).
-- Bound direct-neighbour results with continuation; keep traversal
-  caller-controlled.
-- Read large item bodies in bounded consecutive portions and continue relation
-  lists without silently omitting content.
-- Add typo-tolerant word matching and deterministic relevance ranking.
-- Create one item with its initial outgoing relations atomically through CLI/MCP;
-  see [item creation](docs/alpha.mara.md).
-- Clarify CLI help, MCP parameter guidance, and the Mara skill's authoring and
-  retrieval workflows, including a JSON CLI fallback.
-- Retain file-based narrative access and item-only Mara search; see the reviewed
-  [narrative retrieval findings](docs/retrieval.mara.md#narrative-retrieval-investigation).
-
-See [retrieval scope and contracts](docs/retrieval.mara.md) for implementation
-boundaries, verification expectations, and the accepted narrative boundary.
-
-### 0.1.0 — Stable single-project workflow (published)
-
-- Retain the published alpha.3 runtime and formats, reconcile documentation,
-  and verify stable release artifacts through one release PR.
-- Follow the [stable scope and readiness contract](docs/release-0.1.mara.md).
-  Separate beta/RC publications are not required by the revised release path.
-
-## 0.2.0 — Guided authoring (published)
-
-- Prioritize bundled template files, an optional engineering template, and
-  project-defined flavour selection guidance together.
-- Require flavour guidance for existing and new schemas as a documented
-  breaking change, with a migration guide for 0.2.
-- Supply useful engineering traceability relations through the template.
-- Unify item and narrative discovery under `mara search`, bounded node reading
-  under `mara get`, and direct connections under `mara related`;
-  see [the accepted discovery direction](docs/discovery.mara.md).
-
-See [accepted outcomes and designs](docs/guided-authoring.mara.md) before
-ticket planning. This scope retains one project and schema for package-local
-documents in a monorepo and does not expand the 0.1 stabilization sequence.
-
-## 0.3.0 — Traceability and evolution (requirements planning)
-
-- Enrich relations with inverse authoring, symmetry, typed inline references,
-  cardinality and optional cycle constraints.
-- Add project-defined current-state lifecycle and traceability rules, with
-  qualifying coverage, bounded chains, and diagnostic codes and severity.
-- Keep the rule model extensible to 0.4 transition checks without changing
-  existing current-state meanings.
-- Support deliberate schema migrations for observed vocabulary changes.
-- Generate source-linked traceability matrices from the corpus.
-- Add typed external references without importing remote lifecycle or status.
-- Evaluate a code-traceability pilot for one demonstrated language and workflow.
-
-See [planned requirements and settled design boundaries](docs/traceability.mara.md)
-and [the research comparison](docs/traceability-research.mara.md). Resolve the
-listed interface and pilot decisions before scheduling their implementation.
-
-## 0.4.0 — Knowledge change review (provisional)
+## 0.4.0 — Knowledge change review
 
 - Compare items and documents across Git revisions, distinguishing content and
   relation changes from moves and human-ID renames.
 - Follow item history through immutable identity.
-- Add project-defined lifecycle transition checks using previous and current
-  item states once change comparison is available.
-- Identify related knowledge that may need review and explain its connection
-  to a change; these are review candidates, not proven inconsistencies.
-- Combine diffs, history, and relation context in a bounded review workflow.
+- Evaluate project-defined lifecycle transitions against previous and current
+  states once revision comparison is available.
+- Identify connected knowledge that may need review, explaining why it is a
+  candidate without claiming a proven inconsistency.
+- Combine differences, history and relation context in a bounded review workflow.
 
-The 0.4 grouping remains provisional. Its transition and freshness contracts
-will build on 0.3 and concrete revision-comparison workflows.
+Detailed contracts will be established when this work is selected.
 
 ## Later
 
-- Multi-project aggregation, nested project boundaries, and cross-project
-  relations when independent corpora need a shared operation.
-- Remote template packs and configuration composition when bundled seeds and
-  project-owned schemas are insufficient.
+- Multi-project aggregation, nested boundaries and cross-project relations.
+- Remote template packs and configuration composition.
 - Delivery synchronization and richer graph provenance for concrete consumers.
-- Global plugin installation and discovery improvements for observed client
-  problems.
-- Scale targets and optimization based on measurements.
+- Measured scale improvements, including persisted indexes if needed.
 - Language Server Protocol and editor integration.
-- Persisted indexes or a graph store when measured scale requires them.
-- Semantic or hybrid search when deterministic retrieval proves insufficient.
+- Semantic or hybrid search when deterministic retrieval is insufficient.
 - A graphical interface when stable workflows justify one.
+
+See [release preparation](docs/release.mara.md) for verification and publication
+gates. Published changes are recorded in the generated [changelog](CHANGELOG.md).

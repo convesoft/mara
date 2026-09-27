@@ -1,11 +1,11 @@
-use std::{fs, path::Path, process::Command};
+use std::{fs, path::Path};
 
 use mara::{
     ConnectionKind as Connection, DiscoveryGraph, DiscoveryNode, DiscoveryNodeKind as Node,
     MarkdownBlockKind as Block, RelationDirection as Direction, Template, initialize_project,
     load_corpus, load_schema,
 };
-use tempfile::TempDir;
+mod support;
 
 fn text<'a>(node: DiscoveryNode<'_, '_>, source: &'a str) -> &'a str {
     let span = node.source().span();
@@ -29,9 +29,10 @@ fn item<'g, 'c>(graph: &'g DiscoveryGraph<'c>, id: &str) -> DiscoveryNode<'g, 'c
         .unwrap()
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn derives_scoped_sections_and_navigates_interleaved_content_in_source_order() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     let lf = "Prelude.\n\n### Early\n\nEarly body.\n\n# Outer\n\nBefore.\n:::mara requirement REQ-ONE\n:title: One\n\nItem prelude.\n\n# Local\n\nLocal body.\n\n#### Deep\n\nDeep body.\n:::\nAfter.\n\n### Skipped\n\nNested.\n\n## Peer\n\nPeer body.\n\n# End\n\nFinal.\n";
@@ -92,9 +93,10 @@ fn derives_scoped_sections_and_navigates_interleaved_content_in_source_order() {
     }
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn preserves_ordinary_containers_and_their_local_heading_scopes() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     let source = "# Outside\n\n> Intro.\n>\n> ### Quoted\n>\n> - First\n>   - Nested\n>\n> # Quote peer\n>\n> Last.\n\n- ### Listed\n\n  List body.\n\n  | A | B |\n  |---|---|\n  | é | x |\n\nAfter containers.\n\n```md\n# Example only\n```\n".replace('\n', "\r\n");
@@ -155,9 +157,10 @@ fn preserves_ordinary_containers_and_their_local_heading_scopes() {
     }
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn heading_free_documents_and_empty_documents_have_direct_content() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     fs::write(fixture.path().join("a.mara.md"), "").unwrap();
@@ -188,9 +191,10 @@ fn heading_free_documents_and_empty_documents_have_direct_content() {
     );
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn distinguishes_containment_mentions_and_schema_names_between_direct_neighbours() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema_path = fixture.path().join(".mara/schema.yaml");
     let mut schema_source = fs::read_to_string(&schema_path).unwrap();
@@ -242,16 +246,256 @@ fn distinguishes_containment_mentions_and_schema_names_between_direct_neighbours
     );
 }
 
+// @mara checks DES-DOCUMENT-STRUCTURE
+#[test]
+// Explicit read-only self-hosting check.
+fn projects_repository_structure_deterministically_without_writing_sources() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let project = mara::resolve_project(Some(root), root).unwrap();
+    let schema = load_schema(&project).unwrap();
+    let corpus = load_corpus(&project, &schema).unwrap();
+    let graph = corpus.discovery();
+    let snapshot = |graph: &DiscoveryGraph<'_>| {
+        graph
+            .nodes()
+            .map(|node| {
+                (
+                    format!("{:?}", std::mem::discriminant(&node.kind())),
+                    node.source().clone(),
+                    node.parent().map(|parent| parent.source().clone()),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        snapshot(&graph),
+        snapshot(&load_corpus(&project, &schema).unwrap().discovery())
+    );
+    for node in graph.nodes() {
+        let children = node.children();
+        for child in &children {
+            assert_eq!(child.parent().unwrap().source(), node.source());
+            assert!(child.source().span().start_byte() >= node.source().span().start_byte());
+            assert!(child.source().span().end_byte() <= node.source().span().end_byte());
+        }
+        assert!(
+            children
+                .windows(2)
+                .all(|pair| pair[0].source().span().end_byte()
+                    <= pair[1].source().span().start_byte())
+        );
+    }
+    for document in corpus.documents() {
+        assert_eq!(
+            fs::read_to_string(root.join(document.path())).unwrap(),
+            document.source()
+        );
+    }
+}
+
+// @mara checks DES-DOCUMENT-STRUCTURE
+#[test]
+fn retains_heading_text_and_exact_heading_spans_in_document_context() {
+    let fixture = support::fixture();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    let lf = "# **Café** and `code` [guide][ref]\n\n:::mara requirement REQ-ONE\n:title: One\n\nBody.\n:::\n\n[ref]: https://example.com\n\n多行\nHeading\n=======\n\n## <https://example.com>\n";
+    for source in [lf.to_owned(), lf.replace('\n', "\r\n")] {
+        fs::write(fixture.path().join("heading.mara.md"), &source).unwrap();
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let graph = corpus.discovery();
+        let titles = graph
+            .nodes()
+            .filter_map(|node| match node.kind() {
+                Node::Section { heading } => Some(heading.heading_text().unwrap()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            titles,
+            ["Café and code guide", "多行 Heading", "https://example.com"]
+        );
+        let multiline = section(&graph, "多行 Heading");
+        let Node::Section { heading } = multiline.kind() else {
+            unreachable!()
+        };
+        let span = heading.source().span();
+        assert_eq!(
+            &source[span.start_byte()..span.end_byte()],
+            if source.contains('\r') {
+                "多行\r\nHeading\r\n=======\r\n"
+            } else {
+                "多行\nHeading\n=======\n"
+            }
+        );
+        assert_eq!(span.start_line(), 11);
+        assert_eq!(span.end_line(), 13);
+    }
+}
+
+// @mara checks DES-DOCUMENT-STRUCTURE
+#[test]
+fn preserves_final_narrative_lines_without_a_trailing_newline() {
+    let fixture = support::fixture();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    for (lf, kind, children) in [
+        ("first\n終🙂", Block::Paragraph, 0),
+        ("- first\n- 終🙂", Block::List, 2),
+        ("> first\n> 終🙂", Block::Blockquote, 1),
+    ] {
+        for source in [lf.to_owned(), lf.replace('\n', "\r\n")] {
+            fs::write(fixture.path().join("eof.mara.md"), &source).unwrap();
+            let corpus = load_corpus(&project, &schema).unwrap();
+            let graph = corpus.discovery();
+            let content = graph.nodes().next().unwrap().children();
+            assert_eq!(content.len(), 1);
+            assert!(
+                matches!(content[0].kind(), Node::MarkdownBlock(block) if block.kind() == kind)
+            );
+            assert_eq!(text(content[0], &source), source);
+            assert_eq!(content[0].children().len(), children);
+            assert_eq!(content[0].source().span().end_line(), 2);
+            assert_eq!(
+                fs::read_to_string(fixture.path().join("eof.mara.md")).unwrap(),
+                source
+            );
+        }
+    }
+}
+
+// @mara checks DES-DOCUMENT-STRUCTURE
+#[test]
+fn item_heading_references_share_document_definition_context() {
+    let fixture = support::fixture();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    let body = "# [guide][ref]\n\nBody.\n";
+    let item_source = format!(":::mara requirement REQ-ONE\n:title: One\n\n{body}:::\n");
+    for definition_before in [true, false] {
+        let definition = "[ref]: https://example.com\n\n";
+        let narrative = "# [guide][ref]\n\n";
+        let lf = if definition_before {
+            format!("{definition}{narrative}{item_source}")
+        } else {
+            format!("{narrative}{item_source}\n{definition}")
+        };
+        for source in [lf.clone(), lf.replace('\n', "\r\n")] {
+            fs::write(fixture.path().join("references.mara.md"), &source).unwrap();
+            let corpus = load_corpus(&project, &schema).unwrap();
+            let graph = corpus.discovery();
+            let one = item(&graph, "REQ-ONE");
+            let local = one.children()[0];
+            let Node::Section { heading } = local.kind() else {
+                panic!("missing local section")
+            };
+            assert_eq!(heading.heading_text(), Some("guide"));
+            assert_eq!(local.parent().unwrap().source(), one.source());
+            assert!(
+                matches!(one.parent().unwrap().kind(), Node::Section { heading } if heading.heading_text() == Some("guide"))
+            );
+            let span = heading.source().span();
+            assert_eq!(
+                &source[span.start_byte()..span.end_byte()],
+                if source.contains('\r') {
+                    "# [guide][ref]\r\n"
+                } else {
+                    "# [guide][ref]\n"
+                }
+            );
+            assert_eq!(
+                corpus.items().next().unwrap().body(),
+                if source.contains('\r') {
+                    body.replace('\n', "\r\n")
+                } else {
+                    body.to_owned()
+                }
+            );
+            assert_eq!(
+                fs::read_to_string(fixture.path().join("references.mara.md")).unwrap(),
+                source
+            );
+        }
+    }
+}
+
+// @mara checks DES-DOCUMENT-STRUCTURE
+#[test]
+fn heading_text_decodes_markdown_text_once_and_preserves_code_literals() {
+    let fixture = support::fixture();
+    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
+    let schema = load_schema(&project).unwrap();
+    let cases = [
+        (
+            r"A &amp; B &#169; &#x1F642; \*literal\* \\path \z",
+            r"A & B © 🙂 *literal* \path \z",
+        ),
+        (
+            r"&amp;copy; &#38;copy; \&copy; &bOgUs; &amp",
+            "&copy; &copy; &copy; &bOgUs; &amp",
+        ),
+        (
+            r"`&amp; &#65; \*literal\*` and **&lt;tag&gt;**",
+            r"&amp; &#65; \*literal\* and <tag>",
+        ),
+        (
+            r"&#92;plain &quot;quoted&quot; &apos;single&apos;",
+            r#"\plain "quoted" 'single'"#,
+        ),
+    ];
+    for newline in ["\n", "\r\n"] {
+        let headings = cases
+            .iter()
+            .map(|(authored, _)| format!("# {authored}{newline}{newline}"))
+            .collect::<String>();
+        let path = fixture.path().join("decoded.mara.md");
+        fs::write(&path, &headings).unwrap();
+        let source = format!(
+            "{headings}:::mara requirement REQ-DECODED{newline}:mid: {}{newline}:title: Decoded headings{newline}{newline}{headings}:::{newline}",
+            ulid::Ulid::new()
+        );
+        fs::write(&path, source).unwrap();
+        let original = fs::read_to_string(&path).unwrap();
+        let corpus = load_corpus(&project, &schema).unwrap();
+        let graph = corpus.discovery();
+        let sections = graph
+            .nodes()
+            .filter_map(|node| match node.kind() {
+                Node::Section { heading } => Some((node, heading)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(sections.len(), cases.len() * 2);
+        for (index, (node, heading)) in sections.iter().enumerate() {
+            let (authored, expected) = cases[index % cases.len()];
+            assert_eq!(heading.heading_text(), Some(expected));
+            let span = heading.source().span();
+            assert_eq!(
+                &original[span.start_byte()..span.end_byte()],
+                format!("# {authored}{newline}")
+            );
+            if index >= cases.len() {
+                assert!(
+                    matches!(node.parent().unwrap().kind(), Node::Item(item) if item.id() == "REQ-DECODED")
+                );
+            }
+        }
+        assert_eq!(corpus.items().next().unwrap().body(), headings);
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    }
+}
+
+// @mara implements VER-DOCUMENT-NAVIGATION
+// @mara checks DES-DOCUMENT-STRUCTURE
 #[test]
 fn reloads_real_cli_authored_and_updated_items_into_the_graph() {
-    let fixture = TempDir::new().unwrap();
+    let fixture = support::fixture();
     let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
     let schema = load_schema(&project).unwrap();
     let path = fixture.path().join("model.mara.md");
     fs::write(&path, "# Model\n\nNarrative.\n").unwrap();
     let invoke = |args: &[&str]| {
-        let output = Command::new(env!("CARGO_BIN_EXE_mara"))
-            .current_dir(fixture.path())
+        let output = support::command(fixture.path())
             .args(["--format", "json"])
             .args(args)
             .output()
@@ -306,252 +550,4 @@ fn reloads_real_cli_authored_and_updated_items_into_the_graph() {
         fs::read_to_string(path).unwrap(),
         second.documents()[0].source()
     );
-}
-
-#[test]
-fn projects_repository_structure_deterministically_without_writing_sources() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let project = mara::resolve_project(Some(root), root).unwrap();
-    let schema = load_schema(&project).unwrap();
-    let corpus = load_corpus(&project, &schema).unwrap();
-    let graph = corpus.discovery();
-    let snapshot = |graph: &DiscoveryGraph<'_>| {
-        graph
-            .nodes()
-            .map(|node| {
-                (
-                    format!("{:?}", std::mem::discriminant(&node.kind())),
-                    node.source().clone(),
-                    node.parent().map(|parent| parent.source().clone()),
-                )
-            })
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        snapshot(&graph),
-        snapshot(&load_corpus(&project, &schema).unwrap().discovery())
-    );
-    for node in graph.nodes() {
-        let children = node.children();
-        for child in &children {
-            assert_eq!(child.parent().unwrap().source(), node.source());
-            assert!(child.source().span().start_byte() >= node.source().span().start_byte());
-            assert!(child.source().span().end_byte() <= node.source().span().end_byte());
-        }
-        assert!(
-            children
-                .windows(2)
-                .all(|pair| pair[0].source().span().end_byte()
-                    <= pair[1].source().span().start_byte())
-        );
-    }
-    for document in corpus.documents() {
-        assert_eq!(
-            fs::read_to_string(root.join(document.path())).unwrap(),
-            document.source()
-        );
-    }
-}
-
-#[test]
-fn retains_heading_text_and_exact_heading_spans_in_document_context() {
-    let fixture = TempDir::new().unwrap();
-    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
-    let schema = load_schema(&project).unwrap();
-    let lf = "# **Café** and `code` [guide][ref]\n\n:::mara requirement REQ-ONE\n:title: One\n\nBody.\n:::\n\n[ref]: https://example.com\n\n多行\nHeading\n=======\n\n## <https://example.com>\n";
-    for source in [lf.to_owned(), lf.replace('\n', "\r\n")] {
-        fs::write(fixture.path().join("heading.mara.md"), &source).unwrap();
-        let corpus = load_corpus(&project, &schema).unwrap();
-        let graph = corpus.discovery();
-        let titles = graph
-            .nodes()
-            .filter_map(|node| match node.kind() {
-                Node::Section { heading } => Some(heading.heading_text().unwrap()),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            titles,
-            ["Café and code guide", "多行 Heading", "https://example.com"]
-        );
-        let multiline = section(&graph, "多行 Heading");
-        let Node::Section { heading } = multiline.kind() else {
-            unreachable!()
-        };
-        let span = heading.source().span();
-        assert_eq!(
-            &source[span.start_byte()..span.end_byte()],
-            if source.contains('\r') {
-                "多行\r\nHeading\r\n=======\r\n"
-            } else {
-                "多行\nHeading\n=======\n"
-            }
-        );
-        assert_eq!(span.start_line(), 11);
-        assert_eq!(span.end_line(), 13);
-    }
-}
-
-#[test]
-fn preserves_final_narrative_lines_without_a_trailing_newline() {
-    let fixture = TempDir::new().unwrap();
-    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
-    let schema = load_schema(&project).unwrap();
-    for (lf, kind, children) in [
-        ("first\n終🙂", Block::Paragraph, 0),
-        ("- first\n- 終🙂", Block::List, 2),
-        ("> first\n> 終🙂", Block::Blockquote, 1),
-    ] {
-        for source in [lf.to_owned(), lf.replace('\n', "\r\n")] {
-            fs::write(fixture.path().join("eof.mara.md"), &source).unwrap();
-            let corpus = load_corpus(&project, &schema).unwrap();
-            let graph = corpus.discovery();
-            let content = graph.nodes().next().unwrap().children();
-            assert_eq!(content.len(), 1);
-            assert!(
-                matches!(content[0].kind(), Node::MarkdownBlock(block) if block.kind() == kind)
-            );
-            assert_eq!(text(content[0], &source), source);
-            assert_eq!(content[0].children().len(), children);
-            assert_eq!(content[0].source().span().end_line(), 2);
-            assert_eq!(
-                fs::read_to_string(fixture.path().join("eof.mara.md")).unwrap(),
-                source
-            );
-        }
-    }
-}
-
-#[test]
-fn item_heading_references_share_document_definition_context() {
-    let fixture = TempDir::new().unwrap();
-    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
-    let schema = load_schema(&project).unwrap();
-    let body = "# [guide][ref]\n\nBody.\n";
-    let item_source = format!(":::mara requirement REQ-ONE\n:title: One\n\n{body}:::\n");
-    for definition_before in [true, false] {
-        let definition = "[ref]: https://example.com\n\n";
-        let narrative = "# [guide][ref]\n\n";
-        let lf = if definition_before {
-            format!("{definition}{narrative}{item_source}")
-        } else {
-            format!("{narrative}{item_source}\n{definition}")
-        };
-        for source in [lf.clone(), lf.replace('\n', "\r\n")] {
-            fs::write(fixture.path().join("references.mara.md"), &source).unwrap();
-            let corpus = load_corpus(&project, &schema).unwrap();
-            let graph = corpus.discovery();
-            let one = item(&graph, "REQ-ONE");
-            let local = one.children()[0];
-            let Node::Section { heading } = local.kind() else {
-                panic!("missing local section")
-            };
-            assert_eq!(heading.heading_text(), Some("guide"));
-            assert_eq!(local.parent().unwrap().source(), one.source());
-            assert!(
-                matches!(one.parent().unwrap().kind(), Node::Section { heading } if heading.heading_text() == Some("guide"))
-            );
-            let span = heading.source().span();
-            assert_eq!(
-                &source[span.start_byte()..span.end_byte()],
-                if source.contains('\r') {
-                    "# [guide][ref]\r\n"
-                } else {
-                    "# [guide][ref]\n"
-                }
-            );
-            assert_eq!(
-                corpus.items().next().unwrap().body(),
-                if source.contains('\r') {
-                    body.replace('\n', "\r\n")
-                } else {
-                    body.to_owned()
-                }
-            );
-            assert_eq!(
-                fs::read_to_string(fixture.path().join("references.mara.md")).unwrap(),
-                source
-            );
-        }
-    }
-}
-
-#[test]
-fn heading_text_decodes_markdown_text_once_and_preserves_code_literals() {
-    let fixture = TempDir::new().unwrap();
-    let project = initialize_project(fixture.path(), Template::Minimal).unwrap();
-    let schema = load_schema(&project).unwrap();
-    let cases = [
-        (
-            r"A &amp; B &#169; &#x1F642; \*literal\* \\path \z",
-            r"A & B © 🙂 *literal* \path \z",
-        ),
-        (
-            r"&amp;copy; &#38;copy; \&copy; &bOgUs; &amp",
-            "&copy; &copy; &copy; &bOgUs; &amp",
-        ),
-        (
-            r"`&amp; &#65; \*literal\*` and **&lt;tag&gt;**",
-            r"&amp; &#65; \*literal\* and <tag>",
-        ),
-        (
-            r"&#92;plain &quot;quoted&quot; &apos;single&apos;",
-            r#"\plain "quoted" 'single'"#,
-        ),
-    ];
-    for newline in ["\n", "\r\n"] {
-        let headings = cases
-            .iter()
-            .map(|(authored, _)| format!("# {authored}{newline}{newline}"))
-            .collect::<String>();
-        let path = fixture.path().join("decoded.mara.md");
-        fs::write(&path, &headings).unwrap();
-        let created = Command::new(env!("CARGO_BIN_EXE_mara"))
-            .current_dir(fixture.path())
-            .args([
-                "item",
-                "create",
-                "requirement",
-                "REQ-DECODED",
-                "decoded.mara.md",
-                "--title",
-                "Decoded headings",
-                "--body",
-                &headings,
-            ])
-            .output()
-            .unwrap();
-        assert!(
-            created.status.success(),
-            "{}",
-            String::from_utf8_lossy(&created.stderr)
-        );
-        let original = fs::read_to_string(&path).unwrap();
-        let corpus = load_corpus(&project, &schema).unwrap();
-        let graph = corpus.discovery();
-        let sections = graph
-            .nodes()
-            .filter_map(|node| match node.kind() {
-                Node::Section { heading } => Some((node, heading)),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(sections.len(), cases.len() * 2);
-        for (index, (node, heading)) in sections.iter().enumerate() {
-            let (authored, expected) = cases[index % cases.len()];
-            assert_eq!(heading.heading_text(), Some(expected));
-            let span = heading.source().span();
-            assert_eq!(
-                &original[span.start_byte()..span.end_byte()],
-                format!("# {authored}{newline}")
-            );
-            if index >= cases.len() {
-                assert!(
-                    matches!(node.parent().unwrap().kind(), Node::Item(item) if item.id() == "REQ-DECODED")
-                );
-            }
-        }
-        assert_eq!(corpus.items().next().unwrap().body(), headings);
-        assert_eq!(fs::read_to_string(&path).unwrap(), original);
-    }
 }

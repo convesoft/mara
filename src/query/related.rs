@@ -81,6 +81,10 @@ impl<'a> RelationName<'a> {
 
 /// Direct connections only; outgoing first, then neighbour source order and
 /// authored evidence order within each direction. Parallel edges stay distinct.
+// @mara implements REQ-DIRECT-KNOWLEDGE-NEIGHBOURS
+// @mara implements REQ-ITEM-RELATED
+// @mara implements REQ-RELATED-PAGINATION
+// @mara implements DES-DIRECT-NAVIGATION
 pub fn related(
     corpus: &Corpus,
     schema: &Schema,

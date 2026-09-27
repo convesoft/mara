@@ -27,11 +27,36 @@ tarballs="$temporary/tarballs"
 install="$temporary/install"
 project="$temporary/project"
 mkdir -p "$packages" "$tarballs" "$install" "$project"
+export npm_config_cache="$temporary/npm-cache"
+# All projects and package-manager state belong to this smoke run.
+while IFS= read -r variable; do
+  unset "$variable"
+done < <(compgen -v GIT_ || true)
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+export GIT_CEILING_DIRECTORIES="$temporary" XDG_CONFIG_HOME="$temporary/config"
 
 platform_package=$(node scripts/package-npm.mjs platform "$target" "$binary" "$packages")
 main_package=$(node scripts/package-npm.mjs main "$packages")
-npm pack "$platform_package" --pack-destination "$tarballs" >/dev/null
-npm pack "$main_package" --pack-destination "$tarballs" >/dev/null
+npm pack "$platform_package" --pack-destination "$tarballs" --json > "$temporary/platform-pack.json"
+npm pack "$main_package" --pack-destination "$tarballs" --json > "$temporary/main-pack.json"
+node - "$main_package" "$platform_package" "$temporary" <<'NODE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const [main, platform, temporary] = process.argv.slice(2);
+const manifest = directory => JSON.parse(fs.readFileSync(path.join(directory, "package.json")));
+const files = name => JSON.parse(fs.readFileSync(path.join(temporary, name)))[0].files.map(f => f.path).sort();
+assert.deepEqual(files("main-pack.json"), ["LICENSE-APACHE", "LICENSE-MIT", "README.md", "bin/mara.cjs", "package.json", "skills/mara/SKILL.md"].sort());
+assert.deepEqual(files("platform-pack.json"), ["LICENSE-APACHE", "LICENSE-MIT", "README.md", "bin/mara", "package.json"].sort());
+const mainManifest = manifest(main), platformManifest = manifest(platform);
+assert.equal(mainManifest.version, platformManifest.version);
+assert.deepEqual(mainManifest.bin, { mara: "bin/mara.cjs" });
+assert.deepEqual(Object.keys(mainManifest.optionalDependencies).sort(), ["@convesoft/mara-linux-x64-gnu", "@convesoft/mara-linux-arm64-gnu", "@convesoft/mara-darwin-x64", "@convesoft/mara-darwin-arm64"].sort());
+assert.ok(Object.values(mainManifest.optionalDependencies).every(v => v === mainManifest.version));
+assert.equal(mainManifest.scripts, undefined);
+assert.equal(platformManifest.scripts, undefined);
+console.log("PASS actual packed CLI/skill/native file inventories and exact package versions");
+NODE
 
 platform_filename=$(node -e \
   'const p=require(process.argv[1]); process.stdout.write(`${p.name.slice(1).replace("/", "-")}-${p.version}.tgz`)' \
@@ -45,8 +70,7 @@ main_tarball="$tarballs/$main_filename"
 test -f "$platform_tarball"
 test -f "$main_tarball"
 
-export npm_config_cache="$temporary/npm-cache"
-npm install \
+npm install --offline \
   --prefix "$install" \
   --ignore-scripts \
   --no-audit \
@@ -82,7 +106,7 @@ printf '%s\n' \
 node - "$mara" "$temporary/engineering" "$version" <<'NODE'
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
-const { mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } = require("node:fs");
+const { closeSync, mkdirSync, openSync, readdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } = require("node:fs");
 const path = require("node:path");
 const [mara, engineering, version] = process.argv.slice(2);
 let project = engineering;
@@ -97,13 +121,13 @@ for (const command of ["cargo", "rustc", "rustup", "mara"]) {
 mkdirSync(project);
 for (const args of [
   ["project", "init", "--template", "engineering"],
-  ["item", "create", "requirement", "REQ-ACCESS", "knowledge.mara.md", "--title", "Permit access", "--body", "An authorized user can access the service."],
+  ["item", "create", "requirement", "REQ-ACCESS", "knowledge.mara.md", "--title", "Permit access", "--body", "An authorized user can access the service.", "--field", "status=draft"],
 ]) {
   const output = spawnSync(mara, ["--project", project, ...args], { cwd: project, env, encoding: "utf8" });
   assert.equal(output.status, 0, output.stderr || output.stdout);
   if (args[0] === "project") {
     assert.deepEqual(readdirSync(project), [".mara"]);
-    assert.deepEqual(readdirSync(path.join(project, ".mara")).sort(), ["project.toml", "schema.yaml"]);
+    assert.deepEqual(readdirSync(path.join(project, ".mara")).sort(), ["engineering-checks.yaml", "engineering-execution.yaml", "engineering-rules.yaml", "project.toml", "schema.yaml"]);
   }
 }
 const call = (id, name, args) => ({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
@@ -111,12 +135,27 @@ const requests = [
   { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "mara-npm-smoke", version: "1" } } },
   { jsonrpc: "2.0", method: "notifications/initialized" },
   call(2, "schema_get", {}),
-  call(3, "item_create", { flavour: "verification", id: "VER-ACCESS", file: "knowledge.mara.md", title: "Check access", body: "Demonstrate that an authorized user can access the service." }),
+  call(3, "item_create", { flavour: "verification", id: "VER-ACCESS", file: "knowledge.mara.md", title: "Check access", body: "Demonstrate that an authorized user can access the service.", fields: [{ key: "status", value: "draft" }] }),
   call(4, "relation_add", { source: "VER-ACCESS", relation: "verifies", target: "REQ-ACCESS" }),
   call(5, "related", { reference: "REQ-ACCESS", direction: "incoming", relations: ["verifies"] }),
   call(6, "project_validate", {}),
 ];
-const output = spawnSync(mara, ["mcp", "--project", project], { cwd: project, env, input: requests.map(JSON.stringify).join("\n") + "\n", encoding: "utf8" });
+// A regular input descriptor supplies EOF reliably to the stdio server;
+// Node's synchronous subprocess input socket can remain open after all replies.
+const exchange = messages => {
+  const inputPath = path.join(path.dirname(project), "mcp-requests.jsonl");
+  writeFileSync(inputPath, messages.map(JSON.stringify).join("\n") + "\n");
+  const input = openSync(inputPath, "r");
+  try {
+    return spawnSync(mara, ["mcp", "--project", project], {
+      cwd: project, env, stdio: [input, "pipe", "pipe"], encoding: "utf8", timeout: 30_000,
+    });
+  } finally {
+    closeSync(input);
+    unlinkSync(inputPath);
+  }
+};
+const output = exchange(requests);
 assert.equal(output.status, 0, output.stderr);
 const responses = output.stdout.trim().split("\n").map(JSON.parse);
 const result = id => {
@@ -141,12 +180,7 @@ const cli = args => {
   return JSON.parse(output.stdout);
 };
 const mcp = request => {
-  const output = spawnSync(mara, ["mcp", "--project", project], {
-    cwd: project,
-    env,
-    input: [requests[0], requests[1], request].map(JSON.stringify).join("\n") + "\n",
-    encoding: "utf8",
-  });
+  const output = exchange([requests[0], requests[1], request]);
   assert.equal(output.status, 0, output.stderr);
   const response = output.stdout.trim().split("\n").map(JSON.parse).find(response => response.id === request.id);
   assert.ok(response, output.stdout);
@@ -211,7 +245,7 @@ console.log("PASS packaged guidance and narrative → requirement → verificati
 
 // Extend the same real project with a design and cross-document narrative context.
 cli(["item", "create", "design", "DES-ACCESS", "knowledge.mara.md", "--title", "Access gate",
-  "--body", "Check authorization before granting access.", "--relation", "satisfies=REQ-ACCESS"]);
+  "--body", "Check authorization before granting access.", "--field", "status=draft", "--relation", "satisfies=REQ-ACCESS"]);
 mkdirSync(path.join(project, "docs"));
 writeFileSync(path.join(project, "docs/policy.mara.md"), "# Access policy\n\nApply the authorization gate.\n\n## Audit\n\nRetain access decisions.\n");
 writeFileSync(path.join(project, "context.mara.md"), "# Access context\n\nStart access here: [[REQ-ACCESS]].\n\n[Policy](./docs/policy.mara.md#access-policy) and [document](./docs/policy.mara.md).\n");
@@ -314,12 +348,31 @@ assert.ok(read(fresh.reference).content.startsWith("Unicode"));
 assert.equal(parity(["project", "validate"], "project_validate", {}).valid, true);
 console.log("PASS stale search/get/related cursors and structural handles reject; rediscovery succeeds");
 
-// Use the guide's customized schema, generating genuine item identities before
-// staging its format-1 state. This fixture does not require an old executable.
-const examples = [...readFileSync("docs/migration-0.2.mara.md", "utf8").matchAll(/```yaml\n([\s\S]*?)```/g)].map(match => match[1]);
-assert.equal(examples.length, 2);
-const [before, previous] = examples;
-const after = previous.replace("format_version: 2", "format_version: 3");
+// Verify format rejection and in-place guidance repair in a customized schema.
+// Fixture data belongs to this isolated project, not product documentation.
+const after = `format_version: 3
+flavours:
+  term:
+    description: Controlled project vocabulary.
+    use_when:
+      - Define a project-specific concept whose meaning needs clarification.
+    avoid_when:
+      - Repeat an ordinary word's dictionary meaning.
+    distinguish_from: {}
+    id_prefix: TERM-
+    body: required
+    fields:
+      alias:
+        type: string
+        repeatable: true
+relations:
+  clarifies:
+    description: The source clarifies the meaning of the target term.
+    source: [term]
+    target: [term]
+`;
+const before = after.replace("format_version: 3", "format_version: 1")
+  .replace(/    use_when:[\s\S]*?(?=    id_prefix:)/, "");
 project = path.join(path.dirname(engineering), "customized");
 mkdirSync(project);
 cli(["project", "init", "--template", "empty"]);
@@ -332,15 +385,15 @@ const originalSchema = cli(["schema", "get"]);
 const originalDocument = readFileSync(path.join(project, "terms.mara.md"));
 const originalConfig = readFileSync(path.join(project, ".mara/project.toml"));
 writeFileSync(schemaPath, before);
-rejects(["schema", "validate"], "schema_validate", {}, /migrate/);
+rejects(["schema", "validate"], "schema_validate", {}, /expected 3/);
 assert.equal(readFileSync(schemaPath, "utf8"), before);
 writeFileSync(schemaPath, before.replace("format_version: 1", "format_version: 3"));
 rejects(["schema", "validate"], "schema_validate", {}, /use_when/);
-// Migrate in place by changing the version and adding guidance only.
+// Repair the format declaration and required guidance without reinitializing.
 const guidance = after.slice(after.indexOf("    use_when:"), after.indexOf("    id_prefix:"));
-const migrated = before.replace("format_version: 1", "format_version: 3").replace("    id_prefix:", guidance + "    id_prefix:");
-assert.equal(migrated, after);
-writeFileSync(schemaPath, migrated);
+const repaired = before.replace("format_version: 1", "format_version: 3").replace("    id_prefix:", guidance + "    id_prefix:");
+assert.equal(repaired, after);
+writeFileSync(schemaPath, repaired);
 assert.deepEqual(parity(["schema", "get"], "schema_get", {}), originalSchema);
 assert.deepEqual(parity(["item", "list"], "item_list", {}), originalItems);
 assert.deepEqual(readFileSync(path.join(project, "terms.mara.md")), originalDocument);
@@ -356,5 +409,5 @@ assert.ok(!created.error && !created.result.isError, JSON.stringify(created));
 assert.ok(created.result.structuredContent.mid);
 assert.equal(parity(["related", "TERM-CUSTOM", "--relation", "clarifies", "--direction", "incoming"], "related", { reference: "TERM-CUSTOM", relations: ["clarifies"], direction: "incoming" }).connections[0].neighbour.id, "TERM-NEW");
 assert.equal(parity(["project", "validate"], "project_validate", {}).valid, true);
-console.log("PASS customized format-1 migration preserves schema declarations, repeated fields, relations, IDs/MIDs and source bytes; new MCP authoring succeeds");
+console.log("PASS custom schema repair preserves schema declarations, repeated fields, relations, IDs/MIDs and source bytes; new MCP authoring succeeds");
 NODE

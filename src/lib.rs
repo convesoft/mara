@@ -11,56 +11,54 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 mod code;
+use code::LanguageConfig;
+pub use code::{CodeFile, CodeIndex, CodeMarker, CodeProblem, CodeSymbol};
 mod corpus;
 mod diagnostics;
-mod discovery;
-pub use diagnostics::{
-    ConfigurationDiagnostic, DiagnosticCode, DiagnosticItem, DiagnosticLocation,
-    DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
-};
-mod external;
-mod graph_constraints;
-mod mutation;
-mod operations;
-mod query;
-mod relations;
-mod rules;
-mod trace;
-pub use relations::{
-    RelationEdge, RelationEndpoint, RelationError, RelationInspection, RelationOccurrence,
-};
-
 pub use corpus::{
-    Corpus, Diagnostic, Document, DocumentReference, Item, MarkdownBlock, MarkdownBlockKind,
-    Mention, MetadataEntry, ReferenceKind, Relation, SourceLocation, SourceSpan, load_corpus,
-    load_corpus_for_validation, load_corpus_syntax_for_validation, validate_corpus,
+    Corpus, Diagnostic, Document, DocumentReference, DocumentSet, Item, MarkdownBlock,
+    MarkdownBlockKind, Mention, MetadataEntry, ReferenceKind, Relation, SourceLocation, SourceSpan,
+    load_corpus, load_corpus_for_validation, load_corpus_syntax_for_validation, load_documents,
+    load_documents_for_validation, load_documents_syntax_for_validation, validate_corpus,
     validate_corpus_independent,
 };
+mod discovery;
 pub use discovery::{
     ConnectionKind, DiscoveryConnection, DiscoveryContext, DiscoveryGraph, DiscoveryKind,
     DiscoveryNode, DiscoveryNodeKind, DiscoveryNodeSummary,
 };
-pub use mutation::{
-    BackfilledMid, BackfilledMids, InitialRelation, ItemCreation, ItemCreationRequest,
-    ItemDeletion, ItemLocation, ItemMove, ItemRename, ItemUpdate, ItemUpdateWarning,
-    RelationMutation, TransactionRollback, add_relation, backfill_mids, create_item, delete_item,
-    move_item, remove_relation, rename_item, rollback_transaction, update_item,
+mod external;
+mod relations;
+pub use relations::{
+    RelationEdge, RelationEndpoint, RelationError, RelationErrorDetail, RelationInspection,
+    RelationOccurrence,
 };
-pub use operations::{
-    DeclarationSummary, FieldValue, GetParams, ItemCreateParams, ItemCreationResult,
-    ItemFilterParams, ItemIdParams, ItemMoveParams, ItemUpdateParams, OperationContext,
-    ProjectInitializationResult, ProjectMidBackfillResult, ProjectSummary, RelatedParams,
-    RelationAction, RelationMutationResult, RelationParams, SchemaGetResult, SchemaKind,
-    SchemaListResult, SchemaValidationResult, SearchParams, TransactionRollbackResult,
-    ValidationDiagnostic, ValidationResult, ValidationScope, ValidationSelection, ValidationTarget,
-    ValidationTargetKind, project_initialize,
-};
+mod query;
 pub use query::{
     EntryRange, FieldFilter, GetResult, ItemCollectionResult, ItemFilters, ItemSource, ItemSummary,
-    MetadataFragment, MetadataValue, QueryError, RelatedConnection, RelatedFilters, RelatedItem,
-    RelatedItemsResult, RelatedNeighbour, RelatedResult, RelationDirection, RelationSummary,
-    ResolvedItem, SearchExcerpt, SearchHit, SearchResult, TextRange, get, get_item, list_items,
-    related, related_items, search, search_items,
+    MetadataFragment, QueryError, RelatedConnection, RelatedFilters, RelatedNeighbour,
+    RelatedResult, RelationDirection, SearchExcerpt, SearchHit, SearchResult, TextRange, get,
+    list_items, related, search,
+};
+mod mutation;
+pub use mutation::{
+    BackfilledMid, BackfilledMids, TransactionRollback, backfill_mids, rollback_transaction,
+};
+pub use mutation::{InitialRelation, ItemCreation, ItemCreationRequest, create_item};
+mod graph_constraints;
+mod operations;
+mod rules;
+mod trace;
+pub use diagnostics::{
+    ConfigurationDiagnostic, DiagnosticCode, DiagnosticItem, DiagnosticLocation,
+    DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
+};
+pub use operations::{
+    BackfilledMidResult, DeclarationSummary, FieldValue, GetParams, ItemCreateParams,
+    ItemCreationResult, ItemFilterParams, OperationContext, ProjectInitializationResult,
+    ProjectMidBackfillResult, ProjectSummary, RelatedParams, RelationParams, SchemaGetResult,
+    SchemaKind, SchemaListResult, SearchParams, TransactionRollbackResult, ValidationDiagnostic,
+    ValidationResult, ValidationScope, ValidationTarget, ValidationTargetKind, project_initialize,
 };
 pub use trace::{
     TraceCheck, TraceField, TraceMatrixParams, TraceMatrixResult, TraceMatrixSummary,
@@ -88,7 +86,7 @@ pub struct Project {
     content_patterns: Vec<String>,
     content_discovery_complete: bool,
     rule_files: Vec<PathBuf>,
-    code_languages: Vec<code::LanguageConfig>,
+    code_languages: Vec<LanguageConfig>,
 }
 
 #[derive(Debug)]
@@ -769,6 +767,14 @@ impl RelationDefinition {
 }
 
 impl Project {
+    pub(crate) fn code_languages(&self) -> &[LanguageConfig] {
+        &self.code_languages
+    }
+
+    pub(crate) fn content_discovery_is_complete(&self) -> bool {
+        self.content_discovery_complete
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -784,18 +790,15 @@ impl Project {
     pub fn content_patterns(&self) -> &[String] {
         &self.content_patterns
     }
-
-    pub(crate) fn content_discovery_is_complete(&self) -> bool {
-        self.content_discovery_complete
-    }
-
-    pub(crate) fn code_languages(&self) -> &[code::LanguageConfig] {
-        &self.code_languages
-    }
 }
 
 #[derive(Debug)]
 pub enum Error {
+    InvalidDocument {
+        path: PathBuf,
+        line: usize,
+        message: String,
+    },
     ExistingProject {
         path: PathBuf,
     },
@@ -813,11 +816,6 @@ pub enum Error {
         path: PathBuf,
         message: String,
     },
-    InvalidDocument {
-        path: PathBuf,
-        line: usize,
-        message: String,
-    },
     InvalidMutation {
         message: String,
     },
@@ -831,6 +829,15 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidDocument {
+                path,
+                line,
+                message,
+            } => write!(
+                formatter,
+                "invalid Mara document at {}:{line}: {message}",
+                path.display()
+            ),
             Self::ExistingProject { path } => {
                 write!(
                     formatter,
@@ -862,15 +869,6 @@ impl fmt::Display for Error {
                     path.display()
                 )
             }
-            Self::InvalidDocument {
-                path,
-                line,
-                message,
-            } => write!(
-                formatter,
-                "invalid Mara document at {}:{line}: {message}",
-                path.display()
-            ),
             Self::InvalidMutation { message } => write!(formatter, "{message}"),
             Self::Io {
                 action,
@@ -896,6 +894,15 @@ struct ProjectFile {
     format_version: u32,
     project: ProjectSection,
     content: ContentSection,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rules: Option<TemplateRules>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TemplateRules {
+    format_version: u32,
+    files: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -911,6 +918,8 @@ struct ContentSection {
     include: Vec<String>,
 }
 
+// @mara implements REQ-PROJECT-INITIALIZATION
+// @mara implements REQ-ENGINEERING-TEMPLATE
 pub fn initialize_project(target: impl AsRef<Path>, template: Template) -> Result<Project, Error> {
     let target = target.as_ref();
     fs::create_dir_all(target).map_err(|source| Error::Io {
@@ -932,12 +941,39 @@ pub fn initialize_project(target: impl AsRef<Path>, template: Template) -> Resul
     }
 
     let project_path = root.join(PROJECT_FILE);
-    let schema_path = root.join(SCHEMA_FILE);
     if path_exists(&project_path)? {
         return Err(Error::ExistingProject { path: project_path });
     }
-    if path_exists(&schema_path)? {
-        return Err(Error::WouldOverwrite { path: schema_path });
+
+    let name = root
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("mara-project");
+    let project_source = project_template(name, template)?;
+    let mut files = vec![(SCHEMA_FILE, schema_template(template))];
+    if template == Template::Engineering {
+        files.extend([
+            (
+                ".mara/engineering-rules.yaml",
+                include_str!("../templates/engineering-rules.yaml"),
+            ),
+            (
+                ".mara/engineering-checks.yaml",
+                include_str!("../templates/engineering-checks.yaml"),
+            ),
+            (
+                ".mara/engineering-execution.yaml",
+                include_str!("../templates/engineering-execution.yaml"),
+            ),
+        ]);
+    }
+    files.push((PROJECT_FILE, &project_source));
+    for (path, _) in &files {
+        let path = root.join(path);
+        if path_exists(&path)? {
+            return Err(Error::WouldOverwrite { path });
+        }
     }
 
     let mara_directory = root.join(".mara");
@@ -948,35 +984,25 @@ pub fn initialize_project(target: impl AsRef<Path>, template: Template) -> Resul
         source,
     })?;
 
-    if let Err(error) = write_new(&schema_path, schema_template(template)) {
-        remove_empty_directory(created_mara_directory, &mara_directory);
-        return Err(error);
-    }
-
-    let name = root
-        .file_name()
-        .and_then(|value| value.to_str())
-        .filter(|value| !value.is_empty())
-        .unwrap_or("mara-project");
-    let project_source = match project_template(name) {
-        Ok(source) => source,
-        Err(error) => {
-            let _ = fs::remove_file(&schema_path);
+    let mut created = Vec::new();
+    for (path, source) in files {
+        let path = root.join(path);
+        if let Err(error) = write_new(&path, source) {
+            for path in &created {
+                let _ = fs::remove_file(path);
+            }
             remove_empty_directory(created_mara_directory, &mara_directory);
             return Err(error);
         }
-    };
-    if let Err(error) = write_new(&project_path, &project_source) {
-        let _ = fs::remove_file(&schema_path);
-        remove_empty_directory(created_mara_directory, &mara_directory);
-        return Err(error);
+        created.push(path);
     }
 
     match resolve_project(None, &root) {
         Ok(project) => Ok(project),
         Err(error) => {
-            let _ = fs::remove_file(&project_path);
-            let _ = fs::remove_file(&schema_path);
+            for path in &created {
+                let _ = fs::remove_file(path);
+            }
             remove_empty_directory(created_mara_directory, &mara_directory);
             Err(error)
         }
@@ -999,6 +1025,7 @@ pub fn resolve_project_for_validation(
     load_project_root_for_validation(&root)
 }
 
+// @mara implements REQ-PROJECT-DISCOVERY
 fn resolve_project_root(
     explicit_root: Option<&Path>,
     discovery_start: &Path,
@@ -1105,11 +1132,11 @@ pub fn load_schema_for_validation(
     let format_version_invalid = format_version.is_none();
     let format_version = format_version.unwrap_or_default();
     if !format_version_invalid && format_version != SCHEMA_FORMAT_VERSION {
-        errors.insert(0, ConfigurationDiagnostic::new(DiagnosticCode::FormatUnsupported, "/format_version".into(), if matches!(format_version, 1 | 2) {
-            format!("schema format version {format_version} requires explicit migration: migrate the existing schema to format_version: 3; format 1 also requires description, use_when, avoid_when, and distinguish_from on every flavour. Preserve custom declarations and item identities, do not reinitialize. See https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md")
-        } else {
-            format!("unsupported schema format version {format_version}; expected {SCHEMA_FORMAT_VERSION}; migrate the existing schema explicitly; see https://github.com/convesoft/mara/blob/main/docs/migration-0.3.mara.md")
-        }));
+        errors.insert(0, ConfigurationDiagnostic::new(
+            DiagnosticCode::FormatUnsupported,
+            "/format_version".into(),
+            format!("unsupported schema format version {format_version}; expected {SCHEMA_FORMAT_VERSION}. Edit the schema in place, preserving custom declarations and item identities. Every flavour requires description, use_when, avoid_when and distinguish_from; validate the schema and project after editing"),
+        ));
     }
     let flavour_values: Option<BTreeMap<String, SchemaValue>> =
         decode_schema_configuration_value(flavours, "flavours", &mut errors);
@@ -1181,6 +1208,7 @@ pub fn load_schema_for_validation(
     Ok((schema, errors))
 }
 
+// @mara implements DES-FLAVOUR-AUTHORING-GUIDANCE
 fn recover_flavour(name: &str, value: &SchemaValue) -> Result<RecoveredFlavour, String> {
     let configuration: FlavourFileForValidation = decode_schema_declaration(value)?;
     let mut errors = configuration
@@ -1481,9 +1509,11 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
         }
         if let Some(mut code) = take_project_table(&mut configuration, "code", "code", &mut errors)
         {
-            code_languages =
-                take_project_value(&mut code, "languages", "code.languages", &mut errors)
-                    .unwrap_or_default();
+            if code.contains_key("languages") {
+                code_languages =
+                    take_project_value(&mut code, "languages", "code.languages", &mut errors)
+                        .unwrap_or_default();
+            }
             unknown_project_keys(&code, "code", &mut errors);
         }
     }
@@ -1494,7 +1524,7 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
             DiagnosticCode::FormatUnsupported,
             diagnostics::pointer(&["format_version"]),
             format!(
-                "unsupported project format version {}; use a compatible Mara version or explicitly migrate the configuration, preserving its settings. Supported formats are 1 (without rules or code), 2 (without code), and 3",
+                "unsupported project format version {}; supported formats are 1 (without rules or code), 2 (without code), and 3 (code language bindings). Preserve project settings when editing the configuration",
                 format_version.expect("format version is present")
             ),
         ));
@@ -1735,32 +1765,6 @@ fn is_id_prefix(prefix: &str) -> bool {
         })
 }
 
-pub(crate) fn is_item_id(id: &str) -> bool {
-    let mut segments = id.split('-');
-    let Some(first) = segments.next() else {
-        return false;
-    };
-    let mut characters = first.chars();
-    let valid_first = characters
-        .next()
-        .is_some_and(|character| character.is_ascii_uppercase())
-        && characters.all(|character| character.is_ascii_uppercase() || character.is_ascii_digit());
-    valid_first
-        && segments.clone().next().is_some()
-        && segments.all(|segment| {
-            !segment.is_empty()
-                && segment
-                    .chars()
-                    .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
-        })
-}
-
-pub(crate) fn is_mid(value: &str) -> bool {
-    value
-        .parse::<ulid::Ulid>()
-        .is_ok_and(|mid| mid.to_string() == value)
-}
-
 fn endpoint_errors(
     relation: &str,
     endpoint: &str,
@@ -1841,9 +1845,13 @@ fn remove_empty_directory(created: bool, directory: &Path) {
     }
 }
 
-fn project_template(name: &str) -> Result<String, Error> {
+fn project_template(name: &str, template: Template) -> Result<String, Error> {
     toml::to_string_pretty(&ProjectFile {
-        format_version: 1,
+        format_version: if template == Template::Engineering {
+            2
+        } else {
+            1
+        },
         project: ProjectSection {
             name: name.into(),
             schema: SCHEMA_FILE.into(),
@@ -1851,6 +1859,10 @@ fn project_template(name: &str) -> Result<String, Error> {
         content: ContentSection {
             include: vec!["**/*.mara.md".into()],
         },
+        rules: (template == Template::Engineering).then(|| TemplateRules {
+            format_version: 1,
+            files: vec![".mara/engineering-rules.yaml".into()],
+        }),
     })
     .map_err(|source| Error::InvalidProject {
         path: PathBuf::from(PROJECT_FILE),
@@ -1865,3 +1877,41 @@ fn schema_template(template: Template) -> &'static str {
         Template::Engineering => include_str!("../templates/engineering-schema.yaml"),
     }
 }
+
+pub(crate) fn is_item_id(id: &str) -> bool {
+    let mut segments = id.split('-');
+    let Some(first) = segments.next() else {
+        return false;
+    };
+    let mut characters = first.chars();
+    let valid_first = characters
+        .next()
+        .is_some_and(|character| character.is_ascii_uppercase())
+        && characters.all(|character| character.is_ascii_uppercase() || character.is_ascii_digit());
+    valid_first
+        && segments.clone().next().is_some()
+        && segments.all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .all(|character| character.is_ascii_uppercase() || character.is_ascii_digit())
+        })
+}
+
+pub(crate) fn is_mid(value: &str) -> bool {
+    value
+        .parse::<ulid::Ulid>()
+        .is_ok_and(|mid| mid.to_string() == value)
+}
+
+pub use operations::{RelationAction, RelationMutationResult};
+
+pub use mutation::{ItemUpdate, ItemUpdateWarning, update_item};
+pub use operations::ItemUpdateParams;
+
+pub use mutation::{ItemDeletion, delete_item};
+
+pub use mutation::{ItemLocation, ItemMove, move_item};
+pub use operations::ItemMoveParams;
+
+pub use mutation::{ItemRename, rename_item};

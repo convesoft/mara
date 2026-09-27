@@ -9,7 +9,8 @@ flavours:
     distinguish_from: {}
     id_prefix: TERM-
     body: required
-    fields: {}
+    fields:
+      status: {type: enum, required: true, values: [draft, accepted, retired]}
   actor:
     description: A durable participant role or external system.
     use_when:
@@ -19,7 +20,8 @@ flavours:
     distinguish_from: {}
     id_prefix: ACT-
     body: required
-    fields: {}
+    fields:
+      status: {type: enum, required: true, values: [draft, accepted, retired]}
   goal:
     description: A durable desired stakeholder or product outcome.
     use_when:
@@ -30,7 +32,8 @@ flavours:
       scenario: "Describes a concrete behavioural flow rather than a broader desired outcome."
     id_prefix: GOAL-
     body: required
-    fields: {}
+    fields:
+      status: {type: enum, required: true, values: [draft, accepted, retired]}
   scenario:
     description: A concrete behavioural flow with an observable outcome.
     use_when:
@@ -41,7 +44,8 @@ flavours:
       requirement: States an obligation that may apply across multiple flows.
     id_prefix: SCN-
     body: required
-    fields: {}
+    fields:
+      status: {type: enum, required: true, values: [draft, accepted, retired]}
   requirement:
     description: An independently verifiable obligation.
     use_when:
@@ -53,7 +57,10 @@ flavours:
       design: Defines how an obligation is satisfied.
     id_prefix: REQ-
     body: required
-    fields: {}
+    fields:
+      status: {type: enum, required: true, values: [draft, accepted, retired]}
+      kind: {type: enum, values: [functional, quality, constraint]}
+      concern: {type: string, repeatable: true}
   design:
     description: A solution or interface contract that satisfies requirements.
     use_when:
@@ -65,7 +72,10 @@ flavours:
       decision: Records why a consequential choice was selected.
     id_prefix: DES-
     body: required
-    fields: {}
+    fields:
+      status: {type: enum, required: true, values: [draft, accepted, retired]}
+      kind: {type: enum, values: [structure, behavior, interface, data, deployment]}
+      concern: {type: string, repeatable: true}
   decision:
     description: A consequential choice and its durable rationale.
     use_when:
@@ -76,7 +86,8 @@ flavours:
       design: Defines the selected solution contract rather than selection rationale.
     id_prefix: ADR-
     body: required
-    fields: {}
+    fields:
+      status: {type: enum, required: true, values: [draft, accepted, retired]}
   risk:
     description: A material uncertain condition that could cause harm.
     use_when:
@@ -86,7 +97,11 @@ flavours:
     distinguish_from: {}
     id_prefix: RISK-
     body: required
-    fields: {}
+    fields:
+      status: {type: enum, required: true, values: [draft, accepted, retired]}
+      treatment: {type: enum, values: [open, mitigated, tolerated]}
+      impact: {type: enum, values: [low, medium, high]}
+      likelihood: {type: enum, values: [low, medium, high]}
   verification:
     description: A repeatable verification or validation method.
     use_when:
@@ -97,7 +112,10 @@ flavours:
       evidence: "Records the result and provenance of one verification execution."
     id_prefix: VER-
     body: required
-    fields: {}
+    fields:
+      status: {type: enum, required: true, values: [draft, accepted, retired]}
+      method: {type: enum, values: [test, inspection, analysis, demonstration]}
+      level: {type: enum, values: [unit, integration, system, acceptance]}
   evidence:
     description: One concrete verification or validation result with provenance.
     use_when:
@@ -108,7 +126,11 @@ flavours:
       verification: "Defines a repeatable method and its observable expectations."
     id_prefix: EVD-
     body: required
-    fields: {}
+    fields:
+      status: {type: enum, required: true, values: [draft, accepted, retired]}
+      result: {type: enum, values: [passed, failed, inconclusive]}
+      captured_at: {type: string}
+      subject_revision: {type: string}
   artifact:
     description: A concrete implementation or external output with independent identity.
     use_when:
@@ -118,38 +140,103 @@ flavours:
     distinguish_from: {}
     id_prefix: ART-
     body: required
-    fields: {}
+    fields:
+      status: {type: enum, required: true, values: [draft, accepted, retired]}
 relations:
-  code_implements:
-    description: The code implements the requirement; the association does not prove correctness.
-    source: []
-    target: [requirement]
-    code_source: true
-    inverse: implemented_by_code
-  code_verifies:
-    description: The code defines a check of the requirement; the association does not report execution results.
-    source: []
-    target: [requirement]
-    code_source: true
-    inverse: verified_by_code
   derives_from:
-    description: The source originates from or refines the target’s intent. Use for a direct semantic basis, not chronology or general association.
+    description: The source originates from the target's intent or authority. Use refines for decomposition and sourced_from for an external source.
     source: [requirement, design]
-    target: [scenario, requirement]
+    target: [scenario, requirement, artifact]
+    inverse: source_of
+    acyclic: {severity: error}
+  contributes_to:
+    description: The scenario or requirement advances the target goal.
+    source: [scenario, requirement]
+    target: [goal]
+    inverse: supported_by
+  involves:
+    description: The actor participates in the scenario.
+    source: [scenario]
+    target: [actor]
+    inverse: involved_in
+  refines:
+    description: The source gives a more specific part or elaboration of the target, without replacing it.
+    source: [goal, requirement, design]
+    target: [goal, requirement, design]
+    same_flavour: true
+    inverse: refined_by
+    acyclic: {severity: error}
   depends_on:
-    description: The source cannot be satisfied, understood, or implemented independently of the target. Do not use merely because items concern the same topic.
+    description: The source cannot be satisfied, understood, or implemented independently of the target.
     source: [term, actor, goal, scenario, requirement, design, decision, risk, verification, evidence, artifact]
     target: [term, actor, goal, scenario, requirement, design, decision, risk, verification, evidence, artifact]
+    inverse: required_by
   satisfies:
-    description: The source design provides a solution contract for the target requirement.
+    description: The design provides a solution contract for the requirement.
     source: [design]
     target: [requirement]
+    inverse: satisfied_by
   justifies:
-    description: The source decision preserves the reasoning for the target.
+    description: The decision records the rationale for the requirement, design, or risk treatment.
     source: [decision]
-    target: [requirement, design]
+    target: [requirement, design, risk]
+    inverse: justified_by
   supersedes:
-    description: The source replaces an older target of the same flavour, retaining the target as history. Do not use for ordinary revisions of one item.
+    description: The source replaces an older target of the same flavour, retaining it as history. Do not use for ordinary edits.
     source: [term, actor, goal, scenario, requirement, design, decision, risk, verification, evidence, artifact]
     target: [term, actor, goal, scenario, requirement, design, decision, risk, verification, evidence, artifact]
     same_flavour: true
+    inverse: superseded_by
+    acyclic: {severity: error}
+  verifies:
+    description: The verification defines how to check conformance to the requirement or design.
+    source: [verification]
+    target: [requirement, design]
+    inverse: verified_by
+  validates:
+    description: The verification defines how to check achievement of the goal or scenario outcome.
+    source: [verification]
+    target: [goal, scenario]
+    inverse: validated_by
+  evidences:
+    description: The evidence records a concrete result of performing the verification.
+    source: [evidence]
+    target: [verification]
+    inverse: evidenced_by
+  realizes:
+    description: The artifact provides a concrete realization of the requirement or design.
+    source: [artifact]
+    target: [requirement, design]
+    inverse: realized_by
+  implements:
+    description: The code implements the requirement, design, or verification method; this association does not prove correctness or execution.
+    source: []
+    target: [requirement, design, verification]
+    code_source: true
+    inverse: implemented_by
+  checks:
+    description: The code defines a check of the requirement or design; this association does not report a passing execution.
+    source: []
+    target: [requirement, design]
+    code_source: true
+    inverse: checked_by
+  affects:
+    description: The risk exposes the target knowledge to potential harm.
+    source: [risk]
+    target: [term, actor, goal, scenario, requirement, design, decision, risk, verification, evidence, artifact]
+    inverse: affected_by
+  mitigates:
+    description: The source specifies or provides a measure reducing the risk.
+    source: [requirement, design, decision, verification]
+    target: [risk]
+    inverse: mitigated_by
+  sourced_from:
+    description: The external document provides an originating source or authority for the item; the link is not fetched or verified.
+    source: [term, actor, goal, scenario, requirement, design, decision, risk, verification, evidence, artifact]
+    target: []
+    external: true
+  reported_at:
+    description: The external address locates the report supporting the evidence; the link is not fetched or verified.
+    source: [evidence]
+    target: []
+    external: true

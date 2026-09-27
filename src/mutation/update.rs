@@ -159,6 +159,8 @@ fn render_update(
     (candidate, changed.into_iter().collect())
 }
 
+// @mara implements REQ-ITEM-UPDATE
+// @mara implements DES-ITEM-UPDATE
 pub fn update_item(
     project: &Project,
     schema: &Schema,
@@ -168,14 +170,34 @@ pub fn update_item(
     let corpus = load_corpus(project, schema)?;
     // All identities must be usable before selecting a source span.
     super::ensure_unambiguous_item_identities(&corpus, "update items")?;
-    let resolved =
-        crate::get_item(&corpus, &request.reference).map_err(|error| Error::InvalidMutation {
+    let item = crate::query::resolve_item(&corpus, &request.reference).map_err(|error| {
+        Error::InvalidMutation {
             message: error.to_string(),
-        })?;
-    let item = corpus
-        .items()
-        .find(|item| item.id() == resolved.summary().id())
-        .expect("resolved item belongs to corpus");
+        }
+    })?;
+    // Preserve the legacy item lookup's relation-resolution prerequisite without
+    // restoring its unbounded retrieval result and transport.
+    for source in corpus.items() {
+        for relation in source.relations() {
+            let selected_outgoing = source.mid() == item.mid();
+            let selected_incoming =
+                relation.target() == item.id() || item.mid() == Some(relation.target());
+            if (selected_outgoing || selected_incoming)
+                && crate::external::address(relation.target()).is_none()
+                && !relation.target().starts_with("code:")
+            {
+                crate::query::resolve_relation_target(
+                    &corpus,
+                    source,
+                    relation.name(),
+                    relation.target(),
+                )
+                .map_err(|error| Error::InvalidMutation {
+                    message: error.to_string(),
+                })?;
+            }
+        }
+    }
     let values = replacements(schema, item, &request)?;
     let document = corpus
         .documents()

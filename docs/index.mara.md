@@ -1,21 +1,28 @@
-# Mara documentation
+# Mara
 
-This directory is the canonical project documentation. Start with the
-[document format](format.mara.md), then use the
-[self-hosting taxonomy](taxonomy.mara.md) when creating items. Add further
-documents only when a current user workflow requires them.
+Mara keeps structured project knowledge in readable, Git-tracked Markdown.
+Start with [product intent and workflows](product.mara.md). Accepted items state
+intended behavior; they do not establish implementation or passing execution.
 
-- [First alpha](alpha.mara.md)
-- [Item editing and recovery](editing.mara.md)
-- [Bounded retrieval and planned alpha.3 extensions](retrieval.mara.md)
-- [Distribution and release](distribution.mara.md)
-- [Stable 0.1 scope and release readiness](release-0.1.mara.md)
-- [Guided authoring: accepted 0.2 scope and designs](guided-authoring.mara.md)
-- [Unified discovery: accepted 0.2 contracts](discovery.mara.md)
-- [Migration to 0.2: schema guidance and discovery interface](migration-0.2.mara.md)
-- [Migration to 0.3: formats and reviewed vocabulary changes](migration-0.3.mara.md)
-- [Traceability: planned 0.3 requirements and design boundaries](traceability.mara.md)
-- [Code traceability](code-traceability.mara.md)
-- [Relationship authoring and mutation](relations.mara.md)
-- [Rules, diagnostics and trace matrices](rules.mara.md)
-- [Traceability research: external systems and design lessons](traceability-research.mara.md)
+Execution evidence applies to its recorded revision and verification scope.
+Selection and interpretation of recorded results follow
+[[DES-TRACE-CHECK-BINDING]].
+
+- [Safe schema and vocabulary editing](schema-evolution.mara.md)
+- [Engineering profile and workflow](engineering-template.mara.md)
+- [Release preparation and public guidance](release.mara.md)
+- [CLI packages and agent installation](distribution.mara.md)
+- [Project initialization and schema discovery](project.mara.md)
+- [Canonical source, document format and item identity](format.mara.md)
+- [Document structure, references and direct navigation](discovery.mara.md)
+- [Corpus conformance and validation](validation.mara.md)
+- [Documentation review and execution evidence](verification.mara.md)
+- [Trace matrices and request-local checks](traceability.mara.md)
+- [Item creation](creation.mara.md)
+- [Semantic relation authoring](relations.mara.md)
+- [Source mutation and explicit recovery](editing.mara.md)
+- [Code indexing and traceability](code-traceability.mara.md)
+- [Item listing, search and bounded reads](retrieval.mara.md)
+
+Use the [Mara skill](../skills/mara/SKILL.md) for authoring and the configured
+[schema](../.mara/schema.yaml) for flavours, fields, and relationships.

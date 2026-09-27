@@ -18,6 +18,8 @@ pub struct SearchResult {
 }
 
 /// Unified discovery over owning items, section headings and outermost blocks.
+// @mara implements REQ-DOCUMENT-CONTEXT-DISCOVERY
+// @mara implements DES-UNIFIED-KNOWLEDGE-DISCOVERY
 pub fn search(
     corpus: &Corpus,
     schema: &Schema,
@@ -56,7 +58,7 @@ pub fn search(
             Ok(name.clone())
         })
         .collect::<Result<_, _>>()?;
-    let items = filtered_items(corpus, schema, &item_filters, None)?;
+    let items = filtered_items(corpus, schema, &item_filters)?;
     let item_only = !filters.ids.is_empty()
         || !filters.flavours.is_empty()
         || !filters.fields.is_empty()

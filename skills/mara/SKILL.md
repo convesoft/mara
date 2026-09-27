@@ -15,9 +15,9 @@ discovery format 2, relationship format 1, validation format 1, and trace
 format 1. Typed inline relationships, inverse aliases, symmetric edges,
 external targets, graph policies, YAML current-state rules, and matrices are
 implemented. Use the skill shipped with the selected executable or
-the same source revision. If an older installation exposes a different
+the same source revision. If the selected installation exposes a different
 interface, report the mismatch and use its matching guidance; do not silently
-change the version pin or substitute removed commands.
+change the version pin or substitute unsupported commands.
 
 ## Resolve the CLI fallback
 
@@ -52,7 +52,9 @@ the MCP server was started with that root bound by `--project`. Use the default
 `minimal` template unless the user explicitly requests `empty` or `engineering`.
 Pass the selected name as `template` to `project_init`.
 `engineering` includes engineering flavours, selection guidance, and traceability
-relations; all templates generate configuration and schema only. The CLI equivalent
+relations. It also installs enabled `.mara/engineering-rules.yaml` and request-local
+`.mara/engineering-checks.yaml` and `.mara/engineering-execution.yaml`; no starter
+items are generated. The CLI equivalent
 is `"${mara_cli[@]}" --project /absolute/project --format json project init --template <template>`,
 where `<template>` is the selected `minimal`, `empty`, or `engineering` name.
 Do not create or modify `AGENTS.md` as part of Mara onboarding.
@@ -74,26 +76,43 @@ Use the selected project's declarations, including custom flavours. Keep
 supporting narrative as Markdown when it does not need an independent identity;
 search/get/related can still discover, read, and navigate it.
 
-Schema format 3 retains all four guidance keys directly on every flavour:
+Schema format 3 requires all four guidance keys directly on every flavour:
 a nonblank `description`, a nonempty list of nonblank `use_when` entries,
 an `avoid_when` list (`[]` is valid), and a `distinguish_from` mapping (`{}` is
 valid). Distinction targets must be other declared flavours with nonblank
-explanations. When asked to migrate format 1, edit the existing schema in place,
-set `format_version: 3`, and supply meaningful guidance. Preserve custom
-flavours, prefixes, fields, relations, document bytes, IDs, and MIDs; do not
+explanations. Edit the project schema in place with `format_version: 3` and
+meaningful guidance. Preserve custom flavours, prefixes, fields, relations,
+document bytes, IDs, and MIDs; do not
 reinitialize or replace the schema with a template. Require `valid:true` from
 both `schema_validate` and `project_validate` (CLI `schema validate` and
 `project validate`).
 
 For the engineering template, inspect `schema_get` relation declarations before
 connecting items. `verification` describes a repeatable check; `evidence`
-records its result. The added relations are `verifies` (verification →
+records its result. Engineering relations are `verifies` (verification →
 requirement/design), `validates` (verification → goal/scenario), `evidences`
-(evidence → verification), `implements` (artifact → requirement/design),
+(evidence → verification), `realizes` (artifact → requirement/design), code `implements`
+(→ requirement/design/verification) and code `checks` (→ requirement/design),
 `affects` (risk → affected knowledge), and `mitigates`
 (requirement/design/decision/verification → risk). Add only meaningful links;
 no complete trace chain or placeholder items are required. Existing projects
 do not gain these declarations automatically.
+
+New engineering items require `status`. Use `draft` while classifications and
+links are incomplete; `accepted` enables the bundled knowledge policies, and
+`retired` excludes an item from accepted coverage. Requirements
+and designs need `kind` when accepted; verification needs `method`, evidence needs
+`result`, `captured_at` and `subject_revision`, and risk needs `treatment`. Inspect
+the schema for enum values and optional fields. A status of accepted does not
+claim implementation or passing tests.
+
+Use `.mara/engineering-checks.yaml` with shape IRIs `urn:mara:rule:intent`,
+`urn:mara:rule:realization`, `urn:mara:rule:verification` or
+`urn:mara:rule:validation` on appropriate accepted roots. For execution, use
+`.mara/engineering-execution.yaml` with `urn:mara:rule:execution` on accepted
+verifications and bind `subject_revision` to the actual tested identity. This
+requires accepted evidence with `result: passed` at that revision; historical
+passing evidence and code associations do not establish a current execution result.
 
 ## Choose the operation
 
@@ -123,11 +142,11 @@ Warnings do not invalidate a complete result; configuration/source failures
 remain errors. Current-state rules load from explicit YAML files enabled by
 project format 2 and `[rules]` with `format_version = 1` and `files = [...]`.
 Run `schema_validate` to check definitions, then `project_validate` or
-`item_validate` to evaluate policy. Status/owner fields are project-defined;
-templates and existing projects gain no policies automatically. Schema relation
-`cardinality` and `acyclic` declarations impose structural graph policies when
+`item_validate` to evaluate policy. Status/owner fields are project-defined.
+The engineering template supplies `status: draft|accepted|retired` and accepted-knowledge policies; existing
+projects gain no policies automatically. Schema relation `cardinality` and `acyclic` declarations impose structural graph policies when
 present. Policy failures do not block structured edits.
-Invalid schemas now return the common envelope with `valid:false`, not an MCP
+Invalid schemas return the common envelope with `valid:false`, not an MCP
 tool error. Counts are null when the schema cannot load. Diagnostic `path` and
 `line` alias `location`; project-owned configuration paths are relative and
 unavailable coordinates are omitted.
@@ -197,7 +216,7 @@ different connections to the same neighbour. The byte budget may shorten pages.
 
 Unified discovery responses use `format_version: 2`, independently of schema
 format 3 and the application version. Inspect `node.kind` (item, section, block,
-or document); only items have ID/MID/flavour. Item list retains its item-only
+document, or code); only items have ID/MID/flavour. Item list retains its item-only
 response. On upgrade, discard old cursors and update parsers for the mixed
 `results`, consecutive `content`, and `connections` shapes above.
 
@@ -206,6 +225,59 @@ CLI retrieval uses the same JSON result fields:
 then `"${mara_cli[@]}" --project /absolute/project --format json get '<reference>'`.
 Use `related '<reference>'` for connections, `--relation builtin:mentions` to
 select explicit mentions, and `--cursor '<next_cursor>'` for continuation.
+
+## Code endpoints
+
+Project format 3 uses one `[[code.languages]]` entry per integration with
+`name`, nonempty `extensions`, and `command` (executable/arguments, one standalone
+`{output}` placeholder). Extensions are case-sensitive suffixes without dots,
+unique across language entries. Mara invokes an indexer automatically from the
+project root only when unignored source files match its extensions. With no
+matches it skips that indexer, so empty projects can use documentation operations.
+Adding the first matching file activates indexing; removing the last skips it again.
+This applies with or without Tree-sitter and never suppresses failures once source
+files exist. Configuration and any declared grammar assets must still be valid;
+install indexers separately and only configure trusted commands. Commands may
+run build tools. Missing executables or invalid output fail the operation.
+Optional `position_encoding` supplies `utf8`, `utf16` or `utf32` for old indexers
+that omit their document encoding. The same entry may include `grammar` and
+`query` together for runtime Tree-sitter assets that attach comments
+and expand declaration content. Without these assets, symbol links still work;
+content uses the SCIP enclosing range, or the definition token when absent.
+Language integrations are supplied by the project.
+
+For example, with `rust-analyzer` installed and matching grammar assets present:
+
+```toml
+[[code.languages]]
+name = "rust"
+command = ["rust-analyzer", "scip", ".", "--output", "{output}"]
+position_encoding = "utf8"
+extensions = ["rs"]
+grammar = ".mara/code/rust.wasm"
+query = ".mara/code/rust.scm"
+```
+
+Omit `grammar` and `query` for SCIP-only use; keep `extensions`. Commands and paths are
+project-owned; Mara supplies no per-language defaults.
+
+Source markers use `@mara <canonical-relation> <item-ID-or-MID>` within captured
+comments. All markers in a leading comment group attach to the following
+supported declaration through its modifier/wrapper boundary. Ordinary/doc
+comments and blank lines may intervene; statements and lexical body boundaries
+stop attachment. Original marker spans and declaration content remain separate.
+Otherwise retain deepest-enclosing ownership, valid file fallback, or an
+unsupported/ambiguous-owner diagnostic. Inspect exact endpoints with `related`
+and `relation get`: validation alone also accepts unintended file links.
+
+Use exact `code:path::language::descriptor` references returned by navigation.
+Descriptors omit SCIP package metadata so version bumps preserve local links.
+Unsafe inline characters use uppercase UTF-8 percent escapes. Backticks remain
+literal: `` code:service.ts::typescript::`service.ts`/parse(). ``. Local SCIP symbols are
+unsupported. Distinct implementation overloads require distinct indexer identities;
+multiple declarations of one identity share a link. No name/position fallback is
+allowed. Renames/moves may break authored links. File-only `code:path` needs no
+language integration. See `docs/code-traceability.mara.md` in the Mara repository.
 
 ## Inspect and change relationships
 
@@ -248,33 +320,69 @@ tokens outside item bodies have no typed meaning. Unknown relations, malformed
 tokens and invalid targets in supported contexts fail validation. Use body
 creation/update to author inline assertions; relation add writes metadata.
 
-For a format-1/2 or relation-vocabulary migration, follow
-`docs/migration-0.3.mara.md` with the matching 0.3 executable. The supported
-workflow is manual: save a Git checkpoint or project copy, review the complete
-source diff, then require complete, valid schema and project validation. Mara
-has no schema migration preview/apply command; `project_transaction_rollback`
-does not undo manual edits. Preserve MIDs and unrelated declarations, fields,
-prose and links. Existing relations remain directed with no alias unless the
-schema explicitly changes. Review newly meaningful typed tokens, alias
-collisions, all authored spellings and YAML rule paths before changing names.
-When removing an inverse alias, inspect the canonical edge, reauthor it on its
-canonical source if needed, remove inverse metadata, and demote inverse inline
-tokens to bare mentions when preserving prose navigation. Never replace an
-inverse name with the canonical name on the same item: that can reverse a
-directed edge while validation still passes. Verify the canonical endpoints
-after migration. Do not treat a direction, endpoint or meaning change as a
-rename.
+Before manually changing schema or relation vocabulary, read the source-edit
+workflow in `docs/schema-evolution.mara.md` in the Mara repository. Use the
+selected executable to inspect declarations and canonical edge occurrences,
+then run complete schema/project validation and consume all pages. Preserve a
+source checkpoint for manual recovery; `project_transaction_rollback` handles
+only a pending structured mutation journal.
 
 ## Inspect trace coverage
 
 Use `trace_matrix` (CLI `trace matrix`) for a read-only view of selected roots.
 Select roots with `ids`, `flavours`, `fields`, `paths`, or `all:true`; pass either
-enabled rule IRIs in `rules` or a request-local `check:{files,shape}`. CLI uses
+enabled rule IRIs in `rules` or a request-local `check:{files,shape,parameters?}`. CLI uses
 repeatable `--id`, `--flavour`, `--field KEY=VALUE`, `--path`, and either
 `--rule` or `--check-file` with `--shape`. Do not mix the two evaluation modes.
 The check files supply shapes for this request only; they do not enable policy
 for project validation. A named rule uses its own applicability and selection
 within the requested roots.
+
+For a reusable revision check, use a targetless root and an evidence shape in
+`rules/revision.yaml` (assuming the project declares these relations, flavours
+and evidence fields):
+
+```yaml
+- id: rule:revision_evidence
+  class: requirement
+  property:
+    - path: status
+      hasValue: accepted
+    - path: {inversePath: verifies}
+      qualifiedValueShape: rule:verified_revision
+      qualifiedMinCount: 1
+- id: rule:verified_revision
+  class: verification
+  property:
+    - path: status
+      hasValue: accepted
+    - path: {inversePath: evidences}
+      qualifiedValueShape: rule:passing_revision
+      qualifiedMinCount: 1
+- id: rule:passing_revision
+  class: evidence
+  property:
+    - path: status
+      hasValue: accepted
+    - path: result
+      hasValue: passed
+    - path: subject_revision
+      hasValue: {parameter: subject_revision}
+```
+
+Pass the concrete revision through CLI or MCP:
+
+```text
+mara trace matrix --id REQ-A --check-file rules/revision.yaml --shape urn:mara:rule:revision_evidence --param subject_revision=abc123
+trace_matrix {ids:["REQ-A"],check:{files:["rules/revision.yaml"],shape:"urn:mara:rule:revision_evidence",parameters:{subject_revision:"abc123"}}}
+```
+
+A placeholder may also be an entry in `in`.
+Values are exact text literals, including empty text; resolve Git refs before
+calling Mara. Missing, invalid, duplicate CLI, and unused bindings are errors.
+Keep the YAML unchanged across revisions. Read the resulting state and resolved
+literal in check explanations; this selects recorded evidence and neither runs
+a test nor proves its authenticity. Parameters do not apply to enabled rules.
 
 Read each result state (`passed`, `failed`, `not_applicable`, `unavailable`),
 the check and edge records, source locations, and per-evaluation `summaries`.

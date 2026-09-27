@@ -208,6 +208,7 @@ mod tests {
     use rudof_rdf::{rdf_core::RDFFormat, rdf_impl::ReaderMode};
     use shacl::validator::engine::Validate;
 
+    // @mara checks DES-CURRENT-STATE-EVALUATION
     #[test]
     fn ledger_preserves_errors_swallowed_by_native_not_and_qualification() {
         // Exercise native nested validation, bypassing Mara's definition checks

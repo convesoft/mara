@@ -49,6 +49,10 @@ pub struct TraceCheck {
     pub files: Vec<PathBuf>,
     /// Expanded IRI of one named targetless node shape in the supplied files.
     pub shape: String,
+    /// Named text literals for placeholders in this request check.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schemars(with = "BTreeMap<String, String>")]
+    pub parameters: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -132,6 +136,8 @@ pub struct TraceMatrixResult {
     pub markdown: Option<String>,
 }
 
+// @mara implements REQ-TRACE-MATRIX
+// @mara implements DES-TRACE-VIEW-INTERFACES
 pub(crate) fn matrix(
     project: &Project,
     schema: &Schema,
@@ -168,6 +174,25 @@ pub(crate) fn matrix(
             "supply nonempty rules or one request check, never both",
         ));
     }
+    let bindings = if let Some(check) = &params.check {
+        let mut bindings = BTreeMap::new();
+        for (name, value) in &check.parameters {
+            if !crate::rules::valid_parameter_name(name) {
+                return Err(ValidationError::invalid_argument(format!(
+                    "invalid check parameter name '{name}'"
+                )));
+            }
+            let Some(text) = value.as_str() else {
+                return Err(ValidationError::invalid_argument(format!(
+                    "check parameter '{name}' must be text"
+                )));
+            };
+            bindings.insert(name.clone(), text.to_owned());
+        }
+        Some(bindings)
+    } else {
+        None
+    };
     let limit = params.limit.unwrap_or(20);
     if !(1..=100).contains(&limit) {
         return Err(ValidationError::invalid_argument(
@@ -196,8 +221,8 @@ pub(crate) fn matrix(
         selection.paths.clone(),
         None,
     )
-    .with_search_options(selection.ids.clone(), false);
-    let selected = query::filtered_items(&corpus, schema, &filters, None)
+    .with_ids(selection.ids.clone());
+    let selected = query::filtered_items(&corpus, schema, &filters)
         .map_err(|e| ValidationError::invalid_argument(e.to_string()))?;
     let selected_mids = selected
         .iter()
@@ -212,7 +237,8 @@ pub(crate) fn matrix(
         if check.shape.is_empty() {
             return Err(ValidationError::invalid_argument("check shape is required"));
         }
-        Rules::load_files(project, schema, check.files.clone())
+        Rules::load_check_files(project, schema, check.files.clone(), bindings.unwrap())
+            .map_err(ValidationError::invalid_argument)?
     } else {
         Rules::load(project, schema)
     };
@@ -458,6 +484,8 @@ struct ExplainRecords<'a> {
     records: &'a mut Vec<TraceRecord>,
 }
 
+// @mara implements REQ-TRACE-COVERAGE
+// @mara implements REQ-BOUNDED-TRACE-CHAINS
 fn explain(
     ctx: &ExplainContext<'_>,
     shape_id: &str,
@@ -1070,6 +1098,15 @@ pub fn markdown(result: &TraceMatrixResult) -> String {
                 let dest = if end["kind"] == "external" {
                     let address = end["address"].as_str().unwrap_or("");
                     format!("external [{address}](<{address}>) (terminal)")
+                } else if end["kind"] == "code" {
+                    let reference = end["reference"].as_str().unwrap_or("");
+                    let (path, _) = crate::code::split_reference(reference)
+                        .expect("matrix code endpoint has a validated reference");
+                    let label = md_cell(reference)
+                        .replace('`', "\\`")
+                        .replace('[', "\\[")
+                        .replace(']', "\\]");
+                    format!("[{label}](<{}>)", md_target(&path.to_string_lossy()))
                 } else {
                     let id = end["id"].as_str().unwrap_or("?");
                     let path = end["source"]["path"].as_str().unwrap_or("");
