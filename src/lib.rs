@@ -1906,3 +1906,6 @@ pub(crate) fn is_mid(value: &str) -> bool {
 }
 
 pub use operations::{RelationAction, RelationMutationResult};
+
+pub use mutation::{ItemUpdate, ItemUpdateWarning, update_item};
+pub use operations::ItemUpdateParams;

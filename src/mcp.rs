@@ -1,6 +1,6 @@
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams};
 use mara::{GetParams, GetResult};
-use mara::{InitialRelation, ItemCreateParams, ItemCreationResult};
+use mara::{InitialRelation, ItemCreateParams, ItemCreationResult, ItemUpdate, ItemUpdateParams};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
     Template, ValidationResult,
@@ -210,6 +210,25 @@ impl SearchToolParams {
 
 #[tool_router]
 impl MaraMcp {
+    #[tool(
+        name = "item_update",
+        description = "Partially update one item by exact MID or human ID. Requires a title, custom field replacement or clear, or body. Preserves identity, relations, and untouched source. Validate newly authored references; reject changes that break or retarget surviving internal links, including links to headings or blocks inside the item. Resolve reported impacts before retrying; Markdown links are not automatically repaired."
+    )]
+    fn item_update(
+        &self,
+        Parameters(params): Parameters<ItemUpdateToolParams>,
+    ) -> Result<Json<ItemUpdate>, String> {
+        self.for_project(params.project)?
+            .item_update(ItemUpdateParams {
+                reference: params.reference,
+                title: params.title,
+                fields: params.fields,
+                clear_fields: params.clear_fields,
+                body: params.body,
+            })
+            .map(Json)
+    }
+
     #[tool(name = "relation_add", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Add one metadata assertion using a canonical name or inverse alias. Code links require an item source and declared inverse; code source files are never modified. Returns relationship format 1.")]
     fn relation_add(
         &self,
@@ -558,4 +577,26 @@ struct RelationRemoveToolParams {
     /// Opaque selector returned by relation_get; omitted or null removes the whole relationship.
     #[serde(default)]
     occurrence: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ItemUpdateToolParams {
+    /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Exact human ID or canonical MID (uppercase 26-character ULID without a prefix).
+    reference: String,
+    /// Replacement single-line title; surrounding whitespace is trimmed. Empty or whitespace-only titles and line breaks are rejected; omitted or null leaves it unchanged.
+    #[serde(default)]
+    title: Option<String>,
+    /// Replace all values of each named schema-declared custom field; repeat keys only when schema-repeatable. Values are schema-validated scalar text, trimmed, with line breaks rejected. Excludes structural title/MID metadata and typed relations; use relation_add/relation_remove for edges. Omitted or [] leaves fields unchanged; an empty value is not a clear (use clear_fields).
+    #[serde(default)]
+    fields: Vec<FieldValue>,
+    /// Remove all values of named optional custom fields; cannot also set those keys in fields. Excludes title/MID and typed relations. Omitted or [] clears nothing; an absent optional field is a no-op.
+    #[serde(default)]
+    clear_fields: Vec<String>,
+    /// Replacement literal Markdown body (- is literal), including [[relation:ID]] or [[relation:MID]] typed assertions. Omitted or null leaves it unchanged; an empty string clears an optional body. Empty or whitespace-only replacement of a required body is rejected.
+    #[serde(default)]
+    body: Option<String>,
 }

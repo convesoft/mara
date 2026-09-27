@@ -204,6 +204,11 @@ impl OperationContext {
         )
     }
 
+    pub fn item_update(&self, params: ItemUpdateParams) -> Result<crate::ItemUpdate, String> {
+        let (project, schema) = self.load_project()?;
+        crate::update_item(&project, &schema, params).map_err(|error| error.to_string())
+    }
+
     pub fn relation_add(
         &self,
         params: RelationParams,
@@ -568,4 +573,20 @@ pub struct RelationMutationResult {
     pub changed_occurrences: usize,
     pub remaining_occurrences: usize,
     pub edge_exists: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ItemUpdateParams {
+    pub reference: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Replace all values of each named custom field; repeat keys for repeated values.
+    #[serde(default)]
+    pub fields: Vec<FieldValue>,
+    /// Remove all values of optional custom fields.
+    #[serde(default)]
+    pub clear_fields: Vec<String>,
+    #[serde(default)]
+    pub body: Option<String>,
 }

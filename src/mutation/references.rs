@@ -404,7 +404,12 @@ fn connections<'graph, 'corpus>(
 /// destination during source mutation.
 // @mara implements DES-ITEM-CREATION
 // @mara implements DES-RELATION-MUTATION
-pub(super) fn preflight(before: &Corpus, after: &Corpus) -> Result<(), Error> {
+// @mara implements DES-ITEM-UPDATE
+pub(super) fn preflight(
+    before: &Corpus,
+    after: &Corpus,
+    edited_body: Option<&SourceLocation>,
+) -> Result<(), Error> {
     let mut new_sources = sources(after);
     let maps = sources(before)
         .into_iter()
@@ -429,8 +434,8 @@ pub(super) fn preflight(before: &Corpus, after: &Corpus) -> Result<(), Error> {
                 && reference.source().span().start_byte() == location.1
                 && reference.source().span().end_byte() == location.2
         });
-        let (source, written_target, relation_name) = if let Some(reference) = reference {
-            (reference.source(), reference.target(), None)
+        let (source, written_target, relation_name, inline) = if let Some(reference) = reference {
+            (reference.source(), reference.target(), None, false)
         } else {
             let relation = document
                 .items()
@@ -441,7 +446,12 @@ pub(super) fn preflight(before: &Corpus, after: &Corpus) -> Result<(), Error> {
                         && relation.source().span().end_byte() == location.2
                 })
                 .expect("schema edge has relation evidence");
-            (relation.source(), relation.target(), Some(relation.name()))
+            (
+                relation.source(),
+                relation.target(),
+                Some(relation.name()),
+                relation.inline,
+            )
         };
         let expected = document.source()[location.1..location.2].to_owned();
         let mapped = point(&maps, source, location.1).and_then(|(path, start)| {
@@ -479,6 +489,17 @@ pub(super) fn preflight(before: &Corpus, after: &Corpus) -> Result<(), Error> {
                     (Some(&key) != mapped.as_ref(), key)
                 })
         });
+        if let (Some(original), Some(candidate)) = (reference, surviving)
+            && original.kind() == ReferenceKind::MarkdownLink
+            && edited_body.map(SourceLocation::path) == Some(source.path())
+            && candidate.source().path() == source.path()
+            && original.target() != candidate.target()
+        {
+            // Equal link usage with a changed parsed destination in a body-update
+            // document means its reference definition was edited. Candidate
+            // validation owns the new destination. Moves must not get this exemption.
+            continue;
+        }
         let Some((path, start, end)) = surviving
             .map(|candidate| {
                 let span = candidate.source().span();
@@ -488,7 +509,19 @@ pub(super) fn preflight(before: &Corpus, after: &Corpus) -> Result<(), Error> {
                     span.end_byte(),
                 )
             })
-            .or(mapped)
+            .or_else(|| {
+                // Literal-context edits inside the explicitly replaced body can
+                // remove a parsed reference while retaining all its raw bytes.
+                // Outside that body, disappearance still needs protection: a
+                // mutation must not silently hide an untouched reference.
+                let explicitly_replaced = (reference.is_some() || inline)
+                    && edited_body.is_some_and(|body| {
+                        body.path() == source.path()
+                            && body.span().start_byte() <= location.1
+                            && body.span().end_byte() >= location.2
+                    });
+                if explicitly_replaced { None } else { mapped }
+            })
         else {
             continue; // Explicitly edited or removed reference.
         };

@@ -223,6 +223,19 @@ pub fn rollback_transaction(project: &Project) -> Result<TransactionRollback, Er
     })
 }
 
+// @mara implements DES-ITEM-UPDATE
+pub(super) fn commit_single(
+    project: &Project,
+    change: Change,
+    verify: impl FnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
+    let path = safe_path(project, &change.path)?;
+    let staged = stage(&path, &change.after, change.mode.as_ref())?;
+    verify()?;
+    change.verify(project, false)?;
+    persist(staged, &path, change.before.is_some())
+}
+
 // @mara implements DES-MUTATION-TRANSACTION
 // @mara implements REQ-RECOVERABLE-MUTATION
 pub(super) fn commit(
@@ -643,5 +656,31 @@ mod tests {
         )
         .unwrap();
         panic!("interruption point was not reached");
+    }
+    // @mara checks DES-ITEM-UPDATE
+    #[test]
+    fn single_file_validation_and_preimage_failures_preserve_source() {
+        for change_preimage in [false, true] {
+            let (_directory, project) = fixture();
+            let change = changes(&project, false).remove(0);
+            let result = commit_single(&project, change, || {
+                if change_preimage {
+                    fs::write(project.root().join("a.mara.md"), "manual edit").unwrap();
+                    Ok(())
+                } else {
+                    invalid("candidate validation failed")
+                }
+            });
+            assert!(result.is_err());
+            assert_eq!(
+                fs::read_to_string(project.root().join("a.mara.md")).unwrap(),
+                if change_preimage {
+                    "manual edit"
+                } else {
+                    "original a\r\n"
+                }
+            );
+            assert!(!project.root().join(JOURNAL).exists());
+        }
     }
 }

@@ -10,8 +10,10 @@ use std::{
 use tempfile::NamedTempFile;
 mod references;
 mod transaction;
+mod update;
 use transaction::MutationLock;
 pub use transaction::{TransactionRollback, rollback_transaction};
+pub use update::{ItemUpdate, ItemUpdateWarning, update_item};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackfilledMids {
@@ -372,7 +374,7 @@ pub fn create_item(
 
     let candidate_corpus =
         corpus.with_replacements(&BTreeMap::from([(path.clone(), candidate.clone())]), schema)?;
-    references::preflight(&corpus, &candidate_corpus)?;
+    references::preflight(&corpus, &candidate_corpus, None)?;
     if let Some(diagnostic) = candidate_corpus
         .discovery()
         .diagnostics()
@@ -961,7 +963,7 @@ pub(crate) fn mutate_semantic_relation(
         }
     }
     let projected = corpus.with_replacements(&candidates, schema)?;
-    references::preflight(&corpus, &projected)?;
+    references::preflight(&corpus, &projected, None)?;
     let changes = corpus
         .documents()
         .iter()

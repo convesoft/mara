@@ -516,7 +516,7 @@ fn relation_handle_can_target_item(handle: &str, item: &Item) -> bool {
     }
 }
 
-fn resolve_relation_target<'a>(
+pub(crate) fn resolve_relation_target<'a>(
     corpus: &'a Corpus,
     source: &Item,
     relation: &str,

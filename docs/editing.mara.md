@@ -1,6 +1,6 @@
 # Source mutation and explicit recovery
 
-MID backfill, item creation, relation edits and explicit rollback are restored.
+MID backfill, item creation/update, relation edits and explicit rollback are restored.
 The shared journal publisher supports relation edits; move/rename and other item
 edits remain pending review.
 
@@ -96,4 +96,57 @@ Candidate CLI schema validation and installed-baseline MCP schema/project valida
 The shared journal publisher is used by relation mutations. Under the mutation lock, capture original bytes and permissions, stage every candidate, recheck operation-level project state and every preimage, then durably publish the format-1 journal defined by [[DES-MUTATION-RECOVERY]] before replacing any original. Sync staged files and, on Unix, affected parent directories; remove the journal only after all replacements succeed.
 
 On an in-process publication failure, restore recorded originals and remove newly created destinations. If rollback encounters later manual edits or another failure, preserve recovery information and refuse further writers until explicit rollback succeeds. A stopped process leaves a journal for restart recovery. Recheck each preimage before replacement; the advisory lock does not coordinate manual filesystem edits. Multi-file publication is recoverable, not an atomic snapshot for concurrent readers. Move/rename callers remain pending.
+:::
+
+:::mara requirement REQ-ITEM-UPDATE
+:mid: 01M1RSQNH2J3Q3ZG1KHX3STH1Q
+:title: Update item content without changing identity
+:status: accepted
+:kind: functional
+:derives_from: SCN-AUTHOR-ITEM-FLEXIBLY
+
+CLI `item update` and MCP `item_update` partially update exactly one item by exact MID or human ID. Require a title, custom field replacement/clear or body replacement; omitted properties remain unchanged. Preserve identity, flavour, metadata relations, untouched source and permissions. Body replacement may intentionally change typed inline assertions.
+
+Validate the complete candidate source corpus before one atomic file replacement. Permit only unchanged missing required bodies on existing scaffolds, reported as edit warnings; explicitly supplying an empty/blank required body fails. All other source-conformance errors block writing. Preserve surviving resolved references and refuse changes that hide items or retarget untouched links. Pending recovery blocks updates. Return the selected identity, relative path, actual changed fields and warnings consistently across CLI and MCP.
+:::
+
+:::mara design DES-ITEM-UPDATE
+:mid: 01M1RSQNHERJ070G06PK18A77K
+:title: Apply validated partial updates to source spans
+:status: accepted
+:kind: interface
+:satisfies: REQ-ITEM-UPDATE
+
+CLI accepts `item update REFERENCE` with optional `--title`, repeated `--field KEY=VALUE`, repeated `--clear-field KEY` and `--body TEXT`; `--body -` reads stdin. MCP accepts the corresponding `reference`, `title`, `fields`, `clear_fields` and literal `body` (including `-`). Null title/body is omission.
+
+Group fields by key in request order, replacing each complete sequence. Clear removes every occurrence of an optional field; clearing an absent field is a no-op. Reject structural/unknown/relation keys, set/clear conflicts, required-field removal and invalid scalars. Trim title/field values; distinguish an empty string value from removal. Reuse existing metadata slots and surrounding whitespace, remove surplus entries, append extra values after the last slot and new keys after metadata in lexical order. Leave semantically unchanged fields byte-identical. Preserve body boundaries and closing delimiter; normalize replacement body/new metadata to the document's first newline style and terminate nonempty bodies with a newline.
+
+Require globally unambiguous identities and resolvable existing internal relations on the selected item before editing. The legacy selected-item lookup imposed this prerequisite even when body replacement could remove a broken relation. Parse the candidate, validate whole-corpus source conformance, and verify unchanged item count, identity, unrequested metadata and other items' bodies/mentions. Only typed missing-body diagnostics on unchanged, non-replaced scaffold bodies become warnings. This is source validation, not lifecycle/rule evaluation.
+
+Reference correspondence protects surviving targets, including relocated usages, duplicate headings and anchored blocks. Explicit body replacement may remove/literalize occurrences or edit a reference definition to a valid new destination; other surviving active links remain protected. Metadata-only edits have no body-edit exemption.
+
+Under the mutation lock, stage one candidate with original permissions. Recheck project/schema/corpus/discovery and original bytes/permissions before atomic replacement; no multi-file journal is published. Return `{id,mid,path,changed_fields,warnings}` with sorted unique changed keys and warning `{scope,path,line,message}` entries in resulting source coordinates. No effective change returns an empty changed list without replacement. Human output prints warnings to stderr.
+:::
+
+:::mara decision ADR-DRAFT-ITEM-UPDATES
+:mid: 01M1RSQNHVC39H4Y9CCSTW1GQV
+:title: Allow continued drafting with explicit edit warnings
+:status: accepted
+:justifies: REQ-ITEM-UPDATE
+
+Permit title and field edits while an existing scaffold's required body is missing. A requirement for fully complete knowledge after every edit would prevent incremental drafting. Return unchanged missing-body diagnostics as edit warnings while corpus validation still reports errors. Explicitly replacing a required body with empty text and every other source-conformance defect remain errors.
+:::
+
+:::mara verification VER-ITEM-UPDATE
+:mid: 01M3H4YREQW5Z46QVPMW218NJW
+:title: Check partial edits, drafting warnings and surviving references
+:status: accepted
+:method: test
+:level: system
+:verifies: REQ-ITEM-UPDATE
+:verifies: DES-ITEM-UPDATE
+
+Run `cargo test --locked --test item_update` and the single-file transaction regression. Exercise repeated/cleared/empty fields, title/body changes, stdin versus literal MCP body, CRLF, whitespace, permissions, unchanged adjacent documents/items and no-op publication. Check scaffold warnings/progression, typed diagnostic exemptions, invalid requests and ambiguous identity refusal through real transports.
+
+Retain body-reference cases for explicit definition edits/literal contexts, relocated usages, intact section reordering, anchored paragraph replacement and duplicate/sibling target protection. Check typed inline relations and unchanged source on failure. Run the prior suite, formatting/Clippy, canonical validation and selected traceability.
 :::

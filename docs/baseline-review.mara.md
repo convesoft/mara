@@ -7,7 +7,7 @@ review; it does not authorize removing behavior. Product contracts live in the
 linked capability documents rather than in this inventory.
 
 The active candidate now supports project initialization, schema inspection and
-definition validation, item creation/listing, unified search, bounded get, direct navigation, relation inspection/add/remove, MID backfill and explicit
+definition validation, item creation/update/listing, unified search, bounded get, direct navigation, relation inspection/add/remove, MID backfill and explicit
 journal rollback. Corpus conformance, document/code discovery
 and the document graph are reviewed dependencies. Earlier full-runtime test rows
 remain historical where their edit or validation transports
@@ -502,3 +502,32 @@ subprocess interruption boundaries. The intentionally ignored child test is run
 explicitly by its parent at each boundary. Existing lock tests stay active.
 No production behavior correction or new dependency was needed; the inherited
 reference preflight uses its existing two-argument entry point.
+
+## Item update review
+
+Selected increment: partial title/custom-field/body update through CLI and MCP.
+Dependencies are existing strict corpus/conformance, metadata spans, query
+identity resolution, source correspondence and mutation locking; restore the
+single-file staging helper and explicit-body reference exemptions only.
+
+| Area | Review and disposition |
+|---|---|
+| Partial edits | Retain request presence, scalar/type/repetition/required-field validation; replace grouped values, distinguish empty from clear, preserve unaffected slots/whitespace, identity, metadata relations and adjacent items. No-op requests do not replace files. Body replacement can intentionally change typed inline assertions. |
+| Candidate safety | Retain whole-corpus source conformance, exact body recognition, item-count/identity/unrequested-metadata checks and typed unchanged-scaffold warnings. Do not exempt diagnostics by authored message text or gate on lifecycle/rule evaluation. |
+| Reference dependency | Retain explicit reference-definition edits with newly resolved targets and literalization inside the replaced body; still protect other surviving occurrences, structural heading/block targets and external usages. Add only the edited-body parameter, leaving rename substitution deferred. |
+| Publication | Retain same-directory staging, original permissions, project/schema/discovery/corpus and preimage rechecks, then one atomic replacement under the lock. This baseline path does not publish a multi-file journal. |
+| Tests | Retain six update groups for repeated fields/source/permissions, stdin/optional body/no-op, scaffold progression, invalid requests and false diagnostic exemptions, CLI/MCP parity/bound context, and ambiguous identities/adjacent items. Retain the thirteen body-reference groups covering relocation, definitions, anchored edits/duplicates/siblings and literal contexts. Add typed-inline update coverage from the mixed mutation group; other move/rename/delete assertions stay pending. Restore the existing single-file verify/preimage refusal test. |
+
+Completion requires real update/read workflows, exact source on success/refusal,
+all previous suites, formatting/Clippy, canonical validation, selected matrices
+and execution evidence for the committed tested revision.
+
+The old update path used `get_item` only for identity but also resolved its
+internal relation targets. Retain that precondition using the current shared
+resolver; do not restore the legacy unbounded item result solely for lookup.
+A transport regression covers refusal to repair an already-broken selected
+relation via body replacement. The thirteen reference groups remain separate
+because each distinguishes permitted target edits from a different retargeting
+failure. Project/item validation transport assertions use existing library
+source conformance until those transports are reviewed. Two additional groups
+cover typed-inline body authoring and literal MCP dash/null/no-op behavior.

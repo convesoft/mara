@@ -4,7 +4,7 @@ use mara::{
     SearchParams,
 };
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams, ItemSummary};
-use mara::{InitialRelation, ItemCreateParams};
+use mara::{InitialRelation, ItemCreateParams, ItemUpdateParams};
 use mara::{
     OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
     Template, ValidationOptions, ValidationResult, ValidationTargetKind, project_initialize,
@@ -395,6 +395,44 @@ fn run(cli: Cli) -> Result<bool, String> {
                 print_relation_mutation,
             );
         }
+        Command::Item {
+            command:
+                ItemCommand::Update {
+                    reference,
+                    title,
+                    fields,
+                    clear_fields,
+                    body,
+                },
+        } => {
+            let body = read_body(body)?;
+            let result =
+                OperationContext::from_environment(project)?.item_update(ItemUpdateParams {
+                    reference,
+                    title,
+                    fields: fields.into_iter().map(Into::into).collect(),
+                    clear_fields,
+                    body,
+                })?;
+            emit(format, &result, |result| {
+                println!(
+                    "updated item '{}' with MID {} at {}",
+                    result.id,
+                    result.mid,
+                    result.path.display()
+                );
+                println!("changed fields: {}", result.changed_fields.join(", "));
+                for warning in &result.warnings {
+                    eprintln!(
+                        "warning: {}:{}: {}",
+                        warning.path.display(),
+                        warning.line,
+                        warning.message
+                    );
+                }
+                Ok(())
+            })?;
+        }
         Command::Related {
             reference,
             direction,
@@ -749,6 +787,29 @@ fn print_validation(result: &ValidationResult) -> Result<(), String> {
 
 #[derive(Debug, Subcommand)]
 enum ItemCommand {
+    /// Partially update title, custom fields, or body while preserving identity.
+    Update {
+        /// Exact human ID or canonical MID (uppercase 26-character ULID, no prefix).
+        reference: String,
+        /// Replacement single-line title; surrounding whitespace is trimmed. Empty or whitespace-only titles and line breaks are rejected; omission leaves it unchanged.
+        #[arg(long)]
+        title: Option<String>,
+        /// Replace all values of a custom KEY=VALUE field; repeat for schema-repeatable keys.
+        /// KEY= keeps an empty value; use --clear-field KEY to remove the field.
+        /// Values are schema-validated scalar text: surrounding whitespace is trimmed and line breaks are rejected. Omission leaves fields unchanged.
+        /// Excludes title, MID, and typed relations; use relation add/remove for edges.
+        #[arg(long = "field", value_parser = parse_field)]
+        fields: Vec<CliField>,
+        /// Remove all values of an optional custom field (repeatable); cannot also set that key. Excludes title/MID and typed relations. Omission clears nothing; an absent optional field is a no-op.
+        #[arg(long = "clear-field")]
+        clear_fields: Vec<String>,
+        #[arg(
+            long,
+            help = "Replace body text; - reads stdin, an empty string clears an optional body, omission leaves it unchanged. Empty or whitespace-only replacements of required bodies are rejected"
+        )]
+        body: Option<String>,
+    },
+
     /// Create an item with a generated MID and optional initial relations, or a body scaffold.
     #[command(
         after_help = "Choose a flavour from schema get flavour <NAME>: description explains purpose, use_when gives selection criteria, avoid_when gives exclusions, and distinguish_from compares other flavours. These are schema guidance, not item fields. Inspect relation endpoints before adding initial edges. Newly authored references must resolve; creation rejects changes that break or retarget surviving links, including shifted heading anchors."
