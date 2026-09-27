@@ -150,3 +150,32 @@ Run `cargo test --locked --test item_update` and the single-file transaction reg
 
 Retain body-reference cases for explicit definition edits/literal contexts, relocated usages, intact section reordering, anchored paragraph replacement and duplicate/sibling target protection. Check typed inline relations and unchanged source on failure. Run the prior suite, formatting/Clippy, canonical validation and selected traceability.
 :::
+
+:::mara evidence EVD-ITEM-UPDATE
+:mid: 01M3H54NJK5M5SCK9419R3MSAH
+:title: Partial item updates pass source and reference preservation checks
+:status: accepted
+:result: passed
+:captured_at: 2026-09-27T10:03:45Z
+:subject_revision: fbc67b33d94547956e8c4958bb7bce9d3608afc3
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-ITEM-LIST
+:evidences: VER-UNIFIED-SEARCH
+:evidences: VER-BOUNDED-NODE-READ
+:evidences: VER-DOCUMENT-NAVIGATION
+:evidences: VER-RELATION-INSPECTION
+:evidences: VER-CORPUS-CONFORMANCE
+:evidences: VER-MID-AND-RECOVERY
+:evidences: VER-ITEM-CREATION
+:evidences: VER-RELATION-MUTATION
+:evidences: VER-ITEM-UPDATE
+
+At `fbc67b33d94547956e8c4958bb7bce9d3608afc3`, formatting, `cargo clippy --locked --all-targets --all-features -- -D warnings` and `cargo test --locked --all-targets` passed. The unchanged-source full run passed 230 tests across 19 suites with no failures; one ignored interruption helper was explicitly executed by its parent at three boundaries. The existing proc-macro-error2 future-compatibility notice remains.
+
+Twenty-one update integration groups cover repeated/cleared/empty fields, exact metadata whitespace, CRLF, permissions, identity and adjacent-source preservation, stdin/literal MCP dash/null, no-op inode preservation, scaffold warnings/completion, invalid requests, typed diagnostic exclusions, bound MCP context, typed inline relation authoring and existing relation-resolution refusal. Thirteen of these groups retain distinct surviving-link, reference-definition, literal-context, section and anchored-block regressions through both transports. Single-file publication tests preserve source on verification/preimage failures. All prior suites pass.
+
+Candidate CLI schema validation and installed-baseline MCP schema/project validation returned complete validity without diagnostics. Selected intent passed one root, and realization/verification each passed two roots, consuming every page. Both transports advertise and execute item update. Project/item validation transport assertions use reviewed library source conformance; those transports, remaining item mutations, rule evaluation and matrices remain pending.
+:::
