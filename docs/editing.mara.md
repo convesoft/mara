@@ -381,3 +381,33 @@ Run `cargo test --locked --test item_rename` and rename unit tests. Check CLI/MC
 
 Retain one-file and multi-file injected failure/rollback, manual-edit conflicts, patch preimage checks and real rename-process interruption at every publication boundary followed by explicit recovery. Run all prior suites, formatting/Clippy, canonical validation and selected traceability.
 :::
+
+:::mara evidence EVD-ITEM-RENAME
+:mid: 01M3H6FHB7YY0J25PF634MXCQ6
+:title: Human-ID rename preserves identity, source and recovery
+:status: accepted
+:result: passed
+:captured_at: 2026-09-27T10:27:14Z
+:subject_revision: 666e9c2271583e01020d1a7636a4c82ec6a500eb
+:evidences: VER-PROJECT-INSPECTION
+:evidences: VER-SCHEMA-DEFINITIONS
+:evidences: VER-DOCUMENT-PARSING
+:evidences: VER-CODE-DISCOVERY
+:evidences: VER-ITEM-LIST
+:evidences: VER-UNIFIED-SEARCH
+:evidences: VER-BOUNDED-NODE-READ
+:evidences: VER-DOCUMENT-NAVIGATION
+:evidences: VER-RELATION-INSPECTION
+:evidences: VER-CORPUS-CONFORMANCE
+:evidences: VER-MID-AND-RECOVERY
+:evidences: VER-ITEM-CREATION
+:evidences: VER-RELATION-MUTATION
+:evidences: VER-ITEM-UPDATE
+:evidences: VER-ITEM-DELETION
+:evidences: VER-ITEM-MOVEMENT
+:evidences: VER-ITEM-RENAME
+
+At the subject revision, `cargo test --locked --all-targets` passed 262 tests across 22 suites with no failures. Two ignored subprocess helpers were each explicitly exercised at three interruption boundaries by their passing parent tests. Seven CLI/MCP rename groups cover byte/permission preservation, old-ID absence and stable MID navigation, narrative and typed references, inverse/symmetric/external assertions, heading-link protection, read-only code-marker behavior, no-op/writer gates and unchanged-source refusal. Five rename unit groups cover one-file publication, replacement failures, conflicting manual edits, process interruption/recovery and patch preimages.
+
+`cargo fmt --all --check`, `cargo clippy --locked --all-targets -- -D warnings` and candidate CLI schema validation passed. Installed-baseline MCP schema/project validation returned complete validity with zero errors or warnings. Selected intent, realization and verification checks each passed both selected roots with all pages consumed. Test projects own their files, adapters, configuration and Git state; the read-only self-hosting test passed. These results cover restored capabilities only; project/item validation transports, rule/graph execution and other unreviewed baseline scope remain pending.
+:::
