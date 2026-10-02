@@ -3,7 +3,17 @@
 Mara's supported behavior is defined in the [product documentation](docs/index.mara.md).
 The following development intentions are provisional, not implementation promises.
 
-## 0.4.0 — Knowledge change review
+## 0.4.0 — Execution and integration architecture
+
+The [confirmed scope](docs/0.4.mara.md) establishes one portable document engine,
+native embedded/daemon execution, N-API and browser WASM bindings, and a shared
+TypeScript client. It includes the library/transport paths, not graphical
+applications or GitHub publication. Detailed contracts and release acceptance
+live in that scope and its linked Mara items; implementation is not yet claimed.
+
+## Later
+
+### Knowledge change review
 
 - Compare items and documents across Git revisions, distinguishing content and
   relation changes from moves and human-ID renames.
@@ -14,9 +24,10 @@ The following development intentions are provisional, not implementation promise
   candidate without claiming a proven inconsistency.
 - Combine differences, history and relation context in a bounded review workflow.
 
-Detailed contracts will be established when this work is selected.
+This former 0.4.0 intention is deferred without a new release commitment.
+Detailed contracts will be established when it is selected.
 
-## Later
+### Other intentions
 
 - Multi-project aggregation, nested boundaries and cross-project relations.
 - Remote template packs and configuration composition.
