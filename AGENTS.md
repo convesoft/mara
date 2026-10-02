@@ -67,11 +67,18 @@ Repository-wide instructions for humans and software agents.
 - Squash merge by default. Use rebase merge only when preserving multiple
   independently useful commits that already follow the commit convention.
 - When the user intends to publish item work to GitHub or continue its pull
-  request, delegate PR operations to the project
-  [PR manager](.codex/agents/mara_pr_manager.toml). Provide the Work item ID,
-  branch, exact ready-to-push SHA, relevant Mara IDs, verification evidence,
-  known limitations, and existing PR URL, if any. Keep implementation and
-  review decisions in the main thread.
+  request, identify the Work item ID, branch, exact ready-to-push SHA, relevant
+  Mara IDs, verification evidence, known limitations, and existing PR URL, if
+  any. Keep implementation and review decisions in the main thread, and use
+  the workflow for the active host:
+  - In Pi, the main agent follows the
+    [Pi PR flow](.pi/skills/mara-pr-flow-pi/SKILL.md), runs `gh` directly, and uses
+    Herdr shell monitoring when explicitly requested. No separate PR agent is
+    required. `/pr-status` provides read-only, on-demand inspection.
+    `.pi/settings.json` excludes the Codex-only skill from Pi discovery.
+  - In Codex, the main thread follows the
+    [Mara PR flow](.agents/skills/mara-pr-flow/SKILL.md) and delegates PR operations
+    to the project [PR manager](.codex/agents/mara_pr_manager.toml).
 
 ## Documentation discipline
 

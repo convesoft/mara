@@ -54,3 +54,7 @@ CI passes, and no current-scope or critical finding remains unaddressed.
 Include accepted backlog and dismissed findings in that report. Stop when
 the PR closes or the main thread ends the loop. Never merge on your own.
 """
+
+[[skills.config]]
+path = ".agents/skills/mara-pr-flow/SKILL.md"
+enabled = false
