@@ -12,41 +12,51 @@ Repository-wide instructions for humans and software agents.
 
 ## Delivery coordination
 
-- Git-tracked Mara documents own durable product meaning. Linear may hold task
-  descriptions, expected outcomes, acceptance notes, priority, sequencing,
-  assignment, blockers, and status, but no product fact or decision may depend
-  on Linear remaining available. Do not add `task` or `release` flavours merely
-  to mirror delivery tracking.
+- Git-tracked Mara documents own durable product meaning. Work owns delivery
+  tracking in Git-tracked `.work/items/<full-id>.md` files: task descriptions,
+  expected outcomes, acceptance notes, priority, labels, blockers, and completion.
+  No product fact or decision may depend on a Work item. Do not add `task` or
+  `release` flavours merely to mirror delivery tracking.
+- Use Work through its CLI or MCP tools in the intended Git checkout. Use the
+  canonical full item ID in durable references; an unambiguous `w-` prefix is
+  sufficient for inspection. Work readiness does not claim or start work.
 - GitHub owns pull requests, review discussion, CI, and merge evidence. Treat
-  other operational systems and generated views as replaceable projections.
-- Release preparation must be owned by one Linear issue. Reuse the issue that
-  already owns that release; create one only when none exists.
-- In a multi-repository workspace, every issue must identify its repository and
-  cite relevant Mara IDs when they are known. Given an issue ID, read the issue,
-  this file, and its cited Mara items before acting. If the issue is unavailable,
+  operational views as replaceable projections.
+- Release preparation must be owned by one manual Work item. Reuse the item
+  that already owns that release; create one only when none exists.
+- In a multi-repository workspace, every item must identify its repository and
+  cite relevant Mara IDs when they are known. Given an item ID, read the item,
+  this file, and its cited Mara items before acting. If the item is unavailable,
   report that instead of inventing its contents.
 - When delivery exposes missing, contradictory, or changed product meaning,
-  resolve it in the canonical Mara documents; a Linear issue or review comment
+  resolve it in the canonical Mara documents; a Work item or review comment
   alone cannot establish the decision.
-- Classify findings before creating issues. Put accepted work for the current
-  release in its project as Todo, accepted but unscheduled work in Backlog, and
-  create nothing for duplicate, invalid, or non-actionable findings. Leave
-  backlog work unassigned unless it is explicitly being started.
-- `backlog this` means create one compact, unassigned, unscheduled Linear Backlog
-  issue for the referenced actionable outcome. Link its source and include
-  evident Mara IDs; do not change code. If Linear is unavailable, state that no
-  issue was created.
-- The implementer checks a Linear acceptance box only after producing evidence
-  that its criterion passes. Reviewers verify checked criteria and uncheck or
-  request evidence for unsupported claims. Move an issue to Done only after all
-  acceptance criteria pass and its change is merged; add criteria during review
-  only when the canonical Mara contract changes.
+- Classify findings before creating items. Record accepted current-release work
+  as open items with explicit release context, and accepted but unscheduled work
+  as open items labeled `backlog`. Create nothing for duplicate, invalid, or
+  non-actionable findings. Do not start backlog work unless explicitly requested.
+- `backlog this` means create one compact, unscheduled manual Work item labeled
+  `backlog` for the referenced actionable outcome. Identify the repository, link
+  its source, and include evident Mara IDs; do not change code. If Work is
+  unavailable, state that no item was created.
+- Keep acceptance checklists and delivery evidence in item bodies. Use Work
+  tools for metadata and relations; edit opaque Markdown bodies narrowly,
+  preserving their headers, and run Work diagnostics afterward. Use `depends_on`
+  for lifecycle prerequisites, not informational links.
+- The implementer checks an acceptance box only after producing evidence that
+  its criterion passes. Reviewers verify checked criteria and uncheck or request
+  evidence for unsupported claims. Close a manual implementation item only after
+  all acceptance criteria pass and its change is merged; add criteria during
+  review only when the canonical Mara contract changes. Use manual completion
+  for acceptance-gated deliverables; a `children` aggregate derives completion
+  from its children and is not a separate acceptance approval.
 
 ## Pull requests
 
-- Start issue work from current `main` and use the Linear issue's generated
-  `gitBranchName`. If it is unavailable, use `<identifier>-<short-title>`; do not
-  invent another branch taxonomy or long-lived development and release branches.
+- Start new item work from current `main` and use `<work-id>-<short-title>`,
+  with an unambiguous `w-` prefix for the item, unless the user explicitly selects
+  another branch. Do not invent another branch taxonomy or long-lived development
+  and release branches.
 - Open one pull request per issue against `main`. Its title must follow the
   active commit form and approved-scope list under Commit messages because
   GitHub may use the title for the squash commit.
@@ -56,11 +66,11 @@ Repository-wide instructions for humans and software agents.
   that actually exist; use `N/A` where applicable.
 - Squash merge by default. Use rebase merge only when preserving multiple
   independently useful commits that already follow the commit convention.
-- When the user intends to publish issue work to GitHub or continue its pull
-  request, the main thread uses the repository
-  [Mara PR flow](.agents/skills/mara-pr-flow/SKILL.md) and delegates PR
-  operations to the project [PR manager](.codex/agents/mara_pr_manager.toml).
-  The PR manager does not use the main-thread skill. Keep implementation and
+- When the user intends to publish item work to GitHub or continue its pull
+  request, delegate PR operations to the project
+  [PR manager](.codex/agents/mara_pr_manager.toml). Provide the Work item ID,
+  branch, exact ready-to-push SHA, relevant Mara IDs, verification evidence,
+  known limitations, and existing PR URL, if any. Keep implementation and
   review decisions in the main thread.
 
 ## Documentation discipline

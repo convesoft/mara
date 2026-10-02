@@ -4,7 +4,7 @@
 
 <!-- State the observable result. Keep durable product meaning in `*.mara.md`. -->
 
-- **Linear:** <!-- MARA-123 or N/A -->
+- **Work item:** <!-- Canonical full ID or link to .work/items/<full-id>.md; N/A if none -->
 - **Mara items:** <!-- REQ-..., DES-..., SCN-..., or N/A -->
 
 ## Change
@@ -13,7 +13,7 @@
 
 ## Verification
 
-<!-- List commands run and end-to-end evidence; do not copy Linear acceptance criteria. -->
+<!-- List commands run and end-to-end evidence; do not copy Work acceptance criteria. -->
 
 ## Known limitations
 
