@@ -218,15 +218,12 @@ Repository-wide instructions for humans and software agents.
 - Do not accept mocks, placeholders, or isolated tests as evidence that a real
   primary workflow works. Do not establish new product behavior solely in a
   review comment; update the canonical Mara documents when meaning changes.
-- Ordinary reviews cover one bounded batch. Do not enter repeated review-and-fix
-  loops after the current contract passes unless a newly found critical issue
-  requires action.
 - When a user request or delegated worker task explicitly requires the
   [local Codex review loop](.pi/skills/codex-review-loop/SKILL.md), the implementing
   agent runs it after implementation and before handoff. This opts into fixing
   every finding in the supplied-base diff and repeating review until a completed
   review explicitly reports no findings. The ordinary current-change
-  filtering and bounded-batch limits do not apply to this opt-in workflow. If a
+  filtering does not apply to this opt-in workflow. If a
   finding cannot be resolved, report the blocker rather than claiming a clean
   review. Product decisions, source safety, verification, and publication
   authorization still follow the other repository rules.

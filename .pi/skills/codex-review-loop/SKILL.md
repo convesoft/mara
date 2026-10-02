@@ -19,9 +19,9 @@ command or separate implementing agent is required.
 ```
 
 Follow repository [AGENTS.md](../../../AGENTS.md), applicable Mara contracts, and
-the repository's commit rules. This is the explicit clean-review-loop exception,
-not ordinary PR monitoring. It does not authorize pushing, PR publication, merge,
-or changing product meaning to satisfy a reviewer.
+the repository's commit rules. This workflow requires a completed no-findings
+review, not just fixes. It is separate from PR monitoring and does not authorize
+pushing, PR publication, merge, or changing product meaning to satisfy a reviewer.
 
 ## Review, fix, and repeat
 
