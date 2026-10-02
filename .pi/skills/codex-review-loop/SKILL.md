@@ -1,13 +1,18 @@
 ---
 name: codex-review-loop
-description: Explicitly run local Codex review against a supplied base ref, fix every finding, and repeat until a completed review reports no findings. The main Pi agent owns fixes; Codex is a reviewer subprocess, optionally monitored through Herdr.
-disable-model-invocation: true
+description: Run local Codex review against a supplied base ref, fix every finding, and repeat until no findings remain. Use when an implementing worker's task requires this loop after implementation and before handoff, or the user explicitly requests it. The implementing agent owns fixes; Herdr monitoring is optional.
 ---
 
 # Local Codex review loop in Pi
 
-Use only when the user explicitly requests this loop. Required input: the base
-branch/ref. Never guess it; ask if it was not supplied.
+The implementing agent owns this loop, whether it is the main Pi session or a
+parallel worker. Run after implementation and relevant checks, before handoff,
+when the user request or delegated worker task explicitly requires it.
+
+Required input: the base branch/ref supplied in the request or worker task.
+Never guess it; ask the requester or supervising agent if it was not supplied.
+Workers read this skill and run it in their own checkout; no interactive slash
+command or separate implementing agent is required.
 
 ```text
 /skill:codex-review-loop <base-branch>
@@ -47,7 +52,7 @@ or changing product meaning to satisfy a reviewer.
    blocker, not permission to skip review. If a successful review explicitly
    reports no findings for the unchanged current checkout, go directly to the
    final report; otherwise continue with fixes.
-4. Fix every finding in the main agent, run the relevant checks, and commit the
+4. Fix every finding in the implementing agent, run relevant checks, and commit the
    verified fixes following repository rules. Do not use backlog or dismissal
    as a substitute for the requested no-findings result. If a finding cannot be
    resolved, contradicts canonical knowledge, or requires an unresolved product
@@ -60,14 +65,16 @@ or changing product meaning to satisfy a reviewer.
    result as clean evidence; resolve the changed context before continuing.
 6. Report the base ref/SHA, final reviewed HEAD and any remaining working-tree
    changes, iterations, fixes, checks actually run, and the final no-findings
-   conclusion with its log path. If stopped early, report blocked or paused;
-   never claim completion.
+   conclusion with its log path. Workers return this evidence and their commit
+   SHAs to the supervising agent before handing off completed work. If stopped
+   early, report blocked or paused; never claim completion.
 
 ## Optional Herdr execution
 
-When the user requests Herdr, read its installed skill, require `HERDR_ENV=1`,
-and inspect the current CLI before control commands. Otherwise run directly;
-do not control a focused Herdr session from outside Herdr.
+When the user request or worker task explicitly requests Herdr, read its
+installed skill, require `HERDR_ENV=1`, and inspect the current CLI before control
+commands. Otherwise run directly; do not control a focused Herdr session from
+outside Herdr.
 
 Use an ordinary shell pane in the intended checkout, not a PR-manager agent or
 another implementer. Preserve user focus with `--no-focus`; create a dedicated
@@ -81,5 +88,5 @@ does not prove the reviewer stopped: inspect the process/log before retrying,
 and never launch duplicate reviews against a changing checkout.
 
 Do not edit the checkout while its review is running. Only stop/close processes
-and panes created for this task. Keep the main Pi task active to drive the loop;
-shell output does not automatically wake an idle agent.
+and panes created for this task. Keep the implementing agent's task active to
+drive the loop; shell output does not automatically wake an idle agent.
