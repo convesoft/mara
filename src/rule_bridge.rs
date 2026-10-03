@@ -1,4 +1,4 @@
-//! Supply real native rule checks to the source engine without extracting rules/trace.
+//! Bind shared rule evaluation on native corpus/code inputs to the source engine.
 use crate::{
     CheckOutcome, Corpus, Diagnostic, Project, RuleChecks, Schema, SourceEngine, ValidationResult,
     ValidationSummary, ValidationTarget,
@@ -55,7 +55,7 @@ pub fn load_rule_checks(
     {
         return Err("native schema and explicit rule-check schema differ".into());
     }
-    let rules = crate::rules::Rules::load(project, schema);
+    let rules = crate::native_rules::load(project, schema);
     use sha2::{Digest, Sha256};
     for (path, fingerprint) in &rules.source_fingerprints {
         let supplied = engine.files().get(

@@ -31,6 +31,13 @@ pub mod validation;
 pub use validation::*;
 mod snapshot;
 pub use snapshot::*;
+#[doc(hidden)]
+pub mod rules;
+pub mod trace;
+pub use trace::{
+    TraceCheck, TraceField, TraceMatrixParams, TraceMatrixResult, TraceMatrixSummary, TraceRecord,
+    TraceSelection,
+};
 pub const PROJECT_FILE: &str = ".mara/project.toml";
 pub const SCHEMA_FILE: &str = ".mara/schema.yaml";
 pub const SCHEMA_FORMAT_VERSION: u32 = 3;

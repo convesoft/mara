@@ -27,7 +27,7 @@ impl OperationContext {
             crate::Error::Io { .. } => crate::ValidationError::new("io_error", e.to_string()),
             _ => crate::ValidationError::invalid_argument(e.to_string()),
         })?;
-        crate::trace::matrix(&project, &schema, params)
+        crate::native_trace::matrix(&project, &schema, params)
     }
 
     pub fn from_environment(selected: Option<PathBuf>) -> Result<Self, String> {

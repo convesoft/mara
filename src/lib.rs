@@ -41,12 +41,18 @@ pub use mutation::{
     BackfilledMid, BackfilledMids, TransactionRollback, backfill_mids, rollback_transaction,
 };
 pub use mutation::{InitialRelation, ItemCreation, ItemCreationRequest, create_item};
+#[path = "rules.rs"]
+mod native_rules;
+#[path = "trace.rs"]
+mod native_trace;
 pub mod operations;
-mod rules;
-mod trace;
 pub use diagnostics::{
     ConfigurationDiagnostic, DiagnosticCode, DiagnosticItem, DiagnosticLocation,
     DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
+};
+pub use native_trace::{
+    TraceCheck, TraceField, TraceMatrixParams, TraceMatrixResult, TraceMatrixSummary,
+    TraceSelection,
 };
 pub use operations::{
     BackfilledMidResult, DeclarationSummary, FieldValue, GetParams, ItemCreateParams,
@@ -54,10 +60,6 @@ pub use operations::{
     ProjectMidBackfillResult, ProjectSummary, RelatedParams, RelationParams, SchemaGetResult,
     SchemaKind, SchemaListResult, SearchParams, TransactionRollbackResult, ValidationDiagnostic,
     ValidationResult, ValidationScope, ValidationTarget, ValidationTargetKind, project_initialize,
-};
-pub use trace::{
-    TraceCheck, TraceField, TraceMatrixParams, TraceMatrixResult, TraceMatrixSummary,
-    TraceSelection,
 };
 
 pub use operations::{RelationAction, RelationMutationResult};

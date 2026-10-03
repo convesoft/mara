@@ -429,7 +429,8 @@ Git/configuration state isolated. Capture results at the tested revision.
 
 The `mara-engine` workspace crate owns project/schema parsing and recovery,
 Markdown projection, identity/field/reference conformance, discovery and semantic
-relations, bounded document queries and structural graph policies. It contains
+relations, bounded document queries, structural graph policies, supported-profile
+rule compilation/evaluation and request-local trace computation. It contains
 no filesystem discovery/loading, cwd/environment access, configured subprocess
 execution, identity entropy/time generation or publication. All packages inherit
 the workspace version. Native `mara` owns host effects and uses the shared models
@@ -437,7 +438,8 @@ and computations; CLI/MCP invocation and result contracts remain unchanged.
 
 `SourceEngine::new(SourceSnapshot)` takes snapshot version 1 under
 [[DES-BROWSER-PROJECT-SNAPSHOT]]. Its public methods are schema get/list/validate,
-item list/search/get/related, relation inspection and project/item validation.
+item list/search/get/related, relation inspection, project/item validation,
+`rule_checks(target)` and `trace_matrix(params)`.
 Reuse existing query parameter/result types and validation options; validation
 uses a logical project root. Errors retain owning classifications and locations.
 Snapshot construction or strict reads reject invalid inputs; recovering
@@ -465,9 +467,25 @@ Reject stale outcomes. A corpus derived with source replacements invalidates
 its loaded-source identity; rebuild the full snapshot before binding rule checks.
 Missing required rule checks report unavailability;
 supplied diagnostics and completeness are composed with source and graph checks
-before full-target summaries, reporting filters and pagination. Native
-`load_rule_checks` uses the existing real rule adapter; native validation and
-trace coverage remain intact. Rule/trace extraction is not delivered here.
+before full-target summaries, reporting filters and pagination.
+
+`rule_checks(target)` compiles configured YAML from supplied snapshot sources
+and returns actual definition/evaluation outcomes using the synchronous SHACL
+adapter under [[ADR-NATIVE-SHACL-ADAPTER]]. Callers pass these outcomes into
+validation; omitting them still reports unavailable configured checks. Project
+and schema prerequisites must be usable; invalid rule definitions remain
+source-linked diagnostics. The native `load_rule_checks` adapter preserves its
+source/target binding and native corpus/code checks using the same evaluator.
+
+`trace_matrix(params)` loads configured or request-local YAML only from the
+snapshot. Literal binding follows [[DES-TRACE-CHECK-BINDING]]; explanation,
+applicability, canonical edges, summaries and continuation follow
+[[DES-TRACE-VIEW-INTERFACES]]. Source identity includes every supplied source
+and selection/ignore input. Missing rules or required code never produce a
+pass. Native hosting supplies rule source text or sanitized loading failures,
+plus its loaded corpus, prerequisites and complete code/asset/excluded-source
+identity to the shared trace computation; native filesystem containment and
+canonical duplicate checks remain host-owned.
 
 This slice does not implement initialization, mutation plans, native
 sessions/routing, worker/client packaging or complete browser operation
@@ -482,15 +500,16 @@ partial-conformance edit profile is introduced.
 :status: draft
 :justifies: DES-EXPLICIT-SOURCE-ENGINE
 
-Keep the source-conformance boundary independently usable while rule/trace
-extraction remains separate. Accept explicit, source- and target-bound rule
-outcomes rather than expanding source extraction, duplicating rule semantics,
-or treating absent checks as successful validation. Native hosting supplies
-actual checks through the existing adapter.
+Keep the source-conformance boundary independently usable. Accept explicit,
+source- and target-bound rule outcomes rather than duplicating rule semantics
+or treating absent checks as successful validation. Outcomes come from the
+shared synchronous SHACL adapter: document snapshots use `rule_checks(target)`;
+native hosting supplies its loaded corpus and code capabilities through
+`load_rule_checks`.
 
 Without required outcomes, report incomplete evaluation and
 `evaluation_unavailable`; independent document reads and schema discovery
 remain usable. This is an input boundary, not passing execution evidence,
 authorization or a reduced rule profile. Complete native rule/trace behavior
-and the complete eventual portable document profile remain required.
+and the complete portable document profile remain required.
 :::

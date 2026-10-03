@@ -154,10 +154,10 @@ impl OperationContext {
         snapshot.update(b"yaml-shacl-binding-1-registry-0.3.21-adapter-10");
         let rules = schema
             .as_ref()
-            .map(|schema| crate::rules::Rules::load(&project, schema));
+            .map(|schema| crate::native_rules::load(&project, schema));
         if let Some(rules) = &rules {
             for path in &rules.files {
-                hash_file(&mut snapshot, path);
+                hash_file(&mut snapshot, &project.root().join(path));
             }
             if !rules.diagnostics.is_empty() {
                 result.evaluation_complete = false;

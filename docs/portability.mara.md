@@ -1,11 +1,13 @@
-# Document-engine dependency gate
+# Document-engine dependency and rule/trace execution gate
 
-Build findings for [[ADR-PORTABLE-ENGINE-HOSTS]] and
-[[REQ-PORTABLE-DOCUMENT-ENGINE]]. This gate establishes a dependency path before
-extraction, not the packaged browser workflow in [[VER-BROWSER-DOCUMENT-ENGINE]].
+Build and supplied-source rule/trace checks for [[ADR-PORTABLE-ENGINE-HOSTS]] and
+[[REQ-PORTABLE-DOCUMENT-ENGINE]]. This gate covers the dependency path and
+extracted rule/trace APIs, not the packaged browser workflow in
+[[VER-BROWSER-DOCUMENT-ENGINE]].
 The `mara` package remains the native host. The extracted `mara-engine` crate
-provides the source/query/conformance boundary under
-[[DES-EXPLICIT-SOURCE-ENGINE]]; rule/trace and mutation extraction remain separate.
+provides the source/query/conformance and rule/trace computations under
+[[DES-EXPLICIT-SOURCE-ENGINE]]. Mutation extraction and worker/client packaging
+remain separate.
 
 ## Rule-engine path
 
@@ -71,10 +73,14 @@ From the intended checkout, with Chromium and a matching ChromeDriver installed:
 
 ```bash
 checkout=$PWD
-probe=$(mktemp -d "$HOME/mara-document-probe.XXXXXX")
+# Use the current verified Pi session ID and disk-backed session storage.
+probe="${XDG_CACHE_HOME:-$HOME/.cache}/pi/scratch/$PI_SESSION_ID/probe"
+mkdir -p "$probe"
 cp -R tests/fixtures/document-portability/. "$probe/"
-cp src/rules/{engine,bindings}.rs "$probe/src/"
+cp crates/mara-engine/src/rules/{engine,bindings}.rs "$probe/src/"
 cp Cargo.lock "$probe/Cargo.lock"
+# Point the copied manifest's mara-engine path at "$checkout/crates/mara-engine".
+# Keep TMPDIR and CARGO_TARGET_DIR inside the session-owned scratch directory.
 rustup target add --toolchain 1.97.1 wasm32-unknown-unknown
 cargo +1.97.1 install wasm-bindgen-cli --version 0.2.127 --locked \
   --root "$probe/tooling" -j 2
@@ -95,8 +101,8 @@ WASM binding versions. Keep its source copies, generated lockfile, compiled WASM
 commands, browser versions, revision/source hashes and full results outside the
 repository. Use disk-backed disposable storage if `/tmp` is memory/quota-limited.
 
-Require four browser tests and the same four native tests (plus the existing
-native adapter regression):
+Require seven browser tests and the same seven native tests (plus the existing
+native adapter regression). Four dependency checks:
 
 - Nested two-hop qualification, class, forward/inverse paths, property/node,
   and/or/not, string/integer/double/boolean literals, regex, hasValue/in,
@@ -112,9 +118,19 @@ native adapter regression):
   Unicode search dependencies, graph policy primitive, URL parsing and real
   browser clock/entropy-backed ULIDs.
 
+Three additional checks execute the production `SourceEngine` rule/check and
+trace APIs from supplied project/schema/Markdown/YAML sources in both hosts.
+Compare identical full-result SHA-256 expectations for supported nested,
+qualified, logical and typed-literal rules, source-linked failures, applicability,
+canonical duplicate edges, full summaries and consecutive trace pages. Exercise
+exact/mismatching/empty/IRI-looking parameters, every-target failure, refused
+bindings, stale sources/cursors/checks, invalid definitions and explicit missing
+code. `tests/portable_rules.rs` runs these same checks on native plus real CLI
+and native target-bound adapter parity.
+
 Native full operation suites retain public CLI/MCP coverage for definition
 validation, rule diagnostics, request-local matrices and every document operation.
-The probe does **not** execute those complete operations in a browser, test Mara's
-Markdown extension end to end, package a worker/client, or prove exported source
-changes. Those checks remain [[VER-BROWSER-DOCUMENT-ENGINE]]. No host certification,
-registry install, remote CI or power-loss guarantee follows from this local gate.
+The probe does **not** package a worker/client, exercise browser mutation plans,
+or prove exported source changes. Those checks remain
+[[VER-BROWSER-DOCUMENT-ENGINE]]. No host certification, registry install, remote
+CI or power-loss guarantee follows from this local gate.

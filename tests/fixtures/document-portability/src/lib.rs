@@ -24,6 +24,7 @@ const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 #[allow(dead_code)]
 mod bindings;
 mod engine;
+mod document_rules;
 
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_test::*;

@@ -7,6 +7,7 @@ version = "0.0.0"
 edition = "2024"
 
 [dependencies]
+mara-engine = { path = "../../../crates/mara-engine" }
 shacl = { version = "=0.3.24", default-features = false }
 rudof_rdf = { version = "=0.3.24", default-features = false }
 rudof_iri = "=0.3.24"

@@ -441,6 +441,105 @@ impl SourceEngine {
                         .any(|item| r.target.iter().any(|f| f == item.flavour()))
             })
     }
+    /// Compile and evaluate the supported document-rule profile against this
+    /// exact snapshot and target. Outcomes retain the existing binding contract.
+    pub fn rule_checks(&self, target: ValidationTarget) -> Result<RuleChecks, ValidationError> {
+        let (project, schema) = self
+            .strict_project()
+            .map_err(|e| ValidationError::invalid_argument(e.to_string()))?;
+        let rules =
+            rules::Rules::load_sources(&schema, self.rule_sources(&project.rule_files), None);
+        let definitions = CheckOutcome {
+            evaluation_complete: rules.diagnostics.is_empty(),
+            diagnostics: rules.diagnostics.clone(),
+        };
+        let evaluation = if target.kind == ValidationTargetKind::Schema {
+            None
+        } else {
+            let (documents, mut prerequisites) = self
+                .documents(&project, Some(&schema))
+                .map_err(|e| ValidationError::invalid_argument(e.to_string()))?;
+            let corpus = Corpus {
+                documents,
+                code: CodeIndex::empty(&project),
+                source_fingerprint: self.fingerprint.clone(),
+            };
+            prerequisites.extend(validate_corpus(&corpus, &schema));
+            let mut result = trace::empty_validation(&project);
+            result.target = target.clone();
+            if self.code_required(&project, &schema, &corpus) {
+                unavailable(
+                    &mut result,
+                    ValidationScope::Project,
+                    "required code information is unavailable in a document-only snapshot",
+                );
+            } else if rules.diagnostics.is_empty() {
+                rules.evaluate(&corpus, &schema, &prerequisites, &mut result);
+            } else {
+                result.evaluation_complete = false;
+            }
+            Some((
+                target,
+                CheckOutcome {
+                    evaluation_complete: result.evaluation_complete,
+                    diagnostics: result.diagnostics,
+                },
+            ))
+        };
+        Ok(RuleChecks {
+            source_fingerprint: self.fingerprint.clone(),
+            definitions,
+            evaluation,
+        })
+    }
+
+    fn rule_sources(&self, paths: &[PathBuf]) -> Vec<rules::RuleSource> {
+        paths
+            .iter()
+            .map(|path| rules::RuleSource {
+                path: path.clone(),
+                content: self.file(path).map(str::to_owned).ok_or_else(|| {
+                    "rule source must be an existing regular file inside the project".into()
+                }),
+            })
+            .collect()
+    }
+
+    /// Evaluate a read-only matrix from configured or request-local supplied sources.
+    pub fn trace_matrix(
+        &self,
+        params: &TraceMatrixParams,
+    ) -> Result<TraceMatrixResult, ValidationError> {
+        let (project, schema) = self
+            .strict_project()
+            .map_err(|e| ValidationError::invalid_argument(e.to_string()))?;
+        let (documents, mut prerequisites) = self
+            .documents(&project, Some(&schema))
+            .map_err(|e| ValidationError::invalid_argument(e.to_string()))?;
+        let corpus = Corpus {
+            documents,
+            code: CodeIndex::empty(&project),
+            source_fingerprint: self.fingerprint.clone(),
+        };
+        prerequisites.extend(validate_corpus(&corpus, &schema));
+        let paths = params
+            .check
+            .as_ref()
+            .map_or(&project.rule_files, |c| &c.files);
+        trace::matrix(
+            &project,
+            &schema,
+            params,
+            trace::TraceInputs {
+                corpus: &corpus,
+                prerequisites: &prerequisites,
+                sources: self.rule_sources(paths),
+                source_identity: &self.fingerprint,
+                code_unavailable: self.code_required(&project, &schema, &corpus),
+            },
+        )
+    }
+
     pub fn schema_validate(
         &self,
         options: &ValidationOptions,
