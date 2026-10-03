@@ -121,9 +121,12 @@ Consolidate intermediate edits; omit files restored to their base contents.
 
 Export is not publication and does not reset the base or claim that an external
 revision is current. It contains source data and preconditions, not executable
-publication instructions. Hosts must compare the preconditions before applying
-changes. Git operations, semantic revision comparison and item history are not
-part of this export.
+publication instructions. Before applying changes, hosts must verify the whole
+effective base snapshot and each changed file's original-state precondition.
+Divergence in unchanged documents, configuration, schema, rules, selection or
+ignore inputs also rejects publication; checking changed files alone is
+insufficient. Git operations, semantic revision comparison and item history are
+not part of this export.
 :::
 
 :::mara requirement REQ-EXPLICIT-BACKEND-CAPABILITIES
@@ -141,10 +144,19 @@ write only its memory workspace.
 WASM 0.4.0 neither runs indexers nor imports native code-index snapshots.
 Document-only execution must not interpret missing code coverage as an empty
 valid code graph. Code-dependent validation/matrix work is explicitly
-unavailable; edits requiring absent code information for source/reference
-safety are refused. Independent document operations remain available. Native
-locking, transaction rollback and daemon lifecycle are native-only rather than
-fake browser successes.
+unavailable.
+
+WASM document mutations retain their owning source-conformance prerequisites;
+there is no weaker partial-conformance editing profile. When unavailable code
+information prevents complete source conformance, refuse all mutations against
+that workspace without changing it. Document-only workspaces remain editable;
+unused schema code-relation declarations alone do not require code information.
+Independent document reads and schema checks remain available. Later code
+support must satisfy the same gate rather than change the safety contract.
+
+Native locking, transaction rollback and daemon-wide lifecycle are native-only
+rather than fake browser successes. HTTP authority follows
+[[REQ-LOCAL-DAEMON-HTTP]].
 :::
 
 ## Interfaces and artifacts
@@ -197,8 +209,9 @@ behavior for creation/movement; it cannot assume every new path is included.
 Missing required inputs remain diagnostics/errors rather than being fetched or
 invented.
 
-The engine assigns a source fingerprint from the supplied inputs and uses a
-logical workspace root, not a host absolute path. Caller base identity is
+The engine assigns a source fingerprint over the normalized source inventory,
+exact file contents and supplied selection/ignore inputs. It uses a logical
+workspace root, not a host absolute path. Caller base identity is
 opaque provenance, not proof that a Git revision is current. An empty workspace
 supports explicit initialization; replacing/loading a snapshot establishes a
 new base. Mutations retain the original base for export and update workspace
@@ -225,9 +238,15 @@ meaning deletion). Reject duplicate paths and omit unchanged files; additions
 later deleted and edits restored to base produce no change.
 
 The export is computed from base versus current workspace, not an operation
-log. Exporting does not publish or advance the base. A host compares
-original-state preconditions and its external revision before publication;
-native filesystem permissions, journals and GitHub credentials are not part of
+log. Exporting does not publish or advance the base. The base source
+fingerprint represents the full effective inputs under
+[[DES-BROWSER-PROJECT-SNAPSHOT]], not only changed paths. Before applying any
+change, the host must match that full base, check every changed-file preimage
+and verify its external revision context. Reject divergence without applying
+changes; loading a replacement snapshot establishes a new base, not an
+automatic rebase of prior edits.
+
+Native filesystem permissions, journals and GitHub credentials are not part of
 this format. All exported source remains ordinary canonical files under
 [[REQ-CANONICAL-SOURCE]].
 :::
@@ -279,6 +298,24 @@ instead of adding a separate integration package family. Publish browser assets
 without requiring a native addon.
 :::
 
+:::mara decision ADR-BROWSER-WHOLE-BASE-PRECONDITIONS
+:mid: 01M40DSJ7QKKDFEAYJM1W96DEW
+:title: Require the complete browser base before applying exported changes
+:status: draft
+:justifies: REQ-BROWSER-CHANGE-EXPORT
+:justifies: DES-BROWSER-FILE-CHANGESET
+
+Choose whole-base preconditions rather than checking only touched files or
+implicitly rebasing an export. Unchanged documents, schema, rules, inventory
+and selection/ignore inputs can change whether an edit preserves references or
+belongs to the corpus; matching changed-file preimages alone cannot preserve
+the engine's accepted source-safety assumptions.
+
+Reject a divergent base before application. Loading a new snapshot permits new
+validated edits without claiming semantic merge or revision-comparison support.
+Publication remains the caller's responsibility.
+:::
+
 ## Verification
 
 :::mara verification VER-INSTALLED-JAVASCRIPT-CLIENT
@@ -295,6 +332,7 @@ without requiring a native addon.
 :verifies: DES-LOCAL-DAEMON-PROTOCOL
 :validates: SCN-IMPORT-MARA-NODE
 :validates: SCN-SELECT-BROWSER-MARA
+:verifies: DES-DAEMON-LIFECYCLE
 
 Build and pack the candidate main/native packages, install them with lifecycle
 scripts disabled in disposable storage, and import the Node ESM API on Node 24.
@@ -308,13 +346,21 @@ Verify exact workspace versions, addon/loader/types inventories, browser
 assets, Node 24 minimum and absence of install-time downloads/builds or public
 CJS-library promises.
 
-In real Chromium, import the installed browser client and exercise
-authenticated loopback HTTP against a real daemon. Verify equivalent operation
-results, disk persistence, disabled-by-default HTTP and rejection of
-missing/incorrect tokens and disallowed origins before side effects. Check
-mismatched version refusal and that browser imports need no Node
-built-ins/addon. Chromium is the browser release gate; Firefox/WebKit
-compatibility is not certified by that run.
+In real Chromium, serve the installed browser client from a loopback origin and
+exercise authenticated loopback HTTP against a real daemon. Obtain connection
+information through the explicit local command; verify routine status/logs do
+not disclose tokens. Verify equivalent operation results, disk persistence,
+disabled-by-default HTTP and rejection of missing/incorrect tokens, disallowed
+origins and unauthorized project targets before file access or command
+execution. Authorizing one root must not authorize descendants or another Git
+worktree; native IPC selection remains unchanged.
+
+Exercise initialization at an explicitly authorized destination and project
+rollback/refresh. Refuse daemon-wide administration over HTTP. Check mismatched
+version refusal and that browser imports need no Node built-ins/addon.
+Chromium with a loopback-served application is the HTTP browser release gate.
+Origin configuration remains explicit; hosted HTTPS-to-daemon access and
+Firefox/WebKit compatibility are not certified by that run.
 :::
 
 :::mara verification VER-BROWSER-DOCUMENT-ENGINE
@@ -334,9 +380,10 @@ compatibility is not certified by that run.
 :validates: SCN-DRAFT-MARA-BROWSER
 
 Use the packaged worker/WASM client in real Chromium against fixture-owned
-source snapshots. Exercise initialization/MID backfill, schema operations,
-bounded list/search/get/related, every item and relation mutation, validation,
-graph policies, configured document rules and request-local trace matrices.
+document-only source snapshots. Exercise initialization/MID backfill, schema
+operations, bounded list/search/get/related, every item and relation mutation,
+validation, graph policies, configured document rules and request-local trace
+matrices.
 Compare native and browser outcomes for the same effective inputs, accounting
 only for generated identities and host-root context. Include representative
 nested/qualified/literal/parameterized rules from the supported profile; a
@@ -347,11 +394,18 @@ preservation, Unicode source/metadata, source-preserving reference safety and
 stale handles/cursors. Export a file change set, check exact original-state
 preconditions and consolidated additions/modifications/deletions, then
 materialize its sources in a disposable native project and validate them
-through the real CLI. No GitHub publication is claimed.
+through the real CLI. Verify whole-base checks reject changes to an untouched
+document, configuration/schema/rule source, effective inventory or
+selection/ignore input even when every changed-file preimage still matches.
+No divergent-base application or GitHub publication is claimed.
 
 Reject incomplete required source inputs and unsafe/duplicate paths. Verify
-native-only/code-dependent work is explicitly unavailable, no missing code
-coverage appears as a pass, and unsafe edits are refused without changing the
-workspace. A mock worker or Node-only WASM run is not browser execution
-evidence. Record the candidate revision and actual artifact/browser results.
+native-only/code-dependent work is explicitly unavailable and no missing code
+coverage appears as a pass. In a workspace whose source conformance requires
+unavailable code information, refuse every mutation, including otherwise
+document-local updates, without changing memory or its export. Retain
+independent reads/schema checks and full editing of document-only workspaces,
+including an engineering schema with unused code-relation declarations. A mock
+worker or Node-only WASM run is not browser execution evidence. Record the
+candidate revision and actual artifact/browser results.
 :::

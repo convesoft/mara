@@ -111,9 +111,16 @@ canonical source depend on cache recovery.
 
 Provide an opt-in loopback-only HTTP adapter for the daemon's
 document-operation protocol. Native IPC remains the default. HTTP requires a
-daemon-session token and an explicit allowed-origin policy; authorize before
-accessing project files or executing configured commands. Do not expose a
-remote/cloud service or use wildcard browser-origin access.
+daemon-session token, an explicit allowed-origin policy and an explicit project
+allowlist; authorize before accessing project files or executing configured
+commands. Do not expose a remote/cloud service or use wildcard browser-origin
+access.
+
+Browser authority is limited to authorized project operations. Project
+initialization requires an explicitly authorized destination; project rollback
+and refresh are allowed within that authority. Daemon-wide lifecycle,
+access-policy and credential management remain local-only. HTTP restrictions
+do not narrow native IPC project access.
 
 Native IPC and HTTP must enforce the same operation contracts. Browser HTTP
 selection is explicit and reports unavailable/incompatible backends; it does
@@ -255,8 +262,17 @@ Native transport uses same-user Unix sockets on the supported Linux/macOS
 hosts. Keep endpoint discovery and session credentials in private per-user
 runtime state, never project documents; stale endpoint handling must not stop
 an unrelated process. HTTP is disabled unless explicitly enabled, binds only
-loopback, and checks the session token and allowed Origin before project
-access. Do not put tokens in URLs or logs, or allow wildcard browser origins.
+loopback, and checks the session token, allowed Origin and project allowlist
+before project access. Configure exact authorized project roots and explicit
+initialization destinations locally when starting the daemon; authorizing one
+root does not authorize descendants, another project or another Git worktree.
+Resolve request targets against that authority rather than trusting path
+spelling. Do not put tokens in URLs or logs, or allow wildcard browser origins.
+
+HTTP exposes authorized project operations, including explicit rollback and
+force refresh, but no daemon-wide start/stop, access-policy or credential
+management. Connection information is handed off locally under
+[[DES-DAEMON-LIFECYCLE]]; there is no browser pairing protocol.
 
 MCP remains a separate stdio adapter to the high-level client, not the daemon's
 operation protocol. No remote hosting, event subscription or cross-project
@@ -269,12 +285,21 @@ aggregation is added.
 :status: draft
 :kind: deployment
 :satisfies: REQ-USER-DAEMON-LIFECYCLE
+:satisfies: REQ-LOCAL-DAEMON-HTTP
 
 Expose foreground run and background start plus stop/status and
 selected-project force refresh. Background start detaches from the caller;
 consumers disconnecting do not stop the daemon. Only one daemon instance owns
 the per-user endpoint; a second start reports the existing instance rather than
 replacing it. No installer, OS service or auto-start behavior is included.
+
+Provide an explicit local connection-info command for HTTP callers. Keep
+connection information in private per-user runtime state; return the HTTP
+endpoint and daemon-session token only on deliberate local request. Routine
+status output and logs omit tokens. The caller supplies the connection
+information to the browser client. A dedicated UI launcher and browser pairing
+are outside 0.4.0; a later launcher can automate this handoff without expanding
+browser authority.
 
 The daemon's startup environment is the execution environment for configured
 indexers. Commands run from each selected project root with the existing
@@ -325,6 +350,25 @@ avoid repeated external indexing. External indexing inputs outside the recorded
 project boundary require force refresh, and environment changes require
 restart. This trades complete external-dependency tracking for an explicit
 bounded 0.4 limitation.
+:::
+
+:::mara decision ADR-PROJECT-SCOPED-HTTP-ACCESS
+:mid: 01M40DS7B7RNYE5JDVYHF6C052
+:title: Limit browser authority to explicitly authorized projects
+:status: draft
+:justifies: REQ-LOCAL-DAEMON-HTTP
+:justifies: DES-LOCAL-DAEMON-PROTOCOL
+
+Choose explicit project-scoped browser authority rather than grant access to
+every project available to the daemon's OS user. A session token authenticates
+the caller and the origin policy identifies the browser application; neither
+substitutes for project authorization.
+
+Project reads can execute configured indexers, so access also grants command
+execution within that project's trusted-command boundary. Keep unrelated
+projects and daemon-wide administration outside browser authority. Local
+connection-info handoff supports the library workflow without adding a pairing
+service or the deferred UI launcher.
 :::
 
 ## Verification
