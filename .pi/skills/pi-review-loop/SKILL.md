@@ -1,7 +1,7 @@
 ---
 name: pi-review-loop
 description: Run an independent local Pi review against a supplied base, fix every finding, and repeat until no findings remain. Use when an implementing worker's task requires this loop after implementation and before handoff, or the user explicitly requests it. The implementing agent owns fixes. A reviewer producing findings must not recursively invoke this loop.
-compatibility: Requires Python 3, Git, Linux findmnt, Pi with openai/gpt-6.1-sol and the fast-mode extension, and the calling Pi session's PI_SESSION_ID. Provider access is needed for a live review.
+compatibility: Requires Bash 4+, Git, jq, GNU coreutils, Linux findmnt, Pi with openai/gpt-6.1-sol and the fast-mode extension, and the calling Pi session's PI_SESSION_ID. Provider access is needed for a live review.
 ---
 
 # Local Pi review loop
@@ -14,11 +14,12 @@ report directly to the user when coordinator communication is prohibited.
 
 ## Run one review
 
-From the checkout being reviewed, invoke [scripts/review.py](scripts/review.py)
-with the full immutable commit SHA of the user-supplied local base:
+From the checkout being reviewed, invoke [scripts/review.sh](scripts/review.sh)
+with the full immutable commit SHA of the user-supplied local base. The executable
+uses Bash through its shebang, so it can also be called from Fish:
 
 ```sh
-.pi/skills/pi-review-loop/scripts/review.py <base-sha>
+.pi/skills/pi-review-loop/scripts/review.sh <base-sha>
 ```
 
 Resolve the supplied ref immediately before each iteration. Never guess the
