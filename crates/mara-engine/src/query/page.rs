@@ -2,7 +2,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use super::*;
 
-pub(crate) const PAGE_BYTES: usize = 65_536;
+pub const PAGE_BYTES: usize = 65_536;
 const TITLE_CHARS: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -12,7 +12,7 @@ pub struct ItemCollectionResult {
     pub next_cursor: Option<String>,
 }
 
-pub(crate) fn filtered_page(
+pub fn filtered_page(
     corpus: &Corpus,
     schema: &Schema,
     filters: &ItemFilters,
@@ -65,7 +65,7 @@ pub(crate) fn filtered_page(
     Ok(page)
 }
 
-pub(crate) fn page_limit(limit: Option<usize>) -> Result<usize, QueryError> {
+pub fn page_limit(limit: Option<usize>) -> Result<usize, QueryError> {
     let limit = limit.unwrap_or(20);
     if !(1..=100).contains(&limit) {
         return Err(page_error("page limit must be 1 through 100"));
@@ -73,14 +73,14 @@ pub(crate) fn page_limit(limit: Option<usize>) -> Result<usize, QueryError> {
     Ok(limit)
 }
 
-pub(crate) fn truncate_title(summary: &mut ItemSummary) {
+pub fn truncate_title(summary: &mut ItemSummary) {
     if let Some((end, _)) = summary.title.char_indices().nth(TITLE_CHARS) {
         summary.title.truncate(end);
         summary.title_truncated = true;
     }
 }
 
-pub(crate) fn page_error(message: &str) -> QueryError {
+pub fn page_error(message: &str) -> QueryError {
     QueryError::InvalidPage {
         message: message.to_owned(),
     }
@@ -95,7 +95,7 @@ fn set_continuation(
     (page.has_more, page.next_cursor) = continuation(start, page.items.len(), total, fingerprint);
 }
 
-pub(crate) fn continuation(
+pub fn continuation(
     start: usize,
     count: usize,
     total: usize,
@@ -109,7 +109,7 @@ pub(crate) fn continuation(
     )
 }
 
-pub(crate) fn fingerprint(
+pub fn fingerprint(
     corpus: &Corpus,
     schema: &Schema,
     request: &impl Serialize,
@@ -121,6 +121,7 @@ pub(crate) fn fingerprint(
     serde_json::to_vec(&(request, schema))
         .map_err(|_| page_error("could not fingerprint retrieval request"))?
         .hash(&mut hash);
+    corpus.source_fingerprint.hash(&mut hash);
     for document in corpus.documents() {
         document.path().hash(&mut hash);
         document.source().hash(&mut hash);
@@ -135,19 +136,22 @@ pub(crate) fn fingerprint(
         path.hash(&mut hash);
         corpus.code().file_only_bytes(&path).hash(&mut hash);
     }
-    for path in corpus.code().assets() {
+    for path in corpus
+        .code()
+        .assets()
+        .filter(|path| path.as_path() != std::path::Path::new(crate::PROJECT_FILE))
+    {
         path.hash(&mut hash);
-        std::fs::read(corpus.code().root().join(path))
+        corpus
+            .code()
+            .file_only_bytes(path)
             .unwrap_or_default()
             .hash(&mut hash);
     }
     Ok(format!("{:016x}", hash.finish()))
 }
 
-pub(crate) fn cursor_position(
-    cursor: Option<&str>,
-    fingerprint: &str,
-) -> Result<usize, QueryError> {
+pub fn cursor_position(cursor: Option<&str>, fingerprint: &str) -> Result<usize, QueryError> {
     let Some(cursor) = cursor else {
         return Ok(0);
     };
@@ -183,7 +187,7 @@ pub struct SearchExcerpt {
     pub partial: bool,
 }
 
-pub(crate) fn excerpts(source: &str, item: &Item, terms: &BTreeSet<String>) -> Vec<SearchExcerpt> {
+pub fn excerpts(source: &str, item: &Item, terms: &BTreeSet<String>) -> Vec<SearchExcerpt> {
     if terms.is_empty() {
         return Vec::new();
     }
@@ -249,7 +253,7 @@ pub(crate) fn excerpts(source: &str, item: &Item, terms: &BTreeSet<String>) -> V
     fragments
 }
 
-pub(crate) fn line_at(source: &str, byte: usize) -> usize {
+pub fn line_at(source: &str, byte: usize) -> usize {
     source.as_bytes()[..byte]
         .iter()
         .filter(|b| **b == b'\n')
@@ -257,11 +261,7 @@ pub(crate) fn line_at(source: &str, byte: usize) -> usize {
         + 1
 }
 
-pub(crate) fn matching_spans(
-    value: &str,
-    terms: &BTreeSet<String>,
-    fuzzy: bool,
-) -> Vec<(usize, usize)> {
+pub fn matching_spans(value: &str, terms: &BTreeSet<String>, fuzzy: bool) -> Vec<(usize, usize)> {
     // Normalize whole grapheme clusters so composition and case-fold expansion
     // retain a mapping to their original source bytes (e.g. cafe + accent, ß).
     let mut canonical = String::new();

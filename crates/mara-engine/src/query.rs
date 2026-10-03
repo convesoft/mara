@@ -14,7 +14,7 @@ mod get;
 pub use get::{EntryRange, GetResult, MetadataFragment, TextRange, get};
 mod related;
 pub use related::{RelatedConnection, RelatedNeighbour, RelatedResult, related};
-pub(crate) mod page;
+pub mod page;
 mod search;
 pub use page::ItemCollectionResult;
 pub use page::SearchExcerpt;
@@ -230,7 +230,7 @@ pub fn list_items(
     page::filtered_page(corpus, schema, filters)
 }
 
-pub(crate) fn filtered_items<'a>(
+pub fn filtered_items<'a>(
     corpus: &'a Corpus,
     schema: &Schema,
     filters: &ItemFilters,
@@ -307,7 +307,7 @@ fn validate_fields(schema: &Schema, fields: &[FieldFilter]) -> Result<(), QueryE
     Ok(())
 }
 
-pub(crate) fn normalized_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, QueryError> {
+pub fn normalized_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, QueryError> {
     paths
         .iter()
         .map(|path| {
@@ -487,7 +487,7 @@ fn canonical_text(value: &str) -> String {
     value.nfc().case_fold().nfc().collect()
 }
 
-pub(crate) fn resolve_item<'a>(corpus: &'a Corpus, id: &str) -> Result<&'a Item, QueryError> {
+pub fn resolve_item<'a>(corpus: &'a Corpus, id: &str) -> Result<&'a Item, QueryError> {
     let by_mid = crate::is_mid(id);
     let mut matches = corpus.items().filter(|item| {
         if by_mid {
@@ -516,7 +516,7 @@ fn relation_handle_can_target_item(handle: &str, item: &Item) -> bool {
     }
 }
 
-pub(crate) fn resolve_relation_target<'a>(
+pub fn resolve_relation_target<'a>(
     corpus: &'a Corpus,
     source: &Item,
     relation: &str,

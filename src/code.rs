@@ -7,78 +7,13 @@ use std::{
 };
 
 use ignore::WalkBuilder;
-use serde::Deserialize;
 use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
 
 mod scip_index;
 
-use crate::{DiagnosticCode, Project, SourceLocation, corpus::location};
+use crate::{DiagnosticCode, Project, corpus::location};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeIndex {
-    root: PathBuf,
-    files: BTreeMap<PathBuf, CodeFile>,
-    assets: Vec<PathBuf>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeFile {
-    pub path: PathBuf,
-    pub source: String,
-    pub symbols: Vec<CodeSymbol>,
-    pub markers: Vec<CodeMarker>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeSymbol {
-    pub selector: String,
-    identity: String,
-    pub source: SourceLocation,
-    pub content: SourceLocation,
-    body_start: usize,
-    body_end: usize,
-    attach_starts: Vec<usize>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeMarker {
-    pub relation: String,
-    pub target: String,
-    pub endpoint: String,
-    pub source: SourceLocation,
-    owner_span: Option<(usize, usize)>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CodeProblem {
-    pub code: DiagnosticCode,
-    pub message: String,
-    pub source: SourceLocation,
-    pub target: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ReferenceError {
-    MissingFile,
-    MissingSymbol,
-    Ambiguous,
-    Unsupported,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct LanguageConfig {
-    name: String,
-    command: Vec<String>,
-    /// Compatibility for indexers predating SCIP's per-document position encoding.
-    #[serde(default)]
-    position_encoding: Option<scip_index::Encoding>,
-    #[serde(default)]
-    extensions: Vec<String>,
-    grammar: Option<PathBuf>,
-    query: Option<PathBuf>,
-}
-
+pub use mara_engine::code::*;
 struct Adapter {
     extensions: Vec<String>,
     parser: Parser,
@@ -256,238 +191,105 @@ impl Adapter {
     }
 }
 
-pub(crate) fn split_reference(reference: &str) -> Result<(PathBuf, Option<&str>), ReferenceError> {
-    let rest = reference
-        .strip_prefix("code:")
-        .ok_or(ReferenceError::Unsupported)?;
-    let (path, selector) = rest
-        .split_once("::")
-        .map_or((rest, None), |(p, s)| (p, Some(s)));
-    if path.is_empty()
-        || selector.is_some_and(str::is_empty)
-        || path.contains('\\')
-        || path.chars().any(char::is_whitespace)
-        || path
-            .split('/')
-            .any(|component| component.is_empty() || component == "." || component == "..")
-        || Path::new(path)
-            .components()
-            .any(|c| !matches!(c, Component::Normal(_)))
-        || Path::new(path).is_absolute()
-    {
-        return Err(ReferenceError::Unsupported);
-    }
-    Ok((PathBuf::from(path), selector))
-}
-
-fn valid_asset_path(path: &Path) -> bool {
-    !path.as_os_str().is_empty()
-        && path
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
-}
-
-fn read_project_asset(project: &Project, path: &Path) -> Result<Vec<u8>, String> {
-    let resolved = fs::canonicalize(project.root().join(path)).map_err(|e| e.to_string())?;
-    if !resolved.starts_with(project.root()) || !resolved.is_file() {
-        return Err("adapter asset must be a regular file within the project".into());
-    }
-    fs::read(resolved).map_err(|e| e.to_string())
-}
-
-impl CodeIndex {
-    // @mara implements DES-CODE-TRACEABILITY
-    pub fn load(project: &Project) -> (Self, Vec<CodeProblem>) {
-        let mut result = Self {
-            root: project.root().to_owned(),
-            files: BTreeMap::new(),
-            assets: vec![PathBuf::from(crate::PROJECT_FILE)],
-        };
-        let mut problems = Vec::new();
-        let mut adapters = match Adapter::load(project) {
-            Ok((adapters, assets)) => {
-                result.assets = assets;
-                adapters
-            }
-            Err(problem) => {
-                problems.push(problem);
-                return (result, problems);
-            }
-        };
-        if project.code_languages().is_empty() {
+pub fn load(project: &Project) -> (CodeIndex, Vec<CodeProblem>) {
+    let mut result = CodeIndex {
+        root: project.root().to_owned(),
+        files: BTreeMap::new(),
+        assets: vec![PathBuf::from(crate::PROJECT_FILE)],
+        inputs: Some(std::sync::Arc::new(NativeCodeSource(
+            project.root().to_owned(),
+        ))),
+    };
+    let mut problems = Vec::new();
+    let mut adapters = match Adapter::load(project) {
+        Ok((adapters, assets)) => {
+            result.assets = assets;
+            adapters
+        }
+        Err(problem) => {
+            problems.push(problem);
             return (result, problems);
         }
-        let indexes = match scip_index::run(project) {
-            Ok(indexes) => indexes,
-            Err(problem) => return (result, vec![problem]),
-        };
-        let mut walker = WalkBuilder::new(project.root());
-        walker
-            .hidden(false)
-            .ignore(false)
-            .git_ignore(true)
-            .git_exclude(false)
-            .git_global(false)
-            .parents(true)
-            .require_git(false)
-            .follow_links(false);
-        for entry in walker.build() {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(error) => {
-                    let path = crate::corpus::walk_error_path(project.root(), &error);
-                    problems.push(CodeProblem {
-                        code: DiagnosticCode::SourceInvalid,
-                        message: format!("could not discover code files: {error}"),
-                        source: location(&path, &[0], 0, 0),
-                        target: None,
-                    });
-                    continue;
-                }
-            };
-            let supported_file = entry.file_type().is_some_and(|kind| kind.is_file())
-                || entry.file_type().is_some_and(|kind| kind.is_symlink())
-                    && fs::canonicalize(entry.path()).is_ok_and(|canonical| {
-                        canonical.starts_with(project.root()) && canonical.is_file()
-                    });
-            if !supported_file {
+    };
+    if project.code_languages().is_empty() {
+        return (result, problems);
+    }
+    let indexes = match scip_index::run(project) {
+        Ok(indexes) => indexes,
+        Err(problem) => return (result, vec![problem]),
+    };
+    let mut walker = WalkBuilder::new(project.root());
+    walker
+        .hidden(false)
+        .ignore(false)
+        .git_ignore(true)
+        .git_exclude(false)
+        .git_global(false)
+        .parents(true)
+        .require_git(false)
+        .follow_links(false);
+    for entry in walker.build() {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                let path = crate::corpus::walk_error_path(project.root(), &error);
+                problems.push(CodeProblem {
+                    code: DiagnosticCode::SourceInvalid,
+                    message: format!("could not discover code files: {error}"),
+                    source: location(&path, &[0], 0, 0),
+                    target: None,
+                });
                 continue;
             }
-            let path = entry
-                .path()
-                .strip_prefix(project.root())
-                .unwrap()
-                .to_path_buf();
-            let Some(adapter) = adapters.iter_mut().find(|adapter| adapter.accepts(&path)) else {
+        };
+        let supported_file = entry.file_type().is_some_and(|kind| kind.is_file())
+            || entry.file_type().is_some_and(|kind| kind.is_symlink())
+                && fs::canonicalize(entry.path()).is_ok_and(|canonical| {
+                    canonical.starts_with(project.root()) && canonical.is_file()
+                });
+        if !supported_file {
+            continue;
+        }
+        let path = entry
+            .path()
+            .strip_prefix(project.root())
+            .unwrap()
+            .to_path_buf();
+        let Some(adapter) = adapters.iter_mut().find(|adapter| adapter.accepts(&path)) else {
+            continue;
+        };
+        let source = match fs::read_to_string(entry.path()) {
+            Ok(source) => source,
+            Err(error) => {
+                problems.push(CodeProblem {
+                    code: DiagnosticCode::SourceInvalid,
+                    message: format!("could not read code file: {error}"),
+                    source: location(&path, &[0], 0, 0),
+                    target: None,
+                });
                 continue;
-            };
-            let source = match fs::read_to_string(entry.path()) {
-                Ok(source) => source,
-                Err(error) => {
-                    problems.push(CodeProblem {
-                        code: DiagnosticCode::SourceInvalid,
-                        message: format!("could not read code file: {error}"),
-                        source: location(&path, &[0], 0, 0),
-                        target: None,
-                    });
-                    continue;
-                }
-            };
-            let (file, mut file_problems) = parse_file(path.clone(), source, adapter);
-            problems.append(&mut file_problems);
-            result.files.insert(path, file);
-        }
-        scip_index::apply(project, indexes, &mut result, &mut problems);
-        (result, problems)
+            }
+        };
+        let (file, mut file_problems) = parse_file(path.clone(), source, adapter);
+        problems.append(&mut file_problems);
+        result.files.insert(path, file);
     }
+    scip_index::apply(project, indexes, &mut result, &mut problems);
+    (result, problems)
+}
 
-    pub(crate) fn empty(project: &Project) -> Self {
-        Self {
-            root: project.root().to_owned(),
-            files: BTreeMap::new(),
-            assets: vec![PathBuf::from(crate::PROJECT_FILE)],
-        }
-    }
-
-    pub fn assets(&self) -> impl Iterator<Item = &PathBuf> {
-        self.assets.iter()
-    }
-
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-
-    pub fn files(&self) -> impl Iterator<Item = &CodeFile> {
-        self.files.values()
-    }
-
-    pub(crate) fn file_only_bytes(&self, path: &Path) -> Option<Vec<u8>> {
-        let canonical = fs::canonicalize(self.root.join(path)).ok()?;
-        if !canonical.starts_with(&self.root) || !canonical.is_file() {
-            return None;
-        }
-        fs::read(canonical).ok()
-    }
-
-    // @mara implements DES-CODE-READ
-    pub(crate) fn resolve(&self, reference: &str) -> Result<CodeResolved, ReferenceError> {
-        let (path, selector) = split_reference(reference)?;
-        let absolute = self.root.join(&path);
-        let canonical = fs::canonicalize(&absolute).map_err(|_| ReferenceError::MissingFile)?;
-        if !canonical.starts_with(&self.root) || !canonical.is_file() {
+#[derive(Debug)]
+struct NativeCodeSource(PathBuf);
+impl CodeSource for NativeCodeSource {
+    fn file(&self, path: &Path) -> Result<Vec<u8>, ReferenceError> {
+        let canonical =
+            fs::canonicalize(self.0.join(path)).map_err(|_| ReferenceError::MissingFile)?;
+        if !canonical.starts_with(&self.0) || !canonical.is_file() {
             return Err(ReferenceError::Unsupported);
         }
-        let Some(selector) = selector else {
-            let content = fs::read(&absolute)
-                .map_err(|_| ReferenceError::Unsupported)
-                .map(|bytes| String::from_utf8(bytes).ok())?;
-            let lines = content
-                .as_deref()
-                .map(line_starts)
-                .unwrap_or_else(|| vec![0]);
-            let length = content.as_ref().map_or(0, String::len);
-            return Ok(CodeResolved {
-                reference: reference.to_owned(),
-                source: location(&path, &lines, 0, length),
-                content,
-                symbol: None,
-            });
-        };
-        let file = self.files.get(&path).ok_or(ReferenceError::Unsupported)?;
-        let mut matches = file
-            .symbols
-            .iter()
-            .filter(|symbol| symbol.selector == selector);
-        let symbol = matches.next().ok_or(ReferenceError::MissingSymbol)?;
-        let mut start = symbol.content.span().start_byte();
-        let mut end = symbol.content.span().end_byte();
-        for declaration in matches {
-            if declaration.identity != symbol.identity {
-                return Err(ReferenceError::Ambiguous);
-            }
-            start = start.min(declaration.content.span().start_byte());
-            end = end.max(declaration.content.span().end_byte());
-        }
-        Ok(CodeResolved {
-            reference: reference.to_owned(),
-            source: symbol.source.clone(),
-            content: Some(file.source[start..end].to_owned()),
-            symbol: Some(symbol.selector.clone()),
-        })
+        fs::read(canonical).map_err(|_| ReferenceError::Unsupported)
     }
 }
-
-pub(crate) struct CodeResolved {
-    pub reference: String,
-    pub source: SourceLocation,
-    pub content: Option<String>,
-    pub symbol: Option<String>,
-}
-
-impl CodeResolved {
-    pub(crate) fn summary(&self) -> crate::DiscoveryNodeSummary {
-        crate::DiscoveryNodeSummary {
-            reference: self.reference.clone(),
-            kind: crate::DiscoveryKind::Code,
-            source: (&self.source).into(),
-            title: self
-                .symbol
-                .clone()
-                .or_else(|| Some(self.source.path().display().to_string())),
-            title_truncated: false,
-            context: crate::DiscoveryContext {
-                parent: None,
-                section: None,
-            },
-            id: None,
-            mid: None,
-            flavour: None,
-            block_kind: None,
-            heading_level: None,
-        }
-    }
-}
-
 fn line_starts(source: &str) -> Vec<usize> {
     std::iter::once(0)
         .chain(source.match_indices('\n').map(|(i, _)| i + 1))
@@ -722,6 +524,21 @@ fn collect<'tree>(
     for child in node.named_children(&mut cursor) {
         collect(child, context, symbols);
     }
+}
+
+fn valid_asset_path(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn read_project_asset(project: &Project, path: &Path) -> Result<Vec<u8>, String> {
+    let resolved = fs::canonicalize(project.root().join(path)).map_err(|e| e.to_string())?;
+    if !resolved.starts_with(project.root()) || !resolved.is_file() {
+        return Err("adapter asset must be a regular file within the project".into());
+    }
+    fs::read(resolved).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

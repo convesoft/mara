@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["."]
+members = [".", "crates/mara-engine"]
 
 [workspace.package]
 version = "0.3.0"
@@ -16,6 +16,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/convesoft/mara"
 
 [dependencies]
+mara-engine = { path = "crates/mara-engine" }
 clap = { version = "4.5", features = ["derive"] }
 globset = "0.4"
 rmcp = { version = "3.2", features = ["schemars", "server", "transport-io"] }
@@ -33,14 +34,8 @@ rudof_iri = "=0.3.24"
 
 tree-sitter = { version = "0.27", features = ["wasm"] }
 ignore = "0.4"
-rushdown = "0.18.0"
 ulid = "1"
 
-petgraph = { version = "0.8.3", default-features = false, features = ["std"] }
-strsim = "0.11"
-unicode-casefold = "0.2"
-unicode-normalization = "0.1"
-unicode-segmentation = "1.13"
 url = "2.5"
 
 tempfile = "3"

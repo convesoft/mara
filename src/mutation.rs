@@ -366,7 +366,7 @@ pub fn create_item(
     }
     let line = created.source().span().start_line();
     let complete = schema
-        .flavours
+        .flavours()
         .get(&request.flavour)
         .is_some_and(|flavour| {
             flavour.body == BodyRequirement::Optional
@@ -517,12 +517,13 @@ fn validate_new_item(
     schema: &Schema,
     request: &ItemCreationRequest,
 ) -> Result<(), Error> {
-    let flavour = schema
-        .flavours
-        .get(&request.flavour)
-        .ok_or_else(|| Error::InvalidMutation {
-            message: format!("unknown flavour '{}'", request.flavour),
-        })?;
+    let flavour =
+        schema
+            .flavours()
+            .get(&request.flavour)
+            .ok_or_else(|| Error::InvalidMutation {
+                message: format!("unknown flavour '{}'", request.flavour),
+            })?;
     if !is_item_id(&request.id) {
         return invalid(format!("invalid item ID '{}'", request.id));
     }
@@ -856,11 +857,8 @@ pub(crate) fn mutate_semantic_relation(
     }
     // Validate selectors even when their previous edge no longer exists.
     if let Some(token) = occurrence {
-        let snapshot = crate::query::page::fingerprint(
-            &corpus,
-            schema,
-            &("relation-occurrences-v1", project.root()),
-        )?;
+        let snapshot =
+            crate::query::page::fingerprint(&corpus, schema, &"relation-occurrences-v1")?;
         let prefix = format!("occ-1-{snapshot}-");
         if !token
             .strip_prefix(&prefix)

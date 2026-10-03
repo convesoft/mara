@@ -3,7 +3,9 @@
 Build findings for [[ADR-PORTABLE-ENGINE-HOSTS]] and
 [[REQ-PORTABLE-DOCUMENT-ENGINE]]. This gate establishes a dependency path before
 extraction, not the packaged browser workflow in [[VER-BROWSER-DOCUMENT-ENGINE]].
-The current Mara package remains native and still contains host I/O.
+The `mara` package remains the native host. The extracted `mara-engine` crate
+provides the source/query/conformance boundary under
+[[DES-EXPLICIT-SOURCE-ENGINE]]; rule/trace and mutation extraction remain separate.
 
 ## Rule-engine path
 
@@ -26,9 +28,10 @@ the same RDF/SHACL APIs. The dependency probe must execute both, not infer parit
 from shared type names. Native transitive HTTP/Tokio dependencies are not a
 browser subprocess or required browser service.
 
-## Complete-profile boundary audit
+## Pre-extraction complete-profile boundary audit
 
-These are extraction boundaries, not newly delivered operation APIs. Every row
+This audit records the dependency gate's original source layout and extraction
+boundaries, not newly delivered operation APIs. Every row
 retains its owning source, identity, reference, diagnostic and continuation
 contract; no document operation is dropped.
 

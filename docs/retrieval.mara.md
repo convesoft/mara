@@ -19,7 +19,7 @@ Return bounded, complete continuations for unchanged sources/options; reject inv
 :kind: interface
 :satisfies: REQ-ITEM-LIST
 
-Compose `load_documents` with `CodeIndex::load` in strict `load_corpus`; return the first code problem as an operation error. Do not run semantic graph/field/MID validation as a listing prerequisite.
+Compose native `load_documents` with the native code loader in strict `load_corpus`; return the first code problem as an operation error. Do not run semantic graph/field/MID validation as a listing prerequisite.
 
 Each summary contains ID, optional MID, flavour, title, project-relative path and one-based line. Summaries use document-path/source order and have no body, ranking, excerpts or neighbours. Filters accept declared flavours, custom fields and relation names/inverse aliases. Values match exactly without trimming; repeated values within a field key and within each filter category use OR, while different keys/categories intersect. Relations match canonical declarations among authored outgoing item occurrences; do not resolve target existence to filter.
 

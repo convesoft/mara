@@ -221,6 +221,31 @@ Native code-index inputs are not supported in 0.4.0, and commands declared in
 configuration are never executed. A supplied document set does not prove
 repository-wide code completeness; declare unavailable code capabilities under
 [[REQ-EXPLICIT-BACKEND-CAPABILITIES]].
+
+The Rust source boundary represents v1 as `SourceSnapshot {format_version,
+files, selection, base_identity}`. `files` contains `{path, content}` entries.
+Normalize current-directory components and repeated separators; reject empty,
+absolute, parent-containing, backslash/drive-prefixed and duplicate normalized
+paths. Preserve exact UTF-8 contents and Unicode paths.
+
+`selection.document_paths` declares the complete selected document inventory.
+A listed source without contents makes conformance incomplete; a supplied
+included document omitted from that inventory is an invalid selection input.
+`selection.ignores` supplies each effective Git ignore text with its
+root-relative directory (empty for root). An inherited ignore instead carries
+`root_prefix`: exact relative path components from its ancestor origin to the
+logical root. These preserve anchored ancestor patterns without absolute host
+paths. Ignore matching strips leading UTF-8 BOM characters as native Git ignore
+loading does, while fingerprints retain the exact supplied text. Origins must be distinct and inherited prefixes consistent. Apply
+ancestor-to-descendant precedence and directory exclusion; a child cannot be
+re-included while its parent remains ignored. Membership uses configured
+include patterns with literal separators. No `.ignore`, Git global/exclude,
+filesystem-parent discovery or followed symlinks are inferred by the engine.
+
+The fingerprint hashes normalized, ordered file inventory, exact contents and
+effective selection/ignore inputs with SHA-256. Opaque base identity is not
+hashed as source state. Native producers and document-only callers use this
+same source identity; code-capability inputs remain separately represented.
 :::
 
 :::mara design DES-BROWSER-FILE-CHANGESET

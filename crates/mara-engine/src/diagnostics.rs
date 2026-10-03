@@ -109,7 +109,7 @@ pub struct ConfigurationDiagnostic {
 }
 
 impl ConfigurationDiagnostic {
-    pub(crate) fn new(code: DiagnosticCode, pointer: String, message: String) -> Self {
+    pub fn new(code: DiagnosticCode, pointer: String, message: String) -> Self {
         Self {
             code,
             pointer: Some(pointer),
@@ -119,15 +119,15 @@ impl ConfigurationDiagnostic {
             end_byte: None,
         }
     }
-    pub(crate) fn schema(parts: &[&str], message: String) -> Self {
+    pub fn schema(parts: &[&str], message: String) -> Self {
         Self::new(DiagnosticCode::SchemaInvalid, pointer(parts), message)
     }
-    pub(crate) fn project(parts: &[&str], message: String) -> Self {
+    pub fn project(parts: &[&str], message: String) -> Self {
         Self::new(DiagnosticCode::ProjectInvalid, pointer(parts), message)
     }
 }
 
-pub(crate) fn pointer(parts: &[&str]) -> String {
+pub fn pointer(parts: &[&str]) -> String {
     parts
         .iter()
         .map(|p| format!("/{}", p.replace('~', "~0").replace('/', "~1")))
@@ -156,7 +156,7 @@ pub struct ValidationError {
 }
 
 impl ValidationError {
-    pub(crate) fn new(code: &str, message: impl Into<String>) -> Self {
+    pub fn new(code: &str, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
             message: message.into(),

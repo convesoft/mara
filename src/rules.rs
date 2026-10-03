@@ -45,7 +45,7 @@ pub(crate) struct Rules {
     pub files: Vec<PathBuf>,
     pub diagnostics: Vec<ValidationDiagnostic>,
     ir: Option<IRSchema>,
-    source_fingerprints: BTreeMap<PathBuf, String>,
+    pub(crate) source_fingerprints: BTreeMap<PathBuf, String>,
     parameter_bindings: Option<BTreeMap<String, String>>,
     parameter_uses: BTreeMap<String, BTreeSet<String>>,
     binding_error: Option<String>,
@@ -791,7 +791,7 @@ impl Rules {
                 if let Some(field) = resolved.strip_prefix(FIELD) {
                     let defs = context
                         .iter()
-                        .filter_map(|f| schema.flavours.get(f).and_then(|f| f.fields.get(field)))
+                        .filter_map(|f| schema.flavours().get(f).and_then(|f| f.fields.get(field)))
                         .collect::<Vec<_>>();
                     if !context.is_empty() && defs.len() != context.len() {
                         return Err((
@@ -806,7 +806,7 @@ impl Rules {
                     child_kind = ValueKind::Literals(datatypes);
                     children.clear();
                 } else if let Some(relation) = resolved.strip_prefix(REL) {
-                    let r = &schema.relations[relation];
+                    let r = &schema.relations()[relation];
                     child_kind = if r.external && !path.is_object() {
                         if r.target.is_empty() {
                             ValueKind::ExternalEndpoints

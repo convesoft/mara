@@ -33,7 +33,7 @@ fn replacements(
         return invalid("item update requires at least one requested change");
     }
     let flavour = schema
-        .flavours
+        .flavours()
         .get(item.flavour())
         .ok_or_else(|| Error::InvalidMutation {
             message: format!("unknown flavour '{}'", item.flavour()),

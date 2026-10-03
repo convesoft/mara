@@ -54,14 +54,14 @@ impl RelationEndpoint {
 
 /// Identity in the disposable relation graph. Only item identities are persisted MIDs.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum NodeIdentity {
+pub enum NodeIdentity {
     Item(String),
     Code(String),
     External(String),
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct GraphEdge {
+pub struct GraphEdge {
     pub edge: RelationEdge,
     pub source: ItemSource,
     pub occurrence_count: usize,
@@ -70,14 +70,14 @@ pub(crate) struct GraphEdge {
 /// One semantic graph for item, code and external endpoints. Invalid assertions
 /// have no edge; source validation reports them before policy evaluation.
 #[derive(Debug, Default)]
-pub(crate) struct RelationGraph {
+pub struct RelationGraph {
     pub nodes: BTreeMap<NodeIdentity, RelationEndpoint>,
     edges: BTreeMap<(String, NodeIdentity, NodeIdentity), GraphEdge>,
 }
 
 impl RelationGraph {
     // @mara implements DES-CANONICAL-TRACE-RELATIONS
-    pub(crate) fn new(corpus: &Corpus, schema: &Schema) -> Self {
+    pub fn new(corpus: &Corpus, schema: &Schema) -> Self {
         let mut graph = Self::default();
         for item in corpus.items() {
             if let Ok(endpoint) = RelationEndpoint::new(item) {
@@ -126,7 +126,7 @@ impl RelationGraph {
             });
     }
 
-    pub(crate) fn edges(&self) -> impl Iterator<Item = &GraphEdge> {
+    pub fn edges(&self) -> impl Iterator<Item = &GraphEdge> {
         self.edges.values()
     }
 }
@@ -140,7 +140,7 @@ pub struct RelationEdge {
 }
 
 impl RelationEdge {
-    pub(crate) fn code(
+    pub fn code(
         schema: &Schema,
         reference: &str,
         name: &str,
@@ -170,7 +170,7 @@ impl RelationEdge {
             target: RelationEndpoint::new(item)?,
         })
     }
-    pub(crate) fn external(
+    pub fn external(
         schema: &Schema,
         source: &Item,
         name: &str,
@@ -198,7 +198,7 @@ impl RelationEdge {
             },
         })
     }
-    pub(crate) fn new(
+    pub fn new(
         schema: &Schema,
         source: &Item,
         name: &str,
@@ -246,7 +246,7 @@ impl RelationEdge {
             target: RelationEndpoint::new(target)?,
         })
     }
-    pub(crate) fn matches(&self, source: &Item, relation: &Relation, target: &Item) -> bool {
+    pub fn matches(&self, source: &Item, relation: &Relation, target: &Item) -> bool {
         let (a, b) = if relation.inverse {
             (target, source)
         } else {
@@ -256,7 +256,7 @@ impl RelationEdge {
             && ((self.source.mid() == a.mid() && self.target.mid() == b.mid())
                 || (self.symmetric && self.source.mid() == b.mid() && self.target.mid() == a.mid()))
     }
-    pub(crate) fn matches_external(&self, source: &Item, relation: &Relation) -> bool {
+    pub fn matches_external(&self, source: &Item, relation: &Relation) -> bool {
         self.relation == relation.canonical
             && self.source.mid() == source.mid()
             && matches!(&self.target, RelationEndpoint::External { address } if crate::external::address(relation.target()) == Some(address.as_str()))
@@ -298,7 +298,7 @@ pub struct RelationErrorDetail {
     pub message: String,
 }
 impl RelationError {
-    pub(crate) fn new(code: &str, message: impl ToString) -> Self {
+    pub fn new(code: &str, message: impl ToString) -> Self {
         Self {
             format_version: 1,
             error: RelationErrorDetail {
@@ -309,7 +309,7 @@ impl RelationError {
             occurrence_count: None,
         }
     }
-    pub(crate) fn on_edge(mut self, edge: &RelationEdge, count: usize) -> Self {
+    pub fn on_edge(mut self, edge: &RelationEdge, count: usize) -> Self {
         self.edge = Some(Box::new(edge.clone()));
         self.occurrence_count = Some(count);
         self
@@ -337,7 +337,7 @@ impl From<crate::QueryError> for RelationError {
     }
 }
 
-pub(crate) fn resolve_edge(
+pub fn resolve_edge(
     corpus: &Corpus,
     schema: &Schema,
     source: &str,
@@ -382,13 +382,13 @@ pub(crate) fn resolve_edge(
     RelationEdge::new(schema, source_item, relation, target_item)
 }
 
-pub(crate) fn occurrences(
-    project: &Project,
+pub fn occurrences(
+    _project: &Project,
     corpus: &Corpus,
     schema: &Schema,
     edge: &RelationEdge,
 ) -> Result<Vec<RelationOccurrence>, RelationError> {
-    let snapshot = fingerprint(corpus, schema, &("relation-occurrences-v1", project.root()))?;
+    let snapshot = fingerprint(corpus, schema, &"relation-occurrences-v1")?;
     let mut result = Vec::new();
     let mut index = 0;
     for item in corpus.items() {
@@ -450,7 +450,7 @@ pub(crate) fn occurrences(
 
 // @mara implements REQ-RELATION-INSPECTION
 // @mara implements DES-RELATION-INTERFACES
-pub(crate) fn inspect(
+pub fn inspect(
     project: &Project,
     corpus: &Corpus,
     schema: &Schema,
@@ -483,7 +483,6 @@ pub(crate) fn inspect(
         schema,
         &(
             "relation-get-v1",
-            project.root(),
             &params.source,
             &params.relation,
             &params.target,

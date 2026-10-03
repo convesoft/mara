@@ -16,7 +16,7 @@ fn fixture(language: &str, extensions: &[&str]) -> TempDir {
 
 fn load(root: &Path) -> (CodeIndex, Vec<CodeProblem>) {
     let project = mara::resolve_project(Some(root), root).unwrap();
-    CodeIndex::load(&project)
+    mara::code::load(&project)
 }
 
 fn parse_file(

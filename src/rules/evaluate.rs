@@ -56,7 +56,7 @@ impl Rules {
                 return observations;
             };
             let mut node = json!({"@id":format!("urn:mara:mid:{mid}"),"@type":format!("{FLAVOUR}{}",item.flavour())});
-            if let Some(flavour) = schema.flavours.get(item.flavour()) {
+            if let Some(flavour) = schema.flavours().get(item.flavour()) {
                 for field in item.metadata() {
                     if let Some(def) = flavour.fields.get(field.key()) {
                         let Some(value) = literal(field.value(), def.field_type) else {
@@ -285,7 +285,7 @@ impl Rules {
                         bindings::resolve_path(raw, &serde_json::to_value(schema).unwrap())
                         && let Some(name) = resolved.strip_prefix(REL)
                     {
-                        let relation = &schema.relations[name];
+                        let relation = &schema.relations()[name];
                         let direction = if relation.symmetric {
                             "symmetric"
                         } else if path.is_object() {

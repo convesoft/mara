@@ -1,10 +1,10 @@
 //! Explicit, local-only external target syntax. Parsing never dereferences an address.
 
-pub(crate) fn address(target: &str) -> Option<&str> {
+pub fn address(target: &str) -> Option<&str> {
     target.strip_prefix("external:")
 }
 
-pub(crate) fn valid_address(address: &str) -> bool {
+pub fn valid_address(address: &str) -> bool {
     let Some((scheme, rest)) = address.split_once("://") else {
         return false;
     };

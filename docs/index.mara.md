@@ -9,7 +9,7 @@ Selection and interpretation of recorded results follow
 [[DES-TRACE-CHECK-BINDING]].
 
 - [Planned 0.4.0 scope and acceptance](0.4.mara.md)
-- [Planned native execution architecture](execution.mara.md)
+- [Execution architecture and explicit-source engine boundary](execution.mara.md)
 - [Document-engine dependency portability gate](portability.mara.md)
 - [Planned JavaScript and browser integration](integration.mara.md)
 - [Safe schema and vocabulary editing](schema-evolution.mara.md)

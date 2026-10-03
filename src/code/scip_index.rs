@@ -5,14 +5,6 @@ use scip::{symbol, types};
 use sha2::{Digest, Sha256};
 use std::process::{Command, Stdio};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub(super) enum Encoding {
-    Utf8,
-    Utf16,
-    Utf32,
-}
-
 type Snapshot = BTreeMap<PathBuf, Vec<u8>>;
 pub(super) struct Indexed {
     config: LanguageConfig,

@@ -156,6 +156,10 @@ Use separate engine and binding crates where these build/portability boundaries
 require them; native client/runtime/server/protocol can remain modules.
 Existing Rust exports may be replaced; compatibility wrappers are not required.
 CLI/MCP owning contracts remain compatible.
+
+The extracted source/query/conformance interface is defined by
+[[DES-EXPLICIT-SOURCE-ENGINE]]. The remaining runtime, mutation and rule/trace
+boundaries above remain separate deliverables.
 :::
 
 :::mara design DES-SEMANTIC-CHANGE-PLANS
@@ -413,4 +417,80 @@ and environment adoption on restart.
 
 Use existing Rust tests/tempfile and standard process tools; keep fixture
 Git/configuration state isolated. Capture results at the tested revision.
+:::
+
+:::mara design DES-EXPLICIT-SOURCE-ENGINE
+:mid: 01M410H76N0V58ATK409CD5FV4
+:title: Query and check source conformance from explicit inputs
+:status: draft
+:kind: interface
+:satisfies: REQ-PORTABLE-DOCUMENT-ENGINE
+:satisfies: REQ-EXPLICIT-BACKEND-CAPABILITIES
+
+The `mara-engine` workspace crate owns project/schema parsing and recovery,
+Markdown projection, identity/field/reference conformance, discovery and semantic
+relations, bounded document queries and structural graph policies. It contains
+no filesystem discovery/loading, cwd/environment access, configured subprocess
+execution, identity entropy/time generation or publication. All packages inherit
+the workspace version. Native `mara` owns host effects and uses the shared models
+and computations; CLI/MCP invocation and result contracts remain unchanged.
+
+`SourceEngine::new(SourceSnapshot)` takes snapshot version 1 under
+[[DES-BROWSER-PROJECT-SNAPSHOT]]. Its public methods are schema get/list/validate,
+item list/search/get/related, relation inspection and project/item validation.
+Reuse existing query parameter/result types and validation options; validation
+uses a logical project root. Errors retain owning classifications and locations.
+Snapshot construction or strict reads reject invalid inputs; recovering
+validation reports incomplete prerequisites. Native snapshot construction
+refuses incomplete document projections; retained nodes alone cannot establish
+a complete source inventory. When include configuration is unusable, source
+validation retains its configuration diagnostics and independently supplied
+source recovery instead of failing membership checks before reporting them.
+
+The document-only constructor installs no code capability. Active configured
+languages, authored code endpoints or an applicable code-source graph policy
+require code information; source validation reports `evaluation_unavailable`
+and incomplete evaluation rather than an empty successful graph. Unused code
+relation declarations alone do not require code. Independent schema checks and
+document list/search/get remain available; code-dependent navigation fails.
+For `related`, capability requirements follow the selected node, direction,
+relations and neighbour-flavour filters, not whole-corpus validation needs.
+Native `CodeIndex`/`CodeSource` inputs are supplied by the host; only native
+hosting indexes or loads code/asset bytes. This is not a serialized browser
+code-index import capability.
+
+Rule adapters supply `RuleChecks`: definition-check outcomes and, for project
+or item checks, outcomes bound to the exact target and source fingerprint.
+Reject stale outcomes. A corpus derived with source replacements invalidates
+its loaded-source identity; rebuild the full snapshot before binding rule checks.
+Missing required rule checks report unavailability;
+supplied diagnostics and completeness are composed with source and graph checks
+before full-target summaries, reporting filters and pagination. Native
+`load_rule_checks` uses the existing real rule adapter; native validation and
+trace coverage remain intact. Rule/trace extraction is not delivered here.
+
+This slice does not implement initialization, mutation plans, native
+sessions/routing, worker/client packaging or complete browser operation
+execution. Native mutations still require complete source prerequisites,
+including available required code, and retain guarded publication. No
+partial-conformance edit profile is introduced.
+:::
+
+:::mara decision ADR-EXPLICIT-RULE-CHECK-INPUTS
+:mid: 01M410HJ84ZT36DGH6Q5N4H7MS
+:title: Compose explicit rule checks without reducing validation coverage
+:status: draft
+:justifies: DES-EXPLICIT-SOURCE-ENGINE
+
+Keep the source-conformance boundary independently usable while rule/trace
+extraction remains separate. Accept explicit, source- and target-bound rule
+outcomes rather than expanding source extraction, duplicating rule semantics,
+or treating absent checks as successful validation. Native hosting supplies
+actual checks through the existing adapter.
+
+Without required outcomes, report incomplete evaluation and
+`evaluation_unavailable`; independent document reads and schema discovery
+remain usable. This is an input boundary, not passing execution evidence,
+authorization or a reduced rule profile. Complete native rule/trace behavior
+and the complete eventual portable document profile remain required.
 :::
