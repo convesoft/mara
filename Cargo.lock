@@ -1581,6 +1581,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mara-wasm"
+version = "0.3.0"
+dependencies = [
+ "js-sys",
+ "mara-engine",
+ "serde",
+ "serde_json",
+ "ulid",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "md-5"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"

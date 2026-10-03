@@ -246,6 +246,75 @@ The fingerprint hashes normalized, ordered file inventory, exact contents and
 effective selection/ignore inputs with SHA-256. Opaque base identity is not
 hashed as source state. Native producers and document-only callers use this
 same source identity; code-capability inputs remain separately represented.
+The delivered memory host and worker message/lifecycle boundary are defined by
+[[DES-BROWSER-WORKER-BINDING]].
+:::
+
+:::mara design DES-BROWSER-WORKER-BINDING
+:mid: 01M41JH7X4W2NN5ZBH4QERM0MD
+:title: Host the complete document engine in an isolated memory worker
+:status: draft
+:kind: interface
+:satisfies: REQ-BROWSER-LOCAL-WORKSPACE
+:satisfies: REQ-EXPLICIT-BACKEND-CAPABILITIES
+
+`mara-wasm` is an `rlib`/`cdylib` memory host depending on `mara-engine`, not
+native Mara. `MemoryWorkspace` retains normalized base sources separately from
+current `SourceEngine` state. `execute(Request, generate_mid)` delegates document
+queries, source checks, configured rules, trace matrices and all semantic planners
+to that engine. It serializes an accepted result before applying its non-forgeable
+candidate with `apply_plan`; failure preserves current and base state. Rules are
+computed for the exact validation target/source, not omitted or synthesized.
+
+The wasm-bindgen `Workspace` starts with an empty v1 snapshot. `request(json)`
+accepts `{operation, params}` and returns JSON `{ok:true,result}` or
+`{ok:false,error}`; `error` is an operation envelope, while an invalid validation
+result is still a successful operation result. Existing document parameters,
+result versions, locations and continuation conventions are retained with
+logical project root `.`. Creation/backfill identities come from browser Web
+Crypto and host time; callers cannot supply MIDs in operation parameters.
+
+`npm/browser/worker.mjs` is a dedicated module worker. Requests are
+`{format_version:1,id,operation,params?}` with safe-integer correlation IDs;
+omitted/null params mean `{}`. Responses retain `format_version` and `id` plus
+the binding response. A serialized queue includes WASM startup and prevents
+interleaved replacement/editing. One worker owns one isolated workspace;
+startup failures return correlated errors. The caller creates the worker using
+its bundled asset URL and terminates it with `Worker.terminate()`. Termination
+loses memory; this host has no daemon shutdown, disk persistence or recovery.
+The shared typed client and installed-package asset resolution are separate.
+
+Host operations are `capabilities`, `load_snapshot`, `workspace_state` and
+`workspace_sources`. Capabilities list the complete supported operation names,
+`code:{indexing:false,native_index_import:false}`, memory mutation persistence
+and no native recovery. Native lifecycle/rollback and other unsupported names
+fail explicitly. Workspace state returns current/base source fingerprints and
+opaque base identity; workspace sources returns exact normalized `{base,current}`
+snapshots for downstream client/export work, not a file change set or publication.
+
+`load_snapshot` accepts [[DES-BROWSER-PROJECT-SNAPSHOT]] directly as params.
+It rejects malformed paths/selection and absent selected documents, project
+configuration, configured schema or configured rule sources before replacement.
+An empty inventory is the explicit uninitialized workspace. Supplied invalid
+source/configuration remains diagnosable by recovering validation; loading does
+not certify conformance. A schema path is required only when decoded from
+configuration; a parser's recovery fallback does not invent a required source.
+Included documents cannot be omitted from selection.
+Only successful replacement establishes a new base and discards previous edits;
+ordinary mutations, including initialization, retain the loaded base. Owning
+source fingerprints invalidate stale continuation and affected-document handles;
+no-op edits retain them. Missing code required for source conformance blocks every
+mutation through the document-only planner, not just code-related edits.
+
+`scripts/build-browser.sh OUTPUT_DIRECTORY` uses locked Cargo and matching
+wasm-bindgen CLI 0.2.127 (`--target web`) to produce `mara_wasm.js`,
+`mara_wasm_bg.wasm`, their declarations and `worker.mjs`. Supply disposable
+`TMPDIR`/`CARGO_TARGET_DIR`; generated assets are build outputs, not tracked
+canonical source. Serve these files together so the worker's relative imports
+and WASM URL resolve. No application sources or configured commands are fetched
+or executed. `tests/browser/workspace.spec.mjs` is a real Playwright/Chromium
+worker smoke, not final installed-client/full-profile certification under
+[[VER-BROWSER-DOCUMENT-ENGINE]].
 :::
 
 :::mara design DES-BROWSER-FILE-CHANGESET
