@@ -6,8 +6,8 @@ extracted rule/trace APIs, not the packaged browser workflow in
 [[VER-BROWSER-DOCUMENT-ENGINE]].
 The `mara` package remains the native host. The extracted `mara-engine` crate
 provides the source/query/conformance and rule/trace computations under
-[[DES-EXPLICIT-SOURCE-ENGINE]]. Mutation extraction and worker/client packaging
-remain separate.
+[[DES-EXPLICIT-SOURCE-ENGINE]]. Mutation planning is defined by
+[[DES-SEMANTIC-CHANGE-PLANS]]; worker/client packaging remains separate.
 
 ## Rule-engine path
 

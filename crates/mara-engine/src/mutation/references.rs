@@ -67,7 +67,16 @@ impl Source {
     }
 }
 
-fn sources(corpus: &Corpus) -> BTreeMap<Scope, Source> {
+fn identity(item: &crate::Item, backfilled: &BTreeMap<String, String>) -> String {
+    item.mid().map(str::to_owned).unwrap_or_else(|| {
+        backfilled
+            .get(item.id())
+            .cloned()
+            .unwrap_or_else(|| item.id().to_owned())
+    })
+}
+
+fn sources(corpus: &Corpus, backfilled: &BTreeMap<String, String>) -> BTreeMap<Scope, Source> {
     let mut sources = BTreeMap::<Scope, Source>::new();
     for document in corpus.documents() {
         let path = document.path().to_path_buf();
@@ -81,7 +90,7 @@ fn sources(corpus: &Corpus) -> BTreeMap<Scope, Source> {
                 &document.source()[cursor..span.start_byte()],
             );
             sources
-                .entry(Scope::Item(item.mid().unwrap_or(item.id()).to_owned()))
+                .entry(Scope::Item(identity(item, backfilled)))
                 .or_default()
                 .push(
                     path.clone(),
@@ -158,10 +167,11 @@ fn same_destination(
     maps: &[Correspondence],
     old_graph: &crate::DiscoveryGraph<'_>,
     new_graph: &crate::DiscoveryGraph<'_>,
+    backfilled: &BTreeMap<String, String>,
 ) -> bool {
     let old_source = match (old.kind(), new.kind()) {
         (DiscoveryNodeKind::Item(a), DiscoveryNodeKind::Item(b)) => {
-            return a.mid().unwrap_or(a.id()) == b.mid().unwrap_or(b.id());
+            return identity(a, backfilled) == identity(b, &BTreeMap::new());
         }
         (DiscoveryNodeKind::Document(a), DiscoveryNodeKind::Document(b)) => {
             return a.path() == b.path();
@@ -237,7 +247,9 @@ fn same_destination(
         let (Some(old_parent), Some(new_parent)) = (old.parent(), new.parent()) else {
             return false;
         };
-        if !same_destination(old_parent, new_parent, maps, old_graph, new_graph) {
+        if !same_destination(
+            old_parent, new_parent, maps, old_graph, new_graph, backfilled,
+        ) {
             return false;
         }
         // A surviving sibling can occupy the deleted target's slot. Its intact
@@ -412,8 +424,39 @@ pub(super) fn preflight(
     rename: Option<(&str, &str)>,
     edited_body: Option<&SourceLocation>,
 ) -> Result<(), Error> {
-    let mut new_sources = sources(after);
-    let maps = sources(before)
+    preflight_with_identities(before, after, rename, edited_body, &BTreeMap::new())
+}
+
+pub(super) fn preflight_backfill(before: &Corpus, after: &Corpus) -> Result<(), Error> {
+    let backfilled = before
+        .items()
+        .filter(|item| item.mid().is_none())
+        .map(|item| {
+            let updated = after
+                .items()
+                .find(|updated| updated.id() == item.id())
+                .expect("validated backfill retains items");
+            (
+                item.id().to_owned(),
+                updated
+                    .mid()
+                    .expect("validated backfill supplies MIDs")
+                    .to_owned(),
+            )
+        })
+        .collect();
+    preflight_with_identities(before, after, None, None, &backfilled)
+}
+
+fn preflight_with_identities(
+    before: &Corpus,
+    after: &Corpus,
+    rename: Option<(&str, &str)>,
+    edited_body: Option<&SourceLocation>,
+    backfilled: &BTreeMap<String, String>,
+) -> Result<(), Error> {
+    let mut new_sources = sources(after, &BTreeMap::new());
+    let maps = sources(before, backfilled)
         .into_iter()
         .filter_map(|(scope, before)| {
             new_sources
@@ -545,7 +588,9 @@ pub(super) fn preflight(
         if new_connections
             .get(&(path, start, end))
             .is_none_or(|candidate| {
-                !same_destination(target, *candidate, &maps, &old_graph, &new_graph)
+                !same_destination(
+                    target, *candidate, &maps, &old_graph, &new_graph, backfilled,
+                )
             })
         {
             let owner = document.items().iter().find(|item| {

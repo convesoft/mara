@@ -17,6 +17,19 @@ pub fn load_source_engine(
     SourceEngine::new(source_snapshot(project, documents))
 }
 
+pub(crate) fn load_mutation_engine(
+    project: &Project,
+    documents: &DocumentSet,
+) -> Result<SourceEngine, Error> {
+    if !documents.is_complete() {
+        return Err(Error::InvalidMutation {
+            message: "cannot plan from an incomplete document inventory".into(),
+        });
+    }
+    let snapshot = source_snapshot(project, documents);
+    SourceEngine::from_native_sources(snapshot.files, snapshot.selection)
+}
+
 pub(crate) fn source_fingerprint(project: &Project, documents: &DocumentSet) -> String {
     let snapshot = source_snapshot(project, documents);
     // Snapshot path restrictions do not narrow legacy native filesystem names.

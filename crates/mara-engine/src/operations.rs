@@ -1,4 +1,56 @@
 use crate::*;
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RelationAction {
+    Added,
+    Removed,
+}
+
+impl RelationAction {
+    pub const fn past_tense(self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Removed => "removed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RelationMutationResult {
+    pub format_version: u8,
+    pub action: RelationAction,
+    pub scope: String,
+    pub edge: crate::RelationEdge,
+    pub changed_occurrences: usize,
+    pub remaining_occurrences: usize,
+    pub edge_exists: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ItemUpdateParams {
+    pub reference: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Replace all values of each named custom field; repeat keys for repeated values.
+    #[serde(default)]
+    pub fields: Vec<FieldValue>,
+    /// Remove all values of optional custom fields.
+    #[serde(default)]
+    pub clear_fields: Vec<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ItemMoveParams {
+    pub reference: String,
+    pub file: PathBuf,
+    #[serde(default)]
+    pub line: Option<usize>,
+}
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};

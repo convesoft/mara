@@ -12,6 +12,53 @@ fn normalized(mut value: Value) -> Value {
     value["next_cursor"] = Value::Null;
     value
 }
+// @mara checks DES-SEMANTIC-CHANGE-PLANS
+// @mara checks DES-EXPLICIT-SOURCE-ENGINE
+#[test]
+fn applied_plan_invalidates_rule_outcomes_and_trace_cursors() {
+    let mut engine = SourceEngine::new(document_rules::snapshot()).unwrap();
+    let target = ValidationTarget {
+        kind: ValidationTargetKind::Project,
+        id: None,
+    };
+    let options = ValidationOptions::default();
+    let old_checks = engine.rule_checks(target.clone()).unwrap();
+    let before = engine
+        .project_validate(&[], &options, Some(&old_checks))
+        .unwrap();
+    assert!(before.evaluation_complete);
+    assert!(!before.valid); // Accepted REQ-B has no qualifying verification.
+    let mut old_page = document_rules::params();
+    old_page.cursor = Some(engine.trace_matrix(&old_page).unwrap().next_cursor.unwrap());
+
+    let update = serde_json::from_value(json!({
+        "reference": "REQ-B", "fields": [{"key": "status", "value": "draft"}]
+    }))
+    .unwrap();
+    let plan = engine.planner().unwrap().plan_update(update).unwrap();
+    engine.apply_plan(plan).unwrap();
+
+    assert!(
+        engine
+            .project_validate(&[], &options, Some(&old_checks))
+            .is_err()
+    );
+    assert!(engine.trace_matrix(&old_page).is_err());
+    let new_checks = engine.rule_checks(target).unwrap();
+    let after = engine
+        .project_validate(&[], &options, Some(&new_checks))
+        .unwrap();
+    assert!(after.evaluation_complete && after.valid);
+    let matrix = engine.trace_matrix(&document_rules::params()).unwrap();
+    assert!(matrix.evaluation_complete);
+    assert!(
+        matrix
+            .summaries
+            .iter()
+            .all(|summary| summary.failed == 0 && summary.unavailable == 0)
+    );
+}
+
 // @mara checks DES-EXPLICIT-SOURCE-ENGINE
 // @mara checks DES-TRACE-CHECK-BINDING
 #[test]

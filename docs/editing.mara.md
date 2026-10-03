@@ -25,7 +25,7 @@ Active, pending or unrecoverable transaction state blocks all further Mara conte
 
 CLI `project mid backfill` and MCP `project_mid_backfill` hold the project mutation lock and reject a pending journal. Load the recovering corpus and reject every source-conformance diagnostic except the typed missing-MID condition; authored message text cannot grant an exception. Preserve existing MIDs and generate unique canonical ULIDs for missing identities.
 
-Insert each MID immediately after its opener, using the document's newline style. Preserve all other bytes and parse every candidate before writing. Replace each affected file atomically, retaining permissions. Backfill has no multi-file journal: earlier file replacements can remain if a later write fails. Repeating backfill inserts only identities still missing. Return `{project, changed:[{id,mid,path,line}]}` in path/source order, with absolute project root, relative document paths and resulting one-based MID lines.
+Insert each MID immediately after its opener, using the document's newline style. Preserve all other bytes and validate the complete candidate source before writing. Stage all candidates, recheck complete original inputs and preimages, then replace each affected file atomically, retaining permissions. Backfill has no multi-file journal: earlier file replacements can remain if a later write fails. Repeating backfill inserts only identities still missing. Return `{project, changed:[{id,mid,path,line}]}` in path/source order, with absolute project root, relative document paths and resulting one-based MID lines.
 :::
 
 :::mara design DES-MUTATION-RECOVERY

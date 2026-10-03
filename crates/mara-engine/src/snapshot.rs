@@ -68,6 +68,35 @@ pub fn normalize_source_path(path: &str) -> Result<String, Error> {
     }
     Ok(normalized)
 }
+fn normalize_path(path: &str, native: bool) -> Result<String, Error> {
+    if !native {
+        return normalize_source_path(path);
+    }
+    let requested = Path::new(path);
+    if path.is_empty()
+        || path.contains('\0')
+        || requested.is_absolute()
+        || requested.components().any(|part| {
+            matches!(
+                part,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(input_error(format!("unsafe native source path '{path}'")));
+    }
+    let normalized = requested
+        .components()
+        .filter(|part| !matches!(part, std::path::Component::CurDir))
+        .collect::<PathBuf>();
+    let normalized = normalized
+        .to_str()
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| input_error("native source path must name a UTF-8 file"))?;
+    Ok(normalized.to_owned())
+}
 fn input_error(message: impl Into<String>) -> Error {
     Error::InvalidProject {
         path: PathBuf::from(PROJECT_FILE),
@@ -82,6 +111,7 @@ pub struct SourceEngine {
     selection: SelectionInputs,
     fingerprint: String,
     base_identity: Option<String>,
+    native_paths: bool,
 }
 /// Outcomes from a separate rule adapter. These are inputs, not engine-generated proof.
 /// They bind exact source state and the validation target to prevent stale reuse.
@@ -98,6 +128,31 @@ pub struct CheckOutcome {
 }
 impl SourceEngine {
     pub fn new(snapshot: SourceSnapshot) -> Result<Self, Error> {
+        Self::construct(snapshot, false)
+    }
+    /// Trusted native loading preserves host-relative filenames. This is not a browser
+    /// snapshot-import capability; native hosts still enforce filesystem containment.
+    pub fn from_native_sources(
+        files: Vec<SourceFile>,
+        selection: SelectionInputs,
+    ) -> Result<Self, Error> {
+        Self::construct(
+            SourceSnapshot {
+                format_version: 1,
+                files,
+                selection,
+                base_identity: None,
+            },
+            true,
+        )
+    }
+    pub(crate) fn rebuild(&self, snapshot: SourceSnapshot) -> Result<Self, Error> {
+        Self::construct(snapshot, self.native_paths)
+    }
+    pub(crate) fn normalize_path(&self, path: &str) -> Result<String, Error> {
+        normalize_path(path, self.native_paths)
+    }
+    fn construct(snapshot: SourceSnapshot, native_paths: bool) -> Result<Self, Error> {
         if snapshot.format_version != 1 {
             return Err(input_error(
                 "unsupported source snapshot format; expected 1",
@@ -105,7 +160,7 @@ impl SourceEngine {
         }
         let mut files = BTreeMap::new();
         for file in snapshot.files {
-            let path = normalize_source_path(&file.path)?;
+            let path = normalize_path(&file.path, native_paths)?;
             if files.insert(path.clone(), file.content).is_some() {
                 return Err(input_error(format!(
                     "duplicate normalized source path '{path}'"
@@ -115,7 +170,7 @@ impl SourceEngine {
         let mut selection = snapshot.selection;
         let mut paths = BTreeSet::new();
         for path in &mut selection.document_paths {
-            *path = normalize_source_path(path)?;
+            *path = normalize_path(path, native_paths)?;
             if !paths.insert(path.clone()) {
                 return Err(input_error(format!(
                     "duplicate selected document path '{path}'"
@@ -128,14 +183,15 @@ impl SourceEngine {
                 return Err(input_error("invalid ignore origin"));
             }
             for component in &ignore.root_prefix {
-                if normalize_source_path(component)? != *component || component.contains('/') {
+                if normalize_path(component, native_paths)? != *component || component.contains('/')
+                {
                     return Err(input_error(
                         "ignore root prefix requires ordinary path components",
                     ));
                 }
             }
             if !ignore.directory.is_empty() {
-                ignore.directory = normalize_source_path(&ignore.directory)?;
+                ignore.directory = normalize_path(&ignore.directory, native_paths)?;
             }
             ignore_matcher(ignore)?;
         }
@@ -165,6 +221,7 @@ impl SourceEngine {
             selection,
             fingerprint,
             base_identity: snapshot.base_identity,
+            native_paths,
         })
     }
     pub fn source_fingerprint(&self) -> &str {
@@ -172,6 +229,9 @@ impl SourceEngine {
     }
     pub fn base_identity(&self) -> Option<&str> {
         self.base_identity.as_deref()
+    }
+    pub(crate) fn selection(&self) -> &SelectionInputs {
+        &self.selection
     }
     pub fn files(&self) -> &BTreeMap<String, String> {
         &self.files
@@ -185,10 +245,10 @@ impl SourceEngine {
     }
     fn file(&self, path: &Path) -> Option<&str> {
         let path = path.to_str()?;
-        let normalized = normalize_source_path(path).ok()?;
+        let normalized = self.normalize_path(path).ok()?;
         self.files.get(&normalized).map(String::as_str)
     }
-    fn strict_project(&self) -> Result<(Project, Schema), Error> {
+    pub(crate) fn strict_project(&self) -> Result<(Project, Schema), Error> {
         let (project, errors, available) = self.project_validation()?.into_parts();
         if let Some(error) = errors.first() {
             return Err(input_error(error.message.clone()));
@@ -209,7 +269,7 @@ impl SourceEngine {
     }
     /// Evaluate supplied Git ignore text against logical paths. No ignore files are read.
     pub fn document_is_selected(&self, project: &Project, path: &str) -> Result<bool, Error> {
-        let path = normalize_source_path(path)?;
+        let path = self.normalize_path(path)?;
         let relative = Path::new(&path);
         if !corpus::is_mara_document(relative)
             || !corpus::content_matcher(project)?.is_match(relative)
@@ -426,7 +486,12 @@ impl SourceEngine {
             cursor.as_deref(),
         )
     }
-    fn code_required(&self, project: &Project, schema: &Schema, corpus: &Corpus) -> bool {
+    pub(crate) fn code_required(
+        &self,
+        project: &Project,
+        schema: &Schema,
+        corpus: &Corpus,
+    ) -> bool {
         !project.code_languages().is_empty()
             || corpus.items().any(|item| {
                 item.relations()

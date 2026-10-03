@@ -157,9 +157,10 @@ require them; native client/runtime/server/protocol can remain modules.
 Existing Rust exports may be replaced; compatibility wrappers are not required.
 CLI/MCP owning contracts remain compatible.
 
-The extracted source/query/conformance interface is defined by
-[[DES-EXPLICIT-SOURCE-ENGINE]]. The remaining runtime, mutation and rule/trace
-boundaries above remain separate deliverables.
+The extracted source/query/conformance and rule/trace interfaces are defined by
+[[DES-EXPLICIT-SOURCE-ENGINE]]; mutation planning is defined by
+[[DES-SEMANTIC-CHANGE-PLANS]]. Native runtime and client/binding delivery remain
+separate.
 :::
 
 :::mara design DES-SEMANTIC-CHANGE-PLANS
@@ -177,6 +178,47 @@ surviving-reference obligations before acceptance. Changes retain
 original-state preconditions over all relevant inputs, not only the touched
 file. Keep ordinary parsing/source-span logic in the shared engine.
 
+The delivered Rust boundary is `SourceEngine::planner()` and a
+`ChangePlanner` with `plan_create`, `plan_backfill`, `plan_update`,
+`plan_delete`, `plan_move`, `plan_rename` and `plan_relation` (add/remove,
+including occurrence selectors). `SourceEngine::plan_initialize(name, template)`
+also works before project configuration exists and preserves initialization's
+no-overwrite prerequisites without demanding a valid pre-existing corpus.
+Initialization/templates and source-span/reference checks are engine-owned.
+
+Each operation returns a non-forgeable `ChangePlan<T>`: inspect its original
+and candidate explicit sources (version-1 snapshots for portable engines),
+source fingerprint, ordered source changes
+with optional preimage/candidate bytes, and owning result. Item deletion removes
+the item block but retains its containing file. Preconditions bind the complete
+supplied inventory, exact sources, configuration/schema/rule sources,
+selection/ignore context and caller base identity, including untouched inputs.
+Native code plans additionally bind loaded index structure and relevant code/
+asset bytes, including file-only dependencies first introduced by the candidate. Missing selected sources are not absence proof.
+
+MID entropy/time belongs to hosts. Creation receives one host-generated MID;
+backfill receives identities in document/source order. The engine checks
+canonical form and uniqueness before using them. Native CLI/MCP still generate
+MIDs internally; users cannot supply them through those transports.
+Backfill reference correspondence treats an old ID-only item as the same target
+after its new MID is inserted, including incoming/self and contained-node links.
+
+Trusted native adapters use `SourceEngine::from_native_sources` for
+host-relative UTF-8 filenames. Preserve existing native colon/literal-backslash
+names on hosts where they are valid; filesystem containment, regular-file and
+discovery checks still belong to the native host. Rebuild candidates with the
+same path interpretation. This constructor is not a browser snapshot import:
+portable `SourceEngine::new` restrictions remain unchanged, and native source
+collections containing host-only names are not portable snapshot exports.
+
+`planner_with_code` consumes existing trusted native `CodeIndex` inputs;
+it does not index, discover or import browser code snapshots. Document-only
+planning rejects unavailable required code before every operation, including
+no-ops and backfill. Candidate code dependencies cannot bypass this gate.
+Unused code-relation declarations alone remain editable. Preserve each owning
+mutation's source-validation/scaffold exceptions; lifecycle/rule checks remain
+separate under [[ADR-EXPLICIT-RULE-CHECK-INPUTS]], not invented planner outcomes.
+
 The native host retains [[DES-MUTATION-RECOVERY]] and
 [[DES-MUTATION-TRANSACTION]], including locks, permissions,
 current-input/preimage checks, staging and journals where required. Do not
@@ -184,8 +226,20 @@ replace recoverable publication with unguarded writes. Initialization and
 explicit rollback retain their existing prerequisites; a cached invalid corpus
 must not prevent recovery.
 
+`ChangePlan::check_preconditions` rejects stale input/code state before native
+publication. Native adapters rebuild current inputs under the mutation lock and
+use existing guarded single-file or journaled publishers; non-journaled backfill
+stages its candidates before per-file replacements.
+
+`SourceEngine::apply_plan` checks a document-only plan against current inputs
+and replaces its memory state atomically, preserving caller base identity.
+Changed sources invalidate owning cursor/structural-handle fingerprints;
+no-op plans leave them unchanged. Native-code plans cannot be accepted as
+document-only memory edits. Failed planning or acceptance leaves supplied state
+unchanged. No engine method publishes files, locks, journals or rollback.
+
 The browser applies accepted candidates atomically to its memory workspace.
-Failed edits preserve that workspace. This does not grant filesystem atomicity,
+This does not grant filesystem atomicity,
 change the journal format or coordinate concurrent manual edits.
 :::
 
@@ -487,11 +541,12 @@ plus its loaded corpus, prerequisites and complete code/asset/excluded-source
 identity to the shared trace computation; native filesystem containment and
 canonical duplicate checks remain host-owned.
 
-This slice does not implement initialization, mutation plans, native
-sessions/routing, worker/client packaging or complete browser operation
-execution. Native mutations still require complete source prerequisites,
-including available required code, and retain guarded publication. No
-partial-conformance edit profile is introduced.
+Initialization and validated mutations are delivered separately under
+[[DES-SEMANTIC-CHANGE-PLANS]], using this snapshot boundary without redesigning
+rule outcomes. Native sessions/routing, worker/client packaging and complete
+browser operation execution remain separate deliverables. Native mutations
+retain owning source prerequisites, available required code and guarded
+publication. No partial-conformance edit profile is introduced.
 :::
 
 :::mara decision ADR-EXPLICIT-RULE-CHECK-INPUTS

@@ -38,6 +38,14 @@ pub use trace::{
     TraceCheck, TraceField, TraceMatrixParams, TraceMatrixResult, TraceMatrixSummary, TraceRecord,
     TraceSelection,
 };
+mod plans;
+pub use plans::*;
+mod mutation;
+mod templates;
+pub use mutation::{
+    BackfilledMid, BackfilledMids, InitialRelation, ItemCreation, ItemCreationRequest,
+    ItemDeletion, ItemLocation, ItemMove, ItemRename, ItemUpdate, ItemUpdateWarning,
+};
 pub const PROJECT_FILE: &str = ".mara/project.toml";
 pub const SCHEMA_FILE: &str = ".mara/schema.yaml";
 pub const SCHEMA_FORMAT_VERSION: u32 = 3;

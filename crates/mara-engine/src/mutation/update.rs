@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{invalid, newline_style, transaction, validate_scalar};
-use crate::{Corpus, Error, Item, ItemUpdateParams, Project, Schema, load_corpus, validate_corpus};
+use super::{invalid, newline_style, validate_scalar};
+use crate::{
+    ChangePlan, ChangePlanner, Corpus, Error, Item, ItemUpdateParams, Schema, validate_corpus,
+};
 
 #[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
 pub struct ItemUpdate {
@@ -161,16 +163,15 @@ fn render_update(
 
 // @mara implements REQ-ITEM-UPDATE
 // @mara implements DES-ITEM-UPDATE
-pub fn update_item(
-    project: &Project,
-    schema: &Schema,
+pub(crate) fn update_item(
+    context: &ChangePlanner<'_>,
     request: ItemUpdateParams,
-) -> Result<ItemUpdate, Error> {
-    let _lock = transaction::MutationLock::acquire(project)?;
-    let corpus = load_corpus(project, schema)?;
+) -> Result<ChangePlan<ItemUpdate>, Error> {
+    let schema = &context.schema;
+    let corpus = &context.corpus;
     // All identities must be usable before selecting a source span.
-    super::ensure_unambiguous_item_identities(&corpus, "update items")?;
-    let item = crate::query::resolve_item(&corpus, &request.reference).map_err(|error| {
+    super::ensure_unambiguous_item_identities(corpus, "update items")?;
+    let item = crate::query::resolve_item(corpus, &request.reference).map_err(|error| {
         Error::InvalidMutation {
             message: error.to_string(),
         }
@@ -187,7 +188,7 @@ pub fn update_item(
                 && !relation.target().starts_with("code:")
             {
                 crate::query::resolve_relation_target(
-                    &corpus,
+                    corpus,
                     source,
                     relation.name(),
                     relation.target(),
@@ -210,12 +211,12 @@ pub fn update_item(
     let projected =
         corpus.with_replacements(&BTreeMap::from([(path.clone(), candidate.clone())]), schema)?;
     super::references::preflight(
-        &corpus,
+        corpus,
         &projected,
         None,
         request.body.as_ref().map(|_| item.body_source()),
     )?;
-    let warnings = validate_update(&corpus, &projected, schema, item, &request)?;
+    let warnings = validate_update(corpus, &projected, schema, item, &request)?;
 
     let updated = projected
         .items()
@@ -279,26 +280,7 @@ pub fn update_item(
         changed_fields,
         warnings,
     };
-    if candidate == document.source() {
-        return Ok(result);
-    }
-    let change = transaction::Change::new(
-        project,
-        path.clone(),
-        Some(document.source().to_owned()),
-        candidate,
-    )?;
-    transaction::commit_single(project, change, || {
-        if crate::resolve_project(Some(project.root()), project.root())? != *project
-            || crate::load_schema(project)? != *schema
-            || load_corpus(project, schema)? != corpus
-            || !crate::corpus::document_is_discoverable(project, &path)?
-        {
-            return invalid("project changed since update preflight; retry the update");
-        }
-        Ok(())
-    })?;
-    Ok(result)
+    context.finish(BTreeMap::from([(path, candidate)]), result)
 }
 
 fn metadata_values(item: &Item) -> BTreeMap<&str, Vec<&str>> {

@@ -237,6 +237,32 @@ pub(super) fn commit_single(
 }
 
 // @mara implements DES-MUTATION-TRANSACTION
+// Backfill deliberately retains its non-journaled, per-file publication contract.
+pub(super) fn commit_unjournaled(
+    project: &Project,
+    changes: Vec<Change>,
+    verify: impl FnOnce() -> Result<(), Error>,
+) -> Result<(), Error> {
+    let mut staged = Vec::new();
+    for change in &changes {
+        staged.push(stage(
+            &safe_path(project, &change.path)?,
+            &change.after,
+            change.mode.as_ref(),
+        )?);
+    }
+    verify()?;
+    for change in &changes {
+        change.verify(project, false)?;
+    }
+    for (change, temporary) in changes.iter().zip(staged) {
+        change.verify(project, false)?;
+        let path = safe_path(project, &change.path)?;
+        persist(temporary, &path, change.before.is_some())?;
+        sync_parent(&path)?;
+    }
+    Ok(())
+}
 // @mara implements REQ-RECOVERABLE-MUTATION
 pub(super) fn commit(
     project: &Project,

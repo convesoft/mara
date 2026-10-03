@@ -1,41 +1,10 @@
 use crate::*;
-use serde::{Deserialize, Serialize};
 use std::{
     fs,
     fs::OpenOptions,
     io::Write,
     path::{Path, PathBuf},
 };
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ProjectFile {
-    format_version: u32,
-    project: ProjectSection,
-    content: ContentSection,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    rules: Option<TemplateRules>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TemplateRules {
-    format_version: u32,
-    files: Vec<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ProjectSection {
-    name: String,
-    schema: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ContentSection {
-    include: Vec<String>,
-}
-
 // @mara implements REQ-PROJECT-INITIALIZATION
 // @mara implements REQ-ENGINEERING-TEMPLATE
 pub fn initialize_project(target: impl AsRef<Path>, template: Template) -> Result<Project, Error> {
@@ -68,27 +37,19 @@ pub fn initialize_project(target: impl AsRef<Path>, template: Template) -> Resul
         .and_then(|value| value.to_str())
         .filter(|value| !value.is_empty())
         .unwrap_or("mara-project");
-    let project_source = project_template(name, template)?;
-    let mut files = vec![(SCHEMA_FILE, schema_template(template))];
-    if template == Template::Engineering {
-        files.extend([
-            (
-                ".mara/engineering-rules.yaml",
-                include_str!("../templates/engineering-rules.yaml"),
-            ),
-            (
-                ".mara/engineering-checks.yaml",
-                include_str!("../templates/engineering-checks.yaml"),
-            ),
-            (
-                ".mara/engineering-execution.yaml",
-                include_str!("../templates/engineering-execution.yaml"),
-            ),
-        ]);
-    }
-    files.push((PROJECT_FILE, &project_source));
-    for (path, _) in &files {
-        let path = root.join(path);
+    // Inspect every template destination before planning, including non-UTF-8 files.
+    let engine = SourceEngine::new(SourceSnapshot {
+        format_version: 1,
+        files: Vec::new(),
+        selection: SelectionInputs {
+            document_paths: Vec::new(),
+            ignores: Vec::new(),
+        },
+        base_identity: None,
+    })?;
+    let plan = engine.plan_initialize(name, template)?;
+    for change in plan.changes() {
+        let path = root.join(&change.path);
         if path_exists(&path)? {
             return Err(Error::WouldOverwrite { path });
         }
@@ -103,8 +64,12 @@ pub fn initialize_project(target: impl AsRef<Path>, template: Template) -> Resul
     })?;
 
     let mut created = Vec::new();
-    for (path, source) in files {
-        let path = root.join(path);
+    for change in plan.changes() {
+        let path = root.join(&change.path);
+        let source = change
+            .after
+            .as_deref()
+            .expect("initialization adds source files");
         if let Err(error) = write_new(&path, source) {
             for path in &created {
                 let _ = fs::remove_file(path);
@@ -269,38 +234,5 @@ fn write_new(path: &Path, source: &str) -> Result<(), Error> {
 fn remove_empty_directory(created: bool, directory: &Path) {
     if created {
         let _ = fs::remove_dir(directory);
-    }
-}
-
-fn project_template(name: &str, template: Template) -> Result<String, Error> {
-    toml::to_string_pretty(&ProjectFile {
-        format_version: if template == Template::Engineering {
-            2
-        } else {
-            1
-        },
-        project: ProjectSection {
-            name: name.into(),
-            schema: SCHEMA_FILE.into(),
-        },
-        content: ContentSection {
-            include: vec!["**/*.mara.md".into()],
-        },
-        rules: (template == Template::Engineering).then(|| TemplateRules {
-            format_version: 1,
-            files: vec![".mara/engineering-rules.yaml".into()],
-        }),
-    })
-    .map_err(|source| Error::InvalidProject {
-        path: PathBuf::from(PROJECT_FILE),
-        message: source.to_string(),
-    })
-}
-
-fn schema_template(template: Template) -> &'static str {
-    match template {
-        Template::Minimal => include_str!("../templates/minimal-schema.yaml"),
-        Template::Empty => include_str!("../templates/empty-schema.yaml"),
-        Template::Engineering => include_str!("../templates/engineering-schema.yaml"),
     }
 }

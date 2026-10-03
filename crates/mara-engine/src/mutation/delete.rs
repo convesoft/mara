@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
-use super::{invalid, transaction};
-use crate::{Corpus, Error, Project, Schema, load_corpus, validate_corpus};
+use super::invalid;
+use crate::{ChangePlan, ChangePlanner, Corpus, Error, Schema, validate_corpus};
 
 #[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
 pub struct ItemDeletion {
@@ -12,16 +12,15 @@ pub struct ItemDeletion {
 
 // @mara implements REQ-ITEM-DELETION
 // @mara implements DES-ITEM-DELETION
-pub fn delete_item(
-    project: &Project,
-    schema: &Schema,
+pub(crate) fn delete_item(
+    context: &ChangePlanner<'_>,
     reference: &str,
-) -> Result<ItemDeletion, Error> {
-    let _lock = transaction::MutationLock::acquire(project)?;
-    let corpus = load_corpus(project, schema)?;
-    require_valid_corpus(&corpus, schema)?;
+) -> Result<ChangePlan<ItemDeletion>, Error> {
+    let schema = &context.schema;
+    let corpus = &context.corpus;
+    require_valid_corpus(corpus, schema)?;
     let item =
-        crate::query::resolve_item(&corpus, reference).map_err(|error| Error::InvalidMutation {
+        crate::query::resolve_item(corpus, reference).map_err(|error| Error::InvalidMutation {
             message: error.to_string(),
         })?;
     let mid = item.mid().expect("validated identity");
@@ -48,7 +47,7 @@ pub fn delete_item(
     let candidate = format!("{before}{after}");
     let projected =
         corpus.with_replacements(&BTreeMap::from([(path.clone(), candidate.clone())]), schema)?;
-    super::references::preflight(&corpus, &projected, None, None).map_err(|error| {
+    super::references::preflight(corpus, &projected, None, None).map_err(|error| {
         Error::InvalidMutation {
             message: format!("cannot delete item '{}' with MID {mid}; {error}", item.id()),
         }
@@ -97,27 +96,14 @@ pub fn delete_item(
             return invalid("deletion would change a surviving item's content or references");
         }
     }
-    let change = transaction::Change::new(
-        project,
-        path.clone(),
-        Some(document.source().to_owned()),
-        candidate,
-    )?;
-    transaction::commit_single(project, change, || {
-        if crate::resolve_project(Some(project.root()), project.root())? != *project
-            || crate::load_schema(project)? != *schema
-            || load_corpus(project, schema)? != corpus
-            || !crate::corpus::document_is_discoverable(project, &path)?
-        {
-            return invalid("project changed since deletion preflight; retry the delete");
-        }
-        Ok(())
-    })?;
-    Ok(ItemDeletion {
-        id: item.id().to_owned(),
-        mid: mid.to_owned(),
-        path,
-    })
+    context.finish(
+        BTreeMap::from([(path.clone(), candidate)]),
+        ItemDeletion {
+            id: item.id().to_owned(),
+            mid: mid.to_owned(),
+            path,
+        },
+    )
 }
 
 fn require_valid_corpus(corpus: &Corpus, schema: &Schema) -> Result<(), Error> {
