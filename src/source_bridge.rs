@@ -14,10 +14,12 @@ pub fn load_source_engine(
     if !documents.is_complete() {
         return Err(Error::InvalidProject {path:project.root().join(crate::PROJECT_FILE),message:"cannot construct a source snapshot from an incomplete document projection; supply the full source inventory and loading diagnostics".into()});
     }
-    SourceEngine::new(source_snapshot(project, documents))
+    SourceEngine::new(source_snapshot(project, documents, true)?)
 }
 
-pub(crate) fn load_mutation_engine(
+/// Load trusted host-relative filenames for native execution and mutation planning.
+/// The host must supply a complete document inventory; this is not a browser import.
+pub fn load_native_source_engine(
     project: &Project,
     documents: &DocumentSet,
 ) -> Result<SourceEngine, Error> {
@@ -26,12 +28,17 @@ pub(crate) fn load_mutation_engine(
             message: "cannot plan from an incomplete document inventory".into(),
         });
     }
-    let snapshot = source_snapshot(project, documents);
+    let snapshot = source_snapshot(project, documents, true)?;
     SourceEngine::from_native_sources(snapshot.files, snapshot.selection)
 }
 
+pub(crate) use load_native_source_engine as load_mutation_engine;
+
 pub(crate) fn source_fingerprint(project: &Project, documents: &DocumentSet) -> String {
-    let snapshot = source_snapshot(project, documents);
+    // Validation retains diagnostics for incomplete/unreadable inputs. Planning uses
+    // the strict loader above and never treats an inspection failure as absence.
+    let snapshot =
+        source_snapshot(project, documents, false).expect("permissive fingerprint loading");
     // Snapshot path restrictions do not narrow legacy native filesystem names.
     // Ordinary inventories produce exactly the same normalized engine identity.
     let normalize = |path: String| {
@@ -61,7 +68,11 @@ pub(crate) fn source_fingerprint(project: &Project, documents: &DocumentSet) -> 
     mara_engine::fingerprint_source_inputs(&files, &selection)
 }
 
-fn source_snapshot(project: &Project, documents: &DocumentSet) -> SourceSnapshot {
+fn source_snapshot(
+    project: &Project,
+    documents: &DocumentSet,
+    strict: bool,
+) -> Result<SourceSnapshot, Error> {
     let mut files = documents
         .documents()
         .iter()
@@ -78,23 +89,39 @@ fn source_snapshot(project: &Project, documents: &DocumentSet) -> SourceSnapshot
             .unwrap_or(project.schema_path())
             .to_owned(),
     ];
-    paths.extend(
-        project
-            .rule_files
-            .iter()
-            .filter(|p| {
-                crate::is_project_relative(p)
-                    && fs::canonicalize(project.root().join(p)).is_ok_and(|canonical| {
-                        canonical.starts_with(project.root()) && canonical.is_file()
-                    })
-            })
-            .cloned(),
-    );
+    for path in &project.rule_files {
+        if !crate::is_project_relative(path) {
+            continue;
+        }
+        match fs::canonicalize(project.root().join(path)) {
+            Ok(canonical) if canonical.starts_with(project.root()) => {
+                match fs::metadata(&canonical) {
+                    Ok(metadata) if metadata.is_file() => paths.push(path.clone()),
+                    Err(source) if strict => {
+                        return Err(Error::Io {
+                            action: "snapshot configured rule input",
+                            path: canonical,
+                            source,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            Err(source) if strict && source.kind() != std::io::ErrorKind::NotFound => {
+                return Err(Error::Io {
+                    action: "snapshot configured rule input",
+                    path: project.root().join(path),
+                    source,
+                });
+            }
+            _ => {}
+        }
+    }
     for path in paths {
         if files.iter().any(|f| std::path::Path::new(&f.path) == path) {
             continue;
         }
-        if let Ok(content) = fs::read_to_string(project.root().join(&path)) {
+        if let Some(content) = read_input(&project.root().join(&path), strict)? {
             files.push(SourceFile {
                 path: path.to_string_lossy().into_owned(),
                 content,
@@ -103,7 +130,7 @@ fn source_snapshot(project: &Project, documents: &DocumentSet) -> SourceSnapshot
     }
     let mut ignores = Vec::new();
     for ancestor in project.root().ancestors() {
-        if let Ok(content) = fs::read_to_string(ancestor.join(".gitignore")) {
+        if let Some(content) = read_input(&ancestor.join(".gitignore"), strict)? {
             ignores.push(IgnoreInput {
                 directory: String::new(),
                 root_prefix: project
@@ -126,11 +153,22 @@ fn source_snapshot(project: &Project, documents: &DocumentSet) -> SourceSnapshot
         .parents(true)
         .require_git(false)
         .follow_links(false);
-    for entry in walk.build().flatten() {
+    for entry in walk.build() {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) if strict => {
+                return Err(Error::Io {
+                    action: "snapshot source selection inputs",
+                    path: project.root().to_owned(),
+                    source: std::io::Error::other(error),
+                });
+            }
+            Err(_) => continue,
+        };
         if !entry.file_type().is_some_and(|t| t.is_dir()) || entry.path() == project.root() {
             continue;
         }
-        if let Ok(content) = fs::read_to_string(entry.path().join(".gitignore")) {
+        if let Some(content) = read_input(&entry.path().join(".gitignore"), strict)? {
             ignores.push(IgnoreInput {
                 directory: entry
                     .path()
@@ -143,7 +181,7 @@ fn source_snapshot(project: &Project, documents: &DocumentSet) -> SourceSnapshot
             });
         }
     }
-    SourceSnapshot {
+    Ok(SourceSnapshot {
         format_version: 1,
         files,
         selection: SelectionInputs {
@@ -155,5 +193,17 @@ fn source_snapshot(project: &Project, documents: &DocumentSet) -> SourceSnapshot
             ignores,
         },
         base_identity: None,
+    })
+}
+
+fn read_input(path: &std::path::Path, strict: bool) -> Result<Option<String>, Error> {
+    match fs::read_to_string(path) {
+        Ok(source) => Ok(Some(source)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound || !strict => Ok(None),
+        Err(source) => Err(Error::Io {
+            action: "snapshot explicit source input",
+            path: path.to_owned(),
+            source,
+        }),
     }
 }

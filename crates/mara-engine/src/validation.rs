@@ -162,6 +162,95 @@ pub fn matches_handle(item: &crate::Item, handle: &str) -> bool {
     }
 }
 
+/// Finish conformance/policy evaluation over a host-loaded corpus, including native code.
+/// Configuration/loading diagnostics remain explicit inputs. This function performs no I/O.
+/// Rule outcomes must bind the current complete-input identity and exact target.
+// @mara implements DES-EXPLICIT-SOURCE-ENGINE
+pub fn evaluate_loaded(
+    project: &Project,
+    schema: Option<&Schema>,
+    corpus: Option<(&Corpus, Vec<Diagnostic>)>,
+    checks: Option<&RuleChecks>,
+    source_fingerprint: &str,
+    result: &mut ValidationResult,
+) -> Result<(), ValidationError> {
+    if corpus
+        .as_ref()
+        .is_some_and(|(corpus, _)| corpus.source_fingerprint != source_fingerprint)
+    {
+        return Err(ValidationError::invalid_argument(
+            "corpus belongs to a different source snapshot",
+        ));
+    }
+    if let Some(checks) = checks {
+        if checks.source_fingerprint != source_fingerprint
+            || checks
+                .evaluation
+                .as_ref()
+                .is_some_and(|(target, _)| *target != result.target)
+        {
+            return Err(ValidationError::invalid_argument(
+                "rule-check inputs belong to a different source snapshot or validation target",
+            ));
+        }
+        result.evaluation_complete &= checks.definitions.evaluation_complete;
+        result
+            .diagnostics
+            .extend(checks.definitions.diagnostics.clone());
+    }
+    if schema.is_some() && !project.rule_files.is_empty() && checks.is_none() {
+        result.evaluation_complete = false;
+        result.diagnostics.push(ValidationDiagnostic::new(
+            DiagnosticCode::EvaluationUnavailable,
+            Severity::Error,
+            ValidationScope::Schema,
+            DiagnosticLocation::default(),
+            "configured rule-definition checks are unavailable; supply matching rule-check inputs",
+        ));
+    }
+    if let Some((corpus, mut source_diagnostics)) = corpus {
+        result.evaluation_complete &= corpus.is_complete();
+        result.evaluation_complete &= corpus
+            .items()
+            .filter(|item| {
+                result
+                    .target
+                    .id
+                    .as_deref()
+                    .is_none_or(|id| matches_handle(item, id))
+            })
+            .all(Item::validation_source_is_complete);
+        source_diagnostics.extend(match schema {
+            Some(schema) => validate_corpus(corpus, schema),
+            None => validate_corpus_independent(corpus),
+        });
+        let configuration_valid = result
+            .diagnostics
+            .iter()
+            .all(|d| !matches!(d.scope, ValidationScope::Project | ValidationScope::Schema));
+        if configuration_valid {
+            if let Some((_, evaluation)) = checks.and_then(|checks| checks.evaluation.as_ref()) {
+                result.evaluation_complete &= evaluation.evaluation_complete;
+                result.diagnostics.extend(evaluation.diagnostics.clone());
+            } else if !project.rule_files.is_empty() {
+                result.evaluation_complete = false;
+                result.diagnostics.push(ValidationDiagnostic::new(
+                    DiagnosticCode::EvaluationUnavailable,
+                    Severity::Error,
+                    ValidationScope::Project,
+                    DiagnosticLocation::default(),
+                    "configured rule evaluation is unavailable; supply matching rule-check inputs",
+                ));
+            }
+            if let Some(schema) = schema {
+                graph_constraints::evaluate(project, corpus, schema, &source_diagnostics, result);
+            }
+        }
+        collect_source_diagnostics(corpus, source_diagnostics, result);
+    }
+    Ok(())
+}
+
 fn contains(item: &crate::Item, diagnostic: &Diagnostic) -> bool {
     item.source().path() == diagnostic.source().path()
         && item.source().span().start_byte() <= diagnostic.source().span().start_byte()

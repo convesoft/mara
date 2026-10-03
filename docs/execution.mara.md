@@ -159,8 +159,22 @@ CLI/MCP owning contracts remain compatible.
 
 The extracted source/query/conformance and rule/trace interfaces are defined by
 [[DES-EXPLICIT-SOURCE-ENGINE]]; mutation planning is defined by
-[[DES-SEMANTIC-CHANGE-PLANS]]. Native runtime and client/binding delivery remain
-separate.
+[[DES-SEMANTIC-CHANGE-PLANS]]. The embedded native interface is
+`mara::NativeRuntime::new(selected, current_directory)`; `from_environment`
+is the CLI/MCP convenience constructor. The caller directory must be absolute;
+relative native selections resolve against it. `OperationContext` remains an alias
+for existing adapters. `for_project` preserves absolute request selection and
+bound-server override refusal. Each call loads current inputs; sessions, caches,
+client routing and daemon transports remain separate deliverables.
+
+The runtime exposes schema get/list/validate, item list/search/get/related,
+relation get/add/remove (including occurrence removal), all item mutations,
+project/item validation with continuation options, trace matrices,
+initialization, MID backfill and explicit rollback. It invokes shared engine
+queries/conformance/rule/trace computations and `ChangePlanner` plans; native
+discovery, code indexing, MID generation and guarded publishers stay in
+`mara`. Rollback resolves configuration but bypasses schema/corpus loading.
+CLI/MCP keep their public parameters, invocation and results.
 :::
 
 :::mara design DES-SEMANTIC-CHANGE-PLANS
@@ -229,7 +243,12 @@ must not prevent recovery.
 `ChangePlan::check_preconditions` rejects stale input/code state before native
 publication. Native adapters rebuild current inputs under the mutation lock and
 use existing guarded single-file or journaled publishers; non-journaled backfill
-stages its candidates before per-file replacements.
+stages its candidates before per-file replacements. Native snapshot loading
+rejects unreadable supplied source/selection inputs rather than treating an
+inspection failure as absent input. `load_native_source_engine` exposes trusted
+host-relative input loading; portable `load_source_engine` retains snapshot
+path restrictions. Neither loader turns an incomplete projection into a
+complete inventory.
 
 `SourceEngine::apply_plan` checks a document-only plan against current inputs
 and replaces its memory state atomically, preserving caller base identity.
@@ -530,6 +549,12 @@ validation; omitting them still reports unavailable configured checks. Project
 and schema prerequisites must be usable; invalid rule definitions remain
 source-linked diagnostics. The native `load_rule_checks` adapter preserves its
 source/target binding and native corpus/code checks using the same evaluator.
+Native runtime validation composes loaded configuration diagnostics, recovering
+corpus/code inputs and `RuleChecks` through the engine's
+`validation::evaluate_loaded` before host fingerprinting, selection and paging.
+The engine rejects mismatched source/target bindings and marks missing required
+rule outcomes unavailable; filesystem loading failures remain explicit host
+inputs, not fabricated successful snapshots.
 
 `trace_matrix(params)` loads configured or request-local YAML only from the
 snapshot. Literal binding follows [[DES-TRACE-CHECK-BINDING]]; explanation,

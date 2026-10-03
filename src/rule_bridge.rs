@@ -28,7 +28,7 @@ pub fn load_rule_checks(
         |path| {
             path.strip_prefix(project.root())
                 .ok()
-                .and_then(|path| mara_engine::normalize_source_path(&path.to_string_lossy()).ok())
+                .and_then(|path| source_key(path).ok())
                 .is_some_and(|path| engine.files().contains_key(&path))
         },
     )
@@ -43,10 +43,7 @@ pub fn load_rule_checks(
         .map_err(|e| e.to_string())?;
     let source = engine
         .files()
-        .get(
-            &mara_engine::normalize_source_path(&schema_path.to_string_lossy())
-                .map_err(|e| e.to_string())?,
-        )
+        .get(&source_key(schema_path)?)
         .ok_or("missing explicit schema source")?;
     if mara_engine::parse_schema_for_validation(source)
         .map_err(|e| e.to_string())?
@@ -58,16 +55,47 @@ pub fn load_rule_checks(
     let rules = crate::native_rules::load(project, schema);
     use sha2::{Digest, Sha256};
     for (path, fingerprint) in &rules.source_fingerprints {
-        let supplied = engine.files().get(
-            &mara_engine::normalize_source_path(&path.to_string_lossy())
-                .map_err(|e| e.to_string())?,
-        );
+        let supplied = engine.files().get(&source_key(path)?);
         if supplied
             .is_none_or(|source| format!("{:x}", Sha256::digest(source.as_bytes())) != *fingerprint)
         {
             return Err("native rule sources and explicit snapshot differ".into());
         }
     }
+    Ok(checks_for_loaded(
+        project,
+        schema,
+        &rules,
+        target,
+        corpus,
+        engine.source_fingerprint(),
+    ))
+}
+
+fn source_key(path: &std::path::Path) -> Result<String, String> {
+    if let Ok(key) = mara_engine::normalize_source_path(&path.to_string_lossy()) {
+        return Ok(key);
+    }
+    if !crate::is_project_relative(path) {
+        return Err("unsafe native rule-check source path".into());
+    }
+    path.components()
+        .filter(|part| !matches!(part, std::path::Component::CurDir))
+        .collect::<std::path::PathBuf>()
+        .to_str()
+        .filter(|key| !key.is_empty() && !key.contains('\0'))
+        .map(str::to_owned)
+        .ok_or_else(|| "native rule-check source must name a UTF-8 file".into())
+}
+
+pub(crate) fn checks_for_loaded(
+    project: &Project,
+    schema: &Schema,
+    rules: &crate::native_rules::Rules,
+    target: ValidationTarget,
+    corpus: Option<(&Corpus, &[Diagnostic])>,
+    source_fingerprint: &str,
+) -> RuleChecks {
     let definitions = CheckOutcome {
         evaluation_complete: rules.diagnostics.is_empty(),
         diagnostics: rules.diagnostics.clone(),
@@ -107,9 +135,9 @@ pub fn load_rule_checks(
             },
         )
     });
-    Ok(RuleChecks {
-        source_fingerprint: engine.source_fingerprint().to_owned(),
+    RuleChecks {
+        source_fingerprint: source_fingerprint.to_owned(),
         definitions,
         evaluation,
-    })
+    }
 }

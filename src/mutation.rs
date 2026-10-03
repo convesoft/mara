@@ -238,3 +238,106 @@ fn resolve_document_path(
     }
     Ok((relative, absolute, existed))
 }
+
+#[cfg(test)]
+mod current_input_tests {
+    use super::*;
+
+    // @mara checks DES-SEMANTIC-CHANGE-PLANS
+    // @mara checks DES-MUTATION-TRANSACTION
+    #[test]
+    fn divergent_untouched_inputs_never_reach_single_or_journaled_publication() {
+        for journal in [false, true] {
+            for divergent in [
+                "configuration",
+                "schema",
+                "rules",
+                "ignore",
+                "inventory",
+                "document",
+            ] {
+                let directory = tempfile::TempDir::new().unwrap();
+                let project = initialize_project(directory.path(), Template::Minimal).unwrap();
+                let schema = load_schema(&project).unwrap();
+                create_item(
+                    &project,
+                    &schema,
+                    ItemCreationRequest {
+                        flavour: "requirement".into(),
+                        id: "REQ-A".into(),
+                        file: "a.mara.md".into(),
+                        title: "A".into(),
+                        fields: vec![],
+                        relations: vec![],
+                        body: Some("Body.".into()),
+                        line: None,
+                    },
+                )
+                .unwrap();
+                fs::write(directory.path().join("b.mara.md"), "Untouched narrative.\n").unwrap();
+                let configuration = fs::read_to_string(directory.path().join(PROJECT_FILE))
+                    .unwrap()
+                    .replacen("format_version = 1", "format_version = 2", 1)
+                    + "\n[rules]\nformat_version = 1\nfiles = [\".mara/test-rules.yaml\"]\n";
+                fs::write(directory.path().join(PROJECT_FILE), configuration).unwrap();
+                fs::write(
+                    directory.path().join(".mara/test-rules.yaml"),
+                    "format_version: 1\nshapes: []\n",
+                )
+                .unwrap();
+                let project = resolve_project(Some(directory.path()), directory.path()).unwrap();
+                let _lock = transaction::MutationLock::acquire(&project).unwrap();
+                let (engine, corpus) = inputs(&project, &schema).unwrap();
+                let plan = engine
+                    .planner_with_code(corpus.code())
+                    .unwrap()
+                    .plan_update(
+                        serde_json::from_value(
+                            serde_json::json!({"reference":"REQ-A","title":"Candidate"}),
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap();
+                let original = fs::read(project.root().join("a.mara.md")).unwrap();
+                let permissions = fs::metadata(project.root().join("a.mara.md"))
+                    .unwrap()
+                    .permissions();
+                let path = match divergent {
+                    "configuration" => PathBuf::from(PROJECT_FILE),
+                    "schema" => PathBuf::from(SCHEMA_FILE),
+                    "rules" => ".mara/test-rules.yaml".into(),
+                    "ignore" => ".gitignore".into(),
+                    "inventory" => "new.mara.md".into(),
+                    "document" => "b.mara.md".into(),
+                    _ => unreachable!(),
+                };
+                let mut bytes = fs::read(project.root().join(&path)).unwrap_or_default();
+                bytes.extend_from_slice(b"\n# Divergent input\n");
+                fs::write(project.root().join(&path), &bytes).unwrap();
+                assert!(
+                    publish(&project, &schema, plan, journal).is_err(),
+                    "{divergent}, journal={journal}"
+                );
+                assert_eq!(
+                    fs::read(project.root().join("a.mara.md")).unwrap(),
+                    original
+                );
+                assert_eq!(
+                    fs::metadata(project.root().join("a.mara.md"))
+                        .unwrap()
+                        .permissions(),
+                    permissions
+                );
+                assert_eq!(fs::read(project.root().join(path)).unwrap(), bytes);
+                assert!(!project.root().join(".mara/transaction.json").exists());
+                assert!(!fs::read_dir(project.root()).unwrap().any(|entry| {
+                    entry
+                        .unwrap()
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".mara-stage-")
+                }));
+            }
+        }
+    }
+}

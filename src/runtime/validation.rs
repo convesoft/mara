@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeSet, fs, path::Path};
 
 pub use mara_engine::validation::*;
-impl OperationContext {
+impl NativeRuntime {
     pub fn project_validate(&self, paths: &[PathBuf]) -> Result<ValidationResult, String> {
         self.project_validate_with_options(paths, &ValidationOptions::default())
             .map_err(|e| e.to_string())
@@ -159,10 +159,6 @@ impl OperationContext {
             for path in &rules.files {
                 hash_file(&mut snapshot, &project.root().join(path));
             }
-            if !rules.diagnostics.is_empty() {
-                result.evaluation_complete = false;
-            }
-            result.diagnostics.extend(rules.diagnostics.clone());
         }
         if let Some(schema) = &schema
             && schema_only
@@ -171,7 +167,7 @@ impl OperationContext {
             result.relations = Some(Some(schema.relations().len()));
         }
         if !schema_only {
-            let (corpus, mut source_diagnostics) = match &schema {
+            let (corpus, source_diagnostics) = match &schema {
                 Some(schema) => load_corpus_for_validation(&project, schema),
                 None => load_corpus_syntax_for_validation(&project),
             }
@@ -206,43 +202,44 @@ impl OperationContext {
                     None => snapshot.update([0]),
                 }
             }
-            result.evaluation_complete &= corpus.is_complete();
-            result.evaluation_complete &= corpus
-                .items()
-                .filter(|item| {
-                    result
-                        .target
-                        .id
-                        .as_deref()
-                        .is_none_or(|id| matches_handle(item, id))
-                })
-                .all(crate::Item::validation_source_is_complete);
-            source_diagnostics.extend(match &schema {
-                Some(schema) => crate::corpus::validate_corpus(&corpus, schema),
-                None => crate::corpus::validate_corpus_independent(&corpus),
-            });
-            let configuration_valid = result
-                .diagnostics
-                .iter()
-                .all(|d| !matches!(d.scope, ValidationScope::Project | ValidationScope::Schema));
-            if let (Some(rules), Some(schema)) = (&rules, &schema)
-                && rules.diagnostics.is_empty()
-                && configuration_valid
-            {
-                rules.evaluate(&corpus, schema, &source_diagnostics, &mut result);
-            }
-            if let Some(schema) = &schema
-                && configuration_valid
-            {
-                crate::graph_constraints::evaluate(
+            let checks = rules.as_ref().zip(schema.as_ref()).map(|(rules, schema)| {
+                crate::rule_bridge::checks_for_loaded(
                     &project,
-                    &corpus,
                     schema,
-                    &source_diagnostics,
-                    &mut result,
-                );
-            }
-            collect_source_diagnostics(&corpus, source_diagnostics, &mut result);
+                    rules,
+                    result.target.clone(),
+                    Some((&corpus, &source_diagnostics)),
+                    &corpus.source_fingerprint,
+                )
+            });
+            mara_engine::validation::evaluate_loaded(
+                &project,
+                schema.as_ref(),
+                Some((&corpus, source_diagnostics)),
+                checks.as_ref(),
+                &corpus.source_fingerprint,
+                &mut result,
+            )?;
+        }
+        if schema_only {
+            let checks = rules.as_ref().zip(schema.as_ref()).map(|(rules, schema)| {
+                crate::rule_bridge::checks_for_loaded(
+                    &project,
+                    schema,
+                    rules,
+                    result.target.clone(),
+                    None,
+                    "",
+                )
+            });
+            mara_engine::validation::evaluate_loaded(
+                &project,
+                schema.as_ref(),
+                None,
+                checks.as_ref(),
+                "",
+                &mut result,
+            )?;
         }
         result.summarize();
         sort_diagnostics(&mut result.diagnostics);

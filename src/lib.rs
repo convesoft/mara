@@ -5,7 +5,7 @@ mod rule_bridge;
 mod source_bridge;
 pub use host::*;
 pub use rule_bridge::load_rule_checks;
-pub use source_bridge::load_source_engine;
+pub use source_bridge::{load_native_source_engine, load_source_engine};
 pub mod code;
 pub use code::{CodeFile, CodeIndex, CodeMarker, CodeProblem, CodeSymbol};
 pub mod corpus;
@@ -46,6 +46,7 @@ mod native_rules;
 #[path = "trace.rs"]
 mod native_trace;
 pub mod operations;
+pub mod runtime;
 pub use diagnostics::{
     ConfigurationDiagnostic, DiagnosticCode, DiagnosticItem, DiagnosticLocation,
     DiagnosticObligation, Severity, ValidationError, ValidationOptions, ValidationSummary,
@@ -61,6 +62,7 @@ pub use operations::{
     SchemaKind, SchemaListResult, SearchParams, TransactionRollbackResult, ValidationDiagnostic,
     ValidationResult, ValidationScope, ValidationTarget, ValidationTargetKind, project_initialize,
 };
+pub use runtime::NativeRuntime;
 
 pub use operations::{RelationAction, RelationMutationResult};
 
