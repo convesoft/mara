@@ -186,6 +186,48 @@ Repository-wide instructions for humans and software agents.
   measured constraints. Prefer explicit known limitations in an early working
   release over delaying it for undefined completeness.
 
+## Scratch storage and cleanup
+
+- Use `${XDG_CACHE_HOME:-$HOME/.cache}/mara/scratch/<unique-run>/` for
+  task-owned disposable fixtures, Cargo targets, browser profiles and package
+  builds. Use `${XDG_STATE_HOME:-$HOME/.local/state}/mara/verification/<unique-run>/`
+  for retained logs, commands, revision records, checksums and required artifacts.
+  These are repository conventions, not standard XDG scratch names. Verify the
+  chosen filesystem is disk-backed and has sufficient space; XDG paths alone
+  do not guarantee either. Do not put large build outputs in `/tmp`, tmpfs or
+  `XDG_RUNTIME_DIR`, or create ad hoc build directories directly under `$HOME`.
+- Set `TMPDIR` to a `tmp/` subdirectory and `CARGO_TARGET_DIR` to `target/`
+  inside the owned scratch directory for build/test/review processes. Pass them
+  explicitly to child processes without changing global configuration. Reviewers
+  must inherit these paths, not replace them with hard-coded `/tmp` targets.
+  Check sandbox write access; a denial is not permission to bypass the sandbox.
+- Reuse the task's Cargo target directory across checks and sequential review
+  iterations. Allocate another target only for an actual isolation or fresh-build
+  requirement, under the same owned scratch directory. Do not copy whole target
+  trees merely to preserve evidence or start another review.
+- Creating task-owned scratch carries standing authorization and responsibility
+  to remove it. Before final handoff, including blocked/paused handoff, stop its
+  owned processes, preserve needed evidence/reproduction inputs in the state
+  directory, then explicitly remove its disposable builds, caches and fixtures.
+  Do not delete resources still needed by an active review or verification.
+  If retention is necessary, report the exact path, size, reason and remaining
+  cleanup owner/gate; do not silently leave large directories behind.
+- Keep an inventory of owned paths and cleanup results in the retained evidence,
+  not a new orchestration service or repository state file. Before deletion,
+  verify each exact resolved path belongs to this run and contains no user work
+  or evidence that must survive. Do not use broad globs, age-based sweeps, or
+  delete an XDG root, shared Cargo registry/toolchains, another task's cache or
+  the developer checkout's existing `target/`. Uncertain ownership requires
+  clarification. Preserve only artifacts needed for acceptance/reproduction,
+  not entire build caches disguised as evidence.
+- Integration/authorized resource cleanup includes any remaining task-owned
+  scratch once its evidence gates pass. Retained evidence and release artifacts,
+  shared caches, and real worktrees/branches require separate explicit deletion
+  authorization. Use the managing tool for managed worktrees. Report removed
+  paths, retained paths and reasons; verify cleanup rather than delegating it
+  silently to the user. This required housekeeping is not optional code cleanup
+  or permission to broaden implementation scope.
+
 ## Change discipline
 
 - Do not invent product decisions. When ambiguity materially affects behavior,
