@@ -36,9 +36,13 @@ The launcher resolves bundled assets relative to itself:
 
 It starts one fresh Pi process with `openai/gpt-6.1-sol`, `xhigh`, `--fast`,
 appended reviewer instructions and the substituted scope. It does not resume a
-session, send follow-ups, fix code or automatically repeat review. It never adds
-startup approval; obtain any required trust authorization separately. Do not
-substitute another profile or omit fast mode if unavailable.
+session, send follow-ups, fix code or automatically repeat review. Every Pi call,
+including preflight, uses `--no-approve` to skip trust-gated project configuration
+and resources, including this review skill. Global resources, repository context
+files such as `AGENTS.md`, and the explicitly supplied reviewer prompt remain.
+This is not filesystem isolation; Pi also still reads project `sessionDir` before
+trust resolution. Keep the no-recursion instruction. Do not substitute another
+profile, enable project resources or omit fast mode if unavailable.
 
 Storage follows the global Pi policy using the calling session's `PI_SESSION_ID`:
 XDG cache `pi/scratch/<session-id>/` for temporary files and the reusable Cargo

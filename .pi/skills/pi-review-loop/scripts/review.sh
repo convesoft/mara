@@ -20,9 +20,9 @@ checkout=$PWD
 supplied=$(git rev-parse --verify "$1^{commit}")
 [[ $supplied == "${1,,}" ]] || fail 'the SHA must identify a commit directly, not a tag object'
 baseline=$(git merge-base HEAD "$supplied")
-help_text=$(pi --help)
+help_text=$(pi --no-approve --help)
 grep -Eq '^[[:space:]]+--fast([[:space:]]|$)' <<< "$help_text" || fail 'the required --fast extension is unavailable'
-models=$(pi --list-models gpt-6.1-sol)
+models=$(pi --no-approve --list-models gpt-6.1-sol)
 grep -Eq '^[[:space:]]*openai[[:space:]]+gpt-6\.1-sol([[:space:]]|$)' <<< "$models" || fail 'the exact openai/gpt-6.1-sol model is unavailable'
 
 instructions="$skill/assets/reviewer.md"
@@ -68,7 +68,7 @@ snapshot() {
     '{head:$head, status:$status, diff_sha256:$diff, untracked_sha256:$untracked}'
 }
 
-review_command=(pi --mode json --provider openai --model gpt-6.1-sol \
+review_command=(pi --no-approve --mode json --provider openai --model gpt-6.1-sol \
   --thinking xhigh --fast --append-system-prompt "$instructions" "$prompt")
 snapshot > "$run/before.json"
 prompt_hash=$(sha256sum < "$instructions")

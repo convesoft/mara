@@ -17,11 +17,13 @@ export PATH="$root/bin:$PATH"
 cat > "$root/bin/pi" <<'STUB'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ ${1:-} == --help ]]; then
+# Every invocation, including preflight, must skip project resources.
+[[ ${1:-} == --no-approve ]] || exit 64
+if [[ ${2:-} == --help ]]; then
   [[ ${STUB_NO_FAST:-} == 1 ]] && printf 'No fast flag\n' || printf '  --fast Start fast mode\n'
   exit 0
 fi
-if [[ ${1:-} == --list-models ]]; then
+if [[ ${2:-} == --list-models ]]; then
   [[ ${STUB_NO_MODEL:-} == 1 ]] && printf 'openai other-model\n' || printf 'openai gpt-6.1-sol\n'
   exit 0
 fi
@@ -69,18 +71,18 @@ run=$(latest_evidence)
 jq -e --arg common "$common" --arg cwd "$PWD" \
   --arg instructions "$(dirname "$(dirname "$launcher")")/assets/reviewer.md" \
   --arg target "$XDG_CACHE_HOME/pi/scratch/$PI_SESSION_ID/target" '
-  .argv[0:9] == ["--mode","json","--provider","openai","--model","gpt-6.1-sol","--thinking","xhigh","--fast"]
-  and .argv[9] == "--append-system-prompt"
-  and .argv[10] == $instructions
-  and (.argv[11] | contains("git diff " + $common))
-  and (.argv[11] | contains("@BASE_SHA@") | not)
+  .argv[0:10] == ["--no-approve","--mode","json","--provider","openai","--model","gpt-6.1-sol","--thinking","xhigh","--fast"]
+  and .argv[10] == "--append-system-prompt"
+  and .argv[11] == $instructions
+  and (.argv[12] | contains("git diff " + $common))
+  and (.argv[12] | contains("@BASE_SHA@") | not)
   and (.argv | index("--approve") | not)
   and .cwd == $cwd and .target == $target' "$STUB_CAPTURE" >/dev/null
 jq -e --arg base "$base" --arg common "$common" \
   '.supplied_base_sha == $base and .review_base_sha == $common' "$run/context.json" >/dev/null
 jq -e '.pi_exit_status == 0 and .checkout_unchanged' "$run/status.json" >/dev/null
 grep -q 'stub stderr' "$run/stderr.log"
-printf 'PASS: profile, prompt substitution, merge base and retained evidence\n'
+printf 'PASS: --no-approve on all Pi calls, profile, prompt substitution, merge base and retained evidence\n'
 
 export STUB_EXIT=42
 invoke 42 "$base"
