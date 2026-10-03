@@ -31,20 +31,13 @@ pushing, PR publication, merge, or changing product meaning to satisfy a reviewe
    state. Inspect `codex review --help` before relying on the installed CLI. If
    Codex or its configured review model is unavailable, report the blocker; do
    not silently substitute another reviewer or model.
-2. Follow [scratch storage and cleanup](../../../AGENTS.md#scratch-storage-and-cleanup).
-   In this shell, set `RUN_SCRATCH` to the task's owned disk-backed scratch path
-   and `EVIDENCE_DIR` to its retained verification directory. Confirm reviewer
-   sandbox write access; retain the task's target directory across iterations.
-   Do not create a hard-coded `/tmp` build target or copy the build cache.
-   Run the exact review settings with a fresh retained log for each iteration:
+2. Run the source workflow's exact review settings, saving stdout/stderr outside
+   the repository. Allocate a fresh log for each iteration:
 
    ```bash
-   : "${RUN_SCRATCH:?Set the task-owned disk-backed scratch directory}"
-   : "${EVIDENCE_DIR:?Set the retained verification directory}"
-   mkdir -p "$RUN_SCRATCH/tmp" "$EVIDENCE_DIR"
-   REVIEW_LOG=$(mktemp "$EVIDENCE_DIR/codex-review.XXXXXX.log")
+   REVIEW_LOG=$(mktemp "${TMPDIR:-/tmp}/mara-codex-review.XXXXXX")
    printf 'Review log: %s\n' "$REVIEW_LOG"
-   TMPDIR="$RUN_SCRATCH/tmp" CARGO_TARGET_DIR="$RUN_SCRATCH/target" codex review \
+   codex review \
      -c 'model="gpt-6.1-sol"' \
      -c 'review_model="gpt-6.1-sol"' \
      -c 'model_reasoning_effort="xhigh"' \
@@ -73,11 +66,8 @@ pushing, PR publication, merge, or changing product meaning to satisfy a reviewe
 6. Report the base ref/SHA, final reviewed HEAD and any remaining working-tree
    changes, iterations, fixes, checks actually run, and the final no-findings
    conclusion with its log path. Workers return this evidence and their commit
-   SHAs to the supervising agent before handing off completed work. Apply the
-   AGENTS.md cleanup gate after review processes exit: preserve logs/context/status
-   and required artifacts, remove owned disposable scratch, and report anything
-   retained with its reason and cleanup gate. If stopped early, report blocked
-   or paused; never claim completion.
+   SHAs to the supervising agent before handing off completed work. If stopped
+   early, report blocked or paused; never claim completion.
 
 ## Optional Herdr execution
 
