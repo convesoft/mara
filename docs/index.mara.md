@@ -10,6 +10,7 @@ Selection and interpretation of recorded results follow
 
 - [Planned 0.4.0 scope and acceptance](0.4.mara.md)
 - [Planned native execution architecture](execution.mara.md)
+- [Document-engine dependency portability gate](portability.mara.md)
 - [Planned JavaScript and browser integration](integration.mara.md)
 - [Safe schema and vocabulary editing](schema-evolution.mara.md)
 - [Migration to 0.3](migration-0.3.mara.md)

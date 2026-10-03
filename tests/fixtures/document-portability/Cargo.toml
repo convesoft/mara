@@ -1,0 +1,35 @@
+# Copy to a disposable directory before use; this is not a workspace package.
+[workspace]
+
+[package]
+name = "mara-document-portability-probe"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+shacl = { version = "=0.3.24", default-features = false }
+rudof_rdf = { version = "=0.3.24", default-features = false }
+rudof_iri = "=0.3.24"
+serde_json = "=1.0.151"
+schemars = "=1.2.2"
+similar = { version = "=3.2.0", default-features = false, features = ["text"] }
+serde-saphyr = "=1.2.0"
+toml = "=1.1.4"
+globset = "=0.4.20"
+ignore = "=0.4.33"
+rushdown = "=0.18.0"
+ulid = "=1.2.1"
+sha2 = "=0.10.9"
+petgraph = { version = "=0.8.3", default-features = false, features = ["std"] }
+strsim = "=0.11.1"
+unicode-casefold = "=0.2.0"
+unicode-normalization = "=0.1.25"
+unicode-segmentation = "=1.13.3"
+url = "=2.5.8"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys = "=0.3.104"
+getrandom = { version = "=0.3.4", features = ["wasm_js"] }
+
+[dev-dependencies]
+wasm-bindgen-test = "=0.3.77"

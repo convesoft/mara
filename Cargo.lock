@@ -1973,9 +1973,9 @@ dependencies = [
 
 [[package]]
 name = "prefixmap"
-version = "0.3.21"
+version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58cec0c0a9fd11aeebeec8f894c7f75bcf49af19e5d98c936e9b12bf9a2c49d8"
+checksum = "09fe6e54f7ebe4dfe628e177d5df8e900c24096c039088c3e5153eac051fa249"
 dependencies = [
  "colored",
  "indexmap",
@@ -2461,9 +2461,9 @@ dependencies = [
 
 [[package]]
 name = "rudof_config"
-version = "0.3.21"
+version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee2aa8f8cc753d3c53ce1f538f0693080d00cb66e414e0a40d7b7971a6755f47"
+checksum = "c48b6c7d63b8563eb97086ce425dadd21988030b5a98cad98d7c9e49d3c12a44"
 dependencies = [
  "dirs",
  "serde",
@@ -2473,9 +2473,9 @@ dependencies = [
 
 [[package]]
 name = "rudof_iri"
-version = "0.3.21"
+version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab7a4f8e044fd6997a3da72d80870f2ed6c1d62e6226193cdd93af2d8c94f0af"
+checksum = "6d94635d3a2bb6767292b982ec2cd45c5d7c136187b7c6d367fba9238f38052c"
 dependencies = [
  "getrandom 0.3.4",
  "getrandom 0.4.3",
@@ -2491,9 +2491,9 @@ dependencies = [
 
 [[package]]
 name = "rudof_rdf"
-version = "0.3.21"
+version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e9068c1c338cd8136df62a55fc1bbaab81a0a85349b75c0a893149a8722dac7"
+checksum = "300359eb9033b3e3585de4d7010c64b4b38cb3e0e4e04a9c071fb5b35a060fec"
 dependencies = [
  "colored",
  "const_format",
@@ -2524,23 +2524,24 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "toml 0.9.12+spec-1.1.0",
+ "tracing",
  "url",
 ]
 
 [[package]]
 name = "rudof_typing"
-version = "0.3.21"
+version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af9ff30ca2b1ed7554da90cc2034f5366002fcc59c358d84eb43e179314c692c"
+checksum = "a1dd9bbacd9c8e12771fb82ad26a6fa98c18d133ed9422c416ed15f1e12a3060"
 dependencies = [
  "either",
 ]
 
 [[package]]
 name = "rudof_viz"
-version = "0.3.21"
+version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0910f264f0a905fbcb623509a4a8c3fd9f4c40bbb374b2843a94c9fc35234a7"
+checksum = "eb154830e17aec381147874f31605c0164754d4495e1dece85a3808bd637e6db"
 dependencies = [
  "serde",
  "tempfile",
@@ -2911,9 +2912,9 @@ dependencies = [
 
 [[package]]
 name = "shacl"
-version = "0.3.21"
+version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c576db2e0015704702e757bc204b0a52a340db340a3bb7928b5a1d8ab254721"
+checksum = "686d8efa18fa0d43f540ce7f079e18dd39cb913f47d3ae7bbe7d584f340a65c9"
 dependencies = [
  "anyhow",
  "dashmap",

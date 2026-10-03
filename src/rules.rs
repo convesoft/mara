@@ -1,6 +1,8 @@
 //! Project-owned current-state policy. YAML is converted with generated JSON-LD
 //! bindings and evaluated by the pinned native SHACL engine.
 mod bindings;
+use bindings::bind_literal;
+pub(crate) use bindings::valid_parameter_name;
 mod engine;
 mod evaluate;
 mod yaml;
@@ -995,38 +997,6 @@ fn check_literal(v: &Value) -> Result<(), String> {
     } else if v.is_null() || v.is_array() {
         return Err("expected a scalar literal".into());
     }
-    Ok(())
-}
-
-pub(crate) fn valid_parameter_name(name: &str) -> bool {
-    let mut bytes = name.bytes();
-    matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
-        && bytes.all(|b| matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_'))
-}
-
-// @mara implements DES-TRACE-CHECK-BINDING
-fn bind_literal(
-    literal: &mut Value,
-    bindings: &BTreeMap<String, String>,
-    used: &mut BTreeSet<String>,
-) -> Result<(), String> {
-    let Some(object) = literal.as_object() else {
-        return Ok(());
-    };
-    let Some(parameter) = object.get("parameter") else {
-        return Ok(());
-    };
-    let Some(name) = parameter.as_str() else {
-        return Err("check parameter placeholder must have a text name".into());
-    };
-    if object.len() != 1 || !valid_parameter_name(name) {
-        return Err(format!("invalid check parameter placeholder '{name}'"));
-    }
-    let Some(value) = bindings.get(name) else {
-        return Err(format!("missing check parameter '{name}'"));
-    };
-    used.insert(name.to_owned());
-    *literal = Value::String(value.clone());
     Ok(())
 }
 

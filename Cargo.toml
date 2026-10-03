@@ -27,9 +27,9 @@ tokio = { version = "1", features = ["io-std", "rt"] }
 toml = "1.1"
 
 sha2 = "0.10"
-shacl = { version = "=0.3.21", default-features = false }
-rudof_rdf = { version = "=0.3.21", default-features = false }
-rudof_iri = "=0.3.21"
+shacl = { version = "=0.3.24", default-features = false }
+rudof_rdf = { version = "=0.3.24", default-features = false }
+rudof_iri = "=0.3.24"
 
 tree-sitter = { version = "0.27", features = ["wasm"] }
 ignore = "0.4"

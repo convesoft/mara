@@ -1,6 +1,39 @@
 use super::{FIELD, FLAVOUR, REL, RULE, SH, XSD};
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+
+pub(crate) fn valid_parameter_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    matches!(bytes.next(), Some(b'A'..=b'Z' | b'a'..=b'z' | b'_'))
+        && bytes.all(|b| matches!(b, b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_'))
+}
+
+// @mara implements DES-TRACE-CHECK-BINDING
+pub(super) fn bind_literal(
+    literal: &mut Value,
+    bindings: &BTreeMap<String, String>,
+    used: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    let Some(object) = literal.as_object() else {
+        return Ok(());
+    };
+    let Some(parameter) = object.get("parameter") else {
+        return Ok(());
+    };
+    let Some(name) = parameter.as_str() else {
+        return Err("check parameter placeholder must have a text name".into());
+    };
+    if object.len() != 1 || !valid_parameter_name(name) {
+        return Err(format!("invalid check parameter placeholder '{name}'"));
+    }
+    let Some(value) = bindings.get(name) else {
+        return Err(format!("missing check parameter '{name}'"));
+    };
+    used.insert(name.to_owned());
+    *literal = Value::String(value.clone());
+    Ok(())
+}
+
 pub(super) fn field_names(s: &Value) -> BTreeSet<String> {
     s["flavours"]
         .as_object()

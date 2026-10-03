@@ -128,7 +128,9 @@ Evaluation has no logical work counter or timeout guarantee. Retain finite rule-
 :status: accepted
 :justifies: REQ-CURRENT-STATE-RULES
 
-Use the pinned unmodified native SHACL engine through its public adapter API rather than patching vendor code or reimplementing constraint semantics. Retain Mara's authored vocabulary/type checks and deterministic diagnostic selection at the boundary. Keep a nested error ledger because native logical/qualification validators can swallow an error into nonconformance; any encountered error must remain unavailable. Expose counts only from completed native outcomes. Constraint-semantic changes require a separate compatibility decision; matrix presentation remains a separate projection.
+Use the pinned unmodified SHACL engine through its public adapter API rather than patching vendor code or reimplementing constraint semantics. Retain Mara's authored vocabulary/type checks and deterministic diagnostic selection at the boundary. Keep a nested error ledger because logical/qualification validators can swallow an error into nonconformance; any encountered error must remain unavailable. Expose counts only from completed engine outcomes. Constraint-semantic changes require a separate compatibility decision; matrix presentation remains a separate projection.
+
+Pin shacl, rudof_rdf and rudof_iri to 0.3.24 with SHACL/RDF default features disabled. This upstream release exposes the same synchronous validator on native and browser WASM; the 0.3.21 validator was excluded on WASM. Dependency proof, host boundaries and reproduction follow the [portability gate](portability.mara.md); this is not proof of the extracted browser product.
 :::
 
 :::mara design DES-CURRENT-STATE-EVALUATION
