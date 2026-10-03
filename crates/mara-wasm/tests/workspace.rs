@@ -210,6 +210,7 @@ fn unavailable_code_refuses_all_mutations_but_not_reads_or_schema_checks() {
     config.content.push_str("\n[[code.languages]]\nname = 'rust'\nextensions = ['rs']\ncommand = ['never-run', '{output}']\n");
     call(&mut w, "load_snapshot", json!(snapshot)).unwrap();
     let before = sources(&mut w);
+    let exported_before = w.export_changes();
     for (operation, params) in [
         ("project_init", json!({"name":"Refused"})),
         ("project_mid_backfill", json!({})),
@@ -238,6 +239,7 @@ fn unavailable_code_refuses_all_mutations_but_not_reads_or_schema_checks() {
     ] {
         assert!(call(&mut w, operation, params).is_err(), "{operation}");
         assert_eq!(sources(&mut w), before);
+        assert_eq!(w.export_changes(), exported_before);
     }
     for (operation, params) in [
         ("schema_get", json!({})),

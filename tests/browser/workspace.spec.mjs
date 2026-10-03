@@ -1,8 +1,14 @@
 import { test, expect } from '@playwright/test';
+import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 // @mara checks REQ-BROWSER-LOCAL-WORKSPACE
 // @mara checks DES-BROWSER-PROJECT-SNAPSHOT
 // @mara checks REQ-EXPLICIT-BACKEND-CAPABILITIES
+// @mara checks REQ-BROWSER-CHANGE-EXPORT
+// @mara checks DES-BROWSER-FILE-CHANGESET
 test('real module worker runs the WASM memory workspace, rules and Unicode', async ({ page, browser }, info) => {
   const browserErrors = [];
   page.on('pageerror', error => browserErrors.push(String(error)));
@@ -13,6 +19,7 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
     const pending = new Map();
     const transcript = [];
     const requests = [];
+    let exported;
     const assert = (condition, message) => { if (!condition) throw new Error(message); };
     worker.onmessage = ({ data }) => {
       transcript.push(structuredClone(data));
@@ -86,9 +93,11 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       } });
       assert(check.evaluation_complete && check.summaries[0].passed === 1, 'request-local parameter');
       const before = await call('workspace_sources');
+      const beforeExport = await call('export_changes');
       const rejected = await request('item_update', { reference: 'REQ-A', body: '[[REQ-MISSING]]' });
       assert(!rejected.ok, 'invalid reference accepted');
       assert(JSON.stringify(await call('workspace_sources')) === JSON.stringify(before), 'rejected edit changed state');
+      assert(JSON.stringify(await call('export_changes')) === JSON.stringify(beforeExport), 'rejected edit changed export');
       await call('item_list', { limit: 1, cursor: pageOne.next_cursor });
       const edge = { source: 'REQ-A', relation: 'refines', target: 'REQ-B' };
       await call('relation_add', edge);
@@ -107,6 +116,43 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       await call('item_move', { reference: 'REQ-RENAMED', file: 'moved.mara.md' });
       await call('item_delete', { reference: 'REQ-RENAMED' });
       assert((await call('project_validate')).valid, 'post-edit rules');
+      const finalSources = await call('workspace_sources');
+      const changeSet = await call('export_changes');
+      assert(changeSet.format_version === 1 && changeSet.base_identity === snapshot.base_identity,
+        'export version/provenance');
+      assert(changeSet.changes.length === 2 && changeSet.changes[0].path === 'café/知识.mara.md' &&
+        changeSet.changes[1].path === 'moved.mara.md', 'ordered consolidated changes');
+      assert(changeSet.changes[0].before === snapshot.files.find(f => f.path === 'café/知识.mara.md').content &&
+        changeSet.changes[1].before === null, 'exact preimages');
+      assert(changeSet.changes[0].after.includes('REQ-B') && !changeSet.changes[0].after.includes('REQ-A') &&
+        !changeSet.changes[1].after.includes('REQ-RENAMED'), 'intermediate operations leaked into export');
+      assert(JSON.stringify(await call('export_changes')) === JSON.stringify(changeSet), 'export changed base');
+      const match = await call('check_change_set_preconditions', { change_set: changeSet, snapshot });
+      assert(match.source_preconditions_match && !match.external_context_verified, 'external context claim');
+      for (const mutate of [
+        s => { s.files.find(f => f.path === 'checks.yaml').content += '\\n'; },
+        s => { s.files.find(f => f.path === '.mara/project.toml').content += '\\n'; },
+        s => { s.files.find(f => f.path === '.mara/schema.yaml').content += '\\n'; },
+        s => { s.files.find(f => f.path === '.mara/engineering-rules.yaml').content += '\\n'; },
+        s => { s.files.push({ path: 'untouched.mara.md', content: '# Extra\\n' });
+          s.selection.document_paths.push('untouched.mara.md'); },
+        s => { s.selection.document_paths = []; },
+        s => { s.selection.ignores.push({ directory: '', root_prefix: [], content: 'ignored/\\n' }); },
+      ]) {
+        const divergent = structuredClone(snapshot);
+        mutate(divergent);
+        assert(!(await request('check_change_set_preconditions', {
+          change_set: changeSet, snapshot: divergent,
+        })).ok, 'divergent whole base accepted');
+      }
+      const wrongPreimage = structuredClone(changeSet);
+      wrongPreimage.changes[0].before += 'wrong';
+      assert(!(await request('check_change_set_preconditions', {
+        change_set: wrongPreimage, snapshot,
+      })).ok, 'forged preimage accepted');
+      assert(JSON.stringify(await call('workspace_sources')) === JSON.stringify(finalSources), 'checking wrote memory');
+      assert(JSON.stringify(await call('export_changes')) === JSON.stringify(changeSet), 'checking changed export');
+      exported = { base: finalSources.base, current: finalSources.current, changeSet };
 
       const legacy = (await call('workspace_sources')).current;
       legacy.files.push({ path: 'legacy.mara.md', content:
@@ -123,6 +169,7 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
         "\n[[code.languages]]\nname='rust'\nextensions=['rs']\ncommand=['must-not-run', '{output}']\n";
       await call('load_snapshot', codeSnapshot);
       const codeBefore = JSON.stringify(await call('workspace_sources'));
+      const codeExport = JSON.stringify(await call('export_changes'));
       for (const [operation, params] of [
         ['project_init', { name: 'Again' }], ['project_mid_backfill', {}],
         ['item_create', { flavour: 'requirement', id: 'REQ-NEW', file: 'new.mara.md',
@@ -135,6 +182,7 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       ]) {
         assert(!(await request(operation, params)).ok, operation + ' bypassed code conformance');
         assert(JSON.stringify(await call('workspace_sources')) === codeBefore, operation + ' changed code workspace');
+        assert(JSON.stringify(await call('export_changes')) === codeExport, operation + ' changed code export');
       }
       assert((await call('schema_validate')).valid, 'independent schema check');
       await call('get', { reference: 'REQ-B' });
@@ -163,7 +211,7 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       const recovered = await call('project_validate');
       assert(!recovered.valid && !recovered.evaluation_complete &&
         recovered.diagnostics.some(d => d.code === 'project_invalid'), 'custom-schema configuration recovery');
-      return { requests, transcript, operations: caps.operations, pageTick, userAgent: navigator.userAgent };
+      return { requests, transcript, exported, operations: caps.operations, pageTick, userAgent: navigator.userAgent };
     } finally {
       worker.terminate();
     }
@@ -171,6 +219,82 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
   expect(browserErrors).toEqual([]);
   expect(report.pageTick).toBe(true);
   expect(report.operations).toContain('trace_matrix');
+  expect(report.operations).toContain('export_changes');
+  // Test-only host materialization. No publisher, journal or filesystem policy is added.
+  if (!process.env.TMPDIR || !process.env.MARA_CLI) throw new Error('Set owned TMPDIR and real MARA_CLI');
+  const root = await mkdtemp(path.join(path.resolve(process.env.TMPDIR), 'browser-export-'));
+  try {
+    const { base, current, changeSet } = report.exported;
+    for (const file of base.files) {
+      const target = path.join(root, file.path);
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, file.content, 'utf8');
+    }
+    const readSources = async (directory = '') => {
+      const files = [];
+      for (const entry of await readdir(path.join(root, directory), { withFileTypes: true })) {
+        const relative = directory ? directory + '/' + entry.name : entry.name;
+        if (entry.isDirectory()) files.push(...await readSources(relative));
+        else files.push({ path: relative, content: await readFile(path.join(root, relative), 'utf8') });
+      }
+      return files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+    };
+    // Independently reread the entire fixture inventory, including untouched source inputs.
+    const actual = { ...base, files: await readSources(), selection: {
+      document_paths: (await readSources()).filter(f => f.path.endsWith('.mara.md')).map(f => f.path),
+      ignores: [], // This fixture supplies no ignore context or physical ignore files.
+    } };
+    const checkSources = actual => page.evaluate(async ({ changeSet, actual }) => {
+      const worker = new Worker('./worker.mjs', { type: 'module' });
+      try {
+        return await new Promise((resolve, reject) => {
+          worker.onmessage = ({ data }) => resolve(data);
+          worker.onerror = event => reject(new Error(event.message));
+          worker.postMessage({ format_version: 1, id: 1, operation: 'check_change_set_preconditions',
+            params: { change_set: changeSet, snapshot: actual } });
+        });
+      } finally { worker.terminate(); }
+    }, { changeSet, actual });
+    // A real untouched-file divergence fails the host's pre-write gate. Preserve
+    // the entire divergent tree, including every otherwise matching preimage.
+    const untouched = base.files.find(f => f.path === 'checks.yaml');
+    await writeFile(path.join(root, untouched.path), untouched.content + '\n', 'utf8');
+    const divergentFiles = await readSources();
+    const rejectedCheck = await checkSources({ ...actual, files: divergentFiles });
+    expect(rejectedCheck.ok).toBe(false);
+    expect(await readSources()).toEqual(divergentFiles);
+    for (const change of changeSet.changes) {
+      expect(divergentFiles.find(f => f.path === change.path)?.content ?? null).toBe(change.before);
+    }
+    await writeFile(path.join(root, untouched.path), untouched.content, 'utf8');
+    const checked = await checkSources({ ...actual, files: await readSources() });
+    expect(checked.ok).toBe(true);
+    expect(checked.result.external_context_verified).toBe(false);
+    // All source checks completed before the first application write. External revision
+    // verification/concurrent-writer exclusion belong to real hosts, not this isolated test.
+    for (const change of changeSet.changes) {
+      const file = actual.files.find(f => f.path === change.path);
+      expect(file?.content ?? null).toBe(change.before);
+    }
+    for (const change of changeSet.changes) {
+      const target = path.join(root, change.path);
+      if (change.after === null) await rm(target);
+      else { await mkdir(path.dirname(target), { recursive: true }); await writeFile(target, change.after, 'utf8'); }
+    }
+    expect(await readSources()).toEqual([...current.files].sort((a, b) => a.path < b.path ? -1 : 1));
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+    Object.assign(env, { TMPDIR: path.resolve(process.env.TMPDIR),
+      GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CEILING_DIRECTORIES: root, XDG_CONFIG_HOME: path.join(root, '.test-config') });
+    const args = ['--project', root, '--format', 'json', 'project', 'validate'];
+    const result = await promisify(execFile)(process.env.MARA_CLI, args, { cwd: root, env, timeout: 120_000 });
+    const validation = JSON.parse(result.stdout);
+    expect(validation.valid).toBe(true);
+    expect(validation.evaluation_complete).toBe(true);
+    await info.attach('native-materialization', { body: JSON.stringify({
+      executable: process.env.MARA_CLI, args, base: actual, changeSet, rejectedCheck, checked, validation,
+    }, null, 2), contentType: 'application/json' });
+  } finally { await rm(root, { recursive: true, force: true }); }
   await info.attach('worker-transcript', {
     body: JSON.stringify({ browserVersion: browser.version(), ...report }, null, 2),
     contentType: 'application/json',

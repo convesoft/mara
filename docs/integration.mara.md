@@ -284,13 +284,14 @@ its bundled asset URL and terminates it with `Worker.terminate()`. Termination
 loses memory; this host has no daemon shutdown, disk persistence or recovery.
 The shared typed client and installed-package asset resolution are separate.
 
-Host operations are `capabilities`, `load_snapshot`, `workspace_state` and
-`workspace_sources`. Capabilities list the complete supported operation names,
+Host setup/read operations are `capabilities`, `load_snapshot`, `workspace_state`
+and `workspace_sources`; export/checking operations are defined by
+[[DES-BROWSER-FILE-CHANGESET]]. Capabilities list the complete supported operation names,
 `code:{indexing:false,native_index_import:false}`, memory mutation persistence
 and no native recovery. Native lifecycle/rollback and other unsupported names
 fail explicitly. Workspace state returns current/base source fingerprints and
 opaque base identity; workspace sources returns exact normalized `{base,current}`
-snapshots for downstream client/export work, not a file change set or publication.
+snapshots for caller inspection, not a file change set or publication.
 
 `load_snapshot` accepts [[DES-BROWSER-PROJECT-SNAPSHOT]] directly as params.
 It rejects malformed paths/selection and absent selected documents, project
@@ -339,6 +340,38 @@ change, the host must match that full base, check every changed-file preimage
 and verify its external revision context. Reject divergence without applying
 changes; loading a replacement snapshot establishes a new base, not an
 automatic rebase of prior edits.
+
+The delivered `mara-wasm::FileChangeSet` JSON is `{format_version:1,
+base_source_fingerprint, base_identity, changes}`. `base_identity` is an opaque
+string or null. `changes` contains `{path, before, after}` entries ordered by
+normalized path (Rust string order); before/after are strings or null, with
+empty strings distinct from absence. `MemoryWorkspace::export_changes()` and
+worker operation `export_changes` (empty params) compute this final delta without
+mutating workspace state. Initialization against an empty base exports its new
+sources; item deletion retains its containing file, so an empty retained file
+is not a file deletion.
+
+`FileChangeSet::check_preconditions(snapshot)` and worker operation
+`check_change_set_preconditions` with `{change_set, snapshot}` provide the
+read-only host checking path. The snapshot must be freshly produced from the
+host's complete effective inputs under [[DES-BROWSER-PROJECT-SNAPSHOT]], not
+copied from the export's original base as a substitute for inspecting current
+inputs. The checker normalizes and checks required inventory through the memory
+snapshot loader, matches the whole-base fingerprint and checks every changed
+file's exact preimage. Unsupported versions, non-normalized/duplicate/out-of-order
+paths and unchanged entries are rejected. Worker failures return an operation
+error with code `precondition_failed`; malformed request decoding uses
+`invalid_argument`. Success returns `{format_version:1,
+source_preconditions_match:true, external_context_verified:false}`. Neither
+checking nor exporting writes or advances memory.
+
+Caller base identity is not compared as source state. Even a successful source
+check does not prove external revision currency or authorize application. The
+host must separately verify its external context, establish complete effective
+inputs and prevent divergence between checking and application using its own
+concurrency/publication boundary. Complete all source/preimage checks before
+any write; reject a failed check without partial application. This interface
+provides no application method, filesystem atomicity or semantic rebase.
 
 Native filesystem permissions, journals and GitHub credentials are not part of
 this format. All exported source remains ordinary canonical files under

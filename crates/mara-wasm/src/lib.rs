@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{cell::RefCell, path::PathBuf};
 
+mod change_set;
+pub use change_set::{FileChange, FileChangeSet};
+
 #[cfg(target_arch = "wasm32")]
 mod binding;
 
@@ -12,6 +15,8 @@ pub const OPERATIONS: &[&str] = &[
     "load_snapshot",
     "workspace_state",
     "workspace_sources",
+    "export_changes",
+    "check_change_set_preconditions",
     "project_init",
     "project_mid_backfill",
     "schema_get",
@@ -45,7 +50,7 @@ fn empty_object() -> Value {
     json!({})
 }
 
-/// Retains a normalized base independently of current memory. No export/publication API.
+/// Retains a normalized base independently of current memory. Export never publishes.
 pub struct MemoryWorkspace {
     engine: SourceEngine,
     base: SourceSnapshot,
@@ -66,6 +71,12 @@ impl MemoryWorkspace {
     }
     pub fn current_snapshot(&self) -> SourceSnapshot {
         self.engine.snapshot()
+    }
+
+    /// Consolidate original base versus current sources without advancing either state.
+    // @mara implements REQ-BROWSER-CHANGE-EXPORT
+    pub fn export_changes(&self) -> FileChangeSet {
+        change_set::consolidate(&self.base, self.engine.files(), &self.base_fingerprint)
     }
 
     /// Entropy/time are supplied by the host, never by portable semantics.
@@ -99,6 +110,20 @@ impl MemoryWorkspace {
             "workspace_sources" => {
                 parse::<Empty>(p)?;
                 Ok(json!({"base": self.base, "current": self.engine.snapshot()}))
+            }
+            "export_changes" => {
+                parse::<Empty>(p)?;
+                value(self.export_changes())
+            }
+            "check_change_set_preconditions" => {
+                let p: CheckChangeSet = parse(p)?;
+                p.change_set
+                    .check_preconditions(p.snapshot)
+                    .map_err(|e| envelope("precondition_failed", e))?;
+                Ok(
+                    json!({"format_version":1, "source_preconditions_match":true,
+                    "external_context_verified":false}),
+                )
             }
             "project_init" => {
                 let p: Init = parse(p)?;
@@ -392,6 +417,12 @@ fn relation_error(error: RelationError) -> Value {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Empty {}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CheckChangeSet {
+    change_set: FileChangeSet,
+    snapshot: SourceSnapshot,
+}
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Init {
