@@ -23,9 +23,12 @@ skill and uses its own main-agent PR workflow.
    task, and explicitly forbid it from using this skill. Do not delegate
    product decisions or source edits.
 2. When the agent reports a PR URL, attach that PR to this task. Review each
-   finding it reports against `AGENTS.md` and the applicable Mara contract.
-   Make and verify accepted fixes in the main thread, or decide on a supported
-   reply, dismissal, or backlog outcome. Tell the agent the exact new commit
+   finding it reports using [triage-findings](../../../.pi/skills/triage-findings/SKILL.md)
+   against `AGENTS.md` and applicable contracts. Fix/verify required defects,
+   record authorized non-blocking backlog outcomes, and support dismissals.
+   Required product/authorization clarifications remain pending; preserve the
+   independent verdict and distinguish clean review from accepted after triage.
+   Tell the agent the exact new commit
    SHA and the intended disposition of each finding. The agent handles the
    push, PR replies, and specified conversation resolutions.
 3. Continue the same agent and PR for subsequent reviewed heads. After each
