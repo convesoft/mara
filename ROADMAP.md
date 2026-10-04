@@ -3,7 +3,7 @@
 Mara's supported behavior is defined in the [product documentation](docs/index.mara.md).
 The following development intentions are provisional, not implementation promises.
 
-## 0.4.0 — Execution and integration architecture
+## 0.4.0-alpha.1 — Execution and integration architecture
 
 The [confirmed scope](docs/0.4.mara.md) establishes one portable document engine,
 native embedded/daemon execution, N-API and browser WASM bindings, and a shared

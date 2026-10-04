@@ -8,7 +8,7 @@ Execution evidence applies to its recorded revision and verification scope.
 Selection and interpretation of recorded results follow
 [[DES-TRACE-CHECK-BINDING]].
 
-- [Planned 0.4.0 scope and acceptance](0.4.mara.md)
+- [Planned 0.4.0-alpha.1 scope and acceptance](0.4.mara.md)
 - [Execution architecture and explicit-source engine boundary](execution.mara.md)
 - [Document-engine dependency portability gate](portability.mara.md)
 - [Planned JavaScript and browser integration](integration.mara.md)

@@ -1,6 +1,6 @@
-# JavaScript and browser integration for 0.4.0
+# JavaScript and browser integration for 0.4.0-alpha.1
 
-Target contracts for the [0.4.0 scope](0.4.mara.md). The shared client uses the
+Target contracts for the [0.4.0-alpha.1 scope](0.4.mara.md). The shared client uses the
 [execution architecture](execution.mara.md). These draft items specify library
 artifacts and behavior, not graphical applications or passing test results.
 
@@ -104,7 +104,7 @@ Mutations apply to browser memory only and preserve the same document
 invariants. Rejected operations preserve the workspace. No filesystem
 discovery, native subprocess, GitHub fetch, commit or PR publication occurs in
 the engine. Loading and final publication are caller responsibilities. Browser
-persistence beyond the in-memory workspace is outside 0.4.0.
+persistence beyond the in-memory workspace is outside 0.4.0-alpha.1.
 :::
 
 :::mara requirement REQ-BROWSER-CHANGE-EXPORT
@@ -141,7 +141,7 @@ Clients must expose supported operations, code capabilities and mutation
 persistence. Native mutations write the project working tree; WASM mutations
 write only its memory workspace.
 
-WASM 0.4.0 neither runs indexers nor imports native code-index snapshots.
+WASM 0.4.0-alpha.1 neither runs indexers nor imports native code-index snapshots.
 Document-only execution must not interpret missing code coverage as an empty
 valid code graph. Code-dependent validation/matrix work is explicitly
 unavailable.
@@ -423,7 +423,7 @@ supports explicit initialization; replacing/loading a snapshot establishes a
 new base. Mutations retain the original base for export and update workspace
 fingerprints so stale cursors/handles are rejected.
 
-Native code-index inputs are not supported in 0.4.0, and commands declared in
+Native code-index inputs are not supported in 0.4.0-alpha.1, and commands declared in
 configuration are never executed. A supplied document set does not prove
 repository-wide code completeness; declare unavailable code capabilities under
 [[REQ-EXPLICIT-BACKEND-CAPABILITIES]].

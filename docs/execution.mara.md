@@ -1,6 +1,6 @@
-# Native execution architecture for 0.4.0
+# Native execution architecture for 0.4.0-alpha.1
 
-Target contracts for the [0.4.0 scope](0.4.mara.md). These draft items do not
+Target contracts for the [0.4.0-alpha.1 scope](0.4.mara.md). These draft items do not
 claim shipped functionality or passing execution. Existing operation contracts
 remain the source of semantic detail; this document defines their new execution
 boundary. JavaScript/browser adapters are defined in
@@ -675,7 +675,7 @@ token:"<daemon-session credential>"}` through this local-only boundary, never
 through status or project files. Credentials remain memory-only, not a persisted
 runtime file. The caller supplies the connection
 information to the browser client. A dedicated UI launcher and browser pairing
-are outside 0.4.0; a later launcher can automate this handoff without expanding
+are outside 0.4.0-alpha.1; a later launcher can automate this handoff without expanding
 browser authority.
 
 `run` and `start` accept startup-only `--http-bind <numeric-loopback-IP:port>`
