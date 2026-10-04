@@ -31,14 +31,12 @@ Repository-wide instructions for humans and software agents.
 - When delivery exposes missing, contradictory, or changed product meaning,
   resolve it in the canonical Mara documents; a Work item or review comment
   alone cannot establish the decision.
-- Classify findings before creating items. Record accepted current-release work
-  as open items with explicit release context, and accepted but unscheduled work
-  as open items labeled `backlog`. Create nothing for duplicate, invalid, or
-  non-actionable findings. Do not start backlog work unless explicitly requested.
-- `backlog this` means create one compact, unscheduled manual Work item labeled
-  `backlog` for the referenced actionable outcome. Identify the repository, link
-  its source, and include evident Mara IDs; do not change code. If Work is
-  unavailable, state that no item was created.
+- Follow the **Backlog policy** section of
+  [triage-findings](.pi/skills/triage-findings/SKILL.md) for intake, organization
+  and scheduling. It is the single shared policy; priority scales and existing
+  topic labels remain project configuration.
+- `backlog this` requests recording the referenced outcome under that policy,
+  not code changes. If Work is unavailable, state that no item was created.
 - Keep acceptance checklists and delivery evidence in item bodies. Use Work
   tools for metadata and relations; edit opaque Markdown bodies narrowly,
   preserving their headers, and run Work diagnostics afterward. Use `depends_on`
