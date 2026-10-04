@@ -15,6 +15,9 @@ description = "Structured project knowledge for humans and software agents"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/convesoft/mara"
 
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc = "0.2"
+
 [dependencies]
 mara-engine = { path = "crates/mara-engine" }
 clap = { version = "4.5", features = ["derive"] }

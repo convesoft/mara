@@ -1537,6 +1537,7 @@ dependencies = [
  "clap",
  "globset",
  "ignore",
+ "libc",
  "mara-engine",
  "protobuf",
  "rmcp",

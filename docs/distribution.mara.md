@@ -11,6 +11,11 @@ Supported CLI and agent installation paths share the same native executable.
 
 Install and launch @convesoft/mara without npm lifecycle scripts or a Rust toolchain. The dispatcher and native packages use the exact Cargo workspace version. Support Apple Silicon (arm64) macOS and x64 and arm64 GNU Linux compatible with the Ubuntu 22.04 glibc build baseline. Intel (x64) macOS, Windows and musl Linux are unsupported. Missing or unsupported native packages fail with actionable diagnostics; installation does not download or compile executables through scripts.
 
+The native IPC foundation follows [[DES-LOCAL-DAEMON-PROTOCOL]] and uses
+Unix sockets with Linux/macOS peer-user checks. It does not expand this platform
+matrix; execution on Linux alone does not certify the macOS host. Lifecycle
+commands and package changes remain separate deliverables.
+
 The main package contains its CLI dispatcher, matching standalone Mara skill, README and license texts. Native packages contain the compiled executable and public documentation/licenses. Preserve CLI arguments, inherited standard streams, exit status and termination signals. [[implemented_by:code:npm/mara.cjs]] [[implemented_by:code:scripts/package-npm.mjs]]
 :::
 

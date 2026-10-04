@@ -165,8 +165,9 @@ is the CLI/MCP convenience constructor. The caller directory must be absolute;
 relative native selections resolve against it. `OperationContext` remains an alias
 for existing adapters. `for_project` preserves absolute request selection and
 bound-server override refusal. Each call reconciles current inputs through the
-memory-only sessions in [[DES-NATIVE-PROJECT-SESSIONS]]. Client routing and
-daemon transports remain separate deliverables.
+memory-only sessions in [[DES-NATIVE-PROJECT-SESSIONS]]. High-level client
+routing remains a separate deliverable. The native server
+foundation and reusable dispatcher are delivered under [[DES-LOCAL-DAEMON-PROTOCOL]].
 
 The runtime exposes schema get/list/validate, item list/search/get/related,
 relation get/add/remove (including occurrence removal), all item mutations,
@@ -382,10 +383,87 @@ backend capabilities. Operation parameters/results follow their owning
 contracts. Preserve the distinction between invalid domain validation results
 and RPC/operation failures.
 
+The delivered reusable interface is `mara::protocol::RpcSession`, constructed
+with the server's shared `NativeSessions`. It accepts one JSON-RPC object at a
+time; transport hosts authenticate/authorize before dispatch. Native IPC has one
+compatibility session per connection. Send `mara.negotiate` with
+`{protocol_version:1,application_version:"<exact Cargo workspace version>"}`.
+Success returns `protocol_version`, `application_version`, `result_formats`
+(discovery 2; relationship, validation, trace and operation_error 1), and
+`capabilities`: backend `native`, persistence `filesystem`, supported
+`operations`, code_indexing/configured_indexers/transaction_rollback/
+force_refresh `true`, and project_sessions `reconciled_memory`. These are host
+capabilities, not a guarantee that a project's configured indexer is installed.
+Failed renegotiation clears compatibility; reconnects must negotiate again.
+
+Requests use `{jsonrpc:"2.0",id,method,params}`; IDs are JSON numbers, strings
+or null and are echoed unchanged. Params are named objects; omission means
+`{}`. Every project operation requires `project`, an absolute caller-resolved
+root (initialization destination for `project_init`). No discovery uses the
+daemon cwd and no project is bound globally. Remaining parameters and results
+retain the existing native/MCP operation shapes and owning contracts:
+
+| Methods | Parameters after project selection | Owning semantics |
+| --- | --- | --- |
+| project_init | template (default minimal) | [[REQ-PROJECT-INITIALIZATION]] |
+| schema_get / schema_list | optional kind+name / required kind | [[REQ-SCHEMA-DISCOVERY]] |
+| schema_validate / project_validate / item_validate | limit,cursor; project adds paths; item requires id | [[DES-TRACE-DIAGNOSTIC-INTERFACE]] |
+| item_list / search | existing filters,page; search requires query and supports ids | [[DES-ITEM-LIST]], [[DES-UNIFIED-KNOWLEDGE-DISCOVERY]] |
+| get / related | reference,cursor; related also direction,relations,flavours,limit | [[DES-BOUNDED-NODE-READ]], [[DES-DIRECT-NAVIGATION]] |
+| item_create / item_update / item_delete / item_move / item_rename | existing native operation parameters | [[DES-ITEM-CREATION]], [[DES-ITEM-UPDATE]], [[DES-ITEM-DELETION]], [[DES-ITEM-MOVEMENT]], [[DES-ITEM-RENAME]] |
+| relation_get / relation_add / relation_remove | source,relation,target; get adds limit,cursor; remove adds occurrence | [[DES-RELATION-INTERFACES]], [[DES-RELATION-MUTATION]] |
+| trace_matrix | existing flat root filters,rules/check,limit,cursor,render | [[DES-TRACE-VIEW-INTERFACES]] |
+| project_mid_backfill / project_transaction_rollback | none | [[DES-MID-BACKFILL]], [[DES-MUTATION-RECOVERY]] |
+| project_refresh | none; returns `{refreshed:true}` | [[DES-NATIVE-PROJECT-SESSIONS]] |
+
+Unknown parameters fail before dispatch. Responses contain exactly `result`
+or `error:{code,message,data?}`. Standard JSON-RPC errors are -32700 parse,
+-32600 invalid request, -32601 unknown method, -32602 invalid parameters and
+-32603 internal result-encoding failure. Mara errors use -32001
+negotiation_required, -32002 incompatible_version and -32000 operation failure.
+Their data retains `{format_version:1,error:{code,message}}`; relationship
+failures also retain owning edge/count context. Compatibility failures include
+the supported application/protocol versions. Typed validation/trace/relationship
+error codes survive; native String failures use `operation_failed`. Failure
+messages strip control characters and are bounded to 2,048 characters; no
+indexer stdout/stderr or credentials are added. Domain validation, including
+`valid:false` or incomplete evaluation, is successful RPC result data.
+
+Native framing is newline-delimited UTF-8 JSON. The 1 MiB request limit includes
+the terminating newline; oversized input receives -32600 and closes that
+connection. EOF without a newline never dispatches the partial frame. Existing
+owning result budgets and continuation remain unchanged; IPC framing does not
+truncate domain results. Batches return -32600. Valid notifications receive no
+response and never negotiate or execute project operations. A connection processes
+requests in order; separate consumers can run concurrently through the shared
+root-isolated runtime. A complete dispatched mutation finishes even if its
+consumer disconnects; response loss is not rollback or permission to replay.
+
 Native transport uses same-user Unix sockets on the supported Linux/macOS
 hosts. Keep endpoint discovery and session credentials in private per-user
 runtime state, never project documents; stale endpoint handling must not stop
-an unrelated process. HTTP is disabled unless explicitly enabled, binds only
+an unrelated process. The delivered `mara::ipc::IpcServer` binds
+`native-v1.sock` in `mara/` below the Linux XDG_RUNTIME_DIR (fallback
+`/run/user/<effective-uid>`) or macOS private user TMPDIR. Discovery is local
+and deterministic; native IPC authenticates OS peers, not bearer tokens.
+Both the base and runtime directory must be same-user mode 0700 directories;
+the runtime leaf cannot be a symlink. The socket and persistent advisory
+`native.lock` are same-user mode 0600. Validate endpoint type/owner/mode and
+peer UID on connect; the server checks peer UID before reading any request
+(Linux SO_PEERCRED; macOS getpeereid). Socket paths must be shorter than 104
+bytes. Explicit host runtime directories follow the same checks and must be
+outside project/data directories. Do not repair permissions silently. Refuse an
+owned lock or any occupied endpoint without unlinking it, signaling a process
+or replacing state; stale-state recovery belongs to local lifecycle management.
+Drop removes only this instance's socket identity; the lock file remains.
+
+The foreground example `cargo run --locked --example native-ipc-server`
+exercises the real host. `serve_until` accepts a host-owned shutdown flag;
+consumer EOF never stops listening. Host shutdown closes connections and waits
+for dispatched operations to finish. This foundation adds no CLI lifecycle,
+auto routing, HTTP or credential-management surface.
+
+HTTP is disabled unless explicitly enabled, binds only
 loopback, and checks the session token, allowed Origin and project allowlist
 before project access. Configure exact authorized project roots and explicit
 initialization destinations locally when starting the daemon; authorizing one

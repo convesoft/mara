@@ -41,11 +41,14 @@ pub use mutation::{
     BackfilledMid, BackfilledMids, TransactionRollback, backfill_mids, rollback_transaction,
 };
 pub use mutation::{InitialRelation, ItemCreation, ItemCreationRequest, create_item};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod ipc;
 #[path = "rules.rs"]
 mod native_rules;
 #[path = "trace.rs"]
 mod native_trace;
 pub mod operations;
+pub mod protocol;
 pub mod runtime;
 pub use diagnostics::{
     ConfigurationDiagnostic, DiagnosticCode, DiagnosticItem, DiagnosticLocation,
