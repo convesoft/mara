@@ -15,6 +15,7 @@ Selection and interpretation of recorded results follow
 - [Safe schema and vocabulary editing](schema-evolution.mara.md)
 - [Migration to 0.3](migration-0.3.mara.md)
 - [Engineering profile and workflow](engineering-template.mara.md)
+- [Issue and bounded-scope delivery conventions](delivery.mara.md)
 - [Release preparation and public guidance](release.mara.md)
 - [CLI packages and agent installation](distribution.mara.md)
 - [Project initialization and schema discovery](project.mara.md)

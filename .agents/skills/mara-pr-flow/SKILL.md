@@ -11,9 +11,12 @@ instructions live in `.codex/agents/mara_pr_manager.toml`; do not ask it to use
 this skill. Keep the main turn active during the review loop. Pi excludes this
 skill and uses its own main-agent PR workflow.
 
-1. Complete and verify the authorized work, then commit it. Give the PR manager
-   the Work item ID, branch, exact ready-to-push SHA, relevant Mara IDs,
-   verification evidence, known limitations, and existing PR URL, if any.
+1. Follow [the delivery conventions](../../../docs/delivery.mara.md). Complete
+   and verify the authorized work, then commit it. Give the PR manager the
+   delivery mode, owner and included Work IDs, intended merge method (squash for
+   an individual issue; rebase for a scope), branch, exact ready-to-push SHA,
+   relevant Mara IDs, verification evidence, known limitations, and existing
+   PR URL, if any.
    Select the project `mara_pr_manager` agent when the client supports custom
    agent selection. Otherwise, spawn a `gpt-6-luna` subagent with no forked
    turns; pass the handoff and the agent file's `developer_instructions` in its

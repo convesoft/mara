@@ -53,22 +53,32 @@ Repository-wide instructions for humans and software agents.
 
 ## Pull requests
 
-- Start new item work from current `main` and use `<work-id>-<short-title>`,
-  with an unambiguous `w-` prefix for the item, unless the user explicitly selects
-  another branch. Do not invent another branch taxonomy or long-lived development
-  and release branches.
-- Open one pull request per issue against `main`. Its title must follow the
-  active commit form and approved-scope list under Commit messages because
-  GitHub may use the title for the squash commit.
+- Follow [the delivery conventions](docs/delivery.mara.md). Individual issue
+  branches start from current `main`; bounded version or milestone scopes start
+  from current `main` with one manual Work owner, and included issue branches
+  start from the current scope tip. Use `<work-id>-<short-title>` with an
+  unambiguous `w-` prefix for the branch's owner unless the user explicitly
+  selects another branch. Do not introduce long-lived development or release
+  branches.
+- Open one PR per individual issue, or one PR for the bounded scope after local
+  issue verification, review, squash integration, and combined verification.
+  Target `main`; identify the scope owner and all included items for scope PRs.
+  Titles must follow the active commit form and approved-scope list under
+  Commit messages.
 - Draft every pull request from [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md).
   Preserve its sections, replace guidance comments with concise task-specific
   facts, and include only issue references, Mara IDs, and verification evidence
   that actually exist; use `N/A` where applicable.
-- Squash merge by default. Use rebase merge only when preserving multiple
-  independently useful commits that already follow the commit convention.
-- When the user intends to publish item work to GitHub or continue its pull
-  request, identify the Work item ID, branch, exact ready-to-push SHA, relevant
-  Mara IDs, verification evidence, known limitations, and existing PR URL, if
+- Squash merge individual issue PRs. Rebase merge bounded-scope PRs, preserving
+  one logical Conventional Commit per locally squashed issue in linear history.
+  Do not use merge commits or squash an entire scope. Local integration does
+  not close implementation items; acceptance and integration into `main` do.
+  Keep actual tested SHAs in evidence; rebase merging does not transfer evidence
+  to new commit identities.
+- When the user intends to publish item or scope work to GitHub or continue its
+  PR, identify the delivery mode, owner and included Work IDs, branch,
+  exact ready-to-push SHA, relevant Mara IDs, verification evidence,
+  known limitations, and existing PR URL, if
   any. Keep implementation and review decisions in the main thread, and use
   the workflow for the active host:
   - In Pi, the main agent follows the

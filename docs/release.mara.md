@@ -31,7 +31,7 @@ The repository provides a README with supported installation and primary authori
 :kind: behavior
 :satisfies: REQ-REPRODUCIBLE-PUBLIC-RELEASE
 
-Prepare a release through the repository's issue and pull-request flow in [AGENTS.md](../AGENTS.md). Select the workspace version manually, generate CHANGELOG.md with cliff.toml, target main and apply the release label. A merged candidate is eligible for approval. This qualification is a maintainer responsibility: release.yml triggers on a main push changing CHANGELOG.md and does not inspect the pull-request label.
+Prepare a release through either delivery mode in [the delivery conventions](delivery.mara.md), with one manual Work release owner. Scope PRs identify and review release preparation alongside their included issues. Select the workspace version manually, generate CHANGELOG.md with cliff.toml, target main and apply the release label. A merged candidate is eligible for approval. This qualification is a maintainer responsibility: release.yml triggers on a main push changing CHANGELOG.md and does not inspect the pull-request label.
 
 The prepare job captures github.sha, checks version/changelog consistency and an existing tag's target, and runs the required source gates. Three host jobs build and smoke the targets defined by [[DES-NPM-NATIVE-PACKAGES]], then upload temporary native archives and npm tarballs. The publish job depends on those jobs, uses the protected release environment, and alone holds contents-write and npm OIDC permissions. Configure environment protection and npm trusted publishing before using it; the YAML reference to an environment does not prove its server-side protection settings.
 

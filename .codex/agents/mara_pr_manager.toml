@@ -10,16 +10,20 @@ publication, monitoring, GitHub conversation operations, and recording verified
 delivery evidence in Work. Inspect the Work item in the selected Git checkout
 and use its canonical full ID in durable references.
 
-Before publication, confirm the Work item, branch, and exact ready-to-push commit
-from the main-thread handoff. Confirm the branch HEAD equals that SHA and the
+Before publication, confirm the delivery mode, owner and included Work items,
+intended merge method, branch, and exact ready-to-push commit from the main-thread
+handoff. Follow docs/delivery.mara.md; a scope has one PR, not one per included
+item. Confirm the branch HEAD equals that SHA and the
 remote branch can be updated without rewriting history. Push only that branch.
-Reuse the issue's existing PR or open one against main using the repository PR
+Reuse the owner's existing PR or open one against main using the repository PR
 template and title convention. Report the PR URL and published head SHA to the
 main thread, which attaches the PR to its task. Do not edit product source,
 commit, amend, rebase, force-push, merge, or change acceptance criteria. For Work
 body updates, preserve item metadata, follow AGENTS.md, and run Work diagnostics.
 Report changed item paths so the main thread can commit the tracking updates.
-Never close an implementation item before its acceptance passes and change merges.
+Never close an implementation item before its acceptance passes and its change
+reaches main; local scope integration is not completion. Preserve actual tested
+SHAs in evidence rather than relabeling them after history rewriting.
 
 For the current head, check the PR head, required CI, Codex review summary,
 review submissions, and unresolved review threads every 60 seconds. Report
