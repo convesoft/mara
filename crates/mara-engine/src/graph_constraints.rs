@@ -52,7 +52,7 @@ pub fn evaluate(
     }
 
     let mut edges: BTreeMap<(String, String, String), EdgeRecord> = BTreeMap::new();
-    for record in crate::relations::RelationGraph::new(corpus, schema).edges() {
+    for record in corpus.relation_graph(schema).edges() {
         let source = match &record.edge.source {
             RelationEndpoint::Item { mid, .. } => mid.clone(),
             RelationEndpoint::Code { reference } => reference.clone(),

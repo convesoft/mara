@@ -109,7 +109,7 @@ pub fn resolve_project_for_validation(
 }
 
 // @mara implements REQ-PROJECT-DISCOVERY
-fn resolve_project_root(
+pub(crate) fn resolve_project_root(
     explicit_root: Option<&Path>,
     discovery_start: &Path,
 ) -> Result<PathBuf, Error> {
@@ -166,7 +166,9 @@ pub fn load_schema_for_validation(
         path: project.schema_path().to_owned(),
         source,
     })?;
-    mara_engine::parse_schema_for_validation(&source)
+    crate::runtime::sessions::record(project.schema_path().to_owned());
+    let key = crate::runtime::sessions::key("schema", source.as_bytes());
+    crate::runtime::sessions::cached(key, || mara_engine::parse_schema_for_validation(&source))
 }
 fn load_project_root(root: &Path) -> Result<Project, Error> {
     let validation = load_project_root_for_validation(root)?;
@@ -194,12 +196,31 @@ fn load_project_root_for_validation(root: &Path) -> Result<ProjectValidation, Er
     }
 
     let project_path = root.join(PROJECT_FILE);
+    crate::runtime::sessions::record(project_path.clone());
     let source = fs::read_to_string(&project_path).map_err(|source| Error::Io {
         action: "read project configuration",
         path: project_path.clone(),
         source,
     })?;
-    mara_engine::parse_project_for_validation(root, &source, |path| path.is_file())
+    let key = crate::runtime::sessions::key(
+        "project",
+        &serde_json::to_vec(&(root.as_os_str().as_encoded_bytes(), &source))
+            .expect("project input bytes serialize"),
+    );
+    let value = crate::runtime::sessions::cached(key, || {
+        mara_engine::parse_project_for_validation(root, &source, |path| path.is_file())
+    })?;
+    let (project, _, _) = value.clone().into_parts();
+    crate::runtime::sessions::record(project.schema_path().to_owned());
+    for path in &project.rule_files {
+        crate::runtime::sessions::record(project.root().join(path));
+    }
+    for language in project.code_languages() {
+        for path in [&language.grammar, &language.query].into_iter().flatten() {
+            crate::runtime::sessions::record(project.root().join(path));
+        }
+    }
+    Ok(value)
 }
 fn path_exists(path: &Path) -> Result<bool, Error> {
     path.try_exists().map_err(|source| Error::Io {

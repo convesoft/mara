@@ -378,6 +378,7 @@ impl SourceEngine {
             project,
             schema,
             Corpus {
+                projections: Default::default(),
                 documents,
                 code,
                 source_fingerprint: self.fingerprint.clone(),
@@ -525,6 +526,7 @@ impl SourceEngine {
                 .documents(&project, Some(&schema))
                 .map_err(|e| ValidationError::invalid_argument(e.to_string()))?;
             let corpus = Corpus {
+                projections: Default::default(),
                 documents,
                 code: CodeIndex::empty(&project),
                 source_fingerprint: self.fingerprint.clone(),
@@ -582,6 +584,7 @@ impl SourceEngine {
             .documents(&project, Some(&schema))
             .map_err(|e| ValidationError::invalid_argument(e.to_string()))?;
         let corpus = Corpus {
+            projections: Default::default(),
             documents,
             code: CodeIndex::empty(&project),
             source_fingerprint: self.fingerprint.clone(),
@@ -776,6 +779,7 @@ impl SourceEngine {
                 .documents(&project, schema.as_ref())
                 .map_err(|e| ValidationError::invalid_argument(e.to_string()))?;
             let corpus = Corpus {
+                projections: Default::default(),
                 documents,
                 code: CodeIndex::empty(&project),
                 source_fingerprint: self.fingerprint.clone(),

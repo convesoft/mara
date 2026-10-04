@@ -188,7 +188,7 @@ pub fn related(
         && let DiscoveryNodeKind::Item(item) = node.kind()
     {
         let mut external_connections = Vec::new();
-        for record in crate::relations::RelationGraph::new(corpus, schema).edges() {
+        for record in corpus.relation_graph(schema).edges() {
             let (
                 crate::RelationEndpoint::Item { mid, .. },
                 crate::RelationEndpoint::External { address },
@@ -398,7 +398,8 @@ fn code_connections<'a>(corpus: &'a Corpus, schema: &Schema) -> Vec<CodeConnecti
         .items()
         .filter_map(|item| item.mid().map(|mid| (mid, item)))
         .collect::<BTreeMap<_, _>>();
-    let mut connections = crate::relations::RelationGraph::new(corpus, schema)
+    let mut connections = corpus
+        .relation_graph(schema)
         .edges()
         .filter_map(|record| {
             let (

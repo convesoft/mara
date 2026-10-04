@@ -9,7 +9,7 @@ type Snapshot = BTreeMap<PathBuf, Vec<u8>>;
 pub(super) struct Indexed {
     config: LanguageConfig,
     index: types::Index,
-    inputs: Vec<PathBuf>,
+    inputs: BTreeSet<PathBuf>,
 }
 
 fn problem(message: impl Into<String>) -> CodeProblem {
@@ -22,8 +22,12 @@ fn problem(message: impl Into<String>) -> CodeProblem {
 }
 
 fn snapshot(project: &Project) -> Result<Snapshot, CodeProblem> {
+    input_snapshot(project.root()).map_err(problem)
+}
+
+pub(crate) fn input_snapshot(root: &Path) -> Result<Snapshot, String> {
     let mut result = BTreeMap::new();
-    let mut walk = WalkBuilder::new(project.root());
+    let mut walk = WalkBuilder::new(root);
     walk.hidden(false)
         .ignore(false)
         .git_ignore(true)
@@ -33,20 +37,15 @@ fn snapshot(project: &Project) -> Result<Snapshot, CodeProblem> {
         .require_git(false)
         .follow_links(false);
     for entry in walk.build() {
-        let entry = entry.map_err(|_| problem("could not snapshot indexer inputs"))?;
+        let entry = entry.map_err(|_| "could not snapshot indexer inputs".to_owned())?;
         let supported_file = entry.file_type().is_some_and(|kind| kind.is_file())
             || entry.file_type().is_some_and(|kind| kind.is_symlink())
-                && fs::canonicalize(entry.path()).is_ok_and(|canonical| {
-                    canonical.starts_with(project.root()) && canonical.is_file()
-                });
+                && fs::canonicalize(entry.path())
+                    .is_ok_and(|canonical| canonical.starts_with(root) && canonical.is_file());
         if !supported_file {
             continue;
         }
-        let path = entry
-            .path()
-            .strip_prefix(project.root())
-            .unwrap()
-            .to_path_buf();
+        let path = entry.path().strip_prefix(root).unwrap().to_path_buf();
         if matches!(
             path.to_str(),
             Some(".mara/mutation.lock" | ".mara/transaction.json")
@@ -56,7 +55,8 @@ fn snapshot(project: &Project) -> Result<Snapshot, CodeProblem> {
         {
             continue;
         }
-        let bytes = fs::read(entry.path()).map_err(|_| problem("could not read indexer input"))?;
+        let bytes =
+            fs::read(entry.path()).map_err(|_| "could not read indexer input".to_owned())?;
         result.insert(path, Sha256::digest(bytes).to_vec());
     }
     Ok(result)
@@ -280,13 +280,20 @@ pub(super) fn apply(
         .collect::<BTreeMap<_, _>>();
     let mut identities = BTreeMap::new();
     for indexed in indexes {
-        result.assets.extend(indexed.inputs);
+        result.assets.extend(indexed.inputs.iter().cloned());
         for document in indexed.index.documents {
             let path = PathBuf::from(&document.relative_path);
             if !valid_asset_path(&path) {
                 problems.push(problem("SCIP document path must stay within the project"));
                 continue;
             }
+            // Without a pre-execution input or emitter-supplied text, observing
+            // this source now cannot prove the index describes its current bytes.
+            if document.text.is_empty() && !indexed.inputs.contains(&path) {
+                crate::runtime::sessions::unverified_index_source(&project.root().join(&path));
+            }
+            crate::runtime::sessions::record(project.root().join(&path));
+            result.assets.push(path.clone());
             let source = match read_project_asset(project, &path)
                 .ok()
                 .and_then(|bytes| String::from_utf8(bytes).ok())

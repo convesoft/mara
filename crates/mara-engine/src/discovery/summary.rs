@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use super::{DiscoveryGraph, DiscoveryNode, DiscoveryNodeKind};
+use super::{DiscoveryBuilder, DiscoveryGraph, DiscoveryNode, DiscoveryNodeKind};
 use crate::{Corpus, ItemSource, MarkdownBlockKind, QueryError};
 
 const HANDLE_PREFIX: &str = "mara:node:2:";
@@ -52,7 +52,7 @@ pub struct DiscoveryNodeSummary {
     pub heading_level: Option<u8>,
 }
 
-impl DiscoveryGraph<'_> {
+impl DiscoveryBuilder<'_> {
     pub(super) fn index_references(&mut self, corpus: &Corpus) {
         let revisions = corpus
             .documents()

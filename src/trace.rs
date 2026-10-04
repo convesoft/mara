@@ -22,7 +22,7 @@ pub(crate) fn matrix(
         .map_or_else(|| project.rule_files.clone(), |c| c.files.clone());
     let sources = crate::native_rules::sources(project, files);
     let identity = snapshot_id(project, schema, &corpus, &sources, &prerequisites);
-    mara_engine::trace::matrix(
+    mara_engine::trace::matrix_with_rule_loader(
         project,
         schema,
         params,
@@ -32,6 +32,11 @@ pub(crate) fn matrix(
             sources,
             source_identity: &identity,
             code_unavailable: false,
+        },
+        |schema, sources, bindings| {
+            crate::native_rules::compile(schema, sources, bindings)
+                .as_ref()
+                .clone()
         },
     )
 }

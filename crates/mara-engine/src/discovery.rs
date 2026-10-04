@@ -17,8 +17,152 @@ use crate::{
     Corpus, Document, Item, MarkdownBlock, MarkdownBlockKind, RelationDirection, SourceLocation,
 };
 
+/// Owned topology reusable across immutable corpus clones; no filesystem/cache policy.
+#[derive(Debug)]
+pub struct DiscoveryProjection {
+    graph: DiGraph<OwnedNode, OwnedEdge>,
+    diagnostics: Vec<crate::Diagnostic>,
+    references: BTreeMap<String, Vec<NodeIndex>>,
+}
+#[derive(Debug)]
+struct OwnedNode {
+    kind: OwnedKind,
+    source: SourceLocation,
+    reference: String,
+}
+#[derive(Debug)]
+enum OwnedKind {
+    Document(usize),
+    Item(usize, usize),
+    Section {
+        document: usize,
+        item: Option<usize>,
+        path: Vec<usize>,
+    },
+    Block {
+        document: usize,
+        item: Option<usize>,
+        path: Vec<usize>,
+    },
+}
+fn block_keys(
+    blocks: &[MarkdownBlock],
+    document: usize,
+    item: Option<usize>,
+    prefix: &mut Vec<usize>,
+    result: &mut BTreeMap<usize, (usize, Option<usize>, Vec<usize>)>,
+) {
+    for (index, block) in blocks.iter().enumerate() {
+        prefix.push(index);
+        result.insert(block as *const _ as usize, (document, item, prefix.clone()));
+        block_keys(block.children(), document, item, prefix, result);
+        prefix.pop();
+    }
+}
+#[derive(Debug)]
+struct OwnedEdge {
+    kind: OwnedEdgeKind,
+    source: SourceLocation,
+    symmetric: bool,
+    occurrence_count: usize,
+}
+#[derive(Debug)]
+enum OwnedEdgeKind {
+    Contains,
+    Mentions,
+    Schema(String),
+}
+
 #[derive(Debug)]
 pub struct DiscoveryGraph<'corpus> {
+    projection: std::sync::Arc<DiscoveryProjection>,
+    corpus: &'corpus Corpus,
+}
+impl std::ops::Deref for DiscoveryGraph<'_> {
+    type Target = DiscoveryProjection;
+    fn deref(&self) -> &Self::Target {
+        &self.projection
+    }
+}
+impl<'corpus> DiscoveryGraph<'corpus> {
+    pub(crate) fn from_projection(
+        corpus: &'corpus Corpus,
+        projection: std::sync::Arc<DiscoveryProjection>,
+    ) -> Self {
+        Self { projection, corpus }
+    }
+    pub(crate) fn project(corpus: &Corpus) -> DiscoveryProjection {
+        let builder = DiscoveryBuilder::new(corpus);
+        let mut documents = BTreeMap::new();
+        let mut items = BTreeMap::new();
+        let mut blocks = BTreeMap::new();
+        for (d, document) in corpus.documents().iter().enumerate() {
+            documents.insert(document as *const _ as usize, d);
+            block_keys(document.blocks(), d, None, &mut Vec::new(), &mut blocks);
+            for (i, item) in document.items().iter().enumerate() {
+                items.insert(item as *const _ as usize, (d, i));
+                block_keys(item.body_blocks(), d, Some(i), &mut Vec::new(), &mut blocks);
+            }
+        }
+        DiscoveryProjection {
+            graph: builder.graph.map(
+                |_, n| OwnedNode {
+                    kind: match n.kind {
+                        DiscoveryNodeKind::Document(d) => {
+                            OwnedKind::Document(documents[&(d as *const _ as usize)])
+                        }
+                        DiscoveryNodeKind::Item(i) => {
+                            let (d, i) = items[&(i as *const _ as usize)];
+                            OwnedKind::Item(d, i)
+                        }
+                        DiscoveryNodeKind::Section { heading } => {
+                            let (document, item, path) =
+                                blocks[&(heading as *const _ as usize)].clone();
+                            OwnedKind::Section {
+                                document,
+                                item,
+                                path,
+                            }
+                        }
+                        DiscoveryNodeKind::MarkdownBlock(b) => {
+                            let (document, item, path) = blocks[&(b as *const _ as usize)].clone();
+                            OwnedKind::Block {
+                                document,
+                                item,
+                                path,
+                            }
+                        }
+                    },
+                    source: n.source.clone(),
+                    reference: n.reference.clone(),
+                },
+                |_, e| OwnedEdge {
+                    kind: match e.kind {
+                        EdgeKind::Contains => OwnedEdgeKind::Contains,
+                        EdgeKind::Mentions => OwnedEdgeKind::Mentions,
+                        EdgeKind::Schema(n) => OwnedEdgeKind::Schema(n.to_owned()),
+                    },
+                    source: e.source.clone(),
+                    symmetric: e.symmetric,
+                    occurrence_count: e.occurrence_count,
+                },
+            ),
+            diagnostics: builder.diagnostics,
+            references: builder.references,
+        }
+    }
+    pub fn diagnostics(&self) -> &[crate::Diagnostic] {
+        &self.diagnostics
+    }
+    pub fn nodes(&self) -> impl Iterator<Item = DiscoveryNode<'_, 'corpus>> {
+        self.graph
+            .node_indices()
+            .map(|index| DiscoveryNode { graph: self, index })
+    }
+}
+
+#[derive(Debug)]
+struct DiscoveryBuilder<'corpus> {
     graph: DiGraph<NodeData<'corpus>, EdgeData<'corpus>>,
     diagnostics: Vec<crate::Diagnostic>,
     references: BTreeMap<String, Vec<NodeIndex>>,
@@ -80,8 +224,8 @@ pub struct DiscoveryConnection<'graph, 'corpus> {
     pub occurrence_count: usize,
 }
 
-impl<'corpus> DiscoveryGraph<'corpus> {
-    pub(crate) fn new(corpus: &'corpus Corpus) -> Self {
+impl<'corpus> DiscoveryBuilder<'corpus> {
+    fn new(corpus: &'corpus Corpus) -> Self {
         // @mara implements DES-DOCUMENT-STRUCTURE
         let mut result = Self {
             graph: DiGraph::new(),
@@ -118,18 +262,6 @@ impl<'corpus> DiscoveryGraph<'corpus> {
         result.add_references(corpus);
         result.index_references(corpus);
         result
-    }
-
-    /// Broken internal destinations and ambiguous anchor declarations.
-    pub fn diagnostics(&self) -> &[crate::Diagnostic] {
-        &self.diagnostics
-    }
-
-    /// Document path order, then structural preorder within each document.
-    pub fn nodes(&self) -> impl Iterator<Item = DiscoveryNode<'_, 'corpus>> {
-        self.graph
-            .node_indices()
-            .map(|index| DiscoveryNode { graph: self, index })
     }
 
     fn add_child(
@@ -283,7 +415,36 @@ impl<'corpus> DiscoveryGraph<'corpus> {
 
 impl<'graph, 'corpus> DiscoveryNode<'graph, 'corpus> {
     pub fn kind(self) -> DiscoveryNodeKind<'corpus> {
-        self.graph.graph[self.index].kind
+        let documents = self.graph.corpus.documents();
+        let block = |d: usize, i: Option<usize>, path: &[usize]| {
+            let mut blocks = i.map_or_else(
+                || documents[d].blocks(),
+                |i| documents[d].items()[i].body_blocks(),
+            );
+            let mut selected = None;
+            for &index in path {
+                let b = &blocks[index];
+                selected = Some(b);
+                blocks = b.children();
+            }
+            selected.expect("projection block path")
+        };
+        match &self.graph.graph[self.index].kind {
+            OwnedKind::Document(d) => DiscoveryNodeKind::Document(&documents[*d]),
+            OwnedKind::Item(d, i) => DiscoveryNodeKind::Item(&documents[*d].items()[*i]),
+            OwnedKind::Section {
+                document,
+                item,
+                path,
+            } => DiscoveryNodeKind::Section {
+                heading: block(*document, *item, path),
+            },
+            OwnedKind::Block {
+                document,
+                item,
+                path,
+            } => DiscoveryNodeKind::MarkdownBlock(block(*document, *item, path)),
+        }
     }
 
     pub fn source(self) -> &'graph SourceLocation {
@@ -328,11 +489,11 @@ impl<'graph, 'corpus> DiscoveryNode<'graph, 'corpus> {
                     _ => continue,
                 }
             };
-            let kind = match (data.kind, direction) {
-                (EdgeKind::Contains, RelationDirection::Outgoing) => ConnectionKind::Contains,
-                (EdgeKind::Contains, _) => ConnectionKind::ContainedBy,
-                (EdgeKind::Mentions, _) => ConnectionKind::Mentions,
-                (EdgeKind::Schema(name), _) => ConnectionKind::Schema(name),
+            let kind = match (&data.kind, direction) {
+                (OwnedEdgeKind::Contains, RelationDirection::Outgoing) => ConnectionKind::Contains,
+                (OwnedEdgeKind::Contains, _) => ConnectionKind::ContainedBy,
+                (OwnedEdgeKind::Mentions, _) => ConnectionKind::Mentions,
+                (OwnedEdgeKind::Schema(name), _) => ConnectionKind::Schema(name),
             };
             connections.push(DiscoveryConnection {
                 kind,

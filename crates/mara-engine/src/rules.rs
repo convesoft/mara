@@ -46,6 +46,7 @@ enum ValueKind {
     Literals(Vec<&'static str>),
 }
 /// Compiled supported-profile rules from explicit sources; no host effects.
+#[derive(Clone)]
 pub struct Rules {
     shapes: BTreeMap<String, Shape>,
     roots: Vec<String>,

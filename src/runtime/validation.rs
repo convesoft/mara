@@ -77,6 +77,17 @@ impl NativeRuntime {
         paths: Vec<PathBuf>,
         options: &ValidationOptions,
     ) -> Result<ValidationResult, ValidationError> {
+        self.with_session(false, || {
+            self.validate_target_current(target, paths, options)
+        })
+    }
+
+    fn validate_target_current(
+        &self,
+        target: ValidationTarget,
+        paths: Vec<PathBuf>,
+        options: &ValidationOptions,
+    ) -> Result<ValidationResult, ValidationError> {
         // @mara implements REQ-PROJECT-VALIDATION
         // @mara implements DES-TRACE-DIAGNOSTIC-INTERFACE
         let limit = options.limit.unwrap_or(20);

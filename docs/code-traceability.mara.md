@@ -157,9 +157,11 @@ automatically activates indexing; removing the last skips it again. This rule
 applies to every indexer independently of optional grammar assets. Configuration
 and declared grammar assets must remain valid even when no source files match.
 
-Once matching files exist, Mara invokes the configured command; users need no
-pre-indexing step. The indexer still owns discovery within its project. Mara
-consumes fresh output and keeps no persistent SCIP cache. A valid SCIP index
+Once matching files exist, Mara invokes the configured command on a native
+session cache miss; users need no pre-indexing step. The indexer still owns
+discovery within its project. Unchanged recorded inputs may reuse an eligible
+memory index under [[DES-NATIVE-PROJECT-SESSIONS]]; force refresh discards it.
+Mara keeps no persistent SCIP cache. A valid SCIP index
 with metadata and zero documents is accepted. A failed command or missing output
 is never interpreted as an empty language. Nonzero exit,
 missing/malformed output, a different indexed project root, invalid source ranges,

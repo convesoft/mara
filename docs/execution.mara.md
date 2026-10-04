@@ -164,8 +164,9 @@ The extracted source/query/conformance and rule/trace interfaces are defined by
 is the CLI/MCP convenience constructor. The caller directory must be absolute;
 relative native selections resolve against it. `OperationContext` remains an alias
 for existing adapters. `for_project` preserves absolute request selection and
-bound-server override refusal. Each call loads current inputs; sessions, caches,
-client routing and daemon transports remain separate deliverables.
+bound-server override refusal. Each call reconciles current inputs through the
+memory-only sessions in [[DES-NATIVE-PROJECT-SESSIONS]]. Client routing and
+daemon transports remain separate deliverables.
 
 The runtime exposes schema get/list/validate, item list/search/get/related,
 relation get/add/remove (including occurrence removal), all item mutations,
@@ -291,6 +292,52 @@ data. Caches and compiled projections are memory-only; no persisted index
 format is introduced. Use the same session implementation for long-lived
 embedded clients. Preserve owning cursor/handle fingerprints across reuse and
 eviction.
+
+The delivered native API is `NativeRuntime::with_sessions(NativeSessions)`.
+Runtime clones and `for_project` selections share that pool; separately
+constructed runtimes have independent pools unless the caller supplies one.
+`NativeSessions::new(SessionPolicy)` configures idle retention (default: at most
+16 idle roots, five-minute idle timeout). Operations prune before/after calls;
+`prune_idle` lets an idle host trigger maintenance without a background service.
+Active and waiting operations hold leases and cannot be evicted. Calls on one
+canonical root serialize; different roots can operate concurrently. Each root
+retains at most 32 compiled rule variants, including parameterized checks, with
+least-recently-used eviction; a later request recompiles an evicted variant.
+Request-local rule sources are re-read before every content-keyed lookup and
+are not retained as root dependencies; configured rule paths remain tracked.
+
+Reconciliation scans/hashes effective native indexer inputs and records explicit
+schema/rule/grammar/query, SCIP-emitted source and file-only code dependencies,
+including ignored ones. Derived state is reused only on unchanged recorded inputs; an input change
+conservatively drops the root's projections and rebuilds their dependency records
+from current loaders, so retired explicit dependencies cannot permanently disable
+reuse. Internal cache keys preserve native path bytes. A failed scan of current
+inputs disables reuse rather than concealing current loading diagnostics. Completed read construction checks
+inputs again before retaining state, without promising an atomic external
+multi-file snapshot. Newly discovered ignored SCIP sources without emitter text
+cannot verify their first indexer execution. Retain their dependency records but
+discard that operation's projections; a subsequent stable operation can verify
+those inputs across a fresh execution before allowing reuse.
+Write attempts use uncached loaders and existing locked
+publication/precondition checks, discarding projections before and after every
+attempt, including errors, no-ops and explicit rollback.
+
+`NativeRuntime::force_refresh()` waits for active selected-root work and discards
+all derived state; the next operation rebuilds from source. It does not run
+indexers itself. `session_activity` exposes cache-eligible read parse, code-load,
+rule-compilation and discovery/relation-build counts for reuse verification,
+not write-work accounting or an acceptance result. Eviction resets those
+disposable counters. The portable corpus's `ProjectionCache` only memoizes
+owned semantic topology with source/schema/code identity checks; it owns no
+filesystem access, environment, session retention or publication policy.
+
+Indexer executables, PATH resolution, external dependencies and tool inputs
+outside the recorded boundary are not automatically tracked. Force refresh
+after changing them. Indexer misses inherit the host process environment; a
+daemon uses its startup environment and must restart to adopt environment
+changes. Embedded callers must keep the indexing environment stable or discard/
+refresh their pool after changing it. Canonical source and source-derived cursor/
+handle identities do not depend on the pool, process identity or retention.
 :::
 
 :::mara design DES-NATIVE-CLIENT-ROUTING
@@ -488,6 +535,15 @@ and configured indexer invocations. Record representative cold/warm timings
 without a fixed speedup claim. Test cache eviction/restart without source loss
 and environment adoption on restart.
 
+For the delivered embedded session boundary, run `cargo test --locked --test
+native_sessions` plus `cargo test --locked --test native_sessions
+real_indexer_activity -- --ignored --exact --nocapture` with an installed real
+`scip-typescript`. The explicit probe invokes that indexer against a disposable
+TypeScript project; captured SCIP bytes are not a substitute indexer. Require
+observable unchanged parse/projection/compilation counts and subprocess activity,
+current invalid-input errors, isolated real Git worktrees, ignored explicit
+assets, forced rebuilding and idle/in-flight retention checks.
+
 Use existing Rust tests/tempfile and standard process tools; keep fixture
 Git/configuration state isolated. Capture results at the tested revision.
 :::
@@ -564,12 +620,14 @@ and selection/ignore input. Missing rules or required code never produce a
 pass. Native hosting supplies rule source text or sanitized loading failures,
 plus its loaded corpus, prerequisites and complete code/asset/excluded-source
 identity to the shared trace computation; native filesystem containment and
-canonical duplicate checks remain host-owned.
+canonical duplicate checks remain host-owned. `trace::matrix_with_rule_loader`
+allows a host to reuse source/schema/parameter-bound rule compilation while
+the shared computation still validates parameters and request checks.
 
 Initialization and validated mutations are delivered separately under
 [[DES-SEMANTIC-CHANGE-PLANS]], using this snapshot boundary without redesigning
-rule outcomes. Native sessions/routing, worker/client packaging and complete
-browser operation execution remain separate deliverables. Native mutations
+rule outcomes. Native session ownership follows [[DES-NATIVE-PROJECT-SESSIONS]];
+client routing and packaging retain their separate boundaries. Native mutations
 retain owning source prerequisites, available required code and guarded
 publication. No partial-conformance edit profile is introduced.
 :::

@@ -153,6 +153,18 @@ pub fn matrix(
     params: &TraceMatrixParams,
     inputs: TraceInputs<'_>,
 ) -> Result<TraceMatrixResult, ValidationError> {
+    matrix_with_rule_loader(project, schema, params, inputs, Rules::load_sources)
+}
+
+/// Supply reusable compilation while retaining shared parameter and request-check validation.
+/// The loader is host policy; ordinary portable callers use `matrix`.
+pub fn matrix_with_rule_loader(
+    project: &Project,
+    schema: &Schema,
+    params: &TraceMatrixParams,
+    inputs: TraceInputs<'_>,
+    load: impl FnOnce(&Schema, Vec<RuleSource>, Option<BTreeMap<String, String>>) -> Rules,
+) -> Result<TraceMatrixResult, ValidationError> {
     let mut normalized = params.selection.clone();
     normalized.ids.sort();
     normalized.ids.dedup();
@@ -251,13 +263,13 @@ pub fn matrix(
         if check.shape.is_empty() {
             return Err(ValidationError::invalid_argument("check shape is required"));
         }
-        let rules = Rules::load_sources(schema, sources, bindings);
+        let rules = load(schema, sources, bindings);
         if let Some(error) = rules.binding_error() {
             return Err(ValidationError::invalid_argument(error));
         }
         rules
     } else {
-        Rules::load_sources(schema, sources, None)
+        load(schema, sources, None)
     };
     let (kind, roots) = if let Some(check) = &params.check {
         let flavours = selected
@@ -480,7 +492,8 @@ struct EdgeEntry {
 }
 
 fn collect_edges(corpus: &Corpus, schema: &Schema) -> Result<Vec<EdgeEntry>, ValidationError> {
-    Ok(crate::relations::RelationGraph::new(corpus, schema)
+    Ok(corpus
+        .relation_graph(schema)
         .edges()
         .map(|record| EdgeEntry {
             edge: record.edge.clone(),

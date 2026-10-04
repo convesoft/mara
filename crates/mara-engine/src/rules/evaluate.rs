@@ -72,7 +72,7 @@ impl Rules {
             }
             graph.push(node);
         }
-        let relations = crate::relations::RelationGraph::new(corpus, schema);
+        let relations = corpus.relation_graph(schema);
         let mut edges = BTreeSet::new();
         for record in relations.edges() {
             let edge = &record.edge;

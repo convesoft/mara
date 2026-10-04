@@ -3,8 +3,26 @@ use crate::{Project, Schema};
 pub(crate) use mara_engine::rules::{RuleSource, Rules};
 use std::{collections::BTreeSet, fs, path::PathBuf};
 
-pub(crate) fn load(project: &Project, schema: &Schema) -> Rules {
-    Rules::load_sources(schema, sources(project, project.rule_files.clone()), None)
+pub(crate) fn load(project: &Project, schema: &Schema) -> std::sync::Arc<Rules> {
+    let sources = sources(project, project.rule_files.clone());
+    compile(schema, sources, None)
+}
+pub(crate) fn compile(
+    schema: &Schema,
+    sources: Vec<RuleSource>,
+    bindings: Option<std::collections::BTreeMap<String, String>>,
+) -> std::sync::Arc<Rules> {
+    let key = crate::runtime::sessions::key(
+        "rules",
+        format!("{schema:?}{sources:?}{bindings:?}").as_bytes(),
+    );
+    crate::runtime::sessions::cached::<_, std::convert::Infallible>(key, || {
+        crate::runtime::sessions::count("rules", 1);
+        Ok(std::sync::Arc::new(Rules::load_sources(
+            schema, sources, bindings,
+        )))
+    })
+    .unwrap()
 }
 
 /// Preserve native regular-file containment and canonical duplicate checks.
@@ -38,6 +56,8 @@ pub(crate) fn sources(project: &Project, mut files: Vec<PathBuf>) -> Vec<RuleSou
                 }
                 fs::read_to_string(full).map_err(|_| "cannot read UTF-8 rule source".into())
             })();
+            // Request sources are re-read before every content-keyed lookup.
+            // Configured rules are already recorded by the project loader.
             RuleSource { path, content }
         })
         .collect()

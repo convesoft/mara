@@ -8,6 +8,8 @@ use crate::{BodyRequirement, Error, FieldType, PROJECT_FILE, Project, Schema};
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
 mod markdown;
+mod projections;
+pub use projections::{ProjectionActivity, ProjectionCache};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Disposable document-only source snapshot; code discovery is a separate dependency.
@@ -631,6 +633,7 @@ pub struct Corpus {
     pub documents: DocumentSet,
     pub code: crate::CodeIndex,
     pub source_fingerprint: String,
+    pub projections: ProjectionCache,
 }
 impl Corpus {
     pub fn with_replacements(
@@ -654,6 +657,7 @@ impl Corpus {
                 complete: self.documents.complete,
             },
             code: self.code.clone(),
+            projections: Default::default(),
             // Candidate documents are not a freshly loaded full input snapshot.
             // Do not let their rule outcomes attest the unchanged original sources.
             source_fingerprint: if replacements.is_empty() {
@@ -664,7 +668,7 @@ impl Corpus {
         })
     }
     pub fn discovery(&self) -> crate::DiscoveryGraph<'_> {
-        crate::DiscoveryGraph::new(self)
+        crate::DiscoveryGraph::from_projection(self, self.discovery_projection())
     }
     pub fn documents(&self) -> &[Document] {
         self.documents.documents()

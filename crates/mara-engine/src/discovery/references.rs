@@ -8,7 +8,7 @@ use crate::{DocumentReference, ReferenceKind, corpus::diagnostic};
 
 type Anchors = BTreeMap<(PathBuf, String), Vec<(NodeIndex, SourceLocation)>>;
 
-impl<'corpus> DiscoveryGraph<'corpus> {
+impl<'corpus> DiscoveryBuilder<'corpus> {
     pub(super) fn add_references(&mut self, corpus: &'corpus Corpus) {
         let mut anchors: Anchors = BTreeMap::new();
         let mut generated: BTreeMap<PathBuf, BTreeSet<String>> = BTreeMap::new();

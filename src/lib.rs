@@ -62,7 +62,7 @@ pub use operations::{
     SchemaKind, SchemaListResult, SearchParams, TransactionRollbackResult, ValidationDiagnostic,
     ValidationResult, ValidationScope, ValidationTarget, ValidationTargetKind, project_initialize,
 };
-pub use runtime::NativeRuntime;
+pub use runtime::{NativeRuntime, NativeSessions, SessionActivity, SessionPolicy};
 
 pub use operations::{RelationAction, RelationMutationResult};
 

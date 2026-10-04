@@ -42,8 +42,24 @@ fn load_documents_for_validation_with_schema(
         };
         sources.push((relative_path, source));
     }
+    let key = crate::runtime::sessions::key(
+        "validation-documents",
+        format!(
+            "{sources:?}{schema:?}{diagnostics:?}{}",
+            project.content_discovery_is_complete()
+        )
+        .as_bytes(),
+    );
     let (mut documents, parsed_diagnostics) =
-        parse_documents_for_validation(project, sources, schema, diagnostics);
+        crate::runtime::sessions::cached::<_, Error>(key, || {
+            crate::runtime::sessions::count("documents", sources.len());
+            Ok(parse_documents_for_validation(
+                project,
+                sources,
+                schema,
+                diagnostics,
+            ))
+        })?;
     documents.complete &= complete;
     Ok((documents, parsed_diagnostics))
 }
@@ -61,7 +77,19 @@ pub fn load_documents(project: &Project, schema: &Schema) -> Result<DocumentSet,
             path: absolute_path,
             source,
         })?;
-        documents.push(parse_document(relative_path, source, schema)?);
+        let key = crate::runtime::sessions::key(
+            "document",
+            &serde_json::to_vec(&(
+                relative_path.as_os_str().as_encoded_bytes(),
+                &source,
+                schema,
+            ))
+            .expect("document input bytes serialize"),
+        );
+        documents.push(crate::runtime::sessions::cached(key, || {
+            crate::runtime::sessions::count("documents", 1);
+            parse_document(relative_path, source, schema)
+        })?);
     }
     Ok(DocumentSet {
         documents,
@@ -172,11 +200,7 @@ pub fn load_corpus(project: &Project, schema: &Schema) -> Result<Corpus, Error> 
             message: problem.message,
         });
     }
-    Ok(Corpus {
-        source_fingerprint: crate::source_bridge::source_fingerprint(project, &documents),
-        documents,
-        code,
-    })
+    retain_corpus(project, documents, code)
 }
 
 // @mara implements DES-CORPUS-CONFORMANCE
@@ -213,14 +237,7 @@ pub fn load_corpus_for_validation(
             .expect("diagnostic was added")
             .set_item_ids(item_ids);
     }
-    Ok((
-        Corpus {
-            source_fingerprint: crate::source_bridge::source_fingerprint(project, &documents),
-            documents,
-            code,
-        },
-        diagnostics,
-    ))
+    Ok((retain_corpus(project, documents, code)?, diagnostics))
 }
 
 pub fn load_corpus_syntax_for_validation(
@@ -228,13 +245,33 @@ pub fn load_corpus_syntax_for_validation(
 ) -> Result<(Corpus, Vec<Diagnostic>), Error> {
     let (documents, diagnostics) = load_documents_syntax_for_validation(project)?;
     Ok((
-        Corpus {
-            source_fingerprint: crate::source_bridge::source_fingerprint(project, &documents),
-            documents,
-            code: CodeIndex::empty(project),
-        },
+        retain_corpus(project, documents, CodeIndex::empty(project))?,
         diagnostics,
     ))
+}
+
+fn retain_corpus(
+    project: &Project,
+    documents: DocumentSet,
+    code: CodeIndex,
+) -> Result<Corpus, Error> {
+    let source_fingerprint = crate::source_bridge::source_fingerprint(project, &documents);
+    let key = crate::runtime::sessions::key(
+        "corpus",
+        format!("{documents:?}{code:?}{source_fingerprint}").as_bytes(),
+    );
+    let corpus = crate::runtime::sessions::cached::<_, Error>(key, || {
+        Ok(Corpus {
+            documents,
+            code,
+            source_fingerprint,
+            projections: Default::default(),
+        })
+    })?;
+    for path in corpus.file_only_code_paths() {
+        crate::runtime::sessions::record(project.root().join(path));
+    }
+    Ok(corpus)
 }
 
 pub(crate) fn document_is_discoverable(project: &Project, relative: &Path) -> Result<bool, Error> {

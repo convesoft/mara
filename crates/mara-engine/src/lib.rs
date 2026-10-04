@@ -70,7 +70,7 @@ pub struct Project {
     code_languages: Vec<LanguageConfig>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ProjectValidation {
     project: Project,
     errors: Vec<ConfigurationDiagnostic>,

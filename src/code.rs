@@ -191,7 +191,31 @@ impl Adapter {
     }
 }
 
+pub(crate) use scip_index::input_snapshot;
+
 pub fn load(project: &Project) -> (CodeIndex, Vec<CodeProblem>) {
+    let key = crate::runtime::sessions::key("code", format!("{project:?}").as_bytes());
+    let result = crate::runtime::sessions::cached(key, || {
+        crate::runtime::sessions::count("code", 1);
+        let result = load_current(project);
+        if result.1.is_empty() {
+            Ok(result)
+        } else {
+            Err(result)
+        }
+    });
+    let value = match result {
+        Ok(value) | Err(value) => value,
+    };
+    for path in value.0.assets() {
+        crate::runtime::sessions::record(project.root().join(path));
+    }
+    for file in value.0.files() {
+        crate::runtime::sessions::record(project.root().join(&file.path));
+    }
+    value
+}
+fn load_current(project: &Project) -> (CodeIndex, Vec<CodeProblem>) {
     let mut result = CodeIndex {
         root: project.root().to_owned(),
         files: BTreeMap::new(),
