@@ -45,9 +45,10 @@ Repository-wide instructions for humans and software agents.
   for lifecycle prerequisites, not informational links.
 - The implementer checks an acceptance box only after producing evidence that
   its criterion passes. Reviewers verify checked criteria and uncheck or request
-  evidence for unsupported claims. Close a manual implementation item only after
-  all acceptance criteria pass and its change is merged; add criteria during
-  review only when the canonical Mara contract changes. Use manual completion
+  evidence for unsupported claims. Close a manual implementation item after
+  verified integration into its declared delivery target, with all acceptance
+  criteria passing and required review complete; add criteria during review
+  only when the canonical Mara contract changes. Use manual completion
   for acceptance-gated deliverables; a `children` aggregate derives completion
   from its children and is not a separate acceptance approval.
 
@@ -71,8 +72,10 @@ Repository-wide instructions for humans and software agents.
   that actually exist; use `N/A` where applicable.
 - Squash merge individual issue PRs. Rebase merge bounded-scope PRs, preserving
   one logical Conventional Commit per locally squashed issue in linear history.
-  Do not use merge commits or squash an entire scope. Local integration does
-  not close implementation items; acceptance and integration into `main` do.
+  Do not use merge commits or squash an entire scope. Close issues after
+  verified integration into their declared target: `main` for individual PRs,
+  the scope branch for included issues. The scope owner retains the final
+  `main` integration and cloud-review gates.
   Keep actual tested SHAs in evidence; rebase merging does not transfer evidence
   to new commit identities.
 - When the user intends to publish item or scope work to GitHub or continue its

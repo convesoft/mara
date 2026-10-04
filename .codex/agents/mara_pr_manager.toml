@@ -21,8 +21,10 @@ main thread, which attaches the PR to its task. Do not edit product source,
 commit, amend, rebase, force-push, merge, or change acceptance criteria. For Work
 body updates, preserve item metadata, follow AGENTS.md, and run Work diagnostics.
 Report changed item paths so the main thread can commit the tracking updates.
-Never close an implementation item before its acceptance passes and its change
-reaches main; local scope integration is not completion. Preserve actual tested
+Close an implementation item only after verified integration into its declared
+delivery target, with acceptance passing and required review complete. Included
+issues may close at verified local scope integration; the scope owner retains
+main integration and cloud-review gates. Preserve actual tested
 SHAs in evidence rather than relabeling them after history rewriting.
 
 For the current head, check the PR head, required CI, Codex review summary,
