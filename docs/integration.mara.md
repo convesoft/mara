@@ -311,9 +311,15 @@ mutation through the document-only planner, not just code-related edits.
 wasm-bindgen CLI 0.2.127 (`--target web`) to produce `mara_wasm.js`,
 `mara_wasm_bg.wasm`, their declarations and `worker.mjs`. Supply disposable
 `TMPDIR`/`CARGO_TARGET_DIR`; generated assets are build outputs, not tracked
-canonical source. Serve these files together so the worker's relative imports
-and WASM URL resolve. No application sources or configured commands are fetched
-or executed. `tests/browser/workspace.spec.mjs` is a real Playwright/Chromium
+canonical source. For `tests/browser/playwright.config.mjs`, also set
+`BROWSER_RUNTIME_TMPDIR` to an existing private, session-owned directory under
+`XDG_RUNTIME_DIR`. Keep it short enough for Chromium's generated Unix socket
+path (at most 107 bytes on Linux). Only Chromium's process tree receives this
+`TMPDIR` override; Playwright-created profiles, native fixtures, assets, results
+and retained reports stay on disk-backed storage. Record runtime-directory
+ownership and remove it after the browser stops. Serve these files together so
+the worker's relative imports and WASM URL resolve. No application sources or
+configured commands are fetched or executed. `tests/browser/workspace.spec.mjs` is a real Playwright/Chromium
 worker smoke, not final installed-client/full-profile certification under
 [[VER-BROWSER-DOCUMENT-ENGINE]].
 :::
