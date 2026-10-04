@@ -187,9 +187,12 @@ shared daemon.
 
 The public generated npm artifact exports ESM-only `@convesoft/mara` and
 `@convesoft/mara/node` from `node.mjs`/`node.d.mts`, and browser-safe
-`@convesoft/mara/client` from `client.mjs`/`client.d.mts`. Node root/node exports
+`@convesoft/mara/client` from `client.mjs`/`client.d.mts` and explicit browser-safe
+`@convesoft/mara/http` from `http.mjs`/`http.d.mts`. Node root/node exports
 `createNativeClient`, the shared `createClient`, `MaraClientError` and
 `clientError`; the client entry exports only the shared facade/error helpers.
+The HTTP entry exports `createHttpClient`, `HttpClientOptions` and the shared
+facade/error helpers/types; it imports no Node or native modules.
 Declarations export the owning parameter/result types, `OperationInputs`,
 `OperationResults`, `DocumentOperation`, `ClientAdapter`, `ClientContext`,
 `Capabilities` and `MaraClient`. These entries have import, not require,
@@ -211,7 +214,7 @@ script-free installed-addon certification remain downstream.
 through `execute('capabilities', {})`, and returns one `MaraClient`. The injected
 adapter supplies `{context, execute(operation, params), close()}`; it owns setup,
 transport, owning results and typed errors. The injected boundary does not
-define backend factories; the delivered WASM factory is specified below.
+define backend factories; the delivered HTTP and WASM factories are specified below.
 Setup failure closes the adapter and preserves the
 original error. Initialization is adapter-specific through
 `MaraClient<InitParams>`, `ClientAdapter<InitParams>`, `OperationInputs<InitParams>`
@@ -340,6 +343,53 @@ only argument/result conversion occurs on the JS thread. Close drains preceding
 calls, drops the native client/session ownership, rejects later calls with
 `client_closed`, and is idempotent. GC also releases an unused handle; neither
 path sends daemon shutdown. Independent handles remain independently usable.
+
+`await createHttpClient({endpoint, token, project})` explicitly selects daemon
+HTTP. All three string fields are required; extra setup fields are rejected.
+`endpoint` is the deliberately handed-off numeric loopback `http://127.x.x.x[:port]/rpc`
+or `http://[::1][:port]/rpc` address, without credentials, query or fragment.
+`token` is the daemon-session bearer credential; `project` is an absolute native
+root or authorized initialization destination. No filesystem discovery, pairing,
+policy/credential administration or daemon startup/stop occurs. Bind every call
+to that project and reject per-call `project` fields, including null. To use a
+different project, construct another client. Public context is
+`{backend:"http",selection:{endpoint,project}}`; it excludes the token.
+
+The generated browser-safe `version.mjs` inherits the Cargo workspace version,
+not the planned milestone label. Setup sends `mara.negotiate` with exact artifact
+application/protocol versions, and every POST sends both version headers under
+[[ADR-HTTP-REQUEST-NEGOTIATION]]. Refuse mismatched versions, owning result formats
+or native capability/operation advertisements before returning the client.
+Expose native filesystem persistence, code indexing/configured-indexer support,
+rollback and refresh through the same shared `Capabilities`; context identifies
+HTTP transport while capabilities identify the native execution backend.
+
+Send one JSON-RPC request per call with browser `fetch`, bearer authorization,
+JSON Content-Type, no credential cookies, redirects or referrer, and no automatic
+pagination, retries or backend fallback. The browser supplies Origin; applications
+must serve from an explicitly allowed origin. Reject bodies exceeding the owning
+1 MiB request budget before sending. Params/results remain owning JSON, including
+ordinary JS numeric precision, locations, cursors and validation-invalid data.
+Preserve complete owning error envelopes, including relationship context.
+HTTP 401 and 403 reject with `authentication`/`authentication_failed` and
+`authorization`/`authorization_failed`; version failures remain `incompatible`.
+Known pre-dispatch framing refusals reject as `invalid_argument`, including
+validated null-ID parse/invalid-request RPC errors that cannot echo an undecoded
+request ID; other mismatched IDs do not establish an outcome. Stopping-daemon
+503 rejects as `unavailable`/`daemon_unavailable`. Network/CORS failure during
+setup or reads is `connection`/`http_connection_failed`; unreadable/malformed read
+responses are `transport`/`http_transport_error`. Browser CORS cannot distinguish
+a blocked origin from a network failure. Do not attach raw fetch exceptions,
+URLs containing credentials or bearer tokens to diagnostics.
+
+After an attempted mutation dispatch, response loss, malformed/mismatched responses,
+result-encoding failure or unclassified RPC/HTTP errors reject with
+`unknown_outcome`, operation and selected project. Prohibit retry/replay and direct
+canonical-source/recovery inspection; never imply rollback. Established owning
+operation errors and explicit pre-dispatch rejections retain their classifications.
+There is no operation deadline or TCP-local session assumption. Shared ordered close
+drains earlier work and clears this adapter's connection/credential references;
+it sends no HTTP request and cannot administer or stop the shared daemon.
 
 No implicit browser backend switching or draft publication occurs. The
 application supplies native project selection or browser snapshot loading and
@@ -568,14 +618,15 @@ copies the Linux .so or macOS .dylib to `mara.node`, and includes the private
 loader/declarations. Require caller-owned disk-backed TMPDIR/CARGO_TARGET_DIR.
 This is local build/load support, not platform-package or installed-package
 certification. `scripts/package-npm.mjs main OUTPUT [BROWSER_ASSETS]` includes the public
-Node/shared ESM modules, declarations and private native loader, with ESM
-import-only export metadata and Node >=24. Supplying the output of
-`scripts/build-browser.sh` adds the browser export, browser declarations and
-bundled worker/WASM in that package-relative layout. Omitting it preserves the
-native/shared-only packaging path. A disposable script-free local tarball
-install exercises browser imports/assets and strict types; final release
-packaging must supply those assets. HTTP and native addon platform packaging,
-registry/installed release certification and supported-host gates remain separate.
+Node/shared ESM modules, declarations, HTTP adapter/generated version module and
+private native loader, with ESM import-only export metadata and Node >=24.
+Supplying the output of `scripts/build-browser.sh` adds the browser export,
+browser declarations and bundled worker/WASM in that package-relative layout.
+Omitting it preserves the native/shared/HTTP-only packaging path. A disposable
+script-free local tarball install exercises both browser imports/assets and
+strict types; final release packaging must supply those assets. Native addon
+platform packaging, registry/installed release certification and supported-host
+gates remain separate.
 Existing platform
 optional-dependency packages add the .node addon alongside the executable,
 retaining exact workspace-version selection and current host/glibc boundaries.
@@ -679,6 +730,15 @@ worktree; native IPC selection remains unchanged.
 Exercise initialization at an explicitly authorized destination and project
 rollback/refresh. Refuse daemon-wide administration over HTTP. Check mismatched
 version refusal and that browser imports need no Node built-ins/addon.
+The adapter-local test `tests/browser/http.spec.mjs` uses the script-free installed
+main package, a fixture-owned foreground daemon, deliberate local connection-info
+handoff and exact test origin/project/destination allowlists. It exercises the full
+shared document API, native persistence, owning rules/errors/continuations,
+compatibility/access refusals, a real completed mutation with deliberately lost
+browser response, and close without shared-daemon shutdown. Select this test with
+`BROWSER_TEST_MATCH=http.spec.mjs`; `BROWSER_PORT` selects its isolated test server
+(default 18364). This local workflow does not certify complete installed-artifact
+authority, registry publication or every supported host.
 Chromium with a loopback-served application is the HTTP browser release gate.
 Origin configuration remains explicit; hosted HTTPS-to-daemon access and
 Firefox/WebKit compatibility are not certified by that run.

@@ -2,7 +2,7 @@
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 export type FailureKind = 'operation' | 'invalid_argument' | 'unavailable' | 'incompatible'
-  | 'connection' | 'transport' | 'unknown_outcome' | 'closed';
+  | 'connection' | 'transport' | 'unknown_outcome' | 'closed' | 'authentication' | 'authorization';
 export interface ErrorEnvelope {
   format_version: 1;
   error: { code: string; message: string; operation?: string; project?: string; [key: string]: unknown };

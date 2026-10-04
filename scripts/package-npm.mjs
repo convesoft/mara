@@ -112,12 +112,13 @@ async function packageMain(outputRoot, version, browserAssets) {
       ".": { types: "./node.d.mts", import: "./node.mjs" },
       "./node": { types: "./node.d.mts", import: "./node.mjs" },
       "./client": { types: "./client.d.mts", import: "./client.mjs" },
+      "./http": { types: "./http.d.mts", import: "./http.mjs" },
       ...(browserAssets ? { "./browser": { types: "./browser.d.mts", import: "./browser.mjs" } } : {}),
     },
     optionalDependencies,
     files: [
       "bin/mara.cjs",
-      "node.mjs", "node.d.mts", "client.mjs", "client.d.mts", "native/", "internal/",
+      "node.mjs", "node.d.mts", "client.mjs", "client.d.mts", "http.mjs", "http.d.mts", "version.mjs", "native/", "internal/",
       ...(browserAssets ? ["browser.mjs", "browser.d.mts", "browser/"] : []),
       "skills/mara/SKILL.md",
       "README.md",
@@ -138,7 +139,8 @@ async function packageMain(outputRoot, version, browserAssets) {
     await Promise.all(["worker.mjs", "mara_wasm.js", "mara_wasm_bg.wasm", "mara_wasm.d.ts", "mara_wasm_bg.wasm.d.ts"].map(file =>
       copyFile(path.join(path.resolve(browserAssets), "browser", file), path.join(destination, "browser", file))));
   }
-  await Promise.all(["node.mjs", "node.d.mts", "client.mjs", "client.d.mts"].map(file =>
+  await writeFile(path.join(destination, "version.mjs"), `export const applicationVersion = ${JSON.stringify(version)};\n`);
+  await Promise.all(["node.mjs", "node.d.mts", "client.mjs", "client.d.mts", "http.mjs", "http.d.mts"].map(file =>
     copyFile(path.join(repositoryRoot, "npm", file), path.join(destination, file))));
   await Promise.all(["loader.mjs", "loader.d.mts"].map(file =>
     copyFile(path.join(repositoryRoot, "crates/mara-node", file), path.join(destination, "native", file))));
