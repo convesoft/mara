@@ -185,6 +185,39 @@ built-ins, N-API or filesystem loaders. The WASM adapter owns worker startup,
 messages and shutdown; closing a browser/Node client must not shut down a
 shared daemon.
 
+The delivered private Node adapter is `crates/mara-node/loader.mjs`:
+`loadAddon(absoluteAddonPath)(options)` creates a handle with
+`execute(operation, params = {}) -> Promise<owning result>` and
+`close() -> Promise<void>`. Its small declarations describe this addon boundary,
+not the downstream public per-operation TS facade. The raw addon exports
+`NativeHandle(options)`, with Promise-returning `execute(operation, params)` and
+`close()` producing `{ok:true,result}` or `{ok:false,kind,error:owning envelope}`;
+the loader unwraps these responses and supplies ordering. Options require absolute
+`callerDirectory`; optional `project` resolves relative to it, optional `mode`
+is direct/auto/daemon-required (default auto), and optional `daemonDirectory`
+selects the private IPC directory. These explicit library options do not read
+MARA environment defaults. Unbound calls may supply absolute `params.project`;
+bound handles refuse overrides. Initialization follows the same selection rules.
+
+Operation names and parameters match the native protocol's document/setup
+operation set, plus local `capabilities`. Results keep their owning objects,
+formats, source locations and opaque cursors. JSON numeric results remain JS
+numbers, not BigInts, with ordinary JavaScript number precision (including
+exact safe integers), so owning results remain JSON-serializable. Capabilities report native code
+indexing, filesystem `mutation_persistence`, recovery, refresh, operation names
+and result formats. Invalid validation remains a fulfilled result.
+`NativeClientError` retains `kind`, stable `code`, and the complete owning
+`envelope`; kinds distinguish operation, invalid_argument, unavailable,
+incompatible, connection, transport, unknown_outcome and closed. Unknown outcomes
+retain the native no-replay/source-inspection guidance.
+
+Each handle snapshots JSON-compatible parameters at invocation and queues calls,
+including close, in order. Rust N-API tasks run host work on libuv workers;
+only argument/result conversion occurs on the JS thread. Close drains preceding
+calls, drops the native client/session ownership, rejects later calls with
+`client_closed`, and is idempotent. GC also releases an unused handle; neither
+path sends daemon shutdown. Independent handles remain independently usable.
+
 No implicit browser backend switching or draft publication occurs. The
 application supplies native project selection or browser snapshot loading and
 handles external publication.
@@ -399,8 +432,14 @@ dispatcher separate; its internal CJS format does not establish public CJS
 library support. Browser assets are platform-independent and usable without
 native optional dependencies.
 
-A small cdylib binding crate uses napi/napi-derive and napi-build setup;
-bindings call the Rust client asynchronously. Existing platform
+The delivered `mara-node` cdylib inherits the workspace version and depends on
+native `mara`, napi 3 (N-API 8 and serde-json), napi-derive 3, napi-build 2,
+serde and serde_json. It directly calls `NativeClient`, not CLI processes.
+`scripts/build-node.sh OUTPUT_DIRECTORY` builds the locked local debug addon,
+copies the Linux .so or macOS .dylib to `mara.node`, and includes the private
+loader/declarations. Require caller-owned disk-backed TMPDIR/CARGO_TARGET_DIR.
+This is local build/load support, not platform-package or installed-package
+certification. Existing platform
 optional-dependency packages add the .node addon alongside the executable,
 retaining exact workspace-version selection and current host/glibc boundaries.
 Build/package scripts produce these artifacts before publication; packages
@@ -473,6 +512,18 @@ Load the real addon and run project initialization, search/read, mutation,
 validation and continuation through embedded and daemon execution without
 spawning the CLI. Verify declarations against real usage with the standard
 TypeScript compiler. Retain installed CLI/MCP smoke.
+
+The binding-local gate builds with `scripts/build-node.sh`, then runs
+`cargo test --locked --test node_binding real_node_addon -- --ignored --exact
+--nocapture` with absolute MARA_NODE_ADDON, NODE24 and private MARA_NODE_RUNTIME.
+The Rust fixture hosts the actual Unix-socket server; Node's standard test runner
+executes the real addon in disposable projects through direct, default-auto and
+required daemon routing. Cover all document/setup operations, configured and
+request-local rules, known rule failures versus operation errors, continuation,
+caller selection, event-loop progress and closing without daemon shutdown.
+On Linux, optional MARA_NODE_PROCESS_TRACE captures process/socket syscalls via
+strace, distinguishing the Node test runner's own process from addon operations.
+These local checks do not certify a package installed with scripts disabled.
 
 Require artifact/runtime smoke on each supported native host for release.
 Verify exact workspace versions, addon/loader/types inventories, browser

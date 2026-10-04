@@ -148,7 +148,9 @@ applies candidates to memory.
 
 The native high-level client routes to the embedded runtime or daemon; the
 daemon invokes the runtime directly, never recursively through auto routing.
-N-API wraps that client. WASM wraps the portable engine. The shared TS facade
+The asynchronous `mara-node` N-API tasks wrap that client under
+[[DES-JAVASCRIPT-CLIENT-ADAPTERS]], never the CLI or daemon runtime dispatcher.
+WASM wraps the portable engine. The shared TS facade
 selects N-API, HTTP or worker/WASM adapters without duplicating domain
 behavior.
 

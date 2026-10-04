@@ -1,0 +1,19 @@
+[package]
+name = "mara-node"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+mara = { path = "../.." }
+napi = { version = "3", default-features = false, features = ["napi8", "serde-json"] }
+napi-derive = "3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"
