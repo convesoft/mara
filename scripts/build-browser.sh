@@ -13,3 +13,5 @@ wasm-bindgen --version | grep -qx 'wasm-bindgen 0.2.127'
 wasm-bindgen "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/mara_wasm.wasm" \
   --target web --out-dir "$output" --out-name mara_wasm
 cp -- npm/browser/worker.mjs "$output/worker.mjs"
+# Shared boundary only; worker/WASM setup remains adapter-owned.
+cp -- npm/client.mjs npm/client.d.mts "$output/"

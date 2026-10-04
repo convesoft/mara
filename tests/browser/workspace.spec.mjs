@@ -46,9 +46,19 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       // Requests queued during WASM startup are ordered and leave the page event loop free.
       let pageTick = false;
       setTimeout(() => { pageTick = true; }, 0);
-      const [caps, initialized] = await Promise.all([
-        call('capabilities'), call('project_init', { name: 'café 中文 👩🏽‍💻', template: 'engineering' }),
-      ]);
+      // Inject this actual worker; setup/shutdown remain adapter-owned.
+      const { createClient, MaraClientError } = await import('./client.mjs');
+      const shared = await createClient({
+        context: { backend: 'wasm', selection: { fixture: 'explicit-memory-workspace' } },
+        async execute(operation, params) {
+          const response = await request(operation, params);
+          if (!response.ok) throw new MaraClientError('operation', response.error);
+          return response.result;
+        },
+        async close() { worker.terminate(); },
+      });
+      const caps = shared.capabilities;
+      const initialized = await shared.projectInit({ name: 'café 中文 👩🏽‍💻', template: 'engineering' });
       assert(pageTick, 'worker computation blocked the page event loop');
       assert(caps.mutation_persistence === 'memory' && !caps.code.indexing &&
         !caps.code.native_index_import && !caps.native_recovery, 'capabilities');
@@ -202,16 +212,27 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
         assert(!(await request('load_snapshot', invalid)).ok, 'invalid snapshot accepted');
         assert(JSON.stringify(await call('workspace_sources')) === codeBefore, 'failed load lost base or edits');
       }
+      assert(shared.capabilities.mutation_persistence === 'memory', 'facade persistence');
+      assert((await shared.schemaGet()).kind === 'schema', 'browser-safe facade schema read');
       const custom = structuredClone(codeSnapshot);
       custom.files.find(f => f.path === '.mara/schema.yaml').path = 'custom.yaml';
       custom.files.find(f => f.path === '.mara/project.toml').content =
         custom.files.find(f => f.path === '.mara/project.toml').content.replace('.mara/schema.yaml', 'custom.yaml') +
         '\ninvalid = [';
       await call('load_snapshot', custom);
-      const recovered = await call('project_validate');
+      const recovered = await shared.projectValidate();
       assert(!recovered.valid && !recovered.evaluation_complete &&
         recovered.diagnostics.some(d => d.code === 'project_invalid'), 'custom-schema configuration recovery');
-      return { requests, transcript, exported, operations: caps.operations, pageTick, userAgent: navigator.userAgent };
+      try { await shared.projectTransactionRollback(); throw new Error('unsupported work passed'); }
+      catch (error) { assert(error instanceof MaraClientError && error.code === 'unsupported_operation', 'typed unsupported error'); }
+      const pendingRead = shared.schemaValidate();
+      const closing = shared.close();
+      await pendingRead;
+      await closing;
+      assert(shared.close() === closing, 'idempotent shared close');
+      try { await shared.schemaGet(); throw new Error('closed client read passed'); }
+      catch (error) { assert(error instanceof MaraClientError && error.code === 'client_closed', 'typed closed error'); }
+      return { requests, transcript, exported, operations: caps.operations, pageTick, sharedFacade: true, userAgent: navigator.userAgent };
     } finally {
       worker.terminate();
     }

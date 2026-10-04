@@ -185,7 +185,82 @@ built-ins, N-API or filesystem loaders. The WASM adapter owns worker startup,
 messages and shutdown; closing a browser/Node client must not shut down a
 shared daemon.
 
-The delivered private Node adapter is `crates/mara-node/loader.mjs`:
+The public generated npm artifact exports ESM-only `@convesoft/mara` and
+`@convesoft/mara/node` from `node.mjs`/`node.d.mts`, and browser-safe
+`@convesoft/mara/client` from `client.mjs`/`client.d.mts`. Node root/node exports
+`createNativeClient`, the shared `createClient`, `MaraClientError` and
+`clientError`; the client entry exports only the shared facade/error helpers.
+Declarations export the owning parameter/result types, `OperationInputs`,
+`OperationResults`, `DocumentOperation`, `ClientAdapter`, `ClientContext`,
+`Capabilities` and `MaraClient`. These entries have import, not require,
+conditions; the separate `bin/mara.cjs` CLI keeps its existing behavior.
+
+`await createNativeClient(options)` requires absolute `callerDirectory`;
+optional `project` is absolute or relative to it, `mode` is
+`direct|auto|daemon-required` (default auto), and `daemonDirectory` is an absolute
+private native IPC directory. Omitted project preserves nearest-project discovery.
+Options do not read MARA environment defaults or start a daemon. The loader
+selects the supported host's exact-version optional package and `bin/mara.node`.
+An optional absolute `addonPath` selects a local prebuilt addon instead; both
+paths check its advertised application version against the generated main
+package manifest before returning a client. Missing/load-failed addons are typed
+unavailable failures; package/addon mismatch is incompatible. Host packaging and
+script-free installed-addon certification remain downstream.
+
+`await createClient(adapter)` transfers adapter ownership, obtains capabilities
+through `execute('capabilities', {})`, and returns one `MaraClient`. The injected
+adapter supplies `{context, execute(operation, params), close()}`; it owns setup,
+transport, owning results and typed errors. No HTTP or WASM construction API is
+established by this boundary. Setup failure closes the adapter and preserves the
+original error. Initialization is adapter-specific through
+`MaraClient<InitParams>`, `ClientAdapter<InitParams>`, `OperationInputs<InitParams>`
+and `createClient<InitParams>(adapter)`. Defaults and the Node factory use
+`ProjectInitParams` (`project?`, `template?`); native initialization does not accept
+`name`. The existing worker/WASM input is `MemoryProjectInitParams`
+(`name` required, `template?`, no native project override). A typed injected
+memory consumer selects that generic explicitly; its `projectInit` requires the
+parameter object/name. Both retain the owning project-summary result. This types
+the existing memory initialization boundary, not a new worker/WASM adapter.
+`client.context` is an immutable `{backend, selection}` setup
+snapshot, not a resolved-root claim. Native selection contains its supplied
+caller/project/mode/daemon options, excluding the addon path. Immutable
+`client.capabilities` exposes supported operation names, code support and
+mutation persistence before document operations; native capabilities also report
+backend, application version and owning result formats. Adapter-owned backend
+identity is always available in context.
+
+Public methods take named owning parameter objects and return Promises:
+`projectInit`, `projectMidBackfill`, `projectTransactionRollback`, `projectRefresh`,
+`schemaGet`, `schemaList`, `schemaValidate`, `projectValidate`, `itemValidate`,
+`itemList`, `search`, `get`, `related`, `itemCreate`, `itemUpdate`, `itemMove`,
+`itemDelete`, `itemRename`, `relationGet`, `relationAdd`, `relationRemove`, and
+`traceMatrix`. Each maps to the identically named snake_case native operation
+under [[DES-LOCAL-DAEMON-PROTOCOL]]; input/result fields stay snake_case. Methods
+without required owning fields allow omitted params (`{}`). Unbound native calls
+may supply absolute `project`; bound handles reject overrides. Continuations are
+explicit `cursor`/`next_cursor` with `has_more`: repeat unchanged inputs and page
+limits until complete, and restart after source/schema/configuration changes.
+There is no automatic pagination, replay or backend switching.
+
+`MaraClientError` exposes `kind`, stable string `code` and the complete owning
+`envelope` (including relationship context). `clientError(kind, code, message)`
+constructs error format 1 for adapters. Native operation/routing classifications
+and unknown-outcome no-replay/source-inspection guidance pass through unchanged.
+Invalid validation, including incomplete evaluation, remains fulfilled owning
+data; it is not a rejected Promise. Unsupported advertised operations reject
+with kind `unavailable`/code `unsupported_operation`. Shared calls snapshot JSON
+inputs at invocation and queue in order; non-JSON-encodable input, including
+non-finite numbers, functions, symbols, cyclic data and non-JSON objects, rejects
+with `invalid_argument` before dispatch. Undefined optional object properties
+mean omission; arrays require JSON values and are copied by indexed entries,
+not custom iterators. Snapshotting never invokes `toJSON` or silently drops an
+invalid position into an omitted/null append request. `close()` drains earlier calls, preserves the same close
+Promise/outcome on repetition, rejects later document calls with
+`closed`/`client_closed`, and releases only its adapter. It sends no daemon stop.
+Browser-safe shared modules have no Node/addon/filesystem imports; injected
+adapters retain responsibility for worker startup/shutdown and publication.
+
+The lower-level private Node adapter remains `crates/mara-node/loader.mjs`:
 `loadAddon(absoluteAddonPath)(options)` creates a handle with
 `execute(operation, params = {}) -> Promise<owning result>` and
 `close() -> Promise<void>`. Its small declarations describe this addon boundary,
@@ -196,7 +271,9 @@ the loader unwraps these responses and supplies ordering. Options require absolu
 `callerDirectory`; optional `project` resolves relative to it, optional `mode`
 is direct/auto/daemon-required (default auto), and optional `daemonDirectory`
 selects the private IPC directory. These explicit library options do not read
-MARA environment defaults. Unbound calls may supply absolute `params.project`;
+MARA environment defaults. Malformed native setup data, including N-API argument
+conversion failures, rejects with `invalid_argument`; addon loading failures remain
+`unavailable`. Unbound calls may supply absolute `params.project`;
 bound handles refuse overrides. Initialization follows the same selection rules.
 
 Operation names and parameters match the native protocol's document/setup
@@ -439,7 +516,11 @@ serde and serde_json. It directly calls `NativeClient`, not CLI processes.
 copies the Linux .so or macOS .dylib to `mara.node`, and includes the private
 loader/declarations. Require caller-owned disk-backed TMPDIR/CARGO_TARGET_DIR.
 This is local build/load support, not platform-package or installed-package
-certification. Existing platform
+certification. `scripts/package-npm.mjs main` includes the public Node/shared
+ESM modules, declarations and private native loader, with ESM import-only export
+metadata and Node >=24. It does not yet package HTTP/WASM adapters/assets or add
+an addon to the platform artifact; those are downstream artifact gates.
+Existing platform
 optional-dependency packages add the .node addon alongside the executable,
 retaining exact workspace-version selection and current host/glibc boundaries.
 Build/package scripts produce these artifacts before publication; packages

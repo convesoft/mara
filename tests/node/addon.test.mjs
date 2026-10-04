@@ -5,8 +5,27 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 assert.equal(Number(process.versions.node.split('.')[0]), 24, 'certify the actual Node 24 baseline');
-const { loadAddon, NativeClientError } = await import(pathToFileURL(process.env.MARA_NODE_LOADER));
-const createClient = loadAddon(process.env.MARA_NODE_ADDON);
+const publicFacade = Boolean(process.env.MARA_NODE_CLIENT);
+const { loadAddon, NativeClientError: PrivateError } = await import(pathToFileURL(process.env.MARA_NODE_LOADER));
+const publicModule = publicFacade ? await import(pathToFileURL(process.env.MARA_NODE_CLIENT)) : null;
+const NativeClientError = publicModule?.MaraClientError ?? PrivateError;
+const createClient = publicFacade ? async options => {
+  const client = await publicModule.createNativeClient({ ...options, addonPath: process.env.MARA_NODE_ADDON });
+  assert.equal(client.context.backend, 'native');
+  assert.equal(client.context.selection.callerDirectory, options.callerDirectory);
+  assert.ok(Object.isFrozen(client.capabilities.code));
+  return {
+    execute(operation, params = {}) {
+      if (operation === 'capabilities') return Promise.resolve(client.capabilities);
+      const method = operation.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+      if (!client[method]) return Promise.reject(new NativeClientError('invalid_argument', {
+        format_version: 1, error: { code: 'invalid_argument', message: 'Unknown test operation' },
+      }));
+      return client[method](params);
+    },
+    close: () => client.close(),
+  };
+} : loadAddon(process.env.MARA_NODE_ADDON);
 const base = process.env.MARA_NODE_FIXTURES;
 const daemonDirectory = process.env.MARA_NODE_DAEMON;
 const covered = new Set();
@@ -18,7 +37,7 @@ const check = '- id: rule:status\n  class: requirement\n  property:\n    - {path
 for (const mode of ['direct', undefined, 'daemon-required']) {
   test(`real document workflow: ${mode ?? 'default-auto'}`, async () => {
     const root = path.join(base, mode ?? 'auto');
-    const client = createClient({ callerDirectory: base, project: path.basename(root), mode, daemonDirectory });
+    const client = await createClient({ callerDirectory: base, project: path.basename(root), mode, daemonDirectory });
     const call = async (operation, params = {}) => {
       covered.add(operation);
       return client.execute(operation, params);
@@ -89,6 +108,31 @@ for (const mode of ['direct', undefined, 'daemon-required']) {
       await assert.rejects(call('item_list', { limit: 1, cursor: first.next_cursor }), NativeClientError);
       await call('item_rename', { reference: 'REQ-A', new_id: 'REQ-RENAMED' });
       assert.equal((await call('get', { reference: 'REQ-RENAMED' })).node.mid, a.mid);
+      if (publicFacade) {
+        const original = await readFile(path.join(root, 'docs/a.mara.md'), 'utf8');
+        class IndexedFields extends Array { *[Symbol.iterator]() {} }
+        const invalidFields = new IndexedFields({ key: 'status', value: () => 'draft' });
+        await assert.rejects(call('item_update', { reference: 'REQ-RENAMED',
+          title: 'Iterator must not change canonical source', fields: invalidFields }),
+        error => error instanceof NativeClientError && error.kind === 'invalid_argument');
+        assert.equal(await readFile(path.join(root, 'docs/a.mara.md'), 'utf8'), original);
+        // JSON arrays use indexed entries even when iteration would omit them.
+        await call('item_update', { reference: 'REQ-RENAMED',
+          fields: new IndexedFields({ key: 'status', value: 'retired' }) });
+        assert.equal((await call('get', { reference: 'REQ-RENAMED' })).metadata.find(f => f.key === 'status').value, 'retired');
+        await call('item_update', { reference: 'REQ-RENAMED', fields: [{ key: 'status', value: 'draft' }] });
+        for (const invalidPosition of [NaN, Infinity, -Infinity, () => 1, Symbol('position'), { toJSON: () => null }]) {
+          await assert.rejects(call('item_move', { reference: 'REQ-RENAMED', file: 'docs/nonfinite.mara.md', line: invalidPosition }),
+            error => error instanceof NativeClientError && error.kind === 'invalid_argument');
+        }
+        for (const line of [() => 1, Symbol('position')]) {
+          await assert.rejects(call('item_create', { flavour: 'requirement', id: 'REQ-INVALID',
+            file: 'docs/a.mara.md', title: 'Must not be created', fields: [{ key: 'status', value: 'draft' }], line }),
+          error => error instanceof NativeClientError && error.kind === 'invalid_argument');
+        }
+        assert.equal(await readFile(path.join(root, 'docs/a.mara.md'), 'utf8'), original);
+        await assert.rejects(readFile(path.join(root, 'docs/nonfinite.mara.md')), { code: 'ENOENT' });
+      }
       await call('item_move', { reference: 'REQ-RENAMED', file: 'docs/b.mara.md' });
       const edge = { source: 'REQ-RENAMED', relation: 'depends_on', target: 'REQ-B' };
       await call('relation_add', edge);
@@ -133,30 +177,35 @@ for (const mode of ['direct', undefined, 'daemon-required']) {
       await assert.rejects(client.execute('schema_get'), error => error.code === 'client_closed');
     } finally { await client.close(); }
     // Shared daemon still serves a different consumer after this handle closes.
-    const survivor = createClient({ callerDirectory: base, project: root, mode: 'daemon-required', daemonDirectory });
+    const survivor = await createClient({ callerDirectory: base, project: root, mode: 'daemon-required', daemonDirectory });
     try { assert.equal((await survivor.execute('schema_get')).kind, 'schema'); }
     finally { await survivor.close(); }
   });
 }
 
 test('routing failures, caller discovery, explicit selection and complete coverage', async () => {
-  assert.throws(() => createClient({ callerDirectory: '.' }), NativeClientError);
-  assert.throws(() => createClient({ callerDirectory: base, mode: 'invalid' }), error => error.code === 'invalid_argument');
+  if (publicFacade) {
+    await assert.rejects(createClient({ callerDirectory: '.' }), NativeClientError);
+    await assert.rejects(createClient({ callerDirectory: base, mode: 'invalid' }), error => error.code === 'invalid_argument');
+  } else {
+    assert.throws(() => createClient({ callerDirectory: '.' }), NativeClientError);
+    assert.throws(() => createClient({ callerDirectory: base, mode: 'invalid' }), error => error.code === 'invalid_argument');
+  }
   const root = path.join(base, 'direct');
-  const unbound = createClient({ callerDirectory: path.join(root, 'docs'), mode: 'daemon-required', daemonDirectory });
+  const unbound = await createClient({ callerDirectory: path.join(root, 'docs'), mode: 'daemon-required', daemonDirectory });
   try {
     assert.equal((await unbound.execute('get', { reference: 'REQ-RENAMED' })).node.id, 'REQ-RENAMED');
     assert.equal((await unbound.execute('schema_get', { project: root })).kind, 'schema');
     await assert.rejects(unbound.execute('schema_get', { project: 'relative' }), NativeClientError);
   } finally { await unbound.close(); }
-  const bound = createClient({ callerDirectory: base, project: root, mode: 'direct' });
+  const bound = await createClient({ callerDirectory: base, project: root, mode: 'direct' });
   try { await assert.rejects(bound.execute('schema_get', { project: root }), NativeClientError); }
   finally { await bound.close(); }
   const absentDirectory = path.join(daemonDirectory, 'absent');
-  const required = createClient({ callerDirectory: base, project: root, mode: 'daemon-required', daemonDirectory: absentDirectory });
+  const required = await createClient({ callerDirectory: base, project: root, mode: 'daemon-required', daemonDirectory: absentDirectory });
   try { await assert.rejects(required.execute('schema_get'), error => error.kind === 'unavailable' && error.code === 'daemon_unavailable'); }
   finally { await required.close(); }
-  const auto = createClient({ callerDirectory: base, project: root, daemonDirectory: absentDirectory });
+  const auto = await createClient({ callerDirectory: base, project: root, daemonDirectory: absentDirectory });
   try {
     assert.equal((await auto.execute('schema_get')).kind, 'schema');
     const caps = await auto.execute('capabilities');

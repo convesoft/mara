@@ -105,10 +105,18 @@ async function packageMain(outputRoot, version) {
       "Structured project knowledge CLI and MCP server",
     ),
     bin: { mara: "bin/mara.cjs" },
-    engines: { node: ">=18" },
+    engines: { node: ">=24" },
+    type: "module",
+    types: "./node.d.mts",
+    exports: {
+      ".": { types: "./node.d.mts", import: "./node.mjs" },
+      "./node": { types: "./node.d.mts", import: "./node.mjs" },
+      "./client": { types: "./client.d.mts", import: "./client.mjs" },
+    },
     optionalDependencies,
     files: [
       "bin/mara.cjs",
+      "node.mjs", "node.d.mts", "client.mjs", "client.d.mts", "native/",
       "skills/mara/SKILL.md",
       "README.md",
       "LICENSE-MIT",
@@ -118,6 +126,11 @@ async function packageMain(outputRoot, version) {
 
   await copyFile(path.join(repositoryRoot, "npm/mara.cjs"), path.join(destination, "bin/mara.cjs"));
   await chmod(path.join(destination, "bin/mara.cjs"), 0o755);
+  await mkdir(path.join(destination, "native"), { recursive: true });
+  await Promise.all(["node.mjs", "node.d.mts", "client.mjs", "client.d.mts"].map(file =>
+    copyFile(path.join(repositoryRoot, "npm", file), path.join(destination, file))));
+  await Promise.all(["loader.mjs", "loader.d.mts"].map(file =>
+    copyFile(path.join(repositoryRoot, "crates/mara-node", file), path.join(destination, "native", file))));
   await mkdir(path.join(destination, "skills/mara"), { recursive: true });
   await copyFile(
     path.join(repositoryRoot, "skills/mara/SKILL.md"),
