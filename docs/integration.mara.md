@@ -210,8 +210,9 @@ script-free installed-addon certification remain downstream.
 `await createClient(adapter)` transfers adapter ownership, obtains capabilities
 through `execute('capabilities', {})`, and returns one `MaraClient`. The injected
 adapter supplies `{context, execute(operation, params), close()}`; it owns setup,
-transport, owning results and typed errors. No HTTP or WASM construction API is
-established by this boundary. Setup failure closes the adapter and preserves the
+transport, owning results and typed errors. The injected boundary does not
+define backend factories; the delivered WASM factory is specified below.
+Setup failure closes the adapter and preserves the
 original error. Initialization is adapter-specific through
 `MaraClient<InitParams>`, `ClientAdapter<InitParams>`, `OperationInputs<InitParams>`
 and `createClient<InitParams>(adapter)`. Defaults and the Node factory use
@@ -219,8 +220,8 @@ and `createClient<InitParams>(adapter)`. Defaults and the Node factory use
 `name`. The existing worker/WASM input is `MemoryProjectInitParams`
 (`name` required, `template?`, no native project override). A typed injected
 memory consumer selects that generic explicitly; its `projectInit` requires the
-parameter object/name. Both retain the owning project-summary result. This types
-the existing memory initialization boundary, not a new worker/WASM adapter.
+parameter object/name. Both retain the owning project-summary result. The WASM
+factory returns this memory-specific initialization type without a native override.
 `client.context` is an immutable `{backend, selection}` setup
 snapshot, not a resolved-root claim. Native selection contains its supplied
 caller/project/mode/daemon options, excluding the addon path. Immutable
@@ -258,7 +259,52 @@ invalid position into an omitted/null append request. `close()` drains earlier c
 Promise/outcome on repetition, rejects later document calls with
 `closed`/`client_closed`, and releases only its adapter. It sends no daemon stop.
 Browser-safe shared modules have no Node/addon/filesystem imports; injected
-adapters retain responsibility for worker startup/shutdown and publication.
+adapters retain responsibility for their own resources. Publication remains
+caller-owned.
+
+The browser ESM entry `@convesoft/mara/browser` (`browser.mjs`/`browser.d.mts`)
+exports `createWasmClient` and the shared facade/error helpers and types.
+`await createWasmClient({snapshot})` requires an explicit v1
+`SourceSnapshot` under [[DES-BROWSER-PROJECT-SNAPSHOT]], including
+`{format_version:1,files:[],selection:{document_paths:[],ignores:[]}}` for an
+uninitialized workspace. It snapshots options at invocation, starts one dedicated
+module worker at `new URL('./browser/worker.mjs', import.meta.url)`, obtains
+capabilities, and loads the supplied snapshot before returning. There is no
+worker injection, native project discovery, HTTP fallback or automatic replay.
+Setup failures terminate the owned worker and preserve the original typed error.
+
+The returned `WasmClient extends MaraClient<MemoryProjectInitParams>` includes
+all shared document methods plus `loadSnapshot(snapshot)`, `workspaceState()`,
+`workspaceSources()`, `exportChanges()` and
+`checkChangeSetPreconditions({change_set,snapshot})`. All return Promises and
+share invocation-time JSON snapshots, ordered execution and the same close
+boundary. The extension result types are `WorkspaceState`, `WorkspaceSources`,
+`FileChangeSet` and `ChangeSetPreconditionsResult`, retaining the memory host's
+owning snake_case JSON fields. Snapshot/ignore and change-set types follow their
+owning designs, not a second JS data format. Snapshot replacement discards edits
+only on success; export/checking never advances the base or publishes.
+
+Context is `{backend:'wasm',selection:{snapshot_format_version,base_identity}}`
+for the initial supplied selection; it does not update after replacement or
+claim an external revision is current. `workspaceState()` reports the current
+and original-base fingerprints/identity. Capabilities remain immutable host
+capabilities: memory persistence, no native recovery/indexing/import and explicit
+supported operation names. Native project overrides are not memory setup inputs;
+the owning engine rejects unsupported parameters and required-code mutations.
+
+Owning operation errors retain their envelopes, including relationship context.
+`invalid_argument` uses that failure kind; unsupported operations, unavailable
+Web Crypto and correlated WASM startup failure use `unavailable`. Constructor
+failure is `unavailable/worker_unavailable`; WASM startup failure is
+`unavailable/worker_startup_failed`. A worker error, undecodable response or
+invalid correlation terminates the worker and rejects pending work with
+`unknown_outcome/worker_transport_failed`: dispatched work may have completed,
+so do not replay; reload an explicitly selected snapshot in a new client.
+A failed postMessage is `transport/worker_dispatch_failed` without dispatch or
+retry. Unexpected worker computation errors retain `worker_error` with kind
+`unknown_outcome`. Invalid or incomplete validation remains fulfilled data.
+`close()` drains prior document and memory calls, terminates this worker,
+releases its memory, and keeps its idempotent Promise. It does not stop a daemon.
 
 The lower-level private Node adapter remains `crates/mara-node/loader.mjs`:
 `loadAddon(absoluteAddonPath)(options)` creates a handle with
@@ -389,10 +435,11 @@ Crypto and host time; callers cannot supply MIDs in operation parameters.
 omitted/null params mean `{}`. Responses retain `format_version` and `id` plus
 the binding response. A serialized queue includes WASM startup and prevents
 interleaved replacement/editing. One worker owns one isolated workspace;
-startup failures return correlated errors. The caller creates the worker using
-its bundled asset URL and terminates it with `Worker.terminate()`. Termination
-loses memory; this host has no daemon shutdown, disk persistence or recovery.
-The shared typed client and installed-package asset resolution are separate.
+startup failures return correlated errors. The public adapter in
+[[DES-JAVASCRIPT-CLIENT-ADAPTERS]] owns worker construction, safe-integer
+correlation, response/error decoding and termination; raw messages remain the
+binding boundary, not the public client API. Termination loses memory; this host
+has no daemon shutdown, disk persistence or recovery.
 
 Host setup/read operations are `capabilities`, `load_snapshot`, `workspace_state`
 and `workspace_sources`; export/checking operations are defined by
@@ -418,8 +465,10 @@ no-op edits retain them. Missing code required for source conformance blocks eve
 mutation through the document-only planner, not just code-related edits.
 
 `scripts/build-browser.sh OUTPUT_DIRECTORY` uses locked Cargo and matching
-wasm-bindgen CLI 0.2.127 (`--target web`) to produce `mara_wasm.js`,
-`mara_wasm_bg.wasm`, their declarations and `worker.mjs`. Supply disposable
+wasm-bindgen CLI 0.2.127 (`--target web`) to produce `browser/mara_wasm.js`,
+`browser/mara_wasm_bg.wasm`, their declarations and `browser/worker.mjs`, plus
+root-level shared/browser modules/declarations and `internal/json.mjs`. The
+worker resolves its generated module and WASM within `browser/`. Supply disposable
 `TMPDIR`/`CARGO_TARGET_DIR`; generated assets are build outputs, not tracked
 canonical source. For `tests/browser/playwright.config.mjs`, also set
 `BROWSER_RUNTIME_TMPDIR` to an existing private, session-owned directory under
@@ -430,7 +479,9 @@ and retained reports stay on disk-backed storage. Record runtime-directory
 ownership and remove it after the browser stops. Serve these files together so
 the worker's relative imports and WASM URL resolve. No application sources or
 configured commands are fetched or executed. `tests/browser/workspace.spec.mjs` is a real Playwright/Chromium
-worker smoke, not final installed-client/full-profile certification under
+public-factory smoke, with `client.spec.mjs` comparing the real native/shared
+facade and `typed.spec.mjs` executing a strict compiled browser package consumer.
+These local Chromium checks are not final release/registry certification under
 [[VER-BROWSER-DOCUMENT-ENGINE]].
 :::
 
@@ -516,10 +567,15 @@ serde and serde_json. It directly calls `NativeClient`, not CLI processes.
 copies the Linux .so or macOS .dylib to `mara.node`, and includes the private
 loader/declarations. Require caller-owned disk-backed TMPDIR/CARGO_TARGET_DIR.
 This is local build/load support, not platform-package or installed-package
-certification. `scripts/package-npm.mjs main` includes the public Node/shared
-ESM modules, declarations and private native loader, with ESM import-only export
-metadata and Node >=24. It does not yet package HTTP/WASM adapters/assets or add
-an addon to the platform artifact; those are downstream artifact gates.
+certification. `scripts/package-npm.mjs main OUTPUT [BROWSER_ASSETS]` includes the public
+Node/shared ESM modules, declarations and private native loader, with ESM
+import-only export metadata and Node >=24. Supplying the output of
+`scripts/build-browser.sh` adds the browser export, browser declarations and
+bundled worker/WASM in that package-relative layout. Omitting it preserves the
+native/shared-only packaging path. A disposable script-free local tarball
+install exercises browser imports/assets and strict types; final release
+packaging must supply those assets. HTTP and native addon platform packaging,
+registry/installed release certification and supported-host gates remain separate.
 Existing platform
 optional-dependency packages add the .node addon alongside the executable,
 retaining exact workspace-version selection and current host/glibc boundaries.

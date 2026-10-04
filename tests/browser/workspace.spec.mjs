@@ -12,51 +12,51 @@ import { promisify } from 'node:util';
 test('real module worker runs the WASM memory workspace, rules and Unicode', async ({ page, browser }, info) => {
   const browserErrors = [];
   page.on('pageerror', error => browserErrors.push(String(error)));
-  await page.goto('http://127.0.0.1:18364/');
+  await page.goto('/');
   const report = await page.evaluate(async () => {
-    const worker = new Worker('./worker.mjs', { type: 'module' });
-    let id = 0;
-    const pending = new Map();
-    const transcript = [];
+    const { createWasmClient, MaraClientError } = await import('./browser.mjs');
+    const empty = { format_version: 1, files: [], selection: { document_paths: [], ignores: [] }, base_identity: null };
     const requests = [];
-    let exported;
+    const transcript = [];
     const assert = (condition, message) => { if (!condition) throw new Error(message); };
-    worker.onmessage = ({ data }) => {
-      transcript.push(structuredClone(data));
-      const handler = pending.get(data.id);
-      if (handler) { pending.delete(data.id); handler.resolve(data); }
+    let pageTick = false;
+    setTimeout(() => { pageTick = true; }, 0);
+    const shared = await createWasmClient({ snapshot: empty });
+    const methods = {
+      capabilities: () => shared.capabilities, load_snapshot: p => shared.loadSnapshot(p),
+      workspace_state: () => shared.workspaceState(), workspace_sources: () => shared.workspaceSources(),
+      export_changes: () => shared.exportChanges(),
+      check_change_set_preconditions: p => shared.checkChangeSetPreconditions(p),
+      project_init: p => shared.projectInit(p), project_mid_backfill: p => shared.projectMidBackfill(p),
+      project_transaction_rollback: p => shared.projectTransactionRollback(p),
+      schema_get: p => shared.schemaGet(p), schema_list: p => shared.schemaList(p),
+      schema_validate: p => shared.schemaValidate(p), project_validate: p => shared.projectValidate(p),
+      item_validate: p => shared.itemValidate(p), item_list: p => shared.itemList(p),
+      search: p => shared.search(p), get: p => shared.get(p), related: p => shared.related(p),
+      item_create: p => shared.itemCreate(p), item_update: p => shared.itemUpdate(p),
+      item_move: p => shared.itemMove(p), item_delete: p => shared.itemDelete(p),
+      item_rename: p => shared.itemRename(p), relation_get: p => shared.relationGet(p),
+      relation_add: p => shared.relationAdd(p), relation_remove: p => shared.relationRemove(p),
+      trace_matrix: p => shared.traceMatrix(p),
     };
-    worker.onerror = event => {
-      for (const handler of pending.values()) handler.reject(new Error(event.message));
-      pending.clear();
+    const request = async (operation, params = {}) => {
+      requests.push(structuredClone({ operation, params }));
+      let response;
+      try { response = { ok: true, result: await methods[operation](params) }; }
+      catch (error) {
+        assert(error instanceof MaraClientError, 'untyped public failure');
+        response = { ok: false, kind: error.kind, error: error.envelope };
+      }
+      transcript.push(structuredClone(response));
+      return response;
     };
-    const request = (operation, params = {}) => new Promise((resolve, reject) => {
-      const next = ++id;
-      pending.set(next, { resolve, reject });
-      const message = { format_version: 1, id: next, operation, params };
-      requests.push(structuredClone(message));
-      worker.postMessage(message);
-    });
     const call = async (operation, params = {}) => {
       const response = await request(operation, params);
       assert(response.ok, operation + ': ' + JSON.stringify(response.error));
       return response.result;
     };
+    let exported;
     try {
-      // Requests queued during WASM startup are ordered and leave the page event loop free.
-      let pageTick = false;
-      setTimeout(() => { pageTick = true; }, 0);
-      // Inject this actual worker; setup/shutdown remain adapter-owned.
-      const { createClient, MaraClientError } = await import('./client.mjs');
-      const shared = await createClient({
-        context: { backend: 'wasm', selection: { fixture: 'explicit-memory-workspace' } },
-        async execute(operation, params) {
-          const response = await request(operation, params);
-          if (!response.ok) throw new MaraClientError('operation', response.error);
-          return response.result;
-        },
-        async close() { worker.terminate(); },
-      });
       const caps = shared.capabilities;
       const initialized = await shared.projectInit({ name: 'café 中文 👩🏽‍💻', template: 'engineering' });
       assert(pageTick, 'worker computation blocked the page event loop');
@@ -83,7 +83,18 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
         fields: [{ key: 'status', value: 'draft' }], body: '中文 café 👩🏽‍💻.' });
       await call('item_create', { flavour: 'requirement', id: 'REQ-B',
         file: 'café/知识.mara.md', title: 'Second', fields: [{ key: 'status', value: 'draft' }],
-        body: 'Other source.' });
+        body: 'Other source. 中文 👩🏽‍💻\n'.repeat(5000) });
+      let getCursor;
+      let completeBody = '';
+      let getPages = 0;
+      do {
+        const portion = await shared.get({ reference: 'REQ-B', ...(getCursor ? { cursor: getCursor } : {}) });
+        completeBody += portion.content;
+        getPages++;
+        getCursor = portion.has_more ? portion.next_cursor : null;
+        assert(!portion.has_more || getCursor, 'missing get continuation');
+      } while (getCursor);
+      assert(getPages > 1 && completeBody.includes('Other source. 中文 👩🏽‍💻'), 'bounded complete Unicode read');
       assert(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(a.mid), 'host MID');
       const read = await call('get', { reference: 'REQ-A' });
       assert(read.content.includes('中文 café 👩🏽‍💻'), 'UTF-8 body round trip');
@@ -97,6 +108,12 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       assert((await call('project_validate')).valid, 'project rules pass');
       const trace = await call('trace_matrix', { all: true, rules: ['urn:mara:rule:draft'], limit: 1 });
       assert(trace.evaluation_complete && trace.summaries[0].passed === 2, 'actual configured rules');
+      let traceCursor = trace.next_cursor;
+      while (traceCursor) {
+        const portion = await shared.traceMatrix({ all: true, rules: ['urn:mara:rule:draft'], limit: 1, cursor: traceCursor });
+        assert(portion.evaluation_complete && (!portion.has_more || portion.next_cursor), 'trace continuation');
+        traceCursor = portion.has_more ? portion.next_cursor : null;
+      }
       const check = await call('trace_matrix', { ids: ['REQ-A'], check: {
         files: ['checks.yaml'], shape: 'urn:mara:rule:status',
         parameters: { expected_status: 'draft' },
@@ -234,7 +251,7 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       catch (error) { assert(error instanceof MaraClientError && error.code === 'client_closed', 'typed closed error'); }
       return { requests, transcript, exported, operations: caps.operations, pageTick, sharedFacade: true, userAgent: navigator.userAgent };
     } finally {
-      worker.terminate();
+      await shared.close();
     }
   });
   expect(browserErrors).toEqual([]);
@@ -266,15 +283,14 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       ignores: [], // This fixture supplies no ignore context or physical ignore files.
     } };
     const checkSources = actual => page.evaluate(async ({ changeSet, actual }) => {
-      const worker = new Worker('./worker.mjs', { type: 'module' });
+      const { createWasmClient } = await import('./browser.mjs');
+      const client = await createWasmClient({ snapshot: {
+        format_version: 1, files: [], selection: { document_paths: [], ignores: [] },
+      } });
       try {
-        return await new Promise((resolve, reject) => {
-          worker.onmessage = ({ data }) => resolve(data);
-          worker.onerror = event => reject(new Error(event.message));
-          worker.postMessage({ format_version: 1, id: 1, operation: 'check_change_set_preconditions',
-            params: { change_set: changeSet, snapshot: actual } });
-        });
-      } finally { worker.terminate(); }
+        return { ok: true, result: await client.checkChangeSetPreconditions({ change_set: changeSet, snapshot: actual }) };
+      } catch (error) { return { ok: false, error: error.envelope }; }
+      finally { await client.close(); }
     }, { changeSet, actual });
     // A real untouched-file divergence fails the host's pre-write gate. Preserve
     // the entire divergent tree, including every otherwise matching preimage.

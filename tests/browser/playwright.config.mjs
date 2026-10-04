@@ -10,18 +10,20 @@ if (!browserTmp || !path.isAbsolute(browserTmp) || !statSync(browserTmp, { throw
 if (Buffer.byteLength(path.join(browserTmp, '.org.chromium.Chromium.XXXXXX/SingletonSocket')) > 107) {
   throw new Error('BROWSER_RUNTIME_TMPDIR is too long for Chromium Unix sockets; use a shorter runtime path');
 }
+const port = Number(process.env.BROWSER_TEST_PORT ?? '18364');
+if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid BROWSER_TEST_PORT');
 export default defineConfig({
-  testDir: '.', testMatch: 'workspace.spec.mjs', timeout: 120_000, workers: 1,
+  testDir: '.', testMatch: '*.spec.mjs', timeout: 120_000, workers: 1,
   reporter: [['list'], ['json', { outputFile: process.env.BROWSER_REPORT }]],
   outputDir: process.env.BROWSER_RESULTS,
   use: {
-    browserName: 'chromium', headless: true,
+    browserName: 'chromium', headless: true, baseURL: `http://127.0.0.1:${port}/`,
     launchOptions: { executablePath: process.env.CHROMIUM_PATH ?? '/usr/bin/chromium',
       env: { ...process.env, TMPDIR: browserTmp },
       args: ['--disable-dev-shm-usage'] },
   },
   webServer: {
-    command: `python -m http.server 18364 --bind 127.0.0.1 --directory "${process.env.BROWSER_ASSETS_DIR}"`,
-    url: 'http://127.0.0.1:18364/', reuseExistingServer: false, timeout: 30_000,
+    command: `python -m http.server ${port} --bind 127.0.0.1 --directory "${process.env.BROWSER_ASSETS_DIR}"`,
+    url: `http://127.0.0.1:${port}/`, reuseExistingServer: false, timeout: 30_000,
   },
 });

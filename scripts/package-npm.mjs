@@ -36,7 +36,7 @@ const targets = new Map([
 
 function usage() {
   console.error(
-    "usage: package-npm.mjs main <output-dir> | platform <target> <binary> <output-dir>",
+    "usage: package-npm.mjs main <output-dir> [browser-assets-dir] | platform <target> <binary> <output-dir>",
   );
   process.exit(2);
 }
@@ -92,7 +92,7 @@ async function writeManifest(destination, manifest) {
   );
 }
 
-async function packageMain(outputRoot, version) {
+async function packageMain(outputRoot, version, browserAssets) {
   const packageName = "@convesoft/mara";
   const destination = await resetPackage(outputRoot, packageName);
   const optionalDependencies = Object.fromEntries(
@@ -112,11 +112,13 @@ async function packageMain(outputRoot, version) {
       ".": { types: "./node.d.mts", import: "./node.mjs" },
       "./node": { types: "./node.d.mts", import: "./node.mjs" },
       "./client": { types: "./client.d.mts", import: "./client.mjs" },
+      ...(browserAssets ? { "./browser": { types: "./browser.d.mts", import: "./browser.mjs" } } : {}),
     },
     optionalDependencies,
     files: [
       "bin/mara.cjs",
-      "node.mjs", "node.d.mts", "client.mjs", "client.d.mts", "native/",
+      "node.mjs", "node.d.mts", "client.mjs", "client.d.mts", "native/", "internal/",
+      ...(browserAssets ? ["browser.mjs", "browser.d.mts", "browser/"] : []),
       "skills/mara/SKILL.md",
       "README.md",
       "LICENSE-MIT",
@@ -127,6 +129,15 @@ async function packageMain(outputRoot, version) {
   await copyFile(path.join(repositoryRoot, "npm/mara.cjs"), path.join(destination, "bin/mara.cjs"));
   await chmod(path.join(destination, "bin/mara.cjs"), 0o755);
   await mkdir(path.join(destination, "native"), { recursive: true });
+  await mkdir(path.join(destination, "internal"), { recursive: true });
+  await copyFile(path.join(repositoryRoot, "npm/internal/json.mjs"), path.join(destination, "internal/json.mjs"));
+  if (browserAssets) {
+    await mkdir(path.join(destination, "browser"), { recursive: true });
+    await Promise.all(["browser.mjs", "browser.d.mts"].map(file =>
+      copyFile(path.join(repositoryRoot, "npm", file), path.join(destination, file))));
+    await Promise.all(["worker.mjs", "mara_wasm.js", "mara_wasm_bg.wasm", "mara_wasm.d.ts", "mara_wasm_bg.wasm.d.ts"].map(file =>
+      copyFile(path.join(path.resolve(browserAssets), "browser", file), path.join(destination, "browser", file))));
+  }
   await Promise.all(["node.mjs", "node.d.mts", "client.mjs", "client.d.mts"].map(file =>
     copyFile(path.join(repositoryRoot, "npm", file), path.join(destination, file))));
   await Promise.all(["loader.mjs", "loader.d.mts"].map(file =>
@@ -170,8 +181,8 @@ async function packagePlatform(target, binary, outputRoot, version) {
 const [command, ...arguments_] = process.argv.slice(2);
 const version = await workspaceVersion();
 
-if (command === "main" && arguments_.length === 1) {
-  await packageMain(arguments_[0], version);
+if (command === "main" && (arguments_.length === 1 || arguments_.length === 2)) {
+  await packageMain(arguments_[0], version, arguments_[1]);
 } else if (command === "platform" && arguments_.length === 3) {
   await packagePlatform(arguments_[0], arguments_[1], arguments_[2], version);
 } else {

@@ -45,7 +45,7 @@ const path = require("node:path");
 const [main, platform, temporary] = process.argv.slice(2);
 const manifest = directory => JSON.parse(fs.readFileSync(path.join(directory, "package.json")));
 const files = name => JSON.parse(fs.readFileSync(path.join(temporary, name)))[0].files.map(f => f.path).sort();
-assert.deepEqual(files("main-pack.json"), ["LICENSE-APACHE", "LICENSE-MIT", "README.md", "bin/mara.cjs", "package.json", "skills/mara/SKILL.md", "node.mjs", "node.d.mts", "client.mjs", "client.d.mts", "native/loader.mjs", "native/loader.d.mts"].sort());
+assert.deepEqual(files("main-pack.json"), ["LICENSE-APACHE", "LICENSE-MIT", "README.md", "bin/mara.cjs", "package.json", "skills/mara/SKILL.md", "node.mjs", "node.d.mts", "client.mjs", "client.d.mts", "native/loader.mjs", "native/loader.d.mts", "internal/json.mjs"].sort());
 assert.deepEqual(files("platform-pack.json"), ["LICENSE-APACHE", "LICENSE-MIT", "README.md", "bin/mara", "package.json"].sort());
 const mainManifest = manifest(main), platformManifest = manifest(platform);
 assert.equal(mainManifest.version, platformManifest.version);
