@@ -613,7 +613,7 @@ fn stale_socket_recovery_never_signals_or_replaces_unrelated_state() {
 fn real_indexer_reuses_startup_environment_until_refresh_and_restart() {
     let mut host = Host::new();
     mara::initialize_project(host.project.path(), mara::Template::Minimal).unwrap();
-    let root = host.project.path();
+    let root = host.project.path().to_path_buf();
     fs::write(
         root.join("Cargo.toml"),
         "[package]\nname = 'lifecycle-fixture'\nversion = '0.1.0'\nedition = '2024'\n",
@@ -762,6 +762,22 @@ fn real_indexer_reuses_startup_environment_until_refresh_and_restart() {
     host.rpc("get", json!({"reference":"REQ-A"}));
     assert!(fs::read_to_string(&log).unwrap().ends_with("|changed\n"));
     host.cli(&["daemon", "stop"]);
+    if let Some(evidence) = std::env::var_os("MARA_RUST_PROBE_EVIDENCE") {
+        let evidence = std::path::PathBuf::from(evidence);
+        fs::create_dir_all(&evidence).unwrap();
+        for (source, destination) in [
+            (root.join("Cargo.toml"), "Cargo.toml"),
+            (root.join("src/lib.rs"), "lib.rs"),
+            (root.join("a.mara.md"), "a.mara.md"),
+            (root.join(".mara/project.toml"), "project.toml"),
+            (root.join(".mara/schema.yaml"), "schema.yaml"),
+            (script, "indexer.sh"),
+            (log, "indexer.log"),
+        ] {
+            fs::copy(&source, evidence.join(destination))
+                .unwrap_or_else(|error| panic!("capture {}: {error}", source.display()));
+        }
+    }
 }
 
 // @mara checks DES-DAEMON-LIFECYCLE

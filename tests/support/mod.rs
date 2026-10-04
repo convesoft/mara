@@ -131,7 +131,20 @@ pub fn fixture() -> TempDir {
 }
 
 pub fn command(current_directory: &Path) -> Command {
-    isolated_command(env!("CARGO_BIN_EXE_mara"), current_directory)
+    let mut command = isolated_command(env!("CARGO_BIN_EXE_mara"), current_directory);
+    // Explicit acceptance-only opt-in lets the unchanged CLI/MCP suites exercise
+    // a fixture-owned lifecycle daemon. Never discover an ambient user endpoint.
+    if let Some(directory) = std::env::var_os("MARA_TEST_DAEMON_DIRECTORY") {
+        let directory = std::path::PathBuf::from(directory);
+        assert!(
+            directory.is_absolute(),
+            "test daemon directory must be absolute"
+        );
+        command
+            .env("MARA_EXECUTION_MODE", "daemon-required")
+            .env("MARA_DAEMON_DIRECTORY", directory);
+    }
+    command
 }
 
 pub fn isolated_command(program: &str, current_directory: &Path) -> Command {

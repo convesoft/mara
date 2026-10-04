@@ -500,7 +500,7 @@ fn scip_retrieval_parity(root: &Path, args: &[&str], tool: &str, params: Value) 
     let mut cli_args = vec!["--format", "json"];
     cli_args.extend_from_slice(args);
     let cli = mara(root, &cli_args);
-    assert!(cli.status.success(), "{}", stderr(&cli));
+    assert!(cli.status.success(), "{} {}", stdout(&cli), stderr(&cli));
     let value: Value = serde_json::from_slice(&cli.stdout).unwrap();
     let replies = mcp_exchange(
         root,

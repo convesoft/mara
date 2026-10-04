@@ -764,7 +764,7 @@ service or the deferred UI launcher.
 :::mara verification VER-NATIVE-EXECUTION-BACKENDS
 :mid: 01M3YWA9AXQW6565YJVE94JSAZ
 :title: Verify native routing, freshness and guarded publication
-:status: draft
+:status: accepted
 :method: test
 :level: system
 :verifies: REQ-PORTABLE-DOCUMENT-ENGINE
@@ -777,6 +777,8 @@ service or the deferred UI launcher.
 :verifies: DES-NATIVE-CLIENT-ROUTING
 :verifies: DES-LOCAL-DAEMON-PROTOCOL
 :verifies: DES-DAEMON-LIFECYCLE
+:verifies: DES-MUTATION-RECOVERY
+:verifies: DES-MUTATION-TRANSACTION
 :validates: SCN-SHARE-NATIVE-MARA
 
 Run the real Rust client, CLI and stdio MCP against disposable projects through
@@ -808,8 +810,52 @@ observable unchanged parse/projection/compilation counts and subprocess activity
 current invalid-input errors, isolated real Git worktrees, ignored explicit
 assets, forced rebuilding and idle/in-flight retention checks.
 
+The repeatable lifecycle-process gate is `cargo test --locked --test
+native_system -- --nocapture`. It compares real Rust client/CLI/stdio MCP
+reads, reconciles externally invalid configuration/schema/document/configured
+and request-local rule inputs, rejects stale continuation, isolates real Git
+worktrees, and checks foreground/detached restart without source loss. Both
+backends exercise active writer refusal, real multi-file rename publication,
+exact source/mode parity and schema-independent explicit recovery. Recovery
+journals in this system test are published-format fixtures; actual publisher
+failure/interruption is checked by the transaction unit subprocess tests.
+A Unix transport bridge forwards real negotiation and rename dispatch to the
+lifecycle daemon, reads its successful publication response, then drops that
+response before client delivery. Require `UnknownOutcome`, published source and
+no direct replay; this bridge does not supply mock domain results.
+
+Run the full workspace suite with default isolated direct CLI/MCP execution.
+Repeat the existing document-operation, rule/trace and code suites with
+`MARA_TEST_DAEMON_DIRECTORY` set to an absolute, private, fixture-owned running
+lifecycle endpoint. The shared process helper then requires that daemon rather
+than falling back; it never discovers the user's endpoint. Explicit routing
+flags still override this test setting. Include interface, project bootstrap,
+schema validation/evolution, discovery/get/navigation/search/item list,
+references, all item/relation mutations, MID/recovery, project/policy validation,
+trace matrices and code discovery/SCIP. Their native-library assertions continue
+to provide direct results; their unchanged CLI/MCP assertions exercise daemon
+outcomes. Do not set this override for lifecycle/routing/session suites that
+own their own endpoints or before the daemon is ready. Start that daemon with
+the same explicit trusted indexing/toolchain environment as the test children;
+a checkout-local toolchain override does not follow it into fixture projects.
+
+Also run `cargo test --locked --test daemon_lifecycle
+real_indexer_reuses_startup_environment_until_refresh_and_restart -- --exact
+--nocapture`. This invokes installed `rust-analyzer scip` from the selected
+project root, checks warm reuse, refresh waiting for actual indexing, startup
+environment retention and changed-environment adoption after detached restart.
+`MARA_RUST_PROBE_EVIDENCE` optionally retains fixture sources/configuration and
+actual invocation logs; `MARA_SESSION_PROBE_EVIDENCE` retains the TypeScript
+probe inputs, invocation count and emitted SCIP. Neither optional artifact
+capture changes acceptance assertions.
+
 Use existing Rust tests/tempfile and standard process tools; keep fixture
-Git/configuration state isolated. Capture results at the tested revision.
+Git/configuration state isolated. Scope TMPDIR/Cargo target to owned disk-backed
+storage and `MARA_TEST_RUNTIME_DIR` to a short private IPC directory on both
+Linux and macOS. Capture exact tested revision/tree, commands, exit statuses,
+cold/warm observations, indexer identities and artifact hashes. Default ignored
+probes are not passes: run the explicit TypeScript probe. Linux execution does
+not certify macOS, installed-client packaging, HTTP, N-API or a release.
 :::
 
 :::mara design DES-EXPLICIT-SOURCE-ENGINE
@@ -923,4 +969,97 @@ and the complete portable document profile remain required.
 :justifies: DES-LOCAL-DAEMON-PROTOCOL
 
 Choose exact application/protocol version headers on each HTTP request rather than an opaque negotiated-session handle. Browser connection pooling cannot preserve a TCP-local RpcSession; request-scoped negotiation reuses the shared negotiator without an additional credential, session store or expiry contract. Explicit mara.negotiate still returns the same capabilities. Incompatibility fails before project dispatch; no backend switching or automatic replay is authorized.
+:::
+
+:::mara evidence EVD-NATIVE-SYSTEM-LINUX
+:mid: 01M43H4ZBNQD0HZDKZ72E1T1YS
+:title: Linux native execution system gate at the issue revision
+:status: accepted
+:result: passed
+:captured_at: 2026-10-04T13:19:32Z
+:subject_revision: 84164ba12429c1b1dd4cb53875976100c11ee430
+:evidences: VER-NATIVE-EXECUTION-BACKENDS
+
+Linux x86_64 native IPC/system execution passed at commit
+`84164ba12429c1b1dd4cb53875976100c11ee430`, tree
+`613374f2b7c782214b1c31804a231fb184b1e3fe`. This is issue-checkout
+evidence, not scope integration or release certification.
+
+- Locked workspace all-target build/tests: 464 passed, 5 intentionally ignored
+  probe/subprocess helpers. Explicit installed scip-typescript probe: passed
+  separately, 20 real invocations; unchanged parse/index/projection activity.
+- Lifecycle-managed daemon rerun of 27 existing document/code/rule/trace suites:
+  366 passed, none ignored. Real Rust indexer symbol retrieval runs in this gate.
+- Focused native-system gate: 4 passed; real publication response loss reports
+  unknown without replay, direct/daemon source/mode parity, guarded writes and
+  explicit recovery, freshness and actual Git-worktree/restart isolation.
+- Real Rust indexer lifecycle probe passed separately: selected-root cwd,
+  warm reuse, active refresh waiting, startup environment retained, changed
+  environment adopted after restart.
+- Formatting, strict workspace all-target/all-feature Clippy, engine/WASM
+  wasm32 compile boundary and complete schema/project validation passed;
+  both validations have zero errors/warnings and no remaining page.
+
+Representative observations (not thresholds): lifecycle daemon document cold
+24.646 ms / warm 14.087 ms; TypeScript index cold 314.605 ms / warm 5.286 ms.
+Tools: Rust/rust-analyzer 1.97.1, scip-typescript 0.4.0, Node 26.7.0.
+The suite daemon explicitly inherited the pinned Rust toolchain: an earlier
+un-pinned startup failed because the global default has no rust-analyzer.
+Initial test-development failures and that environment failure remain in logs;
+none count as passes.
+
+Retained execution inventory:
+`/home/araketski/.local/state/pi/verification/01a106f7-4824-7087-a068-f4318248675b/`.
+`checkpoint-commands.txt` and `daemon-validation-commands.txt` record exact
+commands/environment; logs, tested revision/tree, executable/tool versions and
+`probe-hashes.txt` retain provenance. The actual emitted TypeScript SCIP SHA-256
+is `6f7305c8005925ca134fbe9f73315ffd4f9dc801848682336d10f52c770694d0`;
+Rust invocation-log SHA-256 is
+`c97e02cf522aa2d59f167b847b31fcd5ef6499b469e8f6bd3c84a965ad5e1389`.
+Sources/configuration/scripts are retained for reproduction, not as substitute
+indexers.
+
+No macOS execution, installed-client packaging, HTTP/N-API, cloud review,
+integration or release claim. Apple Silicon execution remains the dedicated
+supported-host gate. Published-format system recovery fixtures do not claim
+an interrupted daemon publisher; the existing real transaction subprocess
+interruption/failure regressions passed in the workspace suite.
+:::
+
+:::mara evidence EVD-NATIVE-SYSTEM-LINUX-COMBINED
+:mid: 01M43S0E8YZVAHGHBGJ1EZE4ZA
+:title: Linux native system gate with HTTP and N-API integrated
+:status: accepted
+:result: passed
+:captured_at: 2026-10-04T15:37:18Z
+:subject_revision: 73380ae0b8e978382093fbe29ea5bbd873001c3e
+:evidences: VER-NATIVE-EXECUTION-BACKENDS
+
+Linux x86_64 gate passed against the combined HTTP/N-API/native tree at
+`73380ae0b8e978382093fbe29ea5bbd873001c3e`, tree
+`ef22230fd5d24885d44f85212ec13e0df6fd4913`. This records that tested
+identity, not later receipt commits, installed packages or release readiness.
+
+- Workspace: 470 passed, 0 failed, 6 ignored (not passes).
+- Real lifecycle-daemon rerun: 366 passed in 27 document/code/rule/trace suites;
+  daemon-required CLI/MCP, no fallback. Explicit pinned Rust startup environment.
+- Native system: four real-process tests passed for backend/source/mode parity,
+  freshness/worktree/restart isolation, guarded publication/recovery and real
+  successful publication with response loss/unknown outcome and no replay.
+  Recovery journals are published-format fixtures; actual publisher interruption
+  and failure regressions passed separately in the workspace suite.
+- Installed indexers: TypeScript probe passed with 20 real invocations; Rust
+  lifecycle probe passed for warm reuse, active refresh, retained startup
+  environment and restart adoption. Actual outputs/inputs retained.
+- Local compatibility: six HTTP tests and four Node 24.19.0 addon tests passed.
+  Formatting, locked all-target build, strict all-feature Clippy, wasm32
+  boundary and complete zero-diagnostic schema/project validation passed.
+
+Observations, not thresholds: daemon document cold 25.279128 ms / warm
+13.557412 ms; TypeScript cold 284.806514 ms / warm 5.612064 ms.
+Retained commands, exit statuses, source/tool/artifact hashes and actual probes:
+`/home/araketski/.local/state/pi/verification/01a101b7-9d48-769c-a1b3-9ff16bf41925/native-verification-integration.bM2tFe/`.
+No macOS, installed-client Chromium/package, cloud review or release claim.
+The earlier issue-checkout result [[EVD-NATIVE-SYSTEM-LINUX]] remains historical
+evidence at its own revision.
 :::
