@@ -194,7 +194,9 @@ impl MarkdownBlock {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, schemars::JsonSchema, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum MarkdownBlockKind {
     Paragraph,

@@ -1,10 +1,10 @@
+use mara::{
+    ClientError, NativeClient, ProjectInitializationResult, SchemaGetResult, SchemaKind,
+    SchemaListResult, Template, ValidationResult,
+};
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams};
 use mara::{GetParams, GetResult};
 use mara::{InitialRelation, ItemCreateParams, ItemCreationResult, ItemUpdate, ItemUpdateParams};
-use mara::{
-    OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
-    Template, ValidationResult,
-};
 use mara::{ProjectMidBackfillResult, RelationParams, TransactionRollbackResult};
 use mara::{RelatedParams, RelatedResult, RelationDirection, SearchParams};
 use rmcp::{
@@ -131,9 +131,29 @@ impl TraceMatrixToolParams {
     }
 }
 
+// Preserve string-domain errors; expose routing failures as typed tool errors.
+struct McpError(ClientError);
+impl From<String> for McpError {
+    fn from(message: String) -> Self {
+        Self(ClientError::from(message))
+    }
+}
+impl rmcp::handler::server::tool::IntoCallToolResult for McpError {
+    fn into_call_tool_result(self) -> Result<rmcp::model::CallToolResponse, rmcp::ErrorData> {
+        if matches!(self.0, ClientError::Operation(_)) && self.0.code() == "operation_failed" {
+            return rmcp::handler::server::tool::IntoCallToolResult::into_call_tool_result(
+                self.0.to_string(),
+            );
+        }
+        let mut result = rmcp::model::CallToolResult::structured(self.0.envelope());
+        result.is_error = Some(true);
+        Ok(result.into())
+    }
+}
+
 #[derive(Clone)]
 struct MaraMcp {
-    operations: OperationContext,
+    operations: NativeClient,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -285,7 +305,7 @@ impl MaraMcp {
         let (project, params) = params.into_parts();
         let result = self
             .for_project(project)
-            .map_err(mara::ValidationError::invalid_argument)
+            .map_err(|e| ClientError::from(mara::ValidationError::invalid_argument(e)))
             .and_then(|context| context.trace_matrix(&params));
         let (value, failed) = match result {
             Ok(result) => (serde_json::to_value(result).unwrap(), false),
@@ -307,7 +327,7 @@ impl MaraMcp {
     ) -> rmcp::model::CallToolResult {
         validation_result(
             self.for_project(params.project)
-                .map_err(mara::ValidationError::invalid_argument)
+                .map_err(|e| ClientError::from(mara::ValidationError::invalid_argument(e)))
                 .and_then(|context| {
                     context.item_validate_with_options(&params.id, &params.options)
                 }),
@@ -325,7 +345,7 @@ impl MaraMcp {
     ) -> rmcp::model::CallToolResult {
         validation_result(
             self.for_project(params.project)
-                .map_err(mara::ValidationError::invalid_argument)
+                .map_err(|e| ClientError::from(mara::ValidationError::invalid_argument(e)))
                 .and_then(|context| {
                     context.project_validate_with_options(&params.paths, &params.options)
                 }),
@@ -339,10 +359,11 @@ impl MaraMcp {
     fn item_rename(
         &self,
         Parameters(params): Parameters<ItemRenameToolParams>,
-    ) -> Result<Json<mara::ItemRename>, String> {
+    ) -> Result<Json<mara::ItemRename>, McpError> {
         self.for_project(params.project)?
             .item_rename(&params.reference, &params.new_id)
             .map(Json)
+            .map_err(McpError)
     }
 
     #[tool(
@@ -352,7 +373,7 @@ impl MaraMcp {
     fn item_move(
         &self,
         Parameters(params): Parameters<ItemMoveToolParams>,
-    ) -> Result<Json<mara::ItemMove>, String> {
+    ) -> Result<Json<mara::ItemMove>, McpError> {
         self.for_project(params.project)?
             .item_move(mara::ItemMoveParams {
                 reference: params.reference,
@@ -360,6 +381,7 @@ impl MaraMcp {
                 line: params.line,
             })
             .map(Json)
+            .map_err(McpError)
     }
 
     #[tool(
@@ -369,10 +391,11 @@ impl MaraMcp {
     fn item_delete(
         &self,
         Parameters(params): Parameters<ItemDeleteToolParams>,
-    ) -> Result<Json<mara::ItemDeletion>, String> {
+    ) -> Result<Json<mara::ItemDeletion>, McpError> {
         self.for_project(params.project)?
             .item_delete(&params.reference)
             .map(Json)
+            .map_err(McpError)
     }
 
     #[tool(
@@ -382,7 +405,7 @@ impl MaraMcp {
     fn item_update(
         &self,
         Parameters(params): Parameters<ItemUpdateToolParams>,
-    ) -> Result<Json<ItemUpdate>, String> {
+    ) -> Result<Json<ItemUpdate>, McpError> {
         self.for_project(params.project)?
             .item_update(ItemUpdateParams {
                 reference: params.reference,
@@ -392,6 +415,7 @@ impl MaraMcp {
                 body: params.body,
             })
             .map(Json)
+            .map_err(McpError)
     }
 
     #[tool(name = "relation_add", output_schema = rmcp::handler::server::common::schema_for_type::<mara::RelationMutationResult>(), description = "Add one metadata assertion using a canonical name or inverse alias. Code links require an item source and declared inverse; code source files are never modified. Returns relationship format 1.")]
@@ -402,7 +426,7 @@ impl MaraMcp {
         let (project, params) = params.into_parts();
         relation_result(
             self.for_project(project)
-                .map_err(mara::RelationError::from)
+                .map_err(|e| ClientError::from(mara::RelationError::from(e)))
                 .and_then(|context| context.relation_add(params)),
         )
     }
@@ -415,7 +439,7 @@ impl MaraMcp {
         let (project, relation) = params.edge.into_parts();
         relation_result(
             self.for_project(project)
-                .map_err(mara::RelationError::from)
+                .map_err(|e| ClientError::from(mara::RelationError::from(e)))
                 .and_then(|context| {
                     context.relation_remove_occurrence(relation, params.occurrence)
                 }),
@@ -430,7 +454,7 @@ impl MaraMcp {
         let (project, relation) = params.edge.into_parts();
         relation_result(
             self.for_project(project)
-                .map_err(mara::RelationError::from)
+                .map_err(|e| ClientError::from(mara::RelationError::from(e)))
                 .and_then(|context| context.relation_get(relation, params.limit, params.cursor)),
         )
     }
@@ -442,9 +466,12 @@ impl MaraMcp {
     fn related(
         &self,
         Parameters(params): Parameters<RelatedToolParams>,
-    ) -> Result<Json<RelatedResult>, String> {
+    ) -> Result<Json<RelatedResult>, McpError> {
         let (project, params) = params.into_parts();
-        self.for_project(project)?.related(params).map(Json)
+        self.for_project(project)?
+            .related(params)
+            .map(Json)
+            .map_err(McpError)
     }
 
     #[tool(
@@ -454,13 +481,14 @@ impl MaraMcp {
     fn get(
         &self,
         Parameters(params): Parameters<GetToolParams>,
-    ) -> Result<Json<GetResult>, String> {
+    ) -> Result<Json<GetResult>, McpError> {
         self.for_project(params.project)?
             .get(GetParams {
                 reference: params.reference,
                 cursor: params.cursor,
             })
             .map(Json)
+            .map_err(McpError)
     }
 
     #[tool(
@@ -470,9 +498,12 @@ impl MaraMcp {
     fn search(
         &self,
         Parameters(params): Parameters<SearchToolParams>,
-    ) -> Result<Json<mara::SearchResult>, String> {
+    ) -> Result<Json<mara::SearchResult>, McpError> {
         let (project, params) = params.into_parts();
-        self.for_project(project)?.search(params).map(Json)
+        self.for_project(project)?
+            .search(params)
+            .map(Json)
+            .map_err(McpError)
     }
 
     #[tool(
@@ -482,9 +513,12 @@ impl MaraMcp {
     fn item_list(
         &self,
         Parameters(params): Parameters<ItemFilterToolParams>,
-    ) -> Result<Json<ItemCollectionResult>, String> {
+    ) -> Result<Json<ItemCollectionResult>, McpError> {
         let (project, params) = params.into_parts();
-        self.for_project(project)?.item_list(params).map(Json)
+        self.for_project(project)?
+            .item_list(params)
+            .map(Json)
+            .map_err(McpError)
     }
 
     #[tool(
@@ -494,10 +528,11 @@ impl MaraMcp {
     fn project_mid_backfill(
         &self,
         Parameters(params): Parameters<ProjectParams>,
-    ) -> Result<Json<ProjectMidBackfillResult>, String> {
+    ) -> Result<Json<ProjectMidBackfillResult>, McpError> {
         self.for_project(params.project)?
             .project_mid_backfill()
             .map(Json)
+            .map_err(McpError)
     }
 
     #[tool(
@@ -507,10 +542,11 @@ impl MaraMcp {
     fn project_transaction_rollback(
         &self,
         Parameters(params): Parameters<ProjectParams>,
-    ) -> Result<Json<TransactionRollbackResult>, String> {
+    ) -> Result<Json<TransactionRollbackResult>, McpError> {
         self.for_project(params.project)?
             .project_transaction_rollback()
             .map(Json)
+            .map_err(McpError)
     }
 
     #[tool(
@@ -520,12 +556,15 @@ impl MaraMcp {
     fn item_create(
         &self,
         Parameters(params): Parameters<ItemCreateToolParams>,
-    ) -> Result<Json<ItemCreationResult>, String> {
+    ) -> Result<Json<ItemCreationResult>, McpError> {
         let (project, params) = params.into_parts();
-        self.for_project(project)?.item_create(params).map(Json)
+        self.for_project(project)?
+            .item_create(params)
+            .map(Json)
+            .map_err(McpError)
     }
 
-    fn for_project(&self, project: Option<PathBuf>) -> Result<OperationContext, String> {
+    fn for_project(&self, project: Option<PathBuf>) -> Result<NativeClient, String> {
         self.operations.for_project(project)
     }
     #[tool(
@@ -535,10 +574,11 @@ impl MaraMcp {
     fn project_init(
         &self,
         Parameters(params): Parameters<ProjectInitParams>,
-    ) -> Result<Json<ProjectInitializationResult>, String> {
+    ) -> Result<Json<ProjectInitializationResult>, McpError> {
         self.operations
             .project_initialize(params.project, params.template)
             .map(Json)
+            .map_err(McpError)
     }
 
     #[tool(
@@ -548,10 +588,11 @@ impl MaraMcp {
     fn schema_get(
         &self,
         Parameters(params): Parameters<SchemaGetParams>,
-    ) -> Result<Json<SchemaGetResult>, String> {
+    ) -> Result<Json<SchemaGetResult>, McpError> {
         self.for_project(params.project)?
             .schema_get(params.kind, params.name)
             .map(Json)
+            .map_err(McpError)
     }
 
     #[tool(
@@ -561,10 +602,11 @@ impl MaraMcp {
     fn schema_list(
         &self,
         Parameters(params): Parameters<SchemaListParams>,
-    ) -> Result<Json<SchemaListResult>, String> {
+    ) -> Result<Json<SchemaListResult>, McpError> {
         self.for_project(params.project)?
             .schema_list(params.kind)
             .map(Json)
+            .map_err(McpError)
     }
     #[tool(
         name = "schema_validate",
@@ -577,7 +619,7 @@ impl MaraMcp {
     ) -> rmcp::model::CallToolResult {
         validation_result(
             self.for_project(params.project)
-                .map_err(mara::ValidationError::invalid_argument)
+                .map_err(|e| ClientError::from(mara::ValidationError::invalid_argument(e)))
                 .and_then(|context| context.schema_validate_with_options(&params.options)),
         )
     }
@@ -590,8 +632,7 @@ impl MaraMcp {
 impl ServerHandler for MaraMcp {}
 
 // @mara implements REQ-SURFACE-PARITY
-pub fn run(selected: Option<PathBuf>) -> Result<(), String> {
-    let operations = OperationContext::from_environment(selected)?;
+pub fn run(operations: NativeClient) -> Result<(), String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -609,9 +650,7 @@ pub fn run(selected: Option<PathBuf>) -> Result<(), String> {
     })
 }
 
-fn validation_result(
-    result: Result<ValidationResult, mara::ValidationError>,
-) -> rmcp::model::CallToolResult {
+fn validation_result(result: Result<ValidationResult, ClientError>) -> rmcp::model::CallToolResult {
     let (value, failed) = match result {
         Ok(result) => (
             serde_json::to_value(result).expect("serializable validation result"),
@@ -718,17 +757,14 @@ struct RelationGetToolParams {
     cursor: Option<String>,
 }
 fn relation_result<T: serde::Serialize>(
-    result: Result<T, mara::RelationError>,
+    result: Result<T, ClientError>,
 ) -> rmcp::model::CallToolResult {
     let (value, failed) = match result {
         Ok(value) => (
             serde_json::to_value(value).expect("serializable relationship result"),
             false,
         ),
-        Err(error) => (
-            serde_json::to_value(error).expect("serializable relationship error"),
-            true,
-        ),
+        Err(error) => (error.envelope(), true),
     };
     let mut response = rmcp::model::CallToolResult::structured(value);
     response.is_error = Some(failed);

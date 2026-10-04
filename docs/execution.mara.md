@@ -165,8 +165,9 @@ is the CLI/MCP convenience constructor. The caller directory must be absolute;
 relative native selections resolve against it. `OperationContext` remains an alias
 for existing adapters. `for_project` preserves absolute request selection and
 bound-server override refusal. Each call reconciles current inputs through the
-memory-only sessions in [[DES-NATIVE-PROJECT-SESSIONS]]. High-level client
-routing remains a separate deliverable. The native server
+memory-only sessions in [[DES-NATIVE-PROJECT-SESSIONS]]. CLI/MCP use the
+high-level `NativeClient` under [[DES-NATIVE-CLIENT-ROUTING]]; the daemon
+continues to call `NativeRuntime` directly. The native server
 foundation and reusable dispatcher are delivered under [[DES-LOCAL-DAEMON-PROTOCOL]].
 
 The runtime exposes schema get/list/validate, item list/search/get/related,
@@ -366,6 +367,51 @@ A lost dispatched mutation response is an unknown outcome. Return an actionable
 typed failure and direct the caller to inspect source/recovery state; do not
 retry or claim rollback. Server restart, stale connection state and
 compatibility negotiation cannot authorize duplicate writes.
+
+The delivered Rust interface is `NativeClient::new(selected, caller_directory,
+ClientOptions)`. It is environment-free; the caller directory must be absolute,
+relative selections resolve against it, and an unspecified mode means auto.
+`NativeClient::from_environment(selected, options)` reads the caller cwd and
+matching environment defaults. `ClientOptions.mode: Option<ExecutionMode>`
+selects `Direct`, `Auto` or `DaemonRequired`;
+`daemon_directory: Option<PathBuf>` selects an absolute private IPC host
+directory, subject to [[DES-LOCAL-DAEMON-PROTOCOL]] checks.
+
+CLI global `--execution-mode direct|auto|daemon-required` and
+`--daemon-directory PATH` apply to operation dispatch, including stdio MCP.
+Their matching environment settings are `MARA_EXECUTION_MODE` and
+`MARA_DAEMON_DIRECTORY`. An explicit value overrides only its matching setting;
+invalid effective mode/directory values fail without dispatch. No persisted
+preference, daemon startup or endpoint repair is performed.
+
+The client exposes the native runtime's typed operation methods and owning
+results, with `ClientError` distinguishing owning operation data, invalid
+arguments, unavailable/incompatible daemon, other connection/transport failures
+and `UnknownOutcome { operation, project }`. `envelope()` retains owning
+operation-error data (including relationship context) or returns error format 1
+with a stable routing code. Unknown outcomes use `unknown_outcome`, identify
+the mutation/root, prohibit retry/replay and direct source/recovery inspection.
+CLI JSON and MCP structured tool errors preserve this classification. Existing
+string-domain CLI/MCP errors keep their transport shape.
+
+Each daemon operation uses one authenticated connection and negotiates before
+dispatch. Compatibility requires the exact application/protocol versions,
+owning result formats and advertised native operation/capability set.
+Negotiation has a five-second read/write timeout; operations have no fixed
+deadline because native indexers may run longer. Auto absence means a missing
+runtime directory/endpoint (`NotFound`); refused occupied sockets, permission,
+peer-authentication, malformed negotiation and other connection failures are
+not absence. A supported negotiation incompatibility or incompatible capability
+advertisement permits auto direct execution only before dispatch. Required mode
+reports either unavailable or incompatible conditions. After dispatch, neither
+reads nor mutations reconnect/retry or choose another backend. Lost/unusable
+mutation responses, including server result-encoding failure, report unknown
+outcomes; unclassifiable mutation RPC errors also remain unknown unless the
+protocol establishes a pre-dispatch rejection. Over-limit requests are rejected
+locally before sending their frame. Request/root JSON encoding happens only after
+a compatible daemon is selected: native direct execution retains owning host-path
+handling, while unencodable (non-UTF-8) daemon request paths return
+`invalid_argument` before dispatch, without a backend change.
 :::
 
 :::mara design DES-LOCAL-DAEMON-PROTOCOL

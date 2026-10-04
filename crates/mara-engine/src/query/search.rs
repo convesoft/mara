@@ -3,13 +3,13 @@ use crate::{
     DiscoveryNode, DiscoveryNodeKind, DiscoveryNodeSummary, MarkdownBlock, MarkdownBlockKind,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct SearchHit {
     pub node: DiscoveryNodeSummary,
     pub excerpt: SearchExcerpt,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct SearchResult {
     pub format_version: u8,
     pub results: Vec<SearchHit>,

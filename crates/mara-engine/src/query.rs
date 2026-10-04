@@ -19,7 +19,7 @@ mod search;
 pub use page::ItemCollectionResult;
 pub use page::SearchExcerpt;
 pub use search::{SearchHit, SearchResult, search};
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ItemSummary {
     id: String,
     mid: Option<String>,
@@ -27,7 +27,7 @@ pub struct ItemSummary {
     title: String,
     path: PathBuf,
     line: usize,
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     title_truncated: bool,
 }
 
@@ -75,7 +75,7 @@ impl From<&Item> for ItemSummary {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct FieldFilter {
     name: String,
     value: String,
@@ -358,7 +358,7 @@ fn matches_name_filter(names: &[String], predicate: impl Fn(&str) -> bool) -> bo
     names.is_empty() || names.iter().any(|name| predicate(name))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ItemSource {
     path: PathBuf,
     start_byte: usize,

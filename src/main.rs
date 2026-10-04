@@ -1,14 +1,15 @@
 use clap::{Args, Parser, Subcommand, ValueEnum, error::ErrorKind};
 use mara::{
+    ClientError, ClientOptions, ExecutionMode, NativeClient, ProjectInitializationResult,
+    SchemaGetResult, SchemaKind, SchemaListResult, Template, ValidationOptions, ValidationResult,
+    ValidationTargetKind,
+};
+use mara::{
     EntryRange, GetParams, GetResult, RelatedConnection, RelatedParams, RelationDirection,
     SearchParams,
 };
 use mara::{FieldValue, ItemCollectionResult, ItemFilterParams, ItemSummary};
 use mara::{InitialRelation, ItemCreateParams, ItemUpdateParams};
-use mara::{
-    OperationContext, ProjectInitializationResult, SchemaGetResult, SchemaKind, SchemaListResult,
-    Template, ValidationOptions, ValidationResult, ValidationTargetKind, project_initialize,
-};
 use mara::{ProjectMidBackfillResult, RelationParams};
 use serde::Serialize;
 use std::{
@@ -35,6 +36,12 @@ struct Cli {
     /// Select human-readable or JSON output (does not affect MCP).
     #[arg(long, global = true, value_enum, default_value_t)]
     format: OutputFormat,
+    /// Native backend: direct, auto (default), or daemon-required. Overrides MARA_EXECUTION_MODE; never starts a daemon.
+    #[arg(long, global = true)]
+    execution_mode: Option<ExecutionMode>,
+    /// Absolute private IPC directory. Overrides MARA_DAEMON_DIRECTORY; never repairs permissions or replaces endpoints.
+    #[arg(long, global = true, value_name = "PATH")]
+    daemon_directory: Option<PathBuf>,
     #[command(subcommand)]
     command: Command,
 }
@@ -311,9 +318,12 @@ fn main() -> ExitCode {
         Ok(false) => ExitCode::FAILURE,
         Err(error) => {
             if matches!(format, OutputFormat::Json) {
-                if let Err(render_error) = write_json(&serde_json::json!({
-                    "error": { "message": error }
-                })) {
+                let value = if matches!(error, ClientError::Operation(_)) {
+                    serde_json::json!({"error":{"message":error.to_string()}})
+                } else {
+                    error.envelope()
+                };
+                if let Err(render_error) = write_json(&value) {
                     eprintln!("error: {render_error}");
                 }
             } else {
@@ -369,12 +379,19 @@ fn report_parse_error(error: clap::Error, format: OutputFormat) -> ExitCode {
     exit_code
 }
 
-fn run(cli: Cli) -> Result<bool, String> {
+fn run(cli: Cli) -> Result<bool, ClientError> {
     let Cli {
         project,
         format,
+        execution_mode,
+        daemon_directory,
         command,
     } = cli;
+    let options = ClientOptions {
+        mode: execution_mode,
+        daemon_directory,
+    };
+    let operations = NativeClient::from_environment(project.clone(), options.clone())?;
     match command {
         Command::Trace {
             command:
@@ -459,7 +476,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                 cursor,
                 render: matches!(format, OutputFormat::Human).then(|| "markdown".into()),
             };
-            return match OperationContext::from_environment(project)?.trace_matrix(&params) {
+            return match operations.trace_matrix(&params) {
                 Ok(result) => {
                     if matches!(format, OutputFormat::Json) {
                         write_json(&result)?
@@ -491,7 +508,7 @@ fn run(cli: Cli) -> Result<bool, String> {
         } => {
             return emit_relation(
                 format,
-                OperationContext::from_environment(project)?.relation_get(
+                operations.relation_get(
                     RelationParams {
                         source,
                         relation,
@@ -533,7 +550,7 @@ fn run(cli: Cli) -> Result<bool, String> {
         } => {
             return emit_relation(
                 format,
-                OperationContext::from_environment(project)?.relation_add(RelationParams {
+                operations.relation_add(RelationParams {
                     source,
                     relation,
                     target,
@@ -552,7 +569,7 @@ fn run(cli: Cli) -> Result<bool, String> {
         } => {
             return emit_relation(
                 format,
-                OperationContext::from_environment(project)?.relation_remove_occurrence(
+                operations.relation_remove_occurrence(
                     RelationParams {
                         source,
                         relation,
@@ -574,14 +591,13 @@ fn run(cli: Cli) -> Result<bool, String> {
                 },
         } => {
             let body = read_body(body)?;
-            let result =
-                OperationContext::from_environment(project)?.item_update(ItemUpdateParams {
-                    reference,
-                    title,
-                    fields: fields.into_iter().map(Into::into).collect(),
-                    clear_fields,
-                    body,
-                })?;
+            let result = operations.item_update(ItemUpdateParams {
+                reference,
+                title,
+                fields: fields.into_iter().map(Into::into).collect(),
+                clear_fields,
+                body,
+            })?;
             emit(format, &result, |result| {
                 println!(
                     "updated item '{}' with MID {} at {}",
@@ -604,7 +620,7 @@ fn run(cli: Cli) -> Result<bool, String> {
         Command::Item {
             command: ItemCommand::Delete { reference },
         } => {
-            let result = OperationContext::from_environment(project)?.item_delete(&reference)?;
+            let result = operations.item_delete(&reference)?;
             emit(format, &result, |result| {
                 println!(
                     "deleted item '{}' with MID {} from {}",
@@ -623,12 +639,11 @@ fn run(cli: Cli) -> Result<bool, String> {
                     line,
                 },
         } => {
-            let result =
-                OperationContext::from_environment(project)?.item_move(mara::ItemMoveParams {
-                    reference,
-                    file,
-                    line,
-                })?;
+            let result = operations.item_move(mara::ItemMoveParams {
+                reference,
+                file,
+                line,
+            })?;
             emit(format, &result, |result| {
                 println!(
                     "moved item '{}' with MID {} from {}:{} to {}:{}",
@@ -645,8 +660,7 @@ fn run(cli: Cli) -> Result<bool, String> {
         Command::Item {
             command: ItemCommand::Rename { reference, new_id },
         } => {
-            let result =
-                OperationContext::from_environment(project)?.item_rename(&reference, &new_id)?;
+            let result = operations.item_rename(&reference, &new_id)?;
             emit(format, &result, |result| {
                 println!(
                     "renamed item '{}' to '{}' with MID {}",
@@ -666,7 +680,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             limit,
             cursor,
         } => {
-            let result = OperationContext::from_environment(project)?.related(RelatedParams {
+            let result = operations.related(RelatedParams {
                 reference,
                 direction: direction.map(Into::into),
                 relations: relation,
@@ -681,8 +695,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             })?;
         }
         Command::Get { reference, cursor } => {
-            let result = OperationContext::from_environment(project)?
-                .get(GetParams { reference, cursor })?;
+            let result = operations.get(GetParams { reference, cursor })?;
             emit(format, &result, |item| {
                 print_get(item);
                 Ok(())
@@ -694,7 +707,7 @@ fn run(cli: Cli) -> Result<bool, String> {
             ids,
         } => {
             let filters = filters.into_params();
-            let result = OperationContext::from_environment(project)?.search(SearchParams {
+            let result = operations.search(SearchParams {
                 query,
                 flavours: filters.flavours,
                 fields: filters.fields,
@@ -751,17 +764,16 @@ fn run(cli: Cli) -> Result<bool, String> {
                 },
         } => {
             let body = read_body(body)?;
-            let result =
-                OperationContext::from_environment(project)?.item_create(ItemCreateParams {
-                    flavour,
-                    id,
-                    file,
-                    title,
-                    fields: fields.into_iter().map(Into::into).collect(),
-                    relations,
-                    body,
-                    line,
-                })?;
+            let result = operations.item_create(ItemCreateParams {
+                flavour,
+                id,
+                file,
+                title,
+                fields: fields.into_iter().map(Into::into).collect(),
+                relations,
+                body,
+                line,
+            })?;
             emit(format, &result, |result| {
                 println!(
                     "created item '{}' with MID {} at {}:{}",
@@ -780,18 +792,17 @@ fn run(cli: Cli) -> Result<bool, String> {
         Command::Item {
             command: ItemCommand::List { filters },
         } => {
-            let result =
-                OperationContext::from_environment(project)?.item_list(filters.into_params())?;
+            let result = operations.item_list(filters.into_params())?;
             emit(format, &result, print_item_collection)?;
         }
-        Command::Mcp => mcp::run(project)?,
+        Command::Mcp => mcp::run(operations)?,
         Command::Project {
             command:
                 ProjectCommand::Mid {
                     command: ProjectMidCommand::Backfill,
                 },
         } => {
-            let result = OperationContext::from_environment(project)?.project_mid_backfill()?;
+            let result = operations.project_mid_backfill()?;
             emit(format, &result, print_project_mid_backfill)?;
         }
         Command::Project {
@@ -800,8 +811,7 @@ fn run(cli: Cli) -> Result<bool, String> {
                     command: ProjectTransactionCommand::Rollback,
                 },
         } => {
-            let result =
-                OperationContext::from_environment(project)?.project_transaction_rollback()?;
+            let result = operations.project_transaction_rollback()?;
             emit(format, &result, |result| {
                 if result.restored.is_empty() {
                     println!("no pending transaction");
@@ -825,15 +835,16 @@ fn run(cli: Cli) -> Result<bool, String> {
             };
             emit(
                 format,
-                &project_initialize(target, template.into())?,
+                &NativeClient::from_environment(Some(target), options)?
+                    .project_initialize(None, template.into())?,
                 print_project_initialization,
             )?;
         }
         Command::Schema {
             command: SchemaCommand::Validate { limit, cursor },
         } => {
-            let result = OperationContext::from_environment(project)?
-                .schema_validate_with_options(&ValidationOptions { limit, cursor });
+            let result =
+                operations.schema_validate_with_options(&ValidationOptions { limit, cursor });
             return emit_validation(format, result);
         }
         Command::Project {
@@ -844,35 +855,37 @@ fn run(cli: Cli) -> Result<bool, String> {
                     cursor,
                 },
         } => {
-            let result = OperationContext::from_environment(project)?
+            let result = operations
                 .project_validate_with_options(&paths, &ValidationOptions { limit, cursor });
             return emit_validation(format, result);
         }
         Command::Item {
             command: ItemCommand::Validate { id, limit, cursor },
         } => {
-            let result = OperationContext::from_environment(project)?
-                .item_validate_with_options(&id, &ValidationOptions { limit, cursor });
+            let result =
+                operations.item_validate_with_options(&id, &ValidationOptions { limit, cursor });
             return emit_validation(format, result);
         }
         Command::Schema {
             command: SchemaCommand::Get { kind, name },
         } => {
-            let result = OperationContext::from_environment(project)?
-                .schema_get(kind.map(Into::into), name)?;
+            let result = operations.schema_get(kind.map(Into::into), name)?;
             emit(format, &result, print_schema_get)?;
         }
         Command::Schema {
             command: SchemaCommand::List { kind },
         } => {
-            let result = OperationContext::from_environment(project)?.schema_list(kind.into())?;
+            let result = operations.schema_list(kind.into())?;
             emit(format, &result, print_schema_list)?;
         }
     }
     Ok(true)
 }
 
-fn emit_trace_error(format: OutputFormat, error: mara::ValidationError) -> Result<bool, String> {
+fn emit_trace_error(
+    format: OutputFormat,
+    error: mara::ValidationError,
+) -> Result<bool, ClientError> {
     if matches!(format, OutputFormat::Json) {
         write_json(&error.envelope())?
     } else {
@@ -956,8 +969,8 @@ fn print_yaml(value: &impl Serialize) -> Result<(), String> {
 
 fn emit_validation(
     format: OutputFormat,
-    result: Result<ValidationResult, mara::ValidationError>,
-) -> Result<bool, String> {
+    result: Result<ValidationResult, ClientError>,
+) -> Result<bool, ClientError> {
     match result {
         Ok(result) => {
             emit(format, &result, print_validation)?;
@@ -1462,9 +1475,9 @@ enum RelationCommand {
 
 fn emit_relation<T: Serialize>(
     format: OutputFormat,
-    result: Result<T, mara::RelationError>,
+    result: Result<T, ClientError>,
     human: impl FnOnce(&T) -> Result<(), String>,
-) -> Result<bool, String> {
+) -> Result<bool, ClientError> {
     match result {
         Ok(result) => {
             emit(format, &result, human)?;
@@ -1472,7 +1485,7 @@ fn emit_relation<T: Serialize>(
         }
         Err(error) => {
             if matches!(format, OutputFormat::Json) {
-                write_json(&error)?;
+                write_json(&error.envelope())?;
             } else {
                 eprintln!("error: {error}");
             }

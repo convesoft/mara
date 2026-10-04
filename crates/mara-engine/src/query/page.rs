@@ -5,7 +5,7 @@ use super::*;
 pub const PAGE_BYTES: usize = 65_536;
 const TITLE_CHARS: usize = 256;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ItemCollectionResult {
     pub items: Vec<ItemSummary>,
     pub has_more: bool,
@@ -177,7 +177,7 @@ pub fn cursor_position(cursor: Option<&str>, fingerprint: &str) -> Result<usize,
     usize::from_str_radix(position, 16).map_err(|_| invalid())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct SearchExcerpt {
     pub text: String,
     pub start_byte: usize,

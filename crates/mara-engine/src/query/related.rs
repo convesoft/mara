@@ -1,14 +1,14 @@
 use super::{page::*, *};
 use crate::{ConnectionKind, DiscoveryNodeKind, DiscoveryNodeSummary};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 #[serde(untagged)]
 pub enum RelatedNeighbour {
     Internal(DiscoveryNodeSummary),
     External { kind: String, address: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct RelatedConnection {
     pub relation: String,
     pub direction: RelationDirection,
@@ -23,7 +23,7 @@ pub struct RelatedConnection {
     pub occurrence_count: Option<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct RelatedResult {
     pub format_version: u8,
     pub node: DiscoveryNodeSummary,

@@ -174,7 +174,9 @@ pub struct ItemCreationRequest {
     pub line: Option<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Deserialize, schemars::JsonSchema, serde::Serialize,
+)]
 #[serde(deny_unknown_fields)]
 pub struct InitialRelation {
     /// Schema-declared outgoing relation name, not a custom field.
@@ -910,7 +912,7 @@ fn full_line_end(source: &str, end: usize) -> usize {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema, serde::Deserialize)]
 pub struct ItemMove {
     pub id: String,
     pub mid: String,
@@ -918,7 +920,7 @@ pub struct ItemMove {
     pub new_location: ItemLocation,
 }
 
-#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema, serde::Deserialize)]
 pub struct ItemLocation {
     pub path: PathBuf,
     pub line: usize,

@@ -5,7 +5,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum RelationEndpoint {
     Item { id: String, mid: String },
@@ -131,7 +131,7 @@ impl RelationGraph {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct RelationEdge {
     pub relation: String,
     pub symmetric: bool,
@@ -263,7 +263,7 @@ impl RelationEdge {
     }
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct RelationOccurrence {
     pub reference: String,
     pub kind: String,
@@ -273,7 +273,7 @@ pub struct RelationOccurrence {
     pub target: String,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct RelationInspection {
     pub format_version: u8,
     pub edge: RelationEdge,
@@ -283,7 +283,7 @@ pub struct RelationInspection {
     pub next_cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct RelationError {
     pub format_version: u8,
     pub error: RelationErrorDetail,
@@ -292,7 +292,7 @@ pub struct RelationError {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub occurrence_count: Option<usize>,
 }
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct RelationErrorDetail {
     pub code: String,
     pub message: String,

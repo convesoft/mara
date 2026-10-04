@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema, serde::Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticCode {
     ProjectInvalid,
@@ -50,7 +52,9 @@ impl std::fmt::Display for Severity {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema, serde::Deserialize,
+)]
 pub struct DiagnosticLocation {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
@@ -83,14 +87,14 @@ impl DiagnosticLocation {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct DiagnosticItem {
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mid: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct DiagnosticObligation {
     pub shape: String,
     pub component: String,
@@ -142,14 +146,14 @@ pub struct ValidationOptions {
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ValidationSummary {
     pub errors: usize,
     pub warnings: usize,
     pub counts_exact: bool,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ValidationError {
     pub code: String,
     pub message: String,

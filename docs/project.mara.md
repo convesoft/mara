@@ -86,7 +86,7 @@ depends on precedence.
 
 Public operation wrappers select a project from an explicit path or the execution directory, resolve its current project context, and invoke the operation against that context. Discovery selects the nearest parent containing `.mara/project.toml`; explicit selection overrides discovery.
 
-MCP request selection is absolute and takes effect only when the server was not started with `--project`; a bound server rejects request-level selection. Resolution occurs for each call, so source and schema changes remain visible without server-side project caches.
+MCP request selection is absolute and takes effect only when the server was not started with `--project`; a bound server rejects request-level selection, including for initialization. The native client resolves selection in the caller's directory before daemon dispatch, carrying an absolute root or initialization destination, never the daemon cwd. Resolution and native session reconciliation occur for each call, so source and schema changes remain visible despite reusable derived projections under [[DES-NATIVE-PROJECT-SESSIONS]].
 
 Each operation resolves one project. Workspace aggregation and cross-project operations are outside this boundary.
 :::

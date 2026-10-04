@@ -8,7 +8,7 @@ use crate::{Corpus, ItemSource, MarkdownBlockKind, QueryError};
 const HANDLE_PREFIX: &str = "mara:node:2:";
 const TITLE_CHARS: usize = 256;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiscoveryKind {
     Item,
@@ -19,7 +19,7 @@ pub enum DiscoveryKind {
 }
 
 /// References only: no recursive summaries or inherited item metadata.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct DiscoveryContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent: Option<String>,
@@ -31,7 +31,7 @@ pub struct DiscoveryContext {
 /// The shared, source-backed node projection for discovery operations.
 /// Only titles are truncated. Page builders must preserve references and
 /// locations, or report that their mandatory fields exceed the response budget.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct DiscoveryNodeSummary {
     pub reference: String,
     pub kind: DiscoveryKind,

@@ -1,5 +1,5 @@
 use crate::*;
-#[derive(Debug, Clone, Copy, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RelationAction {
     Added,
@@ -15,7 +15,7 @@ impl RelationAction {
     }
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct RelationMutationResult {
     pub format_version: u8,
     pub action: RelationAction,
@@ -26,7 +26,7 @@ pub struct RelationMutationResult {
     pub edge_exists: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ItemUpdateParams {
     pub reference: String,
@@ -42,7 +42,7 @@ pub struct ItemUpdateParams {
     pub body: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ItemMoveParams {
     pub reference: String,
@@ -61,7 +61,7 @@ pub enum SchemaKind {
     Relation,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum SchemaGetResult {
     Schema {
@@ -79,7 +79,7 @@ pub enum SchemaGetResult {
     },
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct DeclarationSummary {
     pub name: String,
     pub description: String,
@@ -89,7 +89,7 @@ pub struct DeclarationSummary {
     pub symmetric: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct SchemaListResult {
     pub kind: SchemaKind,
     pub declarations: Vec<DeclarationSummary>,
@@ -124,7 +124,7 @@ pub fn declaration_summaries<T: DescribedDeclaration>(
         })
         .collect()
 }
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FieldValue {
     /// Schema-declared custom-field key; structural title/MID metadata and typed relations are excluded from authoring and retrieval field filters.
@@ -133,7 +133,7 @@ pub struct FieldValue {
     pub value: String,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ItemFilterParams {
     #[serde(default)]
@@ -166,7 +166,7 @@ impl ItemFilterParams {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SearchParams {
     pub query: String,
@@ -203,7 +203,7 @@ impl SearchParams {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct GetParams {
     pub reference: String,
@@ -211,7 +211,7 @@ pub struct GetParams {
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RelatedParams {
     pub reference: String,
@@ -227,7 +227,7 @@ pub struct RelatedParams {
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RelationParams {
     pub source: String,

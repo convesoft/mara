@@ -1,7 +1,7 @@
 use super::{page::*, *};
 use crate::{DiscoveryNodeKind, DiscoveryNodeSummary, MetadataEntry};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct TextRange {
     pub start_byte: usize,
     pub end_byte: usize,
@@ -20,7 +20,7 @@ impl TextRange {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct EntryRange {
     pub start_index: usize,
     pub end_index: usize,
@@ -39,7 +39,7 @@ impl EntryRange {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct MetadataFragment {
     pub index: usize,
     pub key: String,
@@ -47,7 +47,7 @@ pub struct MetadataFragment {
     pub range: TextRange,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct GetResult {
     pub format_version: u8,
     pub node: DiscoveryNodeSummary,

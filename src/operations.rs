@@ -8,13 +8,13 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ProjectInitializationResult {
     pub project: ProjectSummary,
     pub created: Vec<PathBuf>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ProjectSummary {
     pub root: PathBuf,
     pub name: String,
@@ -24,19 +24,19 @@ pub struct ProjectSummary {
 
 pub use crate::runtime::project_initialize;
 pub use mara_engine::operations::*;
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct TransactionRollbackResult {
     pub project: PathBuf,
     pub restored: Vec<PathBuf>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ProjectMidBackfillResult {
     pub project: PathBuf,
     pub changed: Vec<BackfilledMidResult>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct BackfilledMidResult {
     pub id: String,
     pub mid: String,
@@ -44,7 +44,7 @@ pub struct BackfilledMidResult {
     pub line: usize,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ItemCreateParams {
     pub flavour: String,
@@ -63,7 +63,7 @@ pub struct ItemCreateParams {
     pub line: Option<usize>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ItemCreationResult {
     pub id: String,
     pub mid: String,

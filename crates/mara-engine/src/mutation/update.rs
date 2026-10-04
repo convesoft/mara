@@ -5,7 +5,7 @@ use crate::{
     ChangePlan, ChangePlanner, Corpus, Error, Item, ItemUpdateParams, Schema, validate_corpus,
 };
 
-#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema, serde::Deserialize)]
 pub struct ItemUpdate {
     pub id: String,
     pub mid: String,
@@ -14,7 +14,7 @@ pub struct ItemUpdate {
     pub warnings: Vec<ItemUpdateWarning>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema, serde::Deserialize)]
 pub struct ItemUpdateWarning {
     pub scope: crate::ValidationScope,
     pub path: std::path::PathBuf,

@@ -146,7 +146,10 @@ pub fn isolated_command(program: &str, current_directory: &Path) -> Command {
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CEILING_DIRECTORIES", current_directory)
-        .env("XDG_CONFIG_HOME", current_directory.join(".test-config"));
+        .env("XDG_CONFIG_HOME", current_directory.join(".test-config"))
+        // Existing tests must never discover the user's running daemon.
+        .env("MARA_EXECUTION_MODE", "direct")
+        .env_remove("MARA_DAEMON_DIRECTORY");
     command
 }
 

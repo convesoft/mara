@@ -71,7 +71,7 @@ pub struct TraceMatrixParams {
     pub render: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct TraceMatrixSummary {
     pub evaluation: Value,
     pub selected: usize,
@@ -121,7 +121,7 @@ pub enum TraceRecord {
     },
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct TraceMatrixResult {
     pub format_version: u8,
     pub kind: String,

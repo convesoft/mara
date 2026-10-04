@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 use super::invalid;
 use crate::{ChangePlan, ChangePlanner, Corpus, Error, Schema, validate_corpus};
 
-#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema, serde::Deserialize)]
 pub struct ItemDeletion {
     pub id: String,
     pub mid: String,

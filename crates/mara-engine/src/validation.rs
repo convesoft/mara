@@ -2,7 +2,7 @@ use crate::*;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ValidationTargetKind {
     Project,
@@ -10,14 +10,16 @@ pub enum ValidationTargetKind {
     Schema,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ValidationTarget {
     pub kind: ValidationTargetKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, JsonSchema, serde::Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum ValidationScope {
     Project,
@@ -26,7 +28,7 @@ pub enum ValidationScope {
     Item,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ValidationDiagnostic {
     pub code: DiagnosticCode,
     pub severity: Severity,
@@ -86,7 +88,7 @@ impl ValidationDiagnostic {
     }
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ValidationResult {
     pub format_version: u8,
     pub project: PathBuf,
@@ -101,10 +103,26 @@ pub struct ValidationResult {
     pub next_cursor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present_count",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub flavours: Option<Option<usize>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "present_count",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub relations: Option<Option<usize>>,
+}
+
+// Preserve explicit null counts (schema unavailable), distinct from an absent
+// schema-only field on project/item results.
+fn present_count<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Option<usize>>, D::Error> {
+    <Option<usize> as serde::Deserialize>::deserialize(d).map(Some)
 }
 
 impl ValidationResult {
@@ -133,7 +151,7 @@ impl ValidationResult {
     }
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ValidationSelection {
     pub paths: Vec<PathBuf>,
     /// Produced diagnostics hidden by paths, excluding later pages and unvisited checks.
