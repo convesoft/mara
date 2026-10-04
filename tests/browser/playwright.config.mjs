@@ -24,7 +24,7 @@ export default defineConfig({
       args: ['--disable-dev-shm-usage'] },
   },
   webServer: {
-    command: `python -m http.server ${port} --bind 127.0.0.1 --directory "${process.env.BROWSER_ASSETS_DIR}"`,
+    command: `python3 -m http.server ${port} --bind 127.0.0.1 --directory "${process.env.BROWSER_ASSETS_DIR}"`,
     url: `${origin}/`, reuseExistingServer: false, timeout: 30_000,
   },
 });

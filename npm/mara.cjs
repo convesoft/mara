@@ -11,6 +11,11 @@ const packages = new Map([
   ["darwin:arm64", "@convesoft/mara-darwin-arm64"],
 ]);
 
+if (Number(process.versions.node.split(".")[0]) < 24) {
+  console.error("Mara requires Node 24 or newer.");
+  process.exit(1);
+}
+
 const platform = `${process.platform}:${process.arch}`;
 const packageName = packages.get(platform);
 

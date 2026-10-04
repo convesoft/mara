@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 const { createNativeClient } = await import(pathToFileURL(process.env.MARA_NODE_CLIENT));
 const input = JSON.parse(await readFile(process.argv[2], 'utf8'));
 const client = await createNativeClient({ callerDirectory: input.root, project: input.root,
-  mode: 'direct', addonPath: process.env.MARA_NODE_ADDON });
+  mode: 'direct', ...(process.env.MARA_NODE_INSTALLED ? {} : { addonPath: process.env.MARA_NODE_ADDON }) });
 const results = [];
 try {
   for (const [method, params] of input.calls) {

@@ -27,6 +27,24 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+      - name: Set disposable build and IPC storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$RUNNER_TEMP/mara"
+          mkdir -p "$scratch/tmp"
+          runtime=$(mktemp -d /tmp/mara-ipc.XXXXXX)
+          chmod 700 "$runtime"
+          {
+            echo "SCRATCH=$scratch"
+            echo "TMPDIR=$scratch/tmp"
+            echo "CARGO_TARGET_DIR=$scratch/target"
+            echo "npm_config_cache=$scratch/npm-cache"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$scratch/browsers"
+            echo "MARA_NODE_RUNTIME=$runtime"
+            echo "MARA_TEST_RUNTIME_DIR=$runtime"
+            echo "BROWSER_RUNTIME_TMPDIR=$runtime"
+          } >> "$GITHUB_ENV"
       - run: rustc --version
       - uses: Swatinem/rust-cache@v2
         with:
@@ -77,8 +95,10 @@ jobs:
             echo "prerelease=$prerelease"
           } >> "$GITHUB_OUTPUT"
       - run: cargo fmt --all -- --check
-      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
-      - run: cargo test --locked --all-targets
+      - run: cargo build --locked --workspace --all-targets -j 2
+      - run: cargo clippy --locked --workspace --all-targets --all-features -j 2 -- -D warnings
+      - run: cargo test --locked --workspace --all-targets -j 2
+      - run: cargo run --locked --quiet -- --format json schema validate
       - run: cargo run --locked --quiet -- --format json project validate
       - name: Verify generated changelog
         uses: orhun/git-cliff-action@v4.8.0
@@ -88,6 +108,34 @@ jobs:
         env:
           OUTPUT: generated-CHANGELOG.md
       - run: diff -u CHANGELOG.md generated-CHANGELOG.md
+      - run: rustup target add wasm32-unknown-unknown
+      - run: cargo install wasm-bindgen-cli --version 0.2.127 --locked -j 2 --root "$SCRATCH/tools"
+      - run: PATH="$SCRATCH/tools/bin:$PATH" scripts/build-browser.sh "$SCRATCH/browser-assets"
+      - name: Pack platform-independent main artifact before approval
+        run: |
+          set -euo pipefail
+          mkdir -p "$SCRATCH/dist"
+          package=$(node scripts/package-npm.mjs main "$SCRATCH/stage" "$SCRATCH/browser-assets")
+          npm pack "$package" --pack-destination "$SCRATCH/dist" --json > "$SCRATCH/main-pack.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-browser-inputs
+          path: ${{ env.SCRATCH }}/browser-assets/
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts-main
+          path: ${{ env.SCRATCH }}/dist/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove disposable storage
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${BROWSER_RUNTIME_TMPDIR:-}" ]]; then rm -rf -- "$BROWSER_RUNTIME_TMPDIR"; fi
+          if [[ -n "${SCRATCH:-}" ]]; then rm -rf -- "$SCRATCH"; fi
+
 
   build:
     needs: prepare
@@ -108,6 +156,24 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.sha }}
+      - name: Set disposable build and IPC storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$RUNNER_TEMP/mara"
+          mkdir -p "$scratch/tmp"
+          runtime=$(mktemp -d /tmp/mara-ipc.XXXXXX)
+          chmod 700 "$runtime"
+          {
+            echo "SCRATCH=$scratch"
+            echo "TMPDIR=$scratch/tmp"
+            echo "CARGO_TARGET_DIR=$scratch/target"
+            echo "npm_config_cache=$scratch/npm-cache"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$scratch/browsers"
+            echo "MARA_NODE_RUNTIME=$runtime"
+            echo "MARA_TEST_RUNTIME_DIR=$runtime"
+            echo "BROWSER_RUNTIME_TMPDIR=$runtime"
+          } >> "$GITHUB_ENV"
       - run: rustc --version
       - uses: Swatinem/rust-cache@v2
         with:
@@ -116,32 +182,108 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
-      - run: cargo build --locked --release
-      - run: scripts/smoke-npm.sh target/release/mara
-      - name: Assemble release artifacts
+      - run: cargo clippy --locked --workspace --all-targets --all-features -j 2 -- -D warnings
+      - run: cargo test --locked --workspace --all-targets -j 2
+      - run: cargo build --locked --release -p mara -j 2
+      - run: scripts/build-node.sh "$SCRATCH/addon" --release
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-browser-inputs
+          path: ${{ env.SCRATCH }}/browser-assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-main
+          path: ${{ env.SCRATCH }}/prepared-main
+      - run: scripts/smoke-npm.sh "$CARGO_TARGET_DIR/release/mara" "$SCRATCH/addon/mara.node" "$SCRATCH/browser-assets" "$SCRATCH/smoke"
+      - name: Verify the prepared main tarball is the installed candidate
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: cmp "$SCRATCH/prepared-main/convesoft-mara-$VERSION.tgz" "$SCRATCH/smoke/tarballs/convesoft-mara-$VERSION.tgz"
+      - name: Verify corresponding-host source and installed addon
+        shell: bash
+        run: |
+          set -euo pipefail
+          NODE24=$(command -v node)
+          export NODE24
+          export MARA_NODE_ADDON="$SCRATCH/addon/mara.node"
+          cargo test --locked --test node_binding real_node_addon -j 2 -- --ignored --exact --nocapture
+          export MARA_NODE_CLIENT="$SCRATCH/smoke/install/node_modules/@convesoft/mara/node.mjs"
+          export MARA_NODE_INSTALLED=1
+          cargo test --locked --test node_binding real_node_facade -j 2 -- --ignored --exact --nocapture
+      - name: Verify installed TypeScript and Chromium clients
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools="$SCRATCH/js-tools"
+          npm install --prefix "$tools" --ignore-scripts --no-audit --no-fund \
+            typescript@5.9.3 @types/node@24.12.0 @playwright/test@1.58.2
+          consumer="$SCRATCH/smoke/install"
+          cp tests/node/usage.mts tests/node/http-usage.mts "$consumer/"
+          "$tools/node_modules/.bin/tsc" --strict --noUncheckedIndexedAccess --target ES2022 \
+            --module NodeNext --moduleResolution NodeNext --typeRoots "$tools/node_modules/@types" \
+            --outDir "$consumer/typed" "$consumer/usage.mts" "$consumer/http-usage.mts"
+          NODE24=$(command -v node)
+          export NODE24 MARA_NODE_INSTALLED=1
+          export MARA_NODE_ADDON="$SCRATCH/addon/mara.node"
+          export MARA_NODE_CLIENT="$consumer/node_modules/@convesoft/mara/node.mjs"
+          export MARA_NODE_FIXTURES="$SCRATCH/typed-fixtures"
+          mkdir -p "$MARA_NODE_FIXTURES"
+          node "$consumer/typed/usage.mjs"
+          export MARA_HTTP_PACKAGE="$consumer/node_modules/@convesoft/mara"
+          node --test tests/node/http.test.mjs
+          browser_consumer="$SCRATCH/smoke/browser-only"
+          cp tests/browser/usage.mts "$browser_consumer/"
+          "$tools/node_modules/.bin/tsc" --strict --noUncheckedIndexedAccess --target ES2022 \
+            --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM \
+            --outDir "$browser_consumer/typed" "$browser_consumer/usage.mts"
+          export BROWSER_ASSETS_DIR="$browser_consumer/node_modules/@convesoft/mara"
+          cp "$browser_consumer/typed/usage.mjs" "$BROWSER_ASSETS_DIR/usage.mjs"
+          mkdir -p "$tools/tests"
+          cp -R tests/browser "$tools/tests/browser"
+          "$tools/node_modules/.bin/playwright" install --with-deps chromium
+          export CHROMIUM_PATH
+          CHROMIUM_PATH=$(node --input-type=module -e \
+            "import {chromium} from '$tools/node_modules/playwright/index.mjs'; console.log(chromium.executablePath())")
+          export MARA_CLI="$consumer/node_modules/.bin/mara"
+          export BROWSER_REPORT="$SCRATCH/browser-report.json" BROWSER_RESULTS="$SCRATCH/browser-results"
+          "$tools/node_modules/.bin/playwright" test --config "$tools/tests/browser/playwright.config.mjs"
+      - name: Assemble native release archives from verified inputs
         env:
           TARGET: ${{ matrix.target }}
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          mkdir -p dist dist/native
-          package=$(node scripts/package-npm.mjs platform "$TARGET" target/release/mara dist/stage)
-          npm pack "$package" --pack-destination dist >/dev/null
+          mkdir -p "$SCRATCH/dist/native"
+          cp "$SCRATCH/smoke/tarballs/convesoft-mara-"*-"$VERSION.tgz" "$SCRATCH/dist/"
 
           archive="mara-$VERSION-$TARGET"
-          mkdir -p "dist/native/$archive"
-          cp target/release/mara "dist/native/$archive/mara"
-          cp README.md LICENSE-MIT LICENSE-APACHE "dist/native/$archive/"
-          tar -C dist/native -czf "dist/$archive.tar.gz" "$archive"
-          rm -rf "dist/native" "dist/stage"
+          mkdir -p "$SCRATCH/dist/native/$archive"
+          cp "$CARGO_TARGET_DIR/release/mara" "$SCRATCH/dist/native/$archive/mara"
+          cp README.md LICENSE-MIT LICENSE-APACHE "$SCRATCH/dist/native/$archive/"
+          tar -C "$SCRATCH/dist/native" -czf "$SCRATCH/dist/$archive.tar.gz" "$archive"
       - uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.target }}
+          name: release-artifacts-${{ matrix.target }}
           path: |
-            dist/*.tar.gz
-            dist/*.tgz
+            ${{ env.SCRATCH }}/dist/*.tar.gz
+            ${{ env.SCRATCH }}/dist/*.tgz
           if-no-files-found: error
           retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-verification-${{ matrix.target }}
+          path: |
+            ${{ env.SCRATCH }}/smoke/*-pack.json
+            ${{ env.SCRATCH }}/browser-report.json
+            ${{ env.SCRATCH }}/browser-results/
+          if-no-files-found: warn
+      - name: Remove disposable storage
+        if: always()
+        shell: bash
+        run: |
+          if [[ -n "${BROWSER_RUNTIME_TMPDIR:-}" ]]; then rm -rf -- "$BROWSER_RUNTIME_TMPDIR"; fi
+          if [[ -n "${SCRATCH:-}" ]]; then rm -rf -- "$SCRATCH"; fi
 
   publish:
     needs: [prepare, build]
@@ -182,15 +324,13 @@ jobs:
       - run: npm install --global npm@11.19.1
       - uses: actions/download-artifact@v4
         with:
-          pattern: release-*
+          pattern: release-artifacts-*
           path: dist
           merge-multiple: true
-      - name: Assemble dispatcher and checksums
+      - name: Check verified artifact inventory and generate checksums
         run: |
           set -euo pipefail
-          package=$(node scripts/package-npm.mjs main dist/stage)
-          npm pack "$package" --pack-destination dist >/dev/null
-          rm -rf dist/stage
+          test -f "dist/convesoft-mara-$VERSION.tgz"
           (cd dist && sha256sum -- *.tar.gz *.tgz > SHA256SUMS)
       - name: Create or verify annotated tag
         run: |

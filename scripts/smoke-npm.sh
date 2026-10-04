@@ -2,12 +2,16 @@
 
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "usage: scripts/smoke-npm.sh <mara-binary>" >&2
+if [[ $# -ne 3 && $# -ne 4 ]]; then
+  echo "usage: scripts/smoke-npm.sh <mara-binary> <addon> <browser-assets> [new-output-directory]" >&2
   exit 2
 fi
 
+: "${TMPDIR:?Set a disposable temporary directory}"
+node -e 'if (Number(process.versions.node.split(".")[0]) !== 24) throw new Error("Smoke requires actual Node 24")'
 binary=$(realpath "$1")
+addon=$(realpath "$2")
+browser_assets=$(realpath "$3")
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64) target=x86_64-unknown-linux-gnu ;;
   Linux:aarch64) target=aarch64-unknown-linux-gnu ;;
@@ -18,8 +22,14 @@ case "$(uname -s):$(uname -m)" in
     ;;
 esac
 
-temporary=$(mktemp -d)
-trap 'rm -rf -- "$temporary"' EXIT
+if [[ $# == 4 ]]; then
+  # Refuse to overwrite existing caller data. Caller owns this retained output.
+  mkdir -- "$4"
+  temporary=$(cd -- "$4" && pwd -P)
+else
+  temporary=$(mktemp -d)
+  trap 'rm -rf -- "$temporary"' EXIT
+fi
 
 packages="$temporary/packages"
 tarballs="$temporary/tarballs"
@@ -34,8 +44,8 @@ done < <(compgen -v GIT_ || true)
 export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
 export GIT_CEILING_DIRECTORIES="$temporary" XDG_CONFIG_HOME="$temporary/config"
 
-platform_package=$(node scripts/package-npm.mjs platform "$target" "$binary" "$packages")
-main_package=$(node scripts/package-npm.mjs main "$packages")
+platform_package=$(node scripts/package-npm.mjs platform "$target" "$binary" "$addon" "$packages")
+main_package=$(node scripts/package-npm.mjs main "$packages" "$browser_assets")
 npm pack "$platform_package" --pack-destination "$tarballs" --json > "$temporary/platform-pack.json"
 npm pack "$main_package" --pack-destination "$tarballs" --json > "$temporary/main-pack.json"
 node - "$main_package" "$platform_package" "$temporary" <<'NODE'
@@ -45,13 +55,15 @@ const path = require("node:path");
 const [main, platform, temporary] = process.argv.slice(2);
 const manifest = directory => JSON.parse(fs.readFileSync(path.join(directory, "package.json")));
 const files = name => JSON.parse(fs.readFileSync(path.join(temporary, name)))[0].files.map(f => f.path).sort();
-assert.deepEqual(files("main-pack.json"), ["LICENSE-APACHE", "LICENSE-MIT", "README.md", "bin/mara.cjs", "package.json", "skills/mara/SKILL.md", "node.mjs", "node.d.mts", "client.mjs", "client.d.mts", "http.mjs", "http.d.mts", "version.mjs", "native/loader.mjs", "native/loader.d.mts", "internal/json.mjs"].sort());
-assert.deepEqual(files("platform-pack.json"), ["LICENSE-APACHE", "LICENSE-MIT", "README.md", "bin/mara", "package.json"].sort());
+assert.deepEqual(files("main-pack.json"), ["LICENSE-APACHE", "LICENSE-MIT", "README.md", "bin/mara.cjs", "package.json", "skills/mara/SKILL.md", "node.mjs", "node.d.mts", "client.mjs", "client.d.mts", "http.mjs", "http.d.mts", "version.mjs", "native/loader.mjs", "native/loader.d.mts", "internal/json.mjs", "browser.mjs", "browser.d.mts", "browser/worker.mjs", "browser/mara_wasm.js", "browser/mara_wasm_bg.wasm", "browser/mara_wasm.d.ts", "browser/mara_wasm_bg.wasm.d.ts"].sort());
+assert.deepEqual(files("platform-pack.json"), ["LICENSE-APACHE", "LICENSE-MIT", "README.md", "bin/mara", "bin/mara.node", "package.json"].sort());
 const mainManifest = manifest(main), platformManifest = manifest(platform);
 assert.equal(mainManifest.version, platformManifest.version);
 assert.deepEqual(mainManifest.bin, { mara: "bin/mara.cjs" });
 assert.equal(mainManifest.engines.node, ">=24");
 assert.equal(mainManifest.type, "module");
+assert.equal(platformManifest.engines.node, ">=24");
+assert.deepEqual(mainManifest.exports["./browser"], { types: "./browser.d.mts", import: "./browser.mjs" });
 assert.deepEqual(mainManifest.exports["."], { types: "./node.d.mts", import: "./node.mjs" });
 assert.deepEqual(mainManifest.exports["./client"], { types: "./client.d.mts", import: "./client.mjs" });
 assert.deepEqual(mainManifest.exports["./http"], { types: "./http.d.mts", import: "./http.mjs" });
@@ -64,9 +76,12 @@ assert.equal(platformManifest.scripts, undefined);
 console.log("PASS actual packed CLI/skill/native file inventories and exact package versions");
 NODE
 
+# JavaScript template expressions below are intentionally literal shell input.
+# shellcheck disable=SC2016
 platform_filename=$(node -e \
   'const p=require(process.argv[1]); process.stdout.write(`${p.name.slice(1).replace("/", "-")}-${p.version}.tgz`)' \
   "$platform_package/package.json")
+# shellcheck disable=SC2016
 main_filename=$(node -e \
   'const p=require(process.argv[1]); process.stdout.write(`${p.name.slice(1).replace("/", "-")}-${p.version}.tgz`)' \
   "$main_package/package.json")
@@ -84,6 +99,62 @@ npm install --offline \
   --package-lock=false \
   "$platform_tarball" \
   "$main_tarball" >/dev/null
+
+# Offline installation cannot substitute an already-published same-version native
+# package. Compare the installed bytes and owning export resolution explicitly.
+node --input-type=module - "$install" "$platform_package" "$binary" "$addon" <<'NODE'
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
+const [install, platform, binary, addon] = process.argv.slice(2);
+const require = createRequire(path.join(install, 'consumer.cjs'));
+const manifest = JSON.parse(await readFile(path.join(platform, 'package.json')));
+const installed = path.dirname(require.resolve(`${manifest.name}/package.json`));
+assert.deepEqual(await readFile(path.join(installed, 'bin/mara')), await readFile(binary));
+assert.deepEqual(await readFile(path.join(installed, 'bin/mara.node')), await readFile(addon));
+const main = path.join(install, 'node_modules/@convesoft/mara');
+for (const entry of ['', '/node', '/client', '/http', '/browser']) {
+  const consumer = path.join(install, `resolve-${entry.replace('/', '') || 'root'}.mjs`);
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(consumer, `export * from '@convesoft/mara${entry}'; export const resolved = import.meta.resolve('@convesoft/mara${entry}');\n`);
+  const exported = await import(pathToFileURL(consumer));
+  assert.ok(exported.resolved.startsWith(pathToFileURL(main + '/').href));
+}
+const { createNativeClient } = await import(pathToFileURL(path.join(main, 'node.mjs')));
+const client = await createNativeClient({ callerDirectory: install, project: 'native-project', mode: 'direct' });
+try {
+  await client.projectInit();
+  const valid = await client.projectValidate();
+  assert.equal(valid.valid, true);
+  assert.equal(valid.evaluation_complete, true);
+  assert.equal(client.capabilities.application_version, manifest.version);
+} finally { await client.close(); }
+assert.throws(() => require('@convesoft/mara'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' });
+console.log('PASS installed candidate CLI/addon bytes, default native loader and all ESM exports');
+NODE
+
+# The browser-only consumer deliberately has no native optional dependencies.
+npm install --offline --prefix "$temporary/browser-only" --omit=optional \
+  --ignore-scripts --no-audit --no-fund --package-lock=false "$main_tarball" >/dev/null
+node --input-type=module - "$temporary/browser-only" <<'NODE'
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { access, readFile, writeFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+import path from 'node:path';
+const root = process.argv[2];
+const require = createRequire(path.join(root, 'consumer.cjs'));
+const pkg = path.join(root, 'node_modules/@convesoft/mara');
+const manifest = JSON.parse(await readFile(path.join(pkg, 'package.json')));
+for (const name of Object.keys(manifest.optionalDependencies)) assert.throws(() => require.resolve(`${name}/package.json`));
+const consumer = path.join(root, 'consumer.mjs');
+await writeFile(consumer, "export * from '@convesoft/mara/browser'; export { createHttpClient } from '@convesoft/mara/http';\n");
+await import(pathToFileURL(consumer));
+for (const file of ['browser/worker.mjs', 'browser/mara_wasm.js', 'browser/mara_wasm_bg.wasm']) await access(path.join(pkg, file));
+console.log('PASS browser-only installed ESM and package-relative worker/WASM without native packages');
+NODE
 
 mara="$install/node_modules/.bin/mara"
 "$mara" --version | grep -F "mara $version"

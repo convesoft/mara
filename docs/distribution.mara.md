@@ -16,7 +16,7 @@ Unix sockets with Linux/macOS peer-user checks. It does not expand this platform
 matrix; execution on Linux alone does not certify the macOS host. Lifecycle
 commands and package changes remain separate deliverables.
 
-The main package contains its CLI dispatcher, matching standalone Mara skill, README and license texts. Native packages contain the compiled executable and public documentation/licenses. Preserve CLI arguments, inherited standard streams, exit status and termination signals. [[implemented_by:code:npm/mara.cjs]] [[implemented_by:code:scripts/package-npm.mjs]]
+The main package contains its CLI dispatcher, matching standalone Mara skill, README and license texts. Separate ESM library entries, declarations and bundled worker/WASM follow [[DES-INTEGRATION-ARTIFACTS]]. Native packages contain the compiled executable, matching .node addon and public documentation/licenses. Node 24 or newer is required; browser-only library use does not require native optional packages. Preserve CLI arguments, inherited standard streams, exit status and termination signals. [[implemented_by:code:npm/mara.cjs]] [[implemented_by:code:scripts/package-npm.mjs]]
 :::
 
 :::mara requirement REQ-AGENT-INSTALLATION-MODES
@@ -38,9 +38,9 @@ The [README](../README.md#configure-an-agent) gives the supported setup commands
 :kind: interface
 :satisfies: REQ-SCRIPT-FREE-NPM-DISTRIBUTION
 
-The main package exposes bin/mara.cjs and requires Node.js 18 or newer. Exact-version optionalDependencies select @convesoft/mara-linux-x64-gnu, @convesoft/mara-linux-arm64-gnu or @convesoft/mara-darwin-arm64 using npm os, cpu and Linux libc constraints. Each platform package exposes bin/mara internally. The dispatcher resolves the matching installed package from process.platform and process.arch, spawns its executable with inherited streams, and forwards arguments, SIGINT, SIGTERM and SIGHUP.
+The main package exposes bin/mara.cjs and requires Node.js 24 or newer. Exact-version optionalDependencies select @convesoft/mara-linux-x64-gnu, @convesoft/mara-linux-arm64-gnu or @convesoft/mara-darwin-arm64 using npm os, cpu and Linux libc constraints. Each platform package exposes bin/mara and bin/mara.node internally; the Node loader uses the addon without spawning the CLI. The dispatcher resolves the matching installed package from process.platform and process.arch, spawns its executable with inherited streams, and forwards arguments, SIGINT, SIGTERM and SIGHUP.
 
-scripts/package-npm.mjs derives all manifests from [workspace.package].version and copies the source skill into skills/mara/SKILL.md. Package generation uses an explicit disposable output directory. It does not run a build, fetch a runtime or publish packages. [[implemented_by:code:npm/mara.cjs]] [[implemented_by:code:scripts/package-npm.mjs]]
+scripts/package-npm.mjs derives all manifests from [workspace.package].version and copies the source skill into skills/mara/SKILL.md. `platform TARGET BINARY ADDON OUTPUT` requires both prebuilt host artifacts; `main OUTPUT BROWSER_ASSETS` includes all library entries/assets for CI/release. Package generation uses an explicit disposable output directory. It does not run a build, fetch a runtime or publish packages. [[implemented_by:code:npm/mara.cjs]] [[implemented_by:code:scripts/package-npm.mjs]]
 :::
 
 :::mara verification VER-NPM-DISTRIBUTION
@@ -54,7 +54,7 @@ scripts/package-npm.mjs derives all manifests from [workspace.package].version a
 :validates: SCN-INSTALL-DISTRIBUTED-MARA
 :validates: SCN-ONBOARD-MARA-AGENT
 
-Build the candidate and run scripts/smoke-npm.sh with its executable path. Generate and pack the main and host-native packages in disposable storage. Inspect the real npm pack file inventory against the intended dispatcher, skill, README, license and manifest files. Require one workspace version, exact native optional-dependency versions and no lifecycle scripts. Install the local tarballs with --ignore-scripts into a disposable project and isolated npm cache.
+Build the candidate CLI/addon and browser assets, then run scripts/smoke-npm.sh with those three input paths. Generate and pack the main and host-native packages in disposable storage. Inspect the real npm pack file inventory against the intended dispatcher, skill, library/declaration/worker/WASM, CLI/addon, README, license and manifest files. Require one workspace version, exact native optional-dependency versions and no lifecycle scripts. Install the local tarballs with --ignore-scripts into a disposable project and isolated npm cache.
 
 Run the installed CLI and real stdio MCP server, including bound/unbound project selection, all templates, schema guidance, item/relation authoring, validation and narrative-to-requirement-to-verification navigation. Compare actual CLI/MCP results, consume bounded continuation, reconstruct Unicode content and reject stale cursors. With only Node discoverable on PATH, require the installed dispatcher to run its bundled binary. Compare the installed skill bytes with source. Exercise unsupported schema formats and missing guidance without source writes, then repair the schema in place while preserving item identities, repeated fields, relations and project settings.
 

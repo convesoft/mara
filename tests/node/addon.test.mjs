@@ -10,7 +10,7 @@ const { loadAddon, NativeClientError: PrivateError } = await import(pathToFileUR
 const publicModule = publicFacade ? await import(pathToFileURL(process.env.MARA_NODE_CLIENT)) : null;
 const NativeClientError = publicModule?.MaraClientError ?? PrivateError;
 const createClient = publicFacade ? async options => {
-  const client = await publicModule.createNativeClient({ ...options, addonPath: process.env.MARA_NODE_ADDON });
+  const client = await publicModule.createNativeClient({ ...options, ...(process.env.MARA_NODE_INSTALLED ? {} : { addonPath: process.env.MARA_NODE_ADDON }) });
   assert.equal(client.context.backend, 'native');
   assert.equal(client.context.selection.callerDirectory, options.callerDirectory);
   assert.ok(Object.isFrozen(client.capabilities.code));

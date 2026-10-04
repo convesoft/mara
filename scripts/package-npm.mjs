@@ -36,7 +36,7 @@ const targets = new Map([
 
 function usage() {
   console.error(
-    "usage: package-npm.mjs main <output-dir> [browser-assets-dir] | platform <target> <binary> <output-dir>",
+    "usage: package-npm.mjs main <output-dir> [browser-assets-dir] | platform <target> <binary> <addon> <output-dir>",
   );
   process.exit(2);
 }
@@ -154,7 +154,7 @@ async function packageMain(outputRoot, version, browserAssets) {
   process.stdout.write(`${destination}\n`);
 }
 
-async function packagePlatform(target, binary, outputRoot, version) {
+async function packagePlatform(target, binary, addon, outputRoot, version) {
   const configuration = targets.get(target);
   if (configuration === undefined) {
     throw new Error(`unsupported Rust target: ${target}`);
@@ -165,16 +165,18 @@ async function packagePlatform(target, binary, outputRoot, version) {
     ...baseManifest(
       configuration.name,
       version,
-      `Mara native binary for ${target}`,
+      `Mara native CLI and Node addon for ${target}`,
     ),
     os: configuration.os,
     cpu: configuration.cpu,
     ...(configuration.libc === undefined ? {} : { libc: configuration.libc }),
-    files: ["bin/mara", "README.md", "LICENSE-MIT", "LICENSE-APACHE"],
+    engines: { node: ">=24" },
+    files: ["bin/mara", "bin/mara.node", "README.md", "LICENSE-MIT", "LICENSE-APACHE"],
   };
 
   await copyFile(path.resolve(binary), path.join(destination, "bin/mara"));
   await chmod(path.join(destination, "bin/mara"), 0o755);
+  await copyFile(path.resolve(addon), path.join(destination, "bin/mara.node"));
   await copyCommonFiles(destination);
   await writeManifest(destination, manifest);
   process.stdout.write(`${destination}\n`);
@@ -185,8 +187,8 @@ const version = await workspaceVersion();
 
 if (command === "main" && (arguments_.length === 1 || arguments_.length === 2)) {
   await packageMain(arguments_[0], version, arguments_[1]);
-} else if (command === "platform" && arguments_.length === 3) {
-  await packagePlatform(arguments_[0], arguments_[1], arguments_[2], version);
+} else if (command === "platform" && arguments_.length === 4) {
+  await packagePlatform(arguments_[0], arguments_[1], arguments_[2], arguments_[3], version);
 } else {
   usage();
 }

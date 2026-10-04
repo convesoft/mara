@@ -5,7 +5,8 @@ if [[ $# != 1 ]]; then echo "usage: $0 OUTPUT_DIRECTORY" >&2; exit 2; fi
 : "${CARGO_TARGET_DIR:?Set a disposable Cargo target directory}"
 : "${TMPDIR:?Set a disposable temporary directory}"
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-output=$(realpath -m -- "$1")
+mkdir -p -- "$1"
+output=$(cd -- "$1" && pwd -P)
 mkdir -p -- "$output/browser" "$output/internal"
 cd -- "$root"
 cargo build --locked --release -p mara-wasm --target wasm32-unknown-unknown -j 2

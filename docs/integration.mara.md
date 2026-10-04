@@ -207,8 +207,8 @@ selects the supported host's exact-version optional package and `bin/mara.node`.
 An optional absolute `addonPath` selects a local prebuilt addon instead; both
 paths check its advertised application version against the generated main
 package manifest before returning a client. Missing/load-failed addons are typed
-unavailable failures; package/addon mismatch is incompatible. Host packaging and
-script-free installed-addon certification remain downstream.
+unavailable failures; package/addon mismatch is incompatible. Host packaging and script-free installed-addon gates follow
+[[DES-INTEGRATION-ARTIFACTS]]; actual release/host certification remains separate.
 
 `await createClient(adapter)` transfers adapter ownership, obtains capabilities
 through `execute('capabilities', {})`, and returns one `MaraClient`. The injected
@@ -613,25 +613,34 @@ native optional dependencies.
 The delivered `mara-node` cdylib inherits the workspace version and depends on
 native `mara`, napi 3 (N-API 8 and serde-json), napi-derive 3, napi-build 2,
 serde and serde_json. It directly calls `NativeClient`, not CLI processes.
-`scripts/build-node.sh OUTPUT_DIRECTORY` builds the locked local debug addon,
+`scripts/build-node.sh OUTPUT_DIRECTORY [--release]` builds the locked corresponding-host addon (debug by default, release for CI/release),
 copies the Linux .so or macOS .dylib to `mara.node`, and includes the private
 loader/declarations. Require caller-owned disk-backed TMPDIR/CARGO_TARGET_DIR.
-This is local build/load support, not platform-package or installed-package
-certification. `scripts/package-npm.mjs main OUTPUT [BROWSER_ASSETS]` includes the public
+Corresponding-host certification requires actual installed-package execution, not merely this build. `scripts/package-npm.mjs main OUTPUT [BROWSER_ASSETS]` includes the public
 Node/shared ESM modules, declarations, HTTP adapter/generated version module and
 private native loader, with ESM import-only export metadata and Node >=24.
 Supplying the output of `scripts/build-browser.sh` adds the browser export,
 browser declarations and bundled worker/WASM in that package-relative layout.
 Omitting it preserves the native/shared/HTTP-only packaging path. A disposable
 script-free local tarball install exercises both browser imports/assets and
-strict types; final release packaging must supply those assets. Native addon
-platform packaging, registry/installed release certification and supported-host
-gates remain separate.
-Existing platform
-optional-dependency packages add the .node addon alongside the executable,
+strict types; final release packaging must supply those assets. `scripts/package-npm.mjs platform TARGET CLI ADDON OUTPUT` requires both prebuilt native artifacts. Existing platform
+optional-dependency packages include the .node addon alongside the executable,
 retaining exact workspace-version selection and current host/glibc boundaries.
 Build/package scripts produce these artifacts before publication; packages
-contain no install-time downloader or compiler.
+contain no install-time downloader, compiler or lifecycle scripts.
+
+`scripts/smoke-npm.sh CLI ADDON BROWSER_ASSETS [NEW_OUTPUT_DIRECTORY]` packs
+and inspects complete main/host packages, installs their local tarballs offline
+with scripts disabled, and compares installed CLI/addon bytes to the candidate
+inputs before importing every public export and loading the default native addon.
+It also installs a browser-only consumer with optional dependencies omitted.
+The optional new output directory retains inventories, exact tarballs and
+consumers for subsequent standard TypeScript and Chromium gates; the caller
+owns its cleanup. CI/release run the real source and installed facade regressions
+and Chromium HTTP/WASM paths on the corresponding native hosts. Release builds
+and packs main/browser inputs before protected publication; host jobs verify
+the identical main tarball. Registry and final supported-host execution remain
+release gates, not claims inferred from workflow YAML.
 
 All Rust crates and generated npm manifests inherit the workspace version. Node
 24+ replaces the 0.3 Node 18 floor for 0.4 npm artifacts. Browser packaging

@@ -105,6 +105,6 @@ void memoryBoundary;
 
 const callerDirectory = process.env.MARA_NODE_FIXTURES!;
 const addonPath = process.env.MARA_NODE_ADDON!;
-const client = await createNativeClient({ callerDirectory, project: 'typescript-usage', mode: 'direct', addonPath });
+const client = await createNativeClient({ callerDirectory, project: 'typescript-usage', mode: 'direct', ...(process.env.MARA_NODE_INSTALLED ? {} : { addonPath }) });
 try { await documentUsage(client); } finally { await client.close(); }
 console.log('PASS standard TypeScript full-method consumer on real Node addon');
