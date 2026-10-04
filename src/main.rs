@@ -20,6 +20,8 @@ use std::{
     path::PathBuf,
     process::ExitCode,
 };
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod daemon;
 mod mcp;
 
 #[derive(Debug, Parser)]
@@ -137,6 +139,12 @@ enum Command {
     Trace {
         #[command(subcommand)]
         command: TraceCommand,
+    },
+    /// Explicit per-user daemon lifecycle; no service installation or automatic start.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    Daemon {
+        #[command(subcommand)]
+        command: daemon::DaemonCommand,
     },
     /// Serve the available operations over stdio MCP; resolve projects per call.
     Mcp,
@@ -393,6 +401,14 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
     };
     let operations = NativeClient::from_environment(project.clone(), options.clone())?;
     match command {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        Command::Daemon { command } => {
+            let result = daemon::execute(command, project, options.daemon_directory)?;
+            emit(format, &result, |result| {
+                println!("{result}");
+                Ok(())
+            })?;
+        }
         Command::Trace {
             command:
                 TraceCommand::Matrix {

@@ -438,8 +438,10 @@ Success returns `protocol_version`, `application_version`, `result_formats`
 (discovery 2; relationship, validation, trace and operation_error 1), and
 `capabilities`: backend `native`, persistence `filesystem`, supported
 `operations`, code_indexing/configured_indexers/transaction_rollback/
-force_refresh `true`, and project_sessions `reconciled_memory`. These are host
-capabilities, not a guarantee that a project's configured indexer is installed.
+force_refresh `true`, project_sessions `reconciled_memory`, and `local_methods`
+(the local-only methods below on IPC; an empty array on a plain `RpcSession`).
+These are host capabilities, not a guarantee that a project's configured indexer
+is installed.
 Failed renegotiation clears compatibility; reconnects must negotiate again.
 
 Requests use `{jsonrpc:"2.0",id,method,params}`; IDs are JSON numbers, strings
@@ -462,6 +464,19 @@ retain the existing native/MCP operation shapes and owning contracts:
 | project_mid_backfill / project_transaction_rollback | none | [[DES-MID-BACKFILL]], [[DES-MUTATION-RECOVERY]] |
 | project_refresh | none; returns `{refreshed:true}` | [[DES-NATIVE-PROJECT-SESSIONS]] |
 
+Native IPC also exposes `daemon_status`, `daemon_stop` and
+`daemon_connection_info`, with empty named params and the same mandatory exact
+version negotiation. They are not project operations and are unavailable on
+plain `RpcSession`/HTTP dispatch. `daemon_status` returns `{state,pid}` with state
+`running` or `stopping`; PID is informational, never process-control authority.
+`daemon_stop` returns `{state:"stopping"}` and requests host shutdown. While
+already-dispatched project work drains, IPC keeps servicing negotiation and
+local administrative methods; new project operations fail with -32000
+`operation_failed` stating that the daemon is stopping, before dispatch.
+`daemon_connection_info` currently returns
+`{available:false,reason:"http_disabled"}`. The enabled endpoint/token handoff
+remains the HTTP adapter's deliverable under [[DES-DAEMON-LIFECYCLE]].
+
 Unknown parameters fail before dispatch. Responses contain exactly `result`
 or `error:{code,message,data?}`. Standard JSON-RPC errors are -32700 parse,
 -32600 invalid request, -32601 unknown method, -32602 invalid parameters and
@@ -477,7 +492,10 @@ indexer stdout/stderr or credentials are added. Domain validation, including
 
 Native framing is newline-delimited UTF-8 JSON. The 1 MiB request limit includes
 the terminating newline; oversized input receives -32600 and closes that
-connection. EOF without a newline never dispatches the partial frame. Existing
+connection. EOF without a newline never dispatches the partial frame. Response
+writes fail after one second of blocked socket backpressure; operation execution
+has no such deadline. Response loss never cancels or rolls back dispatched work,
+and a non-reading consumer cannot indefinitely pin shutdown. Existing
 owning result budgets and continuation remain unchanged; IPC framing does not
 truncate domain results. Batches return -32600. Valid notifications receive no
 response and never negotiate or execute project operations. A connection processes
@@ -494,20 +512,33 @@ an unrelated process. The delivered `mara::ipc::IpcServer` binds
 and deterministic; native IPC authenticates OS peers, not bearer tokens.
 Both the base and runtime directory must be same-user mode 0700 directories;
 the runtime leaf cannot be a symlink. The socket and persistent advisory
-`native.lock` are same-user mode 0600. Validate endpoint type/owner/mode and
+`native.lock` are same-user mode 0600. Bind a short nonce-named staging socket in
+the private runtime directory, set its mode, then atomically hard-link its inode
+to the discoverable endpoint without overwriting an existing name; remove the
+staging name. Concurrent starts never observe a published socket awaiting chmod.
+A crash before publication may leave an undiscovered stale staging socket; it
+has no PID authority and is not reused as an endpoint. Validate endpoint type/owner/mode and
 peer UID on connect; the server checks peer UID before reading any request
 (Linux SO_PEERCRED; macOS getpeereid). Socket paths must be shorter than 104
 bytes. Explicit host runtime directories follow the same checks and must be
 outside project/data directories. Do not repair permissions silently. Refuse an
-owned lock or any occupied endpoint without unlinking it, signaling a process
-or replacing state; stale-state recovery belongs to local lifecycle management.
+owned lock or any occupied endpoint in `bind_in` without unlinking it, signaling
+a process or replacing state. Lifecycle `bind_recovering` holds the same private
+ownership lock before inspecting a stale endpoint: only a validated same-user
+mode-0600 socket with a refused connection and unchanged device/inode may be
+removed. Live endpoints, non-sockets, symlinks and invalid permissions are refused.
+No PID file or process signal is used for stale recovery or local stop.
 Drop removes only this instance's socket identity; the lock file remains.
 
 The foreground example `cargo run --locked --example native-ipc-server`
 exercises the real host. `serve_until` accepts a host-owned shutdown flag;
-consumer EOF never stops listening. Host shutdown closes connections and waits
-for dispatched operations to finish. This foundation adds no CLI lifecycle,
-auto routing, HTTP or credential-management surface.
+consumer EOF never stops listening. Host shutdown closes existing connection
+read sides and waits for dispatched operations (and their response writes) to
+finish before releasing the endpoint/ownership lock. Local administrative
+connections remain serviceable during that drain and cannot indefinitely pin
+shutdown; new project requests are refused. The CLI lifecycle adapter is defined by
+[[DES-DAEMON-LIFECYCLE]]; auto routing, HTTP and enabled credential handoff remain
+separate deliverables.
 
 HTTP is disabled unless explicitly enabled, binds only
 loopback, and checks the session token, allowed Origin and project allowlist
@@ -541,10 +572,59 @@ consumers disconnecting do not stop the daemon. Only one daemon instance owns
 the per-user endpoint; a second start reports the existing instance rather than
 replacing it. No installer, OS service or auto-start behavior is included.
 
+Delivered Linux/macOS CLI: `mara daemon run|start|stop|status|refresh|connection-info`.
+Lifecycle and project routing select the same private IPC directory:
+`--daemon-directory PATH` overrides `MARA_DAEMON_DIRECTORY`; omission uses the
+platform's per-user runtime default. Detached start passes that exact directory
+to its child, so every lifecycle command controls the selected endpoint, never
+an unrelated default. Existing ownership/permission checks still apply.
+`--format human|json` applies normally (human lifecycle results are compact JSON).
+`run` blocks until authenticated local stop, SIGINT or SIGTERM, and emits
+`{state:"stopped"}` after graceful shutdown. `start` launches the same executable's
+`daemon run` with a new OS session and null standard streams; it inherits the
+caller's indexing environment. The child explicitly selects direct mode because
+the server calls the runtime directly; inherited client preferences cannot
+invalidate an accepted parent invocation. It waits up to five seconds for compatible IPC readiness,
+then returns `{state:"running",pid,already_running:false}`; a compatible existing
+owner returns its state/PID with `already_running:true`. If a concurrent owner
+wins after this invocation launches a child, start terminates and reaps only its
+own losing child before reporting that owner, preventing a delayed replacement
+after explicit stop. A losing child's exit does not end the five-second readiness
+wait: a concurrent owner may hold the lock before publishing its endpoint.
+A second foreground run fails with the ownership diagnostic. Background startup failures direct the user
+to foreground `run` for diagnostics; there is no persistent log or PID file.
+
+`status` returns `{state:"stopped"}` when the endpoint is absent,
+`{state:"stale"}` for a validated socket whose connection is refused, or the
+live `{state:"running"|"stopping",pid}`. Invalid ownership/permissions, incompatible
+versions and other connection errors fail rather than imply absence.
+`stop` retains one authenticated IPC connection, records its endpoint identity,
+negotiates and requests shutdown on that same connection, then waits up to 30
+seconds for that owner's endpoint identity to disappear/change; already absent
+or stale endpoints return their status without modification. A timeout reports
+that shutdown was requested and pending work remains; no process is forcibly
+signaled. Startup timeout cleanup targets only the child just launched.
+
+Only `refresh` accepts `--project PATH`, resolving relative selections against
+the caller cwd; omission uses nearest-project discovery. It sends the absolute
+selection through existing `project_refresh`, waits for active selected-root work,
+and returns `{refreshed:true}`. Non-UTF-8 selected or discovered roots return
+`invalid_argument` before IPC dispatch rather than panic. After negotiation, refresh has no response
+health-check timeout: legitimate selected-root work may take longer than 30
+seconds. A disconnect reports possible completion without automatic replay.
+Refresh discards projections without running indexers; the next operation rebuilds them. Other lifecycle commands reject
+`--project` because ownership is per user, not per project. These commands use
+only narrow IPC lifecycle/refresh exchanges; they do not route existing CLI/MCP
+project operations or automatically replay requests.
+
 Provide an explicit local connection-info command for HTTP callers. Keep
 connection information in private per-user runtime state; return the HTTP
 endpoint and daemon-session token only on deliberate local request. Routine
-status output and logs omit tokens. The caller supplies the connection
+status output and logs omit tokens. With a running daemon and HTTP disabled,
+`connection-info` returns `{available:false,reason:"http_disabled"}` successfully;
+absence/incompatibility is a connection error, not an enabled HTTP handoff. The
+HTTP task supplies the enabled endpoint/token result through this local-only
+boundary, never through status or project files. The caller supplies the connection
 information to the browser client. A dedicated UI launcher and browser pairing
 are outside 0.4.0; a later launcher can automate this handoff without expanding
 browser authority.

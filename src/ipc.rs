@@ -16,7 +16,10 @@ use std::{
         },
     },
     path::{Path, PathBuf},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::Duration,
 };
@@ -51,6 +54,7 @@ pub struct IpcServer {
     identity: (u64, u64),
     _lock: File,
     sessions: NativeSessions,
+    control: Arc<AtomicBool>,
 }
 impl IpcServer {
     pub fn bind_default(sessions: NativeSessions) -> io::Result<Self> {
@@ -59,6 +63,14 @@ impl IpcServer {
     /// An explicit private host runtime directory (not a project or data directory).
     /// Never removes an existing endpoint, even if it appears stale.
     pub fn bind_in(directory: &Path, sessions: NativeSessions) -> io::Result<Self> {
+        Self::bind(directory, sessions, false)
+    }
+    /// Lifecycle-only recovery: under the ownership lock, remove only a private
+    /// same-user socket whose connection is refused. Never signal a recorded PID.
+    pub fn bind_recovering(directory: &Path, sessions: NativeSessions) -> io::Result<Self> {
+        Self::bind(directory, sessions, true)
+    }
+    fn bind(directory: &Path, sessions: NativeSessions, recover: bool) -> io::Result<Self> {
         if !directory.is_absolute() {
             return Err(io::Error::other("IPC runtime directory must be absolute"));
         }
@@ -97,19 +109,40 @@ impl IpcServer {
                 "IPC socket path is too long; select a shorter private runtime directory",
             ));
         }
-        let listener = UnixListener::bind(&socket).map_err(|_| io::Error::other("Cannot bind IPC endpoint; an existing endpoint is never replaced. Inspect it through local lifecycle management"))?;
-        if let Err(e) = fs::set_permissions(&socket, fs::Permissions::from_mode(0o600)) {
-            let _ = fs::remove_file(&socket);
-            return Err(e);
+        if recover {
+            recover_stale(&directory)?;
         }
-        let metadata = fs::symlink_metadata(&socket)?;
-        let identity = (metadata.dev(), metadata.ino());
+        // Publish only after the socket has its final private permissions. Binding
+        // the discoverable name and chmod'ing it exposes a transient unsafe mode
+        // to concurrent starts under an ordinary umask. A hard link publishes the
+        // same socket inode atomically and refuses an occupied final name.
+        // Keep the staging basename shorter than native-v1.sock for macOS paths.
+        let nonce = ulid::Ulid::new().to_string();
+        let pending = directory.join(format!(".s{}", &nonce[18..]));
+        let listener = UnixListener::bind(&pending).map_err(|_| {
+            io::Error::other(
+                "Cannot stage IPC endpoint; check runtime ownership and socket path availability",
+            )
+        })?;
+        let publication = (|| {
+            fs::set_permissions(&pending, fs::Permissions::from_mode(0o600))?;
+            let metadata = fs::symlink_metadata(&pending)?;
+            fs::hard_link(&pending, &socket).map_err(|_| {
+                io::Error::other(
+                    "Cannot publish IPC endpoint; an occupied endpoint is never replaced",
+                )
+            })?;
+            Ok::<_, io::Error>((metadata.dev(), metadata.ino()))
+        })();
+        let _ = fs::remove_file(&pending);
+        let identity = publication?;
         Ok(Self {
             listener,
             socket,
             identity,
             _lock: lock,
             sessions,
+            control: Arc::new(AtomicBool::new(false)),
         })
     }
     pub fn endpoint(&self) -> &Path {
@@ -125,13 +158,16 @@ impl IpcServer {
     /// operations finish even if their peer disconnects or the host stops listening.
     pub fn serve_until(self, shutdown: &AtomicBool) -> io::Result<()> {
         self.listener.set_nonblocking(true)?;
-        let mut workers: Vec<(UnixStream, thread::JoinHandle<io::Result<()>>)> = Vec::new();
+        // The last field distinguishes shutdown-only consumers from connections
+        // whose already-dispatched project operations must drain before exit.
+        let mut workers: Vec<(UnixStream, thread::JoinHandle<io::Result<()>>, bool)> = Vec::new();
+        let mut draining = false;
         let result = loop {
             // Retain neither completed threads nor their socket descriptors.
             let mut i = 0;
             while i < workers.len() {
                 if workers[i].1.is_finished() {
-                    let (_, h) = workers.swap_remove(i);
+                    let (_, h, _) = workers.swap_remove(i);
                     let _ = h.join();
                 } else {
                     i += 1;
@@ -139,6 +175,17 @@ impl IpcServer {
             }
             self.sessions.prune_idle();
             if shutdown.load(Ordering::Acquire) {
+                self.control.store(true, Ordering::Release);
+            }
+            if self.control.load(Ordering::Acquire) && !draining {
+                draining = true;
+                // Wake idle readers but let complete dispatched operations finish.
+                // Keep accepting administrative calls so status/start can observe stopping.
+                for (stream, _, _) in &workers {
+                    let _ = stream.shutdown(std::net::Shutdown::Read);
+                }
+            }
+            if draining && workers.iter().all(|(_, _, local_only)| *local_only) {
                 break Ok(());
             }
             match self.listener.accept() {
@@ -153,11 +200,13 @@ impl IpcServer {
                         Err(e) => break Err(e),
                     };
                     let sessions = self.sessions.clone();
+                    let control_flag = self.control.clone();
                     match thread::Builder::new()
                         .name("mara-ipc".into())
-                        .spawn(move || serve_connection(stream, sessions))
-                    {
-                        Ok(worker) => workers.push((control, worker)),
+                        .spawn(move || {
+                            serve_connection_controlled(stream, sessions, Some(control_flag))
+                        }) {
+                        Ok(worker) => workers.push((control, worker, draining)),
                         Err(e) => break Err(e),
                     }
                 }
@@ -168,10 +217,10 @@ impl IpcServer {
                 Err(e) => break Err(e),
             }
         };
-        for (stream, _) in &workers {
-            let _ = stream.shutdown(std::net::Shutdown::Both);
+        for (stream, _, _) in &workers {
+            let _ = stream.shutdown(std::net::Shutdown::Read);
         }
-        for (_, worker) in workers {
+        for (_, worker, _) in workers {
             let _ = worker.join();
         }
         result
@@ -206,6 +255,31 @@ pub fn connect(directory: &Path) -> io::Result<UnixStream> {
         ));
     }
     Ok(stream)
+}
+
+fn recover_stale(directory: &Path) -> io::Result<()> {
+    let socket = endpoint(directory);
+    let metadata = match fs::symlink_metadata(&socket) {
+        Ok(m) => m,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    // connect validates socket type/owner/mode before attempting a connection.
+    match connect(directory) {
+        Err(e) if e.kind() == io::ErrorKind::ConnectionRefused => {
+            let current = fs::symlink_metadata(&socket)?;
+            if (metadata.dev(), metadata.ino()) != (current.dev(), current.ino()) {
+                return Err(io::Error::other(
+                    "IPC endpoint changed during stale inspection; retry",
+                ));
+            }
+            fs::remove_file(socket)
+        }
+        Ok(_) => Err(io::Error::other(
+            "A live server occupies the IPC endpoint; it was not replaced",
+        )),
+        Err(e) => Err(e),
+    }
 }
 
 fn check_private_directory(directory: &Path) -> io::Result<()> {
@@ -261,12 +335,27 @@ fn same_user(stream: &UnixStream) -> io::Result<bool> {
         Ok(peer_uid == uid())
     }
 }
-fn serve_connection(mut stream: UnixStream, sessions: NativeSessions) -> io::Result<()> {
+#[cfg(test)]
+fn serve_connection(stream: UnixStream, sessions: NativeSessions) -> io::Result<()> {
+    serve_connection_controlled(stream, sessions, None)
+}
+fn serve_connection_controlled(
+    mut stream: UnixStream,
+    sessions: NativeSessions,
+    control: Option<Arc<AtomicBool>>,
+) -> io::Result<()> {
     // macOS accept inherits O_NONBLOCK from the polling listener; the framed worker
     // must wait for subsequent requests rather than treat WouldBlock as a disconnect.
     stream.set_nonblocking(false)?;
+    // Bound a non-reading peer's backpressure, not operation execution. A failed
+    // response write never cancels or rolls back an already-dispatched operation.
+    // Set before any write so shutdown also bounds an already-blocked syscall.
+    stream.set_write_timeout(Some(Duration::from_secs(1)))?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut rpc = RpcSession::new(sessions);
+    if let Some(control) = control {
+        rpc = rpc.with_local_control(control);
+    }
     loop {
         let mut bytes = Vec::new();
         let count = reader

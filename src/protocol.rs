@@ -2,7 +2,16 @@
 use crate::{NativeRuntime, NativeSessions, operations::*};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
+
+/// Native IPC only. HTTP hosts must not expose these administrative methods.
+pub const LOCAL_METHODS: &[&str] = &["daemon_status", "daemon_stop", "daemon_connection_info"];
 
 pub const PROTOCOL_VERSION: u8 = 1;
 pub const APPLICATION_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -37,6 +46,7 @@ pub const OPERATIONS: &[&str] = &[
 pub struct RpcSession {
     negotiated: bool,
     sessions: NativeSessions,
+    local_control: Option<Arc<AtomicBool>>,
 }
 
 impl RpcSession {
@@ -44,7 +54,13 @@ impl RpcSession {
         Self {
             negotiated: false,
             sessions,
+            local_control: None,
         }
+    }
+
+    pub(crate) fn with_local_control(mut self, control: Arc<AtomicBool>) -> Self {
+        self.local_control = Some(control);
+        self
     }
 
     /// Decode one JSON message. Notifications never dispatch project operations.
@@ -95,7 +111,9 @@ impl RpcSession {
             ))
         } else if method == "mara.negotiate" {
             self.negotiate(params)
-        } else if !OPERATIONS.contains(&method) {
+        } else if !OPERATIONS.contains(&method)
+            && !(self.local_control.is_some() && LOCAL_METHODS.contains(&method))
+        {
             Err(RpcError::new(
                 -32601,
                 "Method not found; inspect mara.negotiate capabilities",
@@ -105,6 +123,18 @@ impl RpcSession {
                 -32001,
                 "negotiation_required",
                 "Call mara.negotiate with the exact application and protocol versions before project operations",
+            ))
+        } else if LOCAL_METHODS.contains(&method) {
+            self.local(method, params)
+        } else if self
+            .local_control
+            .as_ref()
+            .is_some_and(|control| control.load(Ordering::Acquire))
+        {
+            Err(RpcError::domain(
+                -32000,
+                "operation_failed",
+                "Daemon is stopping; wait for stopped status before starting it again. No new project operation was dispatched",
             ))
         } else {
             self.dispatch(method, params)
@@ -136,8 +166,25 @@ impl RpcSession {
             "result_formats":{"discovery":2, "relationship":1, "validation":1, "trace":1, "operation_error":1},
             "capabilities":{"backend":"native", "operations":OPERATIONS, "persistence":"filesystem",
                 "code_indexing":true, "configured_indexers":true, "transaction_rollback":true,
-                "force_refresh":true, "project_sessions":"reconciled_memory"}
+                "force_refresh":true, "project_sessions":"reconciled_memory",
+                "local_methods": if self.local_control.is_some() { LOCAL_METHODS } else { &[] }}
         }))
+    }
+
+    fn local(&self, method: &str, params: Value) -> Result<Value, RpcError> {
+        let _: Empty = decode(params)?;
+        let control = self.local_control.as_ref().expect("local host checked");
+        match method {
+            "daemon_status" => Ok(
+                json!({"state": if control.load(Ordering::Acquire) { "stopping" } else { "running" }, "pid":std::process::id()}),
+            ),
+            "daemon_stop" => {
+                control.store(true, Ordering::Release);
+                Ok(json!({"state":"stopping"}))
+            }
+            "daemon_connection_info" => Ok(json!({"available":false,"reason":"http_disabled"})),
+            _ => unreachable!("local method table checked"),
+        }
     }
 
     fn dispatch(&self, method: &str, mut params: Value) -> Result<Value, RpcError> {

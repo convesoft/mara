@@ -162,8 +162,13 @@ fn every_cli_command_argument_and_option_has_rendered_guidance() {
             }
         }
     }
-    // Root, seven groups, 21 project operations, and the MCP server.
-    assert_eq!(visited.len(), 30);
+    // Existing project/MCP tree plus the native-only daemon group and six commands.
+    let daemon_commands = if cfg!(any(target_os = "linux", target_os = "macos")) {
+        7
+    } else {
+        0
+    };
+    assert_eq!(visited.len(), 30 + daemon_commands);
 }
 
 // @mara implements VER-INTERFACE-PARITY
