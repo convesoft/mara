@@ -47,6 +47,7 @@ pub struct RpcSession {
     negotiated: bool,
     sessions: NativeSessions,
     local_control: Option<Arc<AtomicBool>>,
+    connection_info: Option<Value>,
 }
 
 impl RpcSession {
@@ -55,11 +56,17 @@ impl RpcSession {
             negotiated: false,
             sessions,
             local_control: None,
+            connection_info: None,
         }
     }
 
     pub(crate) fn with_local_control(mut self, control: Arc<AtomicBool>) -> Self {
         self.local_control = Some(control);
+        self
+    }
+
+    pub(crate) fn with_connection_info(mut self, info: Value) -> Self {
+        self.connection_info = Some(info);
         self
     }
 
@@ -182,7 +189,10 @@ impl RpcSession {
                 control.store(true, Ordering::Release);
                 Ok(json!({"state":"stopping"}))
             }
-            "daemon_connection_info" => Ok(json!({"available":false,"reason":"http_disabled"})),
+            "daemon_connection_info" => Ok(self
+                .connection_info
+                .clone()
+                .unwrap_or_else(|| json!({"available":false,"reason":"http_disabled"}))),
             _ => unreachable!("local method table checked"),
         }
     }
@@ -302,7 +312,7 @@ impl RpcError {
             data: None,
         }
     }
-    fn domain(code: i32, kind: &str, message: &str) -> Self {
+    pub(crate) fn domain(code: i32, kind: &str, message: &str) -> Self {
         Self {
             code,
             message: message.into(),

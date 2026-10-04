@@ -55,6 +55,8 @@ pub struct IpcServer {
     _lock: File,
     sessions: NativeSessions,
     control: Arc<AtomicBool>,
+    http: Option<crate::http::HttpServer>,
+    connection_info: Option<Value>,
 }
 impl IpcServer {
     pub fn bind_default(sessions: NativeSessions) -> io::Result<Self> {
@@ -143,8 +145,18 @@ impl IpcServer {
             _lock: lock,
             sessions,
             control: Arc::new(AtomicBool::new(false)),
+            http: None,
+            connection_info: None,
         })
     }
+    /// Startup policy only; credentials remain memory-only and local IPC-only.
+    pub fn with_http(mut self, options: crate::http::HttpOptions) -> io::Result<Self> {
+        let http = crate::http::HttpServer::bind(options)?;
+        self.connection_info = Some(http.connection_info()?);
+        self.http = Some(http);
+        Ok(self)
+    }
+
     pub fn endpoint(&self) -> &Path {
         &self.socket
     }
@@ -156,8 +168,19 @@ impl IpcServer {
 
     /// Host-owned shutdown: consumer EOF never sets this flag. Already-dispatched
     /// operations finish even if their peer disconnects or the host stops listening.
-    pub fn serve_until(self, shutdown: &AtomicBool) -> io::Result<()> {
+    pub fn serve_until(mut self, shutdown: &AtomicBool) -> io::Result<()> {
         self.listener.set_nonblocking(true)?;
+        let http_worker = if let Some(http) = self.http.take() {
+            let sessions = self.sessions.clone();
+            let control = self.control.clone();
+            Some(
+                thread::Builder::new()
+                    .name("mara-http-host".into())
+                    .spawn(move || http.serve_until(sessions, control))?,
+            )
+        } else {
+            None
+        };
         // The last field distinguishes shutdown-only consumers from connections
         // whose already-dispatched project operations must drain before exit.
         let mut workers: Vec<(UnixStream, thread::JoinHandle<io::Result<()>>, bool)> = Vec::new();
@@ -185,7 +208,12 @@ impl IpcServer {
                     let _ = stream.shutdown(std::net::Shutdown::Read);
                 }
             }
-            if draining && workers.iter().all(|(_, _, local_only)| *local_only) {
+            if draining
+                && workers.iter().all(|(_, _, local_only)| *local_only)
+                && http_worker
+                    .as_ref()
+                    .is_none_or(|worker| worker.is_finished())
+            {
                 break Ok(());
             }
             match self.listener.accept() {
@@ -197,31 +225,53 @@ impl IpcServer {
                     }
                     let control = match stream.try_clone() {
                         Ok(s) => s,
+                        Err(e) if crate::http::resource_pressure(&e) => {
+                            thread::sleep(Duration::from_millis(10));
+                            continue;
+                        }
                         Err(e) => break Err(e),
                     };
                     let sessions = self.sessions.clone();
                     let control_flag = self.control.clone();
+                    let connection_info = self.connection_info.clone();
                     match thread::Builder::new()
                         .name("mara-ipc".into())
                         .spawn(move || {
-                            serve_connection_controlled(stream, sessions, Some(control_flag))
+                            serve_connection_controlled(
+                                stream,
+                                sessions,
+                                Some(control_flag),
+                                connection_info,
+                            )
                         }) {
                         Ok(worker) => workers.push((control, worker, draining)),
+                        Err(e) if crate::http::resource_pressure(&e) => {
+                            thread::sleep(Duration::from_millis(10));
+                        }
                         Err(e) => break Err(e),
                     }
                 }
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                Err(e)
+                    if e.kind() == io::ErrorKind::WouldBlock
+                        || crate::http::resource_pressure(&e) =>
+                {
                     thread::sleep(Duration::from_millis(10))
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
                 Err(e) => break Err(e),
             }
         };
+        self.control.store(true, Ordering::Release);
         for (stream, _, _) in &workers {
             let _ = stream.shutdown(std::net::Shutdown::Read);
         }
         for (_, worker, _) in workers {
             let _ = worker.join();
+        }
+        if let Some(worker) = http_worker {
+            worker
+                .join()
+                .map_err(|_| io::Error::other("HTTP host failed"))??;
         }
         result
     }
@@ -337,12 +387,13 @@ fn same_user(stream: &UnixStream) -> io::Result<bool> {
 }
 #[cfg(test)]
 fn serve_connection(stream: UnixStream, sessions: NativeSessions) -> io::Result<()> {
-    serve_connection_controlled(stream, sessions, None)
+    serve_connection_controlled(stream, sessions, None, None)
 }
 fn serve_connection_controlled(
     mut stream: UnixStream,
     sessions: NativeSessions,
     control: Option<Arc<AtomicBool>>,
+    connection_info: Option<Value>,
 ) -> io::Result<()> {
     // macOS accept inherits O_NONBLOCK from the polling listener; the framed worker
     // must wait for subsequent requests rather than treat WouldBlock as a disconnect.
@@ -355,6 +406,9 @@ fn serve_connection_controlled(
     let mut rpc = RpcSession::new(sessions);
     if let Some(control) = control {
         rpc = rpc.with_local_control(control);
+        if let Some(info) = connection_info {
+            rpc = rpc.with_connection_info(info);
+        }
     }
     loop {
         let mut bytes = Vec::new();

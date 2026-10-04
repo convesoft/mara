@@ -475,9 +475,8 @@ plain `RpcSession`/HTTP dispatch. `daemon_status` returns `{state,pid}` with sta
 already-dispatched project work drains, IPC keeps servicing negotiation and
 local administrative methods; new project operations fail with -32000
 `operation_failed` stating that the daemon is stopping, before dispatch.
-`daemon_connection_info` currently returns
-`{available:false,reason:"http_disabled"}`. The enabled endpoint/token handoff
-remains the HTTP adapter's deliverable under [[DES-DAEMON-LIFECYCLE]].
+`daemon_connection_info` returns the disabled result or deliberate enabled
+endpoint/token handoff defined by [[DES-DAEMON-LIFECYCLE]].
 
 Unknown parameters fail before dispatch. Responses contain exactly `result`
 or `error:{code,message,data?}`. Standard JSON-RPC errors are -32700 parse,
@@ -539,21 +538,67 @@ read sides and waits for dispatched operations (and their response writes) to
 finish before releasing the endpoint/ownership lock. Local administrative
 connections remain serviceable during that drain and cannot indefinitely pin
 shutdown; new project requests are refused. The CLI lifecycle adapter is defined by
-[[DES-DAEMON-LIFECYCLE]]; auto routing, HTTP and enabled credential handoff remain
-separate deliverables.
+[[DES-DAEMON-LIFECYCLE]]. The opt-in HTTP host shares the IPC host's sessions
+and shutdown control; local status remains available while dispatched HTTP work
+drains. Shutdown wakes incomplete HTTP readers and waits for dispatched work
+and bounded response writes before releasing ownership.
 
-HTTP is disabled unless explicitly enabled, binds only
-loopback, and checks the session token, allowed Origin and project allowlist
-before project access. Configure exact authorized project roots and explicit
-initialization destinations locally when starting the daemon; authorizing one
-root does not authorize descendants, another project or another Git worktree.
-Resolve request targets against that authority rather than trusting path
-spelling. Do not put tokens in URLs or logs, or allow wildcard browser origins.
+HTTP is disabled unless explicitly enabled and binds only a numeric loopback
+address. Send one JSON-RPC object in `POST /rpc` with `Content-Type:
+application/json`, a Content-Length body (at most 1 MiB), `Authorization: Bearer
+<token>`, an exact allowed `Origin`, `X-Mara-Protocol-Version: 1` and
+`X-Mara-Application-Version: <exact workspace version>`. Query strings, URL
+credentials and chunked request bodies are not supported. Each request negotiates
+a fresh `RpcSession` with those version headers before dispatch, independent of
+HTTP connection reuse; explicit `mara.negotiate` returns normal capabilities.
+Missing version headers return -32001; incompatible versions return the shared
+-32002 error. No HTTP negotiation handle or cookie is introduced.
 
-HTTP exposes authorized project operations, including explicit rollback and
-force refresh, but no daemon-wide start/stop, access-policy or credential
-management. Connection information is handed off locally under
-[[DES-DAEMON-LIFECYCLE]]; there is no browser pairing protocol.
+Token and origin refusal return HTTP 401 and 403 respectively; exact-root
+refusal returns 403 without project diagnostics. Accepted RPC results/errors
+use HTTP 200 with the same JSON-RPC/domain payloads as IPC. Notifications use
+204 without dispatch. Unknown methods, including daemon administration, return
+-32601; HTTP capabilities have empty `local_methods`. Connections close after
+one response; response loss is not rollback or permission to replay. Request
+headers are bounded to 16 KiB/32 fields; incomplete reads have a five-second
+socket timeout, response backpressure a one-second timeout. Operation execution
+has no transport deadline. At most 16 HTTP connections, including
+unauthenticated readers, own workers at once; additional peers wait in the OS
+listen backlog. Both HTTP and native IPC back off on temporary
+accept/descriptor/thread resource pressure without terminating their listeners.
+Admission may fail or wait during pressure; existing dispatched operations keep
+running. Releasing pressure restores both services without a daemon restart.
+
+Every POST requires both token and allowed Origin before target resolution.
+`OPTIONS /rpc` permits only an explicitly allowed origin, requested method POST
+and supported request headers; it carries no token and never dispatches RPC or
+inspects a project. CORS echoes only the selected exact origin, never wildcard
+or credential cookies. Other paths/methods and malformed/unsupported framing
+fail before RPC dispatch. The daemon stores a fresh cryptographically random
+256-bit bearer token only in memory for that daemon session. Never place it in
+URLs, logs, project files or routine status.
+
+Startup authority stores resolved exact identities, not caller spelling.
+Resolve existing path components and real symlinks using filesystem metadata
+only, before reading project configuration/source or executing indexers. Explicit
+roots/destinations may have an absent suffix; reject dangling symlinks and parent
+traversal under absent components rather than inventing filesystem identity.
+Re-resolve each request, compare exact identity and dispatch that resolved path;
+a later alias retarget cannot inherit authority. A non-UTF-8 resolved identity
+returns -32602 before dispatch, even when its caller alias is UTF-8; JSON cannot
+encode that resolved host path. An alias of the same authorized root is otherwise
+permitted, but descendants, other projects and other Git worktrees are
+not. This is root selection authority, not a sandbox for an authorized project's
+trusted configuration or concurrent filesystem attackers.
+
+`project_init` checks the separate destination allowlist; other project operations
+check the project-root allowlist. To initialize and then read/edit without restart,
+list the destination in both. Destination permission alone grants no subsequent
+project authority; project permission alone grants no initialization authority.
+HTTP permits all authorized project operations, including rollback and force
+refresh, but no daemon-wide lifecycle, access-policy or credential management.
+Native IPC authority is unchanged. Connection information is handed off locally
+under [[DES-DAEMON-LIFECYCLE]]; there is no browser pairing protocol.
 
 MCP remains a separate stdio adapter to the high-level client, not the daemon's
 operation protocol. No remote hosting, event subscription or cross-project
@@ -625,11 +670,24 @@ endpoint and daemon-session token only on deliberate local request. Routine
 status output and logs omit tokens. With a running daemon and HTTP disabled,
 `connection-info` returns `{available:false,reason:"http_disabled"}` successfully;
 absence/incompatibility is a connection error, not an enabled HTTP handoff. The
-HTTP task supplies the enabled endpoint/token result through this local-only
-boundary, never through status or project files. The caller supplies the connection
+enabled result is `{available:true,endpoint:"http://<loopback-address>:<port>/rpc",
+token:"<daemon-session credential>"}` through this local-only boundary, never
+through status or project files. Credentials remain memory-only, not a persisted
+runtime file. The caller supplies the connection
 information to the browser client. A dedicated UI launcher and browser pairing
 are outside 0.4.0; a later launcher can automate this handoff without expanding
 browser authority.
+
+`run` and `start` accept startup-only `--http-bind <numeric-loopback-IP:port>`
+(port 0 selects an available port), repeatable `--http-origin <serialized-origin>`,
+`--http-project <absolute-root>` and `--http-init-destination <absolute-target>`.
+Omitting `--http-bind` disables HTTP; policy flags without it fail. Enabling HTTP
+requires at least one exact serialized HTTP(S) origin (scheme, host and optional
+non-default port; no path, wildcard, credentials or opaque origin). Empty root
+and destination lists grant no project authority. Origins need not be loopback;
+only the daemon listener must be. Hosted-browser certification remains downstream.
+`start` forwards policy to its child; an existing compatible owner is reported
+unchanged, never reconfigured. Policy changes require local stop/restart.
 
 The daemon's startup environment is the execution environment for configured
 indexers. Commands run from each selected project root with the existing
@@ -856,4 +914,13 @@ Without required outcomes, report incomplete evaluation and
 remain usable. This is an input boundary, not passing execution evidence,
 authorization or a reduced rule profile. Complete native rule/trace behavior
 and the complete portable document profile remain required.
+:::
+
+:::mara decision ADR-HTTP-REQUEST-NEGOTIATION
+:mid: 01M43G39EGNC015P94Y5R2GBEA
+:title: Negotiate HTTP compatibility on every request
+:status: draft
+:justifies: DES-LOCAL-DAEMON-PROTOCOL
+
+Choose exact application/protocol version headers on each HTTP request rather than an opaque negotiated-session handle. Browser connection pooling cannot preserve a TCP-local RpcSession; request-scoped negotiation reuses the shared negotiator without an additional credential, session store or expiry contract. Explicit mara.negotiate still returns the same capabilities. Incompatibility fails before project dispatch; no backend switching or automatic replay is authorized.
 :::

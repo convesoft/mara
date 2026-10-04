@@ -1,5 +1,5 @@
 //! Explicit CLI lifecycle adapter. This is not the general native routing client.
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 use mara::{
     ClientError, NativeSessions,
     ipc::{self, IpcServer},
@@ -25,9 +25,9 @@ extern "C" fn stop_signal(_: libc::c_int) {
 #[derive(Debug, Subcommand)]
 pub enum DaemonCommand {
     /// Run in the foreground until local stop, SIGINT or SIGTERM. Never auto-started.
-    Run,
+    Run(HttpStartup),
     /// Explicitly start a detached daemon, or report the compatible existing instance.
-    Start,
+    Start(HttpStartup),
     /// Stop through authenticated local IPC and wait for this endpoint owner to exit.
     Stop,
     /// Report running/stopping, stopped (no endpoint), or stale (refused connection).
@@ -36,6 +36,46 @@ pub enum DaemonCommand {
     Refresh,
     /// Deliberate private HTTP handoff; returns unavailable while HTTP is disabled.
     ConnectionInfo,
+}
+
+#[derive(Debug, Default, Args)]
+pub struct HttpStartup {
+    /// Enable HTTP at this numeric loopback address (port 0 selects a free port).
+    #[arg(long)]
+    http_bind: Option<std::net::SocketAddr>,
+    /// Exact serialized HTTP(S) browser origin; repeat for multiple origins.
+    #[arg(long, requires = "http_bind")]
+    http_origin: Vec<String>,
+    /// Exact existing project root authorized for HTTP operations (absolute).
+    #[arg(long, requires = "http_bind")]
+    http_project: Vec<PathBuf>,
+    /// Exact initialization destination authorized for HTTP project_init (absolute).
+    #[arg(long, requires = "http_bind")]
+    http_init_destination: Vec<PathBuf>,
+}
+impl HttpStartup {
+    fn options(self) -> Option<mara::http::HttpOptions> {
+        self.http_bind.map(|bind| mara::http::HttpOptions {
+            bind,
+            origins: self.http_origin,
+            projects: self.http_project,
+            initialization_destinations: self.http_init_destination,
+        })
+    }
+    fn append(&self, command: &mut Command) {
+        if let Some(bind) = self.http_bind {
+            command.arg("--http-bind").arg(bind.to_string());
+            for origin in &self.http_origin {
+                command.arg("--http-origin").arg(origin);
+            }
+            for project in &self.http_project {
+                command.arg("--http-project").arg(project);
+            }
+            for destination in &self.http_init_destination {
+                command.arg("--http-init-destination").arg(destination);
+            }
+        }
+    }
 }
 
 // @mara implements REQ-USER-DAEMON-LIFECYCLE
@@ -54,8 +94,8 @@ pub fn execute(
         .unwrap_or_else(ipc::runtime_directory)
         .map_err(|e| e.to_string())?;
     match command {
-        DaemonCommand::Run => run(&directory),
-        DaemonCommand::Start => start(&directory),
+        DaemonCommand::Run(http) => run(&directory, http),
+        DaemonCommand::Start(http) => start(&directory, http),
         DaemonCommand::Status => status(&directory),
         DaemonCommand::Stop => stop(&directory),
         DaemonCommand::ConnectionInfo => call(&directory, "daemon_connection_info", json!({})),
@@ -80,7 +120,7 @@ pub fn execute(
     .map_err(ClientError::from)
 }
 
-fn run(directory: &Path) -> Result<Value, String> {
+fn run(directory: &Path, http: HttpStartup) -> Result<Value, String> {
     // Install before binding so there is no visible endpoint without shutdown handling.
     // SAFETY: handlers use only a lock-free atomic flag; no allocation, I/O or pointers.
     unsafe {
@@ -95,6 +135,10 @@ fn run(directory: &Path) -> Result<Value, String> {
         }
     }
     IpcServer::bind_recovering(directory, NativeSessions::default())
+        .and_then(|server| match http.options() {
+            Some(options) => server.with_http(options),
+            None => Ok(server),
+        })
         .and_then(|server| server.serve_until(&SIGNAL_STOP))
         .map_err(|e| e.to_string())?;
     Ok(json!({"state":"stopped"}))
@@ -112,7 +156,7 @@ fn status_with_timeout(directory: &Path, timeout: Duration) -> Result<Value, Str
     }
 }
 
-fn start(directory: &Path) -> Result<Value, String> {
+fn start(directory: &Path, http: HttpStartup) -> Result<Value, String> {
     let current = status(directory)?;
     if matches!(current["state"].as_str(), Some("running" | "stopping")) {
         return Ok(json!({"state":current["state"],"pid":current["pid"],"already_running":true}));
@@ -127,6 +171,7 @@ fn start(directory: &Path) -> Result<Value, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    http.append(&mut command);
     // SAFETY: setsid is async-signal-safe and does not touch Rust state after fork.
     unsafe {
         command.pre_exec(|| {

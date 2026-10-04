@@ -43,6 +43,8 @@ pub use mutation::{
 pub use mutation::{InitialRelation, ItemCreation, ItemCreationRequest, create_item};
 pub mod client;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod http;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod ipc;
 #[path = "rules.rs"]
 mod native_rules;
