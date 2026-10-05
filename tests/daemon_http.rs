@@ -400,7 +400,7 @@ fn refuses_credentials_origins_versions_admin_and_exact_root_escapes_before_comm
     let config = fs::read_to_string(other.path().join(".mara/project.toml"))
         .unwrap()
         .replacen("format_version = 1", "format_version = 3", 1);
-    fs::write(other.path().join(".mara/project.toml"),format!("{config}\n[[code.languages]]\nname = 'rust'\nextensions = ['rs']\ncommand = ['sh', '-c', 'touch command-ran; exit 1']\nposition_encoding = 'utf8'\n")).unwrap();
+    fs::write(other.path().join(".mara/project.toml"),format!("{config}\n[[code.languages]]\nname = 'rust'\nextensions = ['rs']\ncommand = ['sh', '-c', 'touch command-ran; exit 1', 'sentinel', '{{output}}']\nposition_encoding = 'utf8'\n")).unwrap();
     let nested = allowed.path().join("nested");
     fs::create_dir(&nested).unwrap();
     mara::initialize_project(&nested, mara::Template::Minimal).unwrap();

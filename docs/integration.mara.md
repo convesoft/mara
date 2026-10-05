@@ -690,7 +690,7 @@ Publication remains the caller's responsibility.
 :::mara verification VER-INSTALLED-JAVASCRIPT-CLIENT
 :mid: 01M3YWAM1S59307YC4HYNPVGNQ
 :title: Verify installed Node and browser transport artifacts
-:status: draft
+:status: accepted
 :method: test
 :level: system
 :verifies: REQ-NODE-NATIVE-BINDING
@@ -702,6 +702,7 @@ Publication remains the caller's responsibility.
 :validates: SCN-IMPORT-MARA-NODE
 :validates: SCN-SELECT-BROWSER-MARA
 :verifies: DES-DAEMON-LIFECYCLE
+:verifies: REQ-SCRIPT-FREE-NPM-DISTRIBUTION
 
 Build and pack the candidate main/native packages, install them with lifecycle
 scripts disabled in disposable storage, and import the Node ESM API on Node 24.
@@ -720,7 +721,22 @@ request-local rules, known rule failures versus operation errors, continuation,
 caller selection, event-loop progress and closing without daemon shutdown.
 On Linux, optional MARA_NODE_PROCESS_TRACE captures process/socket syscalls via
 strace, distinguishing the Node test runner's own process from addon operations.
-These local checks do not certify a package installed with scripts disabled.
+These binding-local checks do not certify a package installed with scripts disabled.
+
+The complete installed gate is `cargo test --locked --test node_binding
+installed_node_client -- --ignored --exact --nocapture`. Supply absolute NODE24,
+private MARA_NODE_RUNTIME, MARA_NODE_CLIENT pointing to the smoke install's
+`node.mjs`, MARA_NODE_ADDON for the supplemental loader checks, and
+MARA_NODE_TYPED_CONSUMER pointing to the standard TypeScript compiler's installed
+`tests/node/usage.mts` output. It imports bare root/node exports and loads the
+installed exact-version optional addon without an addonPath override. The
+fixture's Node-only PATH and temporarily non-executable installed CLI require
+the full JS and compiled TypeScript workflows to work without CLI execution.
+The real Rust Unix-socket host stays independently owned through direct,
+default-auto and daemon-required execution, complete trace/read continuation
+and close/drain. Restore the CLI's permissions before later CLI/MCP smoke.
+CI/release compile against the installed declarations and run this same
+corresponding-host gate, not a copied source-loader substitute.
 
 Require artifact/runtime smoke on each supported native host for release.
 Verify exact workspace versions, addon/loader/types inventories, browser
@@ -739,15 +755,27 @@ worktree; native IPC selection remains unchanged.
 Exercise initialization at an explicitly authorized destination and project
 rollback/refresh. Refuse daemon-wide administration over HTTP. Check mismatched
 version refusal and that browser imports need no Node built-ins/addon.
-The adapter-local test `tests/browser/http.spec.mjs` uses the script-free installed
-main package, a fixture-owned foreground daemon, deliberate local connection-info
-handoff and exact test origin/project/destination allowlists. It exercises the full
-shared document API, native persistence, owning rules/errors/continuations,
-compatibility/access refusals, a real completed mutation with deliberately lost
-browser response, and close without shared-daemon shutdown. Select this test with
-`BROWSER_TEST_MATCH=http.spec.mjs`; `BROWSER_PORT` selects its isolated test server
-(default 18364). This local workflow does not certify complete installed-artifact
-authority, registry publication or every supported host.
+`tests/browser/http.spec.mjs` serves the script-free installed, optional-native-free
+main package against its installed CLI's fixture-owned foreground daemon.
+Use BROWSER_ASSETS_DIR, MARA_CLI, owned TMPDIR/CARGO_TARGET_DIR, private
+MARA_TEST_RUNTIME_DIR/BROWSER_RUNTIME_TMPDIR and the exact serialized loopback
+origin. Select it with `BROWSER_TEST_MATCH=http.spec.mjs`;
+BROWSER_TEST_PORT selects its isolated server (default 18364).
+
+The two real Chromium tests cover the full shared document API, owning
+rules/errors/continuations, disk persistence and exact native CLI parity.
+Recovery restores API-created source from a published-format pending-journal
+fixture; this is not an interrupted-publisher claim. Separate root/destination
+permissions, missing/wrong credentials, protocol/application mismatch,
+disallowed/missing origins, descendants and an actual other Git worktree are
+refused before FIFO configuration reads. Live configured-indexer sentinels stay
+untouched on HTTP refusal and run through independently authorized native IPC
+positive controls. Check disabled HTTP, local-only administration, token-free
+routine status/foreground output, response-loss unknown outcome without replay
+and close without daemon shutdown. Chromium imports HTTP/shared modules from
+the installed browser-only consumer with no native optional package.
+CI/release run these same tests on each corresponding host; local execution
+certifies only its recorded host/browser/revision, not registry publication.
 Chromium with a loopback-served application is the HTTP browser release gate.
 Origin configuration remains explicit; hosted HTTPS-to-daemon access and
 Firefox/WebKit compatibility are not certified by that run.
@@ -798,4 +826,69 @@ independent reads/schema checks and full editing of document-only workspaces,
 including an engineering schema with unused code-relation declarations. A mock
 worker or Node-only WASM run is not browser execution evidence. Record the
 candidate revision and actual artifact/browser results.
+:::
+
+:::mara evidence EVD-INSTALLED-NATIVE-HTTP-LINUX
+:mid: 01M456QGG88SMSDWW3B5WJSQDB
+:title: Installed Node and Chromium HTTP gate on Linux
+:status: accepted
+:result: passed
+:captured_at: 2026-10-05T04:55:24Z
+:subject_revision: 94bdf0dcbf4f807aa292253cc12a7d950d4ca640
+:evidences: VER-INSTALLED-JAVASCRIPT-CLIENT
+:evidences: VER-NPM-DISTRIBUTION
+
+Linux x86_64 installed-artifact Node/Chromium HTTP gates passed at commit
+`94bdf0dcbf4f807aa292253cc12a7d950d4ca640`, tree `f9201e27d4976cf7afbbfa0a529a3d6308e5af26`.
+This is local issue-checkout execution, not integration or final release certification.
+
+Fresh optimized CLI/addon and worker/WASM builds were made in this session.
+Native compiler inputs are byte-identical between the creation base and tested
+revision; the final standard builds reused that owned Cargo cache. Candidate
+main and matching Linux x64 native tarballs were freshly packed and installed
+offline with scripts disabled; installed CLI/addon bytes and default exact-version
+loader resolution matched those candidate inputs. All-three-target native
+manifests were inspected; foreign-host payloads were local metadata fixtures,
+not executable host evidence.
+
+- Actual Node 24.19.0/npm 11.17.0: installed bare ESM root/node exports and
+  strict TypeScript 5.9.3 compiled consumers passed direct, default-auto and
+  daemon-required full document workflows. A real Rust Unix-socket fixture
+  hosted daemon work; Node-only PATH and non-executable installed CLI excluded
+  CLI execution. Complete trace/large Unicode-read continuation, typed failures,
+  persistence/capabilities, event-loop progress and close/drain passed.
+- Actual Chromium 152.0.7977.82 / Playwright 1.58.2, application origin
+  `http://127.0.0.1:18428`: two installed browser-only HTTP tests passed against
+  the installed fixture daemon, with deliberate local connection-info handoff,
+  exact native read/list/search/validation parity and persisted mutations.
+  Disabled HTTP, version/credential/origin/root/destination refusals preceded
+  FIFO config reads. Descendants and a real other Git worktree remained outside
+  authority; three configured indexer sentinels ran only through native IPC
+  positive controls. Root/destination authority stayed separate; routine
+  foreground output/status omitted tokens; daemon administration was refused.
+- Authorized init, real journal-fixture restoration and refresh passed.
+  The recovery fixture used persisted API-created source and the published
+  journal format; it does not claim a deliberately interrupted daemon publisher.
+  Deliberate loss of a completed mutation response yielded unknown outcome
+  without replay; close left the independently owned daemon usable.
+- Script-free installed CLI/stdio MCP/skill smoke, private addon/public facade
+  regressions, all six existing Chromium tests, WASM build with matching
+  wasm-bindgen 0.2.127, formatting, locked workspace all-target build, strict
+  all-feature Clippy and 470 workspace tests passed. Eight ignored probes/
+  helpers are not counted as passes; Node gates ran explicitly.
+  Schema/project validation was valid and evaluation-complete with zero
+  diagnostics and no continuation; actionlint 1.7.12/ShellCheck 0.11.0 passed.
+
+Retained inventories, exact candidate tarballs/CLI/addon/WASM hashes, commands,
+results and test/reproduction inputs:
+`/home/araketski/.local/state/pi/verification/01a10a52-517e-73f4-9dd4-58fbd7c5f393/`.
+Main tarball SHA-256:
+`c52d8b2e33457f750e963b5593131963e9d6ddd390cb936276a410b3bbaf19d9`;
+Linux x64 native tarball:
+`1bd6eeea3aff969de52984009c397cbdba41ed7c8441703a1e4fd83182158219`.
+Local glibc was 2.44, Rust/Cargo 1.97.1. No actual Linux arm64, Apple Silicon,
+Ubuntu 22.04 baseline, cloud/protected/public-registry or release execution is
+claimed. Hosted HTTPS-to-daemon origins and Firefox/WebKit remain uncertified.
+The existing browser WASM smoke is not the independently owned comprehensive
+packaged-WASM acceptance lane.
 :::

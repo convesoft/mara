@@ -1,14 +1,35 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import test, { after } from 'node:test';
+import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 assert.equal(Number(process.versions.node.split('.')[0]), 24, 'certify the actual Node 24 baseline');
 const publicFacade = Boolean(process.env.MARA_NODE_CLIENT);
-const { loadAddon, NativeClientError: PrivateError } = await import(pathToFileURL(process.env.MARA_NODE_LOADER));
-const publicModule = publicFacade ? await import(pathToFileURL(process.env.MARA_NODE_CLIENT)) : null;
-const NativeClientError = publicModule?.MaraClientError ?? PrivateError;
+const privateModule = publicFacade ? null : await import(pathToFileURL(process.env.MARA_NODE_LOADER));
+// Installed proof uses bare public exports and default optional-package resolution.
+// Temporarily make its bundled CLI non-executable: addon workflows must still pass.
+let publicModule = null;
+if (publicFacade) {
+  if (process.env.MARA_NODE_INSTALLED) {
+    const packageRoot = path.dirname(process.env.MARA_NODE_CLIENT);
+    const consumer = path.resolve(packageRoot, '../../..', 'installed-node-proof.mjs');
+    await writeFile(consumer, "export * from '@convesoft/mara'; export { createNativeClient as nodeFactory } from '@convesoft/mara/node';\n");
+    publicModule = await import(pathToFileURL(consumer));
+    assert.equal(publicModule.createNativeClient, publicModule.nodeFactory);
+    const names = new Map([['linux:x64', 'mara-linux-x64-gnu'], ['linux:arm64', 'mara-linux-arm64-gnu'], ['darwin:arm64', 'mara-darwin-arm64']]);
+    const nativeRoot = path.join(packageRoot, '..', names.get(`${process.platform}:${process.arch}`));
+    const cli = path.join(nativeRoot, 'bin/mara');
+    const originalMode = (await stat(cli)).mode;
+    await chmod(cli, 0o600);
+    after(async () => { await chmod(cli, originalMode); });
+    assert.equal((await stat(cli)).mode & 0o111, 0, 'installed CLI cannot execute during native workflows');
+    console.log('Installed default addon proof with non-executable bundled CLI: ' + nativeRoot);
+  } else {
+    publicModule = await import(pathToFileURL(process.env.MARA_NODE_CLIENT));
+  }
+}
+const NativeClientError = publicModule?.MaraClientError ?? privateModule.NativeClientError;
 const createClient = publicFacade ? async options => {
   const client = await publicModule.createNativeClient({ ...options, ...(process.env.MARA_NODE_INSTALLED ? {} : { addonPath: process.env.MARA_NODE_ADDON }) });
   assert.equal(client.context.backend, 'native');
@@ -25,7 +46,7 @@ const createClient = publicFacade ? async options => {
     },
     close: () => client.close(),
   };
-} : loadAddon(process.env.MARA_NODE_ADDON);
+} : privateModule.loadAddon(process.env.MARA_NODE_ADDON);
 const base = process.env.MARA_NODE_FIXTURES;
 const daemonDirectory = process.env.MARA_NODE_DAEMON;
 const covered = new Set();
@@ -79,7 +100,15 @@ for (const mode of ['direct', undefined, 'daemon-required']) {
       assert.equal(trace.evaluation_complete, true);
       assert.equal(trace.summaries[0].passed, 2);
       assert.equal(trace.has_more, true);
-      await call('trace_matrix', { all: true, rules: ['urn:mara:rule:draft'], limit: 1, cursor: trace.next_cursor });
+      let tracePage = trace;
+      let traceRecords = trace.records.length;
+      while (tracePage.has_more) {
+        tracePage = await call('trace_matrix', { all: true, rules: ['urn:mara:rule:draft'], limit: 1, cursor: tracePage.next_cursor });
+        assert.equal(tracePage.evaluation_complete, true);
+        assert.deepEqual(tracePage.summaries, trace.summaries);
+        traceRecords += tracePage.records.length;
+      }
+      assert.ok(traceRecords > 2, 'consume the complete real trace, not only its second page');
       const local = { ids: ['REQ-A'], check: { files: ['checks.yaml'], shape: 'urn:mara:rule:status',
         parameters: { expected_status: 'draft' } } };
       assert.equal((await call('trace_matrix', local)).summaries[0].passed, 1);
@@ -149,6 +178,12 @@ for (const mode of ['direct', undefined, 'daemon-required']) {
       assert.equal(invalid.valid, false);
       assert.equal(invalid.evaluation_complete, true);
       assert.ok(invalid.summary.errors > 0);
+      let validationPage = invalid;
+      while (validationPage.has_more) {
+        validationPage = await call('project_validate', { limit: 1, cursor: validationPage.next_cursor });
+        assert.deepEqual(validationPage.summary, invalid.summary);
+        assert.equal(validationPage.evaluation_complete, true);
+      }
       await assert.rejects(call('project_validate', { limit: 0 }), error =>
         error instanceof NativeClientError && error.code === 'invalid_argument');
       // Restore configured rule, then exercise consecutive content with a real large read.
@@ -182,6 +217,12 @@ for (const mode of ['direct', undefined, 'daemon-required']) {
     finally { await survivor.close(); }
   });
 }
+
+test('installed compiled TypeScript consumer uses all native routes without an executable CLI',
+  { skip: !publicFacade || !process.env.MARA_NODE_INSTALLED }, async () => {
+    assert.ok(process.env.MARA_NODE_TYPED_CONSUMER, 'compile installed usage.mts and set MARA_NODE_TYPED_CONSUMER');
+    await import(pathToFileURL(process.env.MARA_NODE_TYPED_CONSUMER));
+  });
 
 test('routing failures, caller discovery, explicit selection and complete coverage', async () => {
   if (publicFacade) {

@@ -160,6 +160,23 @@ test('installed HTTP ESM facade uses an authorized real daemon without replay or
     expect(rules.invalid.valid).toBe(false);
     expect(rules.invalid.evaluation_complete).toBe(true);
     expect(rules.invalid.diagnostics[0].code).toBe('rule_failed');
+    // Recover real persisted API-created source through the published journal format.
+    // This is a recovery fixture, not an interrupted-publisher certification.
+    const rollbackPath = path.join(project, 'a.mara.md');
+    const rollbackBefore = await readFile(rollbackPath, 'utf8');
+    await writeFile(rollbackPath, '');
+    await writeFile(path.join(project, '.mara/transaction.json'), JSON.stringify({
+      format_version: 1, changes: [{ path: 'a.mara.md', before: rollbackBefore, after: '', mode: { readonly: false } }],
+    }));
+    const recovery = await page.evaluate(async () => ({
+      rollback: await window.httpClient.projectTransactionRollback(),
+      refresh: await window.httpClient.projectRefresh(),
+      read: await window.httpClient.get({ reference: 'REQ-B' }),
+    }));
+    expect(recovery.rollback.restored).toEqual(['a.mara.md']);
+    expect(recovery.refresh.refreshed).toBe(true);
+    expect(await readFile(rollbackPath, 'utf8')).toBe(rollbackBefore);
+    expect(await readFile(path.join(project, '.mara/transaction.json')).catch(() => null)).toBeNull();
     // A real daemon dispatch completes; its response is deliberately lost at the browser boundary.
     let dispatched = 0;
     await page.route(connection.endpoint, async route => {
@@ -238,6 +255,19 @@ test('installed HTTP ESM facade uses an authorized real daemon without replay or
     expect(lifecycle.idempotent).toBe(true);
     expect(lifecycle.code).toBe('client_closed');
     expect(lifecycle.read.content).toContain('Committed once.');
+    const nativeRead = JSON.parse((await cli(['--project', project, 'get', 'REQ-LOST'])).stdout);
+    expect(lifecycle.read).toEqual(nativeRead);
+    const parity = await page.evaluate(async () => {
+      const { createHttpClient } = await import('./http.mjs');
+      const client = await createHttpClient(window.httpFixture);
+      try {
+        return { list: await client.itemList(), search: await client.search({ query: 'Committed' }),
+          validation: await client.projectValidate() };
+      } finally { await client.close(); }
+    });
+    expect(parity.list).toEqual(JSON.parse((await cli(['--project', project, 'item', 'list'])).stdout));
+    expect(parity.search).toEqual(JSON.parse((await cli(['--project', project, 'search', 'Committed'])).stdout));
+    expect(parity.validation).toEqual(JSON.parse((await cli(['--project', project, 'project', 'validate'])).stdout));
     expect(JSON.parse((await cli(['daemon', 'status'])).stdout).state).toBe('running');
     const source = await readFile(path.join(project, 'a.mara.md'), 'utf8');
     expect(source).toContain('REQ-B');
@@ -257,7 +287,7 @@ test('installed HTTP ESM facade uses an authorized real daemon without replay or
     expect(blockedOrigin.code).toBe('http_connection_failed');
     expect(blockedOrigin.message).not.toContain(connection.token);
     await info.attach('http-acceptance', { body: JSON.stringify({
-      browserVersion: browser.version(), ...report, rules, loss, dispatched, adapterMismatch, versionFailure, lifecycle, blockedOrigin,
+      browserVersion: browser.version(), ...report, rules, recovery, parity, loss, dispatched, adapterMismatch, versionFailure, lifecycle, blockedOrigin,
     }, null, 2), contentType: 'application/json' });
   } finally {
     await page.unrouteAll({ behavior: 'ignoreErrors' });
@@ -267,6 +297,156 @@ test('installed HTTP ESM facade uses an authorized real daemon without replay or
       catch { daemon.kill('SIGTERM'); }
     }
     await daemonExit;
+    await rm(runtime, { recursive: true, force: true });
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+// @mara checks REQ-LOCAL-DAEMON-HTTP
+// @mara checks DES-DAEMON-LIFECYCLE
+// @mara checks DES-LOCAL-DAEMON-PROTOCOL
+test('installed daemon refuses HTTP authority before configuration reads or indexer execution', async ({ page, baseURL }, info) => {
+  if (!process.env.TMPDIR || !process.env.MARA_CLI || !process.env.MARA_TEST_RUNTIME_DIR) {
+    throw new Error('Set owned TMPDIR, private MARA_TEST_RUNTIME_DIR and installed MARA_CLI');
+  }
+  const fixture = await mkdtemp(path.join(process.env.TMPDIR, 'http-authority-'));
+  const runtime = await mkdtemp(path.join(process.env.MARA_TEST_RUNTIME_DIR, 'a-'));
+  const repository = path.join(fixture, 'repository');
+  const project = path.join(repository, 'selected');
+  const descendant = path.join(project, 'descendant');
+  const worktree = path.join(fixture, 'other-worktree');
+  const forbidden = path.join(fixture, 'forbidden');
+  const destination = path.join(fixture, 'init-only');
+  const deniedDestination = path.join(project, 'not-authorized');
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_') && !key.startsWith('MARA_')));
+  Object.assign(env, { TMPDIR: process.env.TMPDIR, CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR,
+    GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CEILING_DIRECTORIES: fixture,
+    XDG_CONFIG_HOME: path.join(fixture, '.test-config') });
+  const cli = args => exec(process.env.MARA_CLI, ['--format', 'json', '--daemon-directory', runtime, ...args],
+    { cwd: fixture, env, timeout: 120_000 });
+  let daemon;
+  let daemonExit;
+  let logs = '';
+  const start = async flags => {
+    daemon = spawn(process.env.MARA_CLI, ['--execution-mode', 'direct', '--daemon-directory', runtime,
+      'daemon', 'run', ...flags], { cwd: fixture, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    daemonExit = once(daemon, 'exit');
+    for (const stream of [daemon.stdout, daemon.stderr]) stream.on('data', chunk => { logs += chunk; });
+    const deadline = Date.now() + 10_000;
+    while (true) {
+      try { return JSON.parse((await cli(['daemon', 'connection-info'])).stdout); }
+      catch {
+        if (daemon.exitCode !== null || Date.now() > deadline) throw new Error('Fixture daemon did not become ready');
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    }
+  };
+  const stop = async () => {
+    if (daemon?.exitCode === null) {
+      try { await cli(['daemon', 'stop']); } catch { daemon.kill('SIGTERM'); }
+    }
+    if (daemonExit) await daemonExit;
+  };
+  try {
+    await mkdir(repository);
+    await exec('git', ['init', '-q', repository], { cwd: fixture, env });
+    await writeFile(path.join(repository, 'anchor'), 'Fixture-owned worktree identity.\n');
+    await exec('git', ['-C', repository, 'add', 'anchor'], { cwd: fixture, env });
+    await exec('git', ['-C', repository, '-c', 'user.name=HTTP fixture', '-c', 'user.email=fixture@example.invalid',
+      '-c', 'commit.gpgsign=false', 'commit', '-qm', 'Fixture'], { cwd: fixture, env });
+    await exec('git', ['-C', repository, 'worktree', 'add', '-q', '--detach', worktree], { cwd: fixture, env });
+    for (const root of [project, descendant, worktree, forbidden]) {
+      await cli(['--execution-mode', 'direct', '--project', root, 'project', 'init']);
+    }
+    const disabled = await start([]);
+    expect(disabled).toEqual({ available: false, reason: 'http_disabled' });
+    expect(JSON.parse((await cli(['daemon', 'status'])).stdout).state).toBe('running');
+    await stop();
+    const connection = await start(['--http-bind', '127.0.0.1:0', '--http-origin', baseURL,
+      '--http-project', project, '--http-init-destination', destination]);
+    expect(new URL(connection.endpoint).hostname).toBe('127.0.0.1');
+    await page.goto('/');
+    // Raw browser fetches retain real Origin/CORS and exact installed artifact versions.
+    const rpc = (method, params, options = {}) => page.evaluate(async ({ connection, method, params, options }) => {
+      const { applicationVersion } = await import('./version.mjs');
+      const headers = { 'Content-Type': 'application/json', 'X-Mara-Protocol-Version': options.protocol ?? '1',
+        'X-Mara-Application-Version': options.version ?? applicationVersion };
+      if (!options.missingToken) headers.Authorization = 'Bearer ' + (options.token ?? connection.token);
+      try {
+        const response = await fetch(connection.endpoint, { method: 'POST', headers,
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) });
+        const text = await response.text();
+        const body = text ? JSON.parse(text) : null; // Access refusals have no RPC body.
+        if (JSON.stringify(body).includes(connection.token)) throw new Error('Credential leaked in RPC diagnostic');
+        return { status: response.status, body };
+      } catch (error) {
+        if (options.corsFailure && error instanceof TypeError) return { corsBlocked: true };
+        throw error;
+      }
+    }, { connection, method, params, options });
+    // A FIFO cannot produce a normal project result: a config read would hang.
+    // Resolve authority using metadata only, including an actual other Git worktree.
+    const originals = new Map();
+    for (const root of [project, descendant, worktree, forbidden]) {
+      const config = path.join(root, '.mara/project.toml');
+      originals.set(config, await readFile(config, 'utf8'));
+      await rm(config);
+      await exec('mkfifo', [config], { cwd: fixture, env });
+    }
+    try {
+      for (const options of [{ missingToken: true }, { token: 'incorrect' }]) {
+        expect((await rpc('item_list', { project }, options)).status).toBe(401);
+      }
+      for (const options of [{ version: '0.0.0' }, { protocol: '99' }]) {
+        expect((await rpc('item_list', { project }, options)).body.error.code).toBe(-32002);
+      }
+      for (const root of [descendant, worktree, forbidden]) {
+        for (const method of ['schema_get', 'item_list', 'project_transaction_rollback', 'project_refresh']) {
+          expect((await rpc(method, { project: root })).status).toBe(403);
+        }
+      }
+      expect((await rpc('project_init', { project })).status).toBe(403); // root authority is not init authority
+      expect((await rpc('project_init', { project: deniedDestination })).status).toBe(403);
+      await page.goto(baseURL.replace('127.0.0.1', 'localhost') + '/');
+      expect(await rpc('item_list', { project }, { corsFailure: true })).toEqual({ corsBlocked: true });
+      await page.goto('/');
+      const missingOrigin = await page.request.post(connection.endpoint, { headers: {
+        Authorization: 'Bearer ' + connection.token, 'X-Mara-Protocol-Version': '1',
+        'X-Mara-Application-Version': JSON.parse(await readFile(path.join(process.env.BROWSER_ASSETS_DIR, 'package.json'), 'utf8')).version,
+      }, data: { jsonrpc: '2.0', id: 1, method: 'schema_get', params: { project } } });
+      expect(missingOrigin.status()).toBe(403);
+    } finally {
+      for (const [config, source] of originals) { await rm(config); await writeFile(config, source); }
+    }
+    expect(await readFile(path.join(deniedDestination, '.mara/project.toml')).catch(() => null)).toBeNull();
+    // An actual configured command sentinel, activated by a matching source file.
+    for (const root of [descendant, worktree, forbidden]) {
+      const config = path.join(root, '.mara/project.toml');
+      await writeFile(path.join(root, 'sentinel.rs'), 'pub fn sentinel() {}\n');
+      await writeFile(config, originals.get(config).replace('format_version = 1', 'format_version = 3') +
+        "\n[[code.languages]]\nname = 'rust'\nextensions = ['rs']\ncommand = ['sh', '-c', 'touch indexer-ran; exit 1', 'sentinel', '{output}']\nposition_encoding = 'utf8'\n");
+      expect((await rpc('item_list', { project: root })).status).toBe(403);
+      expect(await readFile(path.join(root, 'indexer-ran')).catch(() => null)).toBeNull();
+      // Positive control through unchanged native authority proves this command is live.
+      await expect(cli(['--execution-mode', 'daemon-required', '--project', root, 'item', 'list'])).rejects.toThrow();
+      expect(await readFile(path.join(root, 'indexer-ran'), 'utf8')).toBe('');
+    }
+    const initialized = await rpc('project_init', { project: destination });
+    expect(initialized.body.result.project.root).toBe(destination);
+    expect(await readFile(path.join(destination, '.mara/project.toml'), 'utf8')).toContain('[project]');
+    expect((await rpc('schema_get', { project: destination })).status).toBe(403); // init authority is not root authority
+    for (const method of ['daemon_status', 'daemon_stop', 'daemon_connection_info', 'daemon_set_policy', 'daemon_set_token']) {
+      expect((await rpc(method, {})).body.error.code).toBe(-32601);
+    }
+    const status = (await cli(['daemon', 'status'])).stdout;
+    expect(JSON.parse(status).state).toBe('running');
+    await stop();
+    expect(status + logs).not.toContain(connection.token);
+    await info.attach('http-authority', { body: JSON.stringify({ disabled, host: process.platform + '/' + process.arch,
+      descendantRefused: true, otherGitWorktreeRefused: true, fifoReadsRefused: true,
+      liveIndexerSentinels: 3, separateRootAndDestinationAuthority: true, routineLogsTokenFree: true }), contentType: 'application/json' });
+  } finally {
+    await stop();
     await rm(runtime, { recursive: true, force: true });
     await rm(fixture, { recursive: true, force: true });
   }

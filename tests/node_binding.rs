@@ -5,7 +5,7 @@
 #[test]
 #[ignore = "requires built MARA_NODE_ADDON, Node 24 NODE24, private MARA_NODE_RUNTIME"]
 fn real_node_addon() {
-    run_node_tests(false);
+    run_node_tests(false, false);
 }
 
 // @mara checks REQ-SHARED-TYPESCRIPT-CLIENT
@@ -13,11 +13,19 @@ fn real_node_addon() {
 #[test]
 #[ignore = "requires MARA_NODE_CLIENT package entry, built addon, Node 24 and private runtime"]
 fn real_node_facade() {
-    run_node_tests(true);
+    run_node_tests(true, false);
+}
+
+// @mara checks REQ-NODE-NATIVE-BINDING
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+#[ignore = "requires installed MARA_NODE_CLIENT/MARA_NODE_TYPED_CONSUMER, Node 24 and private runtime"]
+fn installed_node_client() {
+    run_node_tests(true, true);
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn run_node_tests(public: bool) {
+fn run_node_tests(public: bool, installed: bool) {
     use std::{
         path::PathBuf,
         process::Command,
@@ -77,6 +85,11 @@ fn run_node_tests(public: bool) {
     } else {
         command.env_remove("MARA_NODE_CLIENT");
     }
+    if installed {
+        command.env("MARA_NODE_INSTALLED", "1");
+    } else {
+        command.env_remove("MARA_NODE_INSTALLED");
+    }
     command.args(["--test", "--test-concurrency=1"]).arg(script);
     if public {
         command.arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/node/client.test.mjs"));
@@ -104,6 +117,12 @@ fn run_node_tests(public: bool) {
         {
             command.env_remove(key);
         }
+    }
+    if installed {
+        let node_only = fixtures.path().join("node-only");
+        std::fs::create_dir(&node_only).unwrap();
+        std::os::unix::fs::symlink(&node, node_only.join("node")).unwrap();
+        command.env("PATH", node_only);
     }
     let status = command.status().unwrap();
     drop(host);

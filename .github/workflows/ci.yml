@@ -107,9 +107,7 @@ jobs:
           export NODE24
           export MARA_NODE_ADDON="$SCRATCH/addon/mara.node"
           cargo test --locked --test node_binding real_node_addon -j 2 -- --ignored --exact --nocapture
-          export MARA_NODE_CLIENT="$SCRATCH/smoke/install/node_modules/@convesoft/mara/node.mjs"
-          export MARA_NODE_INSTALLED=1
-          cargo test --locked --test node_binding real_node_facade -j 2 -- --ignored --exact --nocapture
+          # The complete installed gate runs after TypeScript compilation below.
       - name: Verify installed TypeScript and Chromium clients
         shell: bash
         run: |
@@ -128,7 +126,8 @@ jobs:
           export MARA_NODE_CLIENT="$consumer/node_modules/@convesoft/mara/node.mjs"
           export MARA_NODE_FIXTURES="$SCRATCH/typed-fixtures"
           mkdir -p "$MARA_NODE_FIXTURES"
-          node "$consumer/typed/usage.mjs"
+          export MARA_NODE_TYPED_CONSUMER="$consumer/typed/usage.mjs"
+          cargo test --locked --test node_binding installed_node_client -j 2 -- --ignored --exact --nocapture
           export MARA_HTTP_PACKAGE="$consumer/node_modules/@convesoft/mara"
           node --test tests/node/http.test.mjs
           browser_consumer="$SCRATCH/smoke/browser-only"
