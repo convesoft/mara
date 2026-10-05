@@ -8,6 +8,13 @@ use std::{
 // @mara implements REQ-PROJECT-INITIALIZATION
 // @mara implements REQ-ENGINEERING-TEMPLATE
 pub fn initialize_project(target: impl AsRef<Path>, template: Template) -> Result<Project, Error> {
+    initialize_project_with_changes(target, template).map(|(project, _)| project)
+}
+
+pub(crate) fn initialize_project_with_changes(
+    target: impl AsRef<Path>,
+    template: Template,
+) -> Result<(Project, Vec<PathBuf>), Error> {
     let target = target.as_ref();
     fs::create_dir_all(target).map_err(|source| Error::Io {
         action: "create target directory",
@@ -81,7 +88,15 @@ pub fn initialize_project(target: impl AsRef<Path>, template: Template) -> Resul
     }
 
     match resolve_project(None, &root) {
-        Ok(project) => Ok(project),
+        Ok(project) => {
+            let mut paths: Vec<PathBuf> = plan
+                .changes()
+                .iter()
+                .map(|change| change.path.clone().into())
+                .collect();
+            paths.sort();
+            Ok((project, paths))
+        }
         Err(error) => {
             for path in &created {
                 let _ = fs::remove_file(path);

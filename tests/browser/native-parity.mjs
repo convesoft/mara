@@ -1,5 +1,6 @@
 // Real native shared-facade half of the Chromium document parity test.
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 const { createNativeClient } = await import(pathToFileURL(process.env.MARA_NODE_CLIENT));
 const input = JSON.parse(await readFile(process.argv[2], 'utf8'));
@@ -18,5 +19,18 @@ try {
     } while (cursor);
     results.push(pages);
   }
-  process.stdout.write(JSON.stringify({ results, capabilities: client.capabilities }));
+  const files = [];
+  const readSources = async (directory = '') => {
+    for (const entry of await readdir(path.join(input.root, directory), { withFileTypes: true })) {
+      const relative = directory ? `${directory}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        if (entry.name !== '.test-config') await readSources(relative);
+      } else if (relative !== 'parity-input.json' && !entry.name.endsWith('.lock')) {
+        files.push({ path: relative, content: await readFile(path.join(input.root, relative), 'utf8') });
+      }
+    }
+  };
+  await readSources();
+  files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  process.stdout.write(JSON.stringify({ results, files, capabilities: client.capabilities }));
 } finally { await client.close(); }

@@ -69,7 +69,7 @@ for (const mode of ['direct', undefined, 'daemon-required']) {
       assert.equal(caps.code.indexing, true);
       const initialized = await call('project_init', { template: 'engineering' });
       assert.equal(initialized.project.root, root);
-      assert.equal(initialized.created.length, 2); // Preserve the native owning result.
+      assert.equal(initialized.created.length, 5); // Every installed engineering source is reported.
       assert.ok(await readFile(path.join(root, '.mara/engineering-checks.yaml'), 'utf8'));
       assert.ok(await readFile(path.join(root, '.mara/engineering-execution.yaml'), 'utf8'));
       await writeFile(path.join(root, '.mara/engineering-rules.yaml'), rule);

@@ -784,9 +784,11 @@ Firefox/WebKit compatibility are not certified by that run.
 :::mara verification VER-BROWSER-DOCUMENT-ENGINE
 :mid: 01M3YWAYS67D7NTZ3YZ8RFGJRE
 :title: Verify the complete document profile in real browser WASM
-:status: draft
+:status: accepted
 :method: test
 :level: system
+:verifies: REQ-PROJECT-INITIALIZATION
+:verifies: REQ-TRACE-MATRIX
 :verifies: REQ-PORTABLE-DOCUMENT-ENGINE
 :verifies: REQ-BROWSER-LOCAL-WORKSPACE
 :verifies: REQ-BROWSER-CHANGE-EXPORT
@@ -826,6 +828,94 @@ independent reads/schema checks and full editing of document-only workspaces,
 including an engineering schema with unused code-relation declarations. A mock
 worker or Node-only WASM run is not browser execution evidence. Record the
 candidate revision and actual artifact/browser results.
+
+Repeat this gate with the candidate artifacts through the existing build/package
+path: `scripts/build-node.sh OUTPUT --release`, `scripts/build-browser.sh OUTPUT`
+and `scripts/smoke-npm.sh CLI ADDON BROWSER_ASSETS OUTPUT`. Use its script-free
+`browser-only` install (native optional packages omitted) as `BROWSER_ASSETS_DIR`
+and its installed native CLI/facade for `MARA_CLI`/`MARA_NODE_CLIENT`, with
+`MARA_NODE_INSTALLED=1`. Compile `tests/browser/usage.mts` with strict TypeScript
+and serve its emitted `usage.mjs` beside the installed package. Run the existing
+Playwright configuration with owned disk-backed temporary/results storage,
+private `BROWSER_RUNTIME_TMPDIR`, and a fixture-owned `BROWSER_TEST_PORT`.
+CI and captured-release host jobs run the same `*.spec.mjs` selection.
+
+`client.spec.mjs` compares all document mutation families, MID backfill,
+continuation and graph/rule results plus final source bytes against the real
+native facade. `document-profile.spec.mjs` adds all-template initialization,
+nested/two-hop qualification, typed literals, exact parameter outcomes,
+cardinality and source/heading/anchored-block safety. `workspace.spec.mjs`
+checks complete fresh disk inputs before export materialization; divergent
+untouched sources, inventory, configured membership or physical ignores leave
+every preimage and the entire fixture unchanged. `changeset.spec.mjs` checks
+restored/intermediate edits, retained empty documents and empty-versus-absent
+preimages through real WASM and native CLI validation.
+
+Document mutations retain their containing files; the public API has no
+file-delete operation. Deletion-format checking in Chromium uses a clearly
+caller-supplied v1 delta, not a claimed deletion export. The existing Rust
+consolidation regression exercises absent-current file entries. Snapshot
+replacement establishes a new base and is not a way to delete against the old
+base. Record these distinct scopes with the executed artifacts and revision;
+none certifies external revision currency, publication, other hosts or a final
+captured release candidate.
+:::
+
+:::mara evidence EVD-PACKAGED-BROWSER-DOCUMENT-LINUX
+:mid: 01M457MD3EM8D75B682QQWP58C
+:title: Linux installed browser document gate at the issue revision
+:status: accepted
+:result: passed
+:captured_at: 2026-10-05T05:20:57Z
+:subject_revision: 2459c3a729c1137ec4ad4867af9dee6223ca8362
+:evidences: VER-BROWSER-DOCUMENT-ENGINE
+
+Linux x86_64 installed document-profile gate passed at commit
+`2459c3a729c1137ec4ad4867af9dee6223ca8362`, tree
+`df8f43e0144b4edcd5da93f16f34e938e52c2ee4`. This is issue-checkout execution,
+not integration, other-host or captured-release certification.
+
+- Locked workspace all-target build/tests: 471 passed, zero failed, seven
+  intentionally ignored helpers/probes. Explicit real addon and installed
+  facade gates passed separately. Format and strict all-feature Clippy passed.
+- Main/native local tarballs installed offline with scripts disabled; the
+  browser consumer omitted native optional packages. Strict installed Node and
+  browser TypeScript passed; compiled consumers executed.
+- All 11 real Chromium cases passed, including all-template native/WASM
+  initialization, every document operation/mutation family, final-source parity,
+  bounded/stale continuation, typed/nested/qualified/parameterized rule outcomes,
+  graph policies, Unicode and source/heading/anchored-block reference safety.
+  The retained HTTP case is regression coverage, not the separate full authority gate.
+- Real package-relative module-worker/WASM fetches and asynchronous correlation
+  executed. Memory edits/export and rejected-edit preservation passed. Fresh
+  physical host-input divergence checks refused before application; valid
+  exported sources passed the installed native CLI. Required-code validation
+  and matrices remained unavailable; every mutation family refused unchanged.
+
+Document operations retain files. Chromium exercised real addition/modification
+exports and caller-supplied deletion/empty-versus-absence format checks through
+WASM; the existing passing Rust consolidation test covered absent-current file
+entries. No public file-delete operation, semantic rebase, filesystem-atomic
+publisher or external revision-currency claim is made.
+
+Optimized CLI/addon and browser WASM were built with locked standard scripts in
+owned storage. Identical built artifacts were reused at the committed subject;
+exact compiled-source/dependency, compiler and artifact equality checks are retained.
+The earlier implementation checkpoint was `59f7aedb076dba1b013070dc9ae1002da4ab2b3b`;
+its tests were strengthened to preserve supplied MIDs without normalization. Executed SHA-256:
+CLI `88692d43ec6d2eb48cc061df1f63d1a6f45fb6e08c8d63ebb6b07ce3105f205a`;
+addon `8225a3d15d9fd4862b0acf1ba9568e0cb13eb4bbae8a8ec171070ffe1719b029`;
+WASM `f7998dc8bca932ca81d7820a645d464b6ae5155e8c7b930765b853a8069e321f`.
+Main/native tarballs and full inventories, worker/glue/compiler hashes, commands,
+red-to-green logs and browser/native transcripts are retained under
+`/home/araketski/.local/state/pi/verification/01a10a52-5192-7783-be66-fe5a6143129a/`.
+
+Host: Linux x86_64/glibc 2.44; Node 24.19.0, npm 11.17.0,
+Chromium 152.0.7977.82, Rust/Cargo 1.97.1, wasm-bindgen 0.2.127,
+TypeScript 5.9.3, Playwright 1.58.2. Version remains 0.3.0.
+No Apple Silicon, Linux arm64, Ubuntu 22.04 baseline, remote CI/cloud review,
+registry install, release approval or publication certification. The same
+standard installed Playwright gate remains available to captured-release host jobs.
 :::
 
 :::mara evidence EVD-INSTALLED-NATIVE-HTTP-LINUX

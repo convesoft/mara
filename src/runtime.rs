@@ -3,7 +3,7 @@ use crate::operations::*;
 use crate::{Corpus, ItemCollectionResult, backfill_mids, list_items, load_corpus};
 use crate::{GetResult, RelatedFilters, RelatedResult, SearchResult, get, related, search};
 use crate::{ItemCreationRequest, create_item};
-use crate::{Project, Schema, Template, initialize_project, load_schema, resolve_project};
+use crate::{Project, Schema, Template, load_schema, resolve_project};
 use std::{env, path::PathBuf};
 pub(crate) mod sessions;
 mod validation;
@@ -433,7 +433,8 @@ pub fn project_initialize(
     target: PathBuf,
     template: Template,
 ) -> Result<ProjectInitializationResult, String> {
-    let project = initialize_project(target, template).map_err(|error| error.to_string())?;
+    let (project, created) = crate::host::initialize_project_with_changes(target, template)
+        .map_err(|error| error.to_string())?;
     Ok(ProjectInitializationResult {
         project: ProjectSummary {
             root: project.root().to_path_buf(),
@@ -441,6 +442,6 @@ pub fn project_initialize(
             schema_path: project.schema_path().to_path_buf(),
             content_patterns: project.content_patterns().to_vec(),
         },
-        created: vec![crate::PROJECT_FILE.into(), crate::SCHEMA_FILE.into()],
+        created,
     })
 }

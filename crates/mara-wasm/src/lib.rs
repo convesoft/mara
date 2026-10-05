@@ -131,7 +131,8 @@ impl MemoryWorkspace {
                     .engine
                     .plan_initialize(&p.name, p.template)
                     .map_err(argument)?;
-                let created: Vec<_> = plan.changes().iter().map(|c| c.path.clone()).collect();
+                let mut created: Vec<_> = plan.changes().iter().map(|c| c.path.clone()).collect();
+                created.sort();
                 let candidate = SourceEngine::new(plan.candidate().clone()).map_err(argument)?;
                 let (project, _) = project_inputs(&candidate).map_err(argument)?;
                 let result = json!({"created": created, "project": {

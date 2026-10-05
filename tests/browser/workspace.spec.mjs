@@ -11,6 +11,8 @@ import { promisify } from 'node:util';
 // @mara checks DES-BROWSER-FILE-CHANGESET
 test('real module worker runs the WASM memory workspace, rules and Unicode', async ({ page, browser }, info) => {
   const browserErrors = [];
+  const assetRequests = [];
+  page.context().on('request', request => assetRequests.push(request.url()));
   page.on('pageerror', error => browserErrors.push(String(error)));
   await page.goto('/');
   const report = await page.evaluate(async () => {
@@ -63,6 +65,9 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       assert(caps.mutation_persistence === 'memory' && !caps.code.indexing &&
         !caps.code.native_index_import && !caps.native_recovery, 'capabilities');
       assert(initialized.created.length === 5, 'engineering initialization');
+      const concurrent = await Promise.all([shared.schemaGet(), shared.workspaceState(), shared.workspaceSources()]);
+      assert(concurrent[0].kind === 'schema' && concurrent[1].mutation_persistence === 'memory' &&
+        concurrent[2].base.files.length === 0, 'asynchronous correlation/queued startup results');
       const sources = await call('workspace_sources');
       assert(sources.base.files.length === 0, 'initialization advanced base');
       const snapshot = sources.current;
@@ -71,8 +76,11 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
         '- id: rule:draft\n  targetClass: requirement\n  property:\n    - {path: status, hasValue: draft}\n';
       snapshot.files.push({ path: 'checks.yaml', content:
         '- id: rule:status\n  class: requirement\n  property:\n    - {path: status, hasValue: {parameter: expected_status}}\n' });
-      snapshot.files.push({ path: 'café/知识.mara.md', content: '# Unicode café 👩🏽‍💻\n\nNarrative.\n' });
-      snapshot.selection.document_paths.push('café/知识.mara.md');
+      snapshot.files.push({ path: 'café/知识.mara.md', content: '# Unicode café 👩🏽‍💻\n\nNarrative.\n' },
+        { path: 'untouched.mara.md', content: '# Untouched source\n' },
+        { path: '.gitignore', content: 'ignored/\n' });
+      snapshot.selection.document_paths.push('café/知识.mara.md', 'untouched.mara.md');
+      snapshot.selection.ignores.push({ directory: '', root_prefix: [], content: 'ignored/\n' });
       await call('load_snapshot', snapshot);
       assert((await call('workspace_sources')).base.base_identity === snapshot.base_identity, 'new base');
       await call('schema_get');
@@ -84,6 +92,8 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       await call('item_create', { flavour: 'requirement', id: 'REQ-B',
         file: 'café/知识.mara.md', title: 'Second', fields: [{ key: 'status', value: 'draft' }],
         body: 'Other source. 中文 👩🏽‍💻\n'.repeat(5000) });
+      const firstGet = await shared.get({ reference: 'REQ-B' });
+      assert(firstGet.has_more && firstGet.next_cursor, 'bounded get cursor');
       let getCursor;
       let completeBody = '';
       let getPages = 0;
@@ -98,6 +108,8 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       assert(/^[0-7][0-9A-HJKMNP-TV-Z]{25}$/.test(a.mid), 'host MID');
       const read = await call('get', { reference: 'REQ-A' });
       assert(read.content.includes('中文 café 👩🏽‍💻'), 'UTF-8 body round trip');
+      const firstSearch = await call('search', { query: 'café', limit: 1 });
+      assert(firstSearch.has_more && firstSearch.next_cursor, 'bounded search cursor');
       const search = await call('search', { query: 'café' });
       assert(search.results.length > 0, 'Unicode search');
       const handle = search.results.find(r => r.node.kind === 'section')?.node.reference;
@@ -128,9 +140,15 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       await call('item_list', { limit: 1, cursor: pageOne.next_cursor });
       const edge = { source: 'REQ-A', relation: 'refines', target: 'REQ-B' };
       await call('relation_add', edge);
+      await call('item_update', { reference: 'REQ-A', body: '中文 café 👩🏽‍💻. [[refines:REQ-B]] [[refines:REQ-B]]' });
+      const firstRelation = await call('relation_get', { ...edge, limit: 1 });
+      assert(firstRelation.has_more && firstRelation.next_cursor, 'bounded occurrence inspection');
+      await call('relation_get', { ...edge, limit: 1, cursor: firstRelation.next_cursor });
       const inspection = await call('relation_get', edge);
       await call('related', { reference: 'REQ-A', relations: ['schema:refines'], direction: 'outgoing' });
       await call('relation_remove', { ...edge, occurrence: inspection.occurrences[0].reference });
+      assert(!(await request('relation_get', { ...edge, limit: 1, cursor: firstRelation.next_cursor })).ok,
+        'stale occurrence cursor');
       await call('item_update', { reference: 'REQ-A', fields: [{ key: 'status', value: 'retired' }] });
       const failedRules = await call('project_validate');
       assert(failedRules.evaluation_complete && !failedRules.valid &&
@@ -139,6 +157,8 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       assert(!(await request('trace_matrix', { all: true, rules: ['urn:mara:rule:draft'],
         limit: 1, cursor: trace.next_cursor })).ok, 'stale trace cursor');
       assert(!(await request('get', { reference: handle })).ok, 'stale structural handle');
+      assert(!(await request('get', { reference: 'REQ-B', cursor: firstGet.next_cursor })).ok, 'stale get cursor');
+      assert(!(await request('search', { query: 'café', limit: 1, cursor: firstSearch.next_cursor })).ok, 'stale search cursor');
       await call('item_rename', { reference: 'REQ-A', new_id: 'REQ-RENAMED' });
       await call('item_move', { reference: 'REQ-RENAMED', file: 'moved.mara.md' });
       await call('item_delete', { reference: 'REQ-RENAMED' });
@@ -219,6 +239,14 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       assert(!(await request('project_transaction_rollback')).ok, 'fake native recovery');
 
       for (const mutate of [
+        s => { s.files[0].path = ''; },
+        s => { s.files[0].path = '/absolute'; },
+        s => { s.files[0].path = 'C:/drive'; },
+        s => { s.files[0].path = 'back\\\\slash'; },
+        s => { s.files = s.files.filter(f => f.path !== '.mara/project.toml'); },
+        s => { s.files = s.files.filter(f => f.path !== '.mara/engineering-rules.yaml'); },
+        s => { s.files = s.files.filter(f => f.path !== 'café/知识.mara.md'); },
+        s => { s.selection.document_paths = s.selection.document_paths.filter(p => p !== 'café/知识.mara.md'); },
         s => { s.files[0].path = '../escape'; },
         s => { s.files.push({ ...s.files[0], path: './' + s.files[0].path }); },
         s => { s.files = s.files.filter(f => f.path !== '.mara/schema.yaml'); },
@@ -258,6 +286,9 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
   expect(report.pageTick).toBe(true);
   expect(report.operations).toContain('trace_matrix');
   expect(report.operations).toContain('export_changes');
+  expect(assetRequests.some(url => url.endsWith('/browser/worker.mjs'))).toBe(true);
+  expect(assetRequests.some(url => url.endsWith('/browser/mara_wasm.js'))).toBe(true);
+  expect(assetRequests.some(url => url.endsWith('/browser/mara_wasm_bg.wasm'))).toBe(true);
   // Test-only host materialization. No publisher, journal or filesystem policy is added.
   if (!process.env.TMPDIR || !process.env.MARA_CLI) throw new Error('Set owned TMPDIR and real MARA_CLI');
   const root = await mkdtemp(path.join(path.resolve(process.env.TMPDIR), 'browser-export-'));
@@ -278,10 +309,21 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       return files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
     };
     // Independently reread the entire fixture inventory, including untouched source inputs.
-    const actual = { ...base, files: await readSources(), selection: {
-      document_paths: (await readSources()).filter(f => f.path.endsWith('.mara.md')).map(f => f.path),
-      ignores: [], // This fixture supplies no ignore context or physical ignore files.
-    } };
+    const freshSnapshot = async () => {
+      const files = await readSources();
+      // Fixture-owned complete discovery for these explicit include/ignore patterns;
+      // no original snapshot is substituted for current host inputs.
+      const ignores = [{ directory: '', root_prefix: [], content: await readFile(path.join(root, '.gitignore'), 'utf8') }];
+      const config = await readFile(path.join(root, '.mara/project.toml'), 'utf8');
+      const excludesUntouched = config.includes('include = ["café/**/*.mara.md"]');
+      return { format_version: 1, base_identity: 'freshly-read fixture; not external currency', files, selection: {
+        document_paths: files.filter(f => f.path.endsWith('.mara.md') &&
+          !(excludesUntouched && !f.path.startsWith('café/')) &&
+          !(ignores[0].content.includes('untouched.mara.md') && f.path === 'untouched.mara.md')).map(f => f.path),
+        ignores,
+      } };
+    };
+    const actual = await freshSnapshot();
     const checkSources = actual => page.evaluate(async ({ changeSet, actual }) => {
       const { createWasmClient } = await import('./browser.mjs');
       const client = await createWasmClient({ snapshot: {
@@ -292,19 +334,41 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
       } catch (error) { return { ok: false, error: error.envelope }; }
       finally { await client.close(); }
     }, { changeSet, actual });
-    // A real untouched-file divergence fails the host's pre-write gate. Preserve
-    // the entire divergent tree, including every otherwise matching preimage.
-    const untouched = base.files.find(f => f.path === 'checks.yaml');
-    await writeFile(path.join(root, untouched.path), untouched.content + '\n', 'utf8');
-    const divergentFiles = await readSources();
-    const rejectedCheck = await checkSources({ ...actual, files: divergentFiles });
-    expect(rejectedCheck.ok).toBe(false);
-    expect(await readSources()).toEqual(divergentFiles);
-    for (const change of changeSet.changes) {
-      expect(divergentFiles.find(f => f.path === change.path)?.content ?? null).toBe(change.before);
+    // Complete checks precede any application writes, including matching changed-file
+    // preimages. Each divergence is materialized on disk and independently reread.
+    const rejectedChecks = [];
+    for (const relative of ['untouched.mara.md', '.mara/project.toml', '.mara/schema.yaml',
+      '.mara/engineering-rules.yaml', 'checks.yaml', '.gitignore', 'extra.mara.md']) {
+      const original = actual.files.find(f => f.path === relative)?.content ?? null;
+      await writeFile(path.join(root, relative), (original ?? '# Extra') + '\n', 'utf8');
+      const divergent = await freshSnapshot();
+      const rejectedCheck = await checkSources(divergent);
+      expect(rejectedCheck.ok, relative).toBe(false);
+      expect(await readSources()).toEqual(divergent.files);
+      for (const change of changeSet.changes) {
+        expect(divergent.files.find(f => f.path === change.path)?.content ?? null).toBe(change.before);
+      }
+      rejectedChecks.push({ relative, divergent, rejectedCheck });
+      if (original === null) await rm(path.join(root, relative));
+      else await writeFile(path.join(root, relative), original, 'utf8');
     }
-    await writeFile(path.join(root, untouched.path), untouched.content, 'utf8');
-    const checked = await checkSources({ ...actual, files: await readSources() });
+    const configPath = path.join(root, '.mara/project.toml');
+    const originalConfig = await readFile(configPath, 'utf8');
+    await writeFile(configPath, originalConfig.replace('include = ["**/*.mara.md"]', 'include = ["café/**/*.mara.md"]'));
+    const changedSelection = await freshSnapshot();
+    expect(changedSelection.selection.document_paths).not.toEqual(actual.selection.document_paths);
+    const selectionCheck = await checkSources(changedSelection);
+    expect(selectionCheck.ok).toBe(false);
+    expect(await readSources()).toEqual(changedSelection.files);
+    rejectedChecks.push({ relative: 'effective-selection', divergent: changedSelection, rejectedCheck: selectionCheck });
+    await writeFile(configPath, originalConfig);
+    await writeFile(path.join(root, '.gitignore'), 'ignored/\nuntouched.mara.md\n');
+    const changedIgnore = await freshSnapshot();
+    expect(changedIgnore.selection.document_paths).not.toEqual(actual.selection.document_paths);
+    expect((await checkSources(changedIgnore)).ok).toBe(false);
+    expect(await readSources()).toEqual(changedIgnore.files);
+    await writeFile(path.join(root, '.gitignore'), actual.files.find(f => f.path === '.gitignore').content);
+    const checked = await checkSources(await freshSnapshot());
     expect(checked.ok).toBe(true);
     expect(checked.result.external_context_verified).toBe(false);
     // All source checks completed before the first application write. External revision
@@ -329,11 +393,11 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
     expect(validation.valid).toBe(true);
     expect(validation.evaluation_complete).toBe(true);
     await info.attach('native-materialization', { body: JSON.stringify({
-      executable: process.env.MARA_CLI, args, base: actual, changeSet, rejectedCheck, checked, validation,
+      executable: process.env.MARA_CLI, args, base: actual, changeSet, rejectedChecks, checked, validation,
     }, null, 2), contentType: 'application/json' });
   } finally { await rm(root, { recursive: true, force: true }); }
   await info.attach('worker-transcript', {
-    body: JSON.stringify({ browserVersion: browser.version(), ...report }, null, 2),
+    body: JSON.stringify({ browserVersion: browser.version(), assetRequests, ...report }, null, 2),
     contentType: 'application/json',
   });
 });

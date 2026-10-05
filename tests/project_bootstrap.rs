@@ -99,6 +99,43 @@ fn refuses_to_overwrite_an_existing_project_or_target_file() {
 }
 
 // @mara checks REQ-PROJECT-INITIALIZATION
+// @mara checks REQ-PORTABLE-DOCUMENT-ENGINE
+#[test]
+fn initialization_reports_every_created_template_source_in_path_order() {
+    for template in ["minimal", "empty", "engineering"] {
+        let fixture = fixture();
+        let output = mara(
+            fixture.path(),
+            &[
+                "--format",
+                "json",
+                "project",
+                "init",
+                "--template",
+                template,
+            ],
+        );
+        assert!(output.status.success(), "{}", stderr(&output));
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let expected = if template == "engineering" {
+            json!([
+                ".mara/engineering-checks.yaml",
+                ".mara/engineering-execution.yaml",
+                ".mara/engineering-rules.yaml",
+                ".mara/project.toml",
+                ".mara/schema.yaml"
+            ])
+        } else {
+            json!([".mara/project.toml", ".mara/schema.yaml"])
+        };
+        assert_eq!(result["created"], expected);
+        for path in result["created"].as_array().unwrap() {
+            assert!(fixture.path().join(path.as_str().unwrap()).is_file());
+        }
+    }
+}
+
+// @mara checks REQ-PROJECT-INITIALIZATION
 #[test]
 fn empty_template_creates_no_project_flavours() {
     let fixture = fixture();

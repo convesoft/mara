@@ -19,6 +19,10 @@ overwritten, and an existing Mara project is rejected. The default template is
 provides the same operation with an optional `template`. An unbound server call
 requires an absolute `project` path; a server started with `--project` uses its
 bound target and rejects a request-level `project` override.
+
+The initialization result's `created` list reports every source installed by the
+selected template, using project-relative paths in normalized path order.
+Engineering includes all three rule/check files, not only configuration/schema.
 :::
 
 :::mara requirement REQ-PROJECT-DISCOVERY
