@@ -3,6 +3,9 @@
 Target contracts for the [0.4.0-alpha.1 scope](0.4.mara.md). The shared client uses the
 [execution architecture](execution.mara.md). These draft items specify library
 artifacts and behavior, not graphical applications or passing test results.
+The added [query/policy engine](query-engine.mara.md) uses these same adapters;
+[[REQ-QUERY-ENGINE-SURFACES]] and [[VER-REUSABLE-QUERY-ENGINE]] own its interface
+coverage and additional execution checks.
 
 ## Workflows
 

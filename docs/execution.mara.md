@@ -3,7 +3,9 @@
 Target contracts for the [0.4.0-alpha.1 scope](0.4.mara.md). These draft items do not
 claim shipped functionality or passing execution. Existing operation contracts
 remain the source of semantic detail; this document defines their new execution
-boundary. JavaScript/browser adapters are defined in
+boundary. The additional [reusable query/policy engine](query-engine.mara.md)
+defines new semantic contracts independently of the extraction-era rule/trace
+interfaces below. JavaScript/browser adapters are defined in
 [integration](integration.mara.md).
 
 ## Workflow
@@ -35,7 +37,9 @@ native and browser execution: project initialization and MID
 generation/backfill; schema discovery and validation; item list, search, get
 and related; item create/update/delete/move/rename; relation
 inspection/add/remove; project/item validation; current-state rules and
-request-local trace matrices.
+request-local trace matrices. The subsequently selected query/policy/view
+capabilities are specified by [[REQ-QUERY-ENGINE-SURFACES]] and share this engine
+and host boundary.
 
 Preserve each owning operation's identity, source-preservation,
 reference-safety, diagnostic and bounded-continuation semantics. Inputs are
@@ -157,7 +161,9 @@ behavior.
 Use separate engine and binding crates where these build/portability boundaries
 require them; native client/runtime/server/protocol can remain modules.
 Existing Rust exports may be replaced; compatibility wrappers are not required.
-CLI/MCP owning contracts remain compatible.
+CLI/MCP owning contracts remain compatible for this extraction. The separately
+selected query/policy/view refinement follows [[DES-QUERY-POLICY-ENGINE]] rather
+than extending this extraction's interface-preservation obligation.
 
 The extracted source/query/conformance and rule/trace interfaces are defined by
 [[DES-EXPLICIT-SOURCE-ENGINE]]; mutation planning is defined by

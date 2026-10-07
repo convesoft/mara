@@ -9,6 +9,7 @@ Selection and interpretation of recorded results follow
 [[DES-TRACE-CHECK-BINDING]].
 
 - [Planned 0.4.0-alpha.1 scope and acceptance](0.4.mara.md)
+- [Reusable query, policy and view engine scope](query-engine.mara.md)
 - [Execution architecture and explicit-source engine boundary](execution.mara.md)
 - [Document-engine dependency portability gate](portability.mara.md)
 - [Planned JavaScript and browser integration](integration.mara.md)
