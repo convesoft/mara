@@ -2,6 +2,21 @@
 resolver = "3"
 members = [".", "crates/mara-engine", "crates/mara-wasm", "crates/mara-node"]
 
+# CLI subprocess coverage is not present in the integration test binary's map.
+[[workspace.metadata.affected.rule]]
+globs = ["src/**", "crates/mara-engine/src/**", "tests/support/**"]
+filterset = "package(=mara) & kind(test)"
+
+# LLVM cannot observe embedded templates and fixture inputs.
+[[workspace.metadata.affected.rule]]
+globs = ["templates/**", "tests/fixtures/**", "crates/*/tests/fixtures/**"]
+filterset = "all()"
+
+# Build/test configuration changes must never rely on old coverage ranges.
+[[workspace.metadata.affected.rule]]
+globs = ["**/build.rs", "build.rs", ".cargo/**", ".config/**", "rust-toolchain*", "scripts/verify.sh", ".github/workflows/**"]
+filterset = "all()"
+
 [workspace.package]
 version = "0.3.0"
 edition = "2024"

@@ -1,0 +1,7 @@
+# The integration gate runs every non-ignored test, with no retries masking failures.
+[profile.default]
+fail-fast = false
+test-threads = 2
+
+[profile.default.junit]
+path = "junit.xml"

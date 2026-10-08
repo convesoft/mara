@@ -197,6 +197,22 @@ Repository-wide instructions for humans and software agents.
   measured constraints. Prefer explicit known limitations in an early working
   release over delaying it for undefined completeness.
 
+## Rust verification policy
+
+- Follow [Rust verification](docs/testing.mara.md) for commands, baseline/cache
+  rules, evidence and limitations. During implementation prefer
+  `scripts/verify.sh impacted` or explicitly selected nextest tests.
+- Before rerunning tests during review, inspect existing verification receipts,
+  their tested inputs/environment and scope. Reuse valid evidence; request
+  additional tests when a concrete gap needs them. Changed source, dependencies,
+  test configuration or relevant environment invalidate affected evidence.
+- Never claim full regression coverage from targeted tests. When impact is
+  incomplete or unreliable, broaden selection; do not silently omit tests.
+- Run `scripts/verify.sh full` at the integration gate on the combined inputs.
+  Preserve all required CI, lint, formatting and external acceptance gates; CI
+  remains authoritative. Do not repeatedly run the full suite during development
+  or review without a specific reason (such as invalid evidence or integration).
+
 ## Change discipline
 
 - Do not invent product decisions. When ambiguity materially affects behavior,

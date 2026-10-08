@@ -94,12 +94,17 @@ jobs:
             echo "npm-tag=$npm_tag"
             echo "prerelease=$prerelease"
           } >> "$GITHUB_OUTPUT"
-      - run: cargo fmt --all -- --check
-      - run: cargo build --locked --workspace --all-targets -j 2
-      - run: cargo clippy --locked --workspace --all-targets --all-features -j 2 -- -D warnings
-      - run: cargo test --locked --workspace --all-targets -j 2
-      - run: cargo run --locked --quiet -- --format json schema validate
-      - run: cargo run --locked --quiet -- --format json project validate
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
+      - run: mkdir -p "$CARGO_TARGET_DIR"
+      - run: VERIFY_EVIDENCE_DIR="$SCRATCH/verification" scripts/verify.sh full
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-source-verification
+          path: ${{ env.SCRATCH }}/verification/
+          if-no-files-found: warn
       - name: Verify generated changelog
         uses: orhun/git-cliff-action@v4.8.0
         with:
@@ -182,8 +187,12 @@ jobs:
         with:
           node-version: "24"
           package-manager-cache: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.148
       - run: cargo clippy --locked --workspace --all-targets --all-features -j 2 -- -D warnings
-      - run: cargo test --locked --workspace --all-targets -j 2
+      - run: cargo nextest run --locked --workspace --all-targets --ignore-default-filter --build-jobs 2
+      - run: cargo test --locked --workspace --doc -j 2
       - run: cargo build --locked --release -p mara -j 2
       - run: scripts/build-node.sh "$SCRATCH/addon" --release
       - uses: actions/download-artifact@v4
@@ -274,6 +283,7 @@ jobs:
           name: release-verification-${{ matrix.target }}
           path: |
             ${{ env.SCRATCH }}/smoke/*-pack.json
+            target/nextest/default/junit.xml
             ${{ env.SCRATCH }}/browser-report.json
             ${{ env.SCRATCH }}/browser-results/
           if-no-files-found: warn
