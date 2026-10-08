@@ -86,7 +86,7 @@ snapshot() {
 }
 
 review_command=(pi --no-approve --mode json --provider openai --model gpt-6.1-sol \
-  --thinking xhigh --fast --append-system-prompt "$instructions" "$prompt")
+  --thinking low --fast --append-system-prompt "$instructions" "$prompt")
 snapshot > "$run/before.json"
 prompt_hash=$(sha256sum < "$instructions")
 jq -n --arg checkout "$checkout" --arg session "$session" --arg supplied "$supplied" \
