@@ -25,7 +25,7 @@ use shacl::{
 type Graph = OxigraphInMemory;
 type Node = <Graph as Rdf>::Term;
 
-pub(super) struct RuleEngine {
+pub(crate) struct RuleEngine {
     native: Box<dyn Engine<Graph>>,
     pub failed: Cell<bool>,
     pub counts: BTreeMap<(String, String, String), (usize, Option<usize>)>,

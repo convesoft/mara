@@ -23,6 +23,8 @@ pub use relations::{
     RelationOccurrence,
 };
 pub mod query;
+/// Bounded executable backend proof; not the complete named-query surface.
+pub mod query_backend;
 pub use query::*;
 pub mod graph_constraints;
 pub mod operations;

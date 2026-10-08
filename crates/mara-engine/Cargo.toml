@@ -26,3 +26,12 @@ url = "2.5"
 shacl = { version = "=0.3.24", default-features = false }
 rudof_rdf = { version = "=0.3.24", default-features = false }
 rudof_iri = "=0.3.24"
+# In-memory SELECT with an explicitly disabled SERVICE handler. The RDF wrapper
+# does not expose evaluator configuration; keep its endpoint feature disabled.
+oxigraph = { version = "=0.5.11", default-features = false, features = ["rdf-12"] }
+spargebra = { version = "=0.4.7", features = ["sparql-12"] }
+# Standard portable identities for anonymous SHACL constraints.
+oxrdf = { version = "=0.3.4", features = ["rdfc-10", "rdf-12"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+oxigraph = { version = "=0.5.11", default-features = false, features = ["js", "rdf-12"] }

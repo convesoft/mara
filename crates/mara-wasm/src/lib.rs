@@ -37,6 +37,8 @@ pub const OPERATIONS: &[&str] = &[
     "project_validate",
     "item_validate",
     "trace_matrix",
+    "query_backend_execute",
+    "query_backend_policy",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -150,6 +152,16 @@ impl MemoryWorkspace {
                 let p: SchemaList = parse(p)?;
                 value(self.engine.schema_list(p.kind).map_err(argument)?)
             }
+            "query_backend_execute" => value(
+                self.engine
+                    .query_backend_execute(parse(p)?)
+                    .map_err(argument)?,
+            ),
+            "query_backend_policy" => value(
+                self.engine
+                    .query_backend_policy(parse(p)?)
+                    .map_err(argument)?,
+            ),
             "item_list" => value(self.engine.item_list(parse(p)?).map_err(argument)?),
             "search" => value(self.engine.search(parse(p)?).map_err(argument)?),
             "get" => value(self.engine.get(parse(p)?).map_err(argument)?),

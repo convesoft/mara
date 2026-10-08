@@ -3,8 +3,9 @@
 mod bindings;
 use bindings::bind_literal;
 pub(crate) use bindings::valid_parameter_name;
-mod engine;
+pub(crate) mod engine;
 mod evaluate;
+pub(crate) use evaluate::{project_data, relation_iri};
 mod yaml;
 use crate::{
     DiagnosticCode, DiagnosticLocation, Schema, Severity, ValidationDiagnostic, ValidationScope,

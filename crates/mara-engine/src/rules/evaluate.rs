@@ -49,45 +49,16 @@ impl Rules {
             );
             return observations;
         }
-        let mut graph = Vec::new();
-        for item in corpus.items() {
-            let Some(mid) = item.mid() else {
-                project_unavailable(result, "rule evaluation requires valid item identities");
+        let projection = match project_data(corpus, schema) {
+            Ok(data) => data,
+            Err(message) => {
+                project_unavailable(result, message);
                 return observations;
-            };
-            let mut node = json!({"@id":format!("urn:mara:mid:{mid}"),"@type":format!("{FLAVOUR}{}",item.flavour())});
-            if let Some(flavour) = schema.flavours().get(item.flavour()) {
-                for field in item.metadata() {
-                    if let Some(def) = flavour.fields.get(field.key()) {
-                        let Some(value) = literal(field.value(), def.field_type) else {
-                            project_unavailable(
-                                result,
-                                "rule evaluation requires representable typed field values",
-                            );
-                            return observations;
-                        };
-                        push(&mut node, &format!("{FIELD}{}", field.key()), value);
-                    }
-                }
             }
-            graph.push(node);
-        }
+        };
         let relations = corpus.relation_graph(schema);
-        let mut edges = BTreeSet::new();
-        for record in relations.edges() {
-            let edge = &record.edge;
-            let a = relation_iri(&edge.source);
-            let b = relation_iri(&edge.target);
-            edges.insert((a.clone(), edge.relation.clone(), b.clone()));
-            if edge.symmetric {
-                edges.insert((b, edge.relation.clone(), a));
-            }
-        }
-        for (a, relation, b) in &edges {
-            graph.push(json!({"@id":a,format!("{REL}{relation}"):[{"@id":b}]}));
-        }
         let data = match OxigraphInMemory::from_str(
-            &json!({"@graph":graph}).to_string(),
+            &projection.to_string(),
             &RDFFormat::JsonLd,
             None,
             &ReaderMode::Strict,
@@ -333,7 +304,43 @@ impl Rules {
     }
 }
 
-fn relation_iri(endpoint: &crate::RelationEndpoint) -> String {
+/// Shared typed, canonical RDF preparation for rules and factual queries.
+pub(crate) fn project_data(corpus: &Corpus, schema: &Schema) -> Result<Value, &'static str> {
+    let mut graph = Vec::new();
+    for item in corpus.items() {
+        let mid = item
+            .mid()
+            .ok_or("rule evaluation requires valid item identities")?;
+        let mut node = json!({"@id":format!("urn:mara:mid:{mid}"),"@type":format!("{FLAVOUR}{}",item.flavour())});
+        if let Some(flavour) = schema.flavours().get(item.flavour()) {
+            for field in item.metadata() {
+                if let Some(def) = flavour.fields.get(field.key()) {
+                    let value = literal(field.value(), def.field_type)
+                        .ok_or("rule evaluation requires representable typed field values")?;
+                    push(&mut node, &format!("{FIELD}{}", field.key()), value);
+                }
+            }
+        }
+        graph.push(node);
+    }
+    let relations = corpus.relation_graph(schema);
+    let mut edges = BTreeSet::new();
+    for record in relations.edges() {
+        let edge = &record.edge;
+        let a = relation_iri(&edge.source);
+        let b = relation_iri(&edge.target);
+        edges.insert((a.clone(), edge.relation.clone(), b.clone()));
+        if edge.symmetric {
+            edges.insert((b, edge.relation.clone(), a));
+        }
+    }
+    for (a, relation, b) in edges {
+        graph.push(json!({"@id":a,format!("{REL}{relation}"):[{"@id":b}]}));
+    }
+    Ok(json!({"@graph":graph}))
+}
+
+pub(crate) fn relation_iri(endpoint: &crate::RelationEndpoint) -> String {
     match endpoint {
         crate::RelationEndpoint::Item { mid, .. } => format!("urn:mara:mid:{mid}"),
         crate::RelationEndpoint::Code { reference } => format!(

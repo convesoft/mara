@@ -36,10 +36,11 @@ orchestrator. No UI, new host platform or provider plugin framework is included.
 First specify the semantic input/result contracts, then prove the backend and
 SHACL integration before fixing persisted syntax or broadly refactoring the
 engine. The semantic contracts below fix observable behavior from the capability
-contracts and the user's contract-authoring answers. Backend choice, persisted
-definition language/profile, format versions, exact public operations/encodings
-and numeric evaluation budgets remain pending the proof; illustrative YAML or
-proposed commands do not select them. Do not build a custom query DSL or
+contracts and the user's contract-authoring answers. The bounded proof now
+selects standard SELECT, a SHACL result bridge and the actual proof formats/
+operations/budget in [[DES-QUERY-BACKEND-PROOF]]. Complete release interfaces and
+semantic integration remain later work; illustrative YAML or proposed commands
+outside that design do not select them. Do not build a custom query DSL or
 framework without explicit approval.
 
 Existing `trace matrix` is an obligation-evaluation explanation, not the
@@ -174,18 +175,18 @@ definitions. External fact acquisition belongs to the host; no provider framewor
 is required. Do not reconstruct complete query results from SHACL evaluation
 caches, whose observations reflect only evaluated constraints.
 
-A bounded backend proof must execute one query definition both directly and
-through the SHACL constraint bridge. Reuse applicable evaluator literal,
-qualification and logic behavior, without letting that reuse override the
-selected semantic contracts. Backend choice, persisted definition syntax/profile,
-format versions, concrete public operations/encodings, numeric evaluation budgets
-and normalization/ordering encodings remain pending that proof. The bounded proof subset and subsequent integrated
-fixture/host checks are distinguished in [[VER-REUSABLE-QUERY-ENGINE]].
-A proof conflict requires a user decision, not silent reduction or a custom
-DSL/framework.
+The bounded backend proof and selected standard SELECT/result-bridge contract
+are owned by [[DES-QUERY-BACKEND-PROOF]], with rationale in
+[[ADR-QUERY-SPARQL-RESULT-BRIDGE]]. Direct execution and SHACL consume the same
+definition; SHACL receives the returned distinct tuples, not the source graph.
+The three semantic contracts still govern the later complete engine. Proof
+entry points and format 1 are not completion of those APIs or host coverage.
+The bounded subset and subsequent integrated fixture checks are distinguished
+in [[VER-REUSABLE-QUERY-ENGINE]]. A required backend conflict remains blocked
+pending a user decision, not silent reduction or a custom DSL/framework.
 
-These draft designs specify behavior to prove. They do not certify the backend,
-SHACL bridge, new operations or host parity. Engineering-template refinement and
+These semantic designs specify the full behavior to prove. The bounded backend
+and bridge subset does not certify complete new operations or host parity. Engineering-template refinement and
 self-hosted schema/policy changes remain outside this engine initiative.
 :::
 
@@ -297,8 +298,9 @@ Completeness covers the logical evaluation; page completion covers delivery.
 A page boundary is not a traversal limit. Summaries/counts describe the full
 logical result, never only the current page. Cursors bind the evaluation identity
 and unchanged request, preventing mixed snapshots, repeated/lost rows or stale
-success. Representation, version numbers and exact public errors remain pending
-the bounded backend proof.
+success. [[DES-QUERY-BACKEND-PROOF]] selects the bounded proof's format/operations and
+identity encoding. Complete definition-set, input and continuation encodings
+must implement this contract during the later full-engine work.
 :::
 
 :::mara design DES-QUERY-COMPOSITION-CONTRACT
@@ -357,8 +359,9 @@ If an evaluation resource limit stops required expansion/composition, mark it
 incomplete/unavailable, retain any known support with the limit reason, and
 never infer a complete negative, exact count or policy pass from truncation.
 A definition's intentional bounded-hop question is different: fully evaluating
-that declared domain can be complete. Numeric budgets, supported bound controls,
-cursor encoding and concrete traversal implementation remain for the proof.
+that declared domain can be complete. [[DES-QUERY-BACKEND-PROOF]] defines the proof's observed-row budget and its
+lack of cooperative traversal-work cancellation. Complete composition and
+continuation must preserve these limit outcomes; no timing guarantee is selected.
 
 ### Derived values, logic and mappings
 
@@ -467,8 +470,9 @@ and completeness; they do not interpret policy independently.
 
 Real native/browser and installed-package verification belongs to
 [[VER-REUSABLE-QUERY-ENGINE]] and the selected final supported-host gates.
-This contract does not claim those paths ran. Exact operations/public formats,
-SHACL bridge and backend feasibility remain pending the bounded proof.
+This contract does not claim those paths ran. [[DES-QUERY-BACKEND-PROOF]] selects the backend and actual proof formats/
+operations, and demonstrates the SHACL result bridge. Full consumer operations,
+errors and host coverage still require the later integrated implementation.
 :::
 
 :::mara decision ADR-QUERY-EXACT-RESOLUTION
@@ -695,9 +699,11 @@ Before broad implementation, the bounded backend proof executes the same query
 definition directly and through the SHACL bridge, demonstrating inverse traversal,
 lifecycle bindings, empty roots, distinct qualified counts and source-linked
 explanations natively and in real browser WASM. It must preserve the selected
-contracts; unsupported semantics require a user decision. The proof then selects
-backend/profile, persisted syntax, format versions, exact public operations and
-evaluation budgets. No custom DSL/framework is authorized by this verification.
+contracts; unsupported semantics require a user decision. The selected backend, bounded profile, persisted proof definition/result versions,
+actual proof operations, row budget and limitations are recorded in
+[[DES-QUERY-BACKEND-PROOF]]. Its Rust/Playwright fixture demonstrates this subset;
+it does not substitute for the later complete catalog. No custom DSL/framework
+is authorized by this verification.
 
 The complete fixture catalog and selected host parity are subsequent integrated
 engine checks, not required execution for the contract-only deliverable. Use the
@@ -706,4 +712,66 @@ gate. Record actual tested revisions, artifacts, environments, commands, results
 and limitations. A fixture demonstration is not adoption of the engineering
 template, authentication of reported external evidence or proof of external
 execution.
+:::
+
+:::mara design DES-QUERY-BACKEND-PROOF
+:mid: 01M4D4F67Y1QVKAG5E4H6H7W3J
+:title: Execute standard SELECT facts through a SHACL result bridge
+:status: draft
+:kind: interface
+:satisfies: REQ-NAMED-QUERY-FACTS
+:satisfies: REQ-QUERY-POLICY-CONSUMERS
+:satisfies: REQ-QUERY-ENGINE-SURFACES
+
+Selected after the bounded native/Chromium worker proof for [[DES-QUERY-POLICY-ENGINE]]. This design fixes the backend and proof interface, not completion of the full query engine.
+
+### Backend and language
+
+Use unmodified Oxigraph 0.5.11 in-memory SELECT execution and spargebra 0.4.7 parsing, with existing shacl/rudof_rdf/rudof_iri 0.3.24 for constraint evaluation and OxRDF 0.3.4's standard RDFC-1.0/SHA-256 canonicalization for anonymous policy identities. Disable Oxigraph default features. Its native HTTP handler is explicitly disabled; browser builds have no HTTP handler. Reject SERVICE (including SILENT), dataset loading and updates before execution. Shared typed/canonical RDF preparation is reused by existing rules and queries; hosts supply every source.
+
+The executable proof profile admits SELECT, basic graph patterns, forward/inverse/property paths, joins, OPTIONAL, UNION, MINUS, VALUES, projection and DISTINCT. Expressions admit RDF terms, variables, BOUND, sameTerm, boolean and/or/not and EXISTS. Do not admit SPARQL '=' as Mara's exact typed comparison: it performs cross-datatype numeric equality. ORDER BY, REDUCED, slicing, grouping/aggregates and other functions are rejected in this bounded proof, not substituted with empty results. RDF-star and directional RDF-1.2 literals are rejected; feature closure does not broaden the RDF-1.1 result profile. Validate the SELECT signature before root enumeration, including empty selections. Admitted query/policy literals are strings/language-tagged strings and canonical primitive xsd:integer (i64), finite xsd:double (excluding negative zero), and xsd:boolean spellings. Integer/double spellings must equal i64/f64 Display (as used by pinned oxsdatatypes), and boolean spelling must be true/false; this is backend primitive spelling, not XML Schema's canonical scientific notation. Reject other datatypes/facets, noncanonical spellings and nonfinite values: Oxigraph normalizes known numeric forms before sameTerm/projection, so accepting them would lose literal identity. Source scalar results use the shared typed projection and backend canonical primitive spelling; this is not a guarantee for arbitrary RDF literal lexical forms.
+
+SPARQL is the selected standard query language, not a custom traversal DSL. The full release implementation must add the owning semantic resolution/type/coverage/composition checks and explicit derived operations from the three semantic designs. The current admission profile is a proof subset, not permission to remove those capabilities. Named composition can supply child projections as explicit in-memory relations; dependency order/signatures and complete source support remain engine responsibilities, not SHACL caches. Arbitrary SPARQL conformance is not promised. Numeric coercion, bag counts, SAMPLE/load-order precedence and backend errors must not redefine Mara's semantic contracts.
+
+### Formats and operations
+
+The portable proof uses JSON definition format 1: exact nonempty id, select text, columns naming tuple bindings and support_columns naming canonical edge support. ?root is the explicit invocation key, not a tuple column. Definition sources are supplied snapshot files; no imports/fetches or ontology in Rust. This metadata declares a standard SELECT signature; it is not an expression language.
+
+Public embedded Rust methods and worker operations are query_backend_execute and query_backend_policy. The former takes definition_file, explicit roots and max_rows in 1..=4294967295 (u32 on both hosts); larger JSON integers are rejected before execution. The latter adds shape_file and exact shape IRI. Unknown explicit IDs fail; ID/MID aliases select one root. Unknown request fields and unsupported profile constructs fail. These proof entry points do not replace the later complete definition-set loader or CLI/MCP/Node/HTTP/typed-client surfaces.
+
+Factual result format 1 contains definition/file, SHA-256 input_identity, evaluation_complete, unavailable_reason and ordered root records. Each root has its item identity/source and a bindings array, empty when no matches. Tuple columns contain item identity/source, IRI or RDF literal (lexical value, datatype, optional language); an optional missing value is null, not an empty literal. An all-null projection of a real supported match remains one distinct tuple with combined edge support; only a row with neither projected values nor support is treated as unmatched. Literal datatypes distinguish integer, double, boolean and text; lifecycle is ordinary schema data.
+
+Deduplicate typed tuples after removing support columns and combine canonical edge support. Each support record retains the edge and every authored occurrence/source. Edge IRIs are SHA-256 of canonical edge JSON. Portable query occurrence identities hash source snapshot, location, author, kind, relation and target; do not reuse native relation-inspection cursor hashes, which differ with host word width. Order roots by canonical item IRI, tuples by canonical serialized typed values and support by canonical edge key. Authored occurrence enumeration follows corpus source order. Full facts are independent of policy evaluation caches.
+
+Input identity hashes the explicit snapshot fingerprint and request, including source/definition content and row budget. Proof calls return one complete delivery value and have no cursor; pagination and reusable outcome identity for later composition/inputs must follow [[DES-QUERY-INPUT-RESULT-CONTRACT]], not reuse this small request signature unchanged.
+
+### SHACL result bridge
+
+Execute the selected definition through the same factual method, then materialize only its distinct returned tuples under urn:mara:query:match and urn:mara:query:column:NAME. Each tuple is a blank row node, so row identity cannot collide with returned IRI values and fabricate property-path links. SHACL receives root/row/column RDF, not the original corpus; it cannot repeat the source traversal. The supplied shape chooses qualification and counts. The unchanged synchronous RuleEngine adapter retains nested-error detection and upstream literal/logical/qualification semantics. Counts refer to distinct projected tuples, not authored occurrences. Explicit occurrence-count questions must select distinct occurrence identities as their counted bindings in the later complete profile.
+
+Evaluation format 1 includes the original facts and per-root state, exact policy source file/shape, failed constraint component IRIs and available total/qualifying counts. Canonicalize supplied policy RDF with RDFC-1.0/SHA-256 before compiling SHACL so anonymous shape IDs are stable for identical source inputs. Facts carry root/item locations and canonical authored support independently of the policy. Any incomplete facts suppress all proof-policy counts and produce unavailable checks; any SHACL adapter error makes evaluation incomplete. This is a request-local bridge demonstration, not enabled documentation validity or a complete gate implementation.
+
+### Feasibility and limits
+
+The proof executes inverse traversal, draft/accepted/retired fields, empty roots, ID/MID root deduplication, duplicate UNION branches yielding three distinct supports with five authored assertions, qualified counts, source-linked failed explanations, exact datatype distinctions and reached row limits through real native and Chromium worker/WASM artifacts. The same definition file is consumed directly and by SHACL. Focused regressions exercise supported all-null OPTIONAL projections, repeatable anonymous counts and empty-root signature/directional-literal rejection on both hosts, plus canonical string/integer/double/boolean distinction and sameTerm, rejected normalized literal facets/spellings, collision-free bridge rows and identical budget boundaries. The browser spec is opt-in when fixture/native-result inputs are supplied; missing inputs skip the bounded probe rather than break the existing default browser suite. Passing proof evidence requires actual execution, never that skip. Standard Rust tests and the existing Playwright worker harness compare complete factual/evaluation JSON.
+
+max_rows bounds observed SELECT solution rows across selected roots, including duplicates that provide support. It is not page size, a wall-clock deadline, a bound on graph expansion before the next solution, or a memory/latency guarantee. A reached limit retains known partial support and every root, sets incomplete with a reason, and cannot establish an exact truncated count, complete negative or policy pass. No default numeric budget is implied; callers choose it explicitly. The synchronous upstream evaluator supplies no cooperative traversal-work cancellation hook; do not claim one.
+
+The bounded proof requires document items with MIDs, one loaded definition and no external snapshots, typed parameters, mapping inputs, named dependencies, factual rendering or final host adapters. It does not certify the twelve integrated fixtures, arbitrary cyclic/path provenance, Unicode normalization, aggregate precedence, full coverage/type binding, installed packages or Apple Silicon. Those are still required by [[VER-REUSABLE-QUERY-ENGINE]] and the semantic designs. If their implementation exposes a backend conflict, keep it blocked and seek a user decision; never silently widen SPARQL admission or reduce the contract. No template/schema/policy refinement or host effects are introduced.
+:::
+
+:::mara decision ADR-QUERY-SPARQL-RESULT-BRIDGE
+:mid: 01M4D4FK9V9P2R9CHCXV57SXTZ
+:title: Use in-memory standard queries and project facts into SHACL
+:status: draft
+:justifies: DES-QUERY-POLICY-ENGINE
+:justifies: DES-QUERY-BACKEND-PROOF
+
+The selected backend-proof/design-settlement work permits standard backend selection, not a custom DSL or reduced semantics. Native and real Chromium worker execution of one fixture SELECT establishes the bounded path in [[DES-QUERY-BACKEND-PROOF]].
+
+Choose direct configured Oxigraph SELECT evaluation rather than rudof_rdf's optional QueryRDF convenience API: the latter silently returns empty solutions until ensure_store and does not expose evaluator SERVICE controls. Retain the pinned SHACL NativeEngine adapter for constraints, not facts. Materializing factual tuples as constraint input lets one definition serve raw and policy consumers without duplicating traversal or reconstructing facts from incomplete SHACL caches.
+
+Existing canonical RDF preparation and schema-owned vocabulary avoid a second ontology. A direct parser/profile check rejects numeric-coercing equality and host-effect constructs. Reject affected literal forms that the backend normalizes rather than claiming arbitrary RDF lexical identity or inventing a custom codec; canonical Mara primitive comparisons remain the required path. Blank bridge rows prevent collisions with data IRIs, and a fixed u32 budget gives identical native/WASM JSON boundaries. Portable SHA-256 occurrence identity corrects the host-width-dependent relation handle observed in the first native/browser comparison without changing the existing relation API. Use upstream standard RDFC-1.0/SHA-256 to stabilize anonymous SHACL reporting rather than inventing a source parser or exposing random blank labels. Locked RDF-1.2 feature closure is required for compatible upstream RDF term enums; it does not authorize RDF-star output, directional literals or a broader public language.
+
+This selects a backend and bounded proof contract, not proof of every planned query capability. The semantic contracts remain unchanged. No traversal-work cancellation, arbitrary SPARQL support or completed host/catalog certification is inferred from this result. An unsupported required capability remains a blocker under [[VER-REUSABLE-QUERY-ENGINE]], not justification for custom language code or implicit scope reduction.
 :::
