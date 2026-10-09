@@ -540,6 +540,8 @@ impl crate::SourceEngine {
                 max_rows: config.max_rows,
                 limit: 100,
                 cursor: None,
+                fact_snapshots: vec![],
+                mappings: vec![],
             };
             let result = match collect_named_query(self, request) {
                 Ok(result) => result,
@@ -895,6 +897,8 @@ impl crate::SourceEngine {
                 max_rows: request.max_rows,
                 limit: 100,
                 cursor: None,
+                fact_snapshots: vec![],
+                mappings: vec![],
             };
             let collected = collect_named_query(self, query).map_err(|e| QueryConsumerError {
                 code: e.code,

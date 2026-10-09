@@ -29,6 +29,8 @@ fn request() -> q::Request {
         max_rows: 100,
         limit: 100,
         cursor: None,
+        fact_snapshots: vec![],
+        mappings: vec![],
     }
 }
 fn mutate_file(s: &mut SourceSnapshot, path: &str, f: impl FnOnce(&mut serde_json::Value)) {

@@ -45,6 +45,8 @@ fn request() -> q::Request {
         max_rows: 100,
         limit: 1,
         cursor: None,
+        fact_snapshots: vec![],
+        mappings: vec![],
     }
 }
 fn cli(root: &std::path::Path, req: &q::Request) -> std::process::Output {
@@ -229,6 +231,8 @@ fn empty_facts_request() -> q::Request {
         max_rows: 100,
         limit: 100,
         cursor: None,
+        fact_snapshots: vec![],
+        mappings: vec![],
     }
 }
 fn consumer_mcp(root: &std::path::Path, name: &str, params: Value) -> Value {
@@ -1075,6 +1079,8 @@ fn format_four_composition_matches_portable_embedded_cli_and_mcp_results() {
         max_rows: 100,
         limit: 100,
         cursor: None,
+        fact_snapshots: vec![],
+        mappings: vec![],
     };
     let native = runtime.query_execute(req.clone()).unwrap();
     let engine = portable.query_execute(req.clone()).unwrap();
@@ -2283,6 +2289,7 @@ fn factual_view_preserves_facts_and_empty_roots_across_rust_cli_and_mcp() {
                 values: row.values.clone(),
                 contributors: row.contributors.clone(),
                 support: row.support.clone(),
+                facts: row.facts.clone(),
             })
             .unwrap()
         })

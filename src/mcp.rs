@@ -93,6 +93,12 @@ struct QueryExecuteToolParams {
     /// Continue with every other input unchanged.
     #[serde(default)]
     cursor: Option<String>,
+    /// Optional host-supplied typed fact snapshots (format-5 definitions).
+    #[serde(default)]
+    fact_snapshots: Vec<mara::named_query::FactSnapshot>,
+    /// Optional caller/project typed lookup mappings (format-5 definitions).
+    #[serde(default)]
+    mappings: Vec<mara::named_query::TypedMapping>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -407,7 +413,7 @@ impl MaraMcp {
 
     #[tool(
         name = "query_execute",
-        description = "Execute raw named factual SELECT queries in the embedded engine. Load explicit format-3 or format-4 definition files, select an exact definition and explicit roots, and supply declared typed parameters. Format 4 allows acyclic named dependencies with explicit root, parameter and projected-column/support bindings; joins, unions, filters and transitive paths remain standard SPARQL. Check returned values against declared types and retain only explicitly projected source and edge support; hidden provenance is not inferred. Missing required fact sources produce incomplete results, not empty success. Returns typed distinct bindings, lifecycle data and empty-root records; no policy pass/fail. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs. Content, definition, parameter or control changes reject continuation. Native daemon and final browser/JS adapters are not yet supported."
+        description = "Execute raw named factual SELECT queries in the embedded engine. Load explicit format-3, format-4 or format-5 definition files, select an exact definition and explicit roots, and supply declared typed parameters. Format 4 allows acyclic named dependencies with explicit root, parameter and projected-column/support bindings; joins, unions, filters and transitive paths remain standard SPARQL. Format 5 additionally accepts host-supplied typed fact snapshots with declared complete coverage and caller/project lookup mappings, and may declare generic precedence aggregation. A complete snapshot with no record for a covered key is known missing; a missing snapshot, partial coverage or an out-of-coverage key is unavailable, never a pass. A missing mapping key is unavailable unless an explicit fallback is declared. Supplied candidates and contexts are opaque typed values; nothing is fetched, executed or persisted. Check returned values against declared types and retain only explicitly projected source, edge and fact support; hidden provenance is not inferred. Missing required fact sources produce incomplete results, not empty success. Returns typed distinct bindings, lifecycle data and empty-root records; no policy pass/fail. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs. Content, definition, parameter, fact, mapping or control changes reject continuation. Native daemon and final browser/JS adapters are not yet supported."
     )]
     fn query_execute(
         &self,
@@ -423,6 +429,8 @@ impl MaraMcp {
                 max_rows: p.max_rows,
                 limit: p.limit,
                 cursor: p.cursor,
+                fact_snapshots: p.fact_snapshots,
+                mappings: p.mappings,
             })
             .map_err(McpError)?;
         Ok(Json(serde_json::to_value(page).expect("query result")))
@@ -447,6 +455,8 @@ impl MaraMcp {
                     max_rows: p.max_rows,
                     limit: p.limit,
                     cursor: p.cursor,
+                    fact_snapshots: Vec::new(),
+                    mappings: Vec::new(),
                 },
                 render: p.render,
             })

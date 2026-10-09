@@ -1,5 +1,6 @@
 //! Named factual SELECT execution. Hosts supply sources; policies do not gate facts.
 mod composition;
+mod facts;
 mod signature;
 pub use crate::factual_graph::{Edge, Endpoint, Occurrence, Support};
 use crate::factual_graph::{PreparedGraph, hash, prepare};
@@ -30,6 +31,7 @@ pub enum ValueType {
 pub enum FactSource {
     Documents,
     Code,
+    External,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -81,6 +83,40 @@ fn parameter_guidance(schema: &mut schemars::Schema) {
     }
 }
 impl ParameterValue {
+    /// Typed result value for facts, mappings and derived projections.
+    pub(crate) fn typed(&self, corpus: &crate::Corpus) -> Result<Value, Error> {
+        Ok(match self {
+            Self::Text(value) => Value::Text {
+                value: value.clone(),
+                language: None,
+            },
+            Self::Integer(value) => Value::Integer { value: *value },
+            Self::Number(value) if value.is_finite() => Value::Number {
+                value: if *value == 0.0 {
+                    "0".into()
+                } else {
+                    value.to_string()
+                },
+            },
+            Self::Number(_) => return Err(Error::argument("finite numbers only")),
+            Self::Boolean(value) => Value::Boolean { value: *value },
+            Self::Item(id) => {
+                let item = crate::resolve_item(corpus, id)
+                    .map_err(|error| Error::argument(error.to_string()))?;
+                Value::Item {
+                    endpoint: Endpoint::item(item),
+                    source: ItemSource::from(item.source()),
+                }
+            }
+            Self::Iri(value) => {
+                NamedNode::new(value).map_err(|_| Error::argument("invalid IRI value"))?;
+                Value::Iri {
+                    value: value.clone(),
+                }
+            }
+        })
+    }
+
     pub(crate) fn kind(&self) -> ValueType {
         match self {
             Self::Text(_) => ValueType::Text,
@@ -139,6 +175,9 @@ pub struct Definition {
     pub columns: BTreeMap<String, Column>,
     #[serde(default)]
     pub support_columns: Vec<String>,
+    /// Projected dependency fact provenance; excluded from tuple identity like edge support.
+    #[serde(default)]
+    pub facts_columns: Vec<String>,
     /// Extra projected item variables retained as contributing source support.
     #[serde(default)]
     pub source_columns: Vec<String>,
@@ -147,6 +186,110 @@ pub struct Definition {
     /// Explicit child queries materialized as relations for this standard SELECT.
     #[serde(default)]
     pub dependencies: Vec<Dependency>,
+    /// Host-supplied fact snapshots overlaid onto returned tuple rows (format 5).
+    #[serde(default)]
+    pub external_facts: Vec<ExternalFact>,
+    /// Caller/project-supplied typed lookup mappings applied to tuple rows (format 5).
+    #[serde(default)]
+    pub lookups: Vec<Lookup>,
+    /// Definition-selected precedence aggregation over tuple rows (format 5).
+    #[serde(default)]
+    pub aggregate: Option<Aggregate>,
+}
+
+/// One declared external fact input overlaid onto returned rows by declared key columns.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalFact {
+    /// Request snapshot binding name; a declared input that is not supplied is unavailable.
+    pub input: String,
+    /// Tuple columns (in order) that identify one supplied record.
+    pub keys: Vec<String>,
+    /// Record field name to output tuple column.
+    #[serde(deserialize_with = "unique_map")]
+    pub fields: BTreeMap<String, String>,
+    /// Output column to typed value used only for a covered key with no record.
+    #[serde(deserialize_with = "unique_map")]
+    pub missing: BTreeMap<String, ParameterValue>,
+}
+
+/// A typed lookup from declared key columns to one output column.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Lookup {
+    /// Request-supplied mapping name; a declared mapping that is not supplied is unavailable.
+    pub mapping: String,
+    /// Tuple columns supplying the lookup key, in order.
+    pub keys: Vec<String>,
+    /// Declared output column replaced by the mapped value.
+    pub output: String,
+}
+
+/// Definition-selected precedence aggregation. No built-in state or risk ordering exists.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Aggregate {
+    /// Tuple columns grouped by exact typed value.
+    #[serde(default)]
+    pub group_by: Vec<String>,
+    /// Column whose typed value is ranked by `precedence`.
+    pub rank: String,
+    /// Ordered typed values, highest precedence first.
+    pub precedence: Vec<ParameterValue>,
+    /// Member columns retained in the selected aggregate binding.
+    #[serde(default)]
+    pub retain: Vec<String>,
+    /// Integer output column carrying the number of grouped members.
+    pub count: String,
+    /// Declared rank value for a selected root with no grouped members.
+    pub empty: ParameterValue,
+}
+
+/// One host-supplied typed fact snapshot with an explicit complete-coverage claim.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FactSnapshot {
+    /// Declared input name matched against the definition's external fact input.
+    pub input: String,
+    /// Opaque host label; full content is bound into the request input identity.
+    pub identity: String,
+    /// Key maps for which this snapshot claims complete coverage.
+    #[serde(default)]
+    pub coverage: Vec<BTreeMap<String, ParameterValue>>,
+    /// Typed records supplied by the host.
+    #[serde(default)]
+    pub records: Vec<FactRecord>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FactRecord {
+    /// Declared key columns to opaque typed values.
+    #[serde(deserialize_with = "unique_map")]
+    pub keys: BTreeMap<String, ParameterValue>,
+    /// Declared record field names to typed values.
+    #[serde(deserialize_with = "unique_map")]
+    pub fields: BTreeMap<String, ParameterValue>,
+}
+/// One caller/project-supplied typed lookup mapping bound into input identity.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TypedMapping {
+    /// Request binding name matched against a definition's declared lookup mapping.
+    pub mapping: String,
+    /// Typed key-to-value entries; duplicate typed keys are rejected.
+    pub entries: Vec<MappingEntry>,
+    /// Explicit fallback used only for an absent key; no implicit zero/safe value exists.
+    #[serde(default)]
+    pub fallback: Option<ParameterValue>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MappingEntry {
+    /// Declared lookup key columns to exact typed values.
+    #[serde(deserialize_with = "unique_map")]
+    pub keys: BTreeMap<String, ParameterValue>,
+    /// Typed value returned for this exact key.
+    pub value: ParameterValue,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -175,6 +318,9 @@ pub struct DependencyProjection {
     /// Optional relation-column alias for explicitly projected child edge support.
     #[serde(default)]
     pub support: Option<String>,
+    /// Optional relation-column alias for explicitly projected child fact provenance.
+    #[serde(default)]
+    pub facts: Option<String>,
 }
 fn unique_map<'de, D, T>(deserializer: D) -> Result<BTreeMap<String, T>, D::Error>
 where
@@ -258,6 +404,12 @@ pub struct Request {
     pub limit: usize,
     #[serde(default)]
     pub cursor: Option<String>,
+    /// Explicit host-supplied snapshots; never loaded from the network or persisted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fact_snapshots: Vec<FactSnapshot>,
+    /// Explicit caller/project policy mappings bound into the input identity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mappings: Vec<TypedMapping>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -312,6 +464,22 @@ pub struct Binding {
     pub values: BTreeMap<String, Option<Value>>,
     pub contributors: Vec<Value>,
     pub support: Vec<Support>,
+    /// External snapshot/record provenance for overlaid facts; absent for graph-only results.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub facts: Vec<FactSupport>,
+}
+/// Provenance for one overlaid external fact key. Content identity is bound into input identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FactSupport {
+    /// Declared external fact input name.
+    pub input: String,
+    /// Opaque snapshot label supplied by the host.
+    pub identity: String,
+    /// Declared key columns to typed values used for the lookup.
+    pub key: BTreeMap<String, Value>,
+    /// Record index within the snapshot when a record was present; absent for covered-absent.
+    pub record: Option<usize>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -438,7 +606,7 @@ impl SourceEngine {
             }
         }
         for (id, definition) in &definitions {
-            signature::compile("", definition, &schema)
+            signature::compile("", 3, definition, &schema)
                 .map_err(|error| Error::definition("", format!("{id}: {}", error.message)))?;
         }
         Ok(definitions)

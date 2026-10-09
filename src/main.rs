@@ -12,6 +12,7 @@ use mara::{FieldValue, ItemCollectionResult, ItemFilterParams, ItemSummary};
 use mara::{InitialRelation, ItemCreateParams, ItemUpdateParams};
 use mara::{ProjectMidBackfillResult, RelationParams};
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::{
     collections::BTreeMap,
     env,
@@ -217,6 +218,12 @@ enum QueryCommand {
         /// NAME=typed JSON, e.g. state='{"type":"text","value":"draft"}'.
         #[arg(long = "param")]
         parameters: Vec<String>,
+        /// Host-supplied JSON fact snapshot file; repeatable. Content is bound into input identity.
+        #[arg(long = "fact-file")]
+        fact_files: Vec<String>,
+        /// Caller/project JSON typed lookup mapping file; repeatable.
+        #[arg(long = "mapping-file")]
+        mapping_files: Vec<String>,
         /// Observed solution-row budget, not page size or a traversal deadline.
         #[arg(long)]
         max_rows: u32,
@@ -631,6 +638,8 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                     paths,
                     all,
                     parameters,
+                    fact_files,
+                    mapping_files,
                     max_rows,
                     limit,
                     cursor,
@@ -638,6 +647,8 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
         } => {
             let fields = parse_fields(fields)?;
             let parameters = parse_binding_parameters(parameters)?;
+            let fact_snapshots = read_typed_files(&fact_files, "fact snapshot")?;
+            let mappings = read_typed_files(&mapping_files, "lookup mapping")?;
             let page = match operations.query_execute(mara::named_query::Request {
                 definition,
                 definition_files,
@@ -652,6 +663,8 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                 max_rows,
                 limit,
                 cursor,
+                fact_snapshots,
+                mappings,
             }) {
                 Ok(page) => page,
                 Err(error) => {
@@ -700,6 +713,8 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                     max_rows,
                     limit,
                     cursor,
+                    fact_snapshots: Vec::new(),
+                    mappings: Vec::new(),
                 },
                 render: matches!(format, OutputFormat::Human).then(|| "markdown".into()),
             };
@@ -2015,6 +2030,23 @@ fn read_body(body: Option<String>) -> Result<Option<String>, String> {
         }
         _ => Ok(body),
     }
+}
+
+fn read_typed_files<T: DeserializeOwned>(
+    paths: &[String],
+    label: &str,
+) -> Result<Vec<T>, ClientError> {
+    paths
+        .iter()
+        .map(|path| {
+            let text = std::fs::read_to_string(path).map_err(|error| {
+                ClientError::invalid_argument(format!("could not read {label} '{path}': {error}"))
+            })?;
+            serde_json::from_str(&text).map_err(|error| {
+                ClientError::invalid_argument(format!("invalid {label} '{path}': {error}"))
+            })
+        })
+        .collect()
 }
 
 fn print_relation_mutation(result: &mara::RelationMutationResult) -> Result<(), String> {

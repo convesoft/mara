@@ -10,20 +10,53 @@ use spargebra::{
 
 pub(super) struct Compiled {
     pub query: Query,
+    /// Declared columns produced by facts, lookups or aggregation, not by SELECT.
+    pub computed: BTreeSet<String>,
 }
 
 pub(super) fn compile(
     file: &str,
+    format: u32,
     definition: &Definition,
     schema: &Schema,
 ) -> Result<Compiled, Error> {
-    compile_inner(definition, schema).map_err(|e| Error::definition(file, e))
+    compile_inner(format, definition, schema).map_err(|e| Error::definition(file, e))
 }
 
-fn compile_inner(definition: &Definition, schema: &Schema) -> Result<Compiled, String> {
+fn compile_inner(
+    format: u32,
+    definition: &Definition,
+    schema: &Schema,
+) -> Result<Compiled, String> {
     if definition.root_flavours.is_empty() || definition.columns.is_empty() {
         return Err("declare nonempty root flavour and tuple signatures".into());
     }
+    if format < 5
+        && (!definition.external_facts.is_empty()
+            || !definition.lookups.is_empty()
+            || definition.aggregate.is_some()
+            || !definition.facts_columns.is_empty())
+    {
+        return Err(
+            "external facts, lookups, aggregation and fact provenance require definition format 5"
+                .into(),
+        );
+    }
+    if format > 5 {
+        return Err("unsupported named-definition format".into());
+    }
+    if format < 5
+        && definition
+            .required_fact_sources
+            .contains(&FactSource::External)
+    {
+        return Err("the external fact source requires definition format 5".into());
+    }
+    let computed = if format == 5 {
+        facts::validate_derived(definition)?
+    } else {
+        BTreeSet::new()
+    };
     if !definition
         .required_fact_sources
         .contains(&FactSource::Documents)
@@ -58,14 +91,24 @@ fn compile_inner(definition: &Definition, schema: &Schema) -> Result<Compiled, S
             return Err("invalid/repeated support column".into());
         }
     }
+    for name in &definition.facts_columns {
+        if !valid(name) || !names.insert(name.clone()) {
+            return Err("invalid/repeated fact provenance column".into());
+        }
+    }
     for name in &definition.source_columns {
         if !valid(name) || !names.insert(name.clone()) {
             return Err("invalid/repeated source column".into());
         }
     }
     for (name, parameter) in &definition.parameters {
-        if !valid(name) || !names.insert(name.clone()) {
-            return Err("invalid parameter name or collision with projection".into());
+        if !valid(name) {
+            return Err("invalid parameter name".into());
+        }
+        // A caller-supplied value may name a projected tuple column; it must then be
+        // bound only by the caller, never also by the SELECT pattern.
+        if !definition.columns.contains_key(name) && !names.insert(name.clone()) {
+            return Err("parameter collides with a support or source projection".into());
         }
         if !matches!(
             parameter.r#type,
@@ -112,9 +155,15 @@ fn compile_inner(definition: &Definition, schema: &Schema) -> Result<Compiled, S
     pattern.on_in_scope_variable(|variable| {
         projected.insert(variable.as_str().to_owned());
     });
+    let projected_columns = definition
+        .columns
+        .keys()
+        .filter(|name| !computed.contains(*name))
+        .cloned();
     let expected = std::iter::once("root".to_owned())
-        .chain(definition.columns.keys().cloned())
+        .chain(projected_columns)
         .chain(definition.support_columns.iter().cloned())
+        .chain(definition.facts_columns.iter().cloned())
         .chain(definition.source_columns.iter().cloned())
         .collect::<BTreeSet<_>>();
     if projected != expected {
@@ -124,11 +173,13 @@ fn compile_inner(definition: &Definition, schema: &Schema) -> Result<Compiled, S
     }
 
     let mut used = BTreeSet::new();
+    let mut bound = BTreeSet::new();
     let input_predicates = dependency_predicates(&definition.dependencies)?;
     normalize(
         pattern,
         schema,
         &mut used,
+        &mut bound,
         &mut BTreeMap::new(),
         &BTreeMap::new(),
     )?;
@@ -148,14 +199,21 @@ fn compile_inner(definition: &Definition, schema: &Schema) -> Result<Compiled, S
         .iter()
         .flat_map(|dependency| dependency.parameters.values())
         .collect::<BTreeSet<_>>();
+    if definition.parameters.keys().any(|name| {
+        !used.contains(name) && !projected.contains(name) && !forwarded_parameters.contains(&name)
+    }) {
+        return Err(
+            "declared parameter is unused by SELECT, projection or child dependency".into(),
+        );
+    }
     if definition
         .parameters
         .keys()
-        .any(|name| !used.contains(name) && !forwarded_parameters.contains(&name))
+        .any(|name| definition.columns.contains_key(name) && bound.contains(name))
     {
-        return Err("declared parameter is unused by SELECT or child dependency".into());
+        return Err("caller-supplied parameter column must not also be bound by SELECT".into());
     }
-    Ok(Compiled { query })
+    Ok(Compiled { query, computed })
 }
 
 fn dependency_predicates(
@@ -174,6 +232,7 @@ fn dependency_predicates(
             .collect::<Vec<_>>();
         aliases.extend(dependency.projections.contributors.iter().cloned());
         aliases.extend(dependency.projections.support.iter().cloned());
+        aliases.extend(dependency.projections.facts.iter().cloned());
         predicates.insert(
             format!("urn:mara:query:input:{}", dependency.name),
             NamedNode::new(format!("urn:mara:query:input:{}", dependency.name)).unwrap(),
@@ -396,6 +455,7 @@ pub(super) fn bind_items(
     normalize(
         pattern,
         schema,
+        &mut BTreeSet::new(),
         &mut BTreeSet::new(),
         &mut BTreeMap::new(),
         &aliases,
@@ -621,6 +681,7 @@ fn normalize(
     pattern: &mut GraphPattern,
     schema: &Schema,
     used: &mut BTreeSet<String>,
+    bound: &mut BTreeSet<String>,
     existentials: &mut BTreeMap<String, Variable>,
     item_aliases: &BTreeMap<String, NamedNode>,
 ) -> Result<(), String> {
@@ -629,6 +690,8 @@ fn normalize(
             for triple in patterns {
                 collect(&triple.subject, used);
                 collect(&triple.object, used);
+                collect(&triple.subject, bound);
+                collect(&triple.object, bound);
                 vocabulary_term(&mut triple.subject, schema, item_aliases)?;
                 vocabulary_term(&mut triple.object, schema, item_aliases)?;
                 existential(&mut triple.subject, existentials);
@@ -651,6 +714,8 @@ fn normalize(
         } => {
             collect(subject, used);
             collect(object, used);
+            collect(subject, bound);
+            collect(object, bound);
             vocabulary_term(subject, schema, item_aliases)?;
             vocabulary_term(object, schema, item_aliases)?;
             existential(subject, existentials);
@@ -660,22 +725,22 @@ fn normalize(
         GraphPattern::Join { left, right }
         | GraphPattern::Union { left, right }
         | GraphPattern::Minus { left, right } => {
-            normalize(left, schema, used, existentials, item_aliases)?;
-            normalize(right, schema, used, existentials, item_aliases)?;
+            normalize(left, schema, used, bound, existentials, item_aliases)?;
+            normalize(right, schema, used, bound, existentials, item_aliases)?;
         }
         GraphPattern::LeftJoin {
             left,
             right,
             expression,
         } => {
-            normalize(left, schema, used, existentials, item_aliases)?;
-            normalize(right, schema, used, existentials, item_aliases)?;
+            normalize(left, schema, used, bound, existentials, item_aliases)?;
+            normalize(right, schema, used, bound, existentials, item_aliases)?;
             if let Some(expression) = expression {
                 normalize_expression(expression, schema, used, existentials, item_aliases)?;
             }
         }
         GraphPattern::Filter { expr, inner } => {
-            normalize(inner, schema, used, existentials, item_aliases)?;
+            normalize(inner, schema, used, bound, existentials, item_aliases)?;
             normalize_expression(expr, schema, used, existentials, item_aliases)?;
         }
         GraphPattern::Extend {
@@ -684,7 +749,8 @@ fn normalize(
             inner,
         } => {
             used.insert(variable.as_str().into());
-            normalize(inner, schema, used, existentials, item_aliases)?;
+            bound.insert(variable.as_str().into());
+            normalize(inner, schema, used, bound, existentials, item_aliases)?;
             normalize_expression(expression, schema, used, existentials, item_aliases)?;
         }
         GraphPattern::Values {
@@ -696,6 +762,11 @@ fn normalize(
                     .iter()
                     .map(|variable| variable.as_str().to_owned()),
             );
+            bound.extend(
+                variables
+                    .iter()
+                    .map(|variable| variable.as_str().to_owned()),
+            );
             for term in bindings.iter_mut().flatten().flatten() {
                 if let GroundTerm::NamedNode(node) = term {
                     vocabulary_node(node, schema, item_aliases)?;
@@ -703,7 +774,7 @@ fn normalize(
             }
         }
         GraphPattern::Project { inner, .. } | GraphPattern::Distinct { inner } => {
-            normalize(inner, schema, used, existentials, item_aliases)?;
+            normalize(inner, schema, used, bound, existentials, item_aliases)?;
         }
         _ => return Err("unsupported named SELECT construct".into()),
     }
@@ -823,7 +894,16 @@ fn normalize_expression(
             normalize_expression(inner, schema, used, existentials, item_aliases)?;
         }
         Expression::Exists(pattern) => {
-            normalize(pattern, schema, used, existentials, item_aliases)?;
+            // EXISTS-local bindings never export into the enclosing SELECT, so a caller-supplied
+            // projected column may be read there without counting as a rebinding.
+            normalize(
+                pattern,
+                schema,
+                used,
+                &mut BTreeSet::new(),
+                existentials,
+                item_aliases,
+            )?;
         }
         _ => {}
     }

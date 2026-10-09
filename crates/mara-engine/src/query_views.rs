@@ -55,6 +55,9 @@ pub struct ViewRow {
     /// Explicitly projected canonical edge support with authored occurrences.
     #[serde(default)]
     pub support: Vec<named_query::Support>,
+    /// Unchanged explicitly projected external snapshot/record provenance.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub facts: Vec<named_query::FactSupport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -365,6 +368,7 @@ pub fn factual_view(page: &named_query::Page, columns: Vec<ViewColumn>) -> Factu
                     values: binding.values.clone(),
                     contributors: binding.contributors.clone(),
                     support: binding.support.clone(),
+                    facts: binding.facts.clone(),
                 });
             }
         }
@@ -1101,6 +1105,44 @@ mod tests {
     use crate::ItemSource;
     use crate::named_query::{Endpoint, Value};
     use serde_json::json;
+
+    // @mara checks REQ-QUERY-VIEWS-AND-REPORTS
+    #[test]
+    fn factual_rows_preserve_supplied_fact_provenance() {
+        let page: named_query::Page = serde_json::from_value(json!({
+            "format_version": 3,
+            "definition": "facts",
+            "definition_file": "facts.json",
+            "input_identity": "supplied-input",
+            "evaluation_complete": true,
+            "unavailable_reason": null,
+            "summary": {"selected_roots": 1, "binding_count": 1, "known_bindings": 1},
+            "records": [{
+                "kind": "binding",
+                "root": {"kind": "item", "id": "SUB-A", "mid": null},
+                "binding": {
+                    "values": {}, "contributors": [], "support": [],
+                    "facts": [{
+                        "input": "reported", "identity": "run",
+                        "key": {"context": {"kind": "text", "value": "release", "language": null}},
+                        "record": 0
+                    }]
+                }
+            }],
+            "has_more": false, "next_cursor": null
+        }))
+        .unwrap();
+        let named_query::Record::Binding { binding, .. } = &page.records[0] else {
+            panic!("fixture has one binding");
+        };
+        let view = factual_view(&page, vec![]);
+        assert_eq!(view.roots[0].rows[0].facts, binding.facts);
+        assert_eq!(view.input_identity, page.input_identity);
+        assert_eq!(
+            serde_json::to_value(&view.roots[0].rows[0]).unwrap()["facts"],
+            serde_json::to_value(&binding.facts).unwrap()
+        );
+    }
 
     #[test]
     fn literal_values_render_without_markdown_or_html_reinterpretation() {

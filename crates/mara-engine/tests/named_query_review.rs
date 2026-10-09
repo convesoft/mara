@@ -37,6 +37,8 @@ fn request() -> q::Request {
         max_rows: 100,
         limit: 100,
         cursor: None,
+        fact_snapshots: vec![],
+        mappings: vec![],
     }
 }
 

@@ -332,18 +332,26 @@ Direct/auto clients use embedded execution for this operation; explicit
 daemon-required returns `unsupported_capability`. Daemon and final JS/browser
 adapters remain later surface work, not completed host parity.
 
-#### Definition formats 3 and 4
+#### Definition formats 3, 4 and 5
 
-Project-relative JSON files contain `{format_version:3,definitions:[...]}` or
-`{format_version:4,definitions:[...]}`. Format 3 remains the single-query form;
-format 4 adds only explicit named dependencies. Format-2 files are rejected
-because they do not declare required sources.
+Format 5 adds host-supplied external fact inputs, typed lookup mappings and
+definition-selected precedence aggregation. Its concrete declarations, request
+inputs, coverage/missing semantics, derived outputs and implemented Rust/CLI/MCP
+and browser-worker slice are specified in [[DES-QUERY-FACT-COMPUTATION]].
+Formats 3 and 4 remain the slices consumed by the policy and gate operations.
+The format-4 rules below also apply to format 5.
+
+Project-relative JSON files contain `{format_version:3,definitions:[...]}`, `{format_version:4,definitions:[...]}` or `{format_version:5,definitions:[...]}`. Format 3 remains the single-query form;
+format 4 adds only explicit named dependencies; format 5 adds the external-fact,
+lookup and aggregation declarations of [[DES-QUERY-FACT-COMPUTATION]]. Format-2
+files are rejected because they do not declare required sources.
 Each definition declares exact `id`, standard `select`, nonempty
 `root_flavours`, `required_fact_sources` and named `columns`. `documents` is a
 required fact source; `code` is recognized but unavailable to this embedded
 snapshot, so requiring it produces an incomplete result even for empty roots.
 Required sources are explicit, unique, and never inferred from query variables,
-columns or possible paths. Unknown sources are invalid declarations.
+columns or possible paths. Unknown sources are invalid declarations. The
+`external` source requires declared external fact inputs.
 
 Columns declare `type`, optional item `flavours`, and `optional` (default
 false). Types: item, code, external, iri, text, integer, number, boolean, edge.
@@ -518,7 +526,7 @@ Existence and any on a complete empty set are false; all and none are true; a di
 
 Definitions select aggregate/grouping keys, qualification and result precedence; there is no built-in ordering of pass/fail/inconclusive/error/pending, lifecycle rank or risk formula. An aggregate declares its empty case and retains members and support. Conflicting or underspecified precedence is a definition error, not load-order selection.
 
-Lookup mappings are typed caller/project policy data bound into input identity. Validate key/value types and reject conflicting duplicate keys. A missing key is unavailable unless an explicit fallback is declared; it never silently maps to zero, low risk, pass or no match. Fixture-defined likelihood/consequence scores, thresholds and reassessment use these mechanisms. Implementation links do not automatically lower a risk or select a new assessment.
+Lookup mappings are typed caller/project policy data bound into input identity. Validate key/value types and reject conflicting duplicate keys. A missing key is unavailable unless an explicit fallback is declared; it never silently maps to zero, low risk, pass or no match. Fixture-defined likelihood/consequence scores, thresholds and reassessment use these mechanisms. Implementation links do not automatically lower a risk or select a new assessment. The concrete format-5 declarations, coverage overlay, mapping and aggregate semantics are in [[DES-QUERY-FACT-COMPUTATION]].
 :::
 
 :::mara design DES-QUERY-CONSUMER-CONTRACT
@@ -695,7 +703,8 @@ Factual view format 1 (`kind: "query_view"`) preserves the page's `definition`,
 `summary` (`selected_roots`, `binding_count`, `known_bindings`), `has_more` and
 `next_cursor`. It adds declared `columns` (name, type, optional, flavours) from
 the selected definition and `roots` in page order with unchanged typed `rows`
-(`values`, `contributors`, `support`). A root record's `source` is linked;
+(`values`, `contributors`, `support`, and any explicitly projected `facts`
+provenance). A root record's `source` is linked;
 bindings whose root record was on an earlier page keep their root endpoint with
 `source` and `binding_count` absent rather than fabricating them. An empty root
 is a complete empty result, never a failed cell. Literal text/number/IRI values
@@ -1117,4 +1126,117 @@ Keep deterministic root/tuple/support ordering, distinct typed bindings, logical
 Deliver real shared Rust and embedded CLI/MCP raw execution first. Composition/catalog, policy/gate/view rollout and final daemon/JavaScript/browser surfaces remain separate delivery stages, not additions to this slice or waived release commitments. Hosts retain fact acquisition and native code discovery.
 
 The user separately accepted current transitive-path preparation cost for this slice; optimization is not an acceptance prerequisite and no latency/workload guarantee is added. Scope selection is not evidence that the paused candidate conforms. Verify the real selected workflow under [[VER-REUSABLE-QUERY-ENGINE]] before acceptance.
+:::
+
+:::mara design DES-QUERY-FACT-COMPUTATION
+:mid: 01M4GBX0TTZ0N4CWGBTR9H8AYS
+:title: Supply typed facts and definition-selected derived computations
+:status: draft
+:kind: interface
+:satisfies: REQ-EXPLICIT-QUERY-INPUTS
+:satisfies: REQ-COMPOSABLE-QUERY-PROJECTIONS
+:refines: DES-QUERY-INPUT-RESULT-CONTRACT
+
+Concrete format and operation for [[REQ-EXPLICIT-QUERY-INPUTS]] and the
+derived-value part of [[DES-QUERY-COMPOSITION-CONTRACT]]. It refines
+[[DES-QUERY-INPUT-RESULT-CONTRACT]] for the selected adapter without changing its
+semantics. Standard SPARQL still owns admitted query semantics; no second
+expression evaluator is introduced.
+
+### Definition format 5
+
+Project-relative JSON `{format_version:5,definitions:[...]}` extends format 4.
+Formats 3 and 4 are unchanged; external facts, lookups and aggregation are
+rejected in them. A format-5 definition may additionally declare:
+
+- `external_facts`: `[{input, keys, fields, missing}]`. `input` is the required
+  request snapshot name; `keys` are projected tuple columns identifying one
+  record that no fact, lookup or aggregation derives; `fields` maps supplied record field names to declared derived output
+  columns; `missing` declares one typed value for every field output column.
+- `lookups`: `[{mapping, keys, output}]`. `keys` are tuple columns; `output` is a
+  declared derived column.
+- `aggregate`: `{group_by, rank, precedence, retain, count, empty}`.
+  `precedence` is an ordered list of typed values, highest first, resolving to
+  distinct typed identities (item ID/MID aliases and signed zero are one
+  identity); `count` is a
+  declared integer derived column; `empty` is the declared `rank` value for a
+  completely evaluated selected root with no grouped members.
+- `facts_columns`: projected variable names carrying explicitly projected child
+  fact provenance, excluded from tuple identity like `support_columns`. A format-4
+  `dependencies[].projections.facts` alias exposes one child's fact provenance
+  under that local relation column; the parent opts in by projecting it.
+
+Derived output columns are declared in `columns` but are not part of the SELECT
+tuple signature. The SELECT projects exactly `root`, the non-derived columns,
+`support_columns` and `source_columns`. A caller-supplied typed value may be
+bound directly as a projected tuple column: the parameter and column share a
+name, and SELECT must not also bind that variable (reading it in FILTER or EXISTS
+is allowed). A definition declaring
+`external_facts` also declares the `external` required fact source.
+
+### Request inputs
+
+`query_execute` requests add optional `fact_snapshots` and `mappings`.
+`fact_snapshots` entries declare `input`, an opaque `identity`, `coverage` keys
+and typed `records` with `keys`/`fields`. `mappings` entries declare `mapping`,
+typed `entries` (`keys`/`value`) and an optional typed `fallback`. Snapshot and
+mapping names must be declared by a loaded definition and unique; unknown,
+undeclared or duplicate inputs are argument errors. Full snapshot and mapping
+content participates in the SHA-256 input identity, so an unchanged opaque
+`identity` label never conceals changed content. Candidate and context values
+are opaque typed data, never Git refs or commands.
+
+### Evaluation
+
+`external_facts` are overlaid in declaration order onto each returned tuple row:
+
+- A record whose declared key columns equal the row's typed values fills the
+  field output columns; provenance records the snapshot identity and record index.
+- With no record for a key present in declared coverage, the declared `missing`
+  values apply and provenance records covered absence.
+- A missing snapshot, an unbound key column, or a required key outside declared
+  coverage makes the evaluation incomplete with a reason; known bindings and
+  their provenance remain.
+- Malformed records, key/field type conflicts, duplicate record keys and unknown
+  or duplicate inputs are invalid arguments, never silent overwrites. Supplied
+  records and mapping entries are validated against every loaded declaration that
+  claims them before root enumeration, so rejection never depends on which roots
+  are selected or which loaded definition executes.
+
+`lookups` then replace each declared `output` column with the entry whose typed
+key equals the row's declared key values. A missing key is incomplete unless the
+mapping declares a fallback; conflicting duplicate entries are invalid.
+
+`aggregate` groups rows by the exact typed values of `group_by`, selects the
+member whose `rank` value appears first in `precedence`, and retains the
+`retain` and `rank` values plus the member count. A truncated, unavailable or
+unranked evaluation leaves the count unbound rather than asserting an observed
+member total, and the selected member's explicit
+support, contributors and the union of grouped fact provenance are retained. An
+unranked returned value is incomplete. A selected root whose complete evaluation
+observes no grouped members yields the declared `empty` value with count zero; a
+truncated or otherwise unavailable evaluation must not assert that empty outcome,
+and it is not a pass or a readiness claim. Fact provenance reaches a parent only
+when that parent explicitly projects the dependency's `facts` alias, like edge
+support; no other hidden child provenance is reconstructed.
+
+Types, flavours and canonical endpoints of every derived value are checked like
+projected values; supplied record, coverage and mapping keys are likewise checked
+against their declared columns, including item flavours. Selected roots are
+evaluated independently: one root's unavailable input or reached budget marks
+overall evaluation incomplete without discarding another root's known bindings.
+Nothing is fetched, executed, authenticated or persisted.
+
+### Implemented slice
+
+`SourceEngine` and `NativeRuntime::query_execute` implement format 5 through
+Rust, CLI (`--fact-file`, `--mapping-file`) and MCP (`query_execute`).
+`mara-wasm` exposes the same `query_execute` operation for the real browser
+worker. Fixture inputs are owned by `tests/fixtures/query-facts/snapshot.json`;
+focused checks live in `crates/mara-engine/tests/query_facts.rs` (coverage,
+precedence, mappings, errors, continuation) and `tests/query_facts.rs` (real
+portable, embedded, CLI and MCP parity), with browser comparison in
+`tests/browser/query-facts.spec.mjs`. The complete policy/gate/view consumers,
+daemon/Node/HTTP/TypeScript surfaces and final host rollout remain separate
+delivery work; this design does not claim them.
 :::

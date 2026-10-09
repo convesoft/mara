@@ -9,6 +9,7 @@ use oxigraph::{
 #[derive(Debug, Clone)]
 struct LoadedDefinition {
     file: String,
+    format: u32,
     definition: Definition,
 }
 
@@ -25,10 +26,16 @@ struct EvaluationContext<'a> {
     graph: &'a PreparedGraph,
     store: &'a Store,
     max_rows: u32,
+    prepared: &'a BTreeMap<String, facts::Prepared<'a>>,
 }
 
+#[derive(Default)]
+struct Derived {
+    support: BTreeMap<String, Support>,
+    facts: BTreeMap<String, FactSupport>,
+}
 struct EvaluationState<'a> {
-    derived_support: &'a mut BTreeMap<String, Support>,
+    derived: &'a mut Derived,
     observed_rows: &'a mut u32,
 }
 
@@ -93,10 +100,10 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
         };
         let set: DefinitionSet =
             serde_json::from_str(text).map_err(|e| Error::definition(&path, e.to_string()))?;
-        if !matches!(set.format_version, 3 | 4) {
+        if !matches!(set.format_version, 3..=5) {
             return Err(Error::definition(
                 &path,
-                "expected named-definition format 3 or 4",
+                "expected named-definition format 3, 4 or 5",
             ));
         }
         for definition in set.definitions {
@@ -115,6 +122,7 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
                     id,
                     LoadedDefinition {
                         file: path.clone(),
+                        format: set.format_version,
                         definition,
                     },
                 )
@@ -143,9 +151,21 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
     for (id, loaded) in &definitions {
         compiled.insert(
             id.clone(),
-            signature::compile(&loaded.file, &loaded.definition, &schema)?,
+            signature::compile(&loaded.file, loaded.format, &loaded.definition, &schema)?,
         );
     }
+
+    let mut declared_inputs = BTreeSet::new();
+    let mut declared_mappings = BTreeSet::new();
+    for loaded in definitions.values() {
+        for fact in &loaded.definition.external_facts {
+            declared_inputs.insert(fact.input.clone());
+        }
+        for lookup in &loaded.definition.lookups {
+            declared_mappings.insert(lookup.mapping.clone());
+        }
+    }
+    let inputs = facts::inputs(&request, &declared_inputs, &declared_mappings)?;
 
     let (project, _, corpus) = match engine.corpus() {
         Ok(v) => v,
@@ -245,6 +265,23 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
     }
     add_normalized_text(&store, &corpus, &schema, &selected_definition.file)?;
 
+    // Validate every supplied snapshot record and mapping entry against the declarations that
+    // claim it, including loaded definitions this execution does not reach, so malformed inputs
+    // never depend on root selection or reachability. Only reachable definitions make an
+    // unbound required input unavailable.
+    let reachable = order.iter().collect::<BTreeSet<_>>();
+    let mut prepared = BTreeMap::new();
+    let mut input_unavailable = None;
+    for (id, loaded) in &definitions {
+        let validation = facts::prepare(&loaded.definition, &loaded.file, &corpus, &inputs)?;
+        if reachable.contains(id)
+            && let Some(reason) = validation.unavailable()
+        {
+            input_unavailable.get_or_insert_with(|| reason.to_owned());
+        }
+        prepared.insert(id.clone(), validation);
+    }
+
     let mut rows = 0u32;
     let context = EvaluationContext {
         definitions: &definitions,
@@ -253,43 +290,51 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
         graph: &graph,
         store: &store,
         max_rows: request.max_rows,
+        prepared: &prepared,
     };
     let mut records = vec![];
     for (_, (root, source)) in selected {
-        let bindings = if page.evaluation_complete {
-            let mut path = vec![request.definition.clone()];
-            let mut derived_support = BTreeMap::new();
-            let mut state = EvaluationState {
-                derived_support: &mut derived_support,
-                observed_rows: &mut rows,
-            };
-            let result = evaluate_definition(
-                &request.definition,
-                request.parameters.clone(),
-                &root,
-                &mut path,
-                &context,
-                &mut state,
-            )?;
-            if !result.complete {
-                page.evaluation_complete = false;
+        // Evaluate every selected root: an unavailable child input or a reached budget may make
+        // overall evaluation incomplete, but each root's known bindings are still retained.
+        let mut path = vec![request.definition.clone()];
+        let mut derived = Derived::default();
+        let mut state = EvaluationState {
+            derived: &mut derived,
+            observed_rows: &mut rows,
+        };
+        let result = evaluate_definition(
+            &request.definition,
+            request.parameters.clone(),
+            &root,
+            &mut path,
+            &context,
+            &mut state,
+        )?;
+        if !result.complete {
+            page.evaluation_complete = false;
+            if page.unavailable_reason.is_none() {
                 page.unavailable_reason = result.unavailable_reason;
             }
-            result.bindings
-        } else {
-            vec![]
-        };
-        let count = bindings.len();
+        }
+        let count = result.bindings.len();
         page.summary.known_bindings += count;
         records.push(Record::Root {
             root: root.clone(),
             source,
             binding_count: Some(count),
         });
-        records.extend(bindings.into_iter().map(|binding| Record::Binding {
+        records.extend(result.bindings.into_iter().map(|binding| Record::Binding {
             root: root.clone(),
             binding,
         }));
+    }
+    // A complete evaluation still reports an unbound required input for an empty selection,
+    // where no root was evaluated to surface it.
+    if page.evaluation_complete
+        && let Some(reason) = input_unavailable
+    {
+        page.evaluation_complete = false;
+        page.unavailable_reason = Some(reason);
     }
     if !page.evaluation_complete {
         page.summary.binding_count = None;
@@ -460,6 +505,9 @@ fn validate_dependency(
                 ),
             ));
         }
+        validate_projection_alias(parent_file, alias, &mut aliases)?;
+    }
+    if let Some(alias) = &projections.facts {
         validate_projection_alias(parent_file, alias, &mut aliases)?;
     }
     for (child_parameter, parent_parameter) in &dependency.parameters {
@@ -634,10 +682,17 @@ fn evaluate_definition(
         &*path,
         &parameter_values,
     ));
+    // A required source this host cannot supply makes the definition incomplete from the start;
+    // known graph bindings and derived values are still retained without exact counts.
+    let code_missing = definition.required_fact_sources.contains(&FactSource::Code);
     let mut result = QueryEvaluation {
         bindings: vec![],
-        complete: true,
-        unavailable_reason: None,
+        complete: !code_missing,
+        unavailable_reason: code_missing.then(|| {
+            format!(
+                "required code facts for named definition {id} were not supplied to this snapshot"
+            )
+        }),
     };
 
     for dependency in &definition.dependencies {
@@ -676,7 +731,7 @@ fn evaluate_definition(
             &scope,
             dependency,
             &child.bindings,
-            state.derived_support,
+            state.derived,
         )?;
     }
 
@@ -748,9 +803,14 @@ fn evaluate_definition(
 
         let mut values = BTreeMap::new();
         for (name, column) in &definition.columns {
+            if context.compiled[id].computed.contains(name) {
+                // Derived columns are supplied by declared facts, mappings or aggregation.
+                values.insert(name.clone(), None);
+                continue;
+            }
             let value = solution
                 .get(name.as_str())
-                .map(|term| typed(term, context.graph, state.derived_support))
+                .map(|term| typed(term, context.graph, &state.derived.support))
                 .transpose()
                 .map_err(|error| Error::definition(file, error))?;
             if let Some(value) = &value {
@@ -800,14 +860,14 @@ fn evaluate_definition(
                     .graph
                     .support
                     .get(id.as_str())
-                    .or_else(|| state.derived_support.get(id.as_str()))
+                    .or_else(|| state.derived.support.get(id.as_str()))
                     .ok_or_else(|| Error::definition(file, "unknown canonical edge support"))?;
                 support.insert(id.as_str().to_owned(), edge.clone());
             }
         }
         for name in &definition.source_columns {
             if let Some(term) = solution.get(name.as_str()) {
-                let value = typed(term, context.graph, state.derived_support)
+                let value = typed(term, context.graph, &state.derived.support)
                     .map_err(|error| Error::definition(file, error))?;
                 if !matches!(value, Value::Item { .. }) {
                     return Err(Error::definition(
@@ -818,11 +878,30 @@ fn evaluate_definition(
                 contributors.insert(hash(&value), value);
             }
         }
+        let mut facts = BTreeMap::new();
+        for name in &definition.facts_columns {
+            if let Some(term) = solution.get(name.as_str()) {
+                let Term::NamedNode(node) = term else {
+                    return Err(Error::definition(
+                        file,
+                        "fact provenance column must bind a canonical node",
+                    ));
+                };
+                let provenance = state
+                    .derived
+                    .facts
+                    .get(node.as_str())
+                    .ok_or_else(|| Error::definition(file, "unknown fact provenance"))?;
+                // Key merged provenance by content so an equivalent fact projected twice collapses.
+                facts.insert(hash(provenance), provenance.clone());
+            }
+        }
         let key = serde_json::to_string(&values).expect("typed tuple");
         let entry = tuples.entry(key).or_insert_with(|| Binding {
             values,
             contributors: vec![],
             support: vec![],
+            facts: vec![],
         });
         for contributor in &entry.contributors {
             contributors.insert(hash(contributor), contributor.clone());
@@ -833,10 +912,23 @@ fn evaluate_definition(
                 supported.clone(),
             );
         }
+        for provenance in &entry.facts {
+            facts.insert(hash(provenance), provenance.clone());
+        }
         entry.contributors = contributors.into_values().collect();
         entry.support = support.into_values().collect();
+        entry.facts = facts.into_values().collect();
     }
     result.bindings = tuples.into_values().collect();
+    if let Some(reason) = facts::apply(
+        definition,
+        &context.prepared[id],
+        result.complete,
+        &mut result.bindings,
+    )? {
+        result.complete = false;
+        result.unavailable_reason.get_or_insert(reason);
+    }
     Ok(result)
 }
 
@@ -847,7 +939,7 @@ fn materialize_dependency(
     scope: &str,
     dependency: &Dependency,
     bindings: &[Binding],
-    derived_support: &mut BTreeMap<String, Support>,
+    derived: &mut Derived,
 ) -> Result<(), Error> {
     let root_iri = NamedNode::new(root.iri()).expect("canonical root IRI");
     let relation = NamedNode::new(format!("urn:mara:query:input:{scope}:{}", dependency.name))
@@ -894,13 +986,32 @@ fn materialize_dependency(
             for supported in &binding.support {
                 let predicate = column_predicate(scope, &dependency.name, alias);
                 let id = format!("urn:mara:query:edge:{}", hash(&supported.edge));
-                derived_support.insert(id.clone(), supported.clone());
+                derived.support.insert(id.clone(), supported.clone());
                 insert(
                     store,
                     file,
                     row.clone(),
                     predicate,
                     NamedNode::new(id).expect("canonical support IRI").into(),
+                )?;
+            }
+        }
+        if let Some(alias) = &dependency.projections.facts {
+            for (fact_index, provenance) in binding.facts.iter().enumerate() {
+                let predicate = column_predicate(scope, &dependency.name, alias);
+                let id = format!(
+                    "urn:mara:query:fact:{scope}:{}:{index}:{fact_index}",
+                    hash(&dependency.name)
+                );
+                derived.facts.insert(id.clone(), provenance.clone());
+                insert(
+                    store,
+                    file,
+                    row.clone(),
+                    predicate,
+                    NamedNode::new(id)
+                        .expect("canonical fact provenance IRI")
+                        .into(),
                 )?;
             }
         }

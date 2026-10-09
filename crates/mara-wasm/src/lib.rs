@@ -39,6 +39,7 @@ pub const OPERATIONS: &[&str] = &[
     "trace_matrix",
     "query_backend_execute",
     "query_backend_policy",
+    "query_execute",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -161,6 +162,11 @@ impl MemoryWorkspace {
                 self.engine
                     .query_backend_policy(parse(p)?)
                     .map_err(argument)?,
+            ),
+            "query_execute" => value(
+                self.engine
+                    .query_execute(parse(p)?)
+                    .map_err(|error| envelope(&error.code, error.message))?,
             ),
             "item_list" => value(self.engine.item_list(parse(p)?).map_err(argument)?),
             "search" => value(self.engine.search(parse(p)?).map_err(argument)?),
