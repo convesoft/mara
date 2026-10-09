@@ -77,6 +77,30 @@ fn cli(root: &std::path::Path, req: &q::Request) -> std::process::Output {
     }
     mara(root, &args.iter().map(String::as_str).collect::<Vec<_>>())
 }
+fn composition_cli(root: &std::path::Path, req: &q::Request) -> std::process::Output {
+    let mut args = vec![
+        "--execution-mode".to_owned(),
+        "direct".into(),
+        "--format".into(),
+        "json".into(),
+        "query".into(),
+        "execute".into(),
+        req.definition.clone(),
+    ];
+    for file in &req.definition_files {
+        args.extend(["--definition-file".into(), file.clone()]);
+    }
+    for id in &req.selection.ids {
+        args.extend(["--id".into(), id.clone()]);
+    }
+    args.extend([
+        "--max-rows".into(),
+        req.max_rows.to_string(),
+        "--limit".into(),
+        req.limit.to_string(),
+    ]);
+    mara(root, &args.iter().map(String::as_str).collect::<Vec<_>>())
+}
 fn mcp(root: &std::path::Path, req: &q::Request) -> Value {
     let responses = mcp_exchange_with_arguments(
         root,
@@ -137,6 +161,52 @@ fn real_portable_rust_embedded_rust_cli_mcp_fixture_and_paged_results() {
         )
         .unwrap();
     }
+}
+// @mara checks REQ-COMPOSABLE-QUERY-PROJECTIONS
+// @mara checks DES-QUERY-COMPOSITION-CONTRACT
+#[test]
+fn format_four_composition_matches_portable_embedded_cli_and_mcp_results() {
+    let fixture = project();
+    let query_file = include_str!("fixtures/named-query/composition.json");
+    fs::write(fixture.path().join("composition.json"), query_file).unwrap();
+    let runtime = NativeRuntime::new(Some(fixture.path().into()), fixture.path().into()).unwrap();
+    let mut source = snapshot();
+    source.files.retain(|file| file.path != "queries.json");
+    source.files.push(mara::SourceFile {
+        path: "composition.json".into(),
+        content: query_file.into(),
+    });
+    let portable = SourceEngine::new(source).unwrap();
+    let req = q::Request {
+        definition_files: vec!["composition.json".into()],
+        definition: "urn:fixture:query:composed-support-status".into(),
+        selection: q::Selection {
+            ids: vec!["SUB-LINKED".into(), "SUB-EMPTY".into()],
+            ..Default::default()
+        },
+        parameters: vec![],
+        max_rows: 100,
+        limit: 100,
+        cursor: None,
+    };
+    let native = runtime.query_execute(req.clone()).unwrap();
+    let engine = portable.query_execute(req.clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(&native).unwrap(),
+        serde_json::to_value(&engine).unwrap()
+    );
+    assert!(native.evaluation_complete);
+    assert_eq!(native.summary.binding_count, Some(1));
+    let cli = composition_cli(fixture.path(), &req);
+    assert!(cli.status.success(), "{} {}", stdout(&cli), stderr(&cli));
+    assert_eq!(
+        serde_json::from_slice::<Value>(&cli.stdout).unwrap(),
+        serde_json::to_value(&native).unwrap()
+    );
+    assert_eq!(
+        mcp(fixture.path(), &req),
+        serde_json::to_value(&native).unwrap()
+    );
 }
 // @mara checks DES-QUERY-INPUT-RESULT-CONTRACT
 #[test]

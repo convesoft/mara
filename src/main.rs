@@ -161,7 +161,7 @@ enum QueryCommand {
     Execute {
         /// Exact definition identity.
         definition: String,
-        /// Project-relative JSON named-definition files (format 3).
+        /// Project-relative JSON named-definition files (format 3 or 4).
         #[arg(long = "definition-file", required = true)]
         definition_files: Vec<String>,
         /// Exact item IDs/MIDs; aliases select one root and unknown references fail.

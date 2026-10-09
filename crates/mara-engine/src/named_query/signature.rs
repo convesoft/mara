@@ -124,6 +124,7 @@ fn compile_inner(definition: &Definition, schema: &Schema) -> Result<Compiled, S
     }
 
     let mut used = BTreeSet::new();
+    let input_predicates = dependency_predicates(&definition.dependencies)?;
     normalize(
         pattern,
         schema,
@@ -131,6 +132,7 @@ fn compile_inner(definition: &Definition, schema: &Schema) -> Result<Compiled, S
         &mut BTreeMap::new(),
         &BTreeMap::new(),
     )?;
+    validate_input_predicates(pattern, &input_predicates)?;
     if used
         .iter()
         .chain(&projected)
@@ -141,14 +143,210 @@ fn compile_inner(definition: &Definition, schema: &Schema) -> Result<Compiled, S
     if nested_projection(pattern, true) {
         return Err("nested SELECT signatures belong to the later composition delivery".into());
     }
+    let forwarded_parameters = definition
+        .dependencies
+        .iter()
+        .flat_map(|dependency| dependency.parameters.values())
+        .collect::<BTreeSet<_>>();
     if definition
         .parameters
         .keys()
-        .any(|name| !used.contains(name))
+        .any(|name| !used.contains(name) && !forwarded_parameters.contains(&name))
     {
-        return Err("declared parameter is unused by SELECT".into());
+        return Err("declared parameter is unused by SELECT or child dependency".into());
     }
     Ok(Compiled { query })
+}
+
+fn dependency_predicates(
+    dependencies: &[Dependency],
+) -> Result<BTreeMap<String, NamedNode>, String> {
+    let mut predicates = BTreeMap::new();
+    for dependency in dependencies {
+        if !valid(&dependency.name) {
+            return Err("invalid dependency relation name".into());
+        }
+        let mut aliases = dependency
+            .projections
+            .columns
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        aliases.extend(dependency.projections.contributors.iter().cloned());
+        aliases.extend(dependency.projections.support.iter().cloned());
+        predicates.insert(
+            format!("urn:mara:query:input:{}", dependency.name),
+            NamedNode::new(format!("urn:mara:query:input:{}", dependency.name)).unwrap(),
+        );
+        for alias in aliases {
+            if !valid(&alias) {
+                return Err("invalid dependency projection alias".into());
+            }
+            let iri = format!("urn:mara:query:column:{}:{alias}", dependency.name);
+            if predicates
+                .insert(iri.clone(), NamedNode::new(iri).unwrap())
+                .is_some()
+            {
+                return Err("duplicate dependency projection alias".into());
+            }
+        }
+    }
+    Ok(predicates)
+}
+
+pub(super) fn scope_inputs(query: &mut Query, dependencies: &[Dependency], scope: &str) {
+    let predicates = dependency_predicates(dependencies).expect("validated dependencies");
+    let scoped = predicates
+        .keys()
+        .map(|iri| {
+            let replacement = if let Some(name) = iri.strip_prefix("urn:mara:query:input:") {
+                format!("urn:mara:query:input:{scope}:{name}")
+            } else {
+                let column = iri.strip_prefix("urn:mara:query:column:").unwrap();
+                format!("urn:mara:query:column:{scope}:{column}")
+            };
+            (iri.clone(), NamedNode::new(replacement).unwrap())
+        })
+        .collect::<BTreeMap<_, _>>();
+    if let Query::Select { pattern, .. } = query {
+        scope_pattern(pattern, &scoped);
+    }
+}
+
+fn scope_pattern(pattern: &mut GraphPattern, scoped: &BTreeMap<String, NamedNode>) {
+    match pattern {
+        GraphPattern::Bgp { patterns } => {
+            for triple in patterns {
+                if let NamedNodePattern::NamedNode(predicate) = &mut triple.predicate
+                    && let Some(replacement) = scoped.get(predicate.as_str())
+                {
+                    *predicate = replacement.clone();
+                }
+            }
+        }
+        GraphPattern::Join { left, right }
+        | GraphPattern::Union { left, right }
+        | GraphPattern::Minus { left, right } => {
+            scope_pattern(left, scoped);
+            scope_pattern(right, scoped);
+        }
+        GraphPattern::LeftJoin {
+            left,
+            right,
+            expression,
+        } => {
+            scope_pattern(left, scoped);
+            scope_pattern(right, scoped);
+            if let Some(expression) = expression {
+                scope_expression(expression, scoped);
+            }
+        }
+        GraphPattern::Filter { expr, inner } => {
+            scope_pattern(inner, scoped);
+            scope_expression(expr, scoped);
+        }
+        GraphPattern::Extend {
+            expression, inner, ..
+        } => {
+            scope_pattern(inner, scoped);
+            scope_expression(expression, scoped);
+        }
+        GraphPattern::Project { inner, .. } | GraphPattern::Distinct { inner } => {
+            scope_pattern(inner, scoped);
+        }
+        GraphPattern::Path { .. } | GraphPattern::Values { .. } => {}
+        _ => {}
+    }
+}
+
+fn scope_expression(expression: &mut Expression, scoped: &BTreeMap<String, NamedNode>) {
+    match expression {
+        Expression::Exists(pattern) => scope_pattern(pattern, scoped),
+        Expression::SameTerm(left, right)
+        | Expression::And(left, right)
+        | Expression::Or(left, right) => {
+            scope_expression(left, scoped);
+            scope_expression(right, scoped);
+        }
+        Expression::Not(inner) => scope_expression(inner, scoped),
+        _ => {}
+    }
+}
+
+fn validate_input_predicates(
+    pattern: &GraphPattern,
+    allowed: &BTreeMap<String, NamedNode>,
+) -> Result<(), String> {
+    fn validate(
+        pattern: &GraphPattern,
+        allowed: &BTreeMap<String, NamedNode>,
+    ) -> Result<(), String> {
+        match pattern {
+            GraphPattern::Bgp { patterns } => {
+                for triple in patterns {
+                    if let NamedNodePattern::NamedNode(predicate) = &triple.predicate {
+                        let iri = predicate.as_str();
+                        if (iri.starts_with("urn:mara:query:input:")
+                            || iri.starts_with("urn:mara:query:column:"))
+                            && !allowed.contains_key(iri)
+                        {
+                            return Err(format!("undeclared dependency predicate {iri}"));
+                        }
+                    }
+                }
+            }
+            GraphPattern::Join { left, right }
+            | GraphPattern::Union { left, right }
+            | GraphPattern::Minus { left, right } => {
+                validate(left, allowed)?;
+                validate(right, allowed)?;
+            }
+            GraphPattern::LeftJoin {
+                left,
+                right,
+                expression,
+            } => {
+                validate(left, allowed)?;
+                validate(right, allowed)?;
+                if let Some(expression) = expression {
+                    validate_expression(expression, allowed)?;
+                }
+            }
+            GraphPattern::Filter { expr, inner } => {
+                validate(inner, allowed)?;
+                validate_expression(expr, allowed)?;
+            }
+            GraphPattern::Extend {
+                expression, inner, ..
+            } => {
+                validate(inner, allowed)?;
+                validate_expression(expression, allowed)?;
+            }
+            GraphPattern::Project { inner, .. } | GraphPattern::Distinct { inner } => {
+                validate(inner, allowed)?;
+            }
+            GraphPattern::Path { .. } | GraphPattern::Values { .. } => {}
+            _ => {}
+        }
+        Ok(())
+    }
+    fn validate_expression(
+        expression: &Expression,
+        allowed: &BTreeMap<String, NamedNode>,
+    ) -> Result<(), String> {
+        match expression {
+            Expression::Exists(pattern) => validate(pattern, allowed),
+            Expression::SameTerm(left, right)
+            | Expression::And(left, right)
+            | Expression::Or(left, right) => {
+                validate_expression(left, allowed)?;
+                validate_expression(right, allowed)
+            }
+            Expression::Not(inner) => validate_expression(inner, allowed),
+            _ => Ok(()),
+        }
+    }
+    validate(pattern, allowed)
 }
 
 fn validate_column(name: &str, column: &Column, schema: &Schema) -> Result<(), String> {
@@ -514,6 +712,9 @@ fn normalize(
 
 fn normalize_predicate(predicate: &mut NamedNode, schema: &Schema) -> Result<bool, String> {
     let iri = predicate.as_str();
+    if iri.starts_with("urn:mara:query:input:") || iri.starts_with("urn:mara:query:column:") {
+        return Ok(false);
+    }
     if let Some(raw) = iri.strip_prefix("urn:mara:relation:") {
         let (canonical, _, inverse) = schema
             .resolve_relation(raw)
@@ -521,11 +722,29 @@ fn normalize_predicate(predicate: &mut NamedNode, schema: &Schema) -> Result<boo
         *predicate = NamedNode::new(format!("urn:mara:relation:{canonical}")).unwrap();
         return Ok(inverse);
     }
+    if let Some(field) = iri.strip_prefix("urn:mara:query:nfc-casefold:field:") {
+        if schema.flavours().values().any(|flavour| {
+            flavour.fields.get(field).is_some_and(|definition| {
+                matches!(
+                    definition.field_type,
+                    crate::FieldType::String | crate::FieldType::Enum
+                )
+            })
+        }) {
+            return Ok(false);
+        }
+        return Err(format!(
+            "normalized text comparison requires a string or enum field {field}"
+        ));
+    }
     if let Some(field) = iri.strip_prefix("urn:mara:field:") {
         if schema_has_field(schema, field) {
             return Ok(false);
         }
         return Err(format!("unknown schema field {field}"));
+    }
+    if iri == "urn:mara:query:nfc-casefold:title" {
+        return Ok(false);
     }
     if iri == oxrdf::vocab::rdf::TYPE.as_str()
         || matches!(iri, "urn:mara:item:id" | "urn:mara:item:title")

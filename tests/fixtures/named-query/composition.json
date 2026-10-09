@@ -1,0 +1,276 @@
+{
+  "format_version": 4,
+  "definitions": [
+    {
+      "id": "urn:fixture:query:support-links",
+      "required_fact_sources": [
+        "documents"
+      ],
+      "root_flavours": [
+        "subject"
+      ],
+      "columns": {
+        "support": {
+          "type": "item",
+          "flavours": [
+            "support"
+          ]
+        }
+      },
+      "support_columns": [
+        "edge"
+      ],
+      "select": "SELECT ?root ?support ?edge WHERE { { ?root <urn:mara:relation:supported_by> ?support } UNION { ?support <urn:mara:relation:supports> ?root } ?edge <urn:mara:query:source> ?support ; <urn:mara:query:target> ?root ; <urn:mara:query:relation> <urn:mara:relation:supports> }"
+    },
+    {
+      "id": "urn:fixture:query:root-status",
+      "required_fact_sources": [
+        "documents"
+      ],
+      "root_flavours": [
+        "subject"
+      ],
+      "columns": {
+        "state": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?state WHERE { ?root <urn:mara:field:status> ?state }"
+    },
+    {
+      "id": "urn:fixture:query:composed-support-status",
+      "required_fact_sources": [
+        "documents"
+      ],
+      "root_flavours": [
+        "subject"
+      ],
+      "columns": {
+        "support": {
+          "type": "item",
+          "flavours": [
+            "support"
+          ]
+        },
+        "lifecycle": {
+          "type": "text"
+        }
+      },
+      "support_columns": [
+        "edge"
+      ],
+      "dependencies": [
+        {
+          "name": "supports",
+          "definition": "urn:fixture:query:support-links",
+          "root": "root",
+          "projections": {
+            "columns": {
+              "support": "support"
+            },
+            "support": "edge"
+          }
+        },
+        {
+          "name": "status",
+          "definition": "urn:fixture:query:root-status",
+          "root": "root",
+          "projections": {
+            "columns": {
+              "state": "state"
+            }
+          }
+        }
+      ],
+      "select": "SELECT ?root ?support ?lifecycle ?edge WHERE { ?root <urn:mara:query:input:supports> ?support_row ; <urn:mara:query:input:status> ?status_row . ?support_row <urn:mara:query:column:supports:support> ?support ; <urn:mara:query:column:supports:edge> ?edge . ?status_row <urn:mara:query:column:status:state> ?lifecycle . ?support <urn:mara:field:status> ?lifecycle }"
+    },
+    {
+      "id": "urn:fixture:query:direct-coverage",
+      "required_fact_sources": [
+        "documents"
+      ],
+      "root_flavours": [
+        "subject"
+      ],
+      "columns": {
+        "support": {
+          "type": "item",
+          "flavours": [
+            "support"
+          ]
+        }
+      },
+      "support_columns": [
+        "edge"
+      ],
+      "select": "SELECT ?root ?support ?edge WHERE { ?root <urn:mara:relation:supported_by> ?support . ?edge <urn:mara:query:source> ?support ; <urn:mara:query:target> ?root ; <urn:mara:query:relation> <urn:mara:relation:supports> }"
+    },
+    {
+      "id": "urn:fixture:query:design-coverage",
+      "required_fact_sources": [
+        "documents"
+      ],
+      "root_flavours": [
+        "subject"
+      ],
+      "columns": {
+        "support": {
+          "type": "item",
+          "flavours": [
+            "support"
+          ]
+        }
+      },
+      "support_columns": [
+        "edge"
+      ],
+      "select": "SELECT ?root ?support ?edge WHERE { ?root <urn:mara:relation:parent>+ ?design . ?design <urn:mara:relation:supported_by> ?support . ?edge <urn:mara:query:source> ?support ; <urn:mara:query:target> ?design ; <urn:mara:query:relation> <urn:mara:relation:supports> }"
+    },
+    {
+      "id": "urn:fixture:query:direct-or-design-coverage",
+      "required_fact_sources": [
+        "documents"
+      ],
+      "root_flavours": [
+        "subject"
+      ],
+      "columns": {
+        "support": {
+          "type": "item",
+          "flavours": [
+            "support"
+          ]
+        },
+        "lifecycle": {
+          "type": "text"
+        }
+      },
+      "support_columns": [
+        "edge"
+      ],
+      "dependencies": [
+        {
+          "name": "direct",
+          "definition": "urn:fixture:query:direct-coverage",
+          "root": "root",
+          "projections": {
+            "columns": {
+              "support": "support"
+            },
+            "support": "edge"
+          }
+        },
+        {
+          "name": "design",
+          "definition": "urn:fixture:query:design-coverage",
+          "root": "root",
+          "projections": {
+            "columns": {
+              "support": "support"
+            },
+            "support": "edge"
+          }
+        }
+      ],
+      "select": "SELECT ?root ?support ?lifecycle ?edge WHERE { { ?root <urn:mara:query:input:direct> ?direct_row . ?direct_row <urn:mara:query:column:direct:support> ?support ; <urn:mara:query:column:direct:edge> ?edge . ?support <urn:mara:field:status> ?lifecycle } UNION { ?root <urn:mara:query:input:design> ?design_row . ?design_row <urn:mara:query:column:design:support> ?support ; <urn:mara:query:column:design:edge> ?edge . ?support <urn:mara:field:status> ?lifecycle } }"
+    },
+    {
+      "id": "urn:fixture:query:left-join-absence",
+      "required_fact_sources": [
+        "documents"
+      ],
+      "root_flavours": [
+        "subject"
+      ],
+      "columns": {
+        "support": {
+          "type": "item",
+          "flavours": [
+            "support"
+          ],
+          "optional": true
+        }
+      },
+      "dependencies": [
+        {
+          "name": "status",
+          "definition": "urn:fixture:query:root-status",
+          "root": "root",
+          "projections": {
+            "columns": {
+              "state": "state"
+            }
+          }
+        },
+        {
+          "name": "supports",
+          "definition": "urn:fixture:query:support-links",
+          "root": "root",
+          "projections": {
+            "columns": {
+              "support": "support"
+            }
+          }
+        }
+      ],
+      "select": "SELECT ?root ?support WHERE { ?root <urn:mara:query:input:status> ?status_row . ?status_row <urn:mara:query:column:status:state> ?state . FILTER(sameTerm(?state, \"accepted\")) OPTIONAL { ?root <urn:mara:query:input:supports> ?support_row . ?support_row <urn:mara:query:column:supports:support> ?support } }"
+    },
+    {
+      "id": "urn:fixture:query:parameterized-status",
+      "required_fact_sources": [
+        "documents"
+      ],
+      "root_flavours": [
+        "subject"
+      ],
+      "columns": {
+        "state": {
+          "type": "text"
+        }
+      },
+      "parameters": {
+        "wanted": {
+          "type": "text",
+          "required": true
+        }
+      },
+      "select": "SELECT ?root ?state WHERE { ?root <urn:mara:field:status> ?state . FILTER(sameTerm(?state, ?wanted)) }"
+    },
+    {
+      "id": "urn:fixture:query:forwarded-status",
+      "required_fact_sources": [
+        "documents"
+      ],
+      "root_flavours": [
+        "subject"
+      ],
+      "columns": {
+        "state": {
+          "type": "text"
+        }
+      },
+      "parameters": {
+        "filter_state": {
+          "type": "text",
+          "required": true
+        }
+      },
+      "dependencies": [
+        {
+          "name": "status",
+          "definition": "urn:fixture:query:parameterized-status",
+          "root": "root",
+          "parameters": {
+            "wanted": "filter_state"
+          },
+          "projections": {
+            "columns": {
+              "state": "state"
+            }
+          }
+        }
+      ],
+      "select": "SELECT ?root ?state WHERE { ?root <urn:mara:query:input:status> ?status_row . ?status_row <urn:mara:query:column:status:state> ?state }"
+    }
+  ]
+}

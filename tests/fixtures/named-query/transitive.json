@@ -1,0 +1,12 @@
+{
+  "format_version": 4,
+  "definitions": [
+    {
+      "id": "urn:fixture:query:decomposition-or-supersession",
+      "required_fact_sources": ["documents"],
+      "root_flavours": ["subject"],
+      "columns": {"member": {"type": "item", "flavours": ["subject"]}},
+      "select": "SELECT ?root ?member WHERE { { ?root <urn:mara:relation:decomposes_to>+ ?member } UNION { ?root <urn:mara:relation:supersedes>+ ?member } FILTER(!sameTerm(?root, ?member)) }"
+    }
+  ]
+}

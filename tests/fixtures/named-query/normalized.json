@@ -1,0 +1,12 @@
+{
+  "format_version": 4,
+  "definitions": [
+    {
+      "id": "urn:fixture:query:title-alias-collisions",
+      "required_fact_sources": ["documents"],
+      "root_flavours": ["support"],
+      "columns": {"collision": {"type": "item", "flavours": ["support"]}},
+      "select": "SELECT ?root ?collision WHERE { ?root <urn:mara:query:nfc-casefold:field:alias> ?normalized . ?collision <urn:mara:query:nfc-casefold:title> ?normalized }"
+    }
+  ]
+}

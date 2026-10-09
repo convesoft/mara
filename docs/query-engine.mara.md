@@ -332,10 +332,12 @@ Direct/auto clients use embedded execution for this operation; explicit
 daemon-required returns `unsupported_capability`. Daemon and final JS/browser
 adapters remain later surface work, not completed host parity.
 
-#### Definition format 3
+#### Definition formats 3 and 4
 
-Project-relative JSON files contain `{format_version:3,definitions:[...]}`;
-format-2 files are rejected because they do not declare required sources.
+Project-relative JSON files contain `{format_version:3,definitions:[...]}` or
+`{format_version:4,definitions:[...]}`. Format 3 remains the single-query form;
+format 4 adds only explicit named dependencies. Format-2 files are rejected
+because they do not declare required sources.
 Each definition declares exact `id`, standard `select`, nonempty
 `root_flavours`, `required_fact_sources` and named `columns`. `documents` is a
 required fact source; `code` is recognized but unavailable to this embedded
@@ -363,20 +365,64 @@ These are the only support/contributor sources in this adapter; hidden query
 contributors and derivation reconstruction are not promised. Resolve each
 projected reference through the shared graph, and retain authored occurrences
 for projected edges. SELECT projects exactly root and declared tuple/source/
-support columns. Parameter variables bind separately. Every loaded definition
-is parsed, profile-checked and schema-bound before root enumeration, including
-empty selections. This checks declaration vocabulary and projection shape, not
-possible result types. Check declared value types, item flavours and canonical
-endpoints only for values actually returned; a no-match query need not reveal
-an incompatibility.
+support columns. Parameter variables bind separately. Every definition in the
+explicitly loaded set is parsed, profile-checked and schema-bound before root
+enumeration, including unused definitions and empty selections; only the
+selected definition and its reachable dependencies execute. This checks
+declaration vocabulary and projection shape, not possible result types. Check declared
+value types, item flavours and canonical endpoints only for values actually
+returned; a no-match query need not reveal an incompatibility.
+
+Format 4 dependencies are metadata, not an operation DSL. Each dependency names
+an exact definition in the explicitly loaded files, binds `root` to the caller's
+selected item, optionally maps child parameter names to parent parameters, and
+explicitly projects child tuple columns, contributors and/or edge support under
+local aliases. The `projections` object is required; `{}` exposes only the
+child-row existence. Validate the entire loaded dependency graph before root
+enumeration, including unreachable definitions. Dependencies must be acyclic;
+unresolved references, invalid mappings and recursive graphs are definition
+errors. Only reachable definitions execute. A child runs for the same
+selected root, with only its declared parameters. Returned child bindings are
+materialized as scoped in-memory relations. Parent joins, unions, filters,
+optional matches and property paths use ordinary admitted SPARQL. In the
+parent query, `<urn:mara:query:input:NAME>` links the selected root to a child
+row; `<urn:mara:query:column:NAME:ALIAS>` reads a declared projected value.
+Undeclared dependency predicates are rejected. Child result types are checked
+when returned; automatic full type inference is not provided. Only projected
+child support is propagated, with canonical edges and their authored
+occurrences; hidden derivations are not reconstructed.
+
+Typed result tuples are distinct by their declared values, independent of
+support. Duplicate rows from `UNION`, aliases or multiple paths merge support
+and contributors. A parent projection that merges rows retains their combined
+explicit support. Inner joins require a match; explicit `OPTIONAL` preserves a
+matched left row with absent values. No child match does not remove the selected
+root record. Summary counts count distinct completed bindings, not assertions
+or paths; page size does not change counts. The observed row budget counts
+solution rows across child and parent evaluations. If required work reaches the
+budget, the result is incomplete; already observed bindings and their projected
+support remain available, but the exact count and negative conclusions are
+unavailable.
+
+For exact deterministic text comparisons, definitions may query
+`<urn:mara:query:nfc-casefold:title>` or
+`<urn:mara:query:nfc-casefold:field:FIELD>`. These expose stored values normalized by NFC and full default Unicode case
+folding; original titles, fields and support remain unchanged. Literal query
+operands must already use the same normalized form. This is exact equality
+after normalization, not fuzzy or locale-sensitive matching. Field predicates
+require a declared string/enum field.
 
 The admitted standard SELECT profile follows [[DES-QUERY-BACKEND-PROOF]].
 Bind flavour/field/relation URNs to the selected schema; inverse aliases
 normalize canonical direction, including property paths. Structural ID/title
 predicates are `urn:mara:item:id` and `urn:mara:item:title`, distinct from
-custom fields. Predicates must be schema-bound constants. Open negated-vocabulary
-paths and nested SELECT boundaries are not this delivery's composition interface.
-No SERVICE, imports, updates or implicit numeric/boolean conversion is admitted.
+custom fields. Ordinary predicates must be schema-bound constants; the exact
+format-4 dependency predicates and normalized-text predicates above are the
+only query-specific additions. Open negated-vocabulary paths and nested SELECT
+boundaries are not this delivery's composition interface. These are the only
+new query-specific predicates; the existing canonical edge-support predicates
+remain available. No SERVICE, imports, updates or implicit numeric/boolean
+conversion is admitted.
 Initial admission limits do not remove later composition/derived-value commitments.
 
 #### Request and factual page format 3
@@ -394,8 +440,9 @@ Format-3 pages identify definition/file, SHA-256 input_identity, logical
 evaluation_complete/unavailable_reason, full-result summary, ordered records,
 has_more and next_cursor. Records are root headers (identity/source/count)
 and distinct bindings tied to a root. Empty roots have a header, no binding.
-Unmatched OPTIONAL-only rows are not manufactured matches; a supported
-all-absent projection remains one distinct binding. Bindings retain only explicitly projected source items and canonical edges
+OPTIONAL does not manufacture a left-side match where the rest of the pattern
+had none; when the left side matches, absent projected values remain a binding.
+A supported all-absent projection remains one distinct binding. Bindings retain only explicitly projected source items and canonical edges
 with their authored occurrences. Unprojected joins, UNION/OPTIONAL matches,
 EXISTS filters and path derivations do not add hidden support. Complete negative
 filters bind the definition and complete source snapshot, not invented edge
@@ -419,7 +466,8 @@ Summary selected_roots/known_bindings cover the logical result; binding_count an
 root counts are null when incomplete. Delivery is at most limit records and
 65536 serialized bytes per page. An indivisible oversized record errors rather
 than disappearing or continuing forever. The observed solution-row budget
-includes duplicate support rows, not graph-work/deadline/memory guarantees.
+includes child and parent solution rows, including duplicate support rows, not
+graph-work/deadline/memory guarantees.
 
 Continuation recomputes the question and binds normalized source content/
 inventory/ignore context, schema/configuration, every loaded definition source,
@@ -436,91 +484,41 @@ cannot conceal definition changes. Consume every page with unchanged inputs.
 :kind: behavior
 :satisfies: REQ-COMPOSABLE-QUERY-PROJECTIONS
 
-Semantic composition consumes [[DES-QUERY-INPUT-RESULT-CONTRACT]]; no new
-definition language is selected here.
+Semantic composition consumes [[DES-QUERY-INPUT-RESULT-CONTRACT]]. The user selected versioned dependency metadata and explicit child-input/projection bindings, not a general composition-operation tree or custom query DSL. Existing standard SPARQL remains the query language.
+
+### Selected definition format
+
+Format 4 definitions may name exact child definitions from the explicitly loaded definition files. Each dependency binds the child root to the caller-selected `root`, maps any child parameters to declared parent parameters, and declares which child tuple columns, contributors and edge support are projected under local aliases. The `projections` object is required; `{}` exposes only child-row existence. The `projections` object is required; `{}` exposes only child-row existence. Validate the entire explicitly loaded dependency graph, including unused definitions; unresolved references, invalid bindings and recursion are definition errors. Only reachable definitions execute. Format 3 remains valid for definitions without dependencies.
+
+A child runs for the same caller-selected root. Its typed bindings become scoped in-memory relation rows. Parent joins, unions, filters, optional matches and property paths are expressed in the admitted standard SPARQL profile, using only the dependency's declared `urn:mara:query:input:<name>` and `urn:mara:query:column:<name>:<alias>` predicates. No implicit root expansion or parameter inheritance is allowed. Validation completes before root enumeration, including for an empty root selection. Check returned child and parent values against declared types; full static dependency/type inference remains deferred.
+
+Only explicitly projected child support propagates. Canonical edge identity and its authored occurrences are retained when projected; hidden derivation reconstruction is not promised. Joins use compatible returned RDF terms and exact typed identity, not titles or formatted cells. The parent may project less than the child; if that makes output tuples identical, merge them and combine their explicit support/contributors.
 
 ### Composition and equality
 
-Named-query dependencies form an acyclic graph. Resolve reachable definitions
-and validate their declarations before execution; direct/indirect recursion is
-invalid. Automatic proof of every compatible type/signature remains richer
-future intent under [[DES-QUERY-NAMED-ADAPTER]]; returned values are checked. Compose
-results through joins on explicit compatible typed keys, unions of compatible
-projections, filters and derived projections. Inner joins retain matching
-bindings; explicit left joins retain unmatched left bindings as absence.
-Neither removes the selected-root records when its match set is empty.
-A composed child receives explicitly bound roots/context/parameters; ambient
-project-wide roots and implicit workload expansion are not allowed.
+Named-query dependencies form an acyclic graph. Resolve reachable dependencies before execution and reject direct/indirect recursion. Preserve strict validation of every loaded definition's SELECT, schema vocabulary and projection shape, even when unused; only reachable definitions execute. Automatic proof of every compatible type/signature remains richer future intent under [[DES-QUERY-NAMED-ADAPTER]]; returned values are checked. Compose results through joins on explicit compatible typed keys, unions of compatible projections, filters and derived projections. Inner joins retain matching bindings; explicit left joins retain a matched left binding with absent values when the right side has no match. They do not manufacture a row when the left side has no match. Neither removes the selected-root records when its match set is empty. A composed child receives explicitly bound roots/context/parameters; ambient project-wide roots and implicit workload expansion are not allowed.
 
-Results use distinct typed binding tuples by default. Repeated authored
-assertions, alias spellings or multiple supporting paths do not multiply an
-identical binding. Combine its supporting provenance. Projection may merge
-bindings that become identical after columns are removed, retaining their
-combined support. For the selected adapter this is explicitly projected support,
-not reconstruction of hidden operands or paths. Union uses the same distinctness.
-Joins match typed identity,
-not titles or formatted cells; support from both operands remains attached.
+Results use distinct typed binding tuples by default. Repeated authored assertions, alias spellings or multiple supporting paths do not multiply an identical binding. Combine its supporting provenance. Projection may merge bindings that become identical after columns are removed, retaining their combined support. For the selected adapter this is explicitly projected support, not reconstruction of hidden operands or paths. Union uses the same distinctness. Joins match typed identity, not titles or formatted cells; support from both operands remains attached.
 
-A definition specifies the counted binding/column and qualification.
-Ordinary counts count distinct tuples/endpoints, not authored assertions or
-paths. Explicit assertion-occurrence counting counts distinct authored occurrence
-identities, even if the same occurrence is encountered by two paths; pagination
-never changes counts. Unbounded walk/path counting is not part of this contract.
+A definition specifies the counted binding/column and qualification. Ordinary counts count distinct tuples/endpoints, not authored assertions or paths. Explicit assertion-occurrence counting counts distinct authored occurrence identities, even if the same occurrence is encountered by two paths; pagination never changes counts. Unbounded walk/path counting is not part of this contract.
 
 ### Traversal
 
-Definitions choose relation kinds, direction, qualification and direct versus
-transitive expansion. Ancestry expands only the declared upward relation;
-ancestor context and its related needs/goals/risk support do not become workload,
-and reverse descent into siblings is not implicit. External addresses are
-terminal unless explicitly joined to supplied fact records; URLs are not graphs
-to dereference.
+Definitions choose relation kinds, direction, qualification and direct versus transitive expansion. Ancestry expands only the declared upward relation; ancestor context and its related needs/goals/risk support do not become workload, and reverse descent into siblings is not implicit. External addresses are terminal unless explicitly joined to supplied fact records; URLs are not graphs to dereference.
 
-Transitive reachability returns each qualifying reachable endpoint once.
-Ancestry excludes its starting root, including when a nonzero-length cycle
-returns to it; include-self must be explicit. Track visited identities to
-terminate finite graph cycles while retaining finite supporting provenance.
-Cycle presence does not itself invalidate facts: project schema acyclicity
-remains [[REQ-RELATION-CYCLE-POLICY]]'s independent validation obligation.
-A constrained cycle can therefore be inspectable facts and a documentation
-violation, not a query-engine permission to relax the schema.
+Transitive reachability returns each qualifying reachable endpoint once. Ancestry excludes its starting root, including when a nonzero-length cycle returns to it; include-self must be explicit. Standard property-path evaluation terminates on finite cyclic graphs while retaining only finite, explicitly projected support. Cycle presence does not itself invalidate facts: project schema acyclicity remains [[REQ-RELATION-CYCLE-POLICY]]'s independent validation obligation. A constrained cycle can therefore be inspectable facts and a documentation violation, not a query-engine permission to relax the schema.
 
-If an evaluation resource limit stops required expansion/composition, mark it
-incomplete/unavailable, retain any known support with the limit reason, and
-never infer a complete negative, exact count or policy pass from truncation.
-A definition's intentional bounded-hop question is different: fully evaluating
-that declared domain can be complete. [[DES-QUERY-BACKEND-PROOF]] defines the proof's observed-row budget and its
-lack of cooperative traversal-work cancellation. Complete composition and
-continuation must preserve these limit outcomes; no timing guarantee is selected.
+If an evaluation resource limit stops required expansion/composition, mark it incomplete/unavailable, retain any known support with the limit reason, and never infer a complete negative, exact count or policy pass from truncation. The current observed-solution-row budget spans child and parent evaluations; it is not a graph-work or deadline guarantee. A definition's intentional bounded-hop question is different: fully evaluating that declared domain can be complete. [[DES-QUERY-BACKEND-PROOF]] defines the proof's observed-row budget and its lack of cooperative traversal-work cancellation. Complete composition and continuation must preserve these limit outcomes; no timing guarantee is selected.
 
 ### Derived values, logic and mappings
 
-Equality/text comparison is exact and type-aware by default. Definitions may
-explicitly apply deterministic Unicode NFC normalization and full default
-(nonlocale) case folding for title/alias collisions; preserve original text and
-support. Do not add fuzzy matching or locale-dependent behavior. The proof must
-pin the concrete normalization behavior consistently across hosts.
+Equality/text comparison is exact and type-aware by default. Definitions may explicitly compare the exposed `urn:mara:query:nfc-casefold:title` or schema string/enum-field predicates. Values use deterministic Unicode NFC normalization and full default (nonlocale) case folding; preserve original text and support. Do not add fuzzy matching or locale-dependent behavior. The embedded adapter normalizes stored item values. Literal query operands must already use NFC plus full default case-folded form; no SPARQL normalization function is added.
 
-Existence and any on a complete empty set are false; all and none are true;
-a distinct count is zero. These are query facts, not readiness judgments.
-Missing required input cannot be converted into any of those empty-set values.
-Unknown operands remain explicit; a predicate may be known when complete
-available support logically settles it, but unavailable required dependencies
-remain visible and completeness is not upgraded. Gates follow
-[[DES-QUERY-CONSUMER-CONTRACT]], including explicit empty-set interpretation.
+Existence and any on a complete empty set are false; all and none are true; a distinct count is zero. These are query facts, not readiness judgments. Missing required input cannot be converted into any of those empty-set values. Unknown operands remain explicit; a predicate may be known when complete available support logically settles it, but unavailable required dependencies remain visible and completeness is not upgraded. Gates follow [[DES-QUERY-CONSUMER-CONTRACT]], including explicit empty-set interpretation.
 
-Definitions select aggregate/grouping keys, qualification and result precedence;
-there is no built-in ordering of pass/fail/inconclusive/error/pending, lifecycle
-rank or risk formula. An aggregate declares its empty case and retains members
-and support. Conflicting or underspecified precedence is a definition error,
-not load-order selection.
+Definitions select aggregate/grouping keys, qualification and result precedence; there is no built-in ordering of pass/fail/inconclusive/error/pending, lifecycle rank or risk formula. An aggregate declares its empty case and retains members and support. Conflicting or underspecified precedence is a definition error, not load-order selection.
 
-Lookup mappings are typed caller/project policy data bound into input identity.
-Validate key/value types and reject conflicting duplicate keys. A missing key
-is unavailable unless an explicit fallback is declared; it never silently maps
-to zero, low risk, pass or no match. Fixture-defined likelihood/consequence
-scores, thresholds and reassessment use these mechanisms. Implementation links
-do not automatically lower a risk or select a new assessment.
+Lookup mappings are typed caller/project policy data bound into input identity. Validate key/value types and reject conflicting duplicate keys. A missing key is unavailable unless an explicit fallback is declared; it never silently maps to zero, low risk, pass or no match. Fixture-defined likelihood/consequence scores, thresholds and reassessment use these mechanisms. Implementation links do not automatically lower a risk or select a new assessment.
 :::
 
 :::mara design DES-QUERY-CONSUMER-CONTRACT

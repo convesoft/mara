@@ -3,6 +3,7 @@ use mara_engine::{
     named_query::{self as q, Record, Value},
 };
 use serde_json::json;
+use std::collections::BTreeSet;
 fn snapshot() -> SourceSnapshot {
     serde_json::from_str(include_str!(
         "../../../tests/fixtures/named-query/snapshot.json"
@@ -30,15 +31,20 @@ fn request() -> q::Request {
         cursor: None,
     }
 }
-fn mutate_definition(s: &mut SourceSnapshot, f: impl FnOnce(&mut serde_json::Value)) {
-    let file = s
-        .files
-        .iter_mut()
-        .find(|f| f.path == "queries.json")
-        .unwrap();
+fn mutate_file(s: &mut SourceSnapshot, path: &str, f: impl FnOnce(&mut serde_json::Value)) {
+    let file = s.files.iter_mut().find(|f| f.path == path).unwrap();
     let mut definitions: serde_json::Value = serde_json::from_str(&file.content).unwrap();
     f(&mut definitions);
     file.content = definitions.to_string();
+}
+fn mutate_definition(s: &mut SourceSnapshot, f: impl FnOnce(&mut serde_json::Value)) {
+    mutate_file(s, "queries.json", f);
+}
+fn add_definition_file(s: &mut SourceSnapshot, path: &str, content: &str) {
+    s.files.push(mara_engine::SourceFile {
+        path: path.into(),
+        content: content.into(),
+    });
 }
 // @mara checks REQ-NAMED-QUERY-FACTS
 // @mara checks DES-QUERY-INPUT-RESULT-CONTRACT
@@ -148,6 +154,21 @@ fn strict_definition_schema_arguments_and_unavailable_inputs() {
         assert_eq!(err.code, "invalid_definition", "{mutation}: {err:?}");
         assert_eq!(err.source.as_deref(), Some("queries.json"));
     }
+    let mut non_text_normalization = base.clone();
+    mutate_definition(&mut non_text_normalization, |defs| {
+        let select = defs["definitions"][0]["select"].as_str().unwrap();
+        defs["definitions"][0]["select"] = json!(select.replace(
+            "f:text ?text",
+            "<urn:mara:query:nfc-casefold:field:amount> ?text"
+        ));
+    });
+    let error = SourceEngine::new(non_text_normalization)
+        .unwrap()
+        .query_execute(request())
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_definition");
+    assert!(error.message.contains("string or enum"), "{error:?}");
+
     let engine = SourceEngine::new(base.clone()).unwrap();
     for bad in [0, 1, 2, 3, 4, 5] {
         let mut req = request();
@@ -418,4 +439,445 @@ fn unavailable_code_is_not_empty_and_cycle_policy_does_not_hide_facts() {
             .iter()
             .any(|d| d.code == mara_engine::DiagnosticCode::RelationCycle)
     );
+}
+
+// @mara checks REQ-COMPOSABLE-QUERY-PROJECTIONS
+// @mara checks DES-QUERY-COMPOSITION-CONTRACT
+// @mara checks DES-QUERY-INPUT-RESULT-CONTRACT
+#[test]
+fn named_composition_joins_typed_child_bindings_and_retains_projected_support() {
+    let mut s = snapshot();
+    add_definition_file(
+        &mut s,
+        "composition.json",
+        include_str!("../../../tests/fixtures/named-query/composition.json"),
+    );
+    let engine = SourceEngine::new(s.clone()).unwrap();
+    let mut req = request();
+    req.definition_files = vec!["composition.json".into()];
+    req.definition = "urn:fixture:query:composed-support-status".into();
+    req.parameters.clear();
+    let full = engine.query_execute(req.clone()).unwrap();
+    assert!(full.evaluation_complete, "{full:#?}");
+    assert_eq!(full.summary.selected_roots, 2);
+    assert_eq!(full.summary.binding_count, Some(1));
+    let mut matched_support = false;
+    assert!(full.records.iter().any(|record| matches!(record,
+        Record::Root { root: q::Endpoint::Item { id, .. }, binding_count: Some(0), .. }
+        if id == "SUB-EMPTY")));
+    for record in &full.records {
+        let Record::Binding { binding, .. } = record else {
+            continue;
+        };
+        assert!(matches!(&binding.values["support"], Some(Value::Item {
+            endpoint: q::Endpoint::Item { id, .. }, ..
+        }) if id == "SUP-A"));
+        assert!(
+            matches!(&binding.values["lifecycle"], Some(Value::Text { value, .. }) if value == "draft")
+        );
+        assert_eq!(binding.support.len(), 1);
+        assert!(!binding.support[0].occurrences.is_empty());
+        matched_support = true;
+    }
+    assert!(matched_support);
+
+    let mut row_identity = s.clone();
+    mutate_file(&mut row_identity, "composition.json", |defs| {
+        defs["definitions"][2]["select"] = json!(
+            "SELECT ?root ?support ?lifecycle ?edge WHERE { ?root <urn:mara:query:input:supports> ?support_row ; <urn:mara:query:input:status> ?status_row . FILTER(sameTerm(?support_row, ?status_row)) ?support_row <urn:mara:query:column:supports:support> ?support ; <urn:mara:query:column:supports:edge> ?edge . ?status_row <urn:mara:query:column:status:state> ?lifecycle }"
+        );
+    });
+    let mut row_identity_request = request();
+    row_identity_request.definition_files = vec!["composition.json".into()];
+    row_identity_request.definition = "urn:fixture:query:composed-support-status".into();
+    row_identity_request.parameters.clear();
+    row_identity_request.selection.ids = vec!["SUB-LINKED".into()];
+    let row_identity_result = SourceEngine::new(row_identity)
+        .unwrap()
+        .query_execute(row_identity_request)
+        .unwrap();
+    assert!(row_identity_result.evaluation_complete);
+    assert_eq!(row_identity_result.summary.binding_count, Some(0));
+
+    req.limit = 1;
+    let first = engine.query_execute(req.clone()).unwrap();
+    assert!(first.has_more);
+    let cursor = first.next_cursor.clone().unwrap();
+    let mut records = first.records;
+    req.cursor = Some(cursor.clone());
+    loop {
+        let page = engine.query_execute(req.clone()).unwrap();
+        assert_eq!(page.summary.binding_count, Some(1));
+        records.extend(page.records);
+        req.cursor = page.next_cursor;
+        if !page.has_more {
+            break;
+        }
+    }
+    assert_eq!(
+        serde_json::to_value(records).unwrap(),
+        serde_json::to_value(full.records).unwrap()
+    );
+
+    let mut changed = s;
+    changed
+        .files
+        .iter_mut()
+        .find(|file| file.path == "composition.json")
+        .unwrap()
+        .content
+        .push(' ');
+    let mut stale = request();
+    stale.definition_files = vec!["composition.json".into()];
+    stale.definition = "urn:fixture:query:composed-support-status".into();
+    stale.parameters.clear();
+    stale.limit = 1;
+    stale.cursor = Some(cursor);
+    assert_eq!(
+        SourceEngine::new(changed)
+            .unwrap()
+            .query_execute(stale)
+            .unwrap_err()
+            .code,
+        "invalid_argument"
+    );
+}
+
+// @mara checks REQ-COMPOSABLE-QUERY-PROJECTIONS
+// @mara checks DES-QUERY-COMPOSITION-CONTRACT
+#[test]
+fn explicit_left_join_keeps_an_absent_optional_binding_for_a_matched_left_row() {
+    let mut s = snapshot();
+    add_definition_file(
+        &mut s,
+        "composition.json",
+        include_str!("../../../tests/fixtures/named-query/composition.json"),
+    );
+    let engine = SourceEngine::new(s).unwrap();
+    let mut req = request();
+    req.definition_files = vec!["composition.json".into()];
+    req.definition = "urn:fixture:query:left-join-absence".into();
+    req.parameters.clear();
+    req.selection.ids = vec!["SUB-EMPTY".into()];
+    let page = engine.query_execute(req).unwrap();
+    assert!(page.evaluation_complete, "{page:#?}");
+    assert_eq!(page.summary.binding_count, Some(1));
+    assert!(page.records.iter().any(|record| matches!(record,
+        Record::Binding { binding, .. }
+        if binding.values["support"].is_none() && binding.support.is_empty())));
+}
+
+// @mara checks REQ-COMPOSABLE-QUERY-PROJECTIONS
+// @mara checks DES-QUERY-COMPOSITION-CONTRACT
+#[test]
+fn direct_or_design_mediated_coverage_is_distinct_and_keeps_both_support_edges() {
+    let mut s = snapshot();
+    add_definition_file(
+        &mut s,
+        "composition.json",
+        include_str!("../../../tests/fixtures/named-query/composition.json"),
+    );
+    let engine = SourceEngine::new(s).unwrap();
+    let mut req = request();
+    req.definition_files = vec!["composition.json".into()];
+    req.definition = "urn:fixture:query:direct-or-design-coverage".into();
+    req.parameters.clear();
+    req.selection.ids = vec!["SUB-LINKED".into()];
+    let page = engine.query_execute(req).unwrap();
+    assert!(page.evaluation_complete, "{page:#?}");
+    assert_eq!(page.summary.binding_count, Some(3));
+    let mut support_b_edges = 0;
+    let mut lifecycles = vec![];
+    for record in page.records {
+        let Record::Binding { binding, .. } = record else {
+            continue;
+        };
+        let Some(Value::Item {
+            endpoint: q::Endpoint::Item { id, .. },
+            ..
+        }) = &binding.values["support"]
+        else {
+            panic!("typed support")
+        };
+        if id == "SUP-B" {
+            support_b_edges = binding.support.len();
+        }
+        let Some(Value::Text { value, .. }) = &binding.values["lifecycle"] else {
+            panic!("lifecycle-bearing alternative")
+        };
+        lifecycles.push(value.clone());
+        assert!(!binding.support.is_empty());
+        assert!(
+            binding
+                .support
+                .iter()
+                .all(|support| !support.occurrences.is_empty())
+        );
+    }
+    assert_eq!(
+        support_b_edges, 2,
+        "direct and design-mediated canonical edges survive distinct projection"
+    );
+    lifecycles.sort();
+    assert_eq!(lifecycles, ["accepted", "draft", "retired"]);
+}
+
+// @mara checks REQ-COMPOSABLE-QUERY-PROJECTIONS
+// @mara checks DES-QUERY-COMPOSITION-CONTRACT
+#[test]
+fn transitive_decomposition_supersession_and_ancestry_terminate_and_exclude_seed_siblings() {
+    let mut s = snapshot();
+    add_definition_file(
+        &mut s,
+        "transitive.json",
+        include_str!("../../../tests/fixtures/named-query/transitive.json"),
+    );
+    let engine = SourceEngine::new(s).unwrap();
+    let mut req = request();
+    req.definition_files = vec!["transitive.json".into()];
+    req.definition = "urn:fixture:query:decomposition-or-supersession".into();
+    req.parameters.clear();
+    req.selection.ids = vec!["SUB-LINKED".into()];
+    let composed = engine.query_execute(req).unwrap();
+    assert!(composed.evaluation_complete, "{composed:#?}");
+    assert_eq!(composed.summary.binding_count, Some(3));
+    let mut members = composed
+        .records
+        .iter()
+        .filter_map(|record| match record {
+            Record::Binding { binding, .. } => match &binding.values["member"] {
+                Some(Value::Item {
+                    endpoint: q::Endpoint::Item { id, .. },
+                    ..
+                }) => Some(id.as_str()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    members.sort();
+    assert_eq!(members, ["SUB-A", "SUB-B", "SUB-G"]);
+
+    let mut ancestry = request();
+    ancestry.definition = "urn:fixture:query:ancestry".into();
+    ancestry.parameters.clear();
+    ancestry.selection.ids = vec!["SUB-LINKED".into()];
+    let page = engine.query_execute(ancestry.clone()).unwrap();
+    assert!(page.evaluation_complete, "{page:#?}");
+    assert_eq!(page.summary.binding_count, Some(3));
+    let ancestors = page
+        .records
+        .iter()
+        .filter_map(|record| match record {
+            Record::Binding { binding, .. } => match &binding.values["ancestor"] {
+                Some(Value::Item {
+                    endpoint: q::Endpoint::Item { id, .. },
+                    ..
+                }) => Some(id.as_str()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(ancestors, ["SUB-A", "SUB-B", "SUB-G"].into_iter().collect());
+    ancestry.max_rows = 1;
+    let limited = engine.query_execute(ancestry).unwrap();
+    assert!(!limited.evaluation_complete);
+    assert_eq!(limited.summary.binding_count, None);
+    assert_eq!(limited.summary.known_bindings, 1);
+    assert!(
+        limited
+            .records
+            .iter()
+            .any(|record| matches!(record, Record::Binding { .. }))
+    );
+}
+
+// @mara checks REQ-COMPOSABLE-QUERY-PROJECTIONS
+// @mara checks DES-QUERY-COMPOSITION-CONTRACT
+#[test]
+fn normalized_title_alias_collisions_are_exact_not_fuzzy() {
+    let mut s = snapshot();
+    add_definition_file(
+        &mut s,
+        "normalized.json",
+        include_str!("../../../tests/fixtures/named-query/normalized.json"),
+    );
+    let engine = SourceEngine::new(s.clone()).unwrap();
+    let mut req = request();
+    req.definition_files = vec!["normalized.json".into()];
+    req.definition = "urn:fixture:query:title-alias-collisions".into();
+    req.parameters.clear();
+    req.selection.ids = vec!["SUP-A".into(), "SUP-C".into()];
+    let page = engine.query_execute(req.clone()).unwrap();
+    assert!(page.evaluation_complete, "{page:#?}");
+    assert_eq!(page.summary.binding_count, Some(2));
+    let matches = page
+        .records
+        .iter()
+        .filter_map(|record| match record {
+            Record::Binding {
+                root: q::Endpoint::Item { id: root, .. },
+                binding,
+            } => {
+                let Some(Value::Item {
+                    endpoint: q::Endpoint::Item { id, .. },
+                    ..
+                }) = &binding.values["collision"]
+                else {
+                    panic!("typed collision")
+                };
+                Some((root.as_str(), id.as_str()))
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        matches,
+        [("SUP-A", "SUP-X"), ("SUP-C", "SUP-Y")]
+            .into_iter()
+            .collect()
+    );
+
+    let docs = s
+        .files
+        .iter_mut()
+        .find(|file| file.path == "fixture.mara.md")
+        .unwrap();
+    docs.content = docs.content.replace(":alias: Straße", ":alias: Strase");
+    let mut fuzzy = req;
+    fuzzy.selection.ids = vec!["SUP-A".into()];
+    let exact = SourceEngine::new(s).unwrap().query_execute(fuzzy).unwrap();
+    assert!(exact.evaluation_complete);
+    assert_eq!(exact.summary.binding_count, Some(0));
+}
+
+// @mara checks REQ-COMPOSABLE-QUERY-PROJECTIONS
+// @mara checks DES-QUERY-COMPOSITION-CONTRACT
+// @mara checks REQ-COMPOSABLE-QUERY-PROJECTIONS
+// @mara checks DES-QUERY-COMPOSITION-CONTRACT
+#[test]
+fn parent_parameter_can_be_consumed_only_by_a_mapped_child() {
+    let mut source = snapshot();
+    add_definition_file(
+        &mut source,
+        "composition.json",
+        include_str!("../../../tests/fixtures/named-query/composition.json"),
+    );
+    let mut req = request();
+    req.definition_files = vec!["composition.json".into()];
+    req.definition = "urn:fixture:query:forwarded-status".into();
+    req.selection.ids = vec!["SUB-LINKED".into(), "SUB-EMPTY".into()];
+    req.parameters = vec![q::BindingParameter {
+        name: "filter_state".into(),
+        value: q::ParameterValue::Text("draft".into()),
+    }];
+    let page = SourceEngine::new(source)
+        .unwrap()
+        .query_execute(req)
+        .unwrap();
+    assert!(page.evaluation_complete, "{page:#?}");
+    assert_eq!(page.summary.binding_count, Some(1));
+    assert!(page.records.iter().any(|record| matches!(record,
+        Record::Binding { root: q::Endpoint::Item { id, .. }, binding }
+        if id == "SUB-LINKED"
+            && matches!(&binding.values["state"], Some(Value::Text { value, .. }) if value == "draft")
+    )));
+}
+
+#[test]
+fn definition_dependencies_are_resolved_acyclic_and_versioned() {
+    let mut base = snapshot();
+    add_definition_file(
+        &mut base,
+        "composition.json",
+        include_str!("../../../tests/fixtures/named-query/composition.json"),
+    );
+    let mut req = request();
+    req.definition_files = vec!["composition.json".into()];
+    req.definition = "urn:fixture:query:composed-support-status".into();
+    req.parameters.clear();
+
+    let mut unknown = base.clone();
+    mutate_file(&mut unknown, "composition.json", |defs| {
+        defs["definitions"][2]["dependencies"][0]["definition"] = json!("urn:missing:query");
+    });
+    let error = SourceEngine::new(unknown)
+        .unwrap()
+        .query_execute(req.clone())
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_definition");
+    assert_eq!(error.source.as_deref(), Some("composition.json"));
+
+    let mut unused_unknown = base.clone();
+    mutate_file(&mut unused_unknown, "composition.json", |defs| {
+        defs["definitions"][1]["dependencies"] = json!([{
+            "name":"unused", "definition":"urn:missing:query", "root":"root", "projections":{}
+        }]);
+    });
+    let mut unused_request = req.clone();
+    unused_request.definition = "urn:fixture:query:direct-coverage".into();
+    let error = SourceEngine::new(unused_unknown)
+        .unwrap()
+        .query_execute(unused_request.clone())
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_definition");
+    assert!(
+        error.message.contains("unknown named dependency"),
+        "{error:?}"
+    );
+
+    let mut unused_projection = base.clone();
+    mutate_file(&mut unused_projection, "composition.json", |defs| {
+        defs["definitions"][1]["dependencies"] = json!([{
+            "name":"unused", "definition":"urn:fixture:query:support-links", "root":"root",
+            "projections":{"columns":{"missing":"value"}}
+        }]);
+    });
+    let error = SourceEngine::new(unused_projection)
+        .unwrap()
+        .query_execute(unused_request.clone())
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_definition");
+    assert!(error.message.contains("no column missing"), "{error:?}");
+
+    let mut cyclic = base.clone();
+    mutate_file(&mut cyclic, "composition.json", |defs| {
+        defs["definitions"][1]["dependencies"] = json!([{
+            "name":"loop", "definition":"urn:fixture:query:root-status", "root":"root", "projections":{}
+        }]);
+    });
+    let error = SourceEngine::new(cyclic)
+        .unwrap()
+        .query_execute(req)
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_definition");
+    assert!(error.message.contains("recursive"), "{error:?}");
+    assert_eq!(error.source.as_deref(), Some("composition.json"));
+
+    let mut unused_cycle = base;
+    mutate_file(&mut unused_cycle, "composition.json", |defs| {
+        defs["definitions"][1]["dependencies"] = json!([{
+            "name":"loop", "definition":"urn:fixture:query:root-status", "root":"root", "projections":{}
+        }]);
+    });
+    let error = SourceEngine::new(unused_cycle)
+        .unwrap()
+        .query_execute(unused_request)
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_definition");
+    assert!(error.message.contains("recursive"), "{error:?}");
+
+    let mut old_format = snapshot();
+    mutate_definition(&mut old_format, |defs| {
+        defs["definitions"][0]["dependencies"] = json!([{
+            "name":"unsupported", "definition":"urn:fixture:query:ancestry", "root":"root", "projections":{}
+        }]);
+    });
+    let error = SourceEngine::new(old_format)
+        .unwrap()
+        .query_execute(request())
+        .unwrap_err();
+    assert_eq!(error.code, "invalid_definition");
+    assert!(error.message.contains("format 4"), "{error:?}");
 }

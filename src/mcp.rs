@@ -77,7 +77,7 @@ struct QueryExecuteToolParams {
     /// Absolute project root; omit when the server is bound with --project.
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Explicit project-relative named-definition JSON files, format 3.
+    /// Explicit project-relative named-definition JSON files, format 3 or 4.
     definition_files: Vec<String>,
     /// Exact named definition identity.
     definition: String,
@@ -319,7 +319,7 @@ impl SearchToolParams {
 impl MaraMcp {
     #[tool(
         name = "query_execute",
-        description = "Execute raw named factual SELECT queries in the embedded engine. Load explicit format-3 definition files, select an exact definition and explicit roots, and supply declared typed parameters. Check returned values against declared types and retain only explicitly projected source and edge support; hidden provenance is not inferred. Missing required fact sources produce incomplete results, not empty success. Returns typed distinct bindings, lifecycle data and empty-root records; no policy pass/fail. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs. Content, definition, parameter or control changes reject continuation. Native daemon and final browser/JS adapters are not yet supported."
+        description = "Execute raw named factual SELECT queries in the embedded engine. Load explicit format-3 or format-4 definition files, select an exact definition and explicit roots, and supply declared typed parameters. Format 4 allows acyclic named dependencies with explicit root, parameter and projected-column/support bindings; joins, unions, filters and transitive paths remain standard SPARQL. Check returned values against declared types and retain only explicitly projected source and edge support; hidden provenance is not inferred. Missing required fact sources produce incomplete results, not empty success. Returns typed distinct bindings, lifecycle data and empty-root records; no policy pass/fail. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs. Content, definition, parameter or control changes reject continuation. Native daemon and final browser/JS adapters are not yet supported."
     )]
     fn query_execute(
         &self,

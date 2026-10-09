@@ -483,7 +483,7 @@ fn keyword_terms(value: &str) -> BTreeSet<String> {
     canonical.unicode_words().map(ToOwned::to_owned).collect()
 }
 
-fn canonical_text(value: &str) -> String {
+pub(crate) fn canonical_text(value: &str) -> String {
     value.nfc().case_fold().nfc().collect()
 }
 
