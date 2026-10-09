@@ -122,6 +122,17 @@ fn explicit_empty_unknown_roots_and_incomplete_budget_are_not_policy_success() {
     empty.roots.clear();
     let facts = engine.query_backend_execute(empty).unwrap();
     assert!(facts.evaluation_complete && facts.roots.is_empty());
+    let mut missing_shape = policy(Request {
+        roots: vec![],
+        ..request()
+    });
+    missing_shape.shape = "urn:fixture:policy:missing".into();
+    assert!(
+        engine
+            .query_backend_policy(missing_shape)
+            .unwrap_err()
+            .contains("unknown SHACL shape")
+    );
     let mut unknown = request();
     unknown.roots = vec!["SUB-NOPE".into()];
     assert!(engine.query_backend_execute(unknown).is_err());

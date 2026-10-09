@@ -34,6 +34,19 @@ pub fn load_native_source_engine(
 
 pub(crate) use load_native_source_engine as load_mutation_engine;
 
+/// Snapshot project policy and query inputs; an absent document set is used only
+/// for schema validation, which checks definitions without evaluating facts.
+pub(crate) fn load_query_policy_engine(
+    project: &Project,
+    documents: Option<&DocumentSet>,
+) -> Result<SourceEngine, Error> {
+    let empty = DocumentSet {
+        documents: vec![],
+        complete: true,
+    };
+    load_source_engine(project, documents.unwrap_or(&empty))
+}
+
 pub(crate) fn source_fingerprint(project: &Project, documents: &DocumentSet) -> String {
     // Validation retains diagnostics for incomplete/unreadable inputs. Planning uses
     // the strict loader above and never treats an inspection failure as absence.
@@ -117,6 +130,11 @@ fn source_snapshot(
             }
             _ => {}
         }
+    }
+    if include_rules && let Some(policy) = project.query_policy() {
+        paths.extend(policy.files.iter().cloned());
+        paths.extend(policy.definition_files.iter().map(PathBuf::from));
+        paths.extend(policy.shape_files.iter().cloned());
     }
     for path in paths {
         if files.iter().any(|f| std::path::Path::new(&f.path) == path) {

@@ -70,6 +70,55 @@ impl NativeRuntime {
     }
 
     /// Raw named facts; no documentation-rule evaluation or host acquisition.
+    pub fn query_gate(
+        &self,
+        request: crate::query_consumers::QueryGateRequest,
+    ) -> Result<crate::query_consumers::QueryGateResult, crate::query_consumers::QueryConsumerError>
+    {
+        self.with_session(false, || self.query_gate_current(request))
+    }
+
+    fn query_gate_current(
+        &self,
+        request: crate::query_consumers::QueryGateRequest,
+    ) -> Result<crate::query_consumers::QueryGateResult, crate::query_consumers::QueryConsumerError>
+    {
+        for path in request
+            .definition_files
+            .iter()
+            .chain(std::iter::once(&request.gate_file))
+            .chain(request.shape_files.iter())
+        {
+            crate::normalize_source_path(path).map_err(|e| {
+                crate::query_consumers::QueryConsumerError {
+                    code: "invalid_argument".into(),
+                    message: e.to_string(),
+                }
+            })?;
+        }
+        let (project, schema) =
+            self.load_project()
+                .map_err(|e| crate::query_consumers::QueryConsumerError {
+                    code: "input_unavailable".into(),
+                    message: e.to_string(),
+                })?;
+        let documents = crate::load_documents(&project, &schema).map_err(|e| {
+            crate::query_consumers::QueryConsumerError {
+                code: "input_unavailable".into(),
+                message: e.to_string(),
+            }
+        })?;
+        let mut sources = request.definition_files.clone();
+        sources.push(request.gate_file.clone());
+        sources.extend(request.shape_files.iter().cloned());
+        let engine = crate::source_bridge::load_query_engine(&project, &documents, &sources)
+            .map_err(|e| crate::query_consumers::QueryConsumerError {
+                code: "input_unavailable".into(),
+                message: e.to_string(),
+            })?;
+        engine.query_gate(request)
+    }
+
     pub fn query_execute(
         &self,
         request: crate::named_query::Request,

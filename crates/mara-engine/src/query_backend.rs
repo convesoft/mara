@@ -3,7 +3,7 @@
 use crate::{ItemSource, RelationEdge, RelationEndpoint, RelationOccurrence, SourceEngine};
 use oxigraph::{
     io::{RdfFormat, RdfParser},
-    model::{Graph, Literal, NamedNode, Term, Triple, Variable},
+    model::{BlankNode, Graph, Literal, NamedNode, NamedOrBlankNode, Term, Triple, Variable},
     sparql::{QueryResults, SparqlEvaluator},
     store::Store,
 };
@@ -31,6 +31,143 @@ fn hash(bytes: &[u8]) -> String {
 }
 
 const Q: &str = "urn:mara:query:";
+
+#[derive(Debug, Clone)]
+pub(crate) struct ProjectionOutcome {
+    pub conforms: bool,
+    pub components: Vec<String>,
+    pub counts: Vec<Count>,
+}
+
+pub(crate) fn compile_shape_files(
+    files: &BTreeMap<String, String>,
+    paths: &[String],
+) -> Result<IRSchema, String> {
+    let mut graph = Graph::new();
+    for (file_index, path) in paths.iter().enumerate() {
+        let source = files
+            .get(path)
+            .ok_or_else(|| format!("missing SHACL source: {path}"))?;
+        let mut blank_nodes = BTreeMap::new();
+        for quad in RdfParser::from_format(RdfFormat::Turtle).for_slice(source.as_bytes()) {
+            let quad = quad.map_err(|e| format!("{path}: {e}"))?;
+            let subject = match quad.subject {
+                NamedOrBlankNode::BlankNode(node) => NamedOrBlankNode::BlankNode(
+                    scoped_shape_blank(file_index, &mut blank_nodes, node)?,
+                ),
+                subject => subject,
+            };
+            let object = match quad.object {
+                Term::BlankNode(node) => {
+                    Term::BlankNode(scoped_shape_blank(file_index, &mut blank_nodes, node)?)
+                }
+                Term::Literal(literal) => {
+                    literal_profile(&literal)?;
+                    Term::Literal(literal)
+                }
+                Term::Triple(_) => {
+                    return Err("RDF-star policy terms are outside the proof profile".into());
+                }
+                object => object,
+            };
+            graph.insert(&Triple::new(subject, quad.predicate, object));
+        }
+    }
+    graph.canonicalize(CanonicalizationAlgorithm::Rdfc10 {
+        hash_algorithm: CanonicalizationHashAlgorithm::Sha256,
+    });
+    IRSchema::from_str(
+        &graph.to_string(),
+        &RDFFormat::NTriples,
+        None,
+        &ReaderMode::Strict,
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn scoped_shape_blank(
+    file_index: usize,
+    nodes: &mut BTreeMap<String, BlankNode>,
+    node: BlankNode,
+) -> Result<BlankNode, String> {
+    let key = node.as_str().to_owned();
+    if let Some(scoped) = nodes.get(&key) {
+        return Ok(scoped.clone());
+    }
+    let scoped = BlankNode::new(format!("mara_query_shape_{file_index}_{}", nodes.len()))
+        .map_err(|e| e.to_string())?;
+    nodes.insert(key, scoped.clone());
+    Ok(scoped)
+}
+
+/// Run the pinned native SHACL adapter over a root and projected query rows only.
+/// The source graph is never supplied to the constraint evaluator.
+pub(crate) fn evaluate_projection_shape(
+    ir: &IRSchema,
+    shape_id: &str,
+    focus: &str,
+    rows: &[BTreeMap<String, Value>],
+) -> Result<ProjectionOutcome, String> {
+    let shape = ir
+        .get_shape(&Object::iri(
+            IriS::new(shape_id).map_err(|e| e.to_string())?,
+        ))
+        .ok_or_else(|| format!("unknown SHACL shape '{shape_id}'"))?;
+    let mut triples = vec![json!({"@id":focus})];
+    for (index, binding) in rows.iter().enumerate() {
+        let row_id = format!("_:query_row_{index}");
+        triples.push(json!({"@id":focus,format!("{Q}match"): {"@id":row_id}}));
+        let mut row = json!({"@id":row_id});
+        for (column, value) in binding {
+            row[format!("{Q}column:{column}")] = value.clone();
+        }
+        triples.push(row);
+    }
+    let data = OxigraphInMemory::from_str(
+        &json!({"@graph":triples}).to_string(),
+        &RDFFormat::JsonLd,
+        None,
+        &ReaderMode::Strict,
+    )
+    .map_err(|e| e.to_string())?;
+    let mut engine = crate::rules::engine::RuleEngine::new();
+    let outcome = shape
+        .validate(
+            &data,
+            &mut engine,
+            Some(&FocusNodes::single(
+                Object::iri(IriS::new(focus).map_err(|e| e.to_string())?).into(),
+            )),
+            None,
+            ir,
+        )
+        .map_err(|e| e.to_string())?;
+    if engine.failed.get() {
+        return Err("native SHACL evaluation was incomplete".into());
+    }
+    let components = outcome
+        .violations()
+        .iter()
+        .map(|violation| violation.constraint_component().to_string())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let counts = engine
+        .counts
+        .into_iter()
+        .map(|((shape, _, component), (total, qualifying))| Count {
+            shape,
+            component,
+            total,
+            qualifying,
+        })
+        .collect();
+    Ok(ProjectionOutcome {
+        conforms: outcome.conforms(),
+        components,
+        counts,
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -353,38 +490,11 @@ impl SourceEngine {
     /// Evaluates a supplied SHACL shape over the same definition's projected result.
     /// The shape cannot traverse the source corpus: only root/row/column RDF exists.
     pub fn query_backend_policy(&self, request: PolicyRequest) -> Result<Evaluation, String> {
-        let shapes = self
-            .files()
-            .get(&request.shape_file)
-            .ok_or("missing policy source")?;
-        let mut graph = Graph::new();
-        for quad in RdfParser::from_format(RdfFormat::Turtle).for_slice(shapes.as_bytes()) {
-            let quad = quad.map_err(|e| e.to_string())?;
-            match &quad.object {
-                Term::Literal(literal) => literal_profile(literal)?,
-                Term::Triple(_) => {
-                    return Err("RDF-star policy terms are outside the proof profile".into());
-                }
-                _ => {}
-            }
-            graph.insert(&Triple::new(quad.subject, quad.predicate, quad.object));
+        let ir = compile_shape_files(self.files(), std::slice::from_ref(&request.shape_file))?;
+        let shape_iri = IriS::new(&request.shape).map_err(|e| e.to_string())?;
+        if ir.get_shape(&Object::iri(shape_iri)).is_none() {
+            return Err(format!("unknown SHACL shape '{}'", request.shape));
         }
-        // Parser entropy and host word width must not affect anonymous constraints.
-        graph.canonicalize(CanonicalizationAlgorithm::Rdfc10 {
-            hash_algorithm: CanonicalizationHashAlgorithm::Sha256,
-        });
-        let ir = IRSchema::from_str(
-            &graph.to_string(),
-            &RDFFormat::NTriples,
-            None,
-            &ReaderMode::Strict,
-        )
-        .map_err(|e| e.to_string())?;
-        let shape = ir
-            .get_shape(&Object::iri(
-                IriS::new(&request.shape).map_err(|e| e.to_string())?,
-            ))
-            .ok_or("unknown policy shape")?;
         let facts = self.query_backend_execute(request.query)?;
         let mut checks = vec![];
         let mut complete = facts.evaluation_complete;
@@ -399,64 +509,26 @@ impl SourceEngine {
                 counts: vec![],
             };
             if facts.evaluation_complete {
-                let mut graph = vec![json!({"@id":focus})];
-                for (index, binding) in root.bindings.iter().enumerate() {
-                    let row_id = format!("_:query_row_{index}");
-                    graph.push(json!({"@id":focus,format!("{Q}match"):{"@id":row_id}}));
-                    let mut row = json!({"@id":row_id});
-                    for (column, value) in &binding.values {
-                        if let Some(value) = value {
-                            row[format!("{Q}column:{column}")] = json_ld(value);
-                        }
-                    }
-                    graph.push(row);
-                }
-                let data = OxigraphInMemory::from_str(
-                    &json!({"@graph":graph}).to_string(),
-                    &RDFFormat::JsonLd,
-                    None,
-                    &ReaderMode::Strict,
-                )
-                .map_err(|e| e.to_string())?;
-                let mut engine = crate::rules::engine::RuleEngine::new();
-                let outcome = shape.validate(
-                    &data,
-                    &mut engine,
-                    Some(&FocusNodes::single(
-                        Object::iri(IriS::new(&focus).unwrap()).into(),
-                    )),
-                    None,
-                    &ir,
-                );
-                match outcome {
-                    Ok(outcome) if !engine.failed.get() => {
-                        check.state = if outcome.conforms() {
-                            "passed"
-                        } else {
-                            "failed"
-                        }
-                        .into();
-                        check.components = outcome
-                            .violations()
+                let rows = root
+                    .bindings
+                    .iter()
+                    .map(|binding| {
+                        binding
+                            .values
                             .iter()
-                            .map(|v| v.constraint_component().to_string())
-                            .collect::<BTreeSet<_>>()
-                            .into_iter()
-                            .collect();
-                        check.counts = engine
-                            .counts
-                            .into_iter()
-                            .map(|((shape, _, component), (total, qualifying))| Count {
-                                shape,
-                                component,
-                                total,
-                                qualifying,
+                            .filter_map(|(name, value)| {
+                                value.as_ref().map(|value| (name.clone(), json_ld(value)))
                             })
-                            .collect();
+                            .collect()
+                    })
+                    .collect::<Vec<_>>();
+                match evaluate_projection_shape(&ir, &request.shape, &focus, &rows) {
+                    Ok(outcome) => {
+                        check.state = if outcome.conforms { "passed" } else { "failed" }.into();
+                        check.components = outcome.components;
+                        check.counts = outcome.counts;
                     }
-                    _ => {
-                        complete = false;
-                    }
+                    Err(_) => complete = false,
                 }
             }
             checks.push(check);

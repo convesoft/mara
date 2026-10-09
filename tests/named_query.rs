@@ -115,6 +115,893 @@ fn mcp(root: &std::path::Path, req: &q::Request) -> Value {
     assert_ne!(response["result"]["isError"], true, "{response:#}");
     response["result"]["structuredContent"].clone()
 }
+fn install_query_consumers(root: &std::path::Path) {
+    let config = root.join(".mara/project.toml");
+    let mut project = fs::read_to_string(&config).unwrap();
+    project.push_str("\n[query_policy]\nformat_version = 1\nfiles = [\"invariants.yaml\"]\ndefinition_files = [\"queries.json\"]\nshape_files = [\"presence.ttl\"]\nmax_rows = 100\n");
+    fs::write(config, project).unwrap();
+    fs::write(
+        root.join("invariants.yaml"),
+        r#"format_version: 1
+invariants:
+  - id: require-query-match
+    definition: urn:fixture:query:supports
+    shape: urn:fixture:shape:has-match
+    flavours: [subject]
+    severity: error
+    parameters:
+      - name: state
+        value: {type: text, value: accepted}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("gate.yaml"),
+        r#"format_version: 1
+gates:
+  - id: require-support
+    empty_roots: not_applicable
+    empty_required: not_applicable
+    conditions:
+      - id: support-condition
+        definition: urn:fixture:query:supports
+        shape_file: presence.ttl
+        shape: urn:fixture:shape:has-match
+        severity: error
+        context_parameters: [state]
+  - id: empty-required
+    empty_roots: passed
+    empty_required: failed
+    conditions: []
+  - id: empty-roots
+    empty_roots: not_applicable
+    empty_required: failed
+    conditions: []
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("presence.ttl"),
+        r#"@prefix sh: <http://www.w3.org/ns/shacl#>.
+<urn:fixture:shape:has-match> a sh:NodeShape;
+  sh:property [ sh:path <urn:mara:query:match>; sh:minCount 1 ].
+"#,
+    )
+    .unwrap();
+}
+fn consumer_snapshot() -> SourceSnapshot {
+    let mut snapshot = snapshot();
+    let project = snapshot
+        .files
+        .iter_mut()
+        .find(|file| file.path == ".mara/project.toml")
+        .unwrap();
+    project.content.push_str("\n[query_policy]\nformat_version = 1\nfiles = [\"invariants.yaml\"]\ndefinition_files = [\"queries.json\"]\nshape_files = [\"presence.ttl\"]\nmax_rows = 100\n");
+    snapshot.files.extend([
+        mara::SourceFile { path: "invariants.yaml".into(), content: r#"format_version: 1
+invariants:
+  - id: require-query-match
+    definition: urn:fixture:query:supports
+    shape: urn:fixture:shape:has-match
+    flavours: [subject]
+    severity: error
+    parameters:
+      - name: state
+        value: {type: text, value: accepted}
+"#.into() },
+        mara::SourceFile { path: "gate.yaml".into(), content: r#"format_version: 1
+gates:
+  - id: require-support
+    empty_roots: not_applicable
+    empty_required: not_applicable
+    conditions:
+      - id: support-condition
+        definition: urn:fixture:query:supports
+        shape_file: presence.ttl
+        shape: urn:fixture:shape:has-match
+        severity: error
+        context_parameters: [state]
+  - id: empty-required
+    empty_roots: passed
+    empty_required: failed
+    conditions: []
+  - id: empty-roots
+    empty_roots: not_applicable
+    empty_required: failed
+    conditions: []
+"#.into() },
+        mara::SourceFile { path: "presence.ttl".into(), content: "@prefix sh: <http://www.w3.org/ns/shacl#>.\n<urn:fixture:shape:has-match> a sh:NodeShape; sh:property [ sh:path <urn:mara:query:match>; sh:minCount 1 ].\n".into() },
+    ]);
+    snapshot
+}
+fn empty_facts_request() -> q::Request {
+    q::Request {
+        definition_files: vec!["queries.json".into()],
+        definition: "urn:fixture:query:supports".into(),
+        selection: q::Selection {
+            ids: vec!["SUB-EMPTY".into()],
+            ..Default::default()
+        },
+        parameters: vec![q::BindingParameter {
+            name: "state".into(),
+            value: q::ParameterValue::Text("accepted".into()),
+        }],
+        max_rows: 100,
+        limit: 100,
+        cursor: None,
+    }
+}
+fn consumer_mcp(root: &std::path::Path, name: &str, params: Value) -> Value {
+    let responses = mcp_exchange_with_arguments(
+        root,
+        &["--execution-mode", "direct", "mcp"],
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_call(2, name, params),
+        ],
+    );
+    let response = mcp_response(&responses, 2);
+    assert_ne!(response["result"]["isError"], true, "{response:#}");
+    response["result"]["structuredContent"].clone()
+}
+
+// @mara checks REQ-QUERY-POLICY-CONSUMERS
+// @mara checks REQ-NAMED-QUERY-FACTS
+#[test]
+fn shared_query_facts_become_invariant_and_gate_failures_across_rust_cli_and_mcp() {
+    let fixture = project();
+    install_query_consumers(fixture.path());
+    let runtime = NativeRuntime::new(Some(fixture.path().into()), fixture.path().into()).unwrap();
+    let portable = SourceEngine::new(consumer_snapshot()).unwrap();
+    let request = empty_facts_request();
+
+    let facts = runtime.query_execute(request.clone()).unwrap();
+    assert!(facts.evaluation_complete);
+    assert_eq!(facts.summary.binding_count, Some(0));
+    assert!(matches!(
+        facts.records.as_slice(),
+        [q::Record::Root {
+            binding_count: Some(0),
+            ..
+        }]
+    ));
+    let direct_facts = portable.query_execute(request.clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(&direct_facts.records).unwrap(),
+        serde_json::to_value(&facts.records).unwrap()
+    );
+    let cli_facts = mara(
+        fixture.path(),
+        &[
+            "--execution-mode",
+            "direct",
+            "--format",
+            "json",
+            "query",
+            "execute",
+            "urn:fixture:query:supports",
+            "--definition-file",
+            "queries.json",
+            "--id",
+            "SUB-EMPTY",
+            "--param",
+            "state={\"type\":\"text\",\"value\":\"accepted\"}",
+            "--max-rows",
+            "100",
+            "--limit",
+            "100",
+        ],
+    );
+    assert!(
+        cli_facts.status.success(),
+        "{} {}",
+        stdout(&cli_facts),
+        stderr(&cli_facts)
+    );
+    let cli_facts: Value = serde_json::from_slice(&cli_facts.stdout).unwrap();
+    assert_eq!(cli_facts, serde_json::to_value(&facts).unwrap());
+    assert_eq!(
+        consumer_mcp(
+            fixture.path(),
+            "query_execute",
+            serde_json::to_value(&request).unwrap()
+        ),
+        cli_facts
+    );
+
+    let (portable_policy, portable_diagnostics) =
+        portable.query_policy_validation(mara::ValidationTarget {
+            kind: mara::ValidationTargetKind::Project,
+            id: None,
+        });
+    let portable_policy = portable_policy.unwrap();
+    assert!(
+        portable_policy.evaluation_complete,
+        "{portable_policy:#?} {portable_diagnostics:#?}"
+    );
+    let portable_failure = portable_policy
+        .checks
+        .iter()
+        .find(
+            |check| matches!(&check.root, Some(q::Endpoint::Item { id, .. }) if id == "SUB-EMPTY"),
+        )
+        .unwrap();
+    assert_eq!(
+        portable_failure.state,
+        mara::query_consumers::ConsumerState::Failed
+    );
+    assert_eq!(
+        portable_failure.applicability,
+        mara::query_consumers::ConsumerState::Passed
+    );
+    assert_eq!(portable_failure.severity, mara::Severity::Error);
+    assert_eq!(portable_failure.binding_count, Some(0));
+    assert_eq!(
+        portable_failure.source.path.as_deref(),
+        Some(std::path::Path::new("invariants.yaml"))
+    );
+    assert!(!portable_failure.components.is_empty());
+    let schema_validation = runtime.schema_validate().unwrap();
+    assert!(schema_validation.valid && schema_validation.evaluation_complete);
+    assert!(
+        schema_validation
+            .query_policies
+            .as_ref()
+            .unwrap()
+            .checks
+            .iter()
+            .all(|check| check.state == mara::query_consumers::ConsumerState::NotApplicable)
+    );
+    let validation = runtime.project_validate(&[]).unwrap();
+    assert!(!validation.valid && validation.evaluation_complete);
+    let expected_policy_checks = validation.query_policies.as_ref().unwrap().checks.len();
+    let mut cursor = None;
+    let mut paged_policy_checks = Vec::new();
+    loop {
+        let page = runtime
+            .project_validate_with_options(
+                &[],
+                &mara::ValidationOptions {
+                    limit: Some(1),
+                    cursor,
+                },
+            )
+            .unwrap();
+        let policy_checks = page.query_policies.as_ref().unwrap().checks.clone();
+        assert!(page.diagnostics.len() + policy_checks.len() <= 1);
+        assert_eq!(page.valid, validation.valid);
+        paged_policy_checks.extend(policy_checks);
+        if !page.has_more {
+            break;
+        }
+        cursor = page.next_cursor.clone();
+        assert!(cursor.is_some());
+    }
+    assert_eq!(paged_policy_checks.len(), expected_policy_checks);
+    let cli_page = mara(
+        fixture.path(),
+        &[
+            "--execution-mode",
+            "direct",
+            "--format",
+            "json",
+            "project",
+            "validate",
+            "--limit",
+            "1",
+        ],
+    );
+    assert!(
+        !cli_page.status.success(),
+        "invalid validation must retain its CLI failure status"
+    );
+    let cli_page: Value = serde_json::from_slice(&cli_page.stdout).unwrap();
+    assert_eq!(
+        cli_page.get("has_more"),
+        Some(&Value::Bool(true)),
+        "{cli_page}"
+    );
+    assert_eq!(
+        cli_page["diagnostics"].as_array().unwrap().len()
+            + cli_page["query_policies"]["checks"]
+                .as_array()
+                .unwrap()
+                .len(),
+        1
+    );
+    assert_eq!(
+        consumer_mcp(fixture.path(), "project_validate", json!({"limit":1})),
+        cli_page
+    );
+    assert!(
+        validation
+            .diagnostics
+            .iter()
+            .any(|d| d.rule.as_deref() == Some("require-query-match")
+                && d.severity == mara::Severity::Error)
+    );
+    let native_failure = validation
+        .query_policies
+        .as_ref()
+        .unwrap()
+        .checks
+        .iter()
+        .find(
+            |check| matches!(&check.root, Some(q::Endpoint::Item { id, .. }) if id == "SUB-EMPTY"),
+        )
+        .unwrap();
+    assert_eq!(
+        native_failure.state,
+        mara::query_consumers::ConsumerState::Failed
+    );
+    assert_eq!(
+        serde_json::to_value(&native_failure.bindings).unwrap(),
+        serde_json::to_value(
+            facts
+                .records
+                .iter()
+                .filter_map(|record| match record {
+                    q::Record::Binding { binding, .. } => Some(binding),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        )
+        .unwrap()
+    );
+    let item_validation = runtime.item_validate("SUB-EMPTY").unwrap();
+    assert!(!item_validation.valid && item_validation.evaluation_complete);
+    assert!(
+        item_validation
+            .diagnostics
+            .iter()
+            .any(|d| d.rule.as_deref() == Some("require-query-match"))
+    );
+    let unrelated_item = runtime.item_validate("SUP-A").unwrap();
+    assert!(
+        unrelated_item
+            .query_policies
+            .as_ref()
+            .unwrap()
+            .checks
+            .iter()
+            .all(|check| check.state == mara::query_consumers::ConsumerState::NotApplicable)
+    );
+    let cli_validation = mara(fixture.path(), &["--format", "json", "project", "validate"]);
+    let cli_validation: Value = serde_json::from_slice(&cli_validation.stdout).unwrap();
+    assert_eq!(
+        cli_validation["query_policies"]["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["root"]["id"] == "SUB-EMPTY")
+            .unwrap()["state"],
+        "failed"
+    );
+    let mcp_validation = consumer_mcp(fixture.path(), "project_validate", json!({}));
+    assert_eq!(
+        mcp_validation["query_policies"]["checks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|check| check["root"]["id"] == "SUB-EMPTY")
+            .unwrap()["state"],
+        "failed"
+    );
+    let invariant_path = fixture.path().join("invariants.yaml");
+    let invariant_text = fs::read_to_string(&invariant_path).unwrap();
+    fs::write(
+        &invariant_path,
+        invariant_text.replace("severity: error", "severity: warning"),
+    )
+    .unwrap();
+    let warning_validation = runtime.project_validate(&[]).unwrap();
+    assert!(warning_validation.valid && warning_validation.evaluation_complete);
+    let warning_failure = warning_validation
+        .query_policies
+        .as_ref()
+        .unwrap()
+        .checks
+        .iter()
+        .find(
+            |check| matches!(&check.root, Some(q::Endpoint::Item { id, .. }) if id == "SUB-EMPTY"),
+        )
+        .unwrap();
+    assert_eq!(
+        warning_failure.state,
+        mara::query_consumers::ConsumerState::Failed
+    );
+    assert_eq!(warning_failure.severity, mara::Severity::Warning);
+    assert!(
+        warning_validation
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == mara::Severity::Warning
+                && diagnostic.rule.as_deref() == Some("require-query-match"))
+    );
+    fs::write(&invariant_path, invariant_text).unwrap();
+    let document_path = fixture.path().join("fixture.mara.md");
+    let document_text = fs::read_to_string(&document_path).unwrap();
+    fs::write(
+        &document_path,
+        document_text.replacen(":status: draft", ":status: invalid", 1),
+    )
+    .unwrap();
+    let invalid_source = runtime.project_validate(&[]).unwrap();
+    assert!(
+        invalid_source
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == mara::DiagnosticCode::FieldInvalid)
+    );
+    assert!(
+        !invalid_source
+            .query_policies
+            .as_ref()
+            .unwrap()
+            .evaluation_complete
+    );
+    assert!(
+        invalid_source
+            .query_policies
+            .as_ref()
+            .unwrap()
+            .checks
+            .iter()
+            .all(|check| check.state != mara::query_consumers::ConsumerState::Passed)
+    );
+    fs::write(
+        fixture.path().join("empty-root-pass.yaml"),
+        r#"format_version: 1
+gates:
+  - id: empty-root-passes
+    empty_roots: passed
+    empty_required: passed
+    conditions:
+      - id: support
+        definition: urn:fixture:query:supports
+        shape_file: presence.ttl
+        shape: urn:fixture:shape:has-match
+        severity: error
+        context_parameters: [state]
+"#,
+    )
+    .unwrap();
+    let invalid_scope_gate = runtime
+        .query_gate(mara::query_consumers::QueryGateRequest {
+            definition_files: vec!["queries.json".into()],
+            gate_file: "empty-root-pass.yaml".into(),
+            shape_files: vec!["presence.ttl".into()],
+            gate: "empty-root-passes".into(),
+            scope: q::Selection {
+                fields: vec![q::FieldSelection {
+                    key: "status".into(),
+                    value: "no-match".into(),
+                }],
+                ..Default::default()
+            },
+            context: vec![],
+            max_rows: 100,
+        })
+        .unwrap();
+    assert_eq!(
+        invalid_scope_gate.state,
+        mara::query_consumers::ConsumerState::Unavailable
+    );
+    assert!(!invalid_scope_gate.evaluation_complete);
+    assert!(invalid_scope_gate.roots.is_empty());
+    assert!(invalid_scope_gate.empty_reason.is_none());
+    fs::write(&document_path, document_text).unwrap();
+
+    let gate = mara::query_consumers::QueryGateRequest {
+        definition_files: vec!["queries.json".into()],
+        gate_file: "gate.yaml".into(),
+        shape_files: vec!["presence.ttl".into()],
+        gate: "require-support".into(),
+        scope: request.selection.clone(),
+        context: request.parameters.clone(),
+        max_rows: 100,
+    };
+    let gate_result = runtime.query_gate(gate.clone()).unwrap();
+    let portable_gate = portable.query_gate(gate.clone()).unwrap();
+    let condition = &gate_result.roots[0].conditions[0];
+    assert_eq!(
+        condition.state,
+        mara::query_consumers::ConsumerState::Failed
+    );
+    assert_eq!(
+        condition.applicability,
+        mara::query_consumers::ConsumerState::Passed
+    );
+    assert_eq!(condition.severity, mara::Severity::Error);
+    assert_eq!(condition.binding_count, Some(0));
+    assert_eq!(
+        gate_result.source.path.as_deref(),
+        Some(std::path::Path::new("gate.yaml"))
+    );
+    assert_eq!(
+        condition.source.path.as_deref(),
+        Some(std::path::Path::new("gate.yaml"))
+    );
+    assert!(gate_result.evaluation_complete);
+    let gate_cli = mara(
+        fixture.path(),
+        &[
+            "--execution-mode",
+            "direct",
+            "--format",
+            "json",
+            "query",
+            "gate",
+            "require-support",
+            "--gate-file",
+            "gate.yaml",
+            "--definition-file",
+            "queries.json",
+            "--shape-file",
+            "presence.ttl",
+            "--id",
+            "SUB-EMPTY",
+            "--param",
+            "state={\"type\":\"text\",\"value\":\"accepted\"}",
+            "--max-rows",
+            "100",
+        ],
+    );
+    assert!(
+        gate_cli.status.success(),
+        "{} {}",
+        stdout(&gate_cli),
+        stderr(&gate_cli)
+    );
+    let gate_cli: Value = serde_json::from_slice(&gate_cli.stdout).unwrap();
+    assert_eq!(gate_cli, serde_json::to_value(&gate_result).unwrap());
+    let gate_mcp = consumer_mcp(
+        fixture.path(),
+        "query_gate",
+        serde_json::to_value(&gate).unwrap(),
+    );
+    assert_eq!(gate_mcp, gate_cli);
+    assert_eq!(portable_gate.roots[0].conditions[0].state, condition.state);
+
+    fs::write(
+        fixture.path().join("scope-one.ttl"),
+        "@prefix sh: <http://www.w3.org/ns/shacl#>.\n<urn:fixture:shape:shared> a sh:NodeShape; sh:property _:property.\n_:property sh:path <urn:mara:query:match>; sh:minCount 1.\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("scope-two.ttl"),
+        "@prefix sh: <http://www.w3.org/ns/shacl#>.\n<urn:fixture:shape:shared> a sh:NodeShape; sh:property _:property.\n_:property sh:path <urn:mara:query:match>; sh:maxCount 0.\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("scoped-gate.yaml"),
+        r#"format_version: 1
+gates:
+  - id: scoped-blank-nodes
+    empty_roots: not_applicable
+    empty_required: not_applicable
+    conditions:
+      - id: require-one-match
+        definition: urn:fixture:query:supports
+        shape_file: scope-one.ttl
+        shape: urn:fixture:shape:shared
+        severity: error
+        context_parameters: [state]
+      - id: allow-zero-matches
+        definition: urn:fixture:query:supports
+        shape_file: scope-two.ttl
+        shape: urn:fixture:shape:shared
+        severity: error
+        context_parameters: [state]
+"#,
+    )
+    .unwrap();
+    let scoped_shapes = runtime
+        .query_gate(mara::query_consumers::QueryGateRequest {
+            definition_files: vec!["queries.json".into()],
+            gate_file: "scoped-gate.yaml".into(),
+            shape_files: vec!["scope-one.ttl".into(), "scope-two.ttl".into()],
+            gate: "scoped-blank-nodes".into(),
+            scope: q::Selection {
+                ids: vec!["SUB-LINKED".into()],
+                ..Default::default()
+            },
+            context: vec![mara::named_query::BindingParameter {
+                name: "state".into(),
+                value: mara::named_query::ParameterValue::Text("accepted".into()),
+            }],
+            max_rows: 100,
+        })
+        .unwrap();
+    assert_eq!(
+        scoped_shapes.roots[0].conditions[0].state,
+        mara::query_consumers::ConsumerState::Passed
+    );
+    assert_eq!(
+        scoped_shapes.roots[0].conditions[1].state,
+        mara::query_consumers::ConsumerState::Failed
+    );
+
+    let inactive_gate = runtime
+        .query_gate(mara::query_consumers::QueryGateRequest {
+            definition_files: vec!["queries.json".into()],
+            gate_file: "gate.yaml".into(),
+            shape_files: vec!["presence.ttl".into()],
+            gate: "require-support".into(),
+            scope: q::Selection {
+                ids: vec!["SUP-A".into()],
+                ..Default::default()
+            },
+            context: vec![],
+            max_rows: 100,
+        })
+        .unwrap();
+    assert_eq!(
+        inactive_gate.roots[0].conditions[0].applicability,
+        mara::query_consumers::ConsumerState::NotApplicable
+    );
+    assert_eq!(
+        inactive_gate.roots[0].conditions[0].state,
+        mara::query_consumers::ConsumerState::NotApplicable
+    );
+    assert_eq!(
+        inactive_gate.state,
+        mara::query_consumers::ConsumerState::NotApplicable
+    );
+
+    let gate_only = project();
+    install_query_consumers(gate_only.path());
+    let config = gate_only.path().join(".mara/project.toml");
+    let text = fs::read_to_string(&config).unwrap();
+    fs::write(&config, text.split("\n[query_policy]\n").next().unwrap()).unwrap();
+    let gate_only_runtime =
+        NativeRuntime::new(Some(gate_only.path().into()), gate_only.path().into()).unwrap();
+    assert!(gate_only_runtime.project_validate(&[]).unwrap().valid);
+    let gate_only_failure = gate_only_runtime.query_gate(gate.clone()).unwrap();
+    assert_eq!(
+        gate_only_failure.state,
+        mara::query_consumers::ConsumerState::Failed
+    );
+    assert!(
+        gate_only_runtime.project_validate(&[]).unwrap().valid,
+        "gate evaluation must not alter documentation validity"
+    );
+
+    let empty_required = runtime
+        .query_gate(mara::query_consumers::QueryGateRequest {
+            definition_files: vec![],
+            gate_file: "gate.yaml".into(),
+            shape_files: vec![],
+            gate: "empty-required".into(),
+            scope: request.selection.clone(),
+            context: vec![],
+            max_rows: 100,
+        })
+        .unwrap();
+    assert_eq!(
+        empty_required.state,
+        mara::query_consumers::ConsumerState::Failed
+    );
+    assert_eq!(
+        empty_required.empty_reason.as_deref(),
+        Some("required_conditions")
+    );
+    assert_eq!(
+        empty_required.roots[0].state,
+        mara::query_consumers::ConsumerState::Failed
+    );
+    let empty_roots = runtime
+        .query_gate(mara::query_consumers::QueryGateRequest {
+            definition_files: vec![],
+            gate_file: "gate.yaml".into(),
+            shape_files: vec![],
+            gate: "empty-roots".into(),
+            scope: q::Selection {
+                fields: vec![q::FieldSelection {
+                    key: "status".into(),
+                    value: "no-match".into(),
+                }],
+                ..Default::default()
+            },
+            context: vec![],
+            max_rows: 100,
+        })
+        .unwrap();
+    assert!(empty_roots.roots.is_empty());
+    assert_eq!(
+        empty_roots.state,
+        mara::query_consumers::ConsumerState::NotApplicable
+    );
+    assert_eq!(empty_roots.empty_reason.as_deref(), Some("roots"));
+
+    let unavailable_gate = r#"  - id: retain-known-failure
+    empty_roots: passed
+    empty_required: passed
+    conditions:
+      - id: unavailable-code-condition
+        definition: urn:fixture:query:needs-code
+        shape_file: presence.ttl
+        shape: urn:fixture:shape:has-match
+        severity: warning
+      - id: known-failure
+        definition: urn:fixture:query:supports
+        shape_file: presence.ttl
+        shape: urn:fixture:shape:has-match
+        severity: error
+        context_parameters: [state]
+"#;
+    let mut definitions: Value =
+        serde_json::from_slice(&fs::read(fixture.path().join("queries.json")).unwrap()).unwrap();
+    let mut needs_code = definitions["definitions"][0].clone();
+    needs_code["id"] = json!("urn:fixture:query:needs-code");
+    needs_code["required_fact_sources"] = json!(["documents", "code"]);
+    needs_code["parameters"] = json!({});
+    needs_code["columns"] = json!({"title":{"type":"text"}});
+    needs_code["source_columns"] = json!([]);
+    needs_code["support_columns"] = json!([]);
+    needs_code["select"] =
+        json!("SELECT ?root ?title WHERE { ?root <urn:mara:item:title> ?title }");
+    definitions["definitions"]
+        .as_array_mut()
+        .unwrap()
+        .push(needs_code);
+    let definitions = serde_json::to_string(&definitions).unwrap();
+    fs::write(fixture.path().join("queries.json"), &definitions).unwrap();
+    let gate_file = fixture.path().join("gate.yaml");
+    let mut gate_text = fs::read_to_string(&gate_file).unwrap();
+    gate_text.push_str(unavailable_gate);
+    fs::write(&gate_file, &gate_text).unwrap();
+
+    let mut incomplete_snapshot = consumer_snapshot();
+    let query_source = incomplete_snapshot
+        .files
+        .iter_mut()
+        .find(|file| file.path == "queries.json")
+        .unwrap();
+    query_source.content = definitions;
+    let gate_source = incomplete_snapshot
+        .files
+        .iter_mut()
+        .find(|file| file.path == "gate.yaml")
+        .unwrap();
+    gate_source.content.push_str(unavailable_gate);
+    let incomplete_engine = SourceEngine::new(incomplete_snapshot).unwrap();
+    let retained = runtime
+        .query_gate(mara::query_consumers::QueryGateRequest {
+            definition_files: vec!["queries.json".into()],
+            gate_file: "gate.yaml".into(),
+            shape_files: vec!["presence.ttl".into()],
+            gate: "retain-known-failure".into(),
+            scope: request.selection,
+            context: vec![mara::named_query::BindingParameter {
+                name: "state".into(),
+                value: mara::named_query::ParameterValue::Text("accepted".into()),
+            }],
+            max_rows: 100,
+        })
+        .unwrap();
+    let portable_retained = incomplete_engine
+        .query_gate(mara::query_consumers::QueryGateRequest {
+            definition_files: vec!["queries.json".into()],
+            gate_file: "gate.yaml".into(),
+            shape_files: vec!["presence.ttl".into()],
+            gate: "retain-known-failure".into(),
+            scope: q::Selection {
+                ids: vec!["SUB-EMPTY".into()],
+                ..Default::default()
+            },
+            context: vec![q::BindingParameter {
+                name: "state".into(),
+                value: q::ParameterValue::Text("accepted".into()),
+            }],
+            max_rows: 100,
+        })
+        .unwrap();
+    assert_eq!(
+        retained.state,
+        mara::query_consumers::ConsumerState::Unavailable
+    );
+    assert!(!retained.evaluation_complete);
+    assert_eq!(
+        retained.roots[0].state,
+        mara::query_consumers::ConsumerState::Unavailable
+    );
+    assert_eq!(
+        retained.roots[0].conditions[0].state,
+        mara::query_consumers::ConsumerState::Unavailable
+    );
+    assert_eq!(
+        retained.roots[0].conditions[0].applicability,
+        mara::query_consumers::ConsumerState::Unavailable
+    );
+    assert_eq!(
+        retained.roots[0].conditions[1].state,
+        mara::query_consumers::ConsumerState::Failed
+    );
+    assert_eq!(
+        retained.roots[0].conditions[1].severity,
+        mara::Severity::Error
+    );
+    assert_eq!(
+        portable_retained.roots[0].conditions[1].state,
+        mara::query_consumers::ConsumerState::Failed
+    );
+    let empty_scope_missing_code = runtime
+        .query_gate(mara::query_consumers::QueryGateRequest {
+            definition_files: vec!["queries.json".into()],
+            gate_file: "gate.yaml".into(),
+            shape_files: vec!["presence.ttl".into()],
+            gate: "retain-known-failure".into(),
+            scope: q::Selection {
+                fields: vec![q::FieldSelection {
+                    key: "status".into(),
+                    value: "no-match".into(),
+                }],
+                ..Default::default()
+            },
+            context: vec![],
+            max_rows: 100,
+        })
+        .unwrap();
+    assert_eq!(
+        empty_scope_missing_code.state,
+        mara::query_consumers::ConsumerState::Unavailable
+    );
+    assert!(!empty_scope_missing_code.evaluation_complete);
+    assert!(empty_scope_missing_code.roots.is_empty());
+    assert!(empty_scope_missing_code.empty_reason.is_none());
+
+    let schema_path = fixture.path().join(".mara/schema.yaml");
+    let mut schema: Value = serde_json::from_slice(&fs::read(&schema_path).unwrap()).unwrap();
+    schema["relations"]["parent"]["acyclic"] = json!({"severity":"error"});
+    fs::write(&schema_path, serde_json::to_vec(&schema).unwrap()).unwrap();
+    let structural_validation = runtime.project_validate(&[]).unwrap();
+    assert!(structural_validation.evaluation_complete);
+    assert!(
+        structural_validation
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.code == mara::DiagnosticCode::RelationCycle })
+    );
+    assert!(structural_validation.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == mara::DiagnosticCode::RuleFailed
+            && diagnostic.rule.as_deref() == Some("require-query-match")
+    }));
+}
+
+// @mara checks REQ-QUERY-POLICY-CONSUMERS
+#[test]
+fn configured_query_policy_paths_are_normalized() {
+    let fixture = project();
+    install_query_consumers(fixture.path());
+    let config_path = fixture.path().join(".mara/project.toml");
+    let config = fs::read_to_string(&config_path)
+        .unwrap()
+        .replace(
+            "files = [\"invariants.yaml\"]",
+            "files = [\"./invariants.yaml\"]",
+        )
+        .replace(
+            "shape_files = [\"presence.ttl\"]",
+            "shape_files = [\"./presence.ttl\"]",
+        );
+    fs::write(&config_path, config).unwrap();
+    let runtime = NativeRuntime::new(Some(fixture.path().into()), fixture.path().into()).unwrap();
+
+    let schema_validation = runtime.schema_validate().unwrap();
+    assert!(schema_validation.valid && schema_validation.evaluation_complete);
+    let validation = runtime.project_validate(&[]).unwrap();
+    assert!(!validation.valid && validation.evaluation_complete);
+    assert!(
+        validation
+            .diagnostics
+            .iter()
+            .any(|diagnostic| { diagnostic.rule.as_deref() == Some("require-query-match") })
+    );
+}
+
+// @mara checks REQ-QUERY-POLICY-CONSUMERS
 // @mara checks REQ-NAMED-QUERY-FACTS
 // @mara checks DES-EXECUTION-BOUNDARIES
 // @mara implements VER-REUSABLE-QUERY-ENGINE

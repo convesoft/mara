@@ -97,6 +97,31 @@ struct QueryExecuteToolParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct QueryGateToolParams {
+    /// Absolute project root; omit when the server is bound with --project.
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Explicit project-relative format-3 named-query definition files.
+    #[serde(default)]
+    definition_files: Vec<String>,
+    /// Request-local YAML gate definition file.
+    gate_file: String,
+    /// Explicit Turtle SHACL sources referenced by gate conditions.
+    #[serde(default)]
+    shape_files: Vec<String>,
+    /// Exact gate identity.
+    gate: String,
+    /// Explicit all or exact ID/schema filters; omission never means all.
+    scope: mara::named_query::Selection,
+    /// Typed context parameters, consumed only by named gate conditions.
+    #[serde(default)]
+    context: Vec<mara::named_query::BindingParameter>,
+    /// Positive observed solution-row budget per condition query.
+    max_rows: u32,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct TraceMatrixToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
@@ -317,6 +342,29 @@ impl SearchToolParams {
 
 #[tool_router]
 impl MaraMcp {
+    #[tool(
+        name = "query_gate",
+        description = "Evaluate request-local contextual gate conditions over explicit root scope and typed context. Gate conditions reuse named query definitions and the SHACL fact-result bridge. Empty roots and empty required condition sets use the gate's explicit outcomes; unavailable required inputs stay unavailable and retain known failures. The result reports conditions only: it never grants permission or executes external actions. Does not change documentation validity."
+    )]
+    fn query_gate(
+        &self,
+        Parameters(p): Parameters<QueryGateToolParams>,
+    ) -> Result<Json<serde_json::Value>, McpError> {
+        let operation = self.operations.for_project(p.project)?;
+        let result = operation
+            .query_gate(mara::query_consumers::QueryGateRequest {
+                definition_files: p.definition_files,
+                gate_file: p.gate_file,
+                shape_files: p.shape_files,
+                gate: p.gate,
+                scope: p.scope,
+                context: p.context,
+                max_rows: p.max_rows,
+            })
+            .map_err(McpError)?;
+        Ok(Json(serde_json::to_value(result).expect("gate result")))
+    }
+
     #[tool(
         name = "query_execute",
         description = "Execute raw named factual SELECT queries in the embedded engine. Load explicit format-3 or format-4 definition files, select an exact definition and explicit roots, and supply declared typed parameters. Format 4 allows acyclic named dependencies with explicit root, parameter and projected-column/support bindings; joins, unions, filters and transitive paths remain standard SPARQL. Check returned values against declared types and retain only explicitly projected source and edge support; hidden provenance is not inferred. Missing required fact sources produce incomplete results, not empty success. Returns typed distinct bindings, lifecycle data and empty-root records; no policy pass/fail. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs. Content, definition, parameter or control changes reject continuation. Native daemon and final browser/JS adapters are not yet supported."

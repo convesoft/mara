@@ -687,6 +687,7 @@ impl SourceEngine {
             valid: false,
             evaluation_complete: true,
             diagnostics: Vec::new(),
+            query_policies: None,
             summary: ValidationSummary {
                 errors: 0,
                 warnings: 0,
@@ -844,6 +845,9 @@ impl SourceEngine {
                 }
             }
             validation::collect_source_diagnostics(&corpus, source_diagnostics, &mut result);
+        }
+        if project.query_policy().is_some() {
+            crate::query_consumers::append_query_policy_result(&mut result, self);
         }
         result.summarize();
         validation::sort_diagnostics(&mut result.diagnostics);

@@ -421,6 +421,23 @@ impl NativeClient {
     ) -> Result<crate::RelationMutationResult, ClientError> {
         self.call("relation_remove", json!({"source":params.source,"relation":params.relation,"target":params.target,"occurrence":occurrence}), true, |r, _| r.relation_remove_occurrence(params,occurrence).map_err(Into::into))
     }
+    /// Contextual gates are embedded-only and return conditions, never permissions or actions.
+    pub fn query_gate(
+        &self,
+        request: crate::query_consumers::QueryGateRequest,
+    ) -> Result<crate::query_consumers::QueryGateResult, ClientError> {
+        if self.options.mode == Some(ExecutionMode::DaemonRequired) {
+            return Err(ClientError::Operation(
+                json!({"format_version":2,"error":{"code":"unsupported_capability","message":"query gate daemon execution is not implemented; select direct execution"}}),
+            ));
+        }
+        self.runtime.query_gate(request).map_err(|e| {
+            ClientError::Operation(
+                json!({"format_version":2,"error":{"code":e.code,"message":e.message}}),
+            )
+        })
+    }
+
     /// Named factual execution is embedded-only in this bounded delivery.
     pub fn query_execute(
         &self,

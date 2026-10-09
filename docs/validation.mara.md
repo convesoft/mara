@@ -2,7 +2,11 @@
 
 Source-level checks are a shared prerequisite for validation and authoring.
 Project/item validation combines independently recoverable source diagnostics
-with configured current-state rules and structural relation policies.
+with configured current-state rules and structural relation policies. When enabled,
+query-backed documentation invariants add separate `query_policies` results and
+rule diagnostics; contextual gates are request-local and never change validation
+validity. Their format and empty-set behavior are defined by
+[[DES-QUERY-CONSUMER-CONTRACT]] in [query engine](query-engine.mara.md).
 
 :::mara requirement REQ-PROJECT-VALIDATION
 :mid: 01M1PXP2KGWKQRXBB29DX5D7G1
@@ -117,7 +121,16 @@ CLI project validate accepts repeatable --path reporting selectors; item validat
 
 Recover independently usable configuration, schema and source. Associate diagnostics with unambiguous item identities, retain unavailable coordinates as absent and preserve path/line aliases. Item checks retain selected source problems; when whole-corpus policy prerequisites fail, include their actual blockers. Prove absence only with complete discovery. Source errors retain their typed classification; emit one stable violation per failed item/rule using authored location, shape, component, focus and value ordering. Unavailable native counts remain null; native error details are sanitized.
 
-Report diagnostic pages with limit 1–100 (default 20), at most 65,536 serialized bytes. Repeat unchanged inputs until has_more:false. Bind cursors to project/schema, accepted rule sources, discovered document/code bytes, adapter assets, file-only code and options; changes invalidate them. A single oversized diagnostic/envelope returns output_limit without silently dropping data. Invalid arguments, stale cursors and I/O preventing results use format-1 operation errors; CLI fails on invalid results/errors, MCP invalid validation is successful tool data.
+Enabled query invariants preserve the independent source/graph validation
+pipeline: incomplete source conformance remains visible and unavailable policy
+conditions cannot pass. Error-severity invariant failures make the result
+invalid; warning failures remain visible without invalidating complete
+validation. A contextual gate failure is result data, never a validation
+severity or permission. The focused current consumer regression is
+`tests/named_query.rs::shared_query_facts_become_invariant_and_gate_failures_across_rust_cli_and_mcp`.
+See [[DES-QUERY-CONSUMER-CONTRACT]] for configured inputs and output fields.
+
+Report bounded pages with limit 1–100 (default 20) and at most 65,536 serialized bytes. With query policies enabled, each page contains diagnostics first, then query-policy checks; `query_policies.checks` is page-local while validity, summaries and evaluation completeness describe the full target. Continue unchanged inputs across both arrays until `has_more:false`; reporting-path filters select diagnostics, not query-policy evaluation. Bind cursors to project/schema, accepted rule sources, discovered document/code bytes, adapter assets, file-only code, full query-policy results and options; changes invalidate them. A single oversized diagnostic/check or envelope returns `output_limit` without silently dropping data. Invalid arguments, stale cursors and I/O preventing results use format-1 operation errors; CLI fails on invalid results/errors, MCP invalid validation is successful tool data.
 
 Evaluation has no logical work counter or timeout guarantee. Retain finite rule-definition limits from [[DES-SCHEMA-RULE-DEFINITIONS]]. Validation never writes source, fetches external addresses or performs Git operations.
 :::

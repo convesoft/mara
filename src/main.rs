@@ -157,6 +157,41 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum QueryCommand {
+    /// Evaluate a request-local gate over explicit scope/context; results are not permissions or actions.
+    Gate {
+        /// Exact gate identity from the request-local YAML gate file.
+        gate: String,
+        /// Project-relative YAML file containing request-local gate definitions.
+        #[arg(long, required = true)]
+        gate_file: String,
+        /// Project-relative JSON named-query definitions (format 3).
+        #[arg(long = "definition-file")]
+        definition_files: Vec<String>,
+        /// Project-relative Turtle SHACL sources referenced by gate conditions.
+        #[arg(long = "shape-file")]
+        shape_files: Vec<String>,
+        /// Exact item IDs/MIDs; aliases select one root.
+        #[arg(long = "id")]
+        ids: Vec<String>,
+        /// Exact schema flavours, OR within this category.
+        #[arg(long = "flavour")]
+        flavours: Vec<String>,
+        /// Exact schema-field KEY=VALUE filters.
+        #[arg(long = "field")]
+        fields: Vec<String>,
+        /// Exact project-relative documents or directory subtrees.
+        #[arg(long = "path")]
+        paths: Vec<String>,
+        /// Explicitly select all roots; exclusive of other root filters.
+        #[arg(long)]
+        all: bool,
+        /// NAME=typed JSON context, e.g. candidate='{"type":"item","value":"REQ-X"}'.
+        #[arg(long = "param")]
+        context: Vec<String>,
+        /// Observed solution-row budget for every query condition.
+        #[arg(long, required = true)]
+        max_rows: u32,
+    },
     /// Load an explicit definition set and execute an exact named SELECT.
     Execute {
         /// Exact definition identity.
@@ -445,6 +480,79 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
     };
     let operations = NativeClient::from_environment(project.clone(), options.clone())?;
     match command {
+        Command::Query {
+            command:
+                QueryCommand::Gate {
+                    gate,
+                    gate_file,
+                    definition_files,
+                    shape_files,
+                    ids,
+                    flavours,
+                    fields,
+                    paths,
+                    all,
+                    context,
+                    max_rows,
+                },
+        } => {
+            let fields = fields
+                .into_iter()
+                .map(|f| {
+                    let (key, value) = f.split_once('=').ok_or_else(|| {
+                        ClientError::invalid_argument("--field requires KEY=VALUE")
+                    })?;
+                    Ok(mara::named_query::FieldSelection {
+                        key: key.into(),
+                        value: value.into(),
+                    })
+                })
+                .collect::<Result<Vec<_>, ClientError>>()?;
+            let context = context
+                .into_iter()
+                .map(|p| {
+                    let (name, value) = p.split_once('=').ok_or_else(|| {
+                        ClientError::invalid_argument("--param requires NAME=typed JSON")
+                    })?;
+                    Ok(mara::named_query::BindingParameter {
+                        name: name.into(),
+                        value: serde_json::from_str(value).map_err(|e| {
+                            ClientError::invalid_argument(format!("invalid typed context: {e}"))
+                        })?,
+                    })
+                })
+                .collect::<Result<Vec<_>, ClientError>>()?;
+            let result = operations.query_gate(mara::query_consumers::QueryGateRequest {
+                definition_files,
+                gate_file,
+                shape_files,
+                gate,
+                scope: mara::named_query::Selection {
+                    ids,
+                    flavours,
+                    fields,
+                    paths,
+                    all,
+                },
+                context,
+                max_rows,
+            });
+            match result {
+                Ok(result) => {
+                    let complete = result.evaluation_complete;
+                    write_json(&result)?;
+                    return Ok(complete);
+                }
+                Err(error) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&error.envelope())?;
+                    } else {
+                        eprintln!("error: {error}");
+                    }
+                    return Ok(false);
+                }
+            }
+        }
         Command::Query {
             command:
                 QueryCommand::Execute {

@@ -571,6 +571,86 @@ reported separately from factual truth and applicability; a warning is not
 rewritten into passed. Invalid definitions/arguments are diagnostics/errors,
 not ordinary false facts or not_applicable outcomes.
 
+### Implemented query-consumer slice
+
+The current native Rust/CLI/MCP slice reuses named-query format 3 and the existing
+projected-result SHACL bridge. It does not add traversal or validation behavior
+to the engineering rules or template. `SourceEngine` and `NativeRuntime` expose
+request-local `query_gate`; the CLI command is `query gate <gate>` and MCP tool
+is `query_gate`. Daemon-required gate execution is explicitly unsupported here.
+The complete daemon/Node/HTTP/TypeScript/WASM rollout, rendering and evaluation
+reports remain later release work.
+
+Project configuration enables validation invariants with:
+
+```toml
+[query_policy]
+format_version = 1
+files = ["invariants.yaml"]
+definition_files = ["queries.json"]
+shape_files = ["policy.ttl"]
+max_rows = 100
+```
+
+Each YAML policy file has `format_version: 1` and `invariants`. An invariant
+requires `id`, exact named `definition`, exact SHACL `shape` IRI, nonempty
+`flavours` within the definition's root signature, and `severity` (`error` or
+`warning`); `paths` and typed `parameters` are optional. It runs for selected
+project roots or the selected item only. Each root's query result is checked
+independently. Validation returns optional `query_policies` format 1 with
+`input_identity`, `evaluation_complete`, and checks containing rule, definition,
+shape, root, state, applicability, severity, exact binding count, SHACL
+components, typed bindings/support and policy-source location. Validation pages
+contain diagnostics first, then policy checks; `query_policies.checks` is
+page-local while policy completeness and validation summaries cover the full
+target. The unchanged validation cursor continues across both lists. A completed
+failed invariant adds `rule_failed` at its authored severity. Missing or
+incomplete required inputs add `evaluation_unavailable` and cannot pass.
+Schema validation checks policy definitions/shapes without evaluating facts.
+Source conformance and structural graph constraints remain separate checks.
+
+A gate file has `format_version: 1` and uniquely selected `gates`. Every gate
+requires explicit `empty_roots` and `empty_required` outcomes (`passed`, `failed`
+or `not_applicable`), plus `conditions`. Each condition identifies a named
+`definition`, its explicitly supplied `shape_file` and exact `shape` IRI,
+`severity`, and optional exact `context_parameters` and `applies_when`
+(`bindings_present` or `bindings_absent`). A root outside a definition's declared
+root flavours is not applicable; context needed only by that inactive condition
+is not required. Other missing or unused context bindings are invalid.
+
+`QueryGateRequest` requires explicit root `scope` (`all` or one or more exact
+ID/flavour/field/path filters), typed context bindings and positive `max_rows`.
+Its format-1 result reports each root and condition's applicability, severity,
+state, count, SHACL component, typed supporting bindings and source locations,
+plus the input identity and evaluation completeness. `shape_file` selects the
+condition's shape graph; duplicate shape IRIs and blank-node labels in other
+supplied files do not alter that condition. A complete empty scope is classified
+only after source-conformance prerequisites pass; unavailable required query
+sources keep the gate unavailable even when the selected root set is empty. For
+a complete empty scope, `empty_roots`
+determines the result and `empty_reason` is `roots`. For a nonempty scope with no
+applicable required conditions, `empty_required` determines the root/aggregate
+outcome and `empty_reason` is `required_conditions`. Otherwise any unavailable
+required condition makes the aggregate unavailable and incomplete while retaining
+known failed condition records; absent unavailable conditions, a known failure
+makes it failed. Gate outcomes are condition reports only: they neither change
+`ValidationResult.valid` nor authorize or execute an action.
+
+`query gate` accepts the gate identity, `--gate-file`, repeatable
+`--definition-file` and `--shape-file`, explicit root selectors (`--all`,
+`--id`, `--flavour`, `--field KEY=VALUE`, `--path`), typed `--param NAME=JSON`
+and `--max-rows`. MCP accepts the same request as `query_gate`; conditions that
+fail are successful result data, not tool errors. Named query definitions,
+gate YAML, policy YAML and SHACL Turtle bytes participate in the source identity.
+Blank-node labels remain local to each supplied Turtle file when shapes are
+combined; equal authored labels in separate files never merge constraints. The
+focused cross-consumer regression is
+`tests/named_query.rs::shared_query_facts_become_invariant_and_gate_failures_across_rust_cli_and_mcp`.
+It proves one complete empty fact result remains informational, fails an enabled
+error/warning invariant as authored, fails a separately requested gate, retains
+a known gate failure beside an unavailable condition, and applies both explicit
+empty-gate cases. It does not claim the deferred hosts or renderers.
+
 Reports identify the rule/gate, definition and obligation sources, selected root,
 applicability/severity, candidate/context identity, each condition outcome and
 qualifying, missing or unavailable support. Overall completeness and known
@@ -599,8 +679,8 @@ and completeness; they do not interpret policy independently.
 Real native/browser and installed-package verification belongs to
 [[VER-REUSABLE-QUERY-ENGINE]] and the selected final supported-host gates.
 This contract does not claim those paths ran. [[DES-QUERY-BACKEND-PROOF]] selects the backend and actual proof formats/
-operations, and demonstrates the SHACL result bridge. Full consumer operations,
-errors and host coverage still require the later integrated implementation.
+operations, and demonstrates the SHACL result bridge. Factual views, evaluation
+reports and broader host coverage still require later integrated implementation.
 :::
 
 :::mara decision ADR-QUERY-EXACT-RESOLUTION
@@ -721,9 +801,10 @@ and reject continuation after relevant definition/source/parameter changes.
 Hidden derivation reconstruction and full static type/dependency inference are
 not acceptance gates. Final formats must state this support boundary.
 
-The remaining catalog/consumer/host stages stay scheduled separately; raw-stage
-success does not certify them. Their named-query assertions use this adapter
-boundary, not the deferred automatic guarantees. Preserve actual prior failing
+The broader catalog, factual-view/report and host stages stay scheduled
+separately; raw-stage success does not certify them. The focused invariant/gate
+slice and its evidence are recorded below. Their named-query assertions use this
+adapter boundary, not the deferred automatic guarantees. Preserve actual prior failing
 reviews; only revised, executed checks and required review establish acceptance.
 
 ### Discriminating fixtures
@@ -854,9 +935,10 @@ actual proof operations, row budget and limitations are recorded in
 it does not substitute for the later complete catalog. No custom DSL/framework
 is authorized by this verification.
 
-The complete fixture catalog and selected host parity are subsequent integrated
-engine checks, not required execution for the contract-only deliverable. Use the
-existing supported-host gates, with Apple Silicon execution at the final host
+The complete fixture catalog and selected host parity remain integrated release
+checks. This scoped implementation adds the focused native Rust/CLI/MCP consumer
+regression documented above; it is not evidence for deferred views, reports or
+host adapters. Use the existing supported-host gates, with Apple Silicon execution at the final host
 gate. Record actual tested revisions, artifacts, environments, commands, results
 and limitations. A fixture demonstration is not adoption of the engineering
 template, authentication of reported external evidence or proof of external

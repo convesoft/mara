@@ -162,13 +162,13 @@ fn every_cli_command_argument_and_option_has_rendered_guidance() {
             }
         }
     }
-    // Existing project/MCP tree plus the native-only daemon group and six commands.
+    // Existing project/MCP tree plus the native-only daemon group and seven commands.
     let daemon_commands = if cfg!(any(target_os = "linux", target_os = "macos")) {
         7
     } else {
         0
     };
-    assert_eq!(visited.len(), 32 + daemon_commands);
+    assert_eq!(visited.len(), 33 + daemon_commands);
 }
 
 // @mara implements VER-INTERFACE-PARITY

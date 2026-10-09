@@ -97,6 +97,9 @@ pub struct ValidationResult {
     pub valid: bool,
     pub evaluation_complete: bool,
     pub diagnostics: Vec<ValidationDiagnostic>,
+    /// Query-backed invariant outcomes, when project policy enables them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_policies: Option<crate::query_consumers::QueryPolicyValidation>,
     pub summary: ValidationSummary,
     pub selection: Option<ValidationSelection>,
     pub has_more: bool,
@@ -386,6 +389,12 @@ pub fn paginate(
     fingerprint: &str,
 ) -> Result<ValidationResult, ValidationError> {
     let all = std::mem::take(&mut result.diagnostics);
+    let all_policy_checks = result
+        .query_policies
+        .as_mut()
+        .map(|policies| std::mem::take(&mut policies.checks))
+        .unwrap_or_default();
+    let total = all.len() + all_policy_checks.len();
     let stale = || {
         ValidationError::new(
             "stale_cursor",
@@ -401,38 +410,65 @@ pub fn paginate(
                 return Err(stale());
             }
             let position = usize::from_str_radix(position, 16).map_err(|_| stale())?;
-            if position == 0 || position >= all.len() {
+            if position == 0 || position >= total {
                 return Err(stale());
             }
             position
         }
     };
-    let set_cursor = |result: &mut ValidationResult| {
-        let next = start + result.diagnostics.len();
-        result.has_more = next < all.len();
+    let set_cursor = |result: &mut ValidationResult, emitted: usize| {
+        let next = start + emitted;
+        result.has_more = next < total;
         result.next_cursor = result
             .has_more
             .then(|| format!("validation-1-{fingerprint}-{next:016x}"));
     };
-    for diagnostic in all.iter().skip(start).take(limit) {
-        result.diagnostics.push(diagnostic.clone());
-        set_cursor(&mut result);
+    let mut emitted = 0;
+    for position in start..total {
+        if emitted == limit {
+            break;
+        }
+        let is_diagnostic = position < all.len();
+        if is_diagnostic {
+            result.diagnostics.push(all[position].clone());
+        } else {
+            result
+                .query_policies
+                .as_mut()
+                .expect("policy checks exist for their page entries")
+                .checks
+                .push(all_policy_checks[position - all.len()].clone());
+        }
+        emitted += 1;
+        set_cursor(&mut result, emitted);
         if serde_json::to_vec(&result)
             .expect("validation serializes")
             .len()
             > 65_536
         {
-            result.diagnostics.pop();
-            if result.diagnostics.is_empty() {
-                return Err(ValidationError::new(
-                    "output_limit",
+            if is_diagnostic {
+                result.diagnostics.pop();
+            } else {
+                result
+                    .query_policies
+                    .as_mut()
+                    .expect("policy checks exist for their page entries")
+                    .checks
+                    .pop();
+            }
+            emitted -= 1;
+            if emitted == 0 {
+                let message = if is_diagnostic {
                     format!(
                         "diagnostic at {:?} cannot fit the 65536-byte response budget; shorten the source/configuration value",
-                        diagnostic.location.path
-                    ),
-                ));
+                        all[position].location.path
+                    )
+                } else {
+                    "query-policy check cannot fit the 65536-byte response budget; shorten the policy or supporting source values".into()
+                };
+                return Err(ValidationError::new("output_limit", message));
             }
-            set_cursor(&mut result);
+            set_cursor(&mut result, emitted);
             break;
         }
     }

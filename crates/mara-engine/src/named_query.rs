@@ -81,7 +81,7 @@ fn parameter_guidance(schema: &mut schemars::Schema) {
     }
 }
 impl ParameterValue {
-    pub(super) fn kind(&self) -> ValueType {
+    pub(crate) fn kind(&self) -> ValueType {
         match self {
             Self::Text(_) => ValueType::Text,
             Self::Integer(_) => ValueType::Integer,
@@ -259,7 +259,7 @@ pub struct Request {
     #[serde(default)]
     pub cursor: Option<String>,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Value {
     Item {
@@ -307,7 +307,7 @@ impl Value {
         }
     }
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Binding {
     pub values: BTreeMap<String, Option<Value>>,
     pub contributors: Vec<Value>,
@@ -374,9 +374,76 @@ impl std::fmt::Display for Error {
 }
 impl std::error::Error for Error {}
 
+pub(crate) fn graph_source_prerequisites_valid(diagnostics: &[crate::Diagnostic]) -> bool {
+    diagnostics.iter().all(|diagnostic| {
+        diagnostic.is_missing_mid()
+            || matches!(
+                diagnostic.code(),
+                crate::DiagnosticCode::CodeMissing
+                    | crate::DiagnosticCode::CodeAmbiguous
+                    | crate::DiagnosticCode::CodeUnsupported
+                    | crate::DiagnosticCode::EvaluationUnavailable
+            )
+    })
+}
+
 // @mara implements REQ-NAMED-QUERY-FACTS
 // @mara implements DES-QUERY-INPUT-RESULT-CONTRACT
 impl SourceEngine {
+    pub(crate) fn validated_query_definitions(
+        &self,
+        files: &[String],
+    ) -> Result<BTreeMap<String, Definition>, Error> {
+        if files.is_empty() {
+            return Err(Error::argument("supply an explicit definition set"));
+        }
+        let (_, schema) = self.strict_project().map_err(|e| Error {
+            code: "input_unavailable".into(),
+            message: e.to_string(),
+            source: None,
+        })?;
+        let mut definitions = BTreeMap::new();
+        let mut seen = BTreeSet::new();
+        for file in files {
+            let path = self
+                .normalize_path(file)
+                .map_err(|e| Error::argument(e.to_string()))?;
+            if !seen.insert(path.clone()) {
+                return Err(Error::argument("duplicate normalized definition file"));
+            }
+            let text = self.files().get(&path).ok_or_else(|| Error {
+                code: "input_unavailable".into(),
+                message: format!("missing definition source: {path}"),
+                source: Some(path.clone()),
+            })?;
+            let set: DefinitionSet =
+                serde_json::from_str(text).map_err(|e| Error::definition(&path, e.to_string()))?;
+            if set.format_version != 3 {
+                return Err(Error::definition(
+                    &path,
+                    "expected named-definition format 3",
+                ));
+            }
+            for definition in set.definitions {
+                if definition.id.trim().is_empty()
+                    || definitions
+                        .insert(definition.id.clone(), definition)
+                        .is_some()
+                {
+                    return Err(Error::definition(
+                        &path,
+                        "empty or duplicate definition identity across loaded set",
+                    ));
+                }
+            }
+        }
+        for (id, definition) in &definitions {
+            signature::compile("", definition, &schema)
+                .map_err(|error| Error::definition("", format!("{id}: {}", error.message)))?;
+        }
+        Ok(definitions)
+    }
+
     pub fn query_execute(&self, request: Request) -> Result<Page, Error> {
         composition::execute(self, request)
     }

@@ -115,6 +115,7 @@ impl NativeRuntime {
             valid: false,
             evaluation_complete: true,
             diagnostics: vec![],
+            query_policies: None,
             summary: ValidationSummary {
                 errors: 0,
                 warnings: 0,
@@ -177,6 +178,7 @@ impl NativeRuntime {
             result.flavours = Some(Some(schema.flavours().len()));
             result.relations = Some(Some(schema.relations().len()));
         }
+        let mut policy_documents = None;
         if !schema_only {
             let (corpus, source_diagnostics) = match &schema {
                 Some(schema) => load_corpus_for_validation(&project, schema),
@@ -213,6 +215,10 @@ impl NativeRuntime {
                     None => snapshot.update([0]),
                 }
             }
+            policy_documents = Some(mara_engine::DocumentSet {
+                documents: corpus.documents().to_vec(),
+                complete: corpus.is_complete(),
+            });
             let checks = rules.as_ref().zip(schema.as_ref()).map(|(rules, schema)| {
                 crate::rule_bridge::checks_for_loaded(
                     &project,
@@ -251,6 +257,21 @@ impl NativeRuntime {
                 "",
                 &mut result,
             )?;
+        }
+        if project.query_policy().is_some() {
+            match crate::source_bridge::load_query_policy_engine(
+                &project,
+                policy_documents.as_ref(),
+            ) {
+                Ok(source_engine) => mara_engine::query_consumers::append_query_policy_result(
+                    &mut result,
+                    &source_engine,
+                ),
+                Err(error) => mara_engine::query_consumers::append_query_policy_unavailable(
+                    &mut result,
+                    format!("query policy inputs unavailable: {error}"),
+                ),
+            }
         }
         result.summarize();
         sort_diagnostics(&mut result.diagnostics);

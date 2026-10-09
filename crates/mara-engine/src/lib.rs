@@ -3,7 +3,7 @@ use globset::GlobBuilder;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt, io,
     path::{Component, Path, PathBuf},
 };
@@ -27,6 +27,7 @@ pub mod named_query;
 pub mod query;
 /// Bounded executable backend proof; not the complete named-query surface.
 pub mod query_backend;
+pub mod query_consumers;
 pub use query::*;
 pub mod graph_constraints;
 pub mod operations;
@@ -71,7 +72,16 @@ pub struct Project {
     content_patterns: Vec<String>,
     content_discovery_complete: bool,
     pub rule_files: Vec<PathBuf>,
+    query_policy: Option<QueryPolicyConfig>,
     code_languages: Vec<LanguageConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryPolicyConfig {
+    pub files: Vec<PathBuf>,
+    pub definition_files: Vec<String>,
+    pub shape_files: Vec<PathBuf>,
+    pub max_rows: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -756,6 +766,10 @@ impl Project {
         &self.code_languages
     }
 
+    pub fn query_policy(&self) -> Option<&QueryPolicyConfig> {
+        self.query_policy.as_ref()
+    }
+
     pub fn content_discovery_is_complete(&self) -> bool {
         self.content_discovery_complete
     }
@@ -1407,6 +1421,7 @@ pub fn parse_project_for_validation(
                     content_patterns: vec![],
                     content_discovery_complete: false,
                     rule_files: vec![],
+                    query_policy: None,
                     code_languages: vec![],
                 },
                 errors: vec![diagnostic],
@@ -1473,6 +1488,111 @@ pub fn parse_project_for_validation(
             unknown_project_keys(&rules, "rules", &mut errors);
         }
     }
+    let query_policy = if configuration.contains_key("query_policy") {
+        if format_version != Some(3) {
+            errors.push(ConfigurationDiagnostic::project(
+                &["query_policy"],
+                "query policy bindings require project format 3".into(),
+            ));
+        }
+        take_project_table(
+            &mut configuration,
+            "query_policy",
+            "query_policy",
+            &mut errors,
+        )
+        .map(|mut query_policy| {
+            let version: Option<u32> = take_project_value(
+                &mut query_policy,
+                "format_version",
+                "query_policy.format_version",
+                &mut errors,
+            );
+            if version != Some(1) {
+                errors.push(ConfigurationDiagnostic::new(
+                    DiagnosticCode::FormatUnsupported,
+                    diagnostics::pointer(&["query_policy", "format_version"]),
+                    "unsupported query policy binding; expected 1".into(),
+                ));
+            }
+            let files: Option<Vec<PathBuf>> = take_project_value(
+                &mut query_policy,
+                "files",
+                "query_policy.files",
+                &mut errors,
+            );
+            let definition_files: Option<Vec<String>> = take_project_value(
+                &mut query_policy,
+                "definition_files",
+                "query_policy.definition_files",
+                &mut errors,
+            );
+            let shape_files: Option<Vec<PathBuf>> = take_project_value(
+                &mut query_policy,
+                "shape_files",
+                "query_policy.shape_files",
+                &mut errors,
+            );
+            let max_rows: Option<u32> = take_project_value(
+                &mut query_policy,
+                "max_rows",
+                "query_policy.max_rows",
+                &mut errors,
+            );
+            unknown_project_keys(&query_policy, "query_policy", &mut errors);
+            let files = files.unwrap_or_default();
+            let definition_files = definition_files.unwrap_or_default();
+            let shape_files = shape_files.unwrap_or_default();
+            if files.is_empty() || definition_files.is_empty() || shape_files.is_empty() {
+                errors.push(ConfigurationDiagnostic::project(
+                    &["query_policy"],
+                    "enabled query policies require files, definition_files and shape_files".into(),
+                ));
+            }
+            if max_rows == Some(0) || max_rows.is_none() {
+                errors.push(ConfigurationDiagnostic::project(
+                    &["query_policy", "max_rows"],
+                    "query_policy.max_rows must be a positive u32".into(),
+                ));
+            }
+            let mut paths = BTreeSet::new();
+            for path in files.iter().chain(shape_files.iter()) {
+                let suffix = path.extension().and_then(|x| x.to_str());
+                let allowed = if files.contains(path) {
+                    matches!(suffix, Some("yaml" | "yml"))
+                } else {
+                    suffix == Some("ttl")
+                };
+                if !is_project_relative(path) || !allowed || !paths.insert(path.clone()) {
+                    errors.push(ConfigurationDiagnostic::project(
+                        &["query_policy"],
+                        "query policy and shape paths must be unique project-relative YAML/Turtle files".into(),
+                    ));
+                }
+            }
+            let mut definitions = BTreeSet::new();
+            for path in &definition_files {
+                let path_buf = PathBuf::from(path);
+                if normalize_source_path(path).is_err()
+                    || path_buf.extension().and_then(|x| x.to_str()) != Some("json")
+                    || !definitions.insert(path.clone())
+                {
+                    errors.push(ConfigurationDiagnostic::project(
+                        &["query_policy", "definition_files"],
+                        "query definitions must be unique project-relative JSON files".into(),
+                    ));
+                }
+            }
+            QueryPolicyConfig {
+                files,
+                definition_files,
+                shape_files,
+                max_rows: max_rows.unwrap_or(0),
+            }
+        })
+    } else {
+        None
+    };
     let mut code_languages = Vec::new();
     if configuration.contains_key("code") {
         if format_version != Some(3) {
@@ -1594,6 +1714,7 @@ pub fn parse_project_for_validation(
             content_patterns,
             content_discovery_complete,
             rule_files,
+            query_policy,
             code_languages,
         },
         errors,

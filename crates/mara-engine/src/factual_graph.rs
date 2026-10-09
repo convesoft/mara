@@ -11,7 +11,9 @@ pub(crate) fn hash(value: &impl Serialize) -> String {
         Sha256::digest(serde_json::to_vec(value).expect("serializable query input"))
     )
 }
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Endpoint {
     Item { id: String, mid: Option<String> },
@@ -50,14 +52,14 @@ impl Endpoint {
         }
     }
 }
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Edge {
     pub relation: String,
     pub symmetric: bool,
     pub source: Endpoint,
     pub target: Endpoint,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Occurrence {
     pub identity: String,
     pub source: ItemSource,
@@ -66,7 +68,7 @@ pub struct Occurrence {
     pub relation: String,
     pub target: String,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Support {
     pub edge: Edge,
     pub occurrences: Vec<Occurrence>,

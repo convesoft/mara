@@ -110,6 +110,7 @@ pub(crate) fn checks_for_loaded(
             valid: false,
             evaluation_complete: true,
             diagnostics: Vec::new(),
+            query_policies: None,
             summary: ValidationSummary {
                 errors: 0,
                 warnings: 0,

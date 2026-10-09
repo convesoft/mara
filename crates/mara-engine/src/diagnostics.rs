@@ -140,7 +140,7 @@ pub fn pointer(parts: &[&str]) -> String {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 pub struct ValidationOptions {
-    /// Maximum diagnostics per page, 1 through 100; default 20. The serialized byte budget (65536 bytes) may return fewer.
+    /// Maximum diagnostics and query-policy checks per page, 1 through 100; default 20. The serialized byte budget (65536 bytes) may return fewer.
     pub limit: Option<usize>,
     /// Opaque next_cursor; continue until has_more is false and repeat unchanged project, target, paths and limit. Omit to start or restart after source/schema/configuration changes; empty strings are invalid.
     pub cursor: Option<String>,

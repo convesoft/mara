@@ -85,7 +85,7 @@ impl Node {
 pub(super) fn escape(key: &str) -> String {
     key.replace('~', "~0").replace('/', "~1")
 }
-pub(super) fn parse(
+pub(crate) fn parse(
     source: &str,
     path: &Path,
 ) -> Result<(Value, BTreeMap<String, DiagnosticLocation>), String> {

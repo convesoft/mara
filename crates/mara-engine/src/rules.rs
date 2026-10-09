@@ -6,7 +6,7 @@ pub(crate) use bindings::valid_parameter_name;
 pub(crate) mod engine;
 mod evaluate;
 pub(crate) use evaluate::relation_iri;
-mod yaml;
+pub(crate) mod yaml;
 use crate::{
     DiagnosticCode, DiagnosticLocation, Schema, Severity, ValidationDiagnostic, ValidationScope,
 };

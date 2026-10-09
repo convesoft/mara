@@ -461,6 +461,7 @@ pub(crate) fn empty_validation(project: &Project) -> ValidationResult {
         valid: false,
         evaluation_complete: true,
         diagnostics: vec![],
+        query_policies: None,
         summary: ValidationSummary {
             errors: 0,
             warnings: 0,
