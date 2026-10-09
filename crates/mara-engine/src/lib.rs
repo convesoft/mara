@@ -22,6 +22,8 @@ pub use relations::{
     RelationEdge, RelationEndpoint, RelationError, RelationErrorDetail, RelationInspection,
     RelationOccurrence,
 };
+mod factual_graph;
+pub mod named_query;
 pub mod query;
 /// Bounded executable backend proof; not the complete named-query surface.
 pub mod query_backend;

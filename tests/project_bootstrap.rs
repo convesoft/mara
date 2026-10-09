@@ -775,6 +775,7 @@ fn bootstrap_advertises_only_its_available_operations() {
             "project_mid_backfill",
             "project_transaction_rollback",
             "project_validate",
+            "query_execute",
             "related",
             "relation_add",
             "relation_get",

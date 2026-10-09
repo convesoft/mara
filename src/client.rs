@@ -421,6 +421,21 @@ impl NativeClient {
     ) -> Result<crate::RelationMutationResult, ClientError> {
         self.call("relation_remove", json!({"source":params.source,"relation":params.relation,"target":params.target,"occurrence":occurrence}), true, |r, _| r.relation_remove_occurrence(params,occurrence).map_err(Into::into))
     }
+    /// Named factual execution is embedded-only in this bounded delivery.
+    pub fn query_execute(
+        &self,
+        request: crate::named_query::Request,
+    ) -> Result<crate::named_query::Page, ClientError> {
+        if self.options.mode == Some(ExecutionMode::DaemonRequired) {
+            return Err(ClientError::Operation(
+                json!({"format_version":2,"error":{"code":"unsupported_capability","message":"named query daemon execution is not implemented; select direct execution"}}),
+            ));
+        }
+        self.runtime
+            .query_execute(request)
+            .map_err(|e| ClientError::Operation(json!({"format_version":2,"error":e})))
+    }
+
     pub fn trace_matrix(
         &self,
         params: &crate::TraceMatrixParams,

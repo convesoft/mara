@@ -168,7 +168,7 @@ fn every_cli_command_argument_and_option_has_rendered_guidance() {
     } else {
         0
     };
-    assert_eq!(visited.len(), 30 + daemon_commands);
+    assert_eq!(visited.len(), 32 + daemon_commands);
 }
 
 // @mara implements VER-INTERFACE-PARITY

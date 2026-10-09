@@ -73,6 +73,30 @@ impl ItemCreateToolParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct QueryExecuteToolParams {
+    /// Absolute project root; omit when the server is bound with --project.
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Explicit project-relative named-definition JSON files, format 3.
+    definition_files: Vec<String>,
+    /// Exact named definition identity.
+    definition: String,
+    /// Explicit all or exact IDs/schema filters. No implicit all.
+    selection: mara::named_query::Selection,
+    /// Declared typed bindings; duplicate names are rejected.
+    #[serde(default)]
+    parameters: Vec<mara::named_query::BindingParameter>,
+    /// Observed solution-row budget; positive u32, not page size.
+    max_rows: u32,
+    /// Delivery records per page, 1..=100.
+    limit: usize,
+    /// Continue with every other input unchanged.
+    #[serde(default)]
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct TraceMatrixToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
@@ -293,6 +317,29 @@ impl SearchToolParams {
 
 #[tool_router]
 impl MaraMcp {
+    #[tool(
+        name = "query_execute",
+        description = "Execute raw named factual SELECT queries in the embedded engine. Load explicit format-3 definition files, select an exact definition and explicit roots, and supply declared typed parameters. Check returned values against declared types and retain only explicitly projected source and edge support; hidden provenance is not inferred. Missing required fact sources produce incomplete results, not empty success. Returns typed distinct bindings, lifecycle data and empty-root records; no policy pass/fail. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs. Content, definition, parameter or control changes reject continuation. Native daemon and final browser/JS adapters are not yet supported."
+    )]
+    fn query_execute(
+        &self,
+        Parameters(p): Parameters<QueryExecuteToolParams>,
+    ) -> Result<Json<serde_json::Value>, McpError> {
+        let operation = self.operations.for_project(p.project)?;
+        let page = operation
+            .query_execute(mara::named_query::Request {
+                definition_files: p.definition_files,
+                definition: p.definition,
+                selection: p.selection,
+                parameters: p.parameters,
+                max_rows: p.max_rows,
+                limit: p.limit,
+                cursor: p.cursor,
+            })
+            .map_err(McpError)?;
+        Ok(Json(serde_json::to_value(page).expect("query result")))
+    }
+
     #[tool(
         name = "trace_matrix",
         output_schema = rmcp::handler::server::common::schema_for_type::<mara::TraceMatrixResult>(),

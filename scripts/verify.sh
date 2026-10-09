@@ -20,7 +20,7 @@ root=$PWD
 for directory in "$CARGO_TARGET_DIR" "$TMPDIR" "$MARA_TEST_RUNTIME_DIR"; do
   [[ "$directory" == /* && -d "$directory" ]] || { echo "Missing absolute directory: $directory" >&2; exit 2; }
 done
-export CARGO_BUILD_JOBS=2
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
 
 # Hash environment values, not secrets. Storage paths are recorded separately:
 # moving disposable storage alone is not a change to the test environment.
@@ -189,15 +189,15 @@ case "$mode" in
     ;;
   full)
     run cargo fmt --all -- --check
-    run cargo build --locked --workspace --all-targets
-    run cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+    run cargo build --locked --workspace --all-targets -j "$CARGO_BUILD_JOBS"
+    run cargo clippy --locked --workspace --all-targets --all-features -j "$CARGO_BUILD_JOBS" -- -D warnings
     capture "$evidence/selection.json" cargo nextest list --locked --workspace --all-targets --ignore-default-filter --message-format json
     run cargo nextest run --locked --workspace --all-targets --ignore-default-filter
     # Keep Cargo for doctests: nextest does not execute them.
-    run cargo test --locked --workspace --doc
+    run cargo test --locked --workspace --doc -j "$CARGO_BUILD_JOBS"
     # Validation can exit zero with valid:false: check the structured result.
     for target in schema project; do
-      capture "$evidence/$target.json" cargo run --locked --quiet -- --format json "$target" validate
+      capture "$evidence/$target.json" cargo run --locked --quiet -j "$CARGO_BUILD_JOBS" -- --format json "$target" validate
       grep -Eq '"valid"[[:space:]]*:[[:space:]]*true' "$evidence/$target.json"
       grep -Eq '"evaluation_complete"[[:space:]]*:[[:space:]]*true' "$evidence/$target.json"
     done ;;

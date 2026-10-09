@@ -175,10 +175,8 @@ impl SourceEngine {
         if !validation.is_empty() {
             return Err("unavailable: graph source prerequisites are invalid".into());
         }
-        let mut projection = crate::rules::project_data(&corpus, &schema)?;
-        let graph = projection["@graph"]
-            .as_array_mut()
-            .expect("shared projection graph");
+        let graph =
+            crate::factual_graph::prepare(&project, &corpus, &schema, self.source_fingerprint())?;
         let mut items = BTreeMap::new();
         for item in corpus.items() {
             let mid = item.mid().ok_or("unavailable: query proof requires MIDs")?;
@@ -201,9 +199,7 @@ impl SourceEngine {
                 "{Q}edge:{}",
                 hash(&serde_json::to_vec(edge).expect("edge serializes"))
             );
-            let source = crate::rules::relation_iri(&edge.source);
-            let target = crate::rules::relation_iri(&edge.target);
-            graph.push(json!({"@id":iri, format!("{Q}source"):{"@id":source}, format!("{Q}target"):{"@id":target}, format!("{Q}relation"):{"@id":format!("urn:mara:relation:{}",edge.relation)}}));
+
             let mut occurrences = crate::relations::occurrences(&project, &corpus, &schema, edge)
                 .map_err(|e| e.to_string())?;
             for occurrence in &mut occurrences {
@@ -233,14 +229,16 @@ impl SourceEngine {
             );
         }
         let store = Store::new().map_err(|e| e.to_string())?;
-        store
-            .load_from_slice(
-                RdfParser::from_format(RdfFormat::JsonLd {
-                    profile: Default::default(),
-                }),
-                projection.to_string().as_bytes(),
-            )
-            .map_err(|e| e.to_string())?;
+        for triple in graph.triples {
+            store
+                .insert(&oxigraph::model::Quad::new(
+                    triple.subject,
+                    triple.predicate,
+                    triple.object,
+                    oxigraph::model::GraphName::DefaultGraph,
+                ))
+                .map_err(|e| e.to_string())?;
+        }
         let mut selected = BTreeMap::new();
         for reference in &request.roots {
             let item = crate::resolve_item(&corpus, reference).map_err(|e| e.to_string())?;
@@ -505,7 +503,7 @@ fn json_ld(value: &TypedValue) -> Value {
 
 /// A bounded standard-language subset, not a new expression interpreter.
 /// SPARQL '=' coerces numeric types; this proof admits only sameTerm equality.
-fn profile(pattern: &GraphPattern) -> Result<(), String> {
+pub(crate) fn profile(pattern: &GraphPattern) -> Result<(), String> {
     match pattern {
         GraphPattern::Bgp { patterns } => {
             for triple in patterns { term_profile(&triple.subject)?; term_profile(&triple.object)?; }
@@ -530,7 +528,7 @@ fn profile(pattern: &GraphPattern) -> Result<(), String> {
         _ => Err("query outside the bounded SELECT proof profile (no SERVICE, dataset, slicing, nondeterminism or aggregate shortcut)".into()),
     }
 }
-fn literal_profile(literal: &Literal) -> Result<(), String> {
+pub(crate) fn literal_profile(literal: &Literal) -> Result<(), String> {
     if literal.direction().is_some() {
         return Err("directional literals are outside the RDF-1.1 proof result profile".into());
     }

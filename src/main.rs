@@ -50,6 +50,11 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Execute raw named facts in the embedded engine. No policy pass/fail semantics.
+    Query {
+        #[command(subcommand)]
+        command: QueryCommand,
+    },
     /// Search items and narrative with one source excerpt; exact matches rank first, then ID/title/heading weights. Item filters exclude narrative; ID/MID words and filters stay exact.
     #[command(
         after_help = "Discovery JSON format_version: 2 returns results: [{node, excerpt}]. Pass node.reference to get or related. Excerpts support selection; use get for complete content. Structural handles identify a document snapshot; search again after that document changes. Search has no node-kind filter."
@@ -148,6 +153,45 @@ enum Command {
     },
     /// Serve the available operations over stdio MCP; resolve projects per call.
     Mcp,
+}
+
+#[derive(Debug, Subcommand)]
+enum QueryCommand {
+    /// Load an explicit definition set and execute an exact named SELECT.
+    Execute {
+        /// Exact definition identity.
+        definition: String,
+        /// Project-relative JSON named-definition files (format 3).
+        #[arg(long = "definition-file", required = true)]
+        definition_files: Vec<String>,
+        /// Exact item IDs/MIDs; aliases select one root and unknown references fail.
+        #[arg(long = "id")]
+        ids: Vec<String>,
+        /// Exact schema flavours, OR within this category.
+        #[arg(long = "flavour")]
+        flavours: Vec<String>,
+        /// Exact schema-field KEY=VALUE filters.
+        #[arg(long = "field")]
+        fields: Vec<String>,
+        /// Exact project-relative documents or directory subtrees.
+        #[arg(long = "path")]
+        paths: Vec<String>,
+        /// Explicitly select all roots; exclusive of IDs and filters.
+        #[arg(long)]
+        all: bool,
+        /// NAME=typed JSON, e.g. state='{"type":"text","value":"draft"}'.
+        #[arg(long = "param")]
+        parameters: Vec<String>,
+        /// Observed solution-row budget, not page size or a traversal deadline.
+        #[arg(long)]
+        max_rows: u32,
+        /// Delivery records per page, 1 through 100 (default 20); the 65536-byte budget may return fewer.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Opaque next_cursor; keep inputs unchanged until has_more is false.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -401,6 +445,77 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
     };
     let operations = NativeClient::from_environment(project.clone(), options.clone())?;
     match command {
+        Command::Query {
+            command:
+                QueryCommand::Execute {
+                    definition,
+                    definition_files,
+                    ids,
+                    flavours,
+                    fields,
+                    paths,
+                    all,
+                    parameters,
+                    max_rows,
+                    limit,
+                    cursor,
+                },
+        } => {
+            let fields = fields
+                .into_iter()
+                .map(|f| {
+                    let (key, value) = f.split_once('=').ok_or_else(|| {
+                        ClientError::invalid_argument("--field requires KEY=VALUE")
+                    })?;
+                    Ok(mara::named_query::FieldSelection {
+                        key: key.into(),
+                        value: value.into(),
+                    })
+                })
+                .collect::<Result<Vec<_>, ClientError>>()?;
+            let parameters = parameters
+                .into_iter()
+                .map(|p| {
+                    let (name, value) = p.split_once('=').ok_or_else(|| {
+                        ClientError::invalid_argument("--param requires NAME=typed JSON")
+                    })?;
+                    Ok(mara::named_query::BindingParameter {
+                        name: name.into(),
+                        value: serde_json::from_str(value).map_err(|e| {
+                            ClientError::invalid_argument(format!("invalid typed parameter: {e}"))
+                        })?,
+                    })
+                })
+                .collect::<Result<Vec<_>, ClientError>>()?;
+            let page = match operations.query_execute(mara::named_query::Request {
+                definition,
+                definition_files,
+                selection: mara::named_query::Selection {
+                    ids,
+                    flavours,
+                    fields,
+                    paths,
+                    all,
+                },
+                parameters,
+                max_rows,
+                limit,
+                cursor,
+            }) {
+                Ok(page) => page,
+                Err(error) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&error.envelope())?;
+                    } else {
+                        eprintln!("error: {error}");
+                    }
+                    return Ok(false);
+                }
+            };
+            // Raw typed JSON is also the initial human display; no rendering semantics.
+            write_json(&page)?;
+            return Ok(page.evaluation_complete);
+        }
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         Command::Daemon { command } => {
             let result = daemon::execute(command, project, options.daemon_directory)?;

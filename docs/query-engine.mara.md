@@ -187,8 +187,11 @@ The bounded backend proof and selected standard SELECT/result-bridge contract
 are owned by [[DES-QUERY-BACKEND-PROOF]], with rationale in
 [[ADR-QUERY-SPARQL-RESULT-BRIDGE]]. Direct execution and SHACL consume the same
 definition; SHACL receives the returned distinct tuples, not the source graph.
-The three semantic contracts still govern the later complete engine. Proof
-entry points and format 1 are not completion of those APIs or host coverage.
+The three semantic contracts still govern the complete engine. The initial raw
+named operation/formats live in [[DES-QUERY-INPUT-RESULT-CONTRACT]] and reuse
+canonical relation/scalar preparation with the proven SELECT backend. Proof
+format 1 remains distinct from named execution and does not complete the
+policy/gate/view operations or final host coverage.
 The bounded subset and subsequent integrated fixture checks are distinguished
 in [[VER-REUSABLE-QUERY-ENGINE]]. A required backend conflict remains blocked
 pending a user decision, not silent reduction or a custom DSL/framework.
@@ -209,8 +212,9 @@ self-hosted schema/policy changes remain outside this engine initiative.
 :satisfies: REQ-NAMED-QUERY-FACTS
 :satisfies: REQ-EXPLICIT-QUERY-INPUTS
 
-Semantic contract for the selected 0.4 query engine, not a serialized API or
-implemented capability. The contract-authoring user clarification selected
+Semantic contract for the selected 0.4 query engine, with the initial raw named
+operation specified below. Composition/external inputs and final consumers
+remain separate delivery work. The contract-authoring user clarification selected
 strict identity, selection and typed-input behavior.
 
 ### Definitions and schema binding
@@ -317,6 +321,112 @@ and unchanged request, preventing mixed snapshots, repeated/lost rows or stale
 success. [[DES-QUERY-BACKEND-PROOF]] selects the bounded proof's format/operations and
 identity encoding. Complete definition-set, input and continuation encodings
 must implement this contract during the later full-engine work.
+
+### Initial raw named operation
+
+Rust `SourceEngine::query_execute(named_query::Request)` and embedded
+`NativeRuntime::query_execute` share standard SELECT execution. CLI:
+`mara --execution-mode direct --format json query execute ID --definition-file queries.json --id ROOT --max-rows 100 --limit 20`.
+MCP `query_execute` takes the same request plus optional project selection.
+Direct/auto clients use embedded execution for this operation; explicit
+daemon-required returns `unsupported_capability`. Daemon and final JS/browser
+adapters remain later surface work, not completed host parity.
+
+#### Definition format 3
+
+Project-relative JSON files contain `{format_version:3,definitions:[...]}`;
+format-2 files are rejected because they do not declare required sources.
+Each definition declares exact `id`, standard `select`, nonempty
+`root_flavours`, `required_fact_sources` and named `columns`. `documents` is a
+required fact source; `code` is recognized but unavailable to this embedded
+snapshot, so requiring it produces an incomplete result even for empty roots.
+Required sources are explicit, unique, and never inferred from query variables,
+columns or possible paths. Unknown sources are invalid declarations.
+
+Columns declare `type`, optional item `flavours`, and `optional` (default
+false). Types: item, code, external, iri, text, integer, number, boolean, edge.
+Null is optional absence, not empty text, false or zero. Text retains optional
+language. Numbers carry canonical finite double value text; shared scalar
+preparation preserves numeric values rather than source lexical spellings, with
+both zero signs representing zero.
+
+Optional `parameters` maps names to `{type,required,default?}`.
+Request bindings are `[{name,value:{type,value}}]`, not an overwriting map.
+Input types: text, integer, finite number, boolean, exact item reference, IRI.
+Defaults are typed; explicit empty text never invokes a default. Duplicate,
+unused, missing required and wrong-type declarations/bindings fail.
+CLI example: `--param 'state={"type":"text","value":"draft"}'`.
+
+Optional `source_columns` project extra canonical item references;
+`support_columns` project canonical edge references excluded from tuple identity.
+These are the only support/contributor sources in this adapter; hidden query
+contributors and derivation reconstruction are not promised. Resolve each
+projected reference through the shared graph, and retain authored occurrences
+for projected edges. SELECT projects exactly root and declared tuple/source/
+support columns. Parameter variables bind separately. Every loaded definition
+is parsed, profile-checked and schema-bound before root enumeration, including
+empty selections. This checks declaration vocabulary and projection shape, not
+possible result types. Check declared value types, item flavours and canonical
+endpoints only for values actually returned; a no-match query need not reveal
+an incompatibility.
+
+The admitted standard SELECT profile follows [[DES-QUERY-BACKEND-PROOF]].
+Bind flavour/field/relation URNs to the selected schema; inverse aliases
+normalize canonical direction, including property paths. Structural ID/title
+predicates are `urn:mara:item:id` and `urn:mara:item:title`, distinct from
+custom fields. Predicates must be schema-bound constants. Open negated-vocabulary
+paths and nested SELECT boundaries are not this delivery's composition interface.
+No SERVICE, imports, updates or implicit numeric/boolean conversion is admitted.
+Initial admission limits do not remove later composition/derived-value commitments.
+
+#### Request and factual page format 3
+
+A request supplies `definition_files`, exact `definition`,
+`selection:{all?,ids?,flavours?,fields?:[{key,value}],paths?}`, typed
+`parameters`, positive u32 `max_rows`, `limit` in 1..=100 and optional
+`cursor`. No selector is an argument error; all excludes selectors.
+Selected items must satisfy the declared root signature. Traversal never expands
+roots. Seed-excluding ancestry uses an explicit
+`FILTER(!sameTerm(?root,?ancestor))` with `parent+`; include-self is an
+explicit different question.
+
+Format-3 pages identify definition/file, SHA-256 input_identity, logical
+evaluation_complete/unavailable_reason, full-result summary, ordered records,
+has_more and next_cursor. Records are root headers (identity/source/count)
+and distinct bindings tied to a root. Empty roots have a header, no binding.
+Unmatched OPTIONAL-only rows are not manufactured matches; a supported
+all-absent projection remains one distinct binding. Bindings retain only explicitly projected source items and canonical edges
+with their authored occurrences. Unprojected joins, UNION/OPTIONAL matches,
+EXISTS filters and path derivations do not add hidden support. Complete negative
+filters bind the definition and complete source snapshot, not invented edge
+occurrences.
+
+Order roots by canonical item IRI, tuples by serialized typed values, and
+contributors/edges by stable content keys. MID identity wins; absent MID uses
+project-scoped ID identity without manufacturing a MID. Missing MID alone does
+not hide facts; ambiguous/malformed identities or graph prerequisites remain
+unavailable. Documentation's MID requirement and graph policies are unchanged.
+
+Definitions/arguments fail with source-linked invalid_definition/invalid_argument.
+Missing definition/schema/document prerequisites and backend/row-budget failure
+are unavailable/incomplete, not empty success. Native failures to construct a
+snapshot use input_unavailable. Named document snapshots do not yet attach code
+indexes or external fact snapshots. A signature requiring code-index facts
+reports unavailable; durable external-address edges remain typed factual values.
+This is not a permanent code/type exclusion or completion of external-input work.
+
+Summary selected_roots/known_bindings cover the logical result; binding_count and
+root counts are null when incomplete. Delivery is at most limit records and
+65536 serialized bytes per page. An indivisible oversized record errors rather
+than disappearing or continuing forever. The observed solution-row budget
+includes duplicate support rows, not graph-work/deadline/memory guarantees.
+
+Continuation recomputes the question and binds normalized source content/
+inventory/ignore context, schema/configuration, every loaded definition source,
+original selection/typed bindings, row budget, page limit and application/result
+version. Changes reject old cursors even when rows would match. There is no
+persisted result cache. Native calls reload explicit query files; reused sessions
+cannot conceal definition changes. Consume every page with unchanged inputs.
 :::
 
 :::mara design DES-QUERY-COMPOSITION-CONTRACT

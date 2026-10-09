@@ -14,7 +14,7 @@ pub fn load_source_engine(
     if !documents.is_complete() {
         return Err(Error::InvalidProject {path:project.root().join(crate::PROJECT_FILE),message:"cannot construct a source snapshot from an incomplete document projection; supply the full source inventory and loading diagnostics".into()});
     }
-    SourceEngine::new(source_snapshot(project, documents, true)?)
+    SourceEngine::new(source_snapshot(project, documents, true, true)?)
 }
 
 /// Load trusted host-relative filenames for native execution and mutation planning.
@@ -28,7 +28,7 @@ pub fn load_native_source_engine(
             message: "cannot plan from an incomplete document inventory".into(),
         });
     }
-    let snapshot = source_snapshot(project, documents, true)?;
+    let snapshot = source_snapshot(project, documents, true, true)?;
     SourceEngine::from_native_sources(snapshot.files, snapshot.selection)
 }
 
@@ -38,7 +38,7 @@ pub(crate) fn source_fingerprint(project: &Project, documents: &DocumentSet) -> 
     // Validation retains diagnostics for incomplete/unreadable inputs. Planning uses
     // the strict loader above and never treats an inspection failure as absence.
     let snapshot =
-        source_snapshot(project, documents, false).expect("permissive fingerprint loading");
+        source_snapshot(project, documents, false, true).expect("permissive fingerprint loading");
     // Snapshot path restrictions do not narrow legacy native filesystem names.
     // Ordinary inventories produce exactly the same normalized engine identity.
     let normalize = |path: String| {
@@ -72,6 +72,7 @@ fn source_snapshot(
     project: &Project,
     documents: &DocumentSet,
     strict: bool,
+    include_rules: bool,
 ) -> Result<SourceSnapshot, Error> {
     let mut files = documents
         .documents()
@@ -89,7 +90,7 @@ fn source_snapshot(
             .unwrap_or(project.schema_path())
             .to_owned(),
     ];
-    for path in &project.rule_files {
+    for path in project.rule_files.iter().filter(|_| include_rules) {
         if !crate::is_project_relative(path) {
             continue;
         }
@@ -194,6 +195,54 @@ fn source_snapshot(
         },
         base_identity: None,
     })
+}
+
+/// Snapshot selected documents plus explicit query files. No imports or network reads.
+pub(crate) fn load_query_engine(
+    project: &Project,
+    documents: &DocumentSet,
+    definition_files: &[String],
+) -> Result<SourceEngine, Error> {
+    if !documents.is_complete() {
+        return Err(Error::InvalidProject {
+            path: project.root().join(crate::PROJECT_FILE),
+            message: "query source inventory is incomplete".into(),
+        });
+    }
+    let mut snapshot = source_snapshot(project, documents, true, false)?;
+    for file in definition_files {
+        let file = mara_engine::normalize_source_path(file)?;
+        if snapshot.files.iter().any(|f| f.path == file) {
+            continue;
+        }
+        let requested = project.root().join(&file);
+        let canonical = match fs::canonicalize(&requested) {
+            Ok(path) => path,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(source) => {
+                return Err(Error::Io {
+                    action: "load query definition",
+                    path: requested,
+                    source,
+                });
+            }
+        };
+        if !canonical.starts_with(project.root()) {
+            return Err(Error::InvalidProject {
+                path: requested,
+                message: "query definition escapes selected project".into(),
+            });
+        }
+        snapshot.files.push(SourceFile {
+            path: file,
+            content: fs::read_to_string(&canonical).map_err(|source| Error::Io {
+                action: "load query definition",
+                path: canonical,
+                source,
+            })?,
+        });
+    }
+    SourceEngine::from_native_sources(snapshot.files, snapshot.selection)
 }
 
 fn read_input(path: &std::path::Path, strict: bool) -> Result<Option<String>, Error> {

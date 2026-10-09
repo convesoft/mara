@@ -185,7 +185,11 @@ initialization, MID backfill and explicit rollback. It invokes shared engine
 queries/conformance/rule/trace computations and `ChangePlanner` plans; native
 discovery, code indexing, MID generation and guarded publishers stay in
 `mara`. Rollback resolves configuration but bypasses schema/corpus loading.
-CLI/MCP keep their public parameters, invocation and results.
+CLI/MCP keep their public parameters, invocation and results. Additional raw
+named execution uses the same explicit-source boundary and embedded runtime;
+[[DES-QUERY-INPUT-RESULT-CONTRACT]] owns its request/result and surface limits.
+Native loading supplies explicit query files without executing documentation
+policy or acquiring external facts.
 :::
 
 :::mara design DES-SEMANTIC-CHANGE-PLANS

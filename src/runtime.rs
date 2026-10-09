@@ -69,6 +69,34 @@ impl NativeRuntime {
         })
     }
 
+    /// Raw named facts; no documentation-rule evaluation or host acquisition.
+    pub fn query_execute(
+        &self,
+        request: crate::named_query::Request,
+    ) -> Result<crate::named_query::Page, crate::named_query::Error> {
+        for file in &request.definition_files {
+            crate::normalize_source_path(file)
+                .map_err(|e| crate::named_query::Error::argument(e.to_string()))?;
+        }
+        self.with_session(false, || {
+            let unavailable = |e: String| crate::named_query::Error {
+                code: "input_unavailable".into(),
+                message: e,
+                source: None,
+            };
+            let (project, schema) = self.load_project().map_err(unavailable)?;
+            let documents =
+                crate::load_documents(&project, &schema).map_err(|e| unavailable(e.to_string()))?;
+            let engine = crate::source_bridge::load_query_engine(
+                &project,
+                &documents,
+                &request.definition_files,
+            )
+            .map_err(|e| unavailable(e.to_string()))?;
+            engine.query_execute(request)
+        })
+    }
+
     pub fn trace_matrix(
         &self,
         params: &crate::TraceMatrixParams,
