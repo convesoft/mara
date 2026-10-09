@@ -324,54 +324,53 @@ impl crate::SourceEngine {
                 return Ok((report, diagnostics));
             }
         };
-        if target.kind != ValidationTargetKind::Schema {
-            if let Err(error) =
+        if target.kind != ValidationTargetKind::Schema
+            && let Err(error) =
                 self.preflight_query_inputs(&config.definition_files, fact_snapshots, mappings)
-            {
-                if error.code == "invalid_argument" {
-                    return Err(QueryConsumerError {
-                        code: error.code,
-                        message: error.message,
-                    });
-                }
-                if error.code == "invalid_definition" {
-                    diagnostics.push(invalid_policy(
-                        error
-                            .source
-                            .as_deref()
-                            .map(PathBuf::from)
-                            .map(|path| DiagnosticLocation {
-                                path: Some(path),
-                                ..Default::default()
-                            })
-                            .unwrap_or_default(),
-                        "query-policy",
-                        error.message,
-                    ));
-                    return Ok((
-                        Some(QueryPolicyValidation {
-                            format_version: 1,
-                            input_identity: self.source_fingerprint().into(),
-                            evaluation_complete: false,
-                            checks: vec![],
-                        }),
-                        diagnostics,
-                    ));
-                }
-                let (report, mut errors) = policy_unavailable(
+        {
+            if error.code == "invalid_argument" {
+                return Err(QueryConsumerError {
+                    code: error.code,
+                    message: error.message,
+                });
+            }
+            if error.code == "invalid_definition" {
+                diagnostics.push(invalid_policy(
+                    error
+                        .source
+                        .as_deref()
+                        .map(PathBuf::from)
+                        .map(|path| DiagnosticLocation {
+                            path: Some(path),
+                            ..Default::default()
+                        })
+                        .unwrap_or_default(),
+                    "query-policy",
+                    error.message,
+                ));
+                return Ok((
                     Some(QueryPolicyValidation {
                         format_version: 1,
                         input_identity: self.source_fingerprint().into(),
                         evaluation_complete: false,
                         checks: vec![],
                     }),
-                    error.source.as_deref().unwrap_or(""),
-                    error.message,
-                    validation_scope(target.kind),
-                );
-                diagnostics.append(&mut errors);
-                return Ok((report, diagnostics));
+                    diagnostics,
+                ));
             }
+            let (report, mut errors) = policy_unavailable(
+                Some(QueryPolicyValidation {
+                    format_version: 1,
+                    input_identity: self.source_fingerprint().into(),
+                    evaluation_complete: false,
+                    checks: vec![],
+                }),
+                error.source.as_deref().unwrap_or(""),
+                error.message,
+                validation_scope(target.kind),
+            );
+            diagnostics.append(&mut errors);
+            return Ok((report, diagnostics));
         }
         let shape_paths = config
             .shape_files
