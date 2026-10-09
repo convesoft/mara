@@ -68,6 +68,7 @@ pub struct QueryGateRequest {
     pub gate_file: String,
     /// Explicit Turtle SHACL source files used by the selected gate.
     pub shape_files: Vec<String>,
+    /// Exact gate identity from the request-local YAML gate file.
     pub gate: String,
     /// Explicit root workload. Omitted scope is never interpreted as all roots.
     pub scope: named_query::Selection,

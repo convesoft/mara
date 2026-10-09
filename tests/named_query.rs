@@ -2124,3 +2124,498 @@ fn embedded_returned_types_and_exact_item_constants_are_validated() {
     );
     assert_eq!(mcp_response(&responses, 2)["result"]["isError"], true);
 }
+
+fn view_cli_args(req: &q::Request, format: &str) -> Vec<String> {
+    let mut args = vec![
+        "--execution-mode".into(),
+        "direct".into(),
+        "--format".into(),
+        format.into(),
+        "query".into(),
+        "view".into(),
+        req.definition.clone(),
+    ];
+    for file in &req.definition_files {
+        args.extend(["--definition-file".into(), file.clone()]);
+    }
+    for id in &req.selection.ids {
+        args.extend(["--id".into(), id.clone()]);
+    }
+    for parameter in &req.parameters {
+        args.extend([
+            "--param".into(),
+            format!(
+                "{}={}",
+                parameter.name,
+                serde_json::to_string(&parameter.value).unwrap()
+            ),
+        ]);
+    }
+    args.extend([
+        "--max-rows".into(),
+        req.max_rows.to_string(),
+        "--limit".into(),
+        req.limit.to_string(),
+    ]);
+    if let Some(cursor) = &req.cursor {
+        args.extend(["--cursor".into(), cursor.clone()]);
+    }
+    args
+}
+
+fn gate_request() -> mara::query_consumers::QueryGateRequest {
+    mara::query_consumers::QueryGateRequest {
+        definition_files: vec!["queries.json".into()],
+        gate_file: "gate.yaml".into(),
+        shape_files: vec!["presence.ttl".into()],
+        gate: "require-support".into(),
+        scope: q::Selection {
+            ids: vec!["SUB-LINKED".into(), "SUB-EMPTY".into()],
+            ..Default::default()
+        },
+        context: vec![q::BindingParameter {
+            name: "state".into(),
+            value: q::ParameterValue::Text("accepted".into()),
+        }],
+        max_rows: 100,
+    }
+}
+
+fn gate_report_cli_args(format: &str) -> Vec<String> {
+    vec![
+        "--execution-mode".into(),
+        "direct".into(),
+        "--format".into(),
+        format.into(),
+        "query".into(),
+        "report".into(),
+        "gate".into(),
+        "require-support".into(),
+        "--gate-file".into(),
+        "gate.yaml".into(),
+        "--definition-file".into(),
+        "queries.json".into(),
+        "--shape-file".into(),
+        "presence.ttl".into(),
+        "--id".into(),
+        "SUB-LINKED".into(),
+        "--id".into(),
+        "SUB-EMPTY".into(),
+        "--param".into(),
+        "state={\"type\":\"text\",\"value\":\"accepted\"}".into(),
+        "--max-rows".into(),
+        "100".into(),
+    ]
+}
+
+fn is_sub_empty(root: &Option<q::Endpoint>) -> bool {
+    matches!(root, Some(q::Endpoint::Item { id, .. }) if id == "SUB-EMPTY")
+}
+
+// @mara checks REQ-QUERY-VIEWS-AND-REPORTS
+#[test]
+fn factual_view_preserves_facts_and_empty_roots_across_rust_cli_and_mcp() {
+    let fixture = project();
+    install_query_consumers(fixture.path());
+    let runtime = NativeRuntime::new(Some(fixture.path().into()), fixture.path().into()).unwrap();
+    let mut request = request();
+    request.limit = 100;
+
+    let page = runtime.query_execute(request.clone()).unwrap();
+    let view = runtime
+        .query_view(mara::query_views::ViewParams {
+            request: request.clone(),
+            render: None,
+        })
+        .unwrap();
+    assert_eq!(view.format_version, 1);
+    assert_eq!(view.kind, "query_view");
+    assert_eq!(view.definition, page.definition);
+    assert_eq!(view.definition_file, page.definition_file);
+    assert_eq!(view.input_identity, page.input_identity);
+    assert_eq!(view.evaluation_complete, page.evaluation_complete);
+    assert_eq!(view.summary.selected_roots, page.summary.selected_roots);
+    assert_eq!(view.summary.binding_count, page.summary.binding_count);
+    assert_eq!(view.summary.known_bindings, page.summary.known_bindings);
+    assert_eq!(view.has_more, page.has_more);
+    assert_eq!(view.next_cursor, page.next_cursor);
+    assert_eq!(view.markdown, None);
+    let names = view
+        .columns
+        .iter()
+        .map(|column| column.name.as_str())
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"support"));
+    assert!(names.contains(&"amount"));
+    assert!(names.contains(&"absent"));
+    let linked = view
+        .roots
+        .iter()
+        .find(|root| matches!(&root.root, q::Endpoint::Item { id, .. } if id == "SUB-LINKED"))
+        .unwrap();
+    let empty = view
+        .roots
+        .iter()
+        .find(|root| matches!(&root.root, q::Endpoint::Item { id, .. } if id == "SUB-EMPTY"))
+        .unwrap();
+    assert!(linked.source.is_some());
+    assert_eq!(linked.binding_count, Some(3));
+    assert_eq!(linked.rows.len(), 3);
+    assert!(empty.source.is_some());
+    assert_eq!(empty.binding_count, Some(0));
+    assert!(empty.rows.is_empty());
+
+    // Rendering does not change returned typed facts.
+    let page_rows = page
+        .records
+        .iter()
+        .filter_map(|record| match record {
+            q::Record::Binding { binding, .. } => Some(serde_json::to_value(binding).unwrap()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let view_rows = view
+        .roots
+        .iter()
+        .flat_map(|root| root.rows.iter())
+        .map(|row| {
+            serde_json::to_value(q::Binding {
+                values: row.values.clone(),
+                contributors: row.contributors.clone(),
+                support: row.support.clone(),
+            })
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(page_rows, view_rows);
+
+    let rendered = runtime
+        .query_view(mara::query_views::ViewParams {
+            request: request.clone(),
+            render: Some("markdown".into()),
+        })
+        .unwrap();
+    let markdown = rendered.markdown.as_deref().unwrap();
+    assert!(markdown.contains("# Factual query view"));
+    assert!(
+        markdown.contains("No related matches were returned for this root in the complete result.")
+    );
+    let empty_section = markdown.split("## [SUB-EMPTY]").nth(1).unwrap();
+    assert!(
+        !empty_section.to_lowercase().contains("fail"),
+        "{empty_section}"
+    );
+
+    let cli_json = mara(
+        fixture.path(),
+        &view_cli_args(&request, "json")
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    );
+    assert!(cli_json.status.success(), "{}", stderr(&cli_json));
+    let cli_json: Value = serde_json::from_slice(&cli_json.stdout).unwrap();
+    assert_eq!(cli_json, serde_json::to_value(&view).unwrap());
+    let cli_human = mara(
+        fixture.path(),
+        &view_cli_args(&request, "human")
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    );
+    assert!(cli_human.status.success(), "{}", stderr(&cli_human));
+    assert!(stdout(&cli_human).contains("# Factual query view"));
+
+    let params = serde_json::to_value(&request).unwrap();
+    assert_eq!(
+        consumer_mcp(fixture.path(), "query_view", params.clone()),
+        cli_json
+    );
+    let mut rendered_params = params;
+    rendered_params["render"] = json!("markdown");
+    let mcp_rendered = consumer_mcp(fixture.path(), "query_view", rendered_params);
+    assert_eq!(
+        mcp_rendered["markdown"].as_str().unwrap(),
+        rendered.markdown.as_deref().unwrap()
+    );
+
+    // Continuation preserves every binding and root without repeats.
+    let mut cursor = None;
+    let mut total_rows = 0usize;
+    let mut roots = std::collections::BTreeSet::new();
+    loop {
+        let mut page_request = self::request();
+        page_request.cursor = cursor.take();
+        let page_view = runtime
+            .query_view(mara::query_views::ViewParams {
+                request: page_request,
+                render: None,
+            })
+            .unwrap();
+        total_rows += page_view
+            .roots
+            .iter()
+            .map(|root| root.rows.len())
+            .sum::<usize>();
+        for root in &page_view.roots {
+            roots.insert(root.root.clone());
+        }
+        if !page_view.has_more {
+            break;
+        }
+        cursor = page_view.next_cursor.clone();
+        assert!(cursor.is_some());
+    }
+    assert_eq!(total_rows, 3);
+    assert_eq!(roots.len(), 2);
+}
+
+// @mara checks REQ-QUERY-VIEWS-AND-REPORTS
+#[test]
+fn evaluation_reports_expose_gate_and_rule_outcomes_across_rust_cli_and_mcp() {
+    let fixture = project();
+    install_query_consumers(fixture.path());
+    let runtime = NativeRuntime::new(Some(fixture.path().into()), fixture.path().into()).unwrap();
+    let portable = SourceEngine::new(consumer_snapshot()).unwrap();
+    let target = mara::ValidationTarget {
+        kind: mara::ValidationTargetKind::Project,
+        id: None,
+    };
+    let gate = gate_request();
+    let gate_result = runtime.query_gate(gate.clone()).unwrap();
+    let report = runtime
+        .query_report(mara::query_views::ReportRequest::Gate(gate.clone()), None)
+        .unwrap();
+    assert_eq!(report.format_version, 1);
+    assert_eq!(report.input_identity, gate_result.input_identity);
+    assert_eq!(report.evaluation_complete, gate_result.evaluation_complete);
+    assert_eq!(report.state, Some(gate_result.state));
+    assert!(report.roots.iter().any(|root| {
+        matches!(&root.root, Some(q::Endpoint::Item { id, .. }) if id == "SUB-EMPTY")
+            && root.state == Some(mara::query_consumers::ConsumerState::Failed)
+    }));
+    assert!(matches!(
+        &report.subject,
+        mara::query_views::ReportSubject::Gate(subject) if subject.gate == "require-support"
+    ));
+    let failed = report
+        .checks
+        .iter()
+        .find(|check| check.obligation == "support-condition" && is_sub_empty(&check.root))
+        .unwrap();
+    assert_eq!(failed.kind, "gate_condition");
+    assert_eq!(failed.state, mara::query_consumers::ConsumerState::Failed);
+    assert_eq!(
+        failed.support_state,
+        mara::query_views::SupportState::Missing
+    );
+    assert_eq!(failed.binding_count, Some(0));
+    assert!(!failed.components.is_empty());
+    assert_eq!(failed.severity, mara::Severity::Error);
+    assert_eq!(
+        failed.source.path.as_deref(),
+        Some(std::path::Path::new("gate.yaml"))
+    );
+    assert_eq!(failed.shape, "urn:fixture:shape:has-match");
+    let qualified = report
+        .checks
+        .iter()
+        .find(|check| {
+            check.obligation == "support-condition"
+                && matches!(&check.root, Some(q::Endpoint::Item { id, .. }) if id == "SUB-LINKED")
+        })
+        .unwrap();
+    assert_eq!(
+        qualified.state,
+        mara::query_consumers::ConsumerState::Passed
+    );
+    assert_eq!(
+        qualified.support_state,
+        mara::query_views::SupportState::Qualifying
+    );
+    assert_eq!(qualified.binding_count, Some(1));
+    assert!(!qualified.bindings.is_empty());
+    assert_eq!(report.summary.passed, 1);
+    assert_eq!(report.summary.failed, 1);
+    let gate_markdown = runtime
+        .query_report(
+            mara::query_views::ReportRequest::Gate(gate.clone()),
+            Some("markdown".into()),
+        )
+        .unwrap()
+        .markdown
+        .unwrap();
+    assert!(gate_markdown.contains("# Gate evaluation report: require-support"));
+    assert!(gate_markdown.contains("support **missing**"));
+    assert!(gate_markdown.contains("support **qualifying**"));
+    assert!(gate_markdown.contains("gate.yaml"));
+    assert!(gate_markdown.contains("Scope: ids SUB-LINKED, SUB-EMPTY."));
+    assert!(gate_markdown.contains("Context: state = text accepted."));
+    assert!(gate_markdown.contains("Root: item SUB-EMPTY."));
+    assert!(gate_markdown.contains("| item SUB-EMPTY | failed |"));
+
+    // A gate with no condition records still preserves every evaluated root.
+    let mut conditionless = gate_request();
+    conditionless.gate = "empty-required".into();
+    conditionless.context.clear();
+    let conditionless_report = runtime
+        .query_report(
+            mara::query_views::ReportRequest::Gate(conditionless),
+            Some("markdown".into()),
+        )
+        .unwrap();
+    assert!(conditionless_report.checks.is_empty());
+    assert_eq!(conditionless_report.roots.len(), 2);
+    assert!(
+        conditionless_report
+            .roots
+            .iter()
+            .all(|root| root.state == Some(mara::query_consumers::ConsumerState::Failed))
+    );
+    let conditionless_markdown = conditionless_report.markdown.as_deref().unwrap();
+    assert!(conditionless_markdown.contains("| Root | Outcome |"));
+    assert!(conditionless_markdown.contains("| item SUB-EMPTY | failed |"));
+    assert!(conditionless_markdown.contains("| item SUB-LINKED | failed |"));
+
+    let (policy, _policy_diagnostics) = portable.query_policy_validation(target.clone());
+    let policy = policy.unwrap();
+    let rules = runtime
+        .query_report(
+            mara::query_views::ReportRequest::DocumentationRules {
+                target: target.clone(),
+            },
+            None,
+        )
+        .unwrap();
+    assert!(rules.state.is_none());
+    assert!(!rules.input_identity.is_empty());
+    assert!(rules.evaluation_complete);
+    assert_eq!(rules.evaluation_complete, policy.evaluation_complete);
+    assert!(rules.diagnostics.iter().any(|diagnostic| {
+        diagnostic.rule.as_deref() == Some("require-query-match")
+            && diagnostic.code == mara::DiagnosticCode::RuleFailed
+    }));
+    let rule_failed = rules
+        .checks
+        .iter()
+        .find(|check| check.obligation == "require-query-match" && is_sub_empty(&check.root))
+        .unwrap();
+    assert_eq!(rule_failed.kind, "documentation_rule");
+    assert_eq!(
+        rule_failed.state,
+        mara::query_consumers::ConsumerState::Failed
+    );
+    assert_eq!(
+        rule_failed.support_state,
+        mara::query_views::SupportState::Missing
+    );
+    assert_eq!(rule_failed.binding_count, Some(0));
+    assert!(!rule_failed.components.is_empty());
+    assert_eq!(
+        rule_failed.source.path.as_deref(),
+        Some(std::path::Path::new("invariants.yaml"))
+    );
+    let policy_failed = policy
+        .checks
+        .iter()
+        .find(|check| {
+            check.rule == "require-query-match"
+                && check.root.as_ref().is_some_and(
+                    |root| matches!(root, q::Endpoint::Item { id, .. } if id == "SUB-EMPTY"),
+                )
+        })
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&rule_failed.bindings).unwrap(),
+        serde_json::to_value(&policy_failed.bindings).unwrap()
+    );
+    let rule_markdown = runtime
+        .query_report(
+            mara::query_views::ReportRequest::DocumentationRules {
+                target: target.clone(),
+            },
+            Some("markdown".into()),
+        )
+        .unwrap()
+        .markdown
+        .unwrap();
+    assert!(rule_markdown.contains("# Documentation rule evaluation report"));
+    assert!(rule_markdown.contains("support **missing**"));
+    assert!(rule_markdown.contains("Root: item SUB-EMPTY."));
+
+    let cli_gate = mara(
+        fixture.path(),
+        &gate_report_cli_args("json")
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    );
+    assert!(cli_gate.status.success(), "{}", stderr(&cli_gate));
+    let cli_gate: Value = serde_json::from_slice(&cli_gate.stdout).unwrap();
+    assert_eq!(cli_gate, serde_json::to_value(&report).unwrap());
+    let cli_gate_human = mara(
+        fixture.path(),
+        &gate_report_cli_args("human")
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    );
+    assert!(
+        cli_gate_human.status.success(),
+        "{}",
+        stderr(&cli_gate_human)
+    );
+    assert!(stdout(&cli_gate_human).contains("# Gate evaluation report: require-support"));
+
+    let gate_subject = serde_json::to_value(mara::query_views::ReportRequest::Gate(gate)).unwrap();
+    assert_eq!(
+        consumer_mcp(
+            fixture.path(),
+            "query_report",
+            json!({ "subject": gate_subject })
+        ),
+        cli_gate
+    );
+
+    let cli_rules = mara(
+        fixture.path(),
+        &[
+            "--execution-mode",
+            "direct",
+            "--format",
+            "json",
+            "query",
+            "report",
+            "rules",
+        ],
+    );
+    assert!(cli_rules.status.success(), "{}", stderr(&cli_rules));
+    let cli_rules: Value = serde_json::from_slice(&cli_rules.stdout).unwrap();
+    assert_eq!(cli_rules, serde_json::to_value(&rules).unwrap());
+    assert_eq!(
+        consumer_mcp(
+            fixture.path(),
+            "query_report",
+            json!({"subject": {"kind": "documentation_rules", "target": {"kind": "project"}}})
+        ),
+        cli_rules
+    );
+    let cli_rules_human = mara(
+        fixture.path(),
+        &[
+            "--execution-mode",
+            "direct",
+            "--format",
+            "human",
+            "query",
+            "report",
+            "rules",
+        ],
+    );
+    assert!(
+        cli_rules_human.status.success(),
+        "{}",
+        stderr(&cli_rules_human)
+    );
+    assert!(stdout(&cli_rules_human).contains("# Documentation rule evaluation report"));
+}

@@ -227,6 +227,97 @@ enum QueryCommand {
         #[arg(long)]
         cursor: Option<String>,
     },
+    /// Render a factual table/relationship view over one exact named SELECT page; not a policy evaluation.
+    #[command(
+        after_help = "Default output is a factual Markdown view; --format json returns query view format 1 and includes the same page when a renderer is requested. An empty root is shown as a complete empty result, never as a failure. The view preserves returned bindings, source links, input identity, counts and completeness; follow --cursor with unchanged inputs until has_more is false. It does not change project policy or re-run traversal as presentation."
+    )]
+    View {
+        /// Exact definition identity.
+        definition: String,
+        /// Project-relative JSON named-definition files (format 3 or 4).
+        #[arg(long = "definition-file", required = true)]
+        definition_files: Vec<String>,
+        /// Exact item IDs/MIDs; aliases select one root and unknown references fail.
+        #[arg(long = "id")]
+        ids: Vec<String>,
+        /// Exact schema flavours, OR within this category.
+        #[arg(long = "flavour")]
+        flavours: Vec<String>,
+        /// Exact schema-field KEY=VALUE filters.
+        #[arg(long = "field")]
+        fields: Vec<String>,
+        /// Exact project-relative documents or directory subtrees.
+        #[arg(long = "path")]
+        paths: Vec<String>,
+        /// Explicitly select all roots; exclusive of IDs and filters.
+        #[arg(long)]
+        all: bool,
+        /// NAME=typed JSON, e.g. state='{"type":"text","value":"draft"}'.
+        #[arg(long = "param")]
+        parameters: Vec<String>,
+        /// Observed solution-row budget, not page size or a traversal deadline.
+        #[arg(long)]
+        max_rows: u32,
+        /// Delivery records per page, 1 through 100 (default 20); the 65536-byte budget may return fewer.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Opaque next_cursor; keep inputs unchanged until has_more is false.
+        #[arg(long)]
+        cursor: Option<String>,
+    },
+    /// Render a source-linked evaluation report over gate or documentation-rule outcomes.
+    #[command(
+        after_help = "Default output is a Markdown report; --format json returns evaluation report format 1. A report identifies each obligation, its outcome and applicability, and qualifying or missing support; it never grants permission or changes documentation validity."
+    )]
+    Report {
+        #[command(subcommand)]
+        command: QueryReportCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum QueryReportCommand {
+    /// Render the evaluation report for one request-local gate; results are not permissions or actions.
+    Gate {
+        /// Exact gate identity from the request-local YAML gate file.
+        gate: String,
+        /// Project-relative YAML file containing request-local gate definitions.
+        #[arg(long, required = true)]
+        gate_file: String,
+        /// Project-relative JSON named-query definitions (format 3).
+        #[arg(long = "definition-file")]
+        definition_files: Vec<String>,
+        /// Project-relative Turtle SHACL sources referenced by gate conditions.
+        #[arg(long = "shape-file")]
+        shape_files: Vec<String>,
+        /// Exact item IDs/MIDs; aliases select one root.
+        #[arg(long = "id")]
+        ids: Vec<String>,
+        /// Exact schema flavours, OR within this category.
+        #[arg(long = "flavour")]
+        flavours: Vec<String>,
+        /// Exact schema-field KEY=VALUE filters.
+        #[arg(long = "field")]
+        fields: Vec<String>,
+        /// Exact project-relative documents or directory subtrees.
+        #[arg(long = "path")]
+        paths: Vec<String>,
+        /// Explicitly select all roots; exclusive of other root filters.
+        #[arg(long)]
+        all: bool,
+        /// NAME=typed JSON context, e.g. candidate='{"type":"item","value":"REQ-X"}'.
+        #[arg(long = "param")]
+        context: Vec<String>,
+        /// Observed solution-row budget for every query condition.
+        #[arg(long, required = true)]
+        max_rows: u32,
+    },
+    /// Render the evaluation report for enabled project documentation rules.
+    Rules {
+        /// Exact item ID/MID; omit to report enabled rules project-wide.
+        #[arg(long = "id")]
+        id: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -496,32 +587,8 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                     max_rows,
                 },
         } => {
-            let fields = fields
-                .into_iter()
-                .map(|f| {
-                    let (key, value) = f.split_once('=').ok_or_else(|| {
-                        ClientError::invalid_argument("--field requires KEY=VALUE")
-                    })?;
-                    Ok(mara::named_query::FieldSelection {
-                        key: key.into(),
-                        value: value.into(),
-                    })
-                })
-                .collect::<Result<Vec<_>, ClientError>>()?;
-            let context = context
-                .into_iter()
-                .map(|p| {
-                    let (name, value) = p.split_once('=').ok_or_else(|| {
-                        ClientError::invalid_argument("--param requires NAME=typed JSON")
-                    })?;
-                    Ok(mara::named_query::BindingParameter {
-                        name: name.into(),
-                        value: serde_json::from_str(value).map_err(|e| {
-                            ClientError::invalid_argument(format!("invalid typed context: {e}"))
-                        })?,
-                    })
-                })
-                .collect::<Result<Vec<_>, ClientError>>()?;
+            let fields = parse_fields(fields)?;
+            let context = parse_binding_parameters(context)?;
             let result = operations.query_gate(mara::query_consumers::QueryGateRequest {
                 definition_files,
                 gate_file,
@@ -569,32 +636,8 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                     cursor,
                 },
         } => {
-            let fields = fields
-                .into_iter()
-                .map(|f| {
-                    let (key, value) = f.split_once('=').ok_or_else(|| {
-                        ClientError::invalid_argument("--field requires KEY=VALUE")
-                    })?;
-                    Ok(mara::named_query::FieldSelection {
-                        key: key.into(),
-                        value: value.into(),
-                    })
-                })
-                .collect::<Result<Vec<_>, ClientError>>()?;
-            let parameters = parameters
-                .into_iter()
-                .map(|p| {
-                    let (name, value) = p.split_once('=').ok_or_else(|| {
-                        ClientError::invalid_argument("--param requires NAME=typed JSON")
-                    })?;
-                    Ok(mara::named_query::BindingParameter {
-                        name: name.into(),
-                        value: serde_json::from_str(value).map_err(|e| {
-                            ClientError::invalid_argument(format!("invalid typed parameter: {e}"))
-                        })?,
-                    })
-                })
-                .collect::<Result<Vec<_>, ClientError>>()?;
+            let fields = parse_fields(fields)?;
+            let parameters = parse_binding_parameters(parameters)?;
             let page = match operations.query_execute(mara::named_query::Request {
                 definition,
                 definition_files,
@@ -623,6 +666,154 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
             // Raw typed JSON is also the initial human display; no rendering semantics.
             write_json(&page)?;
             return Ok(page.evaluation_complete);
+        }
+        Command::Query {
+            command:
+                QueryCommand::View {
+                    definition,
+                    definition_files,
+                    ids,
+                    flavours,
+                    fields,
+                    paths,
+                    all,
+                    parameters,
+                    max_rows,
+                    limit,
+                    cursor,
+                },
+        } => {
+            let fields = parse_fields(fields)?;
+            let parameters = parse_binding_parameters(parameters)?;
+            let params = mara::query_views::ViewParams {
+                request: mara::named_query::Request {
+                    definition,
+                    definition_files,
+                    selection: mara::named_query::Selection {
+                        ids,
+                        flavours,
+                        fields,
+                        paths,
+                        all,
+                    },
+                    parameters,
+                    max_rows,
+                    limit,
+                    cursor,
+                },
+                render: matches!(format, OutputFormat::Human).then(|| "markdown".into()),
+            };
+            match operations.query_view(params) {
+                Ok(view) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&view)?
+                    } else {
+                        print!("{}", view.markdown.as_deref().unwrap_or(""))
+                    }
+                    return Ok(view.evaluation_complete);
+                }
+                Err(error) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&error.envelope())?;
+                    } else {
+                        eprintln!("error: {error}");
+                    }
+                    return Ok(false);
+                }
+            }
+        }
+        Command::Query {
+            command:
+                QueryCommand::Report {
+                    command:
+                        QueryReportCommand::Gate {
+                            gate,
+                            gate_file,
+                            definition_files,
+                            shape_files,
+                            ids,
+                            flavours,
+                            fields,
+                            paths,
+                            all,
+                            context,
+                            max_rows,
+                        },
+                },
+        } => {
+            let fields = parse_fields(fields)?;
+            let context = parse_binding_parameters(context)?;
+            match operations.query_report(
+                mara::query_views::ReportRequest::Gate(mara::query_consumers::QueryGateRequest {
+                    definition_files,
+                    gate_file,
+                    shape_files,
+                    gate,
+                    scope: mara::named_query::Selection {
+                        ids,
+                        flavours,
+                        fields,
+                        paths,
+                        all,
+                    },
+                    context,
+                    max_rows,
+                }),
+                matches!(format, OutputFormat::Human).then(|| "markdown".into()),
+            ) {
+                Ok(report) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&report)?
+                    } else {
+                        print!("{}", report.markdown.as_deref().unwrap_or(""))
+                    }
+                    return Ok(report.evaluation_complete);
+                }
+                Err(error) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&error.envelope())?;
+                    } else {
+                        eprintln!("error: {error}");
+                    }
+                    return Ok(false);
+                }
+            }
+        }
+        Command::Query {
+            command:
+                QueryCommand::Report {
+                    command: QueryReportCommand::Rules { id },
+                },
+        } => {
+            let target = mara::ValidationTarget {
+                kind: if id.is_some() {
+                    mara::ValidationTargetKind::Item
+                } else {
+                    mara::ValidationTargetKind::Project
+                },
+                id,
+            };
+            match operations.query_report(
+                mara::query_views::ReportRequest::DocumentationRules { target },
+                matches!(format, OutputFormat::Human).then(|| "markdown".into()),
+            ) {
+                Ok(report) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&report)?
+                    } else {
+                        print!("{}", report.markdown.as_deref().unwrap_or(""))
+                    }
+                    return Ok(report.evaluation_complete);
+                }
+                Err(error) => {
+                    if matches!(format, OutputFormat::Json) {
+                        write_json(&error.envelope())?;
+                    } else {
+                        eprintln!("error: {error}");
+                    }
+                    return Ok(false);
+                }
+            }
         }
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         Command::Daemon { command } => {
@@ -1131,6 +1322,42 @@ fn emit_trace_error(
         eprintln!("error: {error}")
     }
     Ok(false)
+}
+
+fn parse_fields(
+    fields: Vec<String>,
+) -> Result<Vec<mara::named_query::FieldSelection>, ClientError> {
+    fields
+        .into_iter()
+        .map(|field| {
+            let (key, value) = field
+                .split_once('=')
+                .ok_or_else(|| ClientError::invalid_argument("--field requires KEY=VALUE"))?;
+            Ok(mara::named_query::FieldSelection {
+                key: key.into(),
+                value: value.into(),
+            })
+        })
+        .collect()
+}
+
+fn parse_binding_parameters(
+    parameters: Vec<String>,
+) -> Result<Vec<mara::named_query::BindingParameter>, ClientError> {
+    parameters
+        .into_iter()
+        .map(|parameter| {
+            let (name, value) = parameter
+                .split_once('=')
+                .ok_or_else(|| ClientError::invalid_argument("--param requires NAME=typed JSON"))?;
+            Ok(mara::named_query::BindingParameter {
+                name: name.into(),
+                value: serde_json::from_str(value).map_err(|error| {
+                    ClientError::invalid_argument(format!("invalid typed parameter: {error}"))
+                })?,
+            })
+        })
+        .collect()
 }
 
 fn emit<T: Serialize>(

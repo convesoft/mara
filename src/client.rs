@@ -453,6 +453,39 @@ impl NativeClient {
             .map_err(|e| ClientError::Operation(json!({"format_version":2,"error":e})))
     }
 
+    /// Factual view rendering is embedded-only in this bounded delivery.
+    pub fn query_view(
+        &self,
+        params: crate::query_views::ViewParams,
+    ) -> Result<crate::query_views::FactualView, ClientError> {
+        if self.options.mode == Some(ExecutionMode::DaemonRequired) {
+            return Err(ClientError::Operation(
+                json!({"format_version":2,"error":{"code":"unsupported_capability","message":"query view daemon execution is not implemented; select direct execution"}}),
+            ));
+        }
+        self.runtime
+            .query_view(params)
+            .map_err(|e| ClientError::Operation(json!({"format_version":2,"error":e})))
+    }
+
+    /// Evaluation report rendering is embedded-only in this bounded delivery.
+    pub fn query_report(
+        &self,
+        request: crate::query_views::ReportRequest,
+        render: Option<String>,
+    ) -> Result<crate::query_views::EvaluationReport, ClientError> {
+        if self.options.mode == Some(ExecutionMode::DaemonRequired) {
+            return Err(ClientError::Operation(
+                json!({"format_version":2,"error":{"code":"unsupported_capability","message":"query report daemon execution is not implemented; select direct execution"}}),
+            ));
+        }
+        self.runtime.query_report(request, render).map_err(|e| {
+            ClientError::Operation(
+                json!({"format_version":2,"error":{"code":e.code,"message":e.message}}),
+            )
+        })
+    }
+
     pub fn trace_matrix(
         &self,
         params: &crate::TraceMatrixParams,

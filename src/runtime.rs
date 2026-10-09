@@ -83,6 +83,13 @@ impl NativeRuntime {
         request: crate::query_consumers::QueryGateRequest,
     ) -> Result<crate::query_consumers::QueryGateResult, crate::query_consumers::QueryConsumerError>
     {
+        self.gate_engine(&request)?.query_gate(request)
+    }
+
+    fn gate_engine(
+        &self,
+        request: &crate::query_consumers::QueryGateRequest,
+    ) -> Result<crate::SourceEngine, crate::query_consumers::QueryConsumerError> {
         for path in request
             .definition_files
             .iter()
@@ -111,12 +118,12 @@ impl NativeRuntime {
         let mut sources = request.definition_files.clone();
         sources.push(request.gate_file.clone());
         sources.extend(request.shape_files.iter().cloned());
-        let engine = crate::source_bridge::load_query_engine(&project, &documents, &sources)
-            .map_err(|e| crate::query_consumers::QueryConsumerError {
+        crate::source_bridge::load_query_engine(&project, &documents, &sources).map_err(|e| {
+            crate::query_consumers::QueryConsumerError {
                 code: "input_unavailable".into(),
                 message: e.to_string(),
-            })?;
-        engine.query_gate(request)
+            }
+        })
     }
 
     pub fn query_execute(
@@ -144,6 +151,78 @@ impl NativeRuntime {
             .map_err(|e| unavailable(e.to_string()))?;
             engine.query_execute(request)
         })
+    }
+
+    /// Compose a named query and render its factual view. No policy pass/fail semantics.
+    pub fn query_view(
+        &self,
+        params: crate::query_views::ViewParams,
+    ) -> Result<crate::query_views::FactualView, crate::named_query::Error> {
+        for file in &params.request.definition_files {
+            crate::normalize_source_path(file)
+                .map_err(|e| crate::named_query::Error::argument(e.to_string()))?;
+        }
+        self.with_session(false, || {
+            let unavailable = |e: String| crate::named_query::Error {
+                code: "input_unavailable".into(),
+                message: e,
+                source: None,
+            };
+            let (project, schema) = self.load_project().map_err(unavailable)?;
+            let documents =
+                crate::load_documents(&project, &schema).map_err(|e| unavailable(e.to_string()))?;
+            let engine = crate::source_bridge::load_query_engine(
+                &project,
+                &documents,
+                &params.request.definition_files,
+            )
+            .map_err(|e| unavailable(e.to_string()))?;
+            engine.query_view(params)
+        })
+    }
+
+    /// Evaluate a gate or enabled documentation rules and render its report.
+    pub fn query_report(
+        &self,
+        request: crate::query_views::ReportRequest,
+        render: Option<String>,
+    ) -> Result<crate::query_views::EvaluationReport, crate::query_consumers::QueryConsumerError>
+    {
+        self.with_session(false, || self.query_report_current(request, render))
+    }
+
+    fn query_report_current(
+        &self,
+        request: crate::query_views::ReportRequest,
+        render: Option<String>,
+    ) -> Result<crate::query_views::EvaluationReport, crate::query_consumers::QueryConsumerError>
+    {
+        use crate::query_views::ReportRequest;
+        match request {
+            ReportRequest::Gate(request) => self
+                .gate_engine(&request)?
+                .query_report(ReportRequest::Gate(request), render),
+            ReportRequest::DocumentationRules { target } => {
+                let (project, schema) = self.load_project().map_err(|e| {
+                    crate::query_consumers::QueryConsumerError {
+                        code: "input_unavailable".into(),
+                        message: e.to_string(),
+                    }
+                })?;
+                let documents = crate::load_documents(&project, &schema).map_err(|e| {
+                    crate::query_consumers::QueryConsumerError {
+                        code: "input_unavailable".into(),
+                        message: e.to_string(),
+                    }
+                })?;
+                crate::source_bridge::load_query_policy_engine(&project, Some(&documents))
+                    .map_err(|e| crate::query_consumers::QueryConsumerError {
+                        code: "input_unavailable".into(),
+                        message: e.to_string(),
+                    })?
+                    .query_report(ReportRequest::DocumentationRules { target }, render)
+            }
+        }
     }
 
     pub fn trace_matrix(

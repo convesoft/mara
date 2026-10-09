@@ -578,8 +578,9 @@ projected-result SHACL bridge. It does not add traversal or validation behavior
 to the engineering rules or template. `SourceEngine` and `NativeRuntime` expose
 request-local `query_gate`; the CLI command is `query gate <gate>` and MCP tool
 is `query_gate`. Daemon-required gate execution is explicitly unsupported here.
-The complete daemon/Node/HTTP/TypeScript/WASM rollout, rendering and evaluation
-reports remain later release work.
+The complete daemon/Node/HTTP/TypeScript/WASM rollout remains later release
+work; native view and report rendering are implemented in the view/report slice
+below.
 
 Project configuration enables validation invariants with:
 
@@ -676,11 +677,69 @@ results, not a host-specific empty success or an invented browser indexer.
 For identical supplied semantic inputs, hosts share outcomes, bindings, identity
 and completeness; they do not interpret policy independently.
 
+### Implemented view and report slice
+
+The current native Rust/CLI/MCP slice implements factual views and evaluation
+reports over the same composed results; renderers are pure and never re-run a
+traversal or reinterpret a policy outcome. `mara-engine`'s `query_views` module
+defines both formats; `SourceEngine::query_view` composes one named-query page
+and `SourceEngine::query_report` composes a gate or the enabled documentation
+rules. `NativeRuntime`/`NativeClient` expose both. The CLI commands are
+`query view <definition>`, `query report gate <gate>` and `query report rules`;
+the MCP tools are `query_view` and `query_report` (`subject.kind` is `gate` or
+`documentation_rules`). Both accept `render: "markdown"`, which the CLI uses for
+human output; `--format json` returns the structured format.
+
+Factual view format 1 (`kind: "query_view"`) preserves the page's `definition`,
+`definition_file`, `input_identity`, `evaluation_complete`, `unavailable_reason`,
+`summary` (`selected_roots`, `binding_count`, `known_bindings`), `has_more` and
+`next_cursor`. It adds declared `columns` (name, type, optional, flavours) from
+the selected definition and `roots` in page order with unchanged typed `rows`
+(`values`, `contributors`, `support`). A root record's `source` is linked;
+bindings whose root record was on an earlier page keep their root endpoint with
+`source` and `binding_count` absent rather than fabricating them. An empty root
+is a complete empty result, never a failed cell. Literal text/number/IRI values
+are escaped so their Markdown or HTML syntax renders as text; only generated
+source links and emphasis are markup.
+
+Evaluation report format 1 (`subject.kind` is `gate` or `documentation_rules`)
+preserves the owning result's `input_identity` and `evaluation_complete`, the
+gate aggregate `state`/`empty_reason`/`unavailable_reason` when present, and the
+policy `diagnostics`. It also carries `roots`, one entry per evaluated gate root
+with its outcome, independent of condition records, so a gate with no conditions
+still preserves every selected root and its state. Each `checks` entry identifies
+`obligation`, `kind` (`gate_condition` or `documentation_rule`), `definition`,
+`shape`, optional `shape_file`, optional `root`, source-linked `source`,
+`severity`, `state`, `applicability`, `support_state`, exact `binding_count`,
+failed SHACL `components` and the unchanged typed `bindings`. `support_state` is
+`qualifying` for a passed obligation, `missing` for a failed one, and
+`not_applicable` or `unavailable` otherwise. A gate report grants no permission
+and a rule report does not change documentation validity. The Markdown report
+renders a gate's explicit scope and typed context, a roots/outcome table, then
+each check's obligation, definition/shape source and root identity, so
+candidate/context and multi-root outcomes stay attributable.
+
+```sh
+mara query view urn:fixture:query:supports --definition-file queries.json \
+  --id SUB-LINKED --id SUB-EMPTY --param 'state={"type":"text","value":""}' \
+  --max-rows 100 --limit 100 --cursor '<next_cursor>'
+mara query report gate require-support --gate-file gate.yaml \
+  --definition-file queries.json --shape-file presence.ttl --id SUB-EMPTY \
+  --param 'state={"type":"text","value":"accepted"}' --max-rows 100
+mara query report rules
+```
+
+The regression `tests/named_query.rs::factual_view_preserves_facts_and_empty_roots_across_rust_cli_and_mcp`
+and `tests/named_query.rs::evaluation_reports_expose_gate_and_rule_outcomes_across_rust_cli_and_mcp`
+exercise these real Rust/CLI/MCP paths. They do not claim daemon, Node, HTTP,
+TypeScript or WASM parity.
+
 Real native/browser and installed-package verification belongs to
 [[VER-REUSABLE-QUERY-ENGINE]] and the selected final supported-host gates.
 This contract does not claim those paths ran. [[DES-QUERY-BACKEND-PROOF]] selects the backend and actual proof formats/
-operations, and demonstrates the SHACL result bridge. Factual views, evaluation
-reports and broader host coverage still require later integrated implementation.
+operations, and demonstrates the SHACL result bridge. Daemon/Node/HTTP/TypeScript/WASM
+view/report parity and broader host coverage still require later integrated
+implementation.
 :::
 
 :::mara decision ADR-QUERY-EXACT-RESOLUTION
@@ -937,8 +996,10 @@ is authorized by this verification.
 
 The complete fixture catalog and selected host parity remain integrated release
 checks. This scoped implementation adds the focused native Rust/CLI/MCP consumer
-regression documented above; it is not evidence for deferred views, reports or
-host adapters. Use the existing supported-host gates, with Apple Silicon execution at the final host
+regression documented above and the native Rust/CLI/MCP factual-view and
+gate/documentation-rule report regressions in [[DES-QUERY-CONSUMER-CONTRACT]]; it
+is not evidence for daemon, Node, HTTP, TypeScript, WASM or installed-package
+parity. Use the existing supported-host gates, with Apple Silicon execution at the final host
 gate. Record actual tested revisions, artifacts, environments, commands, results
 and limitations. A fixture demonstration is not adoption of the engineering
 template, authentication of reported external evidence or proof of external

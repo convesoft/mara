@@ -12,7 +12,9 @@ pub enum ValidationTargetKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ValidationTarget {
+    /// Validation target kind: project, item or schema.
     pub kind: ValidationTargetKind,
+    /// Exact item ID/MID for an item target; absent for project or schema targets.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
 }

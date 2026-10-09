@@ -777,6 +777,8 @@ fn bootstrap_advertises_only_its_available_operations() {
             "project_validate",
             "query_execute",
             "query_gate",
+            "query_report",
+            "query_view",
             "related",
             "relation_add",
             "relation_get",

@@ -122,6 +122,46 @@ struct QueryGateToolParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct QueryViewToolParams {
+    /// Absolute project root; omit when the server is bound with --project.
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Explicit project-relative named-definition JSON files, format 3 or 4.
+    definition_files: Vec<String>,
+    /// Exact named definition identity.
+    definition: String,
+    /// Explicit all or exact IDs/schema filters. No implicit all.
+    selection: mara::named_query::Selection,
+    /// Declared typed bindings; duplicate names are rejected.
+    #[serde(default)]
+    parameters: Vec<mara::named_query::BindingParameter>,
+    /// Observed solution-row budget; positive u32, not page size.
+    max_rows: u32,
+    /// Delivery records per page, 1..=100.
+    limit: usize,
+    /// Continue with every other input unchanged.
+    #[serde(default)]
+    cursor: Option<String>,
+    /// Set to markdown to include the same rendered page as the CLI default.
+    #[serde(default)]
+    render: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct QueryReportToolParams {
+    /// Absolute project root; omit when the server is bound with --project.
+    #[serde(default)]
+    project: Option<PathBuf>,
+    /// Gate or documentation-rule evaluation subject.
+    subject: mara::query_views::ReportRequest,
+    /// Set to markdown to include the same rendered report as the CLI default.
+    #[serde(default)]
+    render: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct TraceMatrixToolParams {
     /// Absolute project root. Omit or null to discover from the server working directory; when started with --project, omit this parameter (overrides are rejected).
     #[serde(default)]
@@ -386,6 +426,49 @@ impl MaraMcp {
             })
             .map_err(McpError)?;
         Ok(Json(serde_json::to_value(page).expect("query result")))
+    }
+
+    #[tool(
+        name = "query_view",
+        description = "Render a factual table/relationship view over one exact named SELECT page. The view preserves returned typed bindings, explicitly projected source and edge support, source links, input identity, counts and completeness; presentation does not re-run traversal or change membership. A root with no matches is a complete empty result, never a failure. Use render:markdown for the same rendered page as the CLI default. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs; it is not a policy evaluation and grants nothing. Native daemon and final browser/JS adapters are not yet supported."
+    )]
+    fn query_view(
+        &self,
+        Parameters(p): Parameters<QueryViewToolParams>,
+    ) -> Result<Json<serde_json::Value>, McpError> {
+        let operation = self.operations.for_project(p.project)?;
+        let view = operation
+            .query_view(mara::query_views::ViewParams {
+                request: mara::named_query::Request {
+                    definition_files: p.definition_files,
+                    definition: p.definition,
+                    selection: p.selection,
+                    parameters: p.parameters,
+                    max_rows: p.max_rows,
+                    limit: p.limit,
+                    cursor: p.cursor,
+                },
+                render: p.render,
+            })
+            .map_err(McpError)?;
+        Ok(Json(serde_json::to_value(view).expect("query view")))
+    }
+
+    #[tool(
+        name = "query_report",
+        description = "Render a source-linked evaluation report for a request-local gate or enabled project documentation rules. The subject selects a gate (definition_files, gate_file, shape_files, gate, scope, context, max_rows) or documentation_rules (target). The report identifies each obligation, definition/shape source, severity, outcome and applicability, and qualifying or missing support, retaining the owning result's input identity, completeness, checks and diagnostics. Gate reports never grant permission; rule reports never change documentation validity. Use render:markdown for the same rendered report as the CLI default."
+    )]
+    fn query_report(
+        &self,
+        Parameters(p): Parameters<QueryReportToolParams>,
+    ) -> Result<Json<serde_json::Value>, McpError> {
+        let operation = self.operations.for_project(p.project)?;
+        let report = operation
+            .query_report(p.subject, p.render)
+            .map_err(McpError)?;
+        Ok(Json(
+            serde_json::to_value(report).expect("evaluation report"),
+        ))
     }
 
     #[tool(

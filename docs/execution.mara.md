@@ -473,6 +473,7 @@ retain the existing native/MCP operation shapes and owning contracts:
 | item_create / item_update / item_delete / item_move / item_rename | existing native operation parameters | [[DES-ITEM-CREATION]], [[DES-ITEM-UPDATE]], [[DES-ITEM-DELETION]], [[DES-ITEM-MOVEMENT]], [[DES-ITEM-RENAME]] |
 | relation_get / relation_add / relation_remove | source,relation,target; get adds limit,cursor; remove adds occurrence | [[DES-RELATION-INTERFACES]], [[DES-RELATION-MUTATION]] |
 | trace_matrix | existing flat root filters,rules/check,limit,cursor,render | [[DES-TRACE-VIEW-INTERFACES]] |
+| query_execute / query_gate / query_view / query_report | existing named-query selection,parameters,max_rows,limit,cursor; gate adds gate_file,shape_files,context; view adds render; report takes subject gate/documentation_rules and render | [[DES-QUERY-INPUT-RESULT-CONTRACT]], [[DES-QUERY-CONSUMER-CONTRACT]] |
 | project_mid_backfill / project_transaction_rollback | none | [[DES-MID-BACKFILL]], [[DES-MUTATION-RECOVERY]] |
 | project_refresh | none; returns `{refreshed:true}` | [[DES-NATIVE-PROJECT-SESSIONS]] |
 

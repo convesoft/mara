@@ -1136,7 +1136,7 @@ fn md_cell(value: &str) -> String {
         .replace('|', "\\|")
         .replace(['\n', '\r'], " ")
 }
-fn md_target(path: &str) -> String {
+pub(crate) fn md_target(path: &str) -> String {
     path.replace('%', "%25")
         .replace(' ', "%20")
         .replace('<', "%3C")

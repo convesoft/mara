@@ -28,7 +28,12 @@ pub mod query;
 /// Bounded executable backend proof; not the complete named-query surface.
 pub mod query_backend;
 pub mod query_consumers;
+pub mod query_views;
 pub use query::*;
+pub use query_views::{
+    EvaluationReport, FactualView, GateReportSubject, ReportCheck, ReportRequest, ReportSubject,
+    ReportSummary, SupportState, ViewColumn, ViewParams, ViewRoot, ViewRow, ViewSummary,
+};
 pub mod graph_constraints;
 pub mod operations;
 pub use operations::*;
