@@ -7,10 +7,10 @@ use oxigraph::{
 };
 
 #[derive(Debug, Clone)]
-struct LoadedDefinition {
-    file: String,
-    format: u32,
-    definition: Definition,
+pub(super) struct LoadedDefinition {
+    pub(super) file: String,
+    pub(super) format: u32,
+    pub(super) definition: Definition,
 }
 
 struct QueryEvaluation {
@@ -355,7 +355,7 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
     )
 }
 
-fn validate_loaded_dependency_graph(
+pub(super) fn validate_loaded_dependency_graph(
     definitions: &BTreeMap<String, LoadedDefinition>,
 ) -> Result<(), Error> {
     for loaded in definitions.values() {

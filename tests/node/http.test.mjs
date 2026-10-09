@@ -9,10 +9,12 @@ const { applicationVersion } = await import(pathToFileURL(process.env.MARA_HTTP_
 const operations = ['project_init', 'project_mid_backfill', 'project_transaction_rollback', 'project_refresh',
   'schema_get', 'schema_list', 'schema_validate', 'item_list', 'search', 'get', 'related',
   'item_create', 'item_update', 'item_delete', 'item_move', 'item_rename', 'item_validate',
-  'project_validate', 'relation_get', 'relation_add', 'relation_remove', 'trace_matrix'];
+  'project_validate', 'relation_get', 'relation_add', 'relation_remove',
+  'query_execute', 'query_gate', 'query_view', 'query_report', 'trace_matrix'];
 const negotiation = {
   protocol_version: 1, application_version: applicationVersion,
-  result_formats: { discovery: 2, relationship: 1, validation: 1, trace: 1, operation_error: 1 },
+  result_formats: { discovery: 2, relationship: 1, validation: 1, trace: 1,
+    query: 3, gate: 1, query_view: 1, query_report: 1, operation_error: 1 },
   capabilities: { backend: 'native', operations, persistence: 'filesystem', code_indexing: true,
     configured_indexers: true, transaction_rollback: true, force_refresh: true,
     project_sessions: 'reconciled_memory', local_methods: [] },
@@ -46,6 +48,20 @@ test('HTTP transport boundaries retain owning errors, sanitize failures and neve
     assert.ok(Object.isFrozen(client.capabilities));
     reply = rpc => Response.json({ jsonrpc: '2.0', id: rpc.id, result: { valid: false, evaluation_complete: false } });
     assert.deepEqual(await client.projectValidate(), { valid: false, evaluation_complete: false });
+    const query = { definition_files: ['facts.json'], definition: 'urn:fixture:query',
+      selection: { ids: ['CAND-1'] }, parameters: [], max_rows: 10, limit: 20,
+      fact_snapshots: [{ input: 'reported', identity: 'run-1', coverage: [], records: [] }], mappings: [] };
+    const gate = { definition_files: ['facts.json'], gate_file: 'gates.yaml', shape_files: ['gate.ttl'],
+      gate: 'ready', scope: { ids: ['CAND-1'] }, context: [], max_rows: 10, fact_snapshots: query.fact_snapshots, mappings: [] };
+    await client.queryExecute(query);
+    await client.queryGate(gate);
+    await client.queryView({ request: query, render: 'markdown' });
+    await client.queryReport({ subject: { kind: 'gate', ...gate }, render: 'markdown' });
+    reply = rpc => Response.json({ jsonrpc: '2.0', id: rpc.id, result: { evaluation_complete: true } });
+    for (const operation of ['query_execute', 'query_gate', 'query_view', 'query_report']) {
+      assert.ok(requests.some(request => request.rpc.method === operation), `missing ${operation} dispatch`);
+    }
+    assert.deepEqual(requests.find(request => request.rpc.method === 'query_view').rpc.params.request, query);
     const last = requests.at(-1);
     assert.equal(last.rpc.params.project, options.project);
     assert.equal(last.init.headers['X-Mara-Application-Version'], negotiation.application_version);

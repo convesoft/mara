@@ -1,7 +1,7 @@
 #![cfg(any(target_os = "linux", target_os = "macos"))]
 //! Real daemon processes, native socket handoff, HTTP sockets and disposable disk projects.
 mod support;
-use mara::{ipc, protocol::APPLICATION_VERSION};
+use mara::{NativeRuntime, ipc, protocol::APPLICATION_VERSION};
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -247,6 +247,225 @@ fn project() -> tempfile::TempDir {
     let f = support::fixture();
     mara::initialize_project(f.path(), mara::Template::Minimal).unwrap();
     f
+}
+
+fn query_facts_project(root: &Path) -> mara::named_query::FactSnapshot {
+    let snapshot: mara::SourceSnapshot =
+        serde_json::from_str(include_str!("fixtures/query-facts/snapshot.json")).unwrap();
+    for file in snapshot.files {
+        let path = root.join(file.path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, file.content).unwrap();
+    }
+    let project_file = root.join(".mara/project.toml");
+    let mut project = fs::read_to_string(&project_file).unwrap();
+    project.push_str(
+        r#"
+[query_policy]
+format_version = 1
+files = ["facts-invariants.yaml"]
+definition_files = ["facts.json"]
+shape_files = ["facts-present.ttl"]
+max_rows = 100
+"#,
+    );
+    fs::write(project_file, project).unwrap();
+    fs::write(
+        root.join("facts-invariants.yaml"),
+        r#"format_version: 1
+invariants:
+  - id: supplied-composed-facts
+    definition: urn:fixture:facts:composed
+    shape: urn:fixture:shape:has-fact-row
+    flavours: [candidate]
+    severity: error
+    parameters:
+      - name: candidate
+        value: {type: text, value: CAND-C}
+      - name: context
+        value: {type: text, value: release}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("facts-gates.yaml"),
+        r#"format_version: 1
+gates:
+  - id: require-composed-facts
+    empty_roots: not_applicable
+    empty_required: failed
+    conditions:
+      - id: fact-row
+        definition: urn:fixture:facts:composed
+        shape_file: facts-present.ttl
+        shape: urn:fixture:shape:has-fact-row
+        severity: error
+        context_parameters: [candidate, context]
+"#,
+    )
+    .unwrap();
+    fs::write(root.join("facts-present.ttl"), r#"@prefix sh: <http://www.w3.org/ns/shacl#>.
+<urn:fixture:shape:has-fact-row> a sh:NodeShape; sh:property [ sh:path <urn:mara:query:match>; sh:minCount 1 ].
+"#).unwrap();
+    let keys = |verification: &str| {
+        json!({
+            "verification":{"type":"item","value":verification},
+            "candidate":{"type":"text","value":"CAND-C"},
+            "context":{"type":"text","value":"release"}
+        })
+    };
+    let coverage = ["VER-V1", "VER-V2", "VER-V3"]
+        .map(keys)
+        .into_iter()
+        .collect::<Vec<_>>();
+    let records = [("VER-V1", "pass"), ("VER-V2", "pass"), ("VER-V3", "fail")]
+        .map(|(verification, state)| {
+            json!({
+                "keys":keys(verification),
+                "fields":{"state":{"type":"text","value":state}}
+            })
+        })
+        .into_iter()
+        .collect::<Vec<_>>();
+    serde_json::from_value(json!({
+        "input":"reported", "identity":"reported-run", "coverage":coverage, "records":records
+    }))
+    .unwrap()
+}
+
+// @mara checks REQ-LOCAL-DAEMON-HTTP
+// @mara checks DES-QUERY-CONSUMER-CONTRACT
+// @mara checks DES-QUERY-INPUT-RESULT-CONTRACT
+#[test]
+fn supplied_fact_consumers_round_trip_through_authorized_daemon_http() {
+    let fixture = support::fixture();
+    let root = fixture.path();
+    let facts = query_facts_project(root);
+    let mut host = Host::new();
+    let info = host.spawn(&[root], &[], true);
+    let runtime = NativeRuntime::new(None, root.to_path_buf()).unwrap();
+    let call = |method: &str, mut params: Value| {
+        params["project"] = json!(root);
+        ok(&info, method, params)
+    };
+    let request = mara::named_query::Request {
+        definition_files: vec!["facts.json".into()],
+        definition: "urn:fixture:facts:composed".into(),
+        selection: mara::named_query::Selection {
+            ids: vec!["CAND-C".into()],
+            ..Default::default()
+        },
+        parameters: vec![
+            mara::named_query::BindingParameter {
+                name: "candidate".into(),
+                value: mara::named_query::ParameterValue::Text("CAND-C".into()),
+            },
+            mara::named_query::BindingParameter {
+                name: "context".into(),
+                value: mara::named_query::ParameterValue::Text("release".into()),
+            },
+        ],
+        max_rows: 100,
+        limit: 100,
+        cursor: None,
+        fact_snapshots: vec![facts.clone()],
+        mappings: vec![],
+    };
+    assert_eq!(
+        call("query_execute", serde_json::to_value(&request).unwrap()),
+        serde_json::to_value(runtime.query_execute(request.clone()).unwrap()).unwrap()
+    );
+    let view_params = mara::query_views::ViewParams {
+        request: request.clone(),
+        render: None,
+    };
+    assert_eq!(
+        call(
+            "query_view",
+            serde_json::to_value(view_params.clone()).unwrap()
+        ),
+        serde_json::to_value(runtime.query_view(view_params).unwrap()).unwrap()
+    );
+    let options = mara::ValidationOptions {
+        fact_snapshots: vec![facts.clone()],
+        ..Default::default()
+    };
+    assert_eq!(
+        call(
+            "item_validate",
+            json!({"id":"CAND-C","fact_snapshots":[facts.clone()]})
+        ),
+        serde_json::to_value(
+            runtime
+                .item_validate_with_options("CAND-C", &options)
+                .unwrap()
+        )
+        .unwrap()
+    );
+    let gate = mara::query_consumers::QueryGateRequest {
+        definition_files: vec!["facts.json".into()],
+        gate_file: "facts-gates.yaml".into(),
+        shape_files: vec!["facts-present.ttl".into()],
+        gate: "require-composed-facts".into(),
+        scope: request.selection.clone(),
+        context: request.parameters.clone(),
+        fact_snapshots: vec![facts.clone()],
+        mappings: vec![],
+        max_rows: 100,
+    };
+    assert_eq!(
+        call("query_gate", serde_json::to_value(&gate).unwrap()),
+        serde_json::to_value(runtime.query_gate(gate.clone()).unwrap()).unwrap()
+    );
+    for subject in [
+        mara::query_views::ReportRequest::Gate(gate),
+        mara::query_views::ReportRequest::DocumentationRules {
+            target: mara::ValidationTarget {
+                kind: mara::ValidationTargetKind::Item,
+                id: Some("CAND-C".into()),
+            },
+            fact_snapshots: vec![facts],
+            mappings: vec![],
+        },
+    ] {
+        let expected = runtime.query_report(subject.clone(), None).unwrap();
+        assert_eq!(
+            call("query_report", json!({"subject":subject,"render":null})),
+            serde_json::to_value(expected).unwrap()
+        );
+    }
+
+    let invalid_file = "invalid-facts.json";
+    fs::write(root.join(invalid_file), "not valid JSON").unwrap();
+    let mut invalid_request = request.clone();
+    invalid_request
+        .definition_files
+        .push(invalid_file.to_owned());
+    assert_eq!(
+        runtime
+            .query_execute(invalid_request.clone())
+            .unwrap_err()
+            .source
+            .as_deref(),
+        Some(invalid_file)
+    );
+    let mut params = serde_json::to_value(&invalid_request).unwrap();
+    params["project"] = json!(root);
+    let (status, _, response) = http(&info, "query_execute", params);
+    assert_eq!(status, 200, "{response}");
+    assert_eq!(response["error"]["data"]["error"]["source"], invalid_file);
+
+    let view_params = mara::query_views::ViewParams {
+        request: invalid_request,
+        render: None,
+    };
+    let (status, _, response) = http(
+        &info,
+        "query_view",
+        json!({"project":root,"request":view_params.request,"render":null}),
+    );
+    assert_eq!(status, 200, "{response}");
+    assert_eq!(response["error"]["data"]["error"]["source"], invalid_file);
 }
 
 // @mara checks REQ-LOCAL-DAEMON-HTTP

@@ -77,7 +77,7 @@ struct QueryExecuteToolParams {
     /// Absolute project root; omit when the server is bound with --project.
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Explicit project-relative named-definition JSON files, format 3 or 4.
+    /// Explicit project-relative named-definition JSON files, formats 3, 4 or 5.
     definition_files: Vec<String>,
     /// Exact named definition identity.
     definition: String,
@@ -107,7 +107,7 @@ struct QueryGateToolParams {
     /// Absolute project root; omit when the server is bound with --project.
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Explicit project-relative format-3 named-query definition files.
+    /// Explicit project-relative named-query definition files, formats 3, 4 or 5.
     #[serde(default)]
     definition_files: Vec<String>,
     /// Request-local YAML gate definition file.
@@ -122,6 +122,12 @@ struct QueryGateToolParams {
     /// Typed context parameters, consumed only by named gate conditions.
     #[serde(default)]
     context: Vec<mara::named_query::BindingParameter>,
+    /// Host-supplied typed fact snapshots passed unchanged to named gate conditions.
+    #[serde(default)]
+    fact_snapshots: Vec<mara::named_query::FactSnapshot>,
+    /// Caller/project mappings passed unchanged to named gate conditions.
+    #[serde(default)]
+    mappings: Vec<mara::named_query::TypedMapping>,
     /// Positive observed solution-row budget per condition query.
     max_rows: u32,
 }
@@ -132,7 +138,7 @@ struct QueryViewToolParams {
     /// Absolute project root; omit when the server is bound with --project.
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Explicit project-relative named-definition JSON files, format 3 or 4.
+    /// Explicit project-relative named-definition JSON files, formats 3, 4 or 5.
     definition_files: Vec<String>,
     /// Exact named definition identity.
     definition: String,
@@ -148,6 +154,12 @@ struct QueryViewToolParams {
     /// Continue with every other input unchanged.
     #[serde(default)]
     cursor: Option<String>,
+    /// Explicit host-supplied typed fact snapshots for format-5 definitions.
+    #[serde(default)]
+    fact_snapshots: Vec<mara::named_query::FactSnapshot>,
+    /// Explicit caller/project typed lookup mappings for format-5 definitions.
+    #[serde(default)]
+    mappings: Vec<mara::named_query::TypedMapping>,
     /// Set to markdown to include the same rendered page as the CLI default.
     #[serde(default)]
     render: Option<String>,
@@ -390,7 +402,7 @@ impl SearchToolParams {
 impl MaraMcp {
     #[tool(
         name = "query_gate",
-        description = "Evaluate request-local contextual gate conditions over explicit root scope and typed context. Gate conditions reuse named query definitions and the SHACL fact-result bridge. Empty roots and empty required condition sets use the gate's explicit outcomes; unavailable required inputs stay unavailable and retain known failures. The result reports conditions only: it never grants permission or executes external actions. Does not change documentation validity."
+        description = "Evaluate request-local contextual gate conditions over explicit root scope, typed context, supplied fact snapshots and mappings. Gate conditions reuse named query definitions and the SHACL fact-result bridge. Empty roots and empty required condition sets use the gate's explicit outcomes; unavailable required inputs stay unavailable and retain known failures. The result reports conditions only: it never grants permission or executes external actions. Does not change documentation validity."
     )]
     fn query_gate(
         &self,
@@ -405,6 +417,8 @@ impl MaraMcp {
                 gate: p.gate,
                 scope: p.scope,
                 context: p.context,
+                fact_snapshots: p.fact_snapshots,
+                mappings: p.mappings,
                 max_rows: p.max_rows,
             })
             .map_err(McpError)?;
@@ -413,7 +427,7 @@ impl MaraMcp {
 
     #[tool(
         name = "query_execute",
-        description = "Execute raw named factual SELECT queries in the embedded engine. Load explicit format-3, format-4 or format-5 definition files, select an exact definition and explicit roots, and supply declared typed parameters. Format 4 allows acyclic named dependencies with explicit root, parameter and projected-column/support bindings; joins, unions, filters and transitive paths remain standard SPARQL. Format 5 additionally accepts host-supplied typed fact snapshots with declared complete coverage and caller/project lookup mappings, and may declare generic precedence aggregation. A complete snapshot with no record for a covered key is known missing; a missing snapshot, partial coverage or an out-of-coverage key is unavailable, never a pass. A missing mapping key is unavailable unless an explicit fallback is declared. Supplied candidates and contexts are opaque typed values; nothing is fetched, executed or persisted. Check returned values against declared types and retain only explicitly projected source, edge and fact support; hidden provenance is not inferred. Missing required fact sources produce incomplete results, not empty success. Returns typed distinct bindings, lifecycle data and empty-root records; no policy pass/fail. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs. Content, definition, parameter, fact, mapping or control changes reject continuation. Native daemon and final browser/JS adapters are not yet supported."
+        description = "Execute raw named factual SELECT queries through embedded/daemon Rust, CLI/MCP, Node, HTTP and browser worker adapters. Load explicit format-3, format-4 or format-5 definition files, select an exact definition and explicit roots, and supply declared typed parameters. Format 4 allows acyclic named dependencies with explicit root, parameter and projected-column/support bindings; joins, unions, filters and transitive paths remain standard SPARQL. Format 5 additionally accepts host-supplied typed fact snapshots with declared complete coverage and caller/project lookup mappings, and may declare generic precedence aggregation. A complete snapshot with no record for a covered key is known missing; a missing snapshot, partial coverage or an out-of-coverage key is unavailable, never a pass. A missing mapping key is unavailable unless an explicit fallback is declared. Supplied candidates and contexts are opaque typed values; nothing is fetched, executed or persisted. Check returned values against declared types and retain only explicitly projected source, edge and fact support; hidden provenance is not inferred. Missing required fact sources produce incomplete results, not empty success. Returns typed distinct bindings, lifecycle data and empty-root records; no policy pass/fail. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs. Content, definition, parameter, fact, mapping or control changes reject continuation."
     )]
     fn query_execute(
         &self,
@@ -438,7 +452,7 @@ impl MaraMcp {
 
     #[tool(
         name = "query_view",
-        description = "Render a factual table/relationship view over one exact named SELECT page. The view preserves returned typed bindings, explicitly projected source and edge support, source links, input identity, counts and completeness; presentation does not re-run traversal or change membership. A root with no matches is a complete empty result, never a failure. Use render:markdown for the same rendered page as the CLI default. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs; it is not a policy evaluation and grants nothing. Native daemon and final browser/JS adapters are not yet supported."
+        description = "Render a factual table/relationship view over one exact named SELECT page across embedded/daemon Rust, CLI/MCP, Node, HTTP and browser worker adapters. The view preserves returned typed bindings, explicitly projected source, edge and fact support, source links, input identity, counts and completeness; presentation does not re-run traversal or change membership. A root with no matches is a complete empty result, never a failure. Use render:markdown for the same rendered page as the CLI default. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs; it is not a policy evaluation and grants nothing."
     )]
     fn query_view(
         &self,
@@ -455,8 +469,8 @@ impl MaraMcp {
                     max_rows: p.max_rows,
                     limit: p.limit,
                     cursor: p.cursor,
-                    fact_snapshots: Vec::new(),
-                    mappings: Vec::new(),
+                    fact_snapshots: p.fact_snapshots,
+                    mappings: p.mappings,
                 },
                 render: p.render,
             })
@@ -466,7 +480,7 @@ impl MaraMcp {
 
     #[tool(
         name = "query_report",
-        description = "Render a source-linked evaluation report for a request-local gate or enabled project documentation rules. The subject selects a gate (definition_files, gate_file, shape_files, gate, scope, context, max_rows) or documentation_rules (target). The report identifies each obligation, definition/shape source, severity, outcome and applicability, and qualifying or missing support, retaining the owning result's input identity, completeness, checks and diagnostics. Gate reports never grant permission; rule reports never change documentation validity. Use render:markdown for the same rendered report as the CLI default."
+        description = "Render a source-linked evaluation report for a request-local gate or enabled project documentation rules. The subject selects a gate (definition_files, gate_file, shape_files, gate, scope, context, fact_snapshots, mappings, max_rows) or documentation_rules (target, fact_snapshots, mappings). The report identifies each obligation, definition/shape source, severity, outcome and applicability, and qualifying or missing support, retaining the owning result's input identity, completeness, checks and diagnostics. Gate reports never grant permission; rule reports never change documentation validity. Use render:markdown for the same rendered report as the CLI default."
     )]
     fn query_report(
         &self,

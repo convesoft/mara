@@ -24,6 +24,7 @@ const methods = {
   search: 'search', get: 'get', related: 'related', itemCreate: 'item_create',
   itemUpdate: 'item_update', itemMove: 'item_move', itemDelete: 'item_delete', itemRename: 'item_rename',
   relationGet: 'relation_get', relationAdd: 'relation_add', relationRemove: 'relation_remove',
+  queryExecute: 'query_execute', queryGate: 'query_gate', queryView: 'query_view', queryReport: 'query_report',
   traceMatrix: 'trace_matrix',
 };
 

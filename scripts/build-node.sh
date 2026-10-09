@@ -6,6 +6,10 @@ if [[ $# != 1 && ( $# != 2 || "$2" != --release ) ]]; then
 fi
 : "${CARGO_TARGET_DIR:?Set a disposable Cargo target directory}"
 : "${TMPDIR:?Set a disposable temporary directory}"
+build_jobs=${CARGO_BUILD_JOBS:-2}
+if [[ ! $build_jobs =~ ^[1-9][0-9]*$ ]]; then
+  echo "CARGO_BUILD_JOBS must be a positive integer" >&2; exit 2
+fi
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 mkdir -p -- "$1"
 output=$(cd -- "$1" && pwd -P)
@@ -13,7 +17,7 @@ cd -- "$root"
 profile=debug
 arguments=()
 if [[ ${2:-} == --release ]]; then profile=release; arguments+=(--release); fi
-cargo build --locked -p mara-node -j 2 "${arguments[@]}"
+cargo build --locked -p mara-node -j "$build_jobs" "${arguments[@]}"
 case "$(uname -s)" in
   Linux) library=libmara_node.so ;;
   Darwin) library=libmara_node.dylib ;;

@@ -557,11 +557,50 @@ pub(crate) fn graph_source_prerequisites_valid(diagnostics: &[crate::Diagnostic]
 
 // @mara implements REQ-NAMED-QUERY-FACTS
 // @mara implements DES-QUERY-INPUT-RESULT-CONTRACT
+pub(crate) struct QueryInputPreflight {
+    pub(crate) definitions: BTreeMap<String, Definition>,
+    unavailable: BTreeMap<String, Option<String>>,
+}
+impl QueryInputPreflight {
+    /// Required unavailable inputs for a definition and its declared dependencies.
+    pub(crate) fn unavailable_for(&self, id: &str) -> Option<String> {
+        fn visit(
+            id: &str,
+            preflight: &QueryInputPreflight,
+            seen: &mut BTreeSet<String>,
+        ) -> Option<String> {
+            if !seen.insert(id.to_owned()) {
+                return None;
+            }
+            let definition = preflight.definitions.get(id)?;
+            if definition.required_fact_sources.contains(&FactSource::Code) {
+                return Some(format!(
+                    "required code facts for named definition {id} were not supplied to this snapshot"
+                ));
+            }
+            if let Some(reason) = preflight
+                .unavailable
+                .get(id)
+                .and_then(|reason| reason.clone())
+            {
+                return Some(reason);
+            }
+            for dependency in &definition.dependencies {
+                if let Some(reason) = visit(&dependency.definition, preflight, seen) {
+                    return Some(reason);
+                }
+            }
+            None
+        }
+        visit(id, self, &mut BTreeSet::new())
+    }
+}
+
 impl SourceEngine {
-    pub(crate) fn validated_query_definitions(
+    fn load_query_definitions(
         &self,
         files: &[String],
-    ) -> Result<BTreeMap<String, Definition>, Error> {
+    ) -> Result<BTreeMap<String, composition::LoadedDefinition>, Error> {
         if files.is_empty() {
             return Err(Error::argument("supply an explicit definition set"));
         }
@@ -586,16 +625,34 @@ impl SourceEngine {
             })?;
             let set: DefinitionSet =
                 serde_json::from_str(text).map_err(|e| Error::definition(&path, e.to_string()))?;
-            if set.format_version != 3 {
+            if !matches!(set.format_version, 3..=5) {
                 return Err(Error::definition(
                     &path,
-                    "expected named-definition format 3",
+                    "expected named-definition format 3, 4 or 5",
+                ));
+            }
+            if set.format_version == 3
+                && set
+                    .definitions
+                    .iter()
+                    .any(|definition| !definition.dependencies.is_empty())
+            {
+                return Err(Error::definition(
+                    &path,
+                    "named-definition format 3 cannot declare composition dependencies",
                 ));
             }
             for definition in set.definitions {
                 if definition.id.trim().is_empty()
                     || definitions
-                        .insert(definition.id.clone(), definition)
+                        .insert(
+                            definition.id.clone(),
+                            composition::LoadedDefinition {
+                                file: path.clone(),
+                                format: set.format_version,
+                                definition,
+                            },
+                        )
                         .is_some()
                 {
                     return Err(Error::definition(
@@ -605,11 +662,83 @@ impl SourceEngine {
                 }
             }
         }
-        for (id, definition) in &definitions {
-            signature::compile("", 3, definition, &schema)
-                .map_err(|error| Error::definition("", format!("{id}: {}", error.message)))?;
+        composition::validate_loaded_dependency_graph(&definitions)?;
+        for (id, loaded) in &definitions {
+            signature::compile(&loaded.file, loaded.format, &loaded.definition, &schema).map_err(
+                |error| Error::definition(&loaded.file, format!("{id}: {}", error.message)),
+            )?;
         }
         Ok(definitions)
+    }
+
+    pub(crate) fn validated_query_definitions(
+        &self,
+        files: &[String],
+    ) -> Result<BTreeMap<String, Definition>, Error> {
+        Ok(self
+            .load_query_definitions(files)?
+            .into_iter()
+            .map(|(id, loaded)| (id, loaded.definition))
+            .collect())
+    }
+
+    /// Validate supplied facts/mappings with the same format-5 preparer used by query execution,
+    /// independent of selected roots or dependency reachability.
+    pub(crate) fn preflight_query_inputs(
+        &self,
+        files: &[String],
+        fact_snapshots: &[FactSnapshot],
+        mappings: &[TypedMapping],
+    ) -> Result<QueryInputPreflight, Error> {
+        let loaded = self.load_query_definitions(files)?;
+        let definitions = loaded
+            .iter()
+            .map(|(id, value)| (id.clone(), value.definition.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let (_, _, corpus) = self.corpus().map_err(|error| Error {
+            code: "input_unavailable".into(),
+            message: error.to_string(),
+            source: None,
+        })?;
+        let declared_inputs = definitions
+            .values()
+            .flat_map(|definition| {
+                definition
+                    .external_facts
+                    .iter()
+                    .map(|fact| fact.input.clone())
+            })
+            .collect::<BTreeSet<_>>();
+        let declared_mappings = definitions
+            .values()
+            .flat_map(|definition| {
+                definition
+                    .lookups
+                    .iter()
+                    .map(|lookup| lookup.mapping.clone())
+            })
+            .collect::<BTreeSet<_>>();
+        let request = Request {
+            definition_files: files.to_vec(),
+            definition: String::new(),
+            selection: Selection::default(),
+            parameters: vec![],
+            max_rows: 1,
+            limit: 1,
+            cursor: None,
+            fact_snapshots: fact_snapshots.to_vec(),
+            mappings: mappings.to_vec(),
+        };
+        let inputs = facts::inputs(&request, &declared_inputs, &declared_mappings)?;
+        let mut unavailable = BTreeMap::new();
+        for (id, loaded) in &loaded {
+            let prepared = facts::prepare(&loaded.definition, &loaded.file, &corpus, &inputs)?;
+            unavailable.insert(id.clone(), prepared.unavailable().map(str::to_owned));
+        }
+        Ok(QueryInputPreflight {
+            definitions,
+            unavailable,
+        })
     }
 
     pub fn query_execute(&self, request: Request) -> Result<Page, Error> {

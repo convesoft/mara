@@ -461,6 +461,8 @@ fn explicit_inventory_paths_ignore_context_and_stale_state_are_not_invented() {
     let options = ValidationOptions {
         limit: Some(1),
         cursor: None,
+        fact_snapshots: vec![],
+        mappings: vec![],
     };
     let first = engine.project_validate(&[], &options, None).unwrap();
     assert!(first.has_more);
@@ -473,6 +475,8 @@ fn explicit_inventory_paths_ignore_context_and_stale_state_are_not_invented() {
                 &ValidationOptions {
                     limit: Some(1),
                     cursor: Some(token),
+                    fact_snapshots: vec![],
+                    mappings: vec![],
                 },
                 None,
             )
@@ -489,7 +493,9 @@ fn explicit_inventory_paths_ignore_context_and_stale_state_are_not_invented() {
                 &[],
                 &ValidationOptions {
                     limit: Some(1),
-                    cursor: first.next_cursor
+                    cursor: first.next_cursor,
+                    fact_snapshots: vec![],
+                    mappings: vec![],
                 },
                 None
             )

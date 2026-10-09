@@ -53,6 +53,33 @@ const covered = new Set();
 const rule = '- id: rule:draft\n  targetClass: requirement\n  property:\n    - {path: status, hasValue: draft}\n';
 const check = '- id: rule:status\n  class: requirement\n  property:\n    - {path: status, hasValue: {parameter: expected_status}}\n';
 
+async function installQueryFactsProject(root) {
+  const snapshot = JSON.parse(await readFile(new URL('../fixtures/query-facts/snapshot.json', import.meta.url), 'utf8'));
+  for (const file of snapshot.files) {
+    const target = path.join(root, file.path);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, file.content);
+  }
+  const config = path.join(root, '.mara/project.toml');
+  await writeFile(config, (await readFile(config, 'utf8')) + `\n[query_policy]\nformat_version = 1\nfiles = ["facts-invariants.yaml"]\ndefinition_files = ["facts.json"]\nshape_files = ["facts-present.ttl"]\nmax_rows = 100\n`);
+  await writeFile(path.join(root, 'facts-invariants.yaml'), `format_version: 1\ninvariants:\n  - id: supplied-composed-facts\n    definition: urn:fixture:facts:composed\n    shape: urn:fixture:shape:has-fact-row\n    flavours: [candidate]\n    severity: error\n    parameters:\n      - name: candidate\n        value: {type: text, value: CAND-C}\n      - name: context\n        value: {type: text, value: release}\n`);
+  await writeFile(path.join(root, 'facts-gates.yaml'), `format_version: 1\ngates:\n  - id: require-composed-facts\n    empty_roots: not_applicable\n    empty_required: failed\n    conditions:\n      - id: fact-row\n        definition: urn:fixture:facts:composed\n        shape_file: facts-present.ttl\n        shape: urn:fixture:shape:has-fact-row\n        severity: error\n        context_parameters: [candidate, context]\n`);
+  await writeFile(path.join(root, 'facts-present.ttl'), `@prefix sh: <http://www.w3.org/ns/shacl#>.\n<urn:fixture:shape:has-fact-row> a sh:NodeShape; sh:property [ sh:path <urn:mara:query:match>; sh:minCount 1 ].\n`);
+}
+
+function queryFactSnapshot() {
+  const key = verification => ({
+    verification: { type: 'item', value: verification },
+    candidate: { type: 'text', value: 'CAND-C' }, context: { type: 'text', value: 'release' },
+  });
+  return {
+    input: 'reported', identity: 'reported-run', coverage: ['VER-V1', 'VER-V2', 'VER-V3'].map(key),
+    records: [['VER-V1', 'pass'], ['VER-V2', 'pass'], ['VER-V3', 'fail']].map(([verification, state]) => ({
+      keys: key(verification), fields: { state: { type: 'text', value: state } },
+    })),
+  };
+}
+
 // @mara checks REQ-NODE-NATIVE-BINDING
 // @mara checks REQ-EXPLICIT-BACKEND-CAPABILITIES
 for (const mode of ['direct', undefined, 'daemon-required']) {
@@ -217,6 +244,52 @@ for (const mode of ['direct', undefined, 'daemon-required']) {
     finally { await survivor.close(); }
   });
 }
+
+test('real format-5 consumers run through Node direct, auto and daemon-required adapters', async () => {
+  for (const mode of ['direct', undefined, 'daemon-required']) {
+    const root = path.join(base, `query-facts-${mode ?? 'auto'}`);
+    await mkdir(root, { recursive: true });
+    await installQueryFactsProject(root);
+    const client = await createClient({ callerDirectory: base, project: root, mode, daemonDirectory });
+    const call = async (operation, params) => {
+      covered.add(operation);
+      return client.execute(operation, params);
+    };
+    try {
+      const facts = queryFactSnapshot();
+      const request = {
+        definition_files: ['facts.json'], definition: 'urn:fixture:facts:composed',
+        selection: { ids: ['CAND-C'] },
+        parameters: [
+          { name: 'candidate', value: { type: 'text', value: 'CAND-C' } },
+          { name: 'context', value: { type: 'text', value: 'release' } },
+        ], max_rows: 100, limit: 100, fact_snapshots: [facts], mappings: [],
+      };
+      const page = await call('query_execute', request);
+      assert.equal(page.evaluation_complete, true);
+      assert.equal(page.summary.binding_count, 3);
+      const view = await call('query_view', { request, render: null });
+      assert.equal(view.input_identity, page.input_identity);
+      assert.equal(view.summary.binding_count, 3);
+      const validation = await call('item_validate', { id: 'CAND-C', fact_snapshots: [facts], mappings: [] });
+      assert.equal(validation.valid, true, JSON.stringify(validation));
+      assert.equal(validation.query_policies.checks[0].state, 'passed');
+      const gate = {
+        definition_files: ['facts.json'], gate_file: 'facts-gates.yaml', shape_files: ['facts-present.ttl'],
+        gate: 'require-composed-facts', scope: { ids: ['CAND-C'] },
+        context: request.parameters, max_rows: 100, fact_snapshots: [facts], mappings: [],
+      };
+      assert.equal((await call('query_gate', gate)).state, 'passed');
+      const gateReport = await call('query_report', { subject: { kind: 'gate', ...gate }, render: null });
+      assert.equal(gateReport.checks[0].state, 'passed');
+      const ruleReport = await call('query_report', { subject: {
+        kind: 'documentation_rules', target: { kind: 'item', id: 'CAND-C' },
+        fact_snapshots: [facts], mappings: [],
+      } });
+      assert.equal(ruleReport.checks[0].state, 'passed');
+    } finally { await client.close(); }
+  }
+});
 
 test('installed compiled TypeScript consumer uses all native routes without an executable CLI',
   { skip: !publicFacade || !process.env.MARA_NODE_INSTALLED }, async () => {

@@ -144,6 +144,12 @@ pub struct ValidationOptions {
     pub limit: Option<usize>,
     /// Opaque next_cursor; continue until has_more is false and repeat unchanged project, target, paths and limit. Omit to start or restart after source/schema/configuration changes; empty strings are invalid.
     pub cursor: Option<String>,
+    /// Explicit host-supplied query fact snapshots for enabled query-backed invariants.
+    #[serde(default)]
+    pub fact_snapshots: Vec<crate::named_query::FactSnapshot>,
+    /// Explicit host/project lookup mappings for enabled query-backed invariants.
+    #[serde(default)]
+    pub mappings: Vec<crate::named_query::TypedMapping>,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]

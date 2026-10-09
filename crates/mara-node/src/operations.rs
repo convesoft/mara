@@ -37,7 +37,7 @@ pub fn execute(
                 "code":{"indexing":true,"configured_indexers":true},
                 "native_recovery":true, "force_refresh":true,
                 "application_version":env!("CARGO_PKG_VERSION"),
-                "result_formats":{"discovery":2,"relationship":1,"validation":1,"trace":1,"operation_error":1}
+                "result_formats":{"discovery":2,"relationship":1,"validation":1,"trace":1,"query":3,"gate":1,"query_view":1,"query_report":1,"operation_error":1}
             }))
         }
         "project_init" => {
@@ -76,6 +76,8 @@ pub fn execute(
                 &mara::ValidationOptions {
                     limit: p.limit,
                     cursor: p.cursor,
+                    fact_snapshots: p.fact_snapshots,
+                    mappings: p.mappings,
                 },
             ))
         }
@@ -86,6 +88,8 @@ pub fn execute(
                 &mara::ValidationOptions {
                     limit: p.limit,
                     cursor: p.cursor,
+                    fact_snapshots: p.fact_snapshots,
+                    mappings: p.mappings,
                 },
             ))
         }
@@ -119,6 +123,13 @@ pub fn execute(
                 },
                 p.occurrence,
             ))
+        }
+        "query_execute" => encode(client.query_execute(decode(params)?)),
+        "query_gate" => encode(client.query_gate(decode(params)?)),
+        "query_view" => encode(client.query_view(decode(params)?)),
+        "query_report" => {
+            let p: QueryReportParams = decode(params)?;
+            encode(client.query_report(p.subject, p.render))
         }
         "trace_matrix" => encode(client.trace_matrix(&decode(params)?)),
         _ => Err(ClientError::invalid_argument(
@@ -158,6 +169,8 @@ impl Page {
         mara::ValidationOptions {
             limit: self.limit,
             cursor: self.cursor,
+            fact_snapshots: vec![],
+            mappings: vec![],
         }
     }
 }
@@ -168,6 +181,10 @@ struct ProjectValidation {
     paths: Vec<PathBuf>,
     limit: Option<usize>,
     cursor: Option<String>,
+    #[serde(default)]
+    fact_snapshots: Vec<mara::named_query::FactSnapshot>,
+    #[serde(default)]
+    mappings: Vec<mara::named_query::TypedMapping>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -175,6 +192,16 @@ struct ItemValidation {
     id: String,
     limit: Option<usize>,
     cursor: Option<String>,
+    #[serde(default)]
+    fact_snapshots: Vec<mara::named_query::FactSnapshot>,
+    #[serde(default)]
+    mappings: Vec<mara::named_query::TypedMapping>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueryReportParams {
+    subject: mara::query_views::ReportRequest,
+    render: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

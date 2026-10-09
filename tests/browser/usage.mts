@@ -1,5 +1,6 @@
 import { createWasmClient, MaraClientError, type WasmClient, type SourceSnapshot,
-  type MaraClient, type MemoryProjectInitParams, type FileChangeSet } from '@convesoft/mara/browser';
+  type MaraClient, type MemoryProjectInitParams, type FileChangeSet, type FactSnapshot,
+  type NamedQueryRequest, type QueryGateRequest, type QueryReportParams } from '@convesoft/mara/browser';
 
 // @mara checks REQ-SHARED-TYPESCRIPT-CLIENT
 // Compiled by standard strict TypeScript, then executed by real Chromium.
@@ -56,3 +57,25 @@ function negativeUsage(client: WasmClient) {
   client.checkChangeSetPreconditions({ change_set: {} });
 }
 void negativeUsage;
+
+function queryConsumerTypes(client: MaraClient<MemoryProjectInitParams>) {
+  const facts: FactSnapshot = { input: 'host', identity: 'run-1', coverage: [], records: [] };
+  const query: NamedQueryRequest = {
+    definition_files: ['queries.json'], definition: 'urn:fixture:query', selection: { ids: ['CAND-1'] },
+    parameters: [{ name: 'candidate', value: { type: 'text', value: 'CAND-1' } }],
+    max_rows: 100, limit: 20, fact_snapshots: [facts], mappings: [],
+  };
+  const gate: QueryGateRequest = {
+    definition_files: ['queries.json'], gate_file: 'gates.yaml', shape_files: ['gate.ttl'],
+    gate: 'ready', scope: { ids: ['CAND-1'] }, context: query.parameters, max_rows: 100,
+    fact_snapshots: [facts], mappings: [],
+  };
+  const report: QueryReportParams = { subject: { kind: 'gate', ...gate }, render: 'markdown' };
+  void client.queryExecute(query);
+  void client.queryView({ request: query, render: 'markdown' });
+  void client.queryGate(gate);
+  void client.queryReport(report);
+  void client.itemValidate({ id: 'CAND-1', fact_snapshots: [facts] });
+  void client.projectValidate({ fact_snapshots: [facts] });
+}
+void queryConsumerTypes;

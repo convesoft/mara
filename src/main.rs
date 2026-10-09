@@ -165,7 +165,7 @@ enum QueryCommand {
         /// Project-relative YAML file containing request-local gate definitions.
         #[arg(long, required = true)]
         gate_file: String,
-        /// Project-relative JSON named-query definitions (format 3).
+        /// Project-relative JSON named-query definitions (formats 3, 4 or 5).
         #[arg(long = "definition-file")]
         definition_files: Vec<String>,
         /// Project-relative Turtle SHACL sources referenced by gate conditions.
@@ -189,6 +189,12 @@ enum QueryCommand {
         /// NAME=typed JSON context, e.g. candidate='{"type":"item","value":"REQ-X"}'.
         #[arg(long = "param")]
         context: Vec<String>,
+        /// Host-supplied JSON fact snapshot file; repeatable.
+        #[arg(long = "fact-file")]
+        fact_files: Vec<String>,
+        /// Caller/project JSON typed lookup mapping file; repeatable.
+        #[arg(long = "mapping-file")]
+        mapping_files: Vec<String>,
         /// Observed solution-row budget for every query condition.
         #[arg(long, required = true)]
         max_rows: u32,
@@ -197,7 +203,7 @@ enum QueryCommand {
     Execute {
         /// Exact definition identity.
         definition: String,
-        /// Project-relative JSON named-definition files (format 3 or 4).
+        /// Project-relative JSON named-definition files (formats 3, 4 or 5).
         #[arg(long = "definition-file", required = true)]
         definition_files: Vec<String>,
         /// Exact item IDs/MIDs; aliases select one root and unknown references fail.
@@ -241,7 +247,7 @@ enum QueryCommand {
     View {
         /// Exact definition identity.
         definition: String,
-        /// Project-relative JSON named-definition files (format 3 or 4).
+        /// Project-relative JSON named-definition files (formats 3, 4 or 5).
         #[arg(long = "definition-file", required = true)]
         definition_files: Vec<String>,
         /// Exact item IDs/MIDs; aliases select one root and unknown references fail.
@@ -262,6 +268,12 @@ enum QueryCommand {
         /// NAME=typed JSON, e.g. state='{"type":"text","value":"draft"}'.
         #[arg(long = "param")]
         parameters: Vec<String>,
+        /// Host-supplied JSON fact snapshot file; repeatable.
+        #[arg(long = "fact-file")]
+        fact_files: Vec<String>,
+        /// Caller/project JSON typed lookup mapping file; repeatable.
+        #[arg(long = "mapping-file")]
+        mapping_files: Vec<String>,
         /// Observed solution-row budget, not page size or a traversal deadline.
         #[arg(long)]
         max_rows: u32,
@@ -291,7 +303,7 @@ enum QueryReportCommand {
         /// Project-relative YAML file containing request-local gate definitions.
         #[arg(long, required = true)]
         gate_file: String,
-        /// Project-relative JSON named-query definitions (format 3).
+        /// Project-relative JSON named-query definitions (formats 3, 4 or 5).
         #[arg(long = "definition-file")]
         definition_files: Vec<String>,
         /// Project-relative Turtle SHACL sources referenced by gate conditions.
@@ -315,6 +327,12 @@ enum QueryReportCommand {
         /// NAME=typed JSON context, e.g. candidate='{"type":"item","value":"REQ-X"}'.
         #[arg(long = "param")]
         context: Vec<String>,
+        /// Host-supplied JSON fact snapshot file; repeatable.
+        #[arg(long = "fact-file")]
+        fact_files: Vec<String>,
+        /// Caller/project JSON typed lookup mapping file; repeatable.
+        #[arg(long = "mapping-file")]
+        mapping_files: Vec<String>,
         /// Observed solution-row budget for every query condition.
         #[arg(long, required = true)]
         max_rows: u32,
@@ -324,6 +342,12 @@ enum QueryReportCommand {
         /// Exact item ID/MID; omit to report enabled rules project-wide.
         #[arg(long = "id")]
         id: Option<String>,
+        /// Host-supplied JSON fact snapshot file; repeatable.
+        #[arg(long = "fact-file")]
+        fact_files: Vec<String>,
+        /// Caller/project JSON typed lookup mapping file; repeatable.
+        #[arg(long = "mapping-file")]
+        mapping_files: Vec<String>,
     },
 }
 
@@ -386,6 +410,12 @@ enum ProjectCommand {
         /// Opaque next_cursor; repeat unchanged options until has_more is false. Restart after source/schema changes; empty strings are invalid.
         #[arg(long)]
         cursor: Option<String>,
+        /// Host-supplied JSON fact snapshot file for enabled query policy; repeatable.
+        #[arg(long = "fact-file")]
+        fact_files: Vec<String>,
+        /// Caller/project JSON lookup mapping for enabled query policy; repeatable.
+        #[arg(long = "mapping-file")]
+        mapping_files: Vec<String>,
     },
     /// Initialize the current or named directory without overwriting existing files.
     Init {
@@ -591,11 +621,15 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                     paths,
                     all,
                     context,
+                    fact_files,
+                    mapping_files,
                     max_rows,
                 },
         } => {
             let fields = parse_fields(fields)?;
             let context = parse_binding_parameters(context)?;
+            let fact_snapshots = read_typed_files(&fact_files, "fact snapshot")?;
+            let mappings = read_typed_files(&mapping_files, "lookup mapping")?;
             let result = operations.query_gate(mara::query_consumers::QueryGateRequest {
                 definition_files,
                 gate_file,
@@ -609,6 +643,8 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                     all,
                 },
                 context,
+                fact_snapshots,
+                mappings,
                 max_rows,
             });
             match result {
@@ -691,6 +727,8 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                     paths,
                     all,
                     parameters,
+                    fact_files,
+                    mapping_files,
                     max_rows,
                     limit,
                     cursor,
@@ -698,6 +736,8 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
         } => {
             let fields = parse_fields(fields)?;
             let parameters = parse_binding_parameters(parameters)?;
+            let fact_snapshots = read_typed_files(&fact_files, "fact snapshot")?;
+            let mappings = read_typed_files(&mapping_files, "lookup mapping")?;
             let params = mara::query_views::ViewParams {
                 request: mara::named_query::Request {
                     definition,
@@ -713,8 +753,8 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                     max_rows,
                     limit,
                     cursor,
-                    fact_snapshots: Vec::new(),
-                    mappings: Vec::new(),
+                    fact_snapshots,
+                    mappings,
                 },
                 render: matches!(format, OutputFormat::Human).then(|| "markdown".into()),
             };
@@ -752,12 +792,16 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                             paths,
                             all,
                             context,
+                            fact_files,
+                            mapping_files,
                             max_rows,
                         },
                 },
         } => {
             let fields = parse_fields(fields)?;
             let context = parse_binding_parameters(context)?;
+            let fact_snapshots = read_typed_files(&fact_files, "fact snapshot")?;
+            let mappings = read_typed_files(&mapping_files, "lookup mapping")?;
             match operations.query_report(
                 mara::query_views::ReportRequest::Gate(mara::query_consumers::QueryGateRequest {
                     definition_files,
@@ -772,6 +816,8 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                         all,
                     },
                     context,
+                    fact_snapshots,
+                    mappings,
                     max_rows,
                 }),
                 matches!(format, OutputFormat::Human).then(|| "markdown".into()),
@@ -797,9 +843,16 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
         Command::Query {
             command:
                 QueryCommand::Report {
-                    command: QueryReportCommand::Rules { id },
+                    command:
+                        QueryReportCommand::Rules {
+                            id,
+                            fact_files,
+                            mapping_files,
+                        },
                 },
         } => {
+            let fact_snapshots = read_typed_files(&fact_files, "fact snapshot")?;
+            let mappings = read_typed_files(&mapping_files, "lookup mapping")?;
             let target = mara::ValidationTarget {
                 kind: if id.is_some() {
                     mara::ValidationTargetKind::Item
@@ -809,7 +862,11 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                 id,
             };
             match operations.query_report(
-                mara::query_views::ReportRequest::DocumentationRules { target },
+                mara::query_views::ReportRequest::DocumentationRules {
+                    target,
+                    fact_snapshots,
+                    mappings,
+                },
                 matches!(format, OutputFormat::Human).then(|| "markdown".into()),
             ) {
                 Ok(report) => {
@@ -1288,8 +1345,12 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
         Command::Schema {
             command: SchemaCommand::Validate { limit, cursor },
         } => {
-            let result =
-                operations.schema_validate_with_options(&ValidationOptions { limit, cursor });
+            let result = operations.schema_validate_with_options(&ValidationOptions {
+                limit,
+                cursor,
+                fact_snapshots: vec![],
+                mappings: vec![],
+            });
             return emit_validation(format, result);
         }
         Command::Project {
@@ -1298,17 +1359,44 @@ fn run(cli: Cli) -> Result<bool, ClientError> {
                     paths,
                     limit,
                     cursor,
+                    fact_files,
+                    mapping_files,
                 },
         } => {
-            let result = operations
-                .project_validate_with_options(&paths, &ValidationOptions { limit, cursor });
+            let fact_snapshots = read_typed_files(&fact_files, "fact snapshot")?;
+            let mappings = read_typed_files(&mapping_files, "lookup mapping")?;
+            let result = operations.project_validate_with_options(
+                &paths,
+                &ValidationOptions {
+                    limit,
+                    cursor,
+                    fact_snapshots,
+                    mappings,
+                },
+            );
             return emit_validation(format, result);
         }
         Command::Item {
-            command: ItemCommand::Validate { id, limit, cursor },
+            command:
+                ItemCommand::Validate {
+                    id,
+                    limit,
+                    cursor,
+                    fact_files,
+                    mapping_files,
+                },
         } => {
-            let result =
-                operations.item_validate_with_options(&id, &ValidationOptions { limit, cursor });
+            let fact_snapshots = read_typed_files(&fact_files, "fact snapshot")?;
+            let mappings = read_typed_files(&mapping_files, "lookup mapping")?;
+            let result = operations.item_validate_with_options(
+                &id,
+                &ValidationOptions {
+                    limit,
+                    cursor,
+                    fact_snapshots,
+                    mappings,
+                },
+            );
             return emit_validation(format, result);
         }
         Command::Schema {
@@ -1544,6 +1632,12 @@ enum ItemCommand {
         /// Opaque next_cursor; repeat unchanged options until has_more is false. Restart after source/schema changes; empty strings are invalid.
         #[arg(long)]
         cursor: Option<String>,
+        /// Host-supplied JSON fact snapshot file for enabled query policy; repeatable.
+        #[arg(long = "fact-file")]
+        fact_files: Vec<String>,
+        /// Caller/project JSON lookup mapping for enabled query policy; repeatable.
+        #[arg(long = "mapping-file")]
+        mapping_files: Vec<String>,
     },
     /// Rename a human ID and supported typed relations/wiki mentions in items and narrative across a valid project, preserving the MID. Markdown links are preserved, not rewritten.
     Rename {

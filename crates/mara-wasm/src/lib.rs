@@ -40,6 +40,9 @@ pub const OPERATIONS: &[&str] = &[
     "query_backend_execute",
     "query_backend_policy",
     "query_execute",
+    "query_gate",
+    "query_view",
+    "query_report",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -163,11 +166,31 @@ impl MemoryWorkspace {
                     .query_backend_policy(parse(p)?)
                     .map_err(argument)?,
             ),
-            "query_execute" => value(
+            "query_execute" => value(self.engine.query_execute(parse(p)?).map_err(query_error)?),
+            "query_gate" => value(
                 self.engine
-                    .query_execute(parse(p)?)
+                    .query_gate(parse(p)?)
                     .map_err(|error| envelope(&error.code, error.message))?,
             ),
+            "query_view" => {
+                let p: QueryView = parse(p)?;
+                value(
+                    self.engine
+                        .query_view(query_views::ViewParams {
+                            request: p.request,
+                            render: p.render,
+                        })
+                        .map_err(query_error)?,
+                )
+            }
+            "query_report" => {
+                let p: QueryReport = parse(p)?;
+                value(
+                    self.engine
+                        .query_report(p.subject, p.render)
+                        .map_err(|error| envelope(&error.code, error.message))?,
+                )
+            }
             "item_list" => value(self.engine.item_list(parse(p)?).map_err(argument)?),
             "search" => value(self.engine.search(parse(p)?).map_err(argument)?),
             "get" => value(self.engine.get(parse(p)?).map_err(argument)?),
@@ -205,6 +228,8 @@ impl MemoryWorkspace {
                 let options = ValidationOptions {
                     limit: p.limit,
                     cursor: p.cursor,
+                    fact_snapshots: p.fact_snapshots,
+                    mappings: p.mappings,
                 };
                 let result = match kind {
                     ValidationTargetKind::Schema => {
@@ -423,6 +448,9 @@ fn value(value: impl Serialize) -> Result<Value, Value> {
 pub fn envelope(code: &str, message: impl ToString) -> Value {
     json!({"format_version":1, "error":{"code":code, "message":message.to_string()}})
 }
+fn query_error(error: named_query::Error) -> Value {
+    json!({"format_version":1,"error":{"code":error.code,"message":error.message,"source":error.source}})
+}
 fn argument(message: impl ToString) -> Value {
     envelope("invalid_argument", message)
 }
@@ -475,6 +503,20 @@ struct Rename {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct QueryView {
+    request: named_query::Request,
+    #[serde(default)]
+    render: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueryReport {
+    subject: mara_engine::query_views::ReportRequest,
+    #[serde(default)]
+    render: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Validate {
     #[serde(default)]
     id: Option<String>,
@@ -484,6 +526,10 @@ struct Validate {
     limit: Option<usize>,
     #[serde(default)]
     cursor: Option<String>,
+    #[serde(default)]
+    fact_snapshots: Vec<mara_engine::named_query::FactSnapshot>,
+    #[serde(default)]
+    mappings: Vec<mara_engine::named_query::TypedMapping>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

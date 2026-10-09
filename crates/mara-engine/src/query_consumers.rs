@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value as JsonValue, json};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -59,10 +60,29 @@ pub struct QueryPolicyCheck {
     pub source: DiagnosticLocation,
 }
 
+fn policy_input_identity(
+    engine: &crate::SourceEngine,
+    target: &ValidationTarget,
+    fact_snapshots: &[named_query::FactSnapshot],
+    mappings: &[named_query::TypedMapping],
+) -> String {
+    let bytes = serde_json::to_vec(&(
+        "query-policy-input-v1",
+        engine.source_fingerprint(),
+        target,
+        fact_snapshots,
+        mappings,
+    ))
+    .unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QueryGateRequest {
-    /// Explicit project-relative format-3 named-query definition files.
+    /// Explicit project-relative named-query definition files (formats 3, 4 or 5).
     pub definition_files: Vec<String>,
     /// Request-local YAML gate definitions; not enabled project policy.
     pub gate_file: String,
@@ -75,6 +95,12 @@ pub struct QueryGateRequest {
     /// Typed context bindings are passed only to conditions that name them.
     #[serde(default)]
     pub context: Vec<named_query::BindingParameter>,
+    /// Host-supplied typed fact snapshots passed unchanged to named conditions.
+    #[serde(default)]
+    pub fact_snapshots: Vec<named_query::FactSnapshot>,
+    /// Caller/project lookup mappings passed unchanged to named conditions.
+    #[serde(default)]
+    pub mappings: Vec<named_query::TypedMapping>,
     /// Observed solution-row budget for every named condition query.
     pub max_rows: u32,
 }
@@ -194,26 +220,62 @@ impl std::fmt::Display for QueryConsumerError {
 impl std::error::Error for QueryConsumerError {}
 
 impl crate::SourceEngine {
-    /// Evaluate enabled query-backed invariants from the project's explicit policy inputs.
+    /// Evaluate enabled query-backed invariants using the policy's declared default inputs.
     pub fn query_policy_validation(
         &self,
         target: ValidationTarget,
     ) -> (Option<QueryPolicyValidation>, Vec<ValidationDiagnostic>) {
+        self.query_policy_validation_with_inputs(target, &[], &[])
+            .unwrap_or_else(|error| {
+                policy_unavailable(None, "", error.to_string(), ValidationScope::Project)
+            })
+    }
+
+    /// Evaluate enabled query-backed invariants from explicit host-supplied facts and mappings.
+    pub fn query_policy_validation_with_inputs(
+        &self,
+        target: ValidationTarget,
+        fact_snapshots: &[named_query::FactSnapshot],
+        mappings: &[named_query::TypedMapping],
+    ) -> Result<(Option<QueryPolicyValidation>, Vec<ValidationDiagnostic>), QueryConsumerError>
+    {
+        if target.kind == ValidationTargetKind::Schema
+            && (!fact_snapshots.is_empty() || !mappings.is_empty())
+        {
+            return Err(QueryConsumerError::argument(
+                "query facts and mappings apply only to project or item policy evaluation",
+            ));
+        }
         let (project, schema) = match self.strict_project() {
             Ok(value) => value,
             Err(error) => {
-                return policy_unavailable(
+                return Ok(policy_unavailable(
                     None,
                     "",
                     format!("project inputs unavailable: {error}"),
                     ValidationScope::Project,
-                );
+                ));
             }
         };
         let Some(config) = project.query_policy() else {
-            return (None, Vec::new());
+            if !fact_snapshots.is_empty() || !mappings.is_empty() {
+                return Err(QueryConsumerError::argument(
+                    "query facts and mappings require an enabled query policy",
+                ));
+            }
+            return Ok((None, Vec::new()));
         };
-        self.evaluate_query_policies(&schema, config, target)
+        let mut result = self.evaluate_query_policies(
+            &schema,
+            config,
+            target.clone(),
+            fact_snapshots,
+            mappings,
+        )?;
+        if let Some(report) = &mut result.0 {
+            report.input_identity = policy_input_identity(self, &target, fact_snapshots, mappings);
+        }
+        Ok(result)
     }
 
     fn evaluate_query_policies(
@@ -221,7 +283,10 @@ impl crate::SourceEngine {
         schema: &Schema,
         config: &QueryPolicyConfig,
         target: ValidationTarget,
-    ) -> (Option<QueryPolicyValidation>, Vec<ValidationDiagnostic>) {
+        fact_snapshots: &[named_query::FactSnapshot],
+        mappings: &[named_query::TypedMapping],
+    ) -> Result<(Option<QueryPolicyValidation>, Vec<ValidationDiagnostic>), QueryConsumerError>
+    {
         let mut diagnostics = Vec::new();
         let invariants = match load_invariants(self, config) {
             Ok(invariants) => invariants,
@@ -238,7 +303,7 @@ impl crate::SourceEngine {
                     ValidationScope::Schema,
                 );
                 diagnostics.extend(errors);
-                return (report, diagnostics);
+                return Ok((report, diagnostics));
             }
         };
         let definitions = match self.validated_query_definitions(&config.definition_files) {
@@ -256,9 +321,58 @@ impl crate::SourceEngine {
                     ValidationScope::Schema,
                 );
                 diagnostics.append(&mut errors);
-                return (report, diagnostics);
+                return Ok((report, diagnostics));
             }
         };
+        if target.kind != ValidationTargetKind::Schema {
+            if let Err(error) =
+                self.preflight_query_inputs(&config.definition_files, fact_snapshots, mappings)
+            {
+                if error.code == "invalid_argument" {
+                    return Err(QueryConsumerError {
+                        code: error.code,
+                        message: error.message,
+                    });
+                }
+                if error.code == "invalid_definition" {
+                    diagnostics.push(invalid_policy(
+                        error
+                            .source
+                            .as_deref()
+                            .map(PathBuf::from)
+                            .map(|path| DiagnosticLocation {
+                                path: Some(path),
+                                ..Default::default()
+                            })
+                            .unwrap_or_default(),
+                        "query-policy",
+                        error.message,
+                    ));
+                    return Ok((
+                        Some(QueryPolicyValidation {
+                            format_version: 1,
+                            input_identity: self.source_fingerprint().into(),
+                            evaluation_complete: false,
+                            checks: vec![],
+                        }),
+                        diagnostics,
+                    ));
+                }
+                let (report, mut errors) = policy_unavailable(
+                    Some(QueryPolicyValidation {
+                        format_version: 1,
+                        input_identity: self.source_fingerprint().into(),
+                        evaluation_complete: false,
+                        checks: vec![],
+                    }),
+                    error.source.as_deref().unwrap_or(""),
+                    error.message,
+                    validation_scope(target.kind),
+                );
+                diagnostics.append(&mut errors);
+                return Ok((report, diagnostics));
+            }
+        }
         let shape_paths = config
             .shape_files
             .iter()
@@ -282,7 +396,7 @@ impl crate::SourceEngine {
                     ValidationScope::Schema,
                 );
                 diagnostics.append(&mut errors);
-                return (report, diagnostics);
+                return Ok((report, diagnostics));
             }
         };
         let ir = match crate::query_backend::compile_shape_files(self.files(), &shape_paths) {
@@ -303,7 +417,7 @@ impl crate::SourceEngine {
                     ValidationScope::Schema,
                 );
                 diagnostics.append(&mut errors);
-                return (report, diagnostics);
+                return Ok((report, diagnostics));
             }
         };
         if target.kind == ValidationTargetKind::Schema {
@@ -370,7 +484,7 @@ impl crate::SourceEngine {
                     source: source.clone(),
                 });
             }
-            return (
+            return Ok((
                 Some(QueryPolicyValidation {
                     format_version: 1,
                     input_identity: self.source_fingerprint().into(),
@@ -378,7 +492,7 @@ impl crate::SourceEngine {
                     checks,
                 }),
                 diagnostics,
-            );
+            ));
         }
         let corpus = match self.corpus() {
             Ok((_, _, corpus)) => corpus,
@@ -395,7 +509,7 @@ impl crate::SourceEngine {
                     ValidationScope::Project,
                 );
                 diagnostics.append(&mut errors);
-                return (report, diagnostics);
+                return Ok((report, diagnostics));
             }
         };
         let source_diagnostics = crate::validate_corpus(&corpus, schema);
@@ -414,7 +528,7 @@ impl crate::SourceEngine {
                 ValidationScope::Project,
             );
             diagnostics.append(&mut errors);
-            return (next, diagnostics);
+            return Ok((next, diagnostics));
         }
 
         for (invariant, source) in invariants {
@@ -540,8 +654,8 @@ impl crate::SourceEngine {
                 max_rows: config.max_rows,
                 limit: 100,
                 cursor: None,
-                fact_snapshots: vec![],
-                mappings: vec![],
+                fact_snapshots: fact_snapshots.to_vec(),
+                mappings: mappings.to_vec(),
             };
             let result = match collect_named_query(self, request) {
                 Ok(result) => result,
@@ -682,7 +796,7 @@ impl crate::SourceEngine {
         report.evaluation_complete &= !diagnostics
             .iter()
             .any(|d| d.code == DiagnosticCode::EvaluationUnavailable);
-        (Some(report), diagnostics)
+        Ok((Some(report), diagnostics))
     }
 
     /// Evaluate a request-local gate. It returns conditions only and cannot mutate validation or execute actions.
@@ -761,15 +875,30 @@ impl crate::SourceEngine {
                 "duplicate normalized gate SHACL source",
             ));
         }
-        let definitions = if request.definition_files.is_empty() {
-            BTreeMap::new()
+        let preflight = if request.definition_files.is_empty() {
+            if !request.fact_snapshots.is_empty() || !request.mappings.is_empty() {
+                return Err(QueryConsumerError::argument(
+                    "fact snapshots and mappings require an explicit definition set",
+                ));
+            }
+            None
         } else {
-            self.validated_query_definitions(&request.definition_files)
-                .map_err(|e| QueryConsumerError {
-                    code: e.code,
-                    message: e.message,
-                })?
+            Some(
+                self.preflight_query_inputs(
+                    &request.definition_files,
+                    &request.fact_snapshots,
+                    &request.mappings,
+                )
+                .map_err(|error| QueryConsumerError {
+                    code: error.code,
+                    message: error.message,
+                })?,
+            )
         };
+        let definitions = preflight
+            .as_ref()
+            .map(|inputs| inputs.definitions.clone())
+            .unwrap_or_default();
         let context = unique_parameters(&request.context)?;
         let mut used_context = BTreeSet::new();
         let scope = select_scope_roots(self, &request.scope)?;
@@ -780,6 +909,16 @@ impl crate::SourceEngine {
         let mut condition_root_ids = Vec::new();
         let mut unavailable_reasons = scope.unavailable_reason.into_iter().collect::<Vec<_>>();
         let mut complete = scope_complete;
+        if scope_roots.is_empty()
+            && let Some(preflight) = &preflight
+        {
+            for condition in &gate.conditions {
+                if let Some(reason) = preflight.unavailable_for(&condition.definition) {
+                    complete = false;
+                    unavailable_reasons.push(reason);
+                }
+            }
+        }
         let mut identity_parts = vec![
             self.source_fingerprint().into(),
             request.gate_file.clone(),
@@ -897,8 +1036,8 @@ impl crate::SourceEngine {
                 max_rows: request.max_rows,
                 limit: 100,
                 cursor: None,
-                fact_snapshots: vec![],
-                mappings: vec![],
+                fact_snapshots: request.fact_snapshots.clone(),
+                mappings: request.mappings.clone(),
             };
             let collected = collect_named_query(self, query).map_err(|e| QueryConsumerError {
                 code: e.code,
@@ -1060,6 +1199,8 @@ impl crate::SourceEngine {
             &identity_parts,
             &request.scope,
             &request.context,
+            &request.fact_snapshots,
+            &request.mappings,
             request.max_rows,
         ))
         .unwrap_or_default();
@@ -1444,13 +1585,20 @@ fn select_scope_roots(
 pub fn append_query_policy_result(
     result: &mut ValidationResult,
     source_engine: &crate::SourceEngine,
-) {
-    let (policy, diagnostics) = source_engine.query_policy_validation(result.target.clone());
+    fact_snapshots: &[named_query::FactSnapshot],
+    mappings: &[named_query::TypedMapping],
+) -> Result<(), QueryConsumerError> {
+    let (policy, diagnostics) = source_engine.query_policy_validation_with_inputs(
+        result.target.clone(),
+        fact_snapshots,
+        mappings,
+    )?;
     if let Some(policy) = &policy {
         result.evaluation_complete &= policy.evaluation_complete;
     }
     result.query_policies = policy;
     result.diagnostics.extend(diagnostics);
+    Ok(())
 }
 
 pub fn append_query_policy_unavailable(result: &mut ValidationResult, message: impl Into<String>) {

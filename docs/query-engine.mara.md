@@ -36,12 +36,14 @@ orchestrator. No UI, new host platform or provider plugin framework is included.
 First specify the semantic input/result contracts, then prove the backend and
 SHACL integration before fixing persisted syntax or broadly refactoring the
 engine. The semantic contracts below fix observable behavior from the capability
-contracts and the user's contract-authoring answers. The bounded proof now
-selects standard SELECT, a SHACL result bridge and the actual proof formats/
-operations/budget in [[DES-QUERY-BACKEND-PROOF]]. Complete release interfaces and
-semantic integration remain later work; illustrative YAML or proposed commands
-outside that design do not select them. Do not build a custom query DSL or
-framework without explicit approval.
+contracts and the user's contract-authoring answers. The bounded proof selected
+standard SELECT, a SHACL result bridge and the proof formats/operations/budget in
+[[DES-QUERY-BACKEND-PROOF]]. The assigned implementation now carries that
+selection through the named-query consumers and selected host interfaces; the
+complete semantic catalog and integrated acceptance evidence remain separate.
+Illustrative YAML or proposed commands outside the design do not select
+interfaces. Do not build a custom query DSL or framework without explicit
+approval.
 
 The user subsequently approved [[DES-QUERY-NAMED-ADAPTER]] for the selected
 named-query delivery. Its explicit input declarations, runtime output checks and
@@ -322,15 +324,15 @@ success. [[DES-QUERY-BACKEND-PROOF]] selects the bounded proof's format/operatio
 identity encoding. Complete definition-set, input and continuation encodings
 must implement this contract during the later full-engine work.
 
-### Initial raw named operation
+### Named-query operation
 
-Rust `SourceEngine::query_execute(named_query::Request)` and embedded
-`NativeRuntime::query_execute` share standard SELECT execution. CLI:
+`SourceEngine::query_execute(named_query::Request)` is shared by embedded and
+daemon `NativeRuntime`, CLI/MCP, the Node addon, daemon HTTP, the shared
+TypeScript client and worker/WASM. CLI example:
 `mara --execution-mode direct --format json query execute ID --definition-file queries.json --id ROOT --max-rows 100 --limit 20`.
-MCP `query_execute` takes the same request plus optional project selection.
-Direct/auto clients use embedded execution for this operation; explicit
-daemon-required returns `unsupported_capability`. Daemon and final JS/browser
-adapters remain later surface work, not completed host parity.
+MCP `query_execute` accepts the same request plus optional project selection.
+Every adapter exposes its backend's persistence and indexing capabilities; it
+does not invent missing code indexes or fetch external facts.
 
 #### Definition formats 3, 4 and 5
 
@@ -338,8 +340,9 @@ Format 5 adds host-supplied external fact inputs, typed lookup mappings and
 definition-selected precedence aggregation. Its concrete declarations, request
 inputs, coverage/missing semantics, derived outputs and implemented Rust/CLI/MCP
 and browser-worker slice are specified in [[DES-QUERY-FACT-COMPUTATION]].
-Formats 3 and 4 remain the slices consumed by the policy and gate operations.
-The format-4 rules below also apply to format 5.
+Formats 3, 4 and 5 are accepted by raw queries, documentation-rule
+validation, gates, views and reports on the selected adapters. The format-4
+composition rules below also apply to format 5.
 
 Project-relative JSON files contain `{format_version:3,definitions:[...]}`, `{format_version:4,definitions:[...]}` or `{format_version:5,definitions:[...]}`. Format 3 remains the single-query form;
 format 4 adds only explicit named dependencies; format 5 adds the external-fact,
@@ -465,10 +468,11 @@ unavailable. Documentation's MID requirement and graph policies are unchanged.
 Definitions/arguments fail with source-linked invalid_definition/invalid_argument.
 Missing definition/schema/document prerequisites and backend/row-budget failure
 are unavailable/incomplete, not empty success. Native failures to construct a
-snapshot use input_unavailable. Named document snapshots do not yet attach code
-indexes or external fact snapshots. A signature requiring code-index facts
-reports unavailable; durable external-address edges remain typed factual values.
-This is not a permanent code/type exclusion or completion of external-input work.
+snapshot use input_unavailable. Hosts accept caller-supplied, typed external
+fact snapshots and lookup mappings; they do not fetch or persist them. A
+signature requiring unavailable code-index facts reports incomplete rather
+than returning empty success. Browser/WASM does not add native code indexing;
+durable external-address edges remain typed factual values.
 
 Summary selected_roots/known_bindings cover the logical result; binding_count and
 root counts are null when incomplete. Delivery is at most limit records and
@@ -581,14 +585,14 @@ not ordinary false facts or not_applicable outcomes.
 
 ### Implemented query-consumer slice
 
-The current native Rust/CLI/MCP slice reuses named-query format 3 and the existing
-projected-result SHACL bridge. It does not add traversal or validation behavior
-to the engineering rules or template. `SourceEngine` and `NativeRuntime` expose
-request-local `query_gate`; the CLI command is `query gate <gate>` and MCP tool
-is `query_gate`. Daemon-required gate execution is explicitly unsupported here.
-The complete daemon/Node/HTTP/TypeScript/WASM rollout remains later release
-work; native view and report rendering are implemented in the view/report slice
-below.
+The shared consumers reuse named-query formats 3, 4 and 5 and the existing
+projected-result SHACL bridge. They do not add traversal or validation behavior
+to engineering rules or templates. `SourceEngine`, `NativeRuntime` and
+`NativeClient` expose documentation-rule validation, request-local gates,
+factual views and evaluation reports. The same operations are wired through
+CLI/MCP, daemon IPC/HTTP, Node, the shared TypeScript client and worker/WASM.
+Caller-supplied facts and mappings flow through evaluation and input identity;
+missing required input remains unavailable, including on an empty scope.
 
 Project configuration enables validation invariants with:
 
@@ -645,11 +649,14 @@ known failed condition records; absent unavailable conditions, a known failure
 makes it failed. Gate outcomes are condition reports only: they neither change
 `ValidationResult.valid` nor authorize or execute an action.
 
-`query gate` accepts the gate identity, `--gate-file`, repeatable
-`--definition-file` and `--shape-file`, explicit root selectors (`--all`,
-`--id`, `--flavour`, `--field KEY=VALUE`, `--path`), typed `--param NAME=JSON`
-and `--max-rows`. MCP accepts the same request as `query_gate`; conditions that
-fail are successful result data, not tool errors. Named query definitions,
+`query gate` and `query report gate` accept the gate identity, `--gate-file`,
+repeatable `--definition-file` and `--shape-file`, explicit root selectors
+(`--all`, `--id`, `--flavour`, `--field KEY=VALUE`, `--path`), typed
+`--param NAME=JSON`, repeatable `--fact-file`/`--mapping-file` and
+`--max-rows`. MCP `query_gate` accepts the corresponding typed snapshots and
+mappings; conditions that fail are successful result data, not tool errors.
+`item_validate`, `project_validate` and the documentation-rule report accept
+the same host inputs. Named query definitions,
 gate YAML, policy YAML and SHACL Turtle bytes participate in the source identity.
 Blank-node labels remain local to each supplied Turtle file when shapes are
 combined; equal authored labels in separate files never merge constraints. The
@@ -658,7 +665,8 @@ focused cross-consumer regression is
 It proves one complete empty fact result remains informational, fails an enabled
 error/warning invariant as authored, fails a separately requested gate, retains
 a known gate failure beside an unavailable condition, and applies both explicit
-empty-gate cases. It does not claim the deferred hosts or renderers.
+empty-gate cases. The companion host tests exercise the same supplied inputs through native
+daemon IPC and HTTP, Node, CLI/MCP and browser worker paths.
 
 Reports identify the rule/gate, definition and obligation sources, selected root,
 applicability/severity, candidate/context identity, each condition outcome and
@@ -687,16 +695,16 @@ and completeness; they do not interpret policy independently.
 
 ### Implemented view and report slice
 
-The current native Rust/CLI/MCP slice implements factual views and evaluation
-reports over the same composed results; renderers are pure and never re-run a
-traversal or reinterpret a policy outcome. `mara-engine`'s `query_views` module
-defines both formats; `SourceEngine::query_view` composes one named-query page
-and `SourceEngine::query_report` composes a gate or the enabled documentation
-rules. `NativeRuntime`/`NativeClient` expose both. The CLI commands are
-`query view <definition>`, `query report gate <gate>` and `query report rules`;
-the MCP tools are `query_view` and `query_report` (`subject.kind` is `gate` or
-`documentation_rules`). Both accept `render: "markdown"`, which the CLI uses for
-human output; `--format json` returns the structured format.
+Factual views and evaluation reports consume the same composed results;
+renderers are pure and never re-run a traversal or reinterpret a policy
+outcome. `mara-engine`'s `query_views` module defines both formats;
+`SourceEngine::query_view` composes one named-query page and
+`SourceEngine::query_report` composes a gate or enabled documentation rules.
+`NativeRuntime`/`NativeClient` expose both through CLI/MCP, daemon IPC/HTTP,
+Node, the shared TypeScript client and worker/WASM. MCP uses `query_view` and
+`query_report` (`subject.kind` is `gate` or `documentation_rules`). Both accept
+`render: "markdown"`; CLI human output uses the same renderer and `--format json`
+returns the structured format.
 
 Factual view format 1 (`kind: "query_view"`) preserves the page's `definition`,
 `definition_file`, `input_identity`, `evaluation_complete`, `unavailable_reason`,
@@ -738,17 +746,13 @@ mara query report gate require-support --gate-file gate.yaml \
 mara query report rules
 ```
 
-The regression `tests/named_query.rs::factual_view_preserves_facts_and_empty_roots_across_rust_cli_and_mcp`
-and `tests/named_query.rs::evaluation_reports_expose_gate_and_rule_outcomes_across_rust_cli_and_mcp`
-exercise these real Rust/CLI/MCP paths. They do not claim daemon, Node, HTTP,
-TypeScript or WASM parity.
-
-Real native/browser and installed-package verification belongs to
-[[VER-REUSABLE-QUERY-ENGINE]] and the selected final supported-host gates.
-This contract does not claim those paths ran. [[DES-QUERY-BACKEND-PROOF]] selects the backend and actual proof formats/
-operations, and demonstrates the SHACL result bridge. Daemon/Node/HTTP/TypeScript/WASM
-view/report parity and broader host coverage still require later integrated
-implementation.
+The consumer regressions exercise real Rust/CLI/MCP paths, with companion
+fixtures for native daemon IPC/HTTP, installed Node and browser worker/WASM.
+`tests/node/usage.mts` compile-checks the TypeScript request/result surface.
+[[VER-REUSABLE-QUERY-ENGINE]] and the final supported-host gates own the
+matching-artifact and integrated workflow evidence; source or test declarations
+alone do not establish a pass. [[DES-QUERY-BACKEND-PROOF]] selects the backend
+and actual proof formats/operations, and demonstrates the SHACL result bridge.
 :::
 
 :::mara decision ADR-QUERY-EXACT-RESOLUTION
@@ -869,11 +873,13 @@ and reject continuation after relevant definition/source/parameter changes.
 Hidden derivation reconstruction and full static type/dependency inference are
 not acceptance gates. Final formats must state this support boundary.
 
-The broader catalog, factual-view/report and host stages stay scheduled
-separately; raw-stage success does not certify them. The focused invariant/gate
-slice and its evidence are recorded below. Their named-query assertions use this
-adapter boundary, not the deferred automatic guarantees. Preserve actual prior failing
-reviews; only revised, executed checks and required review establish acceptance.
+Raw-stage success does not certify the broader semantic catalog or consumer
+parity. The assigned consumer/host slice carries the adapter boundary through
+policy, gates, views, reports and the selected transports; its integration proof
+remains part of [[VER-REUSABLE-QUERY-ENGINE]]. These assertions do not adopt the
+deferred automatic inference or hidden-provenance guarantees. Preserve actual
+prior failing reviews; only revised, executed checks and required review establish
+acceptance.
 
 ### Discriminating fixtures
 
@@ -1004,15 +1010,15 @@ it does not substitute for the later complete catalog. No custom DSL/framework
 is authorized by this verification.
 
 The complete fixture catalog and selected host parity remain integrated release
-checks. This scoped implementation adds the focused native Rust/CLI/MCP consumer
-regression documented above and the native Rust/CLI/MCP factual-view and
-gate/documentation-rule report regressions in [[DES-QUERY-CONSUMER-CONTRACT]]; it
-is not evidence for daemon, Node, HTTP, TypeScript, WASM or installed-package
-parity. Use the existing supported-host gates, with Apple Silicon execution at the final host
-gate. Record actual tested revisions, artifacts, environments, commands, results
-and limitations. A fixture demonstration is not adoption of the engineering
-template, authentication of reported external evidence or proof of external
-execution.
+checks. This implementation adds focused native Rust/CLI/MCP consumer tests,
+real daemon IPC/HTTP tests, installed Node operation tests, compile-checked
+TypeScript usage and browser worker/WASM tests. These tests exercise the selected
+paths but do not replace the matching-artifact integrated proof in
+[[VER-REUSABLE-QUERY-ENGINE]]. Use the existing supported-host gates, with Apple
+Silicon execution at the final host gate. Record actual tested revisions,
+artifacts, environments, commands, results and limitations. A fixture
+demonstration is not adoption of the engineering template, authentication of
+reported external evidence or proof of external execution.
 :::
 
 :::mara design DES-QUERY-BACKEND-PROOF
@@ -1038,7 +1044,7 @@ SPARQL is the selected standard query language, not a custom traversal DSL. Late
 
 The portable proof uses JSON definition format 1: exact nonempty id, select text, columns naming tuple bindings and support_columns naming canonical edge support. ?root is the explicit invocation key, not a tuple column. Definition sources are supplied snapshot files; no imports/fetches or ontology in Rust. This metadata declares a standard SELECT signature; it is not an expression language.
 
-Public embedded Rust methods and worker operations are query_backend_execute and query_backend_policy. The former takes definition_file, explicit roots and max_rows in 1..=4294967295 (u32 on both hosts); larger JSON integers are rejected before execution. The latter adds shape_file and exact shape IRI. Unknown explicit IDs fail; ID/MID aliases select one root. Unknown request fields and unsupported profile constructs fail. These proof entry points do not replace the later complete definition-set loader or CLI/MCP/Node/HTTP/typed-client surfaces.
+Public embedded Rust methods and worker operations are query_backend_execute and query_backend_policy. The former takes definition_file, explicit roots and max_rows in 1..=4294967295 (u32 on both hosts); larger JSON integers are rejected before execution. The latter adds shape_file and exact shape IRI. Unknown explicit IDs fail; ID/MID aliases select one root. Unknown request fields and unsupported profile constructs fail. These bounded proof entry points remain distinct from the complete definition-set loader and consumer APIs exposed through CLI/MCP, Node, HTTP, the typed client and worker/WASM.
 
 Factual result format 1 contains definition/file, SHA-256 input_identity, evaluation_complete, unavailable_reason and ordered root records. Each root has its item identity/source and a bindings array, empty when no matches. Tuple columns contain item identity/source, IRI or RDF literal (lexical value, datatype, optional language); an optional missing value is null, not an empty literal. An all-null projection of a real supported match remains one distinct tuple with combined edge support; only a row with neither projected values nor support is treated as unmatched. Literal datatypes distinguish integer, double, boolean and text; lifecycle is ordinary schema data.
 
@@ -1123,7 +1129,12 @@ Keep deterministic root/tuple/support ordering, distinct typed bindings, logical
 
 ### Selected workflow and limits
 
-Deliver real shared Rust and embedded CLI/MCP raw execution first. Composition/catalog, policy/gate/view rollout and final daemon/JavaScript/browser surfaces remain separate delivery stages, not additions to this slice or waived release commitments. Hosts retain fact acquisition and native code discovery.
+The initial raw-query stage preceded this assigned extension. This slice carries
+format-5 supplied facts/composition through documentation policy, gates, factual
+views and reports on the selected Rust, CLI/MCP, daemon, Node/TypeScript and
+browser surfaces. Hosts retain fact acquisition; browser/WASM does not promise
+native code indexing. The broader semantic catalog, full static inference and
+hidden-derivation reconstruction remain outside this slice.
 
 The user separately accepted current transitive-path preparation cost for this slice; optimization is not an acceptance prerequisite and no latency/workload guarantee is added. Scope selection is not evidence that the paused candidate conforms. Verify the real selected workflow under [[VER-REUSABLE-QUERY-ENGINE]] before acceptance.
 :::
@@ -1229,14 +1240,13 @@ Nothing is fetched, executed, authenticated or persisted.
 
 ### Implemented slice
 
-`SourceEngine` and `NativeRuntime::query_execute` implement format 5 through
-Rust, CLI (`--fact-file`, `--mapping-file`) and MCP (`query_execute`).
-`mara-wasm` exposes the same `query_execute` operation for the real browser
-worker. Fixture inputs are owned by `tests/fixtures/query-facts/snapshot.json`;
-focused checks live in `crates/mara-engine/tests/query_facts.rs` (coverage,
-precedence, mappings, errors, continuation) and `tests/query_facts.rs` (real
-portable, embedded, CLI and MCP parity), with browser comparison in
-`tests/browser/query-facts.spec.mjs`. The complete policy/gate/view consumers,
-daemon/Node/HTTP/TypeScript surfaces and final host rollout remain separate
-delivery work; this design does not claim them.
+`SourceEngine` and `NativeRuntime` implement format 5 and pass supplied facts and
+mappings through raw queries, enabled policy validation, gates, views and
+reports. CLI/MCP, daemon IPC/HTTP, Node, the shared TypeScript client and
+worker/WASM expose the selected operations. The fixture is
+`tests/fixtures/query-facts/snapshot.json`; Rust tests cover fact semantics,
+consumers and transports; installed Node/TypeScript and Chromium tests cover the
+actual adapters. [[VER-REUSABLE-QUERY-ENGINE]] still requires the integrated
+matching-artifact proof and final supported-host evidence; this design records
+capability, not a test pass.
 :::

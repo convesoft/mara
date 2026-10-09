@@ -7,6 +7,33 @@ import { once } from 'node:events';
 
 const exec = promisify(execFile);
 
+async function installQueryFactsProject(root) {
+  const snapshot = JSON.parse(await readFile(path.resolve('tests/fixtures/query-facts/snapshot.json'), 'utf8'));
+  for (const file of snapshot.files) {
+    const target = path.join(root, file.path);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, file.content);
+  }
+  const project = path.join(root, '.mara/project.toml');
+  await writeFile(project, (await readFile(project, 'utf8')) + `\n[query_policy]\nformat_version = 1\nfiles = ["facts-invariants.yaml"]\ndefinition_files = ["facts.json"]\nshape_files = ["facts-present.ttl"]\nmax_rows = 100\n`);
+  await writeFile(path.join(root, 'facts-invariants.yaml'), `format_version: 1\ninvariants:\n  - id: supplied-composed-facts\n    definition: urn:fixture:facts:composed\n    shape: urn:fixture:shape:has-fact-row\n    flavours: [candidate]\n    severity: error\n    parameters:\n      - name: candidate\n        value: {type: text, value: CAND-C}\n      - name: context\n        value: {type: text, value: release}\n`);
+  await writeFile(path.join(root, 'facts-gates.yaml'), `format_version: 1\ngates:\n  - id: require-composed-facts\n    empty_roots: not_applicable\n    empty_required: failed\n    conditions:\n      - id: fact-row\n        definition: urn:fixture:facts:composed\n        shape_file: facts-present.ttl\n        shape: urn:fixture:shape:has-fact-row\n        severity: error\n        context_parameters: [candidate, context]\n`);
+  await writeFile(path.join(root, 'facts-present.ttl'), `@prefix sh: <http://www.w3.org/ns/shacl#>.\n<urn:fixture:shape:has-fact-row> a sh:NodeShape; sh:property [ sh:path <urn:mara:query:match>; sh:minCount 1 ].\n`);
+}
+
+function queryFacts() {
+  const key = verification => ({
+    verification: { type: 'item', value: verification },
+    candidate: { type: 'text', value: 'CAND-C' }, context: { type: 'text', value: 'release' },
+  });
+  return {
+    input: 'reported', identity: 'reported-run', coverage: ['VER-V1', 'VER-V2', 'VER-V3'].map(key),
+    records: [['VER-V1', 'pass'], ['VER-V2', 'pass'], ['VER-V3', 'fail']].map(([verification, state]) => ({
+      keys: key(verification), fields: { state: { type: 'text', value: state } },
+    })),
+  };
+}
+
 // @mara checks REQ-LOCAL-DAEMON-HTTP
 // @mara checks REQ-SHARED-TYPESCRIPT-CLIENT
 // @mara checks REQ-EXPLICIT-BACKEND-CAPABILITIES
@@ -18,8 +45,11 @@ test('installed HTTP ESM facade uses an authorized real daemon without replay or
   const fixture = await mkdtemp(path.join(process.env.TMPDIR, 'http-browser-'));
   const runtime = await mkdtemp(path.join(process.env.MARA_TEST_RUNTIME_DIR, 'h-'));
   const project = path.join(fixture, 'selected');
+  const queryProject = path.join(fixture, 'query-facts');
   const other = path.join(fixture, 'forbidden');
   await mkdir(other);
+  await mkdir(queryProject);
+  await installQueryFactsProject(queryProject);
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_') && !key.startsWith('MARA_')));
   Object.assign(env, { TMPDIR: process.env.TMPDIR, CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR,
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CEILING_DIRECTORIES: fixture,
@@ -29,7 +59,8 @@ test('installed HTTP ESM facade uses an authorized real daemon without replay or
   await exec('git', ['init', '-q', fixture], { cwd: fixture, env });
   const daemon = spawn(process.env.MARA_CLI, ['--execution-mode', 'direct', '--daemon-directory', runtime,
     'daemon', 'run', '--http-bind', '127.0.0.1:0', '--http-origin', baseURL,
-    '--http-project', project, '--http-init-destination', project], { cwd: fixture, env, stdio: 'ignore' });
+    '--http-project', project, '--http-project', queryProject,
+    '--http-init-destination', project], { cwd: fixture, env, stdio: 'ignore' });
   const daemonExit = once(daemon, 'exit');
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(error.message));
@@ -45,7 +76,7 @@ test('installed HTTP ESM facade uses an authorized real daemon without replay or
     }
     expect(connection.available).toBe(true);
     await page.goto('/');
-    const report = await page.evaluate(async ({ endpoint, token, project, other }) => {
+    const report = await page.evaluate(async ({ endpoint, token, project, queryProject, facts, other }) => {
       const { createHttpClient, MaraClientError } = await import('./http.mjs');
       const assert = (condition, label) => { if (!condition) throw new Error(label); };
       const failure = async (call, kind, code) => {
@@ -124,10 +155,47 @@ test('installed HTTP ESM facade uses an authorized real daemon without replay or
         try { await failure(() => forbidden.schemaGet(), 'authorization', 'authorization_failed'); }
         finally { await forbidden.close(); }
         await failure(() => createHttpClient({ endpoint: 'http://127.0.0.1:1/rpc', token, project }), 'connection', 'http_connection_failed');
+        const queryClient = await createHttpClient({ endpoint, token, project: queryProject });
+        let query;
+        try {
+          const request = {
+            definition_files: ['facts.json'], definition: 'urn:fixture:facts:composed',
+            selection: { ids: ['CAND-C'] },
+            parameters: [
+              { name: 'candidate', value: { type: 'text', value: 'CAND-C' } },
+              { name: 'context', value: { type: 'text', value: 'release' } },
+            ], max_rows: 100, limit: 100, fact_snapshots: [facts], mappings: [],
+          };
+          const page = await queryClient.queryExecute(request);
+          const view = await queryClient.queryView({ request, render: null });
+          const validation = await queryClient.itemValidate({ id: 'CAND-C', fact_snapshots: [facts], mappings: [] });
+          const gate = {
+            definition_files: ['facts.json'], gate_file: 'facts-gates.yaml', shape_files: ['facts-present.ttl'],
+            gate: 'require-composed-facts', scope: { ids: ['CAND-C'] },
+            context: request.parameters, max_rows: 100, fact_snapshots: [facts], mappings: [],
+          };
+          const gateResult = await queryClient.queryGate(gate);
+          const gateReport = await queryClient.queryReport({ subject: { kind: 'gate', ...gate }, render: null });
+          const ruleReport = await queryClient.queryReport({ subject: {
+            kind: 'documentation_rules', target: { kind: 'item', id: 'CAND-C' }, fact_snapshots: [facts], mappings: [],
+          }, render: null });
+          assert(page.evaluation_complete && page.summary.binding_count === 3, 'Format-5 named query');
+          assert(view.input_identity === page.input_identity && view.summary.binding_count === 3, 'Factual query view');
+          assert(validation.valid && validation.query_policies.checks[0].state === 'passed', 'Enabled fact policy');
+          assert(gateResult.state === 'passed' && gateReport.checks[0].state === 'passed', 'Supplied-input gate/report');
+          assert(ruleReport.checks[0].state === 'passed', 'Supplied-input policy report');
+          query = { page, view, validation, gate: gateResult, gateReport, ruleReport };
+        } finally { await queryClient.close(); }
         assert(ticks > 0, 'Async browser event-loop progress');
-        return { caps, init, listed, read, ticks, browser: navigator.userAgent };
+        return { caps, init, listed, read, ticks, browser: navigator.userAgent, query };
       } finally { clearInterval(timer); }
-    }, { ...connection, project, other });
+    }, { ...connection, project, queryProject, other, facts: queryFacts() });
+    expect(report.query.page.summary.binding_count).toBe(3);
+    expect(report.query.view.input_identity).toBe(report.query.page.input_identity);
+    expect(report.query.validation.query_policies.checks[0].state).toBe('passed');
+    expect(report.query.gate.state).toBe('passed');
+    expect(report.query.gateReport.checks[0].state).toBe('passed');
+    expect(report.query.ruleReport.checks[0].state).toBe('passed');
     expect(await readFile(path.join(project, 'surrogate.mara.md'), 'utf8').catch(() => null)).toBeNull();
     // Configured/request-local rule results and complete bounded trace/validation are owning data.
     await writeFile(path.join(project, '.mara/engineering-rules.yaml'),

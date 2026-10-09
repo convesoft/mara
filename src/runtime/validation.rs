@@ -108,6 +108,18 @@ impl NativeRuntime {
                 Err(error) => return Err(operation_error(error)),
             };
         let schema_only = target.kind == ValidationTargetKind::Schema;
+        if !options.fact_snapshots.is_empty() || !options.mappings.is_empty() {
+            if schema_only {
+                return Err(ValidationError::invalid_argument(
+                    "query facts and mappings apply only to project or item validation",
+                ));
+            }
+            if project.query_policy().is_none() {
+                return Err(ValidationError::invalid_argument(
+                    "query facts and mappings require an enabled query policy",
+                ));
+            }
+        }
         let mut result = ValidationResult {
             format_version: 1,
             project: project.root().to_owned(),
@@ -266,7 +278,10 @@ impl NativeRuntime {
                 Ok(source_engine) => mara_engine::query_consumers::append_query_policy_result(
                     &mut result,
                     &source_engine,
-                ),
+                    &options.fact_snapshots,
+                    &options.mappings,
+                )
+                .map_err(|error| ValidationError::new(&error.code, error.message))?,
                 Err(error) => mara_engine::query_consumers::append_query_policy_unavailable(
                     &mut result,
                     format!("query policy inputs unavailable: {error}"),

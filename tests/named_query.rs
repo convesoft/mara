@@ -369,6 +369,8 @@ fn shared_query_facts_become_invariant_and_gate_failures_across_rust_cli_and_mcp
                 &mara::ValidationOptions {
                     limit: Some(1),
                     cursor,
+                    fact_snapshots: vec![],
+                    mappings: vec![],
                 },
             )
             .unwrap();
@@ -585,6 +587,8 @@ gates:
                 ..Default::default()
             },
             context: vec![],
+            fact_snapshots: vec![],
+            mappings: vec![],
             max_rows: 100,
         })
         .unwrap();
@@ -604,6 +608,8 @@ gates:
         gate: "require-support".into(),
         scope: request.selection.clone(),
         context: request.parameters.clone(),
+        fact_snapshots: vec![],
+        mappings: vec![],
         max_rows: 100,
     };
     let gate_result = runtime.query_gate(gate.clone()).unwrap();
@@ -715,6 +721,8 @@ gates:
                 name: "state".into(),
                 value: mara::named_query::ParameterValue::Text("accepted".into()),
             }],
+            fact_snapshots: vec![],
+            mappings: vec![],
             max_rows: 100,
         })
         .unwrap();
@@ -738,6 +746,8 @@ gates:
                 ..Default::default()
             },
             context: vec![],
+            fact_snapshots: vec![],
+            mappings: vec![],
             max_rows: 100,
         })
         .unwrap();
@@ -780,6 +790,8 @@ gates:
             gate: "empty-required".into(),
             scope: request.selection.clone(),
             context: vec![],
+            fact_snapshots: vec![],
+            mappings: vec![],
             max_rows: 100,
         })
         .unwrap();
@@ -809,6 +821,8 @@ gates:
                 ..Default::default()
             },
             context: vec![],
+            fact_snapshots: vec![],
+            mappings: vec![],
             max_rows: 100,
         })
         .unwrap();
@@ -882,6 +896,8 @@ gates:
                 name: "state".into(),
                 value: mara::named_query::ParameterValue::Text("accepted".into()),
             }],
+            fact_snapshots: vec![],
+            mappings: vec![],
             max_rows: 100,
         })
         .unwrap();
@@ -899,6 +915,8 @@ gates:
                 name: "state".into(),
                 value: q::ParameterValue::Text("accepted".into()),
             }],
+            fact_snapshots: vec![],
+            mappings: vec![],
             max_rows: 100,
         })
         .unwrap();
@@ -945,6 +963,8 @@ gates:
                 ..Default::default()
             },
             context: vec![],
+            fact_snapshots: vec![],
+            mappings: vec![],
             max_rows: 100,
         })
         .unwrap();
@@ -1946,7 +1966,7 @@ fn embedded_negative_parameter_and_constant_expression_bindings() {
 }
 // @mara checks DES-QUERY-CONSUMER-CONTRACT
 #[test]
-fn raw_facts_ignore_failing_documentation_policy_and_refuse_unimplemented_daemon_path() {
+fn raw_facts_ignore_failing_documentation_policy() {
     let fixture = project();
     let config = fixture.path().join(".mara/project.toml");
     let source = fs::read_to_string(&config).unwrap();
@@ -1975,26 +1995,6 @@ fn raw_facts_ignore_failing_documentation_policy_and_refuse_unimplemented_daemon
         stdout(&facts),
         stderr(&facts)
     );
-    let result = mara(
-        fixture.path(),
-        &[
-            "--execution-mode",
-            "daemon-required",
-            "--format",
-            "json",
-            "query",
-            "execute",
-            "urn:fixture:query:supports",
-            "--definition-file",
-            "queries.json",
-            "--id",
-            "SUB-LINKED",
-            "--max-rows",
-            "100",
-        ],
-    );
-    assert!(!result.status.success());
-    assert!(stdout(&result).contains("unsupported_capability"));
 }
 // @mara checks DES-QUERY-INPUT-RESULT-CONTRACT
 #[test]
@@ -2183,6 +2183,8 @@ fn gate_request() -> mara::query_consumers::QueryGateRequest {
             name: "state".into(),
             value: q::ParameterValue::Text("accepted".into()),
         }],
+        fact_snapshots: vec![],
+        mappings: vec![],
         max_rows: 100,
     }
 }
@@ -2490,6 +2492,8 @@ fn evaluation_reports_expose_gate_and_rule_outcomes_across_rust_cli_and_mcp() {
         .query_report(
             mara::query_views::ReportRequest::DocumentationRules {
                 target: target.clone(),
+                fact_snapshots: vec![],
+                mappings: vec![],
             },
             None,
         )
@@ -2540,6 +2544,8 @@ fn evaluation_reports_expose_gate_and_rule_outcomes_across_rust_cli_and_mcp() {
         .query_report(
             mara::query_views::ReportRequest::DocumentationRules {
                 target: target.clone(),
+                fact_snapshots: vec![],
+                mappings: vec![],
             },
             Some("markdown".into()),
         )

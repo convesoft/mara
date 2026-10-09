@@ -123,6 +123,95 @@ fn create(client: &mut Client, root: &Path, id: &str, file: &str) -> Value {
     client.ok(root, "item_create", json!({"flavour":"requirement","id":id,"file":file,"title":id,"body":"Real native source."}))
 }
 
+fn daemon_cli(server: &Server, root: &Path, args: &[&str]) -> Value {
+    let output = support::mara_with_daemon_directory(root, server.directory.path(), args);
+    assert!(
+        output.status.success(),
+        "{} {}",
+        support::stdout(&output),
+        support::stderr(&output)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn query_facts_fixture(root: &Path) -> mara::named_query::FactSnapshot {
+    let snapshot: mara::SourceSnapshot =
+        serde_json::from_str(include_str!("fixtures/query-facts/snapshot.json")).unwrap();
+    for file in snapshot.files {
+        let path = root.join(file.path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, file.content).unwrap();
+    }
+    let project_file = root.join(".mara/project.toml");
+    let mut project = fs::read_to_string(&project_file).unwrap();
+    project.push_str(
+        r#"
+[query_policy]
+format_version = 1
+files = ["facts-invariants.yaml"]
+definition_files = ["facts.json"]
+shape_files = ["facts-present.ttl"]
+max_rows = 100
+"#,
+    );
+    fs::write(project_file, project).unwrap();
+    fs::write(
+        root.join("facts-invariants.yaml"),
+        r#"format_version: 1
+invariants:
+  - id: supplied-composed-facts
+    definition: urn:fixture:facts:composed
+    shape: urn:fixture:shape:has-fact-row
+    flavours: [candidate]
+    severity: error
+    parameters:
+      - name: candidate
+        value: {type: text, value: CAND-C}
+      - name: context
+        value: {type: text, value: release}
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("facts-gates.yaml"),
+        r#"format_version: 1
+gates:
+  - id: require-composed-facts
+    empty_roots: not_applicable
+    empty_required: failed
+    conditions:
+      - id: fact-row
+        definition: urn:fixture:facts:composed
+        shape_file: facts-present.ttl
+        shape: urn:fixture:shape:has-fact-row
+        severity: error
+        context_parameters: [candidate, context]
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("facts-present.ttl"),
+        r#"@prefix sh: <http://www.w3.org/ns/shacl#>.
+<urn:fixture:shape:has-fact-row> a sh:NodeShape; sh:property [ sh:path <urn:mara:query:match>; sh:minCount 1 ].
+"#,
+    )
+    .unwrap();
+    serde_json::from_value(json!({
+        "input":"reported",
+        "identity":"reported-run",
+        "coverage":[
+            {"verification":{"type":"item","value":"VER-V1"},"candidate":{"type":"text","value":"CAND-C"},"context":{"type":"text","value":"release"}},
+            {"verification":{"type":"item","value":"VER-V2"},"candidate":{"type":"text","value":"CAND-C"},"context":{"type":"text","value":"release"}},
+            {"verification":{"type":"item","value":"VER-V3"},"candidate":{"type":"text","value":"CAND-C"},"context":{"type":"text","value":"release"}}
+        ],
+        "records":[
+            {"keys":{"verification":{"type":"item","value":"VER-V1"},"candidate":{"type":"text","value":"CAND-C"},"context":{"type":"text","value":"release"}},"fields":{"state":{"type":"text","value":"pass"}}},
+            {"keys":{"verification":{"type":"item","value":"VER-V2"},"candidate":{"type":"text","value":"CAND-C"},"context":{"type":"text","value":"release"}},"fields":{"state":{"type":"text","value":"pass"}}},
+            {"keys":{"verification":{"type":"item","value":"VER-V3"},"candidate":{"type":"text","value":"CAND-C"},"context":{"type":"text","value":"release"}},"fields":{"state":{"type":"text","value":"fail"}}}
+        ]
+    })).unwrap()
+}
+
 // @mara checks DES-LOCAL-DAEMON-PROTOCOL
 #[test]
 fn negotiation_errors_and_notifications_never_dispatch_without_compatibility() {
@@ -193,6 +282,399 @@ fn negotiation_errors_and_notifications_never_dispatch_without_compatibility() {
     assert_eq!(
         second.project(root, "schema_get", json!({}))["error"]["code"],
         -32001
+    );
+}
+
+// @mara checks DES-QUERY-CONSUMER-CONTRACT
+// @mara checks DES-QUERY-INPUT-RESULT-CONTRACT
+// @mara checks DES-LOCAL-DAEMON-PROTOCOL
+#[test]
+fn supplied_fact_consumers_round_trip_through_native_daemon_ipc() {
+    let server = Server::new();
+    let fixture = support::fixture();
+    let root = fixture.path();
+    let facts = query_facts_fixture(root);
+    fs::write(
+        root.join("facts-input.json"),
+        serde_json::to_vec(&facts).unwrap(),
+    )
+    .unwrap();
+    let mut client = server.client();
+    let capabilities = client.negotiate();
+    for operation in ["query_execute", "query_gate", "query_view", "query_report"] {
+        assert!(
+            capabilities["capabilities"]["operations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry == operation)
+        );
+    }
+    let runtime = NativeRuntime::new(None, root.to_path_buf()).unwrap();
+    let request = mara::named_query::Request {
+        definition_files: vec!["facts.json".into()],
+        definition: "urn:fixture:facts:composed".into(),
+        selection: mara::named_query::Selection {
+            ids: vec!["CAND-C".into()],
+            ..Default::default()
+        },
+        parameters: vec![
+            mara::named_query::BindingParameter {
+                name: "candidate".into(),
+                value: mara::named_query::ParameterValue::Text("CAND-C".into()),
+            },
+            mara::named_query::BindingParameter {
+                name: "context".into(),
+                value: mara::named_query::ParameterValue::Text("release".into()),
+            },
+        ],
+        max_rows: 100,
+        limit: 100,
+        cursor: None,
+        fact_snapshots: vec![facts.clone()],
+        mappings: vec![],
+    };
+    let expected_page = runtime.query_execute(request.clone()).unwrap();
+    assert_eq!(
+        client.ok(
+            root,
+            "query_execute",
+            serde_json::to_value(&request).unwrap()
+        ),
+        serde_json::to_value(&expected_page).unwrap()
+    );
+    let view_params = mara::query_views::ViewParams {
+        request: request.clone(),
+        render: None,
+    };
+    let expected_view = runtime.query_view(view_params.clone()).unwrap();
+    assert_eq!(
+        client.ok(
+            root,
+            "query_view",
+            serde_json::to_value(view_params).unwrap()
+        ),
+        serde_json::to_value(&expected_view).unwrap()
+    );
+    let schema_options = mara::ValidationOptions::default();
+    assert_eq!(
+        client.ok(
+            root,
+            "schema_validate",
+            serde_json::to_value(&schema_options).unwrap()
+        ),
+        serde_json::to_value(
+            runtime
+                .schema_validate_with_options(&schema_options)
+                .unwrap()
+        )
+        .unwrap()
+    );
+    let options = mara::ValidationOptions {
+        fact_snapshots: vec![facts.clone()],
+        ..Default::default()
+    };
+    let expected_validation = runtime
+        .item_validate_with_options("CAND-C", &options)
+        .unwrap();
+    assert_eq!(
+        client.ok(
+            root,
+            "item_validate",
+            json!({"id":"CAND-C","fact_snapshots":[facts.clone()]}),
+        ),
+        serde_json::to_value(&expected_validation).unwrap()
+    );
+    let gate_request = mara::query_consumers::QueryGateRequest {
+        definition_files: vec!["facts.json".into()],
+        gate_file: "facts-gates.yaml".into(),
+        shape_files: vec!["facts-present.ttl".into()],
+        gate: "require-composed-facts".into(),
+        scope: request.selection.clone(),
+        context: request.parameters.clone(),
+        fact_snapshots: vec![facts.clone()],
+        mappings: vec![],
+        max_rows: 100,
+    };
+    let expected_gate = runtime.query_gate(gate_request.clone()).unwrap();
+    assert_eq!(
+        client.ok(
+            root,
+            "query_gate",
+            serde_json::to_value(&gate_request).unwrap()
+        ),
+        serde_json::to_value(expected_gate).unwrap()
+    );
+    for subject in [
+        mara::query_views::ReportRequest::Gate(gate_request.clone()),
+        mara::query_views::ReportRequest::DocumentationRules {
+            target: mara::ValidationTarget {
+                kind: mara::ValidationTargetKind::Item,
+                id: Some("CAND-C".into()),
+            },
+            fact_snapshots: vec![facts.clone()],
+            mappings: vec![],
+        },
+    ] {
+        let expected = runtime.query_report(subject.clone(), None).unwrap();
+        assert_eq!(
+            client.ok(
+                root,
+                "query_report",
+                json!({"subject":subject,"render":null})
+            ),
+            serde_json::to_value(expected).unwrap()
+        );
+    }
+
+    let common = [
+        "--format",
+        "json",
+        "query",
+        "execute",
+        "urn:fixture:facts:composed",
+        "--definition-file",
+        "facts.json",
+        "--id",
+        "CAND-C",
+        "--param",
+        r#"candidate={"type":"text","value":"CAND-C"}"#,
+        "--param",
+        r#"context={"type":"text","value":"release"}"#,
+        "--fact-file",
+        "facts-input.json",
+        "--max-rows",
+        "100",
+        "--limit",
+        "100",
+    ];
+    let cli_page = daemon_cli(&server, root, &common);
+    assert_eq!(cli_page, serde_json::to_value(&expected_page).unwrap());
+
+    let view_args = [
+        "--format",
+        "json",
+        "query",
+        "view",
+        "urn:fixture:facts:composed",
+        "--definition-file",
+        "facts.json",
+        "--id",
+        "CAND-C",
+        "--param",
+        r#"candidate={"type":"text","value":"CAND-C"}"#,
+        "--param",
+        r#"context={"type":"text","value":"release"}"#,
+        "--fact-file",
+        "facts-input.json",
+        "--max-rows",
+        "100",
+        "--limit",
+        "100",
+    ];
+    let cli_view = daemon_cli(&server, root, &view_args);
+    assert_eq!(cli_view, serde_json::to_value(&expected_view).unwrap());
+
+    let cli_validation = daemon_cli(
+        &server,
+        root,
+        &[
+            "--format",
+            "json",
+            "item",
+            "validate",
+            "CAND-C",
+            "--fact-file",
+            "facts-input.json",
+        ],
+    );
+    assert_eq!(
+        cli_validation,
+        serde_json::to_value(&expected_validation).unwrap()
+    );
+
+    let gate_args = [
+        "--format",
+        "json",
+        "query",
+        "gate",
+        "require-composed-facts",
+        "--gate-file",
+        "facts-gates.yaml",
+        "--definition-file",
+        "facts.json",
+        "--shape-file",
+        "facts-present.ttl",
+        "--id",
+        "CAND-C",
+        "--param",
+        r#"candidate={"type":"text","value":"CAND-C"}"#,
+        "--param",
+        r#"context={"type":"text","value":"release"}"#,
+        "--fact-file",
+        "facts-input.json",
+        "--max-rows",
+        "100",
+    ];
+    let cli_gate = daemon_cli(&server, root, &gate_args);
+    let expected_gate = runtime.query_gate(gate_request.clone()).unwrap();
+    assert_eq!(cli_gate, serde_json::to_value(expected_gate).unwrap());
+
+    let gate_report_args = [
+        "--format",
+        "json",
+        "query",
+        "report",
+        "gate",
+        "require-composed-facts",
+        "--gate-file",
+        "facts-gates.yaml",
+        "--definition-file",
+        "facts.json",
+        "--shape-file",
+        "facts-present.ttl",
+        "--id",
+        "CAND-C",
+        "--param",
+        r#"candidate={"type":"text","value":"CAND-C"}"#,
+        "--param",
+        r#"context={"type":"text","value":"release"}"#,
+        "--fact-file",
+        "facts-input.json",
+        "--max-rows",
+        "100",
+    ];
+    let cli_gate_report = daemon_cli(&server, root, &gate_report_args);
+    let expected_gate_report = runtime
+        .query_report(
+            mara::query_views::ReportRequest::Gate(gate_request.clone()),
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        cli_gate_report,
+        serde_json::to_value(&expected_gate_report).unwrap()
+    );
+
+    let rules_report_args = [
+        "--format",
+        "json",
+        "query",
+        "report",
+        "rules",
+        "--id",
+        "CAND-C",
+        "--fact-file",
+        "facts-input.json",
+    ];
+    let cli_rules_report = daemon_cli(&server, root, &rules_report_args);
+    let rule_subject = mara::query_views::ReportRequest::DocumentationRules {
+        target: mara::ValidationTarget {
+            kind: mara::ValidationTargetKind::Item,
+            id: Some("CAND-C".into()),
+        },
+        fact_snapshots: vec![facts.clone()],
+        mappings: vec![],
+    };
+    let expected_rules_report = runtime.query_report(rule_subject.clone(), None).unwrap();
+    assert_eq!(
+        cli_rules_report,
+        serde_json::to_value(&expected_rules_report).unwrap()
+    );
+
+    let mut view_params = serde_json::to_value(&request).unwrap();
+    view_params["render"] = Value::Null;
+    let mcp_requests = [
+        support::mcp_initialize(1),
+        json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+        support::mcp_call(2, "query_execute", serde_json::to_value(&request).unwrap()),
+        support::mcp_call(3, "query_view", view_params),
+        support::mcp_call(
+            4,
+            "item_validate",
+            json!({"id":"CAND-C","fact_snapshots":[facts.clone()]}),
+        ),
+        support::mcp_call(
+            5,
+            "query_gate",
+            serde_json::to_value(&gate_request).unwrap(),
+        ),
+        support::mcp_call(
+            6,
+            "query_report",
+            json!({"subject":mara::query_views::ReportRequest::Gate(gate_request.clone()),"render":null}),
+        ),
+        support::mcp_call(
+            7,
+            "query_report",
+            json!({"subject":rule_subject,"render":null}),
+        ),
+    ];
+    let responses = support::mcp_exchange_with_daemon_directory(
+        root,
+        server.directory.path(),
+        &["mcp"],
+        &mcp_requests,
+    );
+    for (id, expected) in [
+        (2, serde_json::to_value(&expected_page).unwrap()),
+        (3, serde_json::to_value(&expected_view).unwrap()),
+        (4, serde_json::to_value(&expected_validation).unwrap()),
+        (
+            5,
+            serde_json::to_value(runtime.query_gate(gate_request.clone()).unwrap()).unwrap(),
+        ),
+        (6, serde_json::to_value(&expected_gate_report).unwrap()),
+        (7, serde_json::to_value(&expected_rules_report).unwrap()),
+    ] {
+        let response = support::mcp_response(&responses, id);
+        assert_ne!(response["result"]["isError"], true, "{response:#}");
+        assert_eq!(
+            response["result"]["structuredContent"], expected,
+            "{response:#}"
+        );
+    }
+
+    let invalid_file = "invalid-facts.json";
+    fs::write(root.join(invalid_file), "not valid JSON").unwrap();
+    let mut invalid_request = request.clone();
+    invalid_request
+        .definition_files
+        .push(invalid_file.to_owned());
+    let direct_error = runtime.query_execute(invalid_request.clone()).unwrap_err();
+    assert_eq!(direct_error.source.as_deref(), Some(invalid_file));
+    let daemon_error = client.project(
+        root,
+        "query_execute",
+        serde_json::to_value(&invalid_request).unwrap(),
+    );
+    assert_eq!(
+        daemon_error["error"]["data"]["error"]["source"],
+        invalid_file
+    );
+    assert_eq!(
+        daemon_error["error"]["data"]["error"]["code"],
+        direct_error.code
+    );
+
+    let invalid_view = mara::query_views::ViewParams {
+        request: invalid_request,
+        render: None,
+    };
+    let direct_error = runtime.query_view(invalid_view.clone()).unwrap_err();
+    assert_eq!(direct_error.source.as_deref(), Some(invalid_file));
+    let daemon_error = client.project(
+        root,
+        "query_view",
+        serde_json::to_value(&invalid_view).unwrap(),
+    );
+    assert_eq!(
+        daemon_error["error"]["data"]["error"]["source"],
+        invalid_file
+    );
+    assert_eq!(
+        daemon_error["error"]["data"]["error"]["code"],
+        direct_error.code
     );
 }
 

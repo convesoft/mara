@@ -202,7 +202,11 @@ impl NativeRuntime {
             ReportRequest::Gate(request) => self
                 .gate_engine(&request)?
                 .query_report(ReportRequest::Gate(request), render),
-            ReportRequest::DocumentationRules { target } => {
+            ReportRequest::DocumentationRules {
+                target,
+                fact_snapshots,
+                mappings,
+            } => {
                 let (project, schema) = self.load_project().map_err(|e| {
                     crate::query_consumers::QueryConsumerError {
                         code: "input_unavailable".into(),
@@ -220,7 +224,14 @@ impl NativeRuntime {
                         code: "input_unavailable".into(),
                         message: e.to_string(),
                     })?
-                    .query_report(ReportRequest::DocumentationRules { target }, render)
+                    .query_report(
+                        ReportRequest::DocumentationRules {
+                            target,
+                            fact_snapshots,
+                            mappings,
+                        },
+                        render,
+                    )
             }
         }
     }

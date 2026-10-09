@@ -5,7 +5,7 @@ export type FailureKind = 'operation' | 'invalid_argument' | 'unavailable' | 'in
   | 'connection' | 'transport' | 'unknown_outcome' | 'closed' | 'authentication' | 'authorization';
 export interface ErrorEnvelope {
   format_version: 1;
-  error: { code: string; message: string; operation?: string; project?: string; [key: string]: unknown };
+  error: { code: string; message: string; source?: string | null; operation?: string; project?: string; [key: string]: unknown };
   edge?: RelationEdge;
   occurrence_count?: number;
   [key: string]: unknown;
@@ -55,6 +55,96 @@ export interface ItemMoveParams extends ProjectSelection { reference: string; fi
 export interface RelationParams extends ProjectSelection { source: string; relation: string; target: string }
 export interface RelationGetParams extends RelationParams, PageParams {}
 export interface RelationRemoveParams extends RelationParams { occurrence?: string | null }
+/** Exact typed value accepted for parameters, supplied fact records and mappings. */
+export type QueryParameterValue =
+  | { type: 'text'; value: string } | { type: 'integer'; value: number }
+  | { type: 'number'; value: number } | { type: 'boolean'; value: boolean }
+  | { type: 'item'; value: string } | { type: 'iri'; value: string };
+export interface FactRecord { keys: Record<string, QueryParameterValue>; fields: Record<string, QueryParameterValue> }
+export interface FactSnapshot {
+  input: string; identity: string; coverage?: Record<string, QueryParameterValue>[]; records?: FactRecord[];
+}
+export interface MappingEntry { keys: Record<string, QueryParameterValue>; value: QueryParameterValue }
+export interface TypedMapping { mapping: string; entries: MappingEntry[]; fallback?: QueryParameterValue | null }
+export interface QueryInputs { fact_snapshots?: FactSnapshot[]; mappings?: TypedMapping[] }
+export interface QuerySelection {
+  all?: boolean; ids?: string[]; flavours?: string[]; fields?: FieldValue[]; paths?: string[];
+}
+export interface NamedQueryRequest extends QueryInputs {
+  definition_files: string[]; definition: string; selection: QuerySelection;
+  parameters?: { name: string; value: QueryParameterValue }[];
+  max_rows: number; limit: number; cursor?: string | null;
+}
+export type QueryEndpoint = { kind: 'item'; id: string; mid: string | null }
+  | { kind: 'code'; reference: string } | { kind: 'external'; address: string };
+export type QueryValue =
+  | { kind: 'item'; endpoint: QueryEndpoint; source: SourceLocation }
+  | { kind: 'code'; reference: string } | { kind: 'external'; address: string }
+  | { kind: 'iri'; value: string } | { kind: 'text'; value: string; language: string | null }
+  | { kind: 'integer'; value: number } | { kind: 'number'; value: string }
+  | { kind: 'boolean'; value: boolean } | { kind: 'edge'; edge: QueryEdge };
+export interface QueryEdge { relation: string; symmetric: boolean; source: QueryEndpoint; target: QueryEndpoint }
+export interface QueryOccurrence {
+  identity: string; source: SourceLocation; author: QueryEndpoint; kind: string; relation: string; target: string;
+}
+export interface QuerySupport { edge: QueryEdge; occurrences: QueryOccurrence[] }
+export interface QueryFactSupport {
+  input: string; identity: string; key: Record<string, QueryValue>; record: number | null;
+}
+export interface QueryBinding {
+  values: Record<string, QueryValue | null>; contributors: QueryValue[];
+  support: QuerySupport[]; facts?: QueryFactSupport[];
+}
+export type QueryRecord =
+  | { kind: 'root'; root: QueryEndpoint; source: SourceLocation; binding_count: number | null }
+  | { kind: 'binding'; root: QueryEndpoint; binding: QueryBinding };
+export interface NamedQueryPage extends Continuation {
+  format_version: 3; definition: string; definition_file: string | null; input_identity: string;
+  evaluation_complete: boolean; unavailable_reason: string | null;
+  summary: { selected_roots: number; binding_count: number | null; known_bindings: number };
+  records: QueryRecord[];
+}
+export type ConsumerState = 'passed' | 'failed' | 'not_applicable' | 'unavailable';
+export interface QueryGateRequest extends QueryInputs {
+  definition_files: string[]; gate_file: string; shape_files: string[]; gate: string;
+  scope: QuerySelection; context?: { name: string; value: QueryParameterValue }[]; max_rows: number;
+}
+export interface QueryGateResult {
+  format_version: 1; gate: string; source: DiagnosticLocation; scope: QuerySelection;
+  context: { name: string; value: QueryParameterValue }[]; input_identity: string;
+  evaluation_complete: boolean; state: ConsumerState; empty_reason: string | null;
+  unavailable_reason: string | null; roots: {
+    root: QueryEndpoint; state: ConsumerState; conditions: {
+      id: string; source: DiagnosticLocation; definition: string; shape_file: string; shape: string;
+      severity: Severity; state: ConsumerState; applicability: ConsumerState; binding_count: number | null;
+      components: string[]; bindings: QueryBinding[];
+    }[];
+  }[];
+}
+export interface QueryViewParams { request: NamedQueryRequest; render?: 'markdown' | null }
+export interface QueryViewRow {
+  values: Record<string, QueryValue | null>; contributors: QueryValue[];
+  support: QuerySupport[]; facts?: QueryFactSupport[];
+}
+export interface QueryFactualView {
+  format_version: 1; kind: 'query_view'; definition: string; definition_file?: string;
+  input_identity: string; evaluation_complete: boolean; unavailable_reason?: string;
+  columns: { name: string; type: string; optional: boolean; flavours: string[] }[];
+  summary: { selected_roots: number; binding_count: number | null; known_bindings: number };
+  roots: { root: QueryEndpoint; source?: SourceLocation; binding_count: number | null; rows: QueryViewRow[] }[];
+  has_more: boolean; next_cursor?: string; markdown?: string;
+}
+export interface ValidationTarget { kind: 'project' | 'item' | 'schema'; id?: string | null }
+export type QueryReportSubject =
+  | ({ kind: 'gate' } & QueryGateRequest)
+  | ({ kind: 'documentation_rules'; target: ValidationTarget } & QueryInputs);
+export interface QueryReportParams { subject: QueryReportSubject; render?: 'markdown' | null }
+export interface QueryEvaluationReport {
+  format_version: 1; subject: JsonObject; input_identity: string; evaluation_complete: boolean;
+  state?: ConsumerState; empty_reason?: string; unavailable_reason?: string;
+  summary: { total: number; applicable: number; passed: number; failed: number; not_applicable: number; unavailable: number };
+  roots?: JsonObject[]; checks: JsonObject[]; diagnostics?: ValidationDiagnostic[]; markdown?: string;
+}
 export interface TraceCheck { files: string[]; shape: string; parameters?: Record<string, string> }
 export interface TraceSelection { ids?: string[]; flavours?: string[]; fields?: FieldValue[]; paths?: string[]; all?: boolean }
 export interface TraceMatrixParams extends TraceSelection, PageParams, ProjectSelection {
@@ -63,8 +153,8 @@ export interface TraceMatrixParams extends TraceSelection, PageParams, ProjectSe
 export type SchemaKind = 'flavour' | 'relation';
 export interface SchemaGetParams extends ProjectSelection { kind?: SchemaKind | null; name?: string | null }
 export type ValidationParams = PageParams & ProjectSelection;
-export interface ProjectValidationParams extends ValidationParams { paths?: string[] }
-export interface ItemValidationParams extends ValidationParams { id: string }
+export interface ProjectValidationParams extends ValidationParams, QueryInputs { paths?: string[] }
+export interface ItemValidationParams extends ValidationParams, QueryInputs { id: string }
 export type Template = 'minimal' | 'empty' | 'engineering';
 export interface ProjectInitParams extends ProjectSelection { template?: Template }
 /** Existing worker/WASM initialization; no native project override or filesystem selection. */
@@ -146,9 +236,16 @@ export interface ValidationDiagnostic {
   obligation?: { component: string; shape: string; source: DiagnosticLocation }; details?: JsonValue;
 }
 /** valid:false (including incomplete evaluation) is fulfilled data, not an exception. */
+export interface QueryPolicyValidation {
+  format_version: 1; input_identity: string; evaluation_complete: boolean;
+  checks: { rule: string; definition: string; shape: string; root: QueryEndpoint | null;
+    state: ConsumerState; applicability: ConsumerState; severity: Severity; binding_count: number | null;
+    components: string[]; bindings: QueryBinding[]; source: DiagnosticLocation }[];
+}
 export interface ValidationResult extends Continuation {
   format_version: 1; project: string; target: { kind: 'project' | 'item' | 'schema'; id?: string };
   valid: boolean; evaluation_complete: boolean; diagnostics: ValidationDiagnostic[];
+  query_policies?: QueryPolicyValidation | null;
   summary: { counts_exact: boolean; errors: number; warnings: number };
   selection: { paths: string[]; omitted_diagnostics: number } | null;
   path?: string; flavours?: number | null; relations?: number | null;
@@ -173,7 +270,9 @@ export interface OperationInputs<InitParams extends object = ProjectInitParams> 
   project_validate: ProjectValidationParams; item_validate: ItemValidationParams; item_list: ItemFilterParams;
   search: SearchParams; get: GetParams; related: RelatedParams; item_create: ItemCreateParams; item_update: ItemUpdateParams;
   item_move: ItemMoveParams; item_delete: ProjectSelection & { reference: string }; item_rename: ProjectSelection & { reference: string; new_id: string };
-  relation_get: RelationGetParams; relation_add: RelationParams; relation_remove: RelationRemoveParams; trace_matrix: TraceMatrixParams;
+  relation_get: RelationGetParams; relation_add: RelationParams; relation_remove: RelationRemoveParams;
+  query_execute: NamedQueryRequest; query_gate: QueryGateRequest; query_view: QueryViewParams;
+  query_report: QueryReportParams; trace_matrix: TraceMatrixParams;
 }
 export interface OperationResults {
   capabilities: Capabilities; project_init: ProjectInitializationResult; project_mid_backfill: ProjectMidBackfillResult;
@@ -182,7 +281,9 @@ export interface OperationResults {
   project_validate: ValidationResult; item_validate: ValidationResult; item_list: ItemCollectionResult;
   search: SearchResult; get: GetResult; related: RelatedResult; item_create: ItemCreationResult; item_update: ItemUpdateResult;
   item_move: ItemMoveResult; item_delete: ItemIdentity; item_rename: ItemRenameResult;
-  relation_get: RelationInspection; relation_add: RelationMutationResult; relation_remove: RelationMutationResult; trace_matrix: TraceMatrixResult;
+  relation_get: RelationInspection; relation_add: RelationMutationResult; relation_remove: RelationMutationResult;
+  query_execute: NamedQueryPage; query_gate: QueryGateResult; query_view: QueryFactualView;
+  query_report: QueryEvaluationReport; trace_matrix: TraceMatrixResult;
 }
 export type DocumentOperation = keyof OperationInputs;
 /** Adapter implements owning formats/errors; setup and external publication stay adapter/application owned. */
@@ -217,6 +318,10 @@ export interface MaraClient<InitParams extends object = ProjectInitParams> {
   relationGet(params: RelationGetParams): Promise<RelationInspection>;
   relationAdd(params: RelationParams): Promise<RelationMutationResult>;
   relationRemove(params: RelationRemoveParams): Promise<RelationMutationResult>;
+  queryExecute(params: NamedQueryRequest): Promise<NamedQueryPage>;
+  queryGate(params: QueryGateRequest): Promise<QueryGateResult>;
+  queryView(params: QueryViewParams): Promise<QueryFactualView>;
+  queryReport(params: QueryReportParams): Promise<QueryEvaluationReport>;
   traceMatrix(params?: TraceMatrixParams): Promise<TraceMatrixResult>;
 }
 /** Async setup obtains capabilities before returning. Adapter ownership transfers even if setup fails. */

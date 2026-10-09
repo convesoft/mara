@@ -33,6 +33,30 @@ pub fn mcp_exchange_with_arguments(
     arguments: &[&str],
     requests: &[Value],
 ) -> Vec<Value> {
+    mcp_exchange_with_environment(current_directory, arguments, requests, None)
+}
+
+pub fn mcp_exchange_with_daemon_directory(
+    current_directory: &Path,
+    daemon_directory: &Path,
+    arguments: &[&str],
+    requests: &[Value],
+) -> Vec<Value> {
+    assert!(daemon_directory.is_absolute());
+    mcp_exchange_with_environment(
+        current_directory,
+        arguments,
+        requests,
+        Some(daemon_directory),
+    )
+}
+
+fn mcp_exchange_with_environment(
+    current_directory: &Path,
+    arguments: &[&str],
+    requests: &[Value],
+    daemon_directory: Option<&Path>,
+) -> Vec<Value> {
     let input = requests
         .iter()
         .map(Value::to_string)
@@ -43,7 +67,13 @@ pub fn mcp_exchange_with_arguments(
         .iter()
         .filter(|request| request.get("id").is_some())
         .count();
-    let mut child = command(current_directory)
+    let mut process = command(current_directory);
+    if let Some(directory) = daemon_directory {
+        process
+            .env("MARA_EXECUTION_MODE", "daemon-required")
+            .env("MARA_DAEMON_DIRECTORY", directory);
+    }
+    let mut child = process
         .current_dir(current_directory)
         .args(arguments)
         .stdin(Stdio::piped())
@@ -145,6 +175,20 @@ pub fn command(current_directory: &Path) -> Command {
             .env("MARA_DAEMON_DIRECTORY", directory);
     }
     command
+}
+
+pub fn mara_with_daemon_directory(
+    current_directory: &Path,
+    daemon_directory: &Path,
+    arguments: &[&str],
+) -> std::process::Output {
+    assert!(daemon_directory.is_absolute());
+    isolated_command(env!("CARGO_BIN_EXE_mara"), current_directory)
+        .env("MARA_EXECUTION_MODE", "daemon-required")
+        .env("MARA_DAEMON_DIRECTORY", daemon_directory)
+        .args(arguments)
+        .output()
+        .expect("run Mara CLI through the fixture daemon")
 }
 
 pub fn isolated_command(program: &str, current_directory: &Path) -> Command {

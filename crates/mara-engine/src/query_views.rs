@@ -96,7 +96,8 @@ pub struct FactualView {
 }
 
 /// Factual view request: an existing named-query request plus optional rendering.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ViewParams {
     pub request: named_query::Request,
     pub render: Option<String>,
@@ -229,6 +230,12 @@ pub enum ReportRequest {
     DocumentationRules {
         /// Exact validation target whose enabled rules were evaluated.
         target: ValidationTarget,
+        /// Explicit host-supplied snapshots consumed by enabled named-query invariants.
+        #[serde(default)]
+        fact_snapshots: Vec<named_query::FactSnapshot>,
+        /// Explicit caller/project mappings consumed by enabled named-query invariants.
+        #[serde(default)]
+        mappings: Vec<named_query::TypedMapping>,
     },
 }
 
@@ -303,8 +310,16 @@ impl SourceEngine {
                 let result = self.query_gate(request)?;
                 gate_report(&result)
             }
-            ReportRequest::DocumentationRules { target } => {
-                let (validation, diagnostics) = self.query_policy_validation(target.clone());
+            ReportRequest::DocumentationRules {
+                target,
+                fact_snapshots,
+                mappings,
+            } => {
+                let (validation, diagnostics) = self.query_policy_validation_with_inputs(
+                    target.clone(),
+                    &fact_snapshots,
+                    &mappings,
+                )?;
                 let Some(validation) = validation else {
                     return Err(QueryConsumerError {
                         code: "invalid_argument".into(),

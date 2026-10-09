@@ -37,6 +37,10 @@ pub const OPERATIONS: &[&str] = &[
     "relation_get",
     "relation_add",
     "relation_remove",
+    "query_execute",
+    "query_gate",
+    "query_view",
+    "query_report",
     "trace_matrix",
 ];
 
@@ -170,7 +174,7 @@ impl RpcSession {
         self.negotiated = true;
         Ok(json!({
             "protocol_version":PROTOCOL_VERSION, "application_version":APPLICATION_VERSION,
-            "result_formats":{"discovery":2, "relationship":1, "validation":1, "trace":1, "operation_error":1},
+            "result_formats":{"discovery":2, "relationship":1, "validation":1, "trace":1, "query":3, "gate":1, "query_view":1, "query_report":1, "operation_error":1},
             "capabilities":{"backend":"native", "operations":OPERATIONS, "persistence":"filesystem",
                 "code_indexing":true, "configured_indexers":true, "transaction_rollback":true,
                 "force_refresh":true, "project_sessions":"reconciled_memory",
@@ -247,6 +251,8 @@ impl RpcSession {
                     &crate::ValidationOptions {
                         limit: p.limit,
                         cursor: p.cursor,
+                        fact_snapshots: p.fact_snapshots,
+                        mappings: p.mappings,
                     },
                 ))
             }
@@ -257,6 +263,8 @@ impl RpcSession {
                     &crate::ValidationOptions {
                         limit: p.limit,
                         cursor: p.cursor,
+                        fact_snapshots: p.fact_snapshots,
+                        mappings: p.mappings,
                     },
                 ))
             }
@@ -291,6 +299,30 @@ impl RpcSession {
                     p.occurrence,
                 ))
             }
+            "query_execute" => {
+                let request: crate::named_query::Request = decode(params)?;
+                encode(runtime.query_execute(request).map_err(RpcError::query)?)
+            }
+            "query_gate" => {
+                let request: crate::query_consumers::QueryGateRequest = decode(params)?;
+                encode(runtime.query_gate(request).map_err(|error| {
+                    RpcError::domain(-32000, &error.code, &sanitize(&error.message))
+                })?)
+            }
+            "query_view" => {
+                let params: crate::query_views::ViewParams = decode(params)?;
+                encode(runtime.query_view(params).map_err(RpcError::query)?)
+            }
+            "query_report" => {
+                let params: QueryReportParams = decode(params)?;
+                encode(
+                    runtime
+                        .query_report(params.subject, params.render)
+                        .map_err(|error| {
+                            RpcError::domain(-32000, &error.code, &sanitize(&error.message))
+                        })?,
+                )
+            }
             "trace_matrix" => validation_result(runtime.trace_matrix(&decode(params)?)),
             _ => unreachable!("operation table checked"),
         }
@@ -317,6 +349,17 @@ impl RpcError {
             code,
             message: message.into(),
             data: Some(json!({"format_version":1,"error":{"code":kind,"message":message}})),
+        }
+    }
+    fn query(error: crate::named_query::Error) -> Self {
+        let message = sanitize(&error.message);
+        let source = error.source.map(|source| sanitize(&source));
+        Self {
+            code: -32000,
+            message: message.clone(),
+            data: Some(
+                json!({"format_version":1,"error":{"code":error.code,"message":message,"source":source}}),
+            ),
         }
     }
     pub fn response(self, id: Value) -> Value {
@@ -396,12 +439,18 @@ struct SchemaList {
 struct Page {
     limit: Option<usize>,
     cursor: Option<String>,
+    #[serde(default)]
+    fact_snapshots: Vec<crate::named_query::FactSnapshot>,
+    #[serde(default)]
+    mappings: Vec<crate::named_query::TypedMapping>,
 }
 impl Page {
     fn options(self) -> crate::ValidationOptions {
         crate::ValidationOptions {
             limit: self.limit,
             cursor: self.cursor,
+            fact_snapshots: self.fact_snapshots,
+            mappings: self.mappings,
         }
     }
 }
@@ -412,6 +461,10 @@ struct ProjectValidation {
     paths: Vec<PathBuf>,
     limit: Option<usize>,
     cursor: Option<String>,
+    #[serde(default)]
+    fact_snapshots: Vec<crate::named_query::FactSnapshot>,
+    #[serde(default)]
+    mappings: Vec<crate::named_query::TypedMapping>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -419,6 +472,16 @@ struct ItemValidation {
     id: String,
     limit: Option<usize>,
     cursor: Option<String>,
+    #[serde(default)]
+    fact_snapshots: Vec<crate::named_query::FactSnapshot>,
+    #[serde(default)]
+    mappings: Vec<crate::named_query::TypedMapping>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QueryReportParams {
+    subject: crate::query_views::ReportRequest,
+    render: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

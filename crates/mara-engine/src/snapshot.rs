@@ -680,6 +680,18 @@ impl SourceEngine {
             .map_err(|e| ValidationError::invalid_argument(e.to_string()))?
             .into_parts();
         let schema_only = target.kind == ValidationTargetKind::Schema;
+        if !options.fact_snapshots.is_empty() || !options.mappings.is_empty() {
+            if schema_only {
+                return Err(ValidationError::invalid_argument(
+                    "query facts and mappings apply only to project or item validation",
+                ));
+            }
+            if project.query_policy().is_none() {
+                return Err(ValidationError::invalid_argument(
+                    "query facts and mappings require an enabled query policy",
+                ));
+            }
+        }
         let mut result = ValidationResult {
             format_version: 1,
             project: project.root().to_owned(),
@@ -847,7 +859,13 @@ impl SourceEngine {
             validation::collect_source_diagnostics(&corpus, source_diagnostics, &mut result);
         }
         if project.query_policy().is_some() {
-            crate::query_consumers::append_query_policy_result(&mut result, self);
+            crate::query_consumers::append_query_policy_result(
+                &mut result,
+                self,
+                &options.fact_snapshots,
+                &options.mappings,
+            )
+            .map_err(|error| ValidationError::new(&error.code, error.message))?;
         }
         result.summarize();
         validation::sort_diagnostics(&mut result.diagnostics);

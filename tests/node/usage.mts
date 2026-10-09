@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { createNativeClient, MaraClientError, type MaraClient, type OperationInputs, type OperationResults,
-  type ValidationResult, type ClientAdapter, type MemoryProjectInitParams } from '@convesoft/mara';
+  type ValidationResult, type ClientAdapter, type MemoryProjectInitParams, type FactSnapshot,
+  type NamedQueryRequest, type QueryEvaluationReport, type QueryFactualView, type QueryGateRequest,
+  type QueryReportParams, type QueryViewParams } from '@convesoft/mara';
 import { createClient } from '@convesoft/mara/client';
 
 // @mara checks REQ-SHARED-TYPESCRIPT-CLIENT
@@ -103,6 +106,83 @@ async function memoryBoundary(adapter: ClientAdapter<MemoryProjectInitParams>) {
 }
 void memoryBoundary;
 
+// Compile-time consumer coverage for supplied facts, mappings, views, policies and gates.
+const factKey = (verification: string) => ({
+  verification: { type: 'item' as const, value: verification },
+  candidate: { type: 'text' as const, value: 'CAND-C' },
+  context: { type: 'text' as const, value: 'release' },
+});
+const suppliedFacts: FactSnapshot = {
+  input: 'reported', identity: 'reported-run',
+  coverage: ['VER-V1', 'VER-V2', 'VER-V3'].map(factKey),
+  records: [['VER-V1', 'pass'], ['VER-V2', 'pass'], ['VER-V3', 'fail']].map(([verification, state]) => ({
+    keys: factKey(verification!), fields: { state: { type: 'text', value: state! } },
+  })),
+};
+const queryRequest: NamedQueryRequest = {
+  definition_files: ['facts.json'], definition: 'urn:fixture:facts:composed',
+  selection: { ids: ['CAND-C'] },
+  parameters: [
+    { name: 'candidate', value: { type: 'text', value: 'CAND-C' } },
+    { name: 'context', value: { type: 'text', value: 'release' } },
+  ],
+  max_rows: 100, limit: 100, fact_snapshots: [suppliedFacts], mappings: [],
+};
+const gateRequest: QueryGateRequest = {
+  definition_files: ['facts.json'], gate_file: 'facts-gates.yaml', shape_files: ['facts-present.ttl'],
+  gate: 'require-composed-facts', scope: { ids: ['CAND-C'] },
+  context: queryRequest.parameters, max_rows: 100, fact_snapshots: [suppliedFacts], mappings: [],
+};
+const viewRequest: QueryViewParams = { request: queryRequest, render: 'markdown' };
+const gateReport: QueryReportParams = { subject: { kind: 'gate', ...gateRequest }, render: 'markdown' };
+const ruleReport: QueryReportParams = { subject: {
+  kind: 'documentation_rules', target: { kind: 'item', id: 'CAND-C' },
+  fact_snapshots: [suppliedFacts], mappings: [],
+} };
+async function queryUsage(client: MaraClient, projectRoot: string) {
+  const page = await client.queryExecute(queryRequest);
+  assert.equal(page.evaluation_complete, true);
+  assert.equal(page.summary.binding_count, 3);
+  const view = await client.queryView(viewRequest);
+  assert.equal(view.input_identity, page.input_identity);
+  assert.equal(view.summary.binding_count, 3);
+  assert.equal((await client.queryGate(gateRequest)).state, 'passed');
+  const gateReportResult = await client.queryReport(gateReport);
+  assert.equal(gateReportResult.checks[0]?.state, 'passed');
+  assert.equal(gateReportResult.diagnostics, undefined);
+  const ruleReportResult = await client.queryReport(ruleReport);
+  assert.equal(ruleReportResult.checks[0]?.state, 'passed');
+  assert.equal(ruleReportResult.roots, undefined);
+  assert.equal(ruleReportResult.diagnostics, undefined);
+  assert.equal(view.next_cursor, undefined);
+  assert.equal(view.unavailable_reason, undefined);
+  const item = await client.itemValidate({ id: 'CAND-C', fact_snapshots: [suppliedFacts], mappings: [] });
+  assert.equal(item.valid, true);
+  assert.equal(item.query_policies?.checks[0]?.state, 'passed');
+  const project = await client.projectValidate({ fact_snapshots: [suppliedFacts], mappings: [] });
+  assert.ok(project.query_policies?.checks.some(check => check.root?.kind === 'item' &&
+    check.root.id === 'CAND-C' && check.state === 'passed'));
+  await writeFile(path.join(projectRoot, 'invalid-facts.json'), 'not valid JSON');
+  const invalidRequest = { ...queryRequest, definition_files: ['facts.json', 'invalid-facts.json'] };
+  const hasSource = (error: unknown) => error instanceof MaraClientError &&
+    error.envelope.error.source === 'invalid-facts.json';
+  await assert.rejects(client.queryExecute(invalidRequest), hasSource);
+  await assert.rejects(client.queryView({ request: invalidRequest, render: null }), hasSource);
+}
+function optionalQueryResultTypes(view: QueryFactualView, report: QueryEvaluationReport) {
+  // @ts-expect-error Rust omits this value when no source definition is available.
+  view.definition_file.toLowerCase();
+  // @ts-expect-error Rust omits this field when query evaluation is complete.
+  view.unavailable_reason.toLowerCase();
+  // @ts-expect-error Rust omits this field when the page is complete.
+  view.next_cursor.toLowerCase();
+  // @ts-expect-error Empty report roots are omitted by the Rust serializer.
+  report.roots.length;
+  // @ts-expect-error Empty report diagnostics are omitted by the Rust serializer.
+  report.diagnostics.length;
+}
+void optionalQueryResultTypes;
+
 const callerDirectory = process.env.MARA_NODE_FIXTURES!;
 const addonPath = process.env.MARA_NODE_ADDON!;
 const daemonDirectory = process.env.MARA_NODE_DAEMON;
@@ -112,4 +192,11 @@ for (const mode of modes) {
     mode, daemonDirectory, ...(process.env.MARA_NODE_INSTALLED ? {} : { addonPath }) });
   try { await documentUsage(client); } finally { await client.close(); }
   console.log('PASS standard installed TypeScript full-method consumer: ' + (mode ?? 'default-auto'));
+}
+for (const mode of modes) {
+  const queryProject = path.join(callerDirectory, `query-facts-${mode ?? 'auto'}`);
+  const client = await createNativeClient({ callerDirectory, project: queryProject, mode, daemonDirectory,
+    ...(process.env.MARA_NODE_INSTALLED ? {} : { addonPath }) });
+  try { await queryUsage(client, queryProject); } finally { await client.close(); }
+  console.log('PASS typed query consumer: ' + (mode ?? 'default-auto'));
 }

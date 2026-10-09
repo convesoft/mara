@@ -421,69 +421,72 @@ impl NativeClient {
     ) -> Result<crate::RelationMutationResult, ClientError> {
         self.call("relation_remove", json!({"source":params.source,"relation":params.relation,"target":params.target,"occurrence":occurrence}), true, |r, _| r.relation_remove_occurrence(params,occurrence).map_err(Into::into))
     }
-    /// Contextual gates are embedded-only and return conditions, never permissions or actions.
+    /// Contextual gates return conditions, never permissions or actions.
     pub fn query_gate(
         &self,
         request: crate::query_consumers::QueryGateRequest,
     ) -> Result<crate::query_consumers::QueryGateResult, ClientError> {
-        if self.options.mode == Some(ExecutionMode::DaemonRequired) {
-            return Err(ClientError::Operation(
-                json!({"format_version":2,"error":{"code":"unsupported_capability","message":"query gate daemon execution is not implemented; select direct execution"}}),
-            ));
-        }
-        self.runtime.query_gate(request).map_err(|e| {
-            ClientError::Operation(
-                json!({"format_version":2,"error":{"code":e.code,"message":e.message}}),
-            )
+        self.call("query_gate", request, false, |runtime, request| {
+            runtime.query_gate(request).map_err(|error| {
+                ClientError::Operation(
+                    json!({"format_version":2,"error":{"code":error.code,"message":error.message}}),
+                )
+            })
         })
     }
 
-    /// Named factual execution is embedded-only in this bounded delivery.
+    /// Execute an exact named factual query.
     pub fn query_execute(
         &self,
         request: crate::named_query::Request,
     ) -> Result<crate::named_query::Page, ClientError> {
-        if self.options.mode == Some(ExecutionMode::DaemonRequired) {
-            return Err(ClientError::Operation(
-                json!({"format_version":2,"error":{"code":"unsupported_capability","message":"named query daemon execution is not implemented; select direct execution"}}),
-            ));
-        }
-        self.runtime
-            .query_execute(request)
-            .map_err(|e| ClientError::Operation(json!({"format_version":2,"error":e})))
+        self.call("query_execute", request, false, |runtime, request| {
+            runtime
+                .query_execute(request)
+                .map_err(|error| ClientError::Operation(json!({"format_version":2,"error":error})))
+        })
     }
 
-    /// Factual view rendering is embedded-only in this bounded delivery.
+    /// Render a factual view over one named-query page.
     pub fn query_view(
         &self,
         params: crate::query_views::ViewParams,
     ) -> Result<crate::query_views::FactualView, ClientError> {
-        if self.options.mode == Some(ExecutionMode::DaemonRequired) {
-            return Err(ClientError::Operation(
-                json!({"format_version":2,"error":{"code":"unsupported_capability","message":"query view daemon execution is not implemented; select direct execution"}}),
-            ));
-        }
-        self.runtime
-            .query_view(params)
-            .map_err(|e| ClientError::Operation(json!({"format_version":2,"error":e})))
+        self.call("query_view", params, false, |runtime, params| {
+            runtime
+                .query_view(params)
+                .map_err(|error| ClientError::Operation(json!({"format_version":2,"error":error})))
+        })
     }
 
-    /// Evaluation report rendering is embedded-only in this bounded delivery.
+    /// Render a gate or enabled-policy evaluation report.
     pub fn query_report(
         &self,
         request: crate::query_views::ReportRequest,
         render: Option<String>,
     ) -> Result<crate::query_views::EvaluationReport, ClientError> {
-        if self.options.mode == Some(ExecutionMode::DaemonRequired) {
-            return Err(ClientError::Operation(
-                json!({"format_version":2,"error":{"code":"unsupported_capability","message":"query report daemon execution is not implemented; select direct execution"}}),
-            ));
+        #[derive(serde::Serialize)]
+        struct Params {
+            subject: crate::query_views::ReportRequest,
+            render: Option<String>,
         }
-        self.runtime.query_report(request, render).map_err(|e| {
-            ClientError::Operation(
-                json!({"format_version":2,"error":{"code":e.code,"message":e.message}}),
-            )
-        })
+        self.call(
+            "query_report",
+            Params {
+                subject: request,
+                render,
+            },
+            false,
+            |runtime, params| {
+                runtime
+                    .query_report(params.subject, params.render)
+                    .map_err(|error| {
+                        ClientError::Operation(
+                            json!({"format_version":2,"error":{"code":error.code,"message":error.message}}),
+                        )
+                    })
+            },
+        )
     }
 
     pub fn trace_matrix(
@@ -528,15 +531,16 @@ impl NativeClient {
         id: &str,
         options: &crate::ValidationOptions,
     ) -> Result<crate::ValidationResult, ClientError> {
-        self.call(
-            "item_validate",
-            json!({"id":id,"limit":options.limit,"cursor":options.cursor}),
-            false,
-            |r, _| {
-                r.item_validate_with_options(id, options)
-                    .map_err(Into::into)
-            },
-        )
+        #[derive(serde::Serialize)]
+        struct Params<'a> {
+            id: &'a str,
+            #[serde(flatten)]
+            options: &'a crate::ValidationOptions,
+        }
+        self.call("item_validate", Params { id, options }, false, |r, _| {
+            r.item_validate_with_options(id, options)
+                .map_err(Into::into)
+        })
     }
     pub fn schema_validate(&self) -> Result<crate::ValidationResult, ClientError> {
         self.schema_validate_with_options(&crate::ValidationOptions::default())

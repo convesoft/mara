@@ -9,14 +9,18 @@ const operations = [
   'project_init', 'project_mid_backfill', 'project_transaction_rollback', 'project_refresh',
   'schema_get', 'schema_list', 'schema_validate', 'item_list', 'search', 'get', 'related',
   'item_create', 'item_update', 'item_delete', 'item_move', 'item_rename', 'item_validate',
-  'project_validate', 'relation_get', 'relation_add', 'relation_remove', 'trace_matrix',
+  'project_validate', 'relation_get', 'relation_add', 'relation_remove',
+  'query_execute', 'query_gate', 'query_view', 'query_report', 'trace_matrix',
 ];
 const mutations = new Set([
   'project_init', 'project_mid_backfill', 'project_transaction_rollback', 'project_refresh',
   'item_create', 'item_update', 'item_delete', 'item_move', 'item_rename',
   'relation_add', 'relation_remove',
 ]);
-const formats = { discovery: 2, relationship: 1, validation: 1, trace: 1, operation_error: 1 };
+const formats = {
+  discovery: 2, relationship: 1, validation: 1, trace: 1,
+  query: 3, gate: 1, query_view: 1, query_report: 1, operation_error: 1,
+};
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 function setup(options) {

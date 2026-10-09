@@ -177,6 +177,8 @@ fn supplied_rules_and_trace_preserve_complete_outcomes() {
             &ValidationOptions {
                 limit: Some(1),
                 cursor: None,
+                fact_snapshots: vec![],
+                mappings: vec![],
             },
             Some(&checks),
         )
@@ -239,6 +241,8 @@ fn supplied_rules_and_trace_preserve_complete_outcomes() {
     let mut options = ValidationOptions {
         limit: Some(1),
         cursor: None,
+        fact_snapshots: vec![],
+        mappings: vec![],
     };
     let mut seen = 0;
     loop {
