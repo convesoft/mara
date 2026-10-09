@@ -43,6 +43,14 @@ semantic integration remain later work; illustrative YAML or proposed commands
 outside that design do not select them. Do not build a custom query DSL or
 framework without explicit approval.
 
+The user subsequently approved [[DES-QUERY-NAMED-ADAPTER]] for the selected
+named-query delivery. Its explicit input declarations, runtime output checks and
+projected-support boundary govern wherever the earlier designs/catalog imply
+automatic type/dependency inference or complete hidden derivation provenance.
+Those stronger guarantees remain future intent, not this delivery's gates.
+Other capability and host commitments remain; this is not a raw-query-console
+pivot or evidence that the paused candidate passes.
+
 Existing `trace matrix` is an obligation-evaluation explanation, not the
 factual query/view abstraction. Its useful source-linked explanations inform
 the new evaluation report; a matrix is a rendering, never an independent
@@ -70,7 +78,7 @@ Support project/template-owned named queries with explicit root selection, param
 
 Return deterministic bindings and supporting source/relationship provenance, retaining selected roots with empty matches. Expose lifecycle values rather than implicitly restricting all queries to accepted items; explicit filters remain available. Distinguish valid empty results, invalid definitions or arguments, and unavailable/incomplete evaluation. Keep input identity and bounded continuation explicit. Query execution alone has no policy pass/fail semantics.
 
-Definition resolution, explicit roots/parameters, typed bindings, absence, provenance and input/result completeness follow [[DES-QUERY-INPUT-RESULT-CONTRACT]].
+Definition resolution, explicit roots/parameters, typed bindings, absence, provenance and input/result completeness follow [[DES-QUERY-INPUT-RESULT-CONTRACT]], with the selected runtime-check/explicit-support boundary in [[DES-QUERY-NAMED-ADAPTER]].
 :::
 
 :::mara requirement REQ-COMPOSABLE-QUERY-PROJECTIONS
@@ -185,8 +193,10 @@ The bounded subset and subsequent integrated fixture checks are distinguished
 in [[VER-REUSABLE-QUERY-ENGINE]]. A required backend conflict remains blocked
 pending a user decision, not silent reduction or a custom DSL/framework.
 
-These semantic designs specify the full behavior to prove. The bounded backend
-and bridge subset does not certify complete new operations or host parity. Engineering-template refinement and
+These semantic designs retain full-engine intent; [[DES-QUERY-NAMED-ADAPTER]]
+explicitly defers their automatic analysis and hidden-support guarantees for the
+selected delivery. The bounded backend/bridge subset does not certify complete
+new operations or host parity. Engineering-template refinement and
 self-hosted schema/policy changes remain outside this engine initiative.
 :::
 
@@ -213,9 +223,12 @@ network import or cross-project resolution applies. Identity spelling, namespace
 encoding and persisted definition syntax remain for the backend proof.
 References bind to the selected definition content, not merely its name.
 
-Bind flavour, field, relation and inverse-alias references against the selected
-schema before execution. Unknown vocabulary, incompatible endpoint/value types
-or incompatible composition signatures are source-linked definition errors.
+Bind declared flavour, field, relation and inverse-alias references against the
+selected schema before execution; unknown declaration vocabulary is a
+source-linked definition error. The richer intent also detects incompatible
+endpoint/value types and composition signatures before execution. Automatic
+proof of every possible type/signature is deferred under
+[[DES-QUERY-NAMED-ADAPTER]]: validate actual returned values instead.
 Normalize aliases and symmetric edges using the canonical relation model;
 built-in and schema relationships remain distinguishable. Lifecycle values
 are schema/project data, not implicit accepted-only filters. A schema or source
@@ -261,8 +274,11 @@ Optional missing fields/left-join bindings are absence, distinguishable from
 empty text, false, zero and unavailable computation. Required missing external
 records follow coverage below, not optional-field semantics.
 
-Each returned fact/derived value retains its root, contributing typed bindings,
-definition/derivation references and source support: document locations,
+For the selected adapter, support means explicitly projected references under
+[[DES-QUERY-NAMED-ADAPTER]], not automatically recovered hidden contributors.
+The richer hidden-derivation intent is deferred: each returned fact/derived value
+would retain its root, contributing typed bindings, definition/derivation
+references and source support: document locations,
 canonical relationship endpoints and authored occurrences, or supplied external
 snapshot/record provenance. Aggregates keep support rather than only a boolean.
 Use finite supporting edges/derivations, not enumeration of infinitely many
@@ -315,8 +331,10 @@ definition language is selected here.
 
 ### Composition and equality
 
-Named-query dependencies form an acyclic graph. Resolve/type-check the reachable
-definitions before execution; direct/indirect recursion is invalid. Compose
+Named-query dependencies form an acyclic graph. Resolve reachable definitions
+and validate their declarations before execution; direct/indirect recursion is
+invalid. Automatic proof of every compatible type/signature remains richer
+future intent under [[DES-QUERY-NAMED-ADAPTER]]; returned values are checked. Compose
 results through joins on explicit compatible typed keys, unions of compatible
 projections, filters and derived projections. Inner joins retain matching
 bindings; explicit left joins retain unmatched left bindings as absence.
@@ -328,7 +346,9 @@ Results use distinct typed binding tuples by default. Repeated authored
 assertions, alias spellings or multiple supporting paths do not multiply an
 identical binding. Combine its supporting provenance. Projection may merge
 bindings that become identical after columns are removed, retaining their
-combined support. Union uses the same distinctness. Joins match typed identity,
+combined support. For the selected adapter this is explicitly projected support,
+not reconstruction of hidden operands or paths. Union uses the same distinctness.
+Joins match typed identity,
 not titles or formatted cells; support from both operands remains attached.
 
 A definition specifies the counted binding/column and qualification.
@@ -579,6 +599,25 @@ The expectations below discriminate implementations of
 evidence from contract authoring. Fixture labels are not public operation names,
 persisted syntax or an adopted engineering ontology.
 
+### Selected named-query adapter gate
+
+Apply [[DES-QUERY-NAMED-ADAPTER]] before interpreting the catalog below. For the
+first raw-query stage, exercise actual Rust and embedded CLI/MCP with a
+project-owned SPARQL definition: explicit/empty roots, typed parameters,
+lifecycle-bearing returned values, optional absence, and projected canonical
+support resolved to authored sources. Check invalid declarations/arguments,
+a returned wrong-type value, declared unavailable inputs and a document-only
+query that does not require undeclared code facts. A no-match query need not
+expose every potential type incompatibility. Compare deterministic paged facts
+and reject continuation after relevant definition/source/parameter changes.
+Hidden derivation reconstruction and full static type/dependency inference are
+not acceptance gates. Final formats must state this support boundary.
+
+The remaining catalog/consumer/host stages stay scheduled separately; raw-stage
+success does not certify them. Their named-query assertions use this adapter
+boundary, not the deferred automatic guarantees. Preserve actual prior failing
+reviews; only revised, executed checks and required review establish acceptance.
+
 ### Discriminating fixtures
 
 1. **One question, four consumers.** Select a linked root and an empty root.
@@ -592,9 +631,11 @@ persisted syntax or an adopted engineering ontology.
    A rendering does not alter either evaluation.
 
 2. **Resolution and arguments.** Two loaded definitions sharing an identity,
-   an unresolved/recursive query reference, an unknown schema name and a
-   type-incompatible relation/join are definition errors. Missing/wrong-type/
-   undeclared parameters and unknown explicit item IDs are argument errors.
+   an unresolved/recursive query reference and an unknown schema name in a
+   declaration are definition errors. Under the selected adapter, returned values
+   incompatible with declared types are errors; a relation/join producing no rows
+   need not reveal all potential incompatibilities before execution. Missing/
+   wrong-type/undeclared parameters and unknown explicit item IDs are argument errors.
    No override, implicit all or dropped IDs is allowed. Select the same root by
    ID and MID: one root record. A valid filter matching nothing gives complete
    empty selection, while missing source inventory cannot establish emptiness.
@@ -610,7 +651,7 @@ persisted syntax or an adopted engineering ontology.
 
 4. **Distinct support and joins.** Two paths reach the same supporting design;
    repeated metadata/inline/inverse assertions denote the same edge. Endpoint
-   count is one and all contributing source support remains inspectable.
+   count is one and all explicitly projected canonical support remains inspectable.
    Explicit assertion-occurrence count distinguishes two authored assertions
    without counting one occurrence twice through different paths.
    Union/projection deduplicate identical tuples; an explicit left join retains
@@ -731,7 +772,7 @@ Use unmodified Oxigraph 0.5.11 in-memory SELECT execution and spargebra 0.4.7 pa
 
 The executable proof profile admits SELECT, basic graph patterns, forward/inverse/property paths, joins, OPTIONAL, UNION, MINUS, VALUES, projection and DISTINCT. Expressions admit RDF terms, variables, BOUND, sameTerm, boolean and/or/not and EXISTS. Do not admit SPARQL '=' as Mara's exact typed comparison: it performs cross-datatype numeric equality. ORDER BY, REDUCED, slicing, grouping/aggregates and other functions are rejected in this bounded proof, not substituted with empty results. RDF-star and directional RDF-1.2 literals are rejected; feature closure does not broaden the RDF-1.1 result profile. Validate the SELECT signature before root enumeration, including empty selections. Admitted query/policy literals are strings/language-tagged strings and canonical primitive xsd:integer (i64), finite xsd:double (excluding negative zero), and xsd:boolean spellings. Integer/double spellings must equal i64/f64 Display (as used by pinned oxsdatatypes), and boolean spelling must be true/false; this is backend primitive spelling, not XML Schema's canonical scientific notation. Reject other datatypes/facets, noncanonical spellings and nonfinite values: Oxigraph normalizes known numeric forms before sameTerm/projection, so accepting them would lose literal identity. Source scalar results use the shared typed projection and backend canonical primitive spelling; this is not a guarantee for arbitrary RDF literal lexical forms.
 
-SPARQL is the selected standard query language, not a custom traversal DSL. The full release implementation must add the owning semantic resolution/type/coverage/composition checks and explicit derived operations from the three semantic designs. The current admission profile is a proof subset, not permission to remove those capabilities. Named composition can supply child projections as explicit in-memory relations; dependency order/signatures and complete source support remain engine responsibilities, not SHACL caches. Arbitrary SPARQL conformance is not promised. Numeric coercion, bag counts, SAMPLE/load-order precedence and backend errors must not redefine Mara's semantic contracts.
+SPARQL is the selected standard query language, not a custom traversal DSL. Later engine stages add the owning resolution/coverage/composition checks and derived operations from the semantic designs, subject to the subsequently approved runtime-type/explicit-support boundary in [[DES-QUERY-NAMED-ADAPTER]]. The admission profile is a proof subset, not removal of other capabilities. Named composition can supply child projections as explicit in-memory relations; dependency order, declared signatures and projected source support remain engine responsibilities, not SHACL caches. Arbitrary SPARQL conformance is not promised. Numeric coercion, bag counts, SAMPLE/load-order precedence and backend errors must not redefine Mara's semantic contracts.
 
 ### Formats and operations
 
@@ -757,7 +798,7 @@ The proof executes inverse traversal, draft/accepted/retired fields, empty roots
 
 max_rows bounds observed SELECT solution rows across selected roots, including duplicates that provide support. It is not page size, a wall-clock deadline, a bound on graph expansion before the next solution, or a memory/latency guarantee. A reached limit retains known partial support and every root, sets incomplete with a reason, and cannot establish an exact truncated count, complete negative or policy pass. No default numeric budget is implied; callers choose it explicitly. The synchronous upstream evaluator supplies no cooperative traversal-work cancellation hook; do not claim one.
 
-The bounded proof requires document items with MIDs, one loaded definition and no external snapshots, typed parameters, mapping inputs, named dependencies, factual rendering or final host adapters. It does not certify the twelve integrated fixtures, arbitrary cyclic/path provenance, Unicode normalization, aggregate precedence, full coverage/type binding, installed packages or Apple Silicon. Those are still required by [[VER-REUSABLE-QUERY-ENGINE]] and the semantic designs. If their implementation exposes a backend conflict, keep it blocked and seek a user decision; never silently widen SPARQL admission or reduce the contract. No template/schema/policy refinement or host effects are introduced.
+The bounded proof requires document items with MIDs, one loaded definition and no external snapshots, typed parameters, mapping inputs, named dependencies, factual rendering or final host adapters. It does not certify the twelve integrated fixtures, arbitrary cyclic/path provenance, Unicode normalization, aggregate precedence, full coverage/type binding, installed packages or Apple Silicon. Later catalog/host work remains required by [[VER-REUSABLE-QUERY-ENGINE]] and the semantic designs, subject to the subsequently approved automatic-analysis/support deferrals in [[DES-QUERY-NAMED-ADAPTER]]. If implementation of a remaining required capability exposes a backend conflict, keep it blocked and seek a user decision; never silently widen SPARQL admission or reduce the contract. No template/schema/policy refinement or host effects are introduced.
 :::
 
 :::mara decision ADR-QUERY-SPARQL-RESULT-BRIDGE
@@ -773,5 +814,56 @@ Choose direct configured Oxigraph SELECT evaluation rather than rudof_rdf's opti
 
 Existing canonical RDF preparation and schema-owned vocabulary avoid a second ontology. A direct parser/profile check rejects numeric-coercing equality and host-effect constructs. Reject affected literal forms that the backend normalizes rather than claiming arbitrary RDF lexical identity or inventing a custom codec; canonical Mara primitive comparisons remain the required path. Blank bridge rows prevent collisions with data IRIs, and a fixed u32 budget gives identical native/WASM JSON boundaries. Portable SHA-256 occurrence identity corrects the host-width-dependent relation handle observed in the first native/browser comparison without changing the existing relation API. Use upstream standard RDFC-1.0/SHA-256 to stabilize anonymous SHACL reporting rather than inventing a source parser or exposing random blank labels. Locked RDF-1.2 feature closure is required for compatible upstream RDF term enums; it does not authorize RDF-star output, directional literals or a broader public language.
 
-This selects a backend and bounded proof contract, not proof of every planned query capability. The semantic contracts remain unchanged. No traversal-work cancellation, arbitrary SPARQL support or completed host/catalog certification is inferred from this result. An unsupported required capability remains a blocker under [[VER-REUSABLE-QUERY-ENGINE]], not justification for custom language code or implicit scope reduction.
+This selects a backend and bounded proof contract, not proof of every planned query capability. At proof selection the semantic contracts remained unchanged; the subsequent [[ADR-QUERY-EXPLICIT-ANALYSIS-BOUNDARY]] narrows their automatic-analysis/support guarantees for the selected delivery. No traversal-work cancellation, arbitrary SPARQL support or completed host/catalog certification is inferred from this result. An unsupported required capability remains a blocker under [[VER-REUSABLE-QUERY-ENGINE]], not justification for custom language code or implicit scope reduction.
+:::
+
+:::mara decision ADR-QUERY-EXPLICIT-ANALYSIS-BOUNDARY
+:mid: 01M4FGP9R5KBJMHKKA4G1XNZRZ
+:title: Prefer explicit query dependencies and projected support to automatic analysis
+:status: draft
+:justifies: DES-QUERY-INPUT-RESULT-CONTRACT
+:justifies: DES-QUERY-NAMED-ADAPTER
+
+The user explicitly approved a typed named-query adapter around SPARQL after pausing the repeated correctness-review loop. Retain the product-facing API and safeguards rather than deliver a raw query console; let the existing standard backend own query semantics rather than continue a second automatic analysis engine.
+
+Choose declared required fact sources, runtime checks of returned column values and explicitly projected provenance. The rejected alternatives for this delivery were continuing exhaustive pre-execution type/dependency inference and hidden-derivation reconstruction, or reducing the product to untyped raw SPARQL bindings.
+
+The tradeoff is explicit: some type/endpoint incompatibilities surface only when a value is returned; no-match cases need not expose them. Source-linked support is accurate for returned references, not a claim of complete hidden derivation history. This narrows the earlier semantic designs for the selected delivery without removing their richer future intent or other scheduled capabilities.
+
+Approval selects a contract, not a passing candidate, a review waiver, implementation resumption or integration/publication authority. Preserve prior failing reviews and work; assess and verify revised implementation against the changed obligations before acceptance.
+:::
+
+:::mara design DES-QUERY-NAMED-ADAPTER
+:mid: 01M4FGPPRF05QKBSR0ZWH26EVN
+:title: Adapt named SPARQL queries with explicit inputs and typed returned facts
+:status: draft
+:kind: interface
+:satisfies: REQ-NAMED-QUERY-FACTS
+:satisfies: REQ-EXPLICIT-QUERY-INPUTS
+
+Selected by the user's approval of the typed named-query/SPARQL middle ground after the correctness-repair loop, with rationale in [[ADR-QUERY-EXPLICIT-ANALYSIS-BOUNDARY]]. This governs named-query results in the selected 0.4 delivery, including later consumers of those results. It narrows only automatic analysis/support guarantees in [[DES-QUERY-INPUT-RESULT-CONTRACT]] and [[DES-QUERY-COMPOSITION-CONTRACT]]; other capability and host commitments remain. Full static inference and hidden-derivation reconstruction remain future intent, not current acceptance.
+
+### Definition and execution boundary
+
+Load uniquely named project/template-owned definitions with native SPARQL SELECT sources. Small metadata declares identity, typed parameters, output columns, required fact sources and provenance columns; it does not encode query expressions. Concrete versioned file/request/result formats must be recorded with implementation, not inferred from illustrative syntax.
+
+Validate declaration vocabulary/types against the selected schema, names and parameters, SELECT/profile syntax and declared column references before execution, including empty selections. Use the standard backend for admitted traversal, filtering, OPTIONAL and UNION semantics; do not add a second algebra/type-inference evaluator. [[DES-QUERY-BACKEND-PROOF]] retains the backend, host-effect restrictions and bounded proof profile; this selection does not promise arbitrary SPARQL support.
+
+Required fact sources are explicit definition metadata, not inferred from possible variable types, hidden paths or output column kinds. Hosts supply those inputs. A declared required source that cannot be supplied is unavailable, not a successful empty result. Loading/malformed-input errors remain distinct. No implicit network imports, SERVICE, dataset acquisition or execution effects are introduced.
+
+### Invocation and returned facts
+
+Keep explicit roots, strict typed arguments/defaults and exact definition resolution under [[DES-QUERY-INPUT-RESULT-CONTRACT]]. An omitted selector never means all; ID/MID aliases select one root; invalid explicit roots are argument errors. Valid empty selections and roots with no matches remain explicit complete results when required inputs are available. Lifecycle is returned data, not an implicit accepted-only filter.
+
+Declared output types are checked against actual returned values, including declared item flavours and canonical endpoint kinds. Wrong returned types/references are errors, never coerced, discarded or reported as empty success. Optional absence remains distinct from empty text, false and zero. There is no promise to prove every possible SPARQL variable type/flavour, endpoint compatibility or composition signature before execution, or to detect every incompatibility when no rows match.
+
+Resolve returned item/edge/code references through shared canonical graph identities and source mappings. Definitions explicitly project the support references they want explained. Resolve and validate those references; canonical edge support includes its authored occurrences. Combine explicitly returned support when distinct typed tuples merge. Root/definition identity and source locations remain inspectable. Provenance describes projected support only: do not claim complete hidden contributors, filtered-out bindings or property-path derivations. More explanation requires explicit projections, not automatic reconstruction.
+
+Keep deterministic root/tuple/support ordering, distinct typed bindings, logical completeness and bounded input-bound continuation. Changes to relevant source/schema/definition content, roots, parameters, declared fact inputs or evaluation controls invalidate prior continuation/reuse. A delivery page is not an evaluation limit; incomplete evaluation cannot establish complete negative facts or policy success.
+
+### Selected workflow and limits
+
+Deliver real shared Rust and embedded CLI/MCP raw execution first. Composition/catalog, policy/gate/view rollout and final daemon/JavaScript/browser surfaces remain separate delivery stages, not additions to this slice or waived release commitments. Hosts retain fact acquisition and native code discovery.
+
+The user separately accepted current transitive-path preparation cost for this slice; optimization is not an acceptance prerequisite and no latency/workload guarantee is added. Scope selection is not evidence that the paused candidate conforms. Verify the real selected workflow under [[VER-REUSABLE-QUERY-ENGINE]] before acceptance.
 :::
