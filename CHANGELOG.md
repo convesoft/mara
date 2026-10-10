@@ -41,6 +41,10 @@ All notable changes to Mara are generated from Conventional Commit history.
 - Use Bash for the Pi review launcher
 - Simplify query input preflight condition
 
+### Continuous integration
+
+- Use standard build storage and warm Rust caches
+
 ### Documentation
 
 - Define 0.4 execution and integration scope
