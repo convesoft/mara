@@ -83,6 +83,20 @@ Return deterministic bindings and supporting source/relationship provenance, ret
 Definition resolution, explicit roots/parameters, typed bindings, absence, provenance and input/result completeness follow [[DES-QUERY-INPUT-RESULT-CONTRACT]], with the selected runtime-check/explicit-support boundary in [[DES-QUERY-NAMED-ADAPTER]].
 :::
 
+:::mara requirement REQ-QUERY-SINGLE-LANGUAGE-AUTHORING
+:mid: 01M4JQXHMF6Z7P1CGK227J5W7H
+:title: Author complete named queries in one existing language
+:status: draft
+:kind: constraint
+:derives_from: SCN-REUSE-QUERY-FACTS
+
+Author named-query inputs, output projections, computation and composition in one existing declarative language or an existing documented dialect. Do not require a separate hand-authored Mara-specific JSON definition or introduce a Mara-specific query/expression DSL. Generated metadata is not a competing authoring source.
+
+Source: the user's query-authoring clarification: use one existing language to declare everything; GraphQL is not mandatory, and SPARQL is acceptable if a single query file covers the input/output declarations as well as the query.
+
+Prefer existing syntax highlighting and project-aware autocompletion when selecting the language. These are selection preferences, not yet an editor-integration acceptance gate. The language/framework and its fit to the existing query contracts remain unresolved; this requirement does not claim that the current JSON loader satisfies it.
+:::
+
 :::mara requirement REQ-COMPOSABLE-QUERY-PROJECTIONS
 :mid: 01M4BP8KCRXSB29201PHSAYZA6
 :title: Compose graph facts and derived projections without domain code
