@@ -173,7 +173,7 @@ jobs:
           name: installed-artifacts-${{ matrix.runner }}
           path: |
             ${{ env.SCRATCH }}/smoke/*-pack.json
-            ${{ env.SCRATCH }}/target/nextest/default/junit.xml
+            target/nextest/default/junit.xml
             ${{ env.SCRATCH }}/native-query-*.json
             ${{ env.SCRATCH }}/installed-query-catalog.json
             ${{ env.SCRATCH }}/browser-report.json
