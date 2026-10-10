@@ -140,6 +140,8 @@ All notable changes to Mara are generated from Conventional Commit history.
 - Verify native execution workflows through real lifecycle daemons
 - Verify installed native and HTTP clients
 - Verify packaged browser parity and safe export
+- Fix macOS path fixtures and shutdown backpressure
+- Retain macOS fixture declarations for code indexing
 ## [0.3.0]
 
 ### Breaking changes and migration
