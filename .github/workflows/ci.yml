@@ -9,6 +9,11 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TARGET_DIR: ${{ github.workspace }}/target
+  QUERY_PROOF_SNAPSHOT: ${{ github.workspace }}/tests/fixtures/query-backend/snapshot.json
+  QUERY_FACTS_SNAPSHOT: ${{ github.workspace }}/tests/fixtures/query-facts/snapshot.json
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -18,52 +23,46 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
-      - name: Set disposable build and IPC storage
+      - name: Set test runtime directories
         shell: bash
         run: |
           set -euo pipefail
-          scratch="$RUNNER_TEMP/mara"
-          mkdir -p "$scratch/tmp"
+          # Preserve the host's private macOS TMPDIR for default daemon discovery.
+          # Linux scripts also require an explicit temporary-directory setting.
+          echo "TMPDIR=${TMPDIR:-$RUNNER_TEMP}" >> "$GITHUB_ENV"
+          # Socket tests need a short private path on both supported hosts.
           runtime=$(mktemp -d /tmp/mara-ipc.XXXXXX)
-          chmod 700 "$runtime"
           {
-            echo "SCRATCH=$scratch"
-            echo "TMPDIR=$scratch/tmp"
-            echo "CARGO_TARGET_DIR=$scratch/target"
-            echo "npm_config_cache=$scratch/npm-cache"
-            echo "PLAYWRIGHT_BROWSERS_PATH=$scratch/browsers"
             echo "MARA_NODE_RUNTIME=$runtime"
             echo "MARA_TEST_RUNTIME_DIR=$runtime"
             echo "BROWSER_RUNTIME_TMPDIR=$runtime"
-            echo "MARA_QUERY_PROOF_REPORT=$scratch/native-query-proof.json"
-            echo "MARA_QUERY_FACTS_REPORT=$scratch/native-query-facts.json"
-            echo "MARA_QUERY_CATALOG_REPORT=$scratch/native-query-catalog.json"
-            echo "MARA_QUERY_CATALOG_NODE_REPORT=$scratch/installed-query-catalog.json"
-            echo "QUERY_PROOF_SNAPSHOT=$GITHUB_WORKSPACE/tests/fixtures/query-backend/snapshot.json"
-            echo "QUERY_FACTS_SNAPSHOT=$GITHUB_WORKSPACE/tests/fixtures/query-facts/snapshot.json"
+            echo "MARA_QUERY_PROOF_REPORT=$RUNNER_TEMP/native-query-proof.json"
+            echo "MARA_QUERY_FACTS_REPORT=$RUNNER_TEMP/native-query-facts.json"
+            echo "MARA_QUERY_CATALOG_REPORT=$RUNNER_TEMP/native-query-catalog.json"
+            echo "MARA_QUERY_CATALOG_NODE_REPORT=$RUNNER_TEMP/installed-query-catalog.json"
           } >> "$GITHUB_ENV"
       - run: rustc --version
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
+          cache-on-failure: true
           shared-key: source-verify
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest@0.9.148
       - run: mkdir -p "$CARGO_TARGET_DIR"
-      - run: VERIFY_EVIDENCE_DIR="$SCRATCH/verification" scripts/verify.sh full
+      - run: VERIFY_EVIDENCE_DIR="$RUNNER_TEMP/verification" scripts/verify.sh full
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: source-verification
-          path: ${{ env.SCRATCH }}/verification/
+          path: ${{ runner.temp }}/verification/
           if-no-files-found: warn
-      - name: Remove disposable storage
+      - name: Remove test IPC directory
         if: always()
         shell: bash
         run: |
           if [[ -n "${BROWSER_RUNTIME_TMPDIR:-}" ]]; then rm -rf -- "$BROWSER_RUNTIME_TMPDIR"; fi
-          if [[ -n "${SCRATCH:-}" ]]; then rm -rf -- "$SCRATCH"; fi
 
   artifacts:
     needs: verify
@@ -77,33 +76,29 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v6
-      - name: Set disposable build and IPC storage
+      - name: Set test runtime directories
         shell: bash
         run: |
           set -euo pipefail
-          scratch="$RUNNER_TEMP/mara"
-          mkdir -p "$scratch/tmp"
+          # Preserve the host's private macOS TMPDIR for default daemon discovery.
+          # Linux scripts also require an explicit temporary-directory setting.
+          echo "TMPDIR=${TMPDIR:-$RUNNER_TEMP}" >> "$GITHUB_ENV"
+          # Socket tests need a short private path on both supported hosts.
           runtime=$(mktemp -d /tmp/mara-ipc.XXXXXX)
-          chmod 700 "$runtime"
           {
-            echo "SCRATCH=$scratch"
-            echo "TMPDIR=$scratch/tmp"
-            echo "CARGO_TARGET_DIR=$scratch/target"
-            echo "npm_config_cache=$scratch/npm-cache"
-            echo "PLAYWRIGHT_BROWSERS_PATH=$scratch/browsers"
             echo "MARA_NODE_RUNTIME=$runtime"
             echo "MARA_TEST_RUNTIME_DIR=$runtime"
             echo "BROWSER_RUNTIME_TMPDIR=$runtime"
-            echo "MARA_QUERY_PROOF_REPORT=$scratch/native-query-proof.json"
-            echo "MARA_QUERY_FACTS_REPORT=$scratch/native-query-facts.json"
-            echo "MARA_QUERY_CATALOG_REPORT=$scratch/native-query-catalog.json"
-            echo "MARA_QUERY_CATALOG_NODE_REPORT=$scratch/installed-query-catalog.json"
-            echo "QUERY_PROOF_SNAPSHOT=$GITHUB_WORKSPACE/tests/fixtures/query-backend/snapshot.json"
-            echo "QUERY_FACTS_SNAPSHOT=$GITHUB_WORKSPACE/tests/fixtures/query-facts/snapshot.json"
+            echo "MARA_QUERY_PROOF_REPORT=$RUNNER_TEMP/native-query-proof.json"
+            echo "MARA_QUERY_FACTS_REPORT=$RUNNER_TEMP/native-query-facts.json"
+            echo "MARA_QUERY_CATALOG_REPORT=$RUNNER_TEMP/native-query-catalog.json"
+            echo "MARA_QUERY_CATALOG_NODE_REPORT=$RUNNER_TEMP/installed-query-catalog.json"
           } >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
+          cache-on-failure: true
+          shared-key: native-artifacts
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
@@ -115,43 +110,45 @@ jobs:
       - run: cargo nextest run --locked --workspace --all-targets --ignore-default-filter --build-jobs 2
       - run: cargo test --locked --workspace --doc -j 2
       - run: cargo build --locked --release -p mara -j 2
-      - run: scripts/build-node.sh "$SCRATCH/addon" --release
+      - run: scripts/build-node.sh "$RUNNER_TEMP/addon" --release
       - run: rustup target add wasm32-unknown-unknown
-      - run: cargo install wasm-bindgen-cli --version 0.2.127 --locked -j 2 --root "$SCRATCH/tools"
-      - run: PATH="$SCRATCH/tools/bin:$PATH" scripts/build-browser.sh "$SCRATCH/browser-assets"
-      - run: scripts/smoke-npm.sh "$CARGO_TARGET_DIR/release/mara" "$SCRATCH/addon/mara.node" "$SCRATCH/browser-assets" "$SCRATCH/smoke"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@0.2.127
+      - run: scripts/build-browser.sh "$RUNNER_TEMP/browser-assets"
+      - run: scripts/smoke-npm.sh "$CARGO_TARGET_DIR/release/mara" "$RUNNER_TEMP/addon/mara.node" "$RUNNER_TEMP/browser-assets" "$RUNNER_TEMP/smoke"
       - name: Verify corresponding-host source and installed addon
         shell: bash
         run: |
           set -euo pipefail
           NODE24=$(command -v node)
           export NODE24
-          export MARA_NODE_ADDON="$SCRATCH/addon/mara.node"
+          export MARA_NODE_ADDON="$RUNNER_TEMP/addon/mara.node"
           cargo test --locked --test node_binding real_node_addon -j 2 -- --ignored --exact --nocapture
           # The complete installed gate runs after TypeScript compilation below.
       - name: Verify installed TypeScript and Chromium clients
         shell: bash
         run: |
           set -euo pipefail
-          tools="$SCRATCH/js-tools"
+          tools="$RUNNER_TEMP/js-tools"
           npm install --prefix "$tools" --ignore-scripts --no-audit --no-fund \
             typescript@5.9.3 @types/node@24.12.0 @playwright/test@1.58.2
-          consumer="$SCRATCH/smoke/install"
+          consumer="$RUNNER_TEMP/smoke/install"
           cp tests/node/usage.mts tests/node/http-usage.mts "$consumer/"
           "$tools/node_modules/.bin/tsc" --strict --noUncheckedIndexedAccess --target ES2022 \
             --module NodeNext --moduleResolution NodeNext --typeRoots "$tools/node_modules/@types" \
             --outDir "$consumer/typed" "$consumer/usage.mts" "$consumer/http-usage.mts"
           NODE24=$(command -v node)
           export NODE24 MARA_NODE_INSTALLED=1
-          export MARA_NODE_ADDON="$SCRATCH/addon/mara.node"
+          export MARA_NODE_ADDON="$RUNNER_TEMP/addon/mara.node"
           export MARA_NODE_CLIENT="$consumer/node_modules/@convesoft/mara/node.mjs"
-          export MARA_NODE_FIXTURES="$SCRATCH/typed-fixtures"
+          export MARA_NODE_FIXTURES="$RUNNER_TEMP/typed-fixtures"
           mkdir -p "$MARA_NODE_FIXTURES"
           export MARA_NODE_TYPED_CONSUMER="$consumer/typed/usage.mjs"
           cargo test --locked --test node_binding installed_node_client -j 2 -- --ignored --exact --nocapture
           export MARA_HTTP_PACKAGE="$consumer/node_modules/@convesoft/mara"
           node --test tests/node/http.test.mjs
-          browser_consumer="$SCRATCH/smoke/browser-only"
+          browser_consumer="$RUNNER_TEMP/smoke/browser-only"
           cp tests/browser/usage.mts "$browser_consumer/"
           "$tools/node_modules/.bin/tsc" --strict --noUncheckedIndexedAccess --target ES2022 \
             --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM \
@@ -165,23 +162,22 @@ jobs:
           CHROMIUM_PATH=$(node --input-type=module -e \
             "import {chromium} from '$tools/node_modules/playwright/index.mjs'; console.log(chromium.executablePath())")
           export MARA_CLI="$consumer/node_modules/.bin/mara"
-          export BROWSER_REPORT="$SCRATCH/browser-report.json" BROWSER_RESULTS="$SCRATCH/browser-results"
+          export BROWSER_REPORT="$RUNNER_TEMP/browser-report.json" BROWSER_RESULTS="$RUNNER_TEMP/browser-results"
           "$tools/node_modules/.bin/playwright" test --config "$tools/tests/browser/playwright.config.mjs"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: installed-artifacts-${{ matrix.runner }}
           path: |
-            ${{ env.SCRATCH }}/smoke/*-pack.json
+            ${{ runner.temp }}/smoke/*-pack.json
             target/nextest/default/junit.xml
-            ${{ env.SCRATCH }}/native-query-*.json
-            ${{ env.SCRATCH }}/installed-query-catalog.json
-            ${{ env.SCRATCH }}/browser-report.json
-            ${{ env.SCRATCH }}/browser-results/
+            ${{ runner.temp }}/native-query-*.json
+            ${{ runner.temp }}/installed-query-catalog.json
+            ${{ runner.temp }}/browser-report.json
+            ${{ runner.temp }}/browser-results/
           if-no-files-found: warn
-      - name: Remove disposable storage
+      - name: Remove test IPC directory
         if: always()
         shell: bash
         run: |
           if [[ -n "${BROWSER_RUNTIME_TMPDIR:-}" ]]; then rm -rf -- "$BROWSER_RUNTIME_TMPDIR"; fi
-          if [[ -n "${SCRATCH:-}" ]]; then rm -rf -- "$SCRATCH"; fi
