@@ -133,7 +133,7 @@ jobs:
           set -euo pipefail
           tools="$RUNNER_TEMP/js-tools"
           npm install --prefix "$tools" --ignore-scripts --no-audit --no-fund \
-            typescript@5.9.3 @types/node@24.12.0 @playwright/test@1.58.2
+            typescript@5.9.3 @types/node@24.12.0 @playwright/test@1.58.2 serve@14.2.4
           consumer="$RUNNER_TEMP/smoke/install"
           cp tests/node/usage.mts tests/node/http-usage.mts "$consumer/"
           "$tools/node_modules/.bin/tsc" --strict --noUncheckedIndexedAccess --target ES2022 \
@@ -164,7 +164,7 @@ jobs:
             "import {chromium} from '$tools/node_modules/playwright/index.mjs'; console.log(chromium.executablePath())")
           export MARA_CLI="$consumer/node_modules/.bin/mara"
           export BROWSER_REPORT="$RUNNER_TEMP/browser-report.json" BROWSER_RESULTS="$RUNNER_TEMP/browser-results"
-          "$tools/node_modules/.bin/playwright" test --config "$tools/tests/browser/playwright.config.mjs"
+          DEBUG=pw:webserver "$tools/node_modules/.bin/playwright" test --config "$tools/tests/browser/playwright.config.mjs"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

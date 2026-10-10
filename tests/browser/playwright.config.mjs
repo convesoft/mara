@@ -1,6 +1,9 @@
 import { defineConfig } from '@playwright/test';
 import { statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
+
+const require = createRequire(import.meta.url);
 
 if (!process.env.BROWSER_ASSETS_DIR) throw new Error('Set BROWSER_ASSETS_DIR to built disposable assets');
 const browserTmp = process.env.BROWSER_RUNTIME_TMPDIR;
@@ -24,7 +27,9 @@ export default defineConfig({
       args: ['--disable-dev-shm-usage'] },
   },
   webServer: {
-    command: `python3 -m http.server ${port} --bind 127.0.0.1 --directory "${process.env.BROWSER_ASSETS_DIR}"`,
+    command: `"${process.execPath}" "${require.resolve('serve/build/main.js')}" --no-clipboard --listen tcp://127.0.0.1:${port} "${process.env.BROWSER_ASSETS_DIR}"`,
+    env: { NO_UPDATE_CHECK: '1' },
+    stdout: 'pipe', stderr: 'pipe',
     url: `${origin}/`, reuseExistingServer: false, timeout: 30_000,
   },
 });
