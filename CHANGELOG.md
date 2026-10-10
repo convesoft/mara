@@ -1,6 +1,145 @@
 # Changelog
 
 All notable changes to Mara are generated from Conventional Commit history.
+## [0.4.0-alpha.1]
+
+### Added
+
+- Extract explicit-source document engine
+- Port document rules and trace evaluation to the engine
+- Integrate validated semantic source-change plans
+- Integrate complete embedded native runtime
+- Integrate the browser WASM document workspace
+- Integrate consolidated browser source export
+- Reuse bounded fresh native project sessions
+- Add versioned same-user daemon IPC
+- Route native operations through an optional daemon
+- Manage the native daemon lifecycle explicitly
+- Bind native operations through asynchronous N-API
+- Expose authorized loopback daemon HTTP operations
+- Expose the shared typed ESM client and native adapter
+- Add the typed browser worker WASM client
+- Add the explicit browser HTTP client adapter
+- Prove portable query and SHACL result execution
+- Add impact-based Rust verification
+- Add typed named factual queries
+- Compose named queries with explicit projections
+- Add query-backed rules and contextual gates
+- Render factual query views and evaluation reports
+- Integrate external facts and derived query computations
+- Expose shared query consumers across native and browser adapters
+- Verify the reusable query catalog across real hosts
+
+### Build
+
+- Establish browser WASM document dependency path
+- Package native and browser libraries before publication
+
+### Changed
+
+- Bundle reviewer assets and launch script in the skill
+- Use Bash for the Pi review launcher
+- Simplify query input preflight condition
+
+### Documentation
+
+- Define 0.4 execution and integration scope
+- Settle 0.4 browser safety and access contracts
+- Require disk-backed scratch and explicit cleanup
+- Move scratch policy to global Pi instructions
+- Save standalone reviewer instructions for Pi
+- Add reusable reviewer scope prompt
+- Defer macOS execution verification to the final 0.4.0 gate
+- Adopt bounded local scope delivery
+- Close work after verified target integration
+- Define the shared label-based backlog policy
+- Rename planned scope to 0.4.0-alpha.1
+- Schedule reusable query engine for 0.4.0-alpha.1
+- Specify reusable query semantic contracts
+- Select the typed named-query adapter boundary
+- Record single-language query authoring goal
+- Select standard SPARQL query authoring
+- Schedule initial v1 SPARQL contract alignment
+- Limit v1 alignment to query definition numbering
+- Defer dedicated alpha qualification and guidance
+
+### Fixed
+
+- Skip project resources in Pi reviewer sessions
+- Isolate test Chromium runtime sockets
+- Renumber named-query definitions to v1
+
+### Maintenance
+
+- Switch delivery tracking to Work
+- Support Pi and Codex PR workflows
+- Track project MCP configuration
+- Remove project MCP configuration
+- Add an opt-in local Codex review loop
+- Support worker-driven Codex review loops
+- Remove the bounded review limit
+- Plan 0.4.0 delivery in Work
+- Record integrated document portability acceptance
+- Run local review loops with Pi
+- Record source-engine integration and completion
+- Migrate source-engine evidence to session storage
+- Record rule and trace integration completion
+- Record semantic planner integration completion
+- Record completed parallel worker cleanup
+- Record native runtime integration completion
+- Record WASM workspace integration completion
+- Record native and WASM worker cleanup
+- Record browser export integration completion
+- Record browser export worker cleanup
+- Record native sessions acceptance and cleanup
+- Record native routing integration acceptance
+- Record native routing resource cleanup
+- Record daemon lifecycle integration and cleanup
+- Declare HTTP and native verification delivery targets
+- Record N-API scope acceptance and resource cleanup
+- Declare typed ESM local delivery target
+- Record HTTP acceptance and authorized worker cleanup
+- Record native verification acceptance and integration cleanup
+- Add reusable finding triage to review workflows
+- Record finding triage verification and cleanup
+- Record backlog policy verification and cleanup
+- Record typed ESM local integration acceptance
+- Record typed ESM resource cleanup
+- Record browser WASM local integration acceptance
+- Record browser WASM resource cleanup
+- Record browser HTTP local integration acceptance
+- Record browser HTTP resource cleanup
+- Record packaging integration acceptance
+- Record packaging resource cleanup
+- Record installed native integration acceptance
+- Record installed native resource cleanup
+- Record packaged WASM integration acceptance
+- Record packaged WASM resource cleanup
+- Record query contract integration acceptance
+- Record query contract resource cleanup
+- Record verified query proof integration
+- Record query proof worker cleanup
+- Relax review reasoning
+- Record fresh named-query worker dispatch
+- Record verified named-query integration
+- Record named-query resource cleanup
+- Record verified query composition integration
+- Record query policy integration and cleanup
+- Record query view integration and cleanup
+- Record accepted external-facts scope integration
+- Clarify adapter worker phases and execution profile
+- Record accepted adapter scope integration
+- Record combined verification worker profile and handoff
+- Record query catalog integration and host handoff
+- Select available Luna for query format alignment
+- Record bounded query format v1 dispatch
+- Record verified query definition v1 integration
+
+### Tests
+
+- Verify native execution workflows through real lifecycle daemons
+- Verify installed native and HTTP clients
+- Verify packaged browser parity and safe export
 ## [0.3.0]
 
 ### Breaking changes and migration
@@ -47,7 +186,6 @@ for source edits, validation, and client interface changes.
 ### Maintenance
 
 - Evaluate code traceability pilot
-- Release 0.3.0-alpha.0
 ## [0.2.0]
 
 ### Breaking changes and migration
@@ -75,10 +213,6 @@ for schema examples, command/response mapping, and reference validation changes.
 
 - Align 0.2 CLI and MCP onboarding
 
-### Maintenance
-
-- Release 0.2.0
-
 ### Tests
 
 - Verify the packaged 0.2 workflow
@@ -88,11 +222,6 @@ for schema examples, command/response mapping, and reference validation changes.
 
 - Require schema format 2 and flavour guidance
 - Add bundled engineering templates and prepare 0.2.0-alpha.0
-## [0.1.0]
-
-### Maintenance
-
-- Release 0.1.0
 ## [0.1.0-alpha.3]
 
 ### Added

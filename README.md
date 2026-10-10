@@ -23,7 +23,11 @@ npx -y '@convesoft/mara@<version>' --help
 The npm package runs a prebuilt binary without install scripts or a Rust toolchain.
 Supported platforms and package contents are defined in
 [distribution](docs/distribution.mara.md).
-For existing projects and clients, follow the [0.3 migration guide](docs/migration-0.3.mara.md).
+Node.js 24 or newer is required. For existing project schemas, the
+[0.3 migration guide](docs/migration-0.3.mara.md) still applies. The
+[0.4.0-alpha.1 scope](docs/0.4.mara.md) describes the new native/daemon,
+Node/browser and query operations and their limits. Standard-SPARQL-file
+authoring is deferred; the alpha uses named JSON query definitions, format 1.
 
 ## Configure an agent
 

@@ -10,7 +10,7 @@ When MCP is unavailable, use an available Mara CLI invocation with `--format jso
 for structured results. The same operation selection, authoring, continuation,
 and validation rules apply to both surfaces.
 
-This skill targets the current 0.3 development interface: schema format 3,
+This skill ships with 0.4.0-alpha.1. Its knowledge-operation interface uses schema format 3,
 discovery format 2, relationship format 1, validation format 1, and trace
 format 1. Typed inline relationships, inverse aliases, symmetric edges,
 external targets, graph policies, YAML current-state rules, and matrices are

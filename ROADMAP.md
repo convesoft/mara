@@ -11,7 +11,11 @@ TypeScript client. It also includes the [reusable query/policy engine](docs/quer
 factual queries, contextual gates and separate views/evaluation reports, without
 engineering-template refinement. It includes the library/transport paths, not
 graphical applications or GitHub publication. Detailed contracts and release acceptance
-live in that scope and its linked Mara items; implementation is not yet claimed.
+live in that scope and its linked Mara items. The implementation is locally
+verified; publication and corresponding-host acceptance must be established by
+actual release results, not this roadmap. Dedicated manual Apple Silicon
+certification and comprehensive final guidance are deferred for this alpha;
+existing automated host CI/release checks remain required.
 
 ## Later
 

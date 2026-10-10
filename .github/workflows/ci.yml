@@ -35,6 +35,12 @@ jobs:
             echo "MARA_NODE_RUNTIME=$runtime"
             echo "MARA_TEST_RUNTIME_DIR=$runtime"
             echo "BROWSER_RUNTIME_TMPDIR=$runtime"
+            echo "MARA_QUERY_PROOF_REPORT=$scratch/native-query-proof.json"
+            echo "MARA_QUERY_FACTS_REPORT=$scratch/native-query-facts.json"
+            echo "MARA_QUERY_CATALOG_REPORT=$scratch/native-query-catalog.json"
+            echo "MARA_QUERY_CATALOG_NODE_REPORT=$scratch/installed-query-catalog.json"
+            echo "QUERY_PROOF_SNAPSHOT=$GITHUB_WORKSPACE/tests/fixtures/query-backend/snapshot.json"
+            echo "QUERY_FACTS_SNAPSHOT=$GITHUB_WORKSPACE/tests/fixtures/query-facts/snapshot.json"
           } >> "$GITHUB_ENV"
       - run: rustc --version
       - uses: Swatinem/rust-cache@v2
@@ -88,6 +94,12 @@ jobs:
             echo "MARA_NODE_RUNTIME=$runtime"
             echo "MARA_TEST_RUNTIME_DIR=$runtime"
             echo "BROWSER_RUNTIME_TMPDIR=$runtime"
+            echo "MARA_QUERY_PROOF_REPORT=$scratch/native-query-proof.json"
+            echo "MARA_QUERY_FACTS_REPORT=$scratch/native-query-facts.json"
+            echo "MARA_QUERY_CATALOG_REPORT=$scratch/native-query-catalog.json"
+            echo "MARA_QUERY_CATALOG_NODE_REPORT=$scratch/installed-query-catalog.json"
+            echo "QUERY_PROOF_SNAPSHOT=$GITHUB_WORKSPACE/tests/fixtures/query-backend/snapshot.json"
+            echo "QUERY_FACTS_SNAPSHOT=$GITHUB_WORKSPACE/tests/fixtures/query-facts/snapshot.json"
           } >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
         with:
@@ -161,7 +173,9 @@ jobs:
           name: installed-artifacts-${{ matrix.runner }}
           path: |
             ${{ env.SCRATCH }}/smoke/*-pack.json
-            target/nextest/default/junit.xml
+            ${{ env.SCRATCH }}/target/nextest/default/junit.xml
+            ${{ env.SCRATCH }}/native-query-*.json
+            ${{ env.SCRATCH }}/installed-query-catalog.json
             ${{ env.SCRATCH }}/browser-report.json
             ${{ env.SCRATCH }}/browser-results/
           if-no-files-found: warn

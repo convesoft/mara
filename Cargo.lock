@@ -1557,7 +1557,7 @@ checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
 
 [[package]]
 name = "mara"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "clap",
  "getrandom 0.3.4",
@@ -1584,7 +1584,7 @@ dependencies = [
 
 [[package]]
 name = "mara-engine"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "globset",
  "ignore",
@@ -1613,7 +1613,7 @@ dependencies = [
 
 [[package]]
 name = "mara-node"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "mara",
  "napi",
@@ -1625,7 +1625,7 @@ dependencies = [
 
 [[package]]
 name = "mara-wasm"
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 dependencies = [
  "js-sys",
  "mara-engine",

@@ -18,7 +18,7 @@ globs = ["**/build.rs", "build.rs", ".cargo/**", ".config/**", "rust-toolchain*"
 filterset = "all()"
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0-alpha.1"
 edition = "2024"
 
 [package]
