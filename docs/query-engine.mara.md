@@ -94,7 +94,7 @@ Author named-query inputs, output projections, computation and composition in on
 
 Source: the user's query-authoring clarification: use one existing language to declare everything; GraphQL is not mandatory, and SPARQL is acceptable if a single query file covers the input/output declarations as well as the query.
 
-Prefer existing syntax highlighting and project-aware autocompletion when selecting the language. These are selection preferences, not yet an editor-integration acceptance gate. The language/framework and its fit to the existing query contracts remain unresolved; this requirement does not claim that the current JSON loader satisfies it.
+Prefer existing syntax highlighting and project-aware autocompletion when selecting tooling. These are selection preferences, not yet an editor-integration acceptance gate. Standard SPARQL is now selected in [[ADR-QUERY-SPARQL-AUTHORING]]; the complete input/output and reusable-composition design still needs proof against the owning contracts. This requirement does not claim that the current JSON loader satisfies it.
 :::
 
 :::mara requirement REQ-COMPOSABLE-QUERY-PROJECTIONS
@@ -793,6 +793,19 @@ fixtures for native daemon IPC/HTTP, installed Node and browser worker/WASM.
 matching-artifact and integrated workflow evidence; source or test declarations
 alone do not establish a pass. [[DES-QUERY-BACKEND-PROOF]] selects the backend
 and actual proof formats/operations, and demonstrates the SHACL result bridge.
+:::
+
+:::mara decision ADR-QUERY-SPARQL-AUTHORING
+:mid: 01M4JRWKGZ7QP77JVXJQXPMXNZ
+:title: Use standard SPARQL as the named-query authoring language
+:status: draft
+:justifies: REQ-QUERY-SINGLE-LANGUAGE-AUTHORING
+
+The user selected standard SPARQL as the named-query authoring direction after comparing GraphQL and the current JSON-plus-SPARQL definitions. Keep query selection, computation and composition in standard SPARQL files; do not require a hand-authored Mara JSON wrapper or invent query directives, decorators or another expression language. Generate tooling metadata from the project schema and query structure where justified.
+
+Rationale: reuse an existing query language and its syntax highlighting/completion ecosystem rather than maintaining a Mara-specific authoring syntax. GraphQL and Rego are not selected alternatives for this change.
+
+This selects the language, not a completed replacement format. Standard SPARQL does not define cross-file stored-query imports or typed function declarations; the input/output and reusable-composition design must preserve the owning contracts without pretending private extensions are standard. Invocation, source loading, completeness and provenance remain explicit Mara execution responsibilities. Do not claim full static inference or successful replacement from language expressiveness alone; verify the real catalog and selected hosts before adoption. The current JSON loader remains unchanged.
 :::
 
 :::mara decision ADR-QUERY-EXACT-RESOLUTION
