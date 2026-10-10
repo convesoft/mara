@@ -46,7 +46,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
-          cache-on-failure: true
           shared-key: source-verify
       - uses: taiki-e/install-action@v2
         with:
@@ -99,8 +98,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
-          cache-on-failure: true
-          shared-key: native-artifacts
+          # Replace the partial archive saved by an earlier failed native job.
+          shared-key: native-artifacts-v1
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
