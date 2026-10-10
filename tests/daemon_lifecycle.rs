@@ -380,7 +380,23 @@ fn detached_start_accepts_explicit_mode_over_invalid_environment() {
 // @mara checks DES-DAEMON-LIFECYCLE
 // @mara checks DES-OPERATION-PROJECT-CONTEXT
 #[test]
-fn refresh_rejects_non_utf8_selected_or_discovered_project_without_panicking() {
+fn refresh_rejects_non_utf8_selected_project_without_panicking() {
+    use std::os::unix::ffi::OsStringExt;
+    let host = Host::new();
+    let root = host
+        .project
+        .path()
+        .join(std::ffi::OsString::from_vec(b"native-\xff".to_vec()));
+    // Explicit selection must reject IPC encoding before accessing the root;
+    // it need not exist (macOS filesystems reject this directory name).
+    assert_non_utf8_refresh_rejected(&host, host.command().arg("--project").arg(&root));
+}
+
+// @mara checks DES-DAEMON-LIFECYCLE
+// @mara checks DES-OPERATION-PROJECT-CONTEXT
+#[cfg(target_os = "linux")]
+#[test]
+fn refresh_rejects_non_utf8_discovered_project_without_panicking() {
     use std::os::unix::ffi::OsStringExt;
     let host = Host::new();
     let root = host
@@ -389,25 +405,21 @@ fn refresh_rejects_non_utf8_selected_or_discovered_project_without_panicking() {
         .join(std::ffi::OsString::from_vec(b"native-\xff".to_vec()));
     fs::create_dir(&root).unwrap();
     mara::initialize_project(&root, mara::Template::Minimal).unwrap();
-    for explicit in [true, false] {
-        let mut command = host.command();
-        if explicit {
-            command.arg("--project").arg(&root);
-        } else {
-            command.current_dir(&root);
-        }
-        let output = command.args(["daemon", "refresh"]).output().unwrap();
-        assert!(!output.status.success());
-        assert_ne!(
-            output.status.code(),
-            Some(101),
-            "refresh panicked: {}",
-            support::stderr(&output)
-        );
-        let error: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(error["error"]["code"], "invalid_argument");
-        assert!(!ipc::endpoint(&host.directory()).exists());
-    }
+    assert_non_utf8_refresh_rejected(&host, host.command().current_dir(&root));
+}
+
+fn assert_non_utf8_refresh_rejected(host: &Host, command: &mut Command) {
+    let output = command.args(["daemon", "refresh"]).output().unwrap();
+    assert!(!output.status.success());
+    assert_ne!(
+        output.status.code(),
+        Some(101),
+        "refresh panicked: {}",
+        support::stderr(&output)
+    );
+    let error: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(error["error"]["code"], "invalid_argument");
+    assert!(!ipc::endpoint(&host.directory()).exists());
 }
 
 // @mara checks REQ-USER-DAEMON-LIFECYCLE
@@ -800,15 +812,19 @@ fn non_reading_consumer_cannot_pin_stop_or_signal_shutdown() {
     let mut host = Host::new();
     for through_signal in [false, true] {
         host.spawn();
-        let mut peer = ipc::connect(&host.directory()).unwrap();
+        let peer = Rpc::new(&host.directory()).0.into_inner();
         peer.set_write_timeout(Some(Duration::from_secs(5)))
             .unwrap();
         let frame = format!(
             "{}\n",
             json!({"jsonrpc":"2.0","id":1,"method":"mara.negotiate","params":{"protocol_version":1,"application_version":APPLICATION_VERSION}})
         );
-        peer.write_all(frame.repeat(136).as_bytes()).unwrap();
-        // Leave the peer alive and unread, including throughout shutdown/wait.
+        // Request writes can also block once unread responses fill the server's
+        // buffer, especially on macOS. Feed concurrently so producer pressure
+        // cannot prevent reaching stop/signal; closure during shutdown is expected.
+        let mut sender = peer.try_clone().unwrap();
+        let producer = thread::spawn(move || sender.write_all(frame.repeat(1024).as_bytes()));
+        // Leave the negotiated peer alive and unread throughout shutdown/wait.
         thread::sleep(Duration::from_millis(50));
         if through_signal {
             let pid = host.foreground.as_ref().unwrap().id() as libc::pid_t;
@@ -819,6 +835,18 @@ fn non_reading_consumer_cannot_pin_stop_or_signal_shutdown() {
         }
         host.wait();
         assert!(!ipc::endpoint(&host.directory()).exists());
+        if let Err(error) = producer.join().unwrap() {
+            assert!(
+                matches!(
+                    error.kind(),
+                    std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                ),
+                "unexpected producer failure: {error}"
+            );
+        }
         drop(peer);
     }
 }

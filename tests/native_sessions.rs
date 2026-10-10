@@ -319,8 +319,9 @@ fn ignored_file_only_inputs_remain_fresh_without_a_language_indexer() {
 }
 
 // @mara checks DES-NATIVE-PROJECT-SESSIONS
+// macOS filesystems reject the non-UTF-8 directory names used by this fixture.
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn native_cache_keys_preserve_non_utf8_paths() {
     use std::{ffi::OsString, os::unix::ffi::OsStringExt};
     let f = support::fixture();

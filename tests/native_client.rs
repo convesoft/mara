@@ -552,16 +552,21 @@ fn non_utf8_host_paths_never_panic_and_are_encoded_only_for_selected_daemon() {
     }
     assert_eq!(fs::read(root.join("a.mara.md")).unwrap(), original);
     let host_root = root.join(std::ffi::OsString::from_vec(b"root-\xff".to_vec()));
-    fs::create_dir_all(host_root.join(".mara")).unwrap();
-    for name in ["project.toml", "schema.yaml"] {
-        fs::copy(
-            root.join(".mara").join(name),
-            host_root.join(".mara").join(name),
-        )
-        .unwrap();
+    // Only Linux can create this existing-root fixture. Keep IPC argument/root
+    // encoding checks on both hosts, without requiring filesystem creation.
+    #[cfg(target_os = "linux")]
+    {
+        fs::create_dir_all(host_root.join(".mara")).unwrap();
+        for name in ["project.toml", "schema.yaml"] {
+            fs::copy(
+                root.join(".mara").join(name),
+                host_root.join(".mara").join(name),
+            )
+            .unwrap();
+        }
+        let host_direct = server.client(&host_root, ExecutionMode::Direct);
+        assert!(host_direct.schema_get(None, None).is_ok());
     }
-    let host_direct = server.client(&host_root, ExecutionMode::Direct);
-    assert!(host_direct.schema_get(None, None).is_ok());
     assert!(matches!(
         server
             .client(&host_root, ExecutionMode::DaemonRequired)
