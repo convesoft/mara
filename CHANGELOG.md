@@ -45,6 +45,7 @@ All notable changes to Mara are generated from Conventional Commit history.
 
 - Use standard build storage and warm Rust caches
 - Normalize host temporary paths before creating fixtures
+- Save native caches only after complete successful jobs
 
 ### Documentation
 
