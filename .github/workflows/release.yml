@@ -36,9 +36,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Preserve the host's private macOS TMPDIR for default daemon discovery.
-          # Linux scripts also require an explicit temporary-directory setting.
-          echo "TMPDIR=${TMPDIR:-$RUNNER_TEMP}" >> "$GITHUB_ENV"
+          # Keep the host temporary directory private and resolve macOS /var aliases.
+          # Fixtures compare their paths with canonical paths returned by the host.
+          temporary=$(cd -- "${TMPDIR:-$RUNNER_TEMP}" && pwd -P)
+          echo "TMPDIR=$temporary" >> "$GITHUB_ENV"
           # Socket tests need a short private path on both supported hosts.
           runtime=$(mktemp -d /tmp/mara-ipc.XXXXXX)
           {
@@ -172,9 +173,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Preserve the host's private macOS TMPDIR for default daemon discovery.
-          # Linux scripts also require an explicit temporary-directory setting.
-          echo "TMPDIR=${TMPDIR:-$RUNNER_TEMP}" >> "$GITHUB_ENV"
+          # Keep the host temporary directory private and resolve macOS /var aliases.
+          # Fixtures compare their paths with canonical paths returned by the host.
+          temporary=$(cd -- "${TMPDIR:-$RUNNER_TEMP}" && pwd -P)
+          echo "TMPDIR=$temporary" >> "$GITHUB_ENV"
           # Socket tests need a short private path on both supported hosts.
           runtime=$(mktemp -d /tmp/mara-ipc.XXXXXX)
           {
