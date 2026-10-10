@@ -44,6 +44,7 @@ All notable changes to Mara are generated from Conventional Commit history.
 ### Continuous integration
 
 - Use standard build storage and warm Rust caches
+- Normalize host temporary paths before creating fixtures
 
 ### Documentation
 
