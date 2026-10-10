@@ -186,13 +186,13 @@ pub struct Definition {
     /// Explicit child queries materialized as relations for this standard SELECT.
     #[serde(default)]
     pub dependencies: Vec<Dependency>,
-    /// Host-supplied fact snapshots overlaid onto returned tuple rows (format 5).
+    /// Host-supplied fact snapshots overlaid onto returned tuple rows (definition format 1).
     #[serde(default)]
     pub external_facts: Vec<ExternalFact>,
-    /// Caller/project-supplied typed lookup mappings applied to tuple rows (format 5).
+    /// Caller/project-supplied typed lookup mappings applied to tuple rows (definition format 1).
     #[serde(default)]
     pub lookups: Vec<Lookup>,
-    /// Definition-selected precedence aggregation over tuple rows (format 5).
+    /// Definition-selected precedence aggregation over tuple rows (definition format 1).
     #[serde(default)]
     pub aggregate: Option<Aggregate>,
 }
@@ -625,21 +625,10 @@ impl SourceEngine {
             })?;
             let set: DefinitionSet =
                 serde_json::from_str(text).map_err(|e| Error::definition(&path, e.to_string()))?;
-            if !matches!(set.format_version, 3..=5) {
+            if set.format_version != 1 {
                 return Err(Error::definition(
                     &path,
-                    "expected named-definition format 3, 4 or 5",
-                ));
-            }
-            if set.format_version == 3
-                && set
-                    .definitions
-                    .iter()
-                    .any(|definition| !definition.dependencies.is_empty())
-            {
-                return Err(Error::definition(
-                    &path,
-                    "named-definition format 3 cannot declare composition dependencies",
+                    "expected named-definition format_version 1",
                 ));
             }
             for definition in set.definitions {
@@ -649,7 +638,6 @@ impl SourceEngine {
                             definition.id.clone(),
                             composition::LoadedDefinition {
                                 file: path.clone(),
-                                format: set.format_version,
                                 definition,
                             },
                         )
@@ -664,9 +652,9 @@ impl SourceEngine {
         }
         composition::validate_loaded_dependency_graph(&definitions)?;
         for (id, loaded) in &definitions {
-            signature::compile(&loaded.file, loaded.format, &loaded.definition, &schema).map_err(
-                |error| Error::definition(&loaded.file, format!("{id}: {}", error.message)),
-            )?;
+            signature::compile(&loaded.file, &loaded.definition, &schema).map_err(|error| {
+                Error::definition(&loaded.file, format!("{id}: {}", error.message))
+            })?;
         }
         Ok(definitions)
     }
@@ -682,8 +670,8 @@ impl SourceEngine {
             .collect())
     }
 
-    /// Validate supplied facts/mappings with the same format-5 preparer used by query execution,
-    /// independent of selected roots or dependency reachability.
+    /// Validate supplied facts/mappings with the definition-format-1 preparer used by query
+    /// execution, independent of selected roots or dependency reachability.
     pub(crate) fn preflight_query_inputs(
         &self,
         files: &[String],

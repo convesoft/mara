@@ -67,12 +67,11 @@ iterations; a later released contract change establishes its next version.
 Already-released project, vocabulary-schema, rule and transport formats retain
 their independent versions.
 
-The current correction only renames the existing final JSON named-query
-definition format 5 to format 1. Preserve its declaration shape, explicit typing,
-composition, supplied inputs and execution semantics; normalize internal 3/4
-fixtures to that final shape rather than shipping checkpoint compatibility.
-Other query request/result counters are not part of this correction. The
-numbered implementation sections below await this bounded alignment.
+The current JSON named-query definition uses initial format 1. It preserves the
+final existing format-5 declaration shape, explicit typing, composition,
+supplied inputs and execution semantics. Previous definition versions 3, 4 and
+5 are not accepted compatibility variants. Query request/result counters retain
+their independent formats. This alignment changes no query behavior or authoring syntax.
 
 SPARQL-only authoring, schema-assisted inference/editor tooling and composition
 redesign under [[REQ-QUERY-SINGLE-LANGUAGE-AUTHORING]] and
@@ -371,20 +370,14 @@ MCP `query_execute` accepts the same request plus optional project selection.
 Every adapter exposes its backend's persistence and indexing capabilities; it
 does not invent missing code indexes or fetch external facts.
 
-#### Definition formats 3, 4 and 5
+#### Definition format 1
 
-Format 5 adds host-supplied external fact inputs, typed lookup mappings and
-definition-selected precedence aggregation. Its concrete declarations, request
-inputs, coverage/missing semantics, derived outputs and implemented Rust/CLI/MCP
-and browser-worker slice are specified in [[DES-QUERY-FACT-COMPUTATION]].
-Formats 3, 4 and 5 are accepted by raw queries, documentation-rule
-validation, gates, views and reports on the selected adapters. The format-4
-composition rules below also apply to format 5.
-
-Project-relative JSON files contain `{format_version:3,definitions:[...]}`, `{format_version:4,definitions:[...]}` or `{format_version:5,definitions:[...]}`. Format 3 remains the single-query form;
-format 4 adds only explicit named dependencies; format 5 adds the external-fact,
-lookup and aggregation declarations of [[DES-QUERY-FACT-COMPUTATION]]. Format-2
-files are rejected because they do not declare required sources.
+Project-relative JSON files contain `{format_version:1,definitions:[...]}`. This
+initial version uses the final existing declaration shape, including named
+dependencies, host-supplied external facts, typed lookup mappings,
+definition-selected aggregation and fact provenance. Internal formats 3, 4 and 5 are not accepted compatibility variants. Their
+final declarations, request inputs, coverage/missing semantics and derived outputs
+are specified in [[DES-QUERY-FACT-COMPUTATION]].
 Each definition declares exact `id`, standard `select`, nonempty
 `root_flavours`, `required_fact_sources` and named `columns`. `documents` is a
 required fact source; `code` is recognized but unavailable to this embedded
@@ -421,7 +414,7 @@ declaration vocabulary and projection shape, not possible result types. Check de
 value types, item flavours and canonical endpoints only for values actually
 returned; a no-match query need not reveal an incompatibility.
 
-Format 4 dependencies are metadata, not an operation DSL. Each dependency names
+Dependencies are metadata, not an operation DSL. Each dependency names
 an exact definition in the explicitly loaded files, binds `root` to the caller's
 selected item, optionally maps child parameter names to parent parameters, and
 explicitly projects child tuple columns, contributors and/or edge support under
@@ -475,7 +468,7 @@ to the selected schema; inverse aliases normalize canonical direction, including
 property paths. Structural ID/title predicates are `urn:mara:item:id` and
 `urn:mara:item:title`, distinct from custom fields. Ordinary predicates must
 be schema-bound constants. Query-specific additions are the exact dependency,
-normalized-text, format-5 fact-input and occurrence predicates specified here;
+normalized-text, external-fact input and occurrence predicates specified here;
 existing canonical edge-support predicates remain available. Open
 negated-vocabulary paths and nested SELECT boundaries are not this delivery's
 composition interface. No SERVICE, imports or updates are admitted. Outside the
@@ -494,7 +487,7 @@ factors through explicitly projected dependency columns.
 `urn:mara:query:occurrence` links a canonical edge to each finite authored
 occurrence IRI, `urn:mara:query:occurrence:<identity>`. Its identity is the
 existing content-bound identity in projected edge support. A definition can
-select distinct occurrences and count them with format-5 aggregation; duplicate
+select distinct occurrences and count them with declared aggregation; duplicate
 paths do not multiply an occurrence. Project the edge as support to retain
 its authored locations. This exposes existing source facts, not hidden path
 derivations or automatic provenance reconstruction.
@@ -563,7 +556,7 @@ Semantic composition consumes [[DES-QUERY-INPUT-RESULT-CONTRACT]]. The user sele
 
 ### Selected definition format
 
-Format 4 definitions may name exact child definitions from the explicitly loaded definition files. Each dependency binds the child root to the caller-selected `root`, maps any child parameters to declared parent parameters, and declares which child tuple columns, contributors and edge support are projected under local aliases. The `projections` object is required; `{}` exposes only child-row existence. The `projections` object is required; `{}` exposes only child-row existence. Validate the entire explicitly loaded dependency graph, including unused definitions; unresolved references, invalid bindings and recursion are definition errors. Only reachable definitions execute. Format 3 remains valid for definitions without dependencies.
+Format 1 definitions may name exact child definitions from the explicitly loaded files. Each dependency binds the child root to the caller-selected `root`, optionally maps child parameters to declared parent parameters, and declares which child tuple columns, contributors, edge support and fact provenance are projected under local aliases. The `projections` object is required; `{}` exposes only child-row existence. Validate the entire explicitly loaded dependency graph, including unused definitions; unresolved references, invalid bindings and recursion are definition errors. Only reachable definitions execute.
 
 A child runs for the same caller-selected root. Its typed bindings become scoped in-memory relation rows. Parent joins, unions, filters, optional matches and property paths are expressed in the admitted standard SPARQL profile, using only the dependency's declared `urn:mara:query:input:<name>` and `urn:mara:query:column:<name>:<alias>` predicates. No implicit root expansion or parameter inheritance is allowed. Validation completes before root enumeration, including for an empty root selection. Check returned child and parent values against declared types; full static dependency/type inference remains deferred.
 
@@ -593,7 +586,7 @@ Existence and any on a complete empty set are false; all and none are true; a di
 
 Definitions select aggregate/grouping keys, qualification and result precedence; there is no built-in ordering of pass/fail/inconclusive/error/pending, lifecycle rank or risk formula. An aggregate declares its empty case and retains members and support. Conflicting or underspecified precedence is a definition error, not load-order selection.
 
-Lookup mappings are typed caller/project policy data bound into input identity. Validate key/value types and reject conflicting duplicate keys. A missing key is unavailable unless an explicit fallback is declared; it never silently maps to zero, low risk, pass or no match. Fixture-defined likelihood/consequence scores, thresholds and reassessment use these mechanisms. Implementation links do not automatically lower a risk or select a new assessment. The concrete format-5 declarations, coverage overlay, mapping and aggregate semantics are in [[DES-QUERY-FACT-COMPUTATION]].
+Lookup mappings are typed caller/project policy data bound into input identity. Validate key/value types and reject conflicting duplicate keys. A missing key is unavailable unless an explicit fallback is declared; it never silently maps to zero, low risk, pass or no match. Fixture-defined likelihood/consequence scores, thresholds and reassessment use these mechanisms. Implementation links do not automatically lower a risk or select a new assessment. The concrete format-1 declarations, coverage overlay, mapping and aggregate semantics are in [[DES-QUERY-FACT-COMPUTATION]].
 :::
 
 :::mara design DES-QUERY-CONSUMER-CONTRACT
@@ -648,7 +641,7 @@ not ordinary false facts or not_applicable outcomes.
 
 ### Implemented query-consumer slice
 
-The shared consumers reuse named-query formats 3, 4 and 5 and the existing
+The shared consumers reuse named-query definition format 1 and the existing
 projected-result SHACL bridge. They do not add traversal or validation behavior
 to engineering rules or templates. `SourceEngine`, `NativeRuntime` and
 `NativeClient` expose documentation-rule validation, request-local gates,
@@ -824,7 +817,7 @@ and actual proof formats/operations, and demonstrates the SHACL result bridge.
 :status: draft
 :justifies: REQ-QUERY-SINGLE-LANGUAGE-AUTHORING
 
-Deferred to a later version by the user's clarification. The current task only renames the existing final JSON named-query definition format from v5 to v1; it does not change the authoring language, input/output declarations, composition or execution semantics.
+Deferred to a later version by the user's clarification. The current JSON named-query definition remains format 1 with its existing input/output declarations, composition and execution semantics; this deferred direction does not change the authoring language.
 
 For future authoring work, the user prefers standard SPARQL files over the current JSON-plus-SPARQL wrapper. Do not invent query directives, decorators or another expression language. Generate tooling metadata from the project schema and query structure where justified. GraphQL and Rego are not selected alternatives.
 
@@ -1215,7 +1208,7 @@ Keep deterministic root/tuple/support ordering, distinct typed bindings, logical
 ### Selected workflow and limits
 
 The initial raw-query stage preceded this assigned extension. This slice carries
-format-5 supplied facts/composition through documentation policy, gates, factual
+format-1 supplied facts/composition through documentation policy, gates, factual
 views and reports on the selected Rust, CLI/MCP, daemon, Node/TypeScript and
 browser surfaces. Hosts retain fact acquisition; browser/WASM does not promise
 native code indexing. The broader semantic catalog, full static inference and
@@ -1239,11 +1232,13 @@ derived-value part of [[DES-QUERY-COMPOSITION-CONTRACT]]. It refines
 semantics. Standard SPARQL still owns admitted query semantics; no second
 expression evaluator is introduced.
 
-### Definition format 5
+### Definition format 1
 
-Project-relative JSON `{format_version:5,definitions:[...]}` extends format 4.
-Formats 3 and 4 are unchanged; external facts, lookups and aggregation are
-rejected in them. A format-5 definition may additionally declare:
+Project-relative JSON `{format_version:1,definitions:[...]}` uses the final
+existing named-definition shape, including the declarations below and the
+explicit query, typing and dependency fields described in
+[[DES-QUERY-INPUT-RESULT-CONTRACT]]. Internal formats 3, 4 and 5 are not accepted
+compatibility variants. A format-1 definition may declare:
 
 - `external_facts`: `[{input, keys, fields, missing}]`. `input` is the required
   request snapshot name; `keys` are projected tuple columns identifying one
@@ -1258,7 +1253,7 @@ rejected in them. A format-5 definition may additionally declare:
   declared integer derived column; `empty` is the declared `rank` value for a
   completely evaluated selected root with no grouped members.
 - `facts_columns`: projected variable names carrying explicitly projected child
-  fact provenance, excluded from tuple identity like `support_columns`. A format-4
+  fact provenance, excluded from tuple identity like `support_columns`. A
   `dependencies[].projections.facts` alias exposes one child's fact provenance
   under that local relation column; the parent opts in by projecting it.
 
@@ -1325,7 +1320,7 @@ Nothing is fetched, executed, authenticated or persisted.
 
 ### Implemented slice
 
-`SourceEngine` and `NativeRuntime` implement format 5 and pass supplied facts and
+`SourceEngine` and `NativeRuntime` implement definition format 1 and pass supplied facts and
 mappings through raw queries, enabled policy validation, gates, views and
 reports. CLI/MCP, daemon IPC/HTTP, Node, the shared TypeScript client and
 worker/WASM expose the selected operations. The fixture is

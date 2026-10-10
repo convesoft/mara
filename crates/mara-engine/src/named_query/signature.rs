@@ -16,47 +16,17 @@ pub(super) struct Compiled {
 
 pub(super) fn compile(
     file: &str,
-    format: u32,
     definition: &Definition,
     schema: &Schema,
 ) -> Result<Compiled, Error> {
-    compile_inner(format, definition, schema).map_err(|e| Error::definition(file, e))
+    compile_inner(definition, schema).map_err(|e| Error::definition(file, e))
 }
 
-fn compile_inner(
-    format: u32,
-    definition: &Definition,
-    schema: &Schema,
-) -> Result<Compiled, String> {
+fn compile_inner(definition: &Definition, schema: &Schema) -> Result<Compiled, String> {
     if definition.root_flavours.is_empty() || definition.columns.is_empty() {
         return Err("declare nonempty root flavour and tuple signatures".into());
     }
-    if format < 5
-        && (!definition.external_facts.is_empty()
-            || !definition.lookups.is_empty()
-            || definition.aggregate.is_some()
-            || !definition.facts_columns.is_empty())
-    {
-        return Err(
-            "external facts, lookups, aggregation and fact provenance require definition format 5"
-                .into(),
-        );
-    }
-    if format > 5 {
-        return Err("unsupported named-definition format".into());
-    }
-    if format < 5
-        && definition
-            .required_fact_sources
-            .contains(&FactSource::External)
-    {
-        return Err("the external fact source requires definition format 5".into());
-    }
-    let computed = if format == 5 {
-        facts::validate_derived(definition)?
-    } else {
-        BTreeSet::new()
-    };
+    let computed = facts::validate_derived(definition)?;
     if !definition
         .required_fact_sources
         .contains(&FactSource::Documents)

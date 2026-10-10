@@ -16,7 +16,7 @@ fn project() -> tempfile::TempDir {
     fixture
 }
 fn write_queries(root: &std::path::Path, mut definitions: Value) {
-    definitions["format_version"] = json!(3);
+    definitions["format_version"] = json!(1);
     for definition in definitions["definitions"]
         .as_array_mut()
         .expect("definition array")
@@ -1076,7 +1076,7 @@ fn real_portable_rust_embedded_rust_cli_mcp_fixture_and_paged_results() {
 // @mara checks REQ-COMPOSABLE-QUERY-PROJECTIONS
 // @mara checks DES-QUERY-COMPOSITION-CONTRACT
 #[test]
-fn format_four_composition_matches_portable_embedded_cli_and_mcp_results() {
+fn named_query_composition_matches_portable_embedded_cli_and_mcp_results() {
     let fixture = project();
     let query_file = include_str!("fixtures/named-query/composition.json");
     fs::write(fixture.path().join("composition.json"), query_file).unwrap();

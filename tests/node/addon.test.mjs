@@ -245,7 +245,7 @@ for (const mode of ['direct', undefined, 'daemon-required']) {
   });
 }
 
-test('real format-5 consumers run through Node direct, auto and daemon-required adapters', async () => {
+test('real definition-v1 consumers run through Node direct, auto and daemon-required adapters', async () => {
   for (const mode of ['direct', undefined, 'daemon-required']) {
     const root = path.join(base, `query-facts-${mode ?? 'auto'}`);
     await mkdir(root, { recursive: true });

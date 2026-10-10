@@ -165,7 +165,7 @@ enum QueryCommand {
         /// Project-relative YAML file containing request-local gate definitions.
         #[arg(long, required = true)]
         gate_file: String,
-        /// Project-relative JSON named-query definitions (formats 3, 4 or 5).
+        /// Project-relative JSON named-query definitions using format_version 1.
         #[arg(long = "definition-file")]
         definition_files: Vec<String>,
         /// Project-relative Turtle SHACL sources referenced by gate conditions.
@@ -203,7 +203,7 @@ enum QueryCommand {
     Execute {
         /// Exact definition identity.
         definition: String,
-        /// Project-relative JSON named-definition files (formats 3, 4 or 5).
+        /// Project-relative JSON named-definition files using format_version 1.
         #[arg(long = "definition-file", required = true)]
         definition_files: Vec<String>,
         /// Exact item IDs/MIDs; aliases select one root and unknown references fail.
@@ -247,7 +247,7 @@ enum QueryCommand {
     View {
         /// Exact definition identity.
         definition: String,
-        /// Project-relative JSON named-definition files (formats 3, 4 or 5).
+        /// Project-relative JSON named-definition files using format_version 1.
         #[arg(long = "definition-file", required = true)]
         definition_files: Vec<String>,
         /// Exact item IDs/MIDs; aliases select one root and unknown references fail.
@@ -303,7 +303,7 @@ enum QueryReportCommand {
         /// Project-relative YAML file containing request-local gate definitions.
         #[arg(long, required = true)]
         gate_file: String,
-        /// Project-relative JSON named-query definitions (formats 3, 4 or 5).
+        /// Project-relative JSON named-query definitions using format_version 1.
         #[arg(long = "definition-file")]
         definition_files: Vec<String>,
         /// Project-relative Turtle SHACL sources referenced by gate conditions.

@@ -77,7 +77,7 @@ struct QueryExecuteToolParams {
     /// Absolute project root; omit when the server is bound with --project.
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Explicit project-relative named-definition JSON files, formats 3, 4 or 5.
+    /// Explicit project-relative named-definition JSON files using format_version 1.
     definition_files: Vec<String>,
     /// Exact named definition identity.
     definition: String,
@@ -93,10 +93,10 @@ struct QueryExecuteToolParams {
     /// Continue with every other input unchanged.
     #[serde(default)]
     cursor: Option<String>,
-    /// Optional host-supplied typed fact snapshots (format-5 definitions).
+    /// Optional host-supplied typed fact snapshots declared by format-1 definitions.
     #[serde(default)]
     fact_snapshots: Vec<mara::named_query::FactSnapshot>,
-    /// Optional caller/project typed lookup mappings (format-5 definitions).
+    /// Optional caller/project typed lookup mappings declared by format-1 definitions.
     #[serde(default)]
     mappings: Vec<mara::named_query::TypedMapping>,
 }
@@ -107,7 +107,7 @@ struct QueryGateToolParams {
     /// Absolute project root; omit when the server is bound with --project.
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Explicit project-relative named-query definition files, formats 3, 4 or 5.
+    /// Explicit project-relative named-query definition files using format_version 1.
     #[serde(default)]
     definition_files: Vec<String>,
     /// Request-local YAML gate definition file.
@@ -138,7 +138,7 @@ struct QueryViewToolParams {
     /// Absolute project root; omit when the server is bound with --project.
     #[serde(default)]
     project: Option<PathBuf>,
-    /// Explicit project-relative named-definition JSON files, formats 3, 4 or 5.
+    /// Explicit project-relative named-definition JSON files using format_version 1.
     definition_files: Vec<String>,
     /// Exact named definition identity.
     definition: String,
@@ -154,10 +154,10 @@ struct QueryViewToolParams {
     /// Continue with every other input unchanged.
     #[serde(default)]
     cursor: Option<String>,
-    /// Explicit host-supplied typed fact snapshots for format-5 definitions.
+    /// Explicit host-supplied typed fact snapshots declared by format-1 definitions.
     #[serde(default)]
     fact_snapshots: Vec<mara::named_query::FactSnapshot>,
-    /// Explicit caller/project typed lookup mappings for format-5 definitions.
+    /// Explicit caller/project typed lookup mappings declared by format-1 definitions.
     #[serde(default)]
     mappings: Vec<mara::named_query::TypedMapping>,
     /// Set to markdown to include the same rendered page as the CLI default.
@@ -427,7 +427,7 @@ impl MaraMcp {
 
     #[tool(
         name = "query_execute",
-        description = "Execute raw named factual SELECT queries through embedded/daemon Rust, CLI/MCP, Node, HTTP and browser worker adapters. Load explicit format-3, format-4 or format-5 definition files, select an exact definition and explicit roots, and supply declared typed parameters. Format 4 allows acyclic named dependencies with explicit root, parameter and projected-column/support bindings; joins, unions, filters and transitive paths remain standard SPARQL. Format 5 additionally accepts host-supplied typed fact snapshots with declared complete coverage and caller/project lookup mappings, and may declare generic precedence aggregation. A complete snapshot with no record for a covered key is known missing; a missing snapshot, partial coverage or an out-of-coverage key is unavailable, never a pass. A missing mapping key is unavailable unless an explicit fallback is declared. Supplied candidates and contexts are opaque typed values; nothing is fetched, executed or persisted. Check returned values against declared types and retain only explicitly projected source, edge and fact support; hidden provenance is not inferred. Missing required fact sources produce incomplete results, not empty success. Returns typed distinct bindings, lifecycle data and empty-root records; no policy pass/fail. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs. Content, definition, parameter, fact, mapping or control changes reject continuation."
+        description = "Execute raw named factual SELECT queries through embedded/daemon Rust, CLI/MCP, Node, HTTP and browser worker adapters. Load explicit named-query definition files with format_version 1, select an exact definition and explicit roots, and supply declared typed parameters. Definitions can declare acyclic named dependencies with explicit root, parameter and projected-column/support bindings; joins, unions, filters and transitive paths remain standard SPARQL. They can also declare host-supplied typed fact snapshots with complete coverage, caller/project lookup mappings, precedence aggregation and projected fact provenance. A complete snapshot with no record for a covered key is known missing; a missing snapshot, partial coverage or an out-of-coverage key is unavailable, never a pass. A missing mapping key is unavailable unless an explicit fallback is declared. Supplied candidates and contexts are opaque typed values; nothing is fetched, executed or persisted. Check returned values against declared types and retain only explicitly projected source, edge and fact support; hidden provenance is not inferred. Missing required fact sources produce incomplete results, not empty success. Returns typed distinct bindings, lifecycle data and empty-root records; no policy pass/fail. Summary counts cover the logical result; evaluation_complete is separate from has_more. Follow next_cursor with unchanged inputs. Content, definition, parameter, fact, mapping or control changes reject continuation."
     )]
     fn query_execute(
         &self,

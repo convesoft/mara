@@ -788,7 +788,7 @@ fn parent_parameter_can_be_consumed_only_by_a_mapped_child() {
 }
 
 #[test]
-fn definition_dependencies_are_resolved_acyclic_and_versioned() {
+fn definition_dependencies_are_resolved_and_acyclic() {
     let mut base = snapshot();
     add_definition_file(
         &mut base,
@@ -869,17 +869,4 @@ fn definition_dependencies_are_resolved_acyclic_and_versioned() {
         .unwrap_err();
     assert_eq!(error.code, "invalid_definition");
     assert!(error.message.contains("recursive"), "{error:?}");
-
-    let mut old_format = snapshot();
-    mutate_definition(&mut old_format, |defs| {
-        defs["definitions"][0]["dependencies"] = json!([{
-            "name":"unsupported", "definition":"urn:fixture:query:ancestry", "root":"root", "projections":{}
-        }]);
-    });
-    let error = SourceEngine::new(old_format)
-        .unwrap()
-        .query_execute(request())
-        .unwrap_err();
-    assert_eq!(error.code, "invalid_definition");
-    assert!(error.message.contains("format 4"), "{error:?}");
 }

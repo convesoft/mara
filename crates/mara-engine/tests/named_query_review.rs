@@ -12,7 +12,7 @@ fn snapshot(select: &str, columns: Value) -> SourceSnapshot {
         .find(|file| file.path == "queries.json")
         .unwrap()
         .content = json!({
-        "format_version": 3,
+        "format_version": 1,
         "definitions": [{
             "id": "review",
             "required_fact_sources": ["documents"],
@@ -49,7 +49,7 @@ fn set_definition(snapshot: &mut SourceSnapshot, definition: Value) {
         .find(|file| file.path == "queries.json")
         .unwrap();
     file.content = json!({
-        "format_version": 3,
+        "format_version": 1,
         "definitions": [definition]
     })
     .to_string();
@@ -67,24 +67,36 @@ fn update_schema(snapshot: &mut SourceSnapshot, change: impl FnOnce(&mut Value))
 }
 
 #[test]
-fn format_three_definitions_reject_legacy_format_two() {
-    let mut fixture_snapshot = snapshot(
-        "SELECT ?root ?title WHERE { ?root <urn:mara:item:title> ?title }",
-        json!({"title":{"type":"text"}}),
-    );
-    let file = fixture_snapshot
-        .files
-        .iter_mut()
-        .find(|file| file.path == "queries.json")
-        .unwrap();
-    let mut definitions: Value = serde_json::from_str(&file.content).unwrap();
-    definitions["format_version"] = json!(2);
-    file.content = definitions.to_string();
-    let error = SourceEngine::new(fixture_snapshot)
+fn only_initial_named_definition_format_is_admitted() {
+    let make_snapshot = || {
+        snapshot(
+            "SELECT ?root ?title WHERE { ?root <urn:mara:item:title> ?title }",
+            json!({"title":{"type":"text"}}),
+        )
+    };
+    let accepted = SourceEngine::new(make_snapshot())
         .unwrap()
         .query_execute(request())
-        .unwrap_err();
-    assert_eq!(error.code, "invalid_definition");
+        .unwrap();
+    assert!(accepted.evaluation_complete, "{accepted:#?}");
+
+    for version in 2..=5 {
+        let mut fixture_snapshot = make_snapshot();
+        let file = fixture_snapshot
+            .files
+            .iter_mut()
+            .find(|file| file.path == "queries.json")
+            .unwrap();
+        let mut definitions: Value = serde_json::from_str(&file.content).unwrap();
+        definitions["format_version"] = json!(version);
+        file.content = definitions.to_string();
+        let error = SourceEngine::new(fixture_snapshot)
+            .unwrap()
+            .query_execute(request())
+            .unwrap_err();
+        assert_eq!(error.code, "invalid_definition");
+        assert!(error.message.contains("format_version 1"), "{error:?}");
+    }
 }
 
 #[test]

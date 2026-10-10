@@ -805,43 +805,6 @@ fn derived_values_validate_unselected_records_flavours_and_iris() {
 // @mara checks DES-QUERY-FACT-COMPUTATION
 #[test]
 fn declarations_and_supplied_content_are_checked_before_root_enumeration() {
-    // The external source belongs to format 5 and cannot be declared in older formats.
-    let mut older = snapshot();
-    older
-        .files
-        .iter_mut()
-        .find(|file| file.path == "facts.json")
-        .unwrap()
-        .content = json!({
-        "format_version": 3,
-        "definitions": [{
-            "id": "urn:fixture:facts:external-declaration",
-            "required_fact_sources": ["documents", "external"],
-            "root_flavours": ["candidate"],
-            "columns": {"candidate": {"type": "text"}},
-            "select": "SELECT ?root ?candidate WHERE { ?root <urn:mara:relation:requires_verification> ?candidate }"
-        }]
-    })
-        .to_string();
-    let engine = SourceEngine::new(older).unwrap();
-    let request = q::Request {
-        definition_files: vec!["facts.json".into()],
-        definition: "urn:fixture:facts:external-declaration".into(),
-        selection: q::Selection {
-            ids: vec!["CAND-C".into()],
-            ..Default::default()
-        },
-        parameters: vec![],
-        max_rows: 100,
-        limit: 100,
-        cursor: None,
-        fact_snapshots: vec![],
-        mappings: vec![],
-    };
-    let error = engine.query_execute(request).unwrap_err();
-    assert_eq!(error.code, "invalid_definition");
-    assert!(error.message.contains("format 5"), "{error:?}");
-
     // Malformed supplied content is rejected even when the root filter selects nothing.
     let engine = SourceEngine::new(snapshot()).unwrap();
     let empty_selection = q::Selection {

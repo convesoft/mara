@@ -179,7 +179,7 @@ test('installed HTTP ESM facade uses an authorized real daemon without replay or
           const ruleReport = await queryClient.queryReport({ subject: {
             kind: 'documentation_rules', target: { kind: 'item', id: 'CAND-C' }, fact_snapshots: [facts], mappings: [],
           }, render: null });
-          assert(page.evaluation_complete && page.summary.binding_count === 3, 'Format-5 named query');
+          assert(page.evaluation_complete && page.summary.binding_count === 3, 'Definition-v1 named query');
           assert(view.input_identity === page.input_identity && view.summary.binding_count === 3, 'Factual query view');
           assert(validation.valid && validation.query_policies.checks[0].state === 'passed', 'Enabled fact policy');
           assert(gateResult.state === 'passed' && gateReport.checks[0].state === 'passed', 'Supplied-input gate/report');

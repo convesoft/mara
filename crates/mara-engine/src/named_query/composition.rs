@@ -13,7 +13,6 @@ use spargebra::{
 #[derive(Debug, Clone)]
 pub(super) struct LoadedDefinition {
     pub(super) file: String,
-    pub(super) format: u32,
     pub(super) definition: Definition,
 }
 
@@ -104,21 +103,15 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
         };
         let set: DefinitionSet =
             serde_json::from_str(text).map_err(|e| Error::definition(&path, e.to_string()))?;
-        if !matches!(set.format_version, 3..=5) {
+        if set.format_version != 1 {
             return Err(Error::definition(
                 &path,
-                "expected named-definition format 3, 4 or 5",
+                "expected named-definition format_version 1",
             ));
         }
         for definition in set.definitions {
             if definition.id.trim().is_empty() {
                 return Err(Error::definition(&path, "empty definition identity"));
-            }
-            if set.format_version == 3 && !definition.dependencies.is_empty() {
-                return Err(Error::definition(
-                    &path,
-                    "named dependencies require definition format 4",
-                ));
             }
             let id = definition.id.clone();
             if definitions
@@ -126,7 +119,6 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
                     id,
                     LoadedDefinition {
                         file: path.clone(),
-                        format: set.format_version,
                         definition,
                     },
                 )
@@ -155,7 +147,7 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
     for (id, loaded) in &definitions {
         compiled.insert(
             id.clone(),
-            signature::compile(&loaded.file, loaded.format, &loaded.definition, &schema)?,
+            signature::compile(&loaded.file, &loaded.definition, &schema)?,
         );
     }
 

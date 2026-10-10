@@ -82,7 +82,7 @@ fn policy_input_identity(
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct QueryGateRequest {
-    /// Explicit project-relative named-query definition files (formats 3, 4 or 5).
+    /// Explicit project-relative named-query definition files using format_version 1.
     pub definition_files: Vec<String>,
     /// Request-local YAML gate definitions; not enabled project policy.
     pub gate_file: String,

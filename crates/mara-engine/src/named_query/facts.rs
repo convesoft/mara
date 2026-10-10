@@ -9,7 +9,7 @@ pub(super) struct Inputs<'a> {
     pub mappings: BTreeMap<String, &'a TypedMapping>,
 }
 
-/// Validate the declared format-5 facts/lookups/aggregate and return derived output columns.
+/// Validate the declared facts/lookups/aggregate and return derived output columns.
 /// Derived columns must be declared but are not part of the SELECT tuple signature.
 pub(super) fn validate_derived(definition: &Definition) -> Result<BTreeSet<String>, String> {
     let declared = definition.columns.keys().cloned().collect::<BTreeSet<_>>();
