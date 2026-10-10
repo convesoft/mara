@@ -149,7 +149,7 @@ fn compile_inner(
     else {
         return Err("named queries require SELECT over the supplied default graph".into());
     };
-    crate::query_backend::profile(pattern)?;
+    crate::query_backend::named_profile(pattern)?;
 
     let mut projected = BTreeSet::new();
     pattern.on_in_scope_variable(|variable| {
@@ -323,7 +323,12 @@ fn scope_expression(expression: &mut Expression, scoped: &BTreeMap<String, Named
         Expression::Exists(pattern) => scope_pattern(pattern, scoped),
         Expression::SameTerm(left, right)
         | Expression::And(left, right)
-        | Expression::Or(left, right) => {
+        | Expression::Or(left, right)
+        | Expression::Multiply(left, right)
+        | Expression::Greater(left, right)
+        | Expression::GreaterOrEqual(left, right)
+        | Expression::Less(left, right)
+        | Expression::LessOrEqual(left, right) => {
             scope_expression(left, scoped);
             scope_expression(right, scoped);
         }
@@ -397,7 +402,12 @@ fn validate_input_predicates(
             Expression::Exists(pattern) => validate(pattern, allowed),
             Expression::SameTerm(left, right)
             | Expression::And(left, right)
-            | Expression::Or(left, right) => {
+            | Expression::Or(left, right)
+            | Expression::Multiply(left, right)
+            | Expression::Greater(left, right)
+            | Expression::GreaterOrEqual(left, right)
+            | Expression::Less(left, right)
+            | Expression::LessOrEqual(left, right) => {
                 validate_expression(left, allowed)?;
                 validate_expression(right, allowed)
             }
@@ -573,7 +583,12 @@ fn validate_item_expression(expression: &Expression, graph: &PreparedGraph) -> R
         Expression::Exists(pattern) => validate_item_pattern(pattern, graph)?,
         Expression::SameTerm(left, right)
         | Expression::And(left, right)
-        | Expression::Or(left, right) => {
+        | Expression::Or(left, right)
+        | Expression::Multiply(left, right)
+        | Expression::Greater(left, right)
+        | Expression::GreaterOrEqual(left, right)
+        | Expression::Less(left, right)
+        | Expression::LessOrEqual(left, right) => {
             validate_item_expression(left, graph)?;
             validate_item_expression(right, graph)?;
         }
@@ -616,7 +631,12 @@ fn expression_projection(expression: &Expression) -> bool {
         Expression::Exists(pattern) => nested_projection(pattern, false),
         Expression::SameTerm(left, right)
         | Expression::And(left, right)
-        | Expression::Or(left, right) => {
+        | Expression::Or(left, right)
+        | Expression::Multiply(left, right)
+        | Expression::Greater(left, right)
+        | Expression::GreaterOrEqual(left, right)
+        | Expression::Less(left, right)
+        | Expression::LessOrEqual(left, right) => {
             expression_projection(left) || expression_projection(right)
         }
         Expression::Not(inner) => expression_projection(inner),
@@ -821,7 +841,10 @@ fn normalize_predicate(predicate: &mut NamedNode, schema: &Schema) -> Result<boo
         || matches!(iri, "urn:mara:item:id" | "urn:mara:item:title")
         || matches!(
             iri,
-            "urn:mara:query:source" | "urn:mara:query:target" | "urn:mara:query:relation"
+            "urn:mara:query:source"
+                | "urn:mara:query:target"
+                | "urn:mara:query:relation"
+                | "urn:mara:query:occurrence"
         )
     {
         return Ok(false);
@@ -886,7 +909,12 @@ fn normalize_expression(
         }
         Expression::SameTerm(left, right)
         | Expression::And(left, right)
-        | Expression::Or(left, right) => {
+        | Expression::Or(left, right)
+        | Expression::Multiply(left, right)
+        | Expression::Greater(left, right)
+        | Expression::GreaterOrEqual(left, right)
+        | Expression::Less(left, right)
+        | Expression::LessOrEqual(left, right) => {
             normalize_expression(left, schema, used, existentials, item_aliases)?;
             normalize_expression(right, schema, used, existentials, item_aliases)?;
         }

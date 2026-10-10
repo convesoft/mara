@@ -415,6 +415,15 @@ budget, the result is incomplete; already observed bindings and their projected
 support remain available, but the exact count and negative conclusions are
 unavailable.
 
+The named adapter orders projected solution terms in Oxigraph before applying
+the observed-row budget, so partial prefixes do not depend on native/WASM store
+iteration. Lexical, language and datatype tie breaks distinguish RDF terms that
+compare equal numerically. The input identity binds this ordering revision,
+rejecting earlier continuations. Shared discovery/occurrence selectors also use
+fixed-width content framing across native and WASM. This internal execution ordering does not admit
+caller `ORDER BY`. The row budget does not bound backend sorting, graph work,
+time or memory.
+
 For exact deterministic text comparisons, definitions may query
 `<urn:mara:query:nfc-casefold:title>` or
 `<urn:mara:query:nfc-casefold:field:FIELD>`. These expose stored values normalized by NFC and full default Unicode case
@@ -423,18 +432,35 @@ operands must already use the same normalized form. This is exact equality
 after normalization, not fuzzy or locale-sensitive matching. Field predicates
 require a declared string/enum field.
 
-The admitted standard SELECT profile follows [[DES-QUERY-BACKEND-PROOF]].
-Bind flavour/field/relation URNs to the selected schema; inverse aliases
-normalize canonical direction, including property paths. Structural ID/title
-predicates are `urn:mara:item:id` and `urn:mara:item:title`, distinct from
-custom fields. Ordinary predicates must be schema-bound constants; the exact
-format-4 dependency predicates and normalized-text predicates above are the
-only query-specific additions. Open negated-vocabulary paths and nested SELECT
-boundaries are not this delivery's composition interface. These are the only
-new query-specific predicates; the existing canonical edge-support predicates
-remain available. No SERVICE, imports, updates or implicit numeric/boolean
-conversion is admitted.
+The admitted standard SELECT profile follows [[DES-QUERY-BACKEND-PROOF]]
+with the named-only numeric extension below. Bind flavour/field/relation URNs
+to the selected schema; inverse aliases normalize canonical direction, including
+property paths. Structural ID/title predicates are `urn:mara:item:id` and
+`urn:mara:item:title`, distinct from custom fields. Ordinary predicates must
+be schema-bound constants. Query-specific additions are the exact dependency,
+normalized-text, format-5 fact-input and occurrence predicates specified here;
+existing canonical edge-support predicates remain available. Open
+negated-vocabulary paths and nested SELECT boundaries are not this delivery's
+composition interface. No SERVICE, imports or updates are admitted. Outside the
+expressly admitted numeric operators, implicit numeric/boolean conversion is
+not admitted.
 Initial admission limits do not remove later composition/derived-value commitments.
+
+For the integrated catalog, the user approved a bounded named-query extension:
+standard SPARQL multiplication and ordering (`*`, `<`, `<=`, `>`, `>=`)
+execute in Oxigraph. The format-1 backend proof profile remains unchanged.
+Exact typed equality still uses `sameTerm`; no numeric-coercing `=` or
+second expression evaluator is added. Returned values retain runtime type
+checks. Definitions own formulas and thresholds; typed lookup inputs supply
+factors through explicitly projected dependency columns.
+
+`urn:mara:query:occurrence` links a canonical edge to each finite authored
+occurrence IRI, `urn:mara:query:occurrence:<identity>`. Its identity is the
+existing content-bound identity in projected edge support. A definition can
+select distinct occurrences and count them with format-5 aggregation; duplicate
+paths do not multiply an occurrence. Project the edge as support to retain
+its authored locations. This exposes existing source facts, not hidden path
+derivations or automatic provenance reconstruction.
 
 #### Request and factual page format 3
 
@@ -1010,7 +1036,14 @@ it does not substitute for the later complete catalog. No custom DSL/framework
 is authorized by this verification.
 
 The complete fixture catalog and selected host parity remain integrated release
-checks. This implementation adds focused native Rust/CLI/MCP consumer tests,
+checks. `tests/fixtures/query-catalog/snapshot.json` owns reusable catalog
+sources/definitions. `tests/query_catalog.rs` asserts the twelve discriminators
+through portable and direct/daemon native Rust, CLI and MCP. Its optional
+`MARA_QUERY_CATALOG_REPORT` captures executed inputs and complete outcomes for
+the installed Node and Chromium HTTP/worker catalog tests. Those tests compare
+owning typed results and errors, including identity, support and completeness;
+a skipped opt-in proof is not acceptance. Receipts remain outside the corpus.
+This implementation also includes focused native Rust/CLI/MCP consumer tests,
 real daemon IPC/HTTP tests, installed Node operation tests, compile-checked
 TypeScript usage and browser worker/WASM tests. These tests exercise the selected
 paths but do not replace the matching-artifact integrated proof in

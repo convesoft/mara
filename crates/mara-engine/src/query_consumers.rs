@@ -67,7 +67,7 @@ fn policy_input_identity(
     mappings: &[named_query::TypedMapping],
 ) -> String {
     let bytes = serde_json::to_vec(&(
-        "query-policy-input-v1",
+        "query-policy-input-v2", // Includes the revised named-query stream ordering.
         engine.source_fingerprint(),
         target,
         fact_snapshots,

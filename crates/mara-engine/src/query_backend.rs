@@ -340,8 +340,8 @@ impl SourceEngine {
             let mut occurrences = crate::relations::occurrences(&project, &corpus, &schema, edge)
                 .map_err(|e| e.to_string())?;
             for occurrence in &mut occurrences {
-                // Existing relation-get cursors use a host-width-dependent hash.
-                // Query occurrence identity is portable and independent of paths.
+                // Query occurrence identity is content-based rather than a position
+                // in the relation-get snapshot; both selector forms are portable.
                 occurrence.reference = format!(
                     "query-occ-1-{}",
                     hash(
@@ -576,6 +576,15 @@ fn json_ld(value: &TypedValue) -> Value {
 /// A bounded standard-language subset, not a new expression interpreter.
 /// SPARQL '=' coerces numeric types; this proof admits only sameTerm equality.
 pub(crate) fn profile(pattern: &GraphPattern) -> Result<(), String> {
+    profile_in(pattern, false)
+}
+
+/// The named catalog adds only backend-owned multiplication and ordering.
+pub(crate) fn named_profile(pattern: &GraphPattern) -> Result<(), String> {
+    profile_in(pattern, true)
+}
+
+fn profile_in(pattern: &GraphPattern, named: bool) -> Result<(), String> {
     match pattern {
         GraphPattern::Bgp { patterns } => {
             for triple in patterns { term_profile(&triple.subject)?; term_profile(&triple.object)?; }
@@ -592,11 +601,11 @@ pub(crate) fn profile(pattern: &GraphPattern) -> Result<(), String> {
             }
             Ok(())
         }
-        GraphPattern::Join { left, right } | GraphPattern::Union { left, right } | GraphPattern::Minus { left, right } => { profile(left)?; profile(right) },
-        GraphPattern::LeftJoin { left, right, expression } => { profile(left)?; profile(right)?; if let Some(e) = expression { expression_profile(e)?; } Ok(()) },
-        GraphPattern::Filter { expr, inner } => { expression_profile(expr)?; profile(inner) },
-        GraphPattern::Extend { expression, inner, .. } => { expression_profile(expression)?; profile(inner) },
-        GraphPattern::Project { inner, .. } | GraphPattern::Distinct { inner } => profile(inner),
+        GraphPattern::Join { left, right } | GraphPattern::Union { left, right } | GraphPattern::Minus { left, right } => { profile_in(left, named)?; profile_in(right, named) },
+        GraphPattern::LeftJoin { left, right, expression } => { profile_in(left, named)?; profile_in(right, named)?; if let Some(e) = expression { expression_profile(e, named)?; } Ok(()) },
+        GraphPattern::Filter { expr, inner } => { expression_profile(expr, named)?; profile_in(inner, named) },
+        GraphPattern::Extend { expression, inner, .. } => { expression_profile(expression, named)?; profile_in(inner, named) },
+        GraphPattern::Project { inner, .. } | GraphPattern::Distinct { inner } => profile_in(inner, named),
         _ => Err("query outside the bounded SELECT proof profile (no SERVICE, dataset, slicing, nondeterminism or aggregate shortcut)".into()),
     }
 }
@@ -633,16 +642,26 @@ fn term_profile(term: &TermPattern) -> Result<(), String> {
         _ => Ok(()),
     }
 }
-fn expression_profile(expression: &Expression) -> Result<(), String> {
+fn expression_profile(expression: &Expression, named: bool) -> Result<(), String> {
     match expression {
         Expression::Literal(literal) => literal_profile(literal),
         Expression::NamedNode(_) | Expression::Variable(_) | Expression::Bound(_) => Ok(()),
         Expression::SameTerm(a, b) | Expression::And(a, b) | Expression::Or(a, b) => {
-            expression_profile(a)?;
-            expression_profile(b)
+            expression_profile(a, named)?;
+            expression_profile(b, named)
         }
-        Expression::Not(e) => expression_profile(e),
-        Expression::Exists(p) => profile(p),
+        Expression::Multiply(a, b)
+        | Expression::Greater(a, b)
+        | Expression::GreaterOrEqual(a, b)
+        | Expression::Less(a, b)
+        | Expression::LessOrEqual(a, b)
+            if named =>
+        {
+            expression_profile(a, named)?;
+            expression_profile(b, named)
+        }
+        Expression::Not(e) => expression_profile(e, named),
+        Expression::Exists(p) => profile_in(p, named),
         _ => Err("expression outside the exact typed proof profile".into()),
     }
 }

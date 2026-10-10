@@ -1,4 +1,4 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
+use sha2::{Digest, Sha256};
 
 use super::*;
 
@@ -114,41 +114,53 @@ pub fn fingerprint(
     schema: &Schema,
     request: &impl Serialize,
 ) -> Result<String, QueryError> {
-    // Deterministic across processes of this build. This is change detection,
-    // not an authentication token; cursors confer no access to stored state.
-    let mut hash = DefaultHasher::new();
-    env!("CARGO_PKG_VERSION").hash(&mut hash);
-    serde_json::to_vec(&(request, schema))
-        .map_err(|_| page_error("could not fingerprint retrieval request"))?
-        .hash(&mut hash);
-    corpus.source_fingerprint.hash(&mut hash);
+    // Fixed-width byte framing is portable across native and WASM. This is
+    // change detection, not authentication; cursors confer no stored-state access.
+    let mut hash = Sha256::new();
+    let mut input = |bytes: &[u8]| {
+        hash.update((bytes.len() as u64).to_be_bytes());
+        hash.update(bytes);
+    };
+    input(b"retrieval-fingerprint-2");
+    input(env!("CARGO_PKG_VERSION").as_bytes());
+    input(
+        &serde_json::to_vec(&(request, schema))
+            .map_err(|_| page_error("could not fingerprint retrieval request"))?,
+    );
+    input(corpus.source_fingerprint.as_bytes());
+    input(b"documents");
     for document in corpus.documents() {
-        document.path().hash(&mut hash);
-        document.source().hash(&mut hash);
+        input(document.path().as_os_str().as_encoded_bytes());
+        input(document.source().as_bytes());
     }
+    input(b"code-files");
     for file in corpus.code().files() {
-        file.path.hash(&mut hash);
-        file.source.hash(&mut hash);
+        input(file.path.as_os_str().as_encoded_bytes());
+        input(file.source.as_bytes());
     }
     // Explicit file-only endpoints need no adapter, so they are absent from
     // the code index. Their existence and contents can change related results.
+    input(b"file-only-code");
     for path in corpus.file_only_code_paths() {
-        path.hash(&mut hash);
-        corpus.code().file_only_bytes(&path).hash(&mut hash);
+        input(path.as_os_str().as_encoded_bytes());
+        match corpus.code().file_only_bytes(&path) {
+            Some(bytes) => {
+                input(&[1]);
+                input(&bytes);
+            }
+            None => input(&[0]),
+        }
     }
+    input(b"code-assets");
     for path in corpus
         .code()
         .assets()
         .filter(|path| path.as_path() != std::path::Path::new(crate::PROJECT_FILE))
     {
-        path.hash(&mut hash);
-        corpus
-            .code()
-            .file_only_bytes(path)
-            .unwrap_or_default()
-            .hash(&mut hash);
+        input(path.as_os_str().as_encoded_bytes());
+        input(&corpus.code().file_only_bytes(path).unwrap_or_default());
     }
-    Ok(format!("{:016x}", hash.finish()))
+    Ok(format!("{:x}", hash.finalize())[..16].to_owned())
 }
 
 pub fn cursor_position(cursor: Option<&str>, fingerprint: &str) -> Result<usize, QueryError> {

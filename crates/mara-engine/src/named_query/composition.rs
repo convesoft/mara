@@ -5,6 +5,10 @@ use oxigraph::{
     sparql::{QueryResults, SparqlEvaluator},
     store::Store,
 };
+use spargebra::{
+    Query,
+    algebra::{Expression, Function, GraphPattern, OrderExpression},
+};
 
 #[derive(Debug, Clone)]
 pub(super) struct LoadedDefinition {
@@ -63,7 +67,7 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
     let mut identity_request = request.clone();
     identity_request.cursor = None;
     let identity = hash(&(
-        "named-query-4",
+        "named-query-5",
         env!("CARGO_PKG_VERSION"),
         engine.source_fingerprint(),
         &identity_request,
@@ -754,6 +758,36 @@ fn evaluate_definition(
             .into(),
     );
 
+    // Unordered backend iteration differs between native and WASM. Order the visible
+    // solution terms in the backend before taking an observed-row prefix. RDF numeric
+    // comparisons can tie distinct terms, so lexical/language/datatype break those ties.
+    let Query::Select { pattern, .. } = &mut query else {
+        unreachable!("compiled SELECT")
+    };
+    let mut variables = BTreeSet::new();
+    pattern.on_in_scope_variable(|v| {
+        variables.insert(v.clone());
+    });
+    let expression = variables
+        .into_iter()
+        .flat_map(|v| {
+            let value = Expression::Variable(v);
+            [
+                OrderExpression::Asc(value.clone()),
+                OrderExpression::Asc(Expression::FunctionCall(Function::Str, vec![value.clone()])),
+                OrderExpression::Asc(Expression::FunctionCall(
+                    Function::Lang,
+                    vec![value.clone()],
+                )),
+                OrderExpression::Asc(Expression::FunctionCall(Function::Datatype, vec![value])),
+            ]
+        })
+        .collect();
+    let inner = std::mem::replace(pattern, GraphPattern::Bgp { patterns: vec![] });
+    *pattern = GraphPattern::OrderBy {
+        inner: Box::new(inner),
+        expression,
+    };
     let evaluator = SparqlEvaluator::new().without_optimizations();
     #[cfg(not(target_family = "wasm"))]
     let evaluator = evaluator.without_default_http_service_handler();

@@ -260,6 +260,17 @@ pub(crate) fn prepare(
 }
 fn insert_edge(graph: &mut PreparedGraph, edge: Edge, occurrences: Vec<Occurrence>) {
     let key = format!("urn:mara:query:edge:{}", hash(&edge));
+    // Authored occurrences are finite source facts, not hidden path derivations.
+    for occurrence in &occurrences {
+        graph.triples.push(triple(
+            &key,
+            "urn:mara:query:occurrence",
+            node(&format!(
+                "urn:mara:query:occurrence:{}",
+                occurrence.identity
+            )),
+        ));
+    }
     if let Some(existing) = graph.support.get_mut(&key) {
         existing.occurrences.extend(occurrences);
         return;

@@ -93,6 +93,9 @@ fn run_node_tests(public: bool, installed: bool) {
     command.args(["--test", "--test-concurrency=1"]).arg(script);
     if public {
         command.arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/node/client.test.mjs"));
+        command.arg(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/node/query-catalog.test.mjs"),
+        );
     }
     command
         .current_dir(fixtures.path())
