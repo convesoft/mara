@@ -67,13 +67,17 @@ iterations; a later released contract change establishes its next version.
 Already-released project, vocabulary-schema, rule and transport formats retain
 their independent versions.
 
-The authoring target is [[REQ-QUERY-SINGLE-LANGUAGE-AUTHORING]] under
-[[ADR-QUERY-SPARQL-AUTHORING]]. The current numbered JSON-format sections below
-describe the implementation awaiting migration, not the selected public v1
-contract. Freeze the concrete v1 input/output and reusable-composition design
-before dependent implementation; standard SPARQL has no cross-file query-import
-mechanism. Existing semantic and host acceptance contracts remain applicable
-unless a material change is explicitly resolved.
+The current correction only renames the existing final JSON named-query
+definition format 5 to format 1. Preserve its declaration shape, explicit typing,
+composition, supplied inputs and execution semantics; normalize internal 3/4
+fixtures to that final shape rather than shipping checkpoint compatibility.
+Other query request/result counters are not part of this correction. The
+numbered implementation sections below await this bounded alignment.
+
+SPARQL-only authoring, schema-assisted inference/editor tooling and composition
+redesign under [[REQ-QUERY-SINGLE-LANGUAGE-AUTHORING]] and
+[[ADR-QUERY-SPARQL-AUTHORING]] are deferred to later versions. They are not
+implementation or acceptance work for this v5-to-v1 correction.
 
 ## Capability contracts
 
@@ -107,11 +111,13 @@ Definition resolution, explicit roots/parameters, typed bindings, absence, prove
 :kind: constraint
 :derives_from: SCN-REUSE-QUERY-FACTS
 
+Deferred to a later version by the user; not part of the current v5-to-v1 definition-numbering correction.
+
 Author named-query inputs, output projections, computation and composition in one existing declarative language or an existing documented dialect. Do not require a separate hand-authored Mara-specific JSON definition or introduce a Mara-specific query/expression DSL. Generated metadata is not a competing authoring source.
 
-Source: the user's query-authoring clarification: use one existing language to declare everything; GraphQL is not mandatory, and SPARQL is acceptable if a single query file covers the input/output declarations as well as the query.
+Source: the user's query-authoring discussion and subsequent clarification that this authoring change is future work. Standard SPARQL is the preferred direction in [[ADR-QUERY-SPARQL-AUTHORING]], not an implemented replacement contract.
 
-Prefer existing syntax highlighting and project-aware autocompletion when selecting tooling. These are selection preferences, not yet an editor-integration acceptance gate. Standard SPARQL is now selected in [[ADR-QUERY-SPARQL-AUTHORING]]; the complete input/output and reusable-composition design still needs proof against the owning contracts. This requirement does not claim that the current JSON loader satisfies it.
+Prefer existing syntax highlighting and project-aware autocompletion when selecting tooling. These are selection preferences, not an editor-integration acceptance gate. The complete input/output and reusable-composition design needs proof against the owning contracts. The current delivery retains the existing JSON definition shape and query semantics.
 :::
 
 :::mara requirement REQ-COMPOSABLE-QUERY-PROJECTIONS
@@ -818,11 +824,13 @@ and actual proof formats/operations, and demonstrates the SHACL result bridge.
 :status: draft
 :justifies: REQ-QUERY-SINGLE-LANGUAGE-AUTHORING
 
-The user selected standard SPARQL as the named-query authoring direction after comparing GraphQL and the current JSON-plus-SPARQL definitions. Keep query selection, computation and composition in standard SPARQL files; do not require a hand-authored Mara JSON wrapper or invent query directives, decorators or another expression language. Generate tooling metadata from the project schema and query structure where justified.
+Deferred to a later version by the user's clarification. The current task only renames the existing final JSON named-query definition format from v5 to v1; it does not change the authoring language, input/output declarations, composition or execution semantics.
 
-Rationale: reuse an existing query language and its syntax highlighting/completion ecosystem rather than maintaining a Mara-specific authoring syntax. GraphQL and Rego are not selected alternatives for this change.
+For future authoring work, the user prefers standard SPARQL files over the current JSON-plus-SPARQL wrapper. Do not invent query directives, decorators or another expression language. Generate tooling metadata from the project schema and query structure where justified. GraphQL and Rego are not selected alternatives.
 
-This selects the language, not a completed replacement format. Standard SPARQL does not define cross-file stored-query imports or typed function declarations; the input/output and reusable-composition design must preserve the owning contracts without pretending private extensions are standard. Invocation, source loading, completeness and provenance remain explicit Mara execution responsibilities. Do not claim full static inference or successful replacement from language expressiveness alone; verify the real catalog and selected hosts before adoption. The current JSON loader remains unchanged.
+Rationale: reuse an existing query language and its syntax highlighting/completion ecosystem rather than maintaining a Mara-specific authoring syntax.
+
+This future direction is not a completed replacement format. Standard SPARQL does not define cross-file stored-query imports or typed function declarations; establish the concrete input/output and reusable-composition design before separately authorized implementation. Preserve the existing typing, completeness and projected-provenance boundaries unless the user resolves a material change.
 :::
 
 :::mara decision ADR-QUERY-EXACT-RESOLUTION
