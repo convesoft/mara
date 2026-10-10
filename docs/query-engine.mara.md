@@ -58,6 +58,23 @@ factual query/view abstraction. Its useful source-linked explanations inform
 the new evaluation report; a matrix is a rendering, never an independent
 traversal or policy mechanism.
 
+## Initial public v1 alignment
+
+The user selected initial public query-contract version **1**. Internal formats
+3/4/5 are unreleased implementation checkpoints, not released compatibility
+obligations. Do not increment a public contract version between internal
+iterations; a later released contract change establishes its next version.
+Already-released project, vocabulary-schema, rule and transport formats retain
+their independent versions.
+
+The authoring target is [[REQ-QUERY-SINGLE-LANGUAGE-AUTHORING]] under
+[[ADR-QUERY-SPARQL-AUTHORING]]. The current numbered JSON-format sections below
+describe the implementation awaiting migration, not the selected public v1
+contract. Freeze the concrete v1 input/output and reusable-composition design
+before dependent implementation; standard SPARQL has no cross-file query-import
+mechanism. Existing semantic and host acceptance contracts remain applicable
+unless a material change is explicitly resolved.
+
 ## Capability contracts
 
 :::mara scenario SCN-REUSE-QUERY-FACTS
