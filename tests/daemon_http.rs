@@ -777,8 +777,11 @@ fn refuses_credentials_origins_versions_admin_and_exact_root_escapes_before_comm
 
 // @mara checks REQ-LOCAL-DAEMON-HTTP
 // @mara checks DES-LOCAL-DAEMON-PROTOCOL
-// macOS filesystems reject non-UTF-8 names before this resolved-root case can run.
-#[cfg(target_os = "linux")]
+// Keep the declaration indexed for self-hosted traceability on both hosts.
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "requires existing non-UTF-8 directories, rejected by macOS filesystems"
+)]
 #[test]
 fn non_utf8_resolved_roots_return_errors_before_project_access() {
     use std::ffi::OsString;

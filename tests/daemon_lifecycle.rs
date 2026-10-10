@@ -394,7 +394,11 @@ fn refresh_rejects_non_utf8_selected_project_without_panicking() {
 
 // @mara checks DES-DAEMON-LIFECYCLE
 // @mara checks DES-OPERATION-PROJECT-CONTEXT
-#[cfg(target_os = "linux")]
+// Keep the declaration indexed for self-hosted traceability on both hosts.
+#[cfg_attr(
+    target_os = "macos",
+    ignore = "requires existing non-UTF-8 directories, rejected by macOS filesystems"
+)]
 #[test]
 fn refresh_rejects_non_utf8_discovered_project_without_panicking() {
     use std::os::unix::ffi::OsStringExt;
