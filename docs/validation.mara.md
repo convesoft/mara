@@ -30,6 +30,8 @@ Optional project-relative reporting paths select document diagnostics without na
 
 The recovering corpus loader composes document recovery with configured local code discovery. Preserve readable source and item context after independent errors; missing/unreadable source makes discovery incomplete. Without a usable schema, syntax-only recovery does not load code adapters.
 
+Native query-policy source conformance reuses the code projection acquired by native validation, including file-only source inputs, rather than reconstructing a document-only corpus or rerunning indexers. Policy unavailability retains source-located blockers without duplicating diagnostics already reported by native validation. Portable document snapshots do not gain native code access.
+
 Source conformance checks identities, valid flavour/field declarations, required bodies, metadata, typed relations and discovery references. Numeric field values must be finite. Check every valid authored MID, including repeated entries, so secondary duplicate identities remain visible. Use schema recovery flags to suppress only checks dependent on invalid declarations, and item recovery flags to avoid inventing missing fields or bodies. Proven ambiguity remains an error; report a missing item target only when discovery is complete, including targets authored in code comments.
 
 Retain stable diagnostic codes and original source spans; order by path, line and message. Associate code problems with their target's exact human ID and MID when resolvable. Reads never repair source. These checks do not execute conditional rules or graph policies and cannot alone establish project validity.

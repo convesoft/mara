@@ -191,6 +191,7 @@ impl NativeRuntime {
             result.relations = Some(Some(schema.relations().len()));
         }
         let mut policy_documents = None;
+        let mut policy_code = None;
         if !schema_only {
             let (corpus, source_diagnostics) = match &schema {
                 Some(schema) => load_corpus_for_validation(&project, schema),
@@ -227,6 +228,7 @@ impl NativeRuntime {
                     None => snapshot.update([0]),
                 }
             }
+            policy_code = Some(corpus.code().clone());
             policy_documents = Some(mara_engine::DocumentSet {
                 documents: corpus.documents().to_vec(),
                 complete: corpus.is_complete(),
@@ -274,6 +276,7 @@ impl NativeRuntime {
             match crate::source_bridge::load_query_policy_engine(
                 &project,
                 policy_documents.as_ref(),
+                policy_code.as_ref(),
             ) {
                 Ok(source_engine) => mara_engine::query_consumers::append_query_policy_result(
                     &mut result,

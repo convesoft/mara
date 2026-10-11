@@ -493,8 +493,8 @@ impl crate::SourceEngine {
                 diagnostics,
             ));
         }
-        let corpus = match self.corpus() {
-            Ok((_, _, corpus)) => corpus,
+        let (project, _, mut corpus) = match self.corpus() {
+            Ok(value) => value,
             Err(error) => {
                 let (report, mut errors) = policy_unavailable(
                     Some(QueryPolicyValidation {
@@ -511,6 +511,25 @@ impl crate::SourceEngine {
                 return Ok((report, diagnostics));
             }
         };
+        // Source conformance includes authored code links and configured code
+        // markers, even when the policy's query only reads document facts.
+        // Leave a genuinely document-only projection and its identities unchanged.
+        let needs_code = !project.code_languages().is_empty()
+            || corpus.items().any(|item| {
+                item.relations()
+                    .iter()
+                    .any(|relation| relation.target().starts_with("code:"))
+            });
+        let code_unavailable = if needs_code {
+            self.native_query_code.as_ref().and_then(|loader| {
+                let inputs = loader.inputs();
+                corpus.code = inputs.index.clone();
+                corpus.source_fingerprint = self.query_fingerprint();
+                inputs.unavailable_reason.clone()
+            })
+        } else {
+            None
+        };
         let source_diagnostics = crate::validate_corpus(&corpus, schema);
         let mut report = QueryPolicyValidation {
             format_version: 1,
@@ -518,15 +537,26 @@ impl crate::SourceEngine {
             evaluation_complete: true,
             checks: vec![],
         };
-        if !source_diagnostics.is_empty() || !corpus.is_complete() {
+        if !source_diagnostics.is_empty() || !corpus.is_complete() || code_unavailable.is_some() {
             report.evaluation_complete = false;
             let (next, mut errors) = policy_unavailable(
                 Some(report),
                 "",
-                "query policy evaluation unavailable until source conformance is complete".into(),
+                code_unavailable.map_or_else(
+                    || {
+                        "query policy evaluation unavailable until source conformance is complete"
+                            .into()
+                    },
+                    |reason| format!("query policy code inputs unavailable: {reason}"),
+                ),
                 ValidationScope::Project,
             );
             diagnostics.append(&mut errors);
+            diagnostics.extend(
+                source_diagnostics
+                    .iter()
+                    .map(|diagnostic| crate::validation::source_diagnostic(&corpus, diagnostic)),
+            );
             return Ok((next, diagnostics));
         }
 
@@ -1596,7 +1626,11 @@ pub fn append_query_policy_result(
         result.evaluation_complete &= policy.evaluation_complete;
     }
     result.query_policies = policy;
-    result.diagnostics.extend(diagnostics);
+    for diagnostic in diagnostics {
+        if !result.diagnostics.contains(&diagnostic) {
+            result.diagnostics.push(diagnostic);
+        }
+    }
     Ok(())
 }
 

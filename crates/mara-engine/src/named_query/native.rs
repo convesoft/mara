@@ -25,7 +25,7 @@ impl fmt::Debug for NativeCodeLoader {
     }
 }
 impl NativeCodeLoader {
-    pub(super) fn inputs(&self) -> &NativeCodeInputs {
+    pub(crate) fn inputs(&self) -> &NativeCodeInputs {
         self.inputs.get_or_init(|| (self.load)())
     }
 }

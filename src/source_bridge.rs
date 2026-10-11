@@ -39,6 +39,7 @@ pub(crate) use load_native_source_engine as load_mutation_engine;
 pub(crate) fn load_query_policy_engine(
     project: &Project,
     documents: Option<&DocumentSet>,
+    code: Option<&crate::CodeIndex>,
 ) -> Result<SourceEngine, Error> {
     let empty = DocumentSet {
         documents: vec![],
@@ -46,7 +47,14 @@ pub(crate) fn load_query_policy_engine(
     };
     let documents = documents.unwrap_or(&empty);
     let engine = load_native_source_engine(project, documents)?;
-    attach_query_code(engine, project, documents)
+    if let Some(code) = code {
+        // Native validation already acquired this projection. Freeze its inputs,
+        // rather than invoking the configured indexers a second time.
+        let inputs = query_code_inputs(project, documents, code.clone(), None);
+        engine.with_native_query_code(move || inputs.clone())
+    } else {
+        attach_query_code(engine, project, documents)
+    }
 }
 
 pub(crate) fn source_fingerprint(project: &Project, documents: &DocumentSet) -> String {
@@ -285,6 +293,21 @@ fn attach_query_code(
     documents: &DocumentSet,
 ) -> Result<SourceEngine, Error> {
     let project = project.clone();
+    let documents = documents.clone();
+    engine.with_native_query_code(move || {
+        let (index, problems) = crate::code::load(&project);
+        let reason = problems.first().map(|problem| problem.message.clone());
+        query_code_inputs(&project, &documents, index, reason)
+    })
+}
+
+fn query_code_inputs(
+    project: &Project,
+    documents: &DocumentSet,
+    mut index: crate::CodeIndex,
+    mut reason: Option<String>,
+) -> mara_engine::named_query::NativeCodeInputs {
+    use sha2::{Digest, Sha256};
     let references = documents
         .items()
         .flat_map(|item| item.relations())
@@ -294,51 +317,44 @@ fn attach_query_code(
                 .map(|(path, _)| path)
         })
         .collect::<std::collections::BTreeSet<_>>();
-    engine.with_native_query_code(move || {
-        use sha2::{Digest, Sha256};
-        let (mut index, problems) = crate::code::load(&project);
-        let mut reason = problems.first().map(|problem| problem.message.clone());
-        let mut files = index
-            .files()
-            .map(|file| (file.path.clone(), file.source.as_bytes().to_vec()))
-            .collect::<std::collections::BTreeMap<_, _>>();
-        for path in &references {
-            if files.contains_key(path) {
-                continue;
-            }
-            match index.inputs.as_ref().unwrap().file(path) {
-                Ok(bytes) => {
-                    files.insert(path.clone(), bytes);
-                }
-                Err(error) => {
-                    reason
-                        .get_or_insert_with(|| format!("code input {}: {error:?}", path.display()));
-                }
-            }
-            crate::runtime::sessions::record(project.root().join(path));
+    let mut files = index
+        .files()
+        .map(|file| (file.path.clone(), file.source.as_bytes().to_vec()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for path in &references {
+        if files.contains_key(path) {
+            continue;
         }
-        let assets = index
-            .assets()
-            .map(|path| {
-                let bytes = fs::read(project.root().join(path)).map_err(|error| error.kind());
-                if let Err(error) = &bytes {
-                    reason
-                        .get_or_insert_with(|| format!("code input {}: {error:?}", path.display()));
-                }
-                (path.clone(), bytes)
-            })
-            .collect::<Vec<_>>();
-        let identity = format!(
-            "{:x}",
-            Sha256::digest(format!("{index:?}{files:?}{assets:?}{problems:?}").as_bytes())
-        );
-        index.inputs = Some(std::sync::Arc::new(QueryCodeFiles(files)));
-        mara_engine::named_query::NativeCodeInputs {
-            index,
-            identity,
-            unavailable_reason: reason,
+        match index.inputs.as_ref().unwrap().file(path) {
+            Ok(bytes) => {
+                files.insert(path.clone(), bytes);
+            }
+            Err(error) => {
+                reason.get_or_insert_with(|| format!("code input {}: {error:?}", path.display()));
+            }
         }
-    })
+        crate::runtime::sessions::record(project.root().join(path));
+    }
+    let assets = index
+        .assets()
+        .map(|path| {
+            let bytes = fs::read(project.root().join(path)).map_err(|error| error.kind());
+            if let Err(error) = &bytes {
+                reason.get_or_insert_with(|| format!("code input {}: {error:?}", path.display()));
+            }
+            (path.clone(), bytes)
+        })
+        .collect::<Vec<_>>();
+    let identity = format!(
+        "{:x}",
+        Sha256::digest(format!("{index:?}{files:?}{assets:?}{reason:?}").as_bytes())
+    );
+    index.inputs = Some(std::sync::Arc::new(QueryCodeFiles(files)));
+    mara_engine::named_query::NativeCodeInputs {
+        index,
+        identity,
+        unavailable_reason: reason,
+    }
 }
 
 fn read_input(path: &std::path::Path, strict: bool) -> Result<Option<String>, Error> {

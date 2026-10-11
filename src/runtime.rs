@@ -219,7 +219,7 @@ impl NativeRuntime {
                         message: e.to_string(),
                     }
                 })?;
-                crate::source_bridge::load_query_policy_engine(&project, Some(&documents))
+                crate::source_bridge::load_query_policy_engine(&project, Some(&documents), None)
                     .map_err(|e| crate::query_consumers::QueryConsumerError {
                         code: "input_unavailable".into(),
                         message: e.to_string(),

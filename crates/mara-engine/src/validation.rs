@@ -30,7 +30,7 @@ pub enum ValidationScope {
     Item,
 }
 
-#[derive(Debug, Clone, Serialize, JsonSchema, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema, serde::Deserialize)]
 pub struct ValidationDiagnostic {
     pub code: DiagnosticCode,
     pub severity: Severity,
@@ -330,38 +330,44 @@ pub fn collect_source_diagnostics(
         {
             continue;
         }
-        let mut entry = ValidationDiagnostic::from_source(&diagnostic);
-        let owners = corpus
-            .items()
-            .filter(|item| contains(item, &diagnostic))
-            .collect::<Vec<_>>();
-        if let [item] = owners.as_slice() {
-            let unique_id = corpus
-                .items()
-                .filter(|other| other.id() == item.id())
-                .count()
-                == 1;
-            let unique_mid = item.mid().is_some_and(|mid| {
-                corpus
-                    .items()
-                    .filter(|other| {
-                        other
-                            .metadata()
-                            .iter()
-                            .any(|e| e.key() == "mid" && e.value() == mid)
-                    })
-                    .count()
-                    == 1
-            });
-            if unique_id && (unique_mid || item.mid().is_none()) {
-                entry.item = Some(DiagnosticItem {
-                    id: item.id().to_owned(),
-                    mid: item.mid().map(str::to_owned),
-                });
-            }
-        }
-        result.diagnostics.push(entry);
+        result
+            .diagnostics
+            .push(source_diagnostic(corpus, &diagnostic));
     }
+}
+
+pub(crate) fn source_diagnostic(corpus: &Corpus, diagnostic: &Diagnostic) -> ValidationDiagnostic {
+    let mut entry = ValidationDiagnostic::from_source(diagnostic);
+    let owners = corpus
+        .items()
+        .filter(|item| contains(item, diagnostic))
+        .collect::<Vec<_>>();
+    if let [item] = owners.as_slice() {
+        let unique_id = corpus
+            .items()
+            .filter(|other| other.id() == item.id())
+            .count()
+            == 1;
+        let unique_mid = item.mid().is_some_and(|mid| {
+            corpus
+                .items()
+                .filter(|other| {
+                    other
+                        .metadata()
+                        .iter()
+                        .any(|e| e.key() == "mid" && e.value() == mid)
+                })
+                .count()
+                == 1
+        });
+        if unique_id && (unique_mid || item.mid().is_none()) {
+            entry.item = Some(DiagnosticItem {
+                id: item.id().to_owned(),
+                mid: item.mid().map(str::to_owned),
+            });
+        }
+    }
+    entry
 }
 
 pub fn sort_diagnostics(diagnostics: &mut [ValidationDiagnostic]) {

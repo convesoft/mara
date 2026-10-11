@@ -642,6 +642,226 @@ fn factual_views_preserve_missing_roots_and_mixed_flavours_without_false_readine
     assert!(engine.query_execute(view).unwrap().evaluation_complete);
 }
 
+fn query_policy_validation_results(engine: &EngineeringProject, id: &str) -> Vec<Value> {
+    let root = engine._fixture.path();
+    let mut results = vec![
+        serde_json::to_value(engine.project_validate(&[]).unwrap()).unwrap(),
+        serde_json::to_value(engine.item_validate(id).unwrap()).unwrap(),
+    ];
+    for args in [vec!["project", "validate"], vec!["item", "validate", id]] {
+        let mut command = vec!["--execution-mode", "direct", "--format", "json"];
+        command.extend(args);
+        let output = support::mara(root, &command);
+        let result: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            output.status.success(),
+            result["valid"] == true,
+            "{}",
+            support::stderr(&output)
+        );
+        results.push(result);
+    }
+    let responses = support::mcp_exchange_with_arguments(
+        root,
+        &["--execution-mode", "direct", "mcp"],
+        &[
+            support::mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            support::mcp_call(2, "project_validate", json!({})),
+            support::mcp_call(3, "item_validate", json!({"id":id})),
+        ],
+    );
+    for id in [2, 3] {
+        let response = support::mcp_response(&responses, id);
+        assert_ne!(response["result"]["isError"], true, "{response:#}");
+        results.push(response["result"]["structuredContent"].clone());
+    }
+    results
+}
+
+// @mara checks REQ-PROJECT-VALIDATION
+// @mara checks REQ-CODE-TRACEABILITY
+// @mara checks REQ-CURRENT-STATE-RULES
+#[test]
+fn native_query_policy_validation_reuses_code_inputs_across_transports() {
+    for (configured, target) in [
+        (false, "code:app.ts"),
+        (true, "code:app.ts"),
+        (true, "code:app.ts::typescript::send()."),
+    ] {
+        let original = knowledge();
+        let source = original.replace(
+            ":title: REQ-A\n",
+            &format!(":title: REQ-A\n:implemented_by: {target}\n"),
+        );
+        let engine = documents(&source);
+        let root = engine._fixture.path();
+        fs::write(root.join("app.ts"), "export function send() {}\n").unwrap();
+        let invocation_count = tempfile::NamedTempFile::new().unwrap();
+        if configured {
+            support::code_index::configure(root, "typescript", &["ts"], false);
+            support::code_index::write_single(root, "typescript", "app.ts", "send", "send().");
+            let config = root.join(".mara/project.toml");
+            fs::write(
+                &config,
+                fs::read_to_string(&config).unwrap().replace(
+                    "[\"cp\", \".mara/typescript.scip\", \"{output}\"]",
+                    &format!(
+                        "[\"sh\", \".mara/index.sh\", \"{{output}}\", {:?}]",
+                        invocation_count.path().to_string_lossy()
+                    ),
+                ),
+            )
+            .unwrap();
+            fs::write(
+                root.join(".mara/index.sh"),
+                "printf 'index\\n' >> \"$2\"\nexec cp .mara/typescript.scip \"$1\"\n",
+            )
+            .unwrap();
+            // Keep the counter outside the indexed project so it cannot invalidate
+            // the indexer's stable-input check. Native sessions may reuse the index.
+            for item in [None, Some("REQ-A")] {
+                let result = match item {
+                    None => engine.project_validate(&[]).unwrap(),
+                    Some(id) => engine.item_validate(id).unwrap(),
+                };
+                assert!(result.valid && result.evaluation_complete, "{result:?}");
+                assert_eq!(
+                    fs::read_to_string(invocation_count.path()).unwrap(),
+                    "index\n"
+                );
+            }
+        }
+        for result in query_policy_validation_results(&engine, "REQ-A") {
+            assert_eq!(result["valid"], true, "{result:#}");
+            assert_eq!(result["evaluation_complete"], true, "{result:#}");
+            assert_eq!(
+                result["query_policies"]["evaluation_complete"], true,
+                "{result:#}"
+            );
+        }
+        fs::write(root.join("knowledge.mara.md"), original).unwrap();
+        for result in query_policy_validation_results(&engine, "REQ-A") {
+            assert_eq!(result["valid"], true, "{result:#}");
+            assert_eq!(result["evaluation_complete"], true, "{result:#}");
+        }
+    }
+}
+
+// @mara checks REQ-PROJECT-VALIDATION
+// @mara checks REQ-TRACE-DIAGNOSTICS
+// @mara checks REQ-CODE-TRACEABILITY
+#[test]
+fn native_query_policy_validation_retains_code_blockers_without_duplicates() {
+    for (target, broken_indexer) in [
+        ("code:missing.ts", false),
+        ("code:app.ts::typescript::missing().", false),
+        ("code:app.ts", true),
+    ] {
+        let source = knowledge().replace(
+            ":title: REQ-A\n",
+            &format!(":title: REQ-A\n:implemented_by: {target}\n"),
+        );
+        let engine = documents(&source);
+        let root = engine._fixture.path();
+        fs::write(root.join("app.ts"), "export function send() {}\n").unwrap();
+        support::code_index::configure(root, "typescript", &["ts"], false);
+        support::code_index::write_single(root, "typescript", "app.ts", "send", "send().");
+        if broken_indexer {
+            let config = root.join(".mara/project.toml");
+            fs::write(
+                &config,
+                fs::read_to_string(&config).unwrap().replace(
+                    "[\"cp\", \".mara/typescript.scip\", \"{output}\"]",
+                    "[\"mara-test-missing-indexer\", \"{output}\"]",
+                ),
+            )
+            .unwrap();
+        }
+        // An unrelated selected item must still retain whole-corpus policy blockers.
+        for result in query_policy_validation_results(&engine, "REQ-PARENT") {
+            assert_eq!(result["valid"], false, "{result:#}");
+            assert_eq!(result["evaluation_complete"], false, "{result:#}");
+            assert_eq!(
+                result["query_policies"]["evaluation_complete"], false,
+                "{result:#}"
+            );
+            let diagnostics = result["diagnostics"].as_array().unwrap();
+            if !broken_indexer {
+                let blockers = diagnostics
+                    .iter()
+                    .filter(|d| d["code"] == "code_missing")
+                    .collect::<Vec<_>>();
+                assert_eq!(blockers.len(), 1, "{result:#}");
+                assert_eq!(blockers[0]["item"]["id"], "REQ-A");
+                assert_eq!(blockers[0]["location"]["path"], "knowledge.mara.md");
+                assert!(blockers[0]["location"]["line"].as_u64().unwrap() > 0);
+            } else {
+                assert!(
+                    diagnostics.iter().any(|d| d["code"] == "source_invalid"
+                        && d["location"]["path"] == ".mara/project.toml"
+                        && d["message"].as_str().unwrap().contains("SCIP indexer")),
+                    "{result:#}"
+                );
+            }
+            for (i, diagnostic) in diagnostics.iter().enumerate() {
+                assert!(
+                    !diagnostics[..i].contains(diagnostic),
+                    "duplicate: {result:#}"
+                );
+            }
+        }
+    }
+}
+
+// @mara checks REQ-CURRENT-STATE-RULES
+// @mara checks REQ-CODE-TRACEABILITY
+#[test]
+fn portable_query_policy_validation_retains_unavailable_code_diagnostics() {
+    let base = initialized(Template::Engineering);
+    let mut files = base
+        .files()
+        .iter()
+        .map(|(path, content)| SourceFile {
+            path: path.clone(),
+            content: content.clone(),
+        })
+        .collect::<Vec<_>>();
+    files.push(SourceFile {
+        path: "knowledge.mara.md".into(),
+        content: knowledge().replace(
+            ":title: REQ-A\n",
+            ":title: REQ-A\n:implemented_by: code:app.ts\n",
+        ),
+    });
+    files.push(SourceFile {
+        path: "app.ts".into(),
+        content: "export function send() {}\n".into(),
+    });
+    let engine = SourceEngine::new(SourceSnapshot {
+        format_version: 1,
+        files,
+        selection: SelectionInputs {
+            document_paths: vec!["knowledge.mara.md".into()],
+            ignores: vec![],
+        },
+        base_identity: None,
+    })
+    .unwrap();
+    let (_, diagnostics) = engine.query_policy_validation(ValidationTarget {
+        kind: ValidationTargetKind::Item,
+        id: Some("REQ-PARENT".into()),
+    });
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::EvaluationUnavailable
+                && d.item.as_ref().is_some_and(|item| item.id == "REQ-A")
+                && d.location.path.as_deref() == Some(std::path::Path::new("knowledge.mara.md"))),
+        "{diagnostics:?}"
+    );
+}
+
 // @mara checks REQ-NAMED-QUERY-FACTS
 // @mara checks REQ-ENGINEERING-TEMPLATE
 #[test]
