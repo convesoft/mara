@@ -1,0 +1,101 @@
+format_version: 1
+gates:
+  - id: implementation_ready
+    empty_roots: failed
+    empty_required: failed
+    conditions:
+      - id: accepted
+        definition: requirement_status
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:accepted-root
+        severity: error
+      - id: requirement-knowledge
+        definition: requirement_knowledge
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:requirement-knowledge
+        severity: error
+      - id: requirement-endpoints
+        definition: requirement_endpoints
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:lifecycle
+        severity: error
+      - id: requirement-lifecycle
+        definition: requirement_lifecycle
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:lifecycle
+        severity: error
+      - id: no-blocking-risk
+        definition: blocking_risks
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:absent
+        severity: error
+  - id: verified
+    empty_roots: failed
+    empty_required: failed
+    conditions:
+      - id: accepted
+        definition: requirement_status
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:accepted-root
+        severity: error
+      - id: implementation
+        definition: requirement_implementation
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:present
+        severity: error
+      - id: every-verification
+        definition: accepted_verification_results
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:all-pass
+        severity: error
+        context_parameters: [candidate]
+  - id: release_ready
+    empty_roots: failed
+    empty_required: failed
+    conditions:
+      - id: accepted
+        definition: requirement_status
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:accepted-root
+        severity: error
+      - id: requirement-knowledge
+        definition: requirement_knowledge
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:requirement-knowledge
+        severity: error
+      - id: requirement-endpoints
+        definition: requirement_endpoints
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:lifecycle
+        severity: error
+      - id: requirement-lifecycle
+        definition: requirement_lifecycle
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:lifecycle
+        severity: error
+      - id: no-blocking-risk
+        definition: blocking_risks
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:absent
+        severity: error
+      - id: implementation
+        definition: requirement_implementation
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:present
+        severity: error
+      - id: every-verification
+        definition: accepted_verification_results
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:all-pass
+        severity: error
+        context_parameters: [candidate]
+  - id: required_validation
+    empty_roots: failed
+    empty_required: failed
+    conditions:
+      - id: applicable-validation
+        definition: required_validation_result
+        shape_file: .mara/engineering-shapes.ttl
+        shape: urn:mara:engineering:required-validation
+        severity: error
+        context_parameters: [context]

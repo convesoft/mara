@@ -1,0 +1,1143 @@
+{
+  "format_version": 1,
+  "definitions": [
+    {
+      "id": "requirement_basis",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "basis": {
+          "type": "item"
+        },
+        "flavour": {
+          "type": "iri"
+        },
+        "relation": {
+          "type": "iri"
+        },
+        "status": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?basis ?flavour ?relation ?status ?edge WHERE {\n{ ?root <urn:mara:relation:satisfies> ?basis . BIND(<urn:mara:relation:satisfies> AS ?relation) ?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?basis ; <urn:mara:query:relation> <urn:mara:relation:satisfies> . }\nUNION { ?root <urn:mara:relation:decomposes> ?basis . BIND(<urn:mara:relation:decomposes> AS ?relation) ?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?basis ; <urn:mara:query:relation> <urn:mara:relation:decomposes> . }\nUNION { ?root <urn:mara:relation:derives_from> ?basis . BIND(<urn:mara:relation:derives_from> AS ?relation) ?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?basis ; <urn:mara:query:relation> <urn:mara:relation:derives_from> . }\nUNION { ?basis <urn:mara:relation:justifies> ?root . BIND(<urn:mara:relation:justifies> AS ?relation) ?edge <urn:mara:query:source> ?basis ; <urn:mara:query:target> ?root ; <urn:mara:query:relation> <urn:mara:relation:justifies> . }\n?basis a ?flavour ; <urn:mara:field:status> ?status .\n}",
+      "support_columns": [
+        "edge"
+      ]
+    },
+    {
+      "id": "design_basis",
+      "root_flavours": [
+        "design"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "basis": {
+          "type": "item"
+        },
+        "flavour": {
+          "type": "iri"
+        },
+        "relation": {
+          "type": "iri"
+        },
+        "status": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?basis ?flavour ?relation ?status ?edge WHERE {\n{ ?root <urn:mara:relation:satisfies> ?basis . BIND(<urn:mara:relation:satisfies> AS ?relation) ?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?basis ; <urn:mara:query:relation> <urn:mara:relation:satisfies> . }\nUNION { ?root <urn:mara:relation:contributes_to> ?basis . BIND(<urn:mara:relation:contributes_to> AS ?relation) ?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?basis ; <urn:mara:query:relation> <urn:mara:relation:contributes_to> . }\nUNION { ?root <urn:mara:relation:decomposes> ?basis . BIND(<urn:mara:relation:decomposes> AS ?relation) ?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?basis ; <urn:mara:query:relation> <urn:mara:relation:decomposes> . }\n?basis a ?flavour ; <urn:mara:field:status> ?status .\n}",
+      "support_columns": [
+        "edge"
+      ]
+    },
+    {
+      "id": "term_collisions",
+      "root_flavours": [
+        "term"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "other": {
+          "type": "item",
+          "flavours": [
+            "term"
+          ]
+        },
+        "status": {
+          "type": "text"
+        },
+        "matched": {
+          "type": "text"
+        },
+        "kind": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?other ?status ?matched ?kind WHERE {\n{ ?root <urn:mara:query:nfc-casefold:title> ?matched . ?other <urn:mara:query:nfc-casefold:title> ?matched . BIND(\"title/title\" AS ?kind) }\nUNION { ?root <urn:mara:query:nfc-casefold:title> ?matched . ?other <urn:mara:query:nfc-casefold:field:aliases> ?matched . BIND(\"title/alias\" AS ?kind) }\nUNION { ?root <urn:mara:query:nfc-casefold:field:aliases> ?matched . ?other <urn:mara:query:nfc-casefold:title> ?matched . BIND(\"alias/title\" AS ?kind) }\nUNION { ?root <urn:mara:query:nfc-casefold:field:aliases> ?matched . ?other <urn:mara:query:nfc-casefold:field:aliases> ?matched . BIND(\"alias/alias\" AS ?kind) }\n?other a <urn:mara:flavour:term> ; <urn:mara:field:status> ?status . FILTER(!sameTerm(?root,?other))\n}"
+    },
+    {
+      "id": "relation_lifecycle",
+      "root_flavours": [
+        "goal",
+        "need",
+        "scenario",
+        "requirement",
+        "design",
+        "decision",
+        "risk",
+        "term",
+        "evidence",
+        "verification",
+        "validation"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "source_status": {
+          "type": "text"
+        },
+        "relation": {
+          "type": "iri"
+        },
+        "target": {
+          "type": "item"
+        },
+        "target_status": {
+          "type": "text"
+        },
+        "class": {
+          "type": "text"
+        },
+        "compatible": {
+          "type": "boolean"
+        }
+      },
+      "select": "SELECT ?root ?source_status ?relation ?target ?target_status ?class ?compatible ?edge WHERE {\nVALUES (?relation ?class) { (<urn:mara:relation:satisfies> \"strict\") (<urn:mara:relation:contributes_to> \"strict\") (<urn:mara:relation:decomposes> \"strict\") (<urn:mara:relation:derives_from> \"strict\") (<urn:mara:relation:threatens> \"strict\") (<urn:mara:relation:mitigates> \"strict\") (<urn:mara:relation:accepts> \"strict\") (<urn:mara:relation:verifies> \"strict\") (<urn:mara:relation:validates> \"strict\") (<urn:mara:relation:exercises> \"strict\") (<urn:mara:relation:justifies> \"developmental\") (<urn:mara:relation:supports> \"developmental\") (<urn:mara:relation:supersedes> \"replacement\") }\n?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?target ; <urn:mara:query:relation> ?relation .\n?root <urn:mara:field:status> ?source_status . ?target <urn:mara:field:status> ?target_status .\nBIND((sameTerm(?source_status,\"draft\") || sameTerm(?class,\"developmental\") || (sameTerm(?class,\"strict\") && (!sameTerm(?source_status,\"accepted\") || sameTerm(?target_status,\"accepted\"))) || (sameTerm(?class,\"replacement\") && sameTerm(?target_status,\"retired\") && (sameTerm(?source_status,\"accepted\") || sameTerm(?source_status,\"retired\")))) AS ?compatible)\n}",
+      "support_columns": [
+        "edge"
+      ]
+    },
+    {
+      "id": "implemented",
+      "root_flavours": [
+        "requirement",
+        "design",
+        "verification"
+      ],
+      "required_fact_sources": [
+        "documents",
+        "code"
+      ],
+      "columns": {
+        "implementation": {
+          "type": "code"
+        },
+        "design": {
+          "type": "item",
+          "optional": true,
+          "flavours": [
+            "design"
+          ]
+        },
+        "route": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?implementation ?design ?route ?implementation_edge ?design_edge WHERE {\n{ ?implementation <urn:mara:relation:implements> ?root . BIND(\"direct\" AS ?route) ?implementation_edge <urn:mara:query:source> ?implementation ; <urn:mara:query:target> ?root ; <urn:mara:query:relation> <urn:mara:relation:implements> . }\nUNION { ?root a <urn:mara:flavour:requirement> . ?design <urn:mara:relation:satisfies> ?root ; <urn:mara:field:status> \"accepted\" . ?implementation <urn:mara:relation:implements> ?design . BIND(\"design\" AS ?route) ?implementation_edge <urn:mara:query:source> ?implementation ; <urn:mara:query:target> ?design ; <urn:mara:query:relation> <urn:mara:relation:implements> . ?design_edge <urn:mara:query:source> ?design ; <urn:mara:query:target> ?root ; <urn:mara:query:relation> <urn:mara:relation:satisfies> . }\n}",
+      "support_columns": [
+        "implementation_edge",
+        "design_edge"
+      ]
+    },
+    {
+      "id": "risk_level",
+      "root_flavours": [
+        "risk"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "likelihood": {
+          "type": "text",
+          "optional": true
+        },
+        "consequence": {
+          "type": "text",
+          "optional": true
+        },
+        "level": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?likelihood ?consequence WHERE {\nOPTIONAL { ?root <urn:mara:field:likelihood> ?likelihood } OPTIONAL { ?root <urn:mara:field:consequence> ?consequence }\n}",
+      "lookups": [
+        {
+          "mapping": "risk_matrix",
+          "keys": [
+            "likelihood",
+            "consequence"
+          ],
+          "output": "level"
+        }
+      ]
+    },
+    {
+      "id": "risk_scope",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "ancestor": {
+          "type": "item",
+          "flavours": [
+            "requirement"
+          ]
+        },
+        "target": {
+          "type": "item"
+        },
+        "kind": {
+          "type": "text"
+        },
+        "status": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?ancestor ?target ?kind ?status ?context_edge ?need_edge WHERE {\n{ ?root (<urn:mara:relation:decomposes>|<urn:mara:relation:derives_from>)* ?ancestor . BIND(?ancestor AS ?target) BIND(\"requirement\" AS ?kind) }\nUNION { ?root (<urn:mara:relation:decomposes>|<urn:mara:relation:derives_from>)* ?ancestor . ?ancestor <urn:mara:relation:satisfies> ?target . ?target a <urn:mara:flavour:need> . BIND(\"need\" AS ?kind)\n?context_edge <urn:mara:query:source> ?ancestor ; <urn:mara:query:target> ?target ; <urn:mara:query:relation> <urn:mara:relation:satisfies> . }\nUNION { ?root (<urn:mara:relation:decomposes>|<urn:mara:relation:derives_from>)* ?ancestor . ?ancestor <urn:mara:relation:satisfies> ?need . ?need a <urn:mara:flavour:need> ; <urn:mara:relation:contributes_to> ?target . BIND(\"goal\" AS ?kind)\n?context_edge <urn:mara:query:source> ?need ; <urn:mara:query:target> ?target ; <urn:mara:query:relation> <urn:mara:relation:contributes_to> .\n?need_edge <urn:mara:query:source> ?ancestor ; <urn:mara:query:target> ?need ; <urn:mara:query:relation> <urn:mara:relation:satisfies> . }\n?target <urn:mara:field:status> ?status .\n}",
+      "support_columns": [
+        "context_edge",
+        "need_edge"
+      ]
+    },
+    {
+      "id": "relevant_risks",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "risk": {
+          "type": "item",
+          "flavours": [
+            "risk"
+          ]
+        },
+        "status": {
+          "type": "text"
+        },
+        "target": {
+          "type": "item"
+        },
+        "ancestor": {
+          "type": "item",
+          "flavours": [
+            "requirement"
+          ]
+        },
+        "kind": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?risk ?status ?target ?ancestor ?kind ?scope_support ?risk_edge WHERE {\n?root <urn:mara:query:input:scope> ?scope_row .\n?scope_row <urn:mara:query:column:scope:target> ?target .\n?scope_row <urn:mara:query:column:scope:ancestor> ?ancestor .\n?scope_row <urn:mara:query:column:scope:kind> ?kind .\n?risk <urn:mara:relation:threatens> ?target ; <urn:mara:field:status> ?status . ?risk_edge <urn:mara:query:source> ?risk ; <urn:mara:query:target> ?target ; <urn:mara:query:relation> <urn:mara:relation:threatens> .\nOPTIONAL { ?scope_row <urn:mara:query:column:scope:scope_support> ?scope_support }\n}",
+      "dependencies": [
+        {
+          "name": "scope",
+          "definition": "risk_scope",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "target": "target",
+              "ancestor": "ancestor",
+              "kind": "kind"
+            },
+            "support": "scope_support"
+          }
+        }
+      ],
+      "support_columns": [
+        "scope_support",
+        "risk_edge"
+      ]
+    },
+    {
+      "id": "verification_status",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents",
+        "external"
+      ],
+      "columns": {
+        "verification": {
+          "type": "item",
+          "flavours": [
+            "verification"
+          ]
+        },
+        "status": {
+          "type": "text"
+        },
+        "candidate": {
+          "type": "text"
+        },
+        "result": {
+          "type": "text"
+        },
+        "definition_revision": {
+          "type": "text"
+        },
+        "applicable": {
+          "type": "boolean"
+        },
+        "knowledge_complete": {
+          "type": "boolean"
+        }
+      },
+      "select": "SELECT ?root ?verification ?status ?candidate ?edge ?knowledge_complete WHERE {\n?verification <urn:mara:relation:verifies> ?root ; <urn:mara:field:status> ?status . ?edge <urn:mara:query:source> ?verification ; <urn:mara:query:target> ?root ; <urn:mara:query:relation> <urn:mara:relation:verifies> .\nBIND((EXISTS { ?verification <urn:mara:field:methods> ?method } && (EXISTS { ?verification <urn:mara:relation:verifies> ?accepted_target . ?accepted_target <urn:mara:field:status> \"accepted\" }) && !(EXISTS { ?verification <urn:mara:relation:verifies> ?invalid_target . ?invalid_target <urn:mara:field:status> ?target_status . FILTER(!sameTerm(?target_status,\"accepted\")) })) AS ?knowledge_complete)\nFILTER(sameTerm(?lifecycle,\"\") || sameTerm(?lifecycle,?status))\n}",
+      "parameters": {
+        "candidate": {
+          "type": "text",
+          "required": true
+        },
+        "lifecycle": {
+          "type": "text",
+          "default": {
+            "type": "text",
+            "value": ""
+          }
+        }
+      },
+      "external_facts": [
+        {
+          "input": "verification_results",
+          "keys": [
+            "verification",
+            "candidate"
+          ],
+          "fields": {
+            "result": "result",
+            "definition_revision": "definition_revision",
+            "applicable": "applicable"
+          },
+          "missing": {
+            "result": {
+              "type": "text",
+              "value": "PENDING"
+            },
+            "definition_revision": {
+              "type": "text",
+              "value": ""
+            },
+            "applicable": {
+              "type": "boolean",
+              "value": false
+            }
+          }
+        }
+      ],
+      "support_columns": [
+        "edge"
+      ]
+    },
+    {
+      "id": "validation_records",
+      "root_flavours": [
+        "need",
+        "goal"
+      ],
+      "required_fact_sources": [
+        "documents",
+        "external"
+      ],
+      "columns": {
+        "validation": {
+          "type": "item",
+          "flavours": [
+            "validation"
+          ]
+        },
+        "status": {
+          "type": "text"
+        },
+        "context": {
+          "type": "text"
+        },
+        "result": {
+          "type": "text"
+        },
+        "definition_revision": {
+          "type": "text"
+        },
+        "applicable": {
+          "type": "boolean"
+        },
+        "knowledge_complete": {
+          "type": "boolean"
+        }
+      },
+      "select": "SELECT ?root ?validation ?status ?context ?edge ?knowledge_complete WHERE {\n?validation <urn:mara:relation:validates> ?root ; <urn:mara:field:status> ?status . ?edge <urn:mara:query:source> ?validation ; <urn:mara:query:target> ?root ; <urn:mara:query:relation> <urn:mara:relation:validates> .\nBIND((EXISTS { ?validation <urn:mara:field:methods> ?method } && (EXISTS { ?validation <urn:mara:relation:validates> ?accepted_target . ?accepted_target <urn:mara:field:status> \"accepted\" }) && !(EXISTS { ?validation <urn:mara:relation:validates> ?invalid_target . ?invalid_target <urn:mara:field:status> ?target_status . FILTER(!sameTerm(?target_status,\"accepted\")) } || EXISTS { ?validation <urn:mara:relation:exercises> ?invalid_target . ?invalid_target <urn:mara:field:status> ?target_status . FILTER(!sameTerm(?target_status,\"accepted\")) })) AS ?knowledge_complete)\nFILTER(sameTerm(?lifecycle,\"\") || sameTerm(?lifecycle,?status))\n}",
+      "parameters": {
+        "context": {
+          "type": "text",
+          "required": true
+        },
+        "lifecycle": {
+          "type": "text",
+          "default": {
+            "type": "text",
+            "value": ""
+          }
+        }
+      },
+      "external_facts": [
+        {
+          "input": "validation_results",
+          "keys": [
+            "validation",
+            "context"
+          ],
+          "fields": {
+            "result": "result",
+            "definition_revision": "definition_revision",
+            "applicable": "applicable"
+          },
+          "missing": {
+            "result": {
+              "type": "text",
+              "value": "PENDING"
+            },
+            "definition_revision": {
+              "type": "text",
+              "value": ""
+            },
+            "applicable": {
+              "type": "boolean",
+              "value": false
+            }
+          }
+        }
+      ],
+      "support_columns": [
+        "edge"
+      ]
+    },
+    {
+      "id": "requirement_knowledge",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        },
+        "basis_status": {
+          "type": "text",
+          "optional": true
+        },
+        "verification_status": {
+          "type": "text",
+          "optional": true
+        }
+      },
+      "select": "SELECT ?root ?status ?basis_status ?verification_status ?basis_support ?verification_edge WHERE {\n?root <urn:mara:field:status> ?status . OPTIONAL { ?root <urn:mara:query:input:basis> ?basis_row .\n?basis_row <urn:mara:query:column:basis:status> ?basis_status . OPTIONAL { ?basis_row <urn:mara:query:column:basis:basis_support> ?basis_support } }\nOPTIONAL { ?verification <urn:mara:relation:verifies> ?root ; <urn:mara:field:status> ?verification_status . ?verification_edge <urn:mara:query:source> ?verification ; <urn:mara:query:target> ?root ; <urn:mara:query:relation> <urn:mara:relation:verifies> . }\n}",
+      "dependencies": [
+        {
+          "name": "basis",
+          "definition": "requirement_basis",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "status": "status"
+            },
+            "support": "basis_support"
+          }
+        }
+      ],
+      "support_columns": [
+        "basis_support",
+        "verification_edge"
+      ]
+    },
+    {
+      "id": "design_knowledge",
+      "root_flavours": [
+        "design"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        },
+        "basis_status": {
+          "type": "text",
+          "optional": true
+        },
+        "verification_status": {
+          "type": "text",
+          "optional": true
+        }
+      },
+      "select": "SELECT ?root ?status ?basis_status ?verification_status ?basis_support WHERE {\n?root <urn:mara:field:status> ?status . OPTIONAL { ?root <urn:mara:query:input:basis> ?basis_row .\n?basis_row <urn:mara:query:column:basis:status> ?basis_status . OPTIONAL { ?basis_row <urn:mara:query:column:basis:basis_support> ?basis_support } }\n}",
+      "dependencies": [
+        {
+          "name": "basis",
+          "definition": "design_basis",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "status": "status"
+            },
+            "support": "basis_support"
+          }
+        }
+      ],
+      "support_columns": [
+        "basis_support"
+      ]
+    },
+    {
+      "id": "item_status",
+      "root_flavours": [
+        "goal",
+        "need",
+        "scenario",
+        "requirement",
+        "design",
+        "decision",
+        "risk",
+        "term",
+        "evidence",
+        "verification",
+        "validation"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?status WHERE {\n?root <urn:mara:field:status> ?status .\n}"
+    },
+    {
+      "id": "term_validity",
+      "root_flavours": [
+        "term"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        },
+        "collision_status": {
+          "type": "text",
+          "optional": true
+        },
+        "repeats_title": {
+          "type": "boolean"
+        }
+      },
+      "select": "SELECT ?root ?status ?collision_status ?repeats_title WHERE {\n?root <urn:mara:field:status> ?status .\nBIND(EXISTS { ?root <urn:mara:query:nfc-casefold:title> ?name ; <urn:mara:query:nfc-casefold:field:aliases> ?name } AS ?repeats_title)\nOPTIONAL { ?root <urn:mara:query:input:collisions> ?collisions_row .\n?collisions_row <urn:mara:query:column:collisions:status> ?collision_status . }\n}",
+      "dependencies": [
+        {
+          "name": "collisions",
+          "definition": "term_collisions",
+          "root": "root",
+          "projections": {
+            "columns": {
+              "status": "status"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "scoped_risk_levels",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "risk": {
+          "type": "item",
+          "flavours": [
+            "risk"
+          ]
+        },
+        "status": {
+          "type": "text"
+        },
+        "target": {
+          "type": "item"
+        },
+        "likelihood": {
+          "type": "text",
+          "optional": true
+        },
+        "consequence": {
+          "type": "text",
+          "optional": true
+        },
+        "level": {
+          "type": "text"
+        },
+        "accepted": {
+          "type": "boolean"
+        }
+      },
+      "select": "SELECT ?root ?risk ?status ?target ?likelihood ?consequence ?accepted ?risks_support WHERE {\n?root <urn:mara:query:input:risks> ?risks_row .\n?risks_row <urn:mara:query:column:risks:risk> ?risk .\n?risks_row <urn:mara:query:column:risks:status> ?status .\n?risks_row <urn:mara:query:column:risks:target> ?target .\nFILTER(sameTerm(?status,\"accepted\"))\nOPTIONAL { ?risk <urn:mara:field:likelihood> ?likelihood } OPTIONAL { ?risk <urn:mara:field:consequence> ?consequence }\nBIND(EXISTS { ?decision <urn:mara:relation:accepts> ?risk ; <urn:mara:field:status> \"accepted\" } AS ?accepted)\nOPTIONAL { ?risks_row <urn:mara:query:column:risks:risks_support> ?risks_support }\n}",
+      "dependencies": [
+        {
+          "name": "risks",
+          "definition": "relevant_risks",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "risk": "risk",
+              "status": "status",
+              "target": "target"
+            },
+            "support": "risks_support"
+          }
+        }
+      ],
+      "lookups": [
+        {
+          "mapping": "risk_matrix",
+          "keys": [
+            "likelihood",
+            "consequence"
+          ],
+          "output": "level"
+        }
+      ],
+      "support_columns": [
+        "risks_support"
+      ]
+    },
+    {
+      "id": "blocking_risks",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "risk": {
+          "type": "item",
+          "flavours": [
+            "risk"
+          ]
+        },
+        "level": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?risk ?level ?levels_support WHERE {\n?root <urn:mara:query:input:levels> ?levels_row .\n?levels_row <urn:mara:query:column:levels:risk> ?risk .\n?levels_row <urn:mara:query:column:levels:status> ?status .\n?levels_row <urn:mara:query:column:levels:level> ?level .\n?levels_row <urn:mara:query:column:levels:accepted> ?accepted .\nFILTER(sameTerm(?status,\"accepted\") && sameTerm(?level,\"HIGH\") && sameTerm(?accepted,false))\nOPTIONAL { ?levels_row <urn:mara:query:column:levels:levels_support> ?levels_support }\n}",
+      "dependencies": [
+        {
+          "name": "levels",
+          "definition": "scoped_risk_levels",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "risk": "risk",
+              "status": "status",
+              "level": "level",
+              "accepted": "accepted"
+            },
+            "support": "levels_support"
+          }
+        }
+      ],
+      "support_columns": [
+        "levels_support"
+      ]
+    },
+    {
+      "id": "accepted_verification_results",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "verification": {
+          "type": "item",
+          "flavours": [
+            "verification"
+          ]
+        },
+        "result": {
+          "type": "text"
+        },
+        "definition_revision": {
+          "type": "text"
+        },
+        "applicable": {
+          "type": "boolean"
+        },
+        "knowledge_complete": {
+          "type": "boolean"
+        }
+      },
+      "select": "SELECT ?root ?verification ?result ?definition_revision ?applicable ?results_support ?results_facts ?knowledge_complete WHERE {\n?root <urn:mara:query:input:results> ?results_row .\n?results_row <urn:mara:query:column:results:verification> ?verification .\n?results_row <urn:mara:query:column:results:status> ?status .\n?results_row <urn:mara:query:column:results:result> ?result .\n?results_row <urn:mara:query:column:results:definition_revision> ?definition_revision .\n?results_row <urn:mara:query:column:results:applicable> ?applicable .\nFILTER(sameTerm(?status,\"accepted\"))\nOPTIONAL { ?results_row <urn:mara:query:column:results:results_support> ?results_support } OPTIONAL { ?results_row <urn:mara:query:column:results:results_facts> ?results_facts }\n?results_row <urn:mara:query:column:results:knowledge_complete> ?knowledge_complete .\n}",
+      "parameters": {
+        "candidate": {
+          "type": "text",
+          "required": true
+        },
+        "lifecycle": {
+          "type": "text",
+          "default": {
+            "type": "text",
+            "value": "accepted"
+          }
+        }
+      },
+      "dependencies": [
+        {
+          "name": "results",
+          "definition": "verification_status",
+          "root": "root",
+          "parameters": {
+            "candidate": "candidate",
+            "lifecycle": "lifecycle"
+          },
+          "projections": {
+            "columns": {
+              "verification": "verification",
+              "status": "status",
+              "result": "result",
+              "definition_revision": "definition_revision",
+              "applicable": "applicable",
+              "knowledge_complete": "knowledge_complete"
+            },
+            "support": "results_support",
+            "facts": "results_facts"
+          }
+        }
+      ],
+      "support_columns": [
+        "results_support"
+      ],
+      "facts_columns": [
+        "results_facts"
+      ]
+    },
+    {
+      "id": "required_validation_result",
+      "root_flavours": [
+        "validation"
+      ],
+      "required_fact_sources": [
+        "documents",
+        "external"
+      ],
+      "columns": {
+        "validation": {
+          "type": "item",
+          "flavours": [
+            "validation"
+          ]
+        },
+        "status": {
+          "type": "text"
+        },
+        "context": {
+          "type": "text"
+        },
+        "result": {
+          "type": "text"
+        },
+        "definition_revision": {
+          "type": "text"
+        },
+        "applicable": {
+          "type": "boolean"
+        },
+        "knowledge_complete": {
+          "type": "boolean"
+        }
+      },
+      "select": "SELECT ?root ?validation ?status ?context ?knowledge_complete WHERE {\nBIND(?root AS ?validation) ?root <urn:mara:field:status> ?status .\nBIND((EXISTS { ?root <urn:mara:field:methods> ?method } && (EXISTS { ?root <urn:mara:relation:validates> ?accepted_target . ?accepted_target <urn:mara:field:status> \"accepted\" }) && !(EXISTS { ?root <urn:mara:relation:validates> ?invalid_target . ?invalid_target <urn:mara:field:status> ?target_status . FILTER(!sameTerm(?target_status,\"accepted\")) } || EXISTS { ?root <urn:mara:relation:exercises> ?invalid_target . ?invalid_target <urn:mara:field:status> ?target_status . FILTER(!sameTerm(?target_status,\"accepted\")) })) AS ?knowledge_complete)\n}",
+      "parameters": {
+        "context": {
+          "type": "text",
+          "required": true
+        }
+      },
+      "external_facts": [
+        {
+          "input": "validation_results",
+          "keys": [
+            "validation",
+            "context"
+          ],
+          "fields": {
+            "result": "result",
+            "definition_revision": "definition_revision",
+            "applicable": "applicable"
+          },
+          "missing": {
+            "result": {
+              "type": "text",
+              "value": "PENDING"
+            },
+            "definition_revision": {
+              "type": "text",
+              "value": ""
+            },
+            "applicable": {
+              "type": "boolean",
+              "value": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "requirement_status",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?status WHERE {\n?root <urn:mara:field:status> ?status .\n}"
+    },
+    {
+      "id": "requirement_implementation",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents",
+        "code"
+      ],
+      "columns": {
+        "implementation": {
+          "type": "code"
+        },
+        "design": {
+          "type": "item",
+          "optional": true,
+          "flavours": [
+            "design"
+          ]
+        },
+        "route": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?implementation ?design ?route ?implementation_edge ?design_edge WHERE {\n{ ?implementation <urn:mara:relation:implements> ?root . BIND(\"direct\" AS ?route) ?implementation_edge <urn:mara:query:source> ?implementation ; <urn:mara:query:target> ?root ; <urn:mara:query:relation> <urn:mara:relation:implements> . }\nUNION { ?root a <urn:mara:flavour:requirement> . ?design <urn:mara:relation:satisfies> ?root ; <urn:mara:field:status> \"accepted\" . ?implementation <urn:mara:relation:implements> ?design . BIND(\"design\" AS ?route) ?implementation_edge <urn:mara:query:source> ?implementation ; <urn:mara:query:target> ?design ; <urn:mara:query:relation> <urn:mara:relation:implements> . ?design_edge <urn:mara:query:source> ?design ; <urn:mara:query:target> ?root ; <urn:mara:query:relation> <urn:mara:relation:satisfies> . }\n}",
+      "support_columns": [
+        "implementation_edge",
+        "design_edge"
+      ]
+    },
+    {
+      "id": "requirement_lifecycle",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "source_status": {
+          "type": "text"
+        },
+        "relation": {
+          "type": "iri"
+        },
+        "target": {
+          "type": "item"
+        },
+        "target_status": {
+          "type": "text"
+        },
+        "class": {
+          "type": "text"
+        },
+        "compatible": {
+          "type": "boolean"
+        }
+      },
+      "dependencies": [
+        {
+          "name": "lifecycle",
+          "definition": "relation_lifecycle",
+          "root": "root",
+          "projections": {
+            "columns": {
+              "source_status": "source_status",
+              "relation": "relation",
+              "target": "target",
+              "target_status": "target_status",
+              "class": "class",
+              "compatible": "compatible"
+            },
+            "support": "edge"
+          }
+        }
+      ],
+      "support_columns": [
+        "edge"
+      ],
+      "select": "SELECT ?root ?source_status ?relation ?target ?target_status ?class ?compatible ?edge WHERE {\n?root <urn:mara:query:input:lifecycle> ?row .\n?row <urn:mara:query:column:lifecycle:source_status> ?source_status .\n?row <urn:mara:query:column:lifecycle:relation> ?relation .\n?row <urn:mara:query:column:lifecycle:target> ?target .\n?row <urn:mara:query:column:lifecycle:target_status> ?target_status .\n?row <urn:mara:query:column:lifecycle:class> ?class .\n?row <urn:mara:query:column:lifecycle:compatible> ?compatible .\nOPTIONAL { ?row <urn:mara:query:column:lifecycle:edge> ?edge }\n}"
+    },
+    {
+      "id": "requirement_endpoints",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "compatible": {
+          "type": "boolean"
+        }
+      },
+      "select": "SELECT ?root ?compatible WHERE {\nBIND(!EXISTS { ?root <urn:mara:relation:satisfies> ?target . FILTER(!EXISTS { ?target a <urn:mara:flavour:need> }) } AS ?compatible)\n}"
+    },
+    {
+      "id": "validation_summary",
+      "root_flavours": [
+        "need",
+        "goal"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "state": {
+          "type": "text"
+        },
+        "count": {
+          "type": "integer",
+          "optional": true
+        },
+        "validation": {
+          "type": "item",
+          "flavours": [
+            "validation"
+          ],
+          "optional": true
+        }
+      },
+      "parameters": {
+        "context": {
+          "type": "text",
+          "required": true
+        },
+        "lifecycle": {
+          "type": "text",
+          "default": {
+            "type": "text",
+            "value": "accepted"
+          }
+        }
+      },
+      "dependencies": [
+        {
+          "name": "records",
+          "definition": "validation_records",
+          "root": "root",
+          "parameters": {
+            "context": "context",
+            "lifecycle": "lifecycle"
+          },
+          "projections": {
+            "columns": {
+              "status": "status",
+              "result": "result",
+              "applicable": "applicable",
+              "knowledge_complete": "knowledge_complete",
+              "validation": "validation"
+            },
+            "support": "support",
+            "facts": "facts"
+          }
+        }
+      ],
+      "support_columns": [
+        "support"
+      ],
+      "facts_columns": [
+        "facts"
+      ],
+      "aggregate": {
+        "group_by": [],
+        "rank": "state",
+        "precedence": [
+          {
+            "type": "text",
+            "value": "FAIL"
+          },
+          {
+            "type": "text",
+            "value": "ERROR"
+          },
+          {
+            "type": "text",
+            "value": "INCONCLUSIVE"
+          },
+          {
+            "type": "text",
+            "value": "PENDING"
+          },
+          {
+            "type": "text",
+            "value": "PASS"
+          }
+        ],
+        "retain": [],
+        "count": "count",
+        "empty": {
+          "type": "text",
+          "value": "PENDING"
+        }
+      },
+      "select": "SELECT ?root ?state ?validation ?support ?facts WHERE {\n{ ?root <urn:mara:query:input:records> ?records_row .\n?records_row <urn:mara:query:column:records:status> ?status .\n?records_row <urn:mara:query:column:records:applicable> ?applicable .\n?records_row <urn:mara:query:column:records:knowledge_complete> ?knowledge_complete . FILTER(sameTerm(?status,\"accepted\") && sameTerm(?applicable,true) && sameTerm(?knowledge_complete,true)) ?records_row <urn:mara:query:column:records:result> ?state . }\nUNION { ?root <urn:mara:query:input:records> ?records_row .\n?records_row <urn:mara:query:column:records:status> ?status .\n?records_row <urn:mara:query:column:records:applicable> ?applicable .\n?records_row <urn:mara:query:column:records:knowledge_complete> ?knowledge_complete . FILTER(sameTerm(?status,\"accepted\") && !(sameTerm(?applicable,true) && sameTerm(?knowledge_complete,true))) BIND(\"PENDING\" AS ?state) }\n?records_row <urn:mara:query:column:records:validation> ?validation .\nOPTIONAL { ?records_row <urn:mara:query:column:records:support> ?support }\nOPTIONAL { ?records_row <urn:mara:query:column:records:facts> ?facts }\n}"
+    },
+    {
+      "id": "validation_status",
+      "root_flavours": [
+        "need",
+        "goal"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "validation": {
+          "type": "item",
+          "flavours": [
+            "validation"
+          ],
+          "optional": true
+        },
+        "status": {
+          "type": "text",
+          "optional": true
+        },
+        "context": {
+          "type": "text"
+        },
+        "result": {
+          "type": "text",
+          "optional": true
+        },
+        "definition_revision": {
+          "type": "text",
+          "optional": true
+        },
+        "applicable": {
+          "type": "boolean",
+          "optional": true
+        },
+        "knowledge_complete": {
+          "type": "boolean",
+          "optional": true
+        },
+        "summary": {
+          "type": "text"
+        },
+        "validation_count": {
+          "type": "integer",
+          "optional": true
+        }
+      },
+      "parameters": {
+        "context": {
+          "type": "text",
+          "required": true
+        }
+      },
+      "dependencies": [
+        {
+          "name": "records",
+          "definition": "validation_records",
+          "root": "root",
+          "parameters": {
+            "context": "context"
+          },
+          "projections": {
+            "columns": {
+              "validation": "validation",
+              "status": "status",
+              "result": "result",
+              "definition_revision": "definition_revision",
+              "applicable": "applicable",
+              "knowledge_complete": "knowledge_complete"
+            },
+            "support": "support",
+            "facts": "facts"
+          }
+        },
+        {
+          "name": "summary",
+          "definition": "validation_summary",
+          "root": "root",
+          "parameters": {
+            "context": "context"
+          },
+          "projections": {
+            "columns": {
+              "state": "state",
+              "count": "count"
+            },
+            "facts": "summary_facts"
+          }
+        }
+      ],
+      "support_columns": [
+        "support"
+      ],
+      "facts_columns": [
+        "facts",
+        "summary_facts"
+      ],
+      "select": "SELECT ?root ?validation ?status ?context ?result ?definition_revision ?applicable ?knowledge_complete ?summary ?validation_count ?support ?facts ?summary_facts WHERE {\n?root <urn:mara:query:input:summary> ?summary_row .\n?summary_row <urn:mara:query:column:summary:state> ?summary .\nOPTIONAL { ?summary_row <urn:mara:query:column:summary:count> ?validation_count }\nOPTIONAL { ?summary_row <urn:mara:query:column:summary:summary_facts> ?summary_facts }\nOPTIONAL {\n?root <urn:mara:query:input:records> ?records_row .\nOPTIONAL { ?records_row <urn:mara:query:column:records:validation> ?validation }\nOPTIONAL { ?records_row <urn:mara:query:column:records:status> ?status }\nOPTIONAL { ?records_row <urn:mara:query:column:records:result> ?result }\nOPTIONAL { ?records_row <urn:mara:query:column:records:definition_revision> ?definition_revision }\nOPTIONAL { ?records_row <urn:mara:query:column:records:applicable> ?applicable }\nOPTIONAL { ?records_row <urn:mara:query:column:records:knowledge_complete> ?knowledge_complete }\nOPTIONAL { ?records_row <urn:mara:query:column:records:support> ?support }\nOPTIONAL { ?records_row <urn:mara:query:column:records:facts> ?facts }\n}\n}"
+    }
+  ]
+}

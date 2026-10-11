@@ -44,7 +44,9 @@ pub(crate) fn load_query_policy_engine(
         documents: vec![],
         complete: true,
     };
-    load_source_engine(project, documents.unwrap_or(&empty))
+    let documents = documents.unwrap_or(&empty);
+    let engine = load_native_source_engine(project, documents)?;
+    attach_query_code(engine, project, documents)
 }
 
 pub(crate) fn source_fingerprint(project: &Project, documents: &DocumentSet) -> String {
@@ -260,7 +262,83 @@ pub(crate) fn load_query_engine(
             })?,
         });
     }
-    SourceEngine::from_native_sources(snapshot.files, snapshot.selection)
+    let engine = SourceEngine::from_native_sources(snapshot.files, snapshot.selection)?;
+    attach_query_code(engine, project, documents)
+}
+
+#[derive(Debug)]
+struct QueryCodeFiles(std::collections::BTreeMap<PathBuf, Vec<u8>>);
+impl crate::code::CodeSource for QueryCodeFiles {
+    fn file(&self, path: &std::path::Path) -> Result<Vec<u8>, crate::code::ReferenceError> {
+        self.0
+            .get(path)
+            .cloned()
+            .ok_or(crate::code::ReferenceError::MissingFile)
+    }
+}
+
+// Reuse native acquisition lazily; freeze referenced files so identity and resolution
+// describe the same execution inputs, without adding a browser snapshot import.
+fn attach_query_code(
+    engine: SourceEngine,
+    project: &Project,
+    documents: &DocumentSet,
+) -> Result<SourceEngine, Error> {
+    let project = project.clone();
+    let references = documents
+        .items()
+        .flat_map(|item| item.relations())
+        .filter_map(|relation| {
+            crate::code::split_reference(relation.target())
+                .ok()
+                .map(|(path, _)| path)
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    engine.with_native_query_code(move || {
+        use sha2::{Digest, Sha256};
+        let (mut index, problems) = crate::code::load(&project);
+        let mut reason = problems.first().map(|problem| problem.message.clone());
+        let mut files = index
+            .files()
+            .map(|file| (file.path.clone(), file.source.as_bytes().to_vec()))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for path in &references {
+            if files.contains_key(path) {
+                continue;
+            }
+            match index.inputs.as_ref().unwrap().file(path) {
+                Ok(bytes) => {
+                    files.insert(path.clone(), bytes);
+                }
+                Err(error) => {
+                    reason
+                        .get_or_insert_with(|| format!("code input {}: {error:?}", path.display()));
+                }
+            }
+            crate::runtime::sessions::record(project.root().join(path));
+        }
+        let assets = index
+            .assets()
+            .map(|path| {
+                let bytes = fs::read(project.root().join(path)).map_err(|error| error.kind());
+                if let Err(error) = &bytes {
+                    reason
+                        .get_or_insert_with(|| format!("code input {}: {error:?}", path.display()));
+                }
+                (path.clone(), bytes)
+            })
+            .collect::<Vec<_>>();
+        let identity = format!(
+            "{:x}",
+            Sha256::digest(format!("{index:?}{files:?}{assets:?}{problems:?}").as_bytes())
+        );
+        index.inputs = Some(std::sync::Arc::new(QueryCodeFiles(files)));
+        mara_engine::named_query::NativeCodeInputs {
+            index,
+            identity,
+            unavailable_reason: reason,
+        }
+    })
 }
 
 fn read_input(path: &std::path::Path, strict: bool) -> Result<Option<String>, Error> {

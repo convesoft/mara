@@ -870,6 +870,17 @@ gates:
     let mut gate_text = fs::read_to_string(&gate_file).unwrap();
     gate_text.push_str(unavailable_gate);
     fs::write(&gate_file, &gate_text).unwrap();
+    // Native absence is now known; use an actual unavailable indexer to retain this case.
+    fs::write(
+        fixture.path().join("unavailable.rs"),
+        "pub fn unavailable() {}",
+    )
+    .unwrap();
+    let config = fixture.path().join(".mara/project.toml");
+    let original_config = fs::read_to_string(&config).unwrap();
+    let (_, rest) = original_config.split_once('\n').unwrap();
+    let config_text = format!("format_version = 3\n{rest}");
+    fs::write(&config, format!("{config_text}\n[[code.languages]]\nname = \"rust\"\nextensions = [\"rs\"]\ncommand = [\"mara-test-missing-indexer\", \"{{output}}\"]\n")).unwrap();
 
     let mut incomplete_snapshot = consumer_snapshot();
     let query_source = incomplete_snapshot
@@ -975,6 +986,8 @@ gates:
     assert!(!empty_scope_missing_code.evaluation_complete);
     assert!(empty_scope_missing_code.roots.is_empty());
     assert!(empty_scope_missing_code.empty_reason.is_none());
+    fs::write(config, original_config).unwrap();
+    fs::remove_file(fixture.path().join("unavailable.rs")).unwrap();
 
     let schema_path = fixture.path().join(".mara/schema.yaml");
     let mut schema: Value = serde_json::from_slice(&fs::read(&schema_path).unwrap()).unwrap();

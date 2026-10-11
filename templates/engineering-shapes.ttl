@@ -1,0 +1,49 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix q: <urn:mara:query:> .
+@prefix c: <urn:mara:query:column:> .
+@prefix e: <urn:mara:engineering:> .
+
+# Projected root rows: a draft/retired item needs no accepted coverage.
+e:accepted-row a sh:NodeShape ;
+  sh:property [ sh:path c:status ; sh:hasValue "accepted" ] .
+e:accepted-root a sh:NodeShape ;
+  sh:property [ sh:path q:match ; sh:minCount 1 ; sh:node e:accepted-row ] .
+e:requirement-knowledge a sh:NodeShape ;
+  sh:or (
+    [ sh:property [ sh:path q:match ; sh:qualifiedValueShape e:accepted-row ; sh:qualifiedMaxCount 0 ] ]
+    [ sh:property
+      [ sh:path q:match ; sh:qualifiedValueShape [ sh:property [ sh:path c:basis_status ; sh:hasValue "accepted" ] ] ; sh:qualifiedMinCount 1 ],
+      [ sh:path q:match ; sh:qualifiedValueShape [ sh:property [ sh:path c:verification_status ; sh:hasValue "accepted" ] ] ; sh:qualifiedMinCount 1 ]
+    ]
+  ) .
+e:design-knowledge a sh:NodeShape ;
+  sh:or (
+    [ sh:property [ sh:path q:match ; sh:qualifiedValueShape e:accepted-row ; sh:qualifiedMaxCount 0 ] ]
+    [ sh:property [ sh:path q:match ; sh:qualifiedValueShape [ sh:property [ sh:path c:basis_status ; sh:hasValue "accepted" ] ] ; sh:qualifiedMinCount 1 ] ]
+  ) .
+e:term-validity a sh:NodeShape ;
+  sh:property [ sh:path q:match ; sh:node [
+    sh:or (
+      [ sh:not e:accepted-row ]
+      [ sh:property
+        [ sh:path c:repeats_title ; sh:hasValue false ],
+        [ sh:path c:collision_status ; sh:not [ sh:hasValue "accepted" ] ]
+      ]
+    )
+  ] ] .
+e:lifecycle a sh:NodeShape ;
+  sh:property [ sh:path q:match ; sh:node [ sh:property [ sh:path c:compatible ; sh:hasValue true ] ] ] .
+e:present a sh:NodeShape ; sh:property [ sh:path q:match ; sh:minCount 1 ] .
+e:absent a sh:NodeShape ; sh:property [ sh:path q:match ; sh:maxCount 0 ] .
+e:applicable-pass-row a sh:NodeShape ;
+  sh:property
+    [ sh:path c:result ; sh:hasValue "PASS" ],
+    [ sh:path c:applicable ; sh:hasValue true ],
+    [ sh:path c:knowledge_complete ; sh:hasValue true ],
+    [ sh:path c:definition_revision ; sh:minCount 1 ; sh:pattern "\\S" ] .
+e:all-pass a sh:NodeShape ;
+  sh:property [ sh:path q:match ; sh:minCount 1 ; sh:node e:applicable-pass-row ] .
+e:required-validation a sh:NodeShape ;
+  sh:property [ sh:path q:match ; sh:minCount 1 ; sh:node [
+    sh:and ( e:accepted-row e:applicable-pass-row )
+  ] ] .

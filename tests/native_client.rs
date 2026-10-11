@@ -133,7 +133,7 @@ fn real_clients_preserve_document_results_and_cross_backend_continuation() {
     let direct = server.client(root, ExecutionMode::Direct);
     let daemon = server.client(root, ExecutionMode::DaemonRequired);
     daemon
-        .project_initialize(None, Template::Engineering)
+        .project_initialize(None, Template::EngineeringLegacy)
         .unwrap();
     let a=daemon.item_create(decode(json!({"flavour":"requirement","id":"REQ-A","title":"A","file":"a.mara.md","fields":[{"key":"status","value":"draft"}],"body":"First."}))).unwrap();
     direct.item_create(decode(json!({"flavour":"requirement","id":"REQ-B","title":"B","file":"b.mara.md","fields":[{"key":"status","value":"draft"}],"body":"Second."}))).unwrap();

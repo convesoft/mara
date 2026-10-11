@@ -380,8 +380,15 @@ final declarations, request inputs, coverage/missing semantics and derived outpu
 are specified in [[DES-QUERY-FACT-COMPUTATION]].
 Each definition declares exact `id`, standard `select`, nonempty
 `root_flavours`, `required_fact_sources` and named `columns`. `documents` is a
-required fact source; `code` is recognized but unavailable to this embedded
-snapshot, so requiring it produces an incomplete result even for empty roots.
+required fact source. The user subsequently authorized a bounded native code-fact
+bridge to unblock implementation-dependent gates. Native query execution supplies
+code inputs through the existing host indexer and canonical relationship preparation,
+only when a reachable definition requires code. A complete supplied index with no
+matches is known absence; unavailable/incomplete indexing cannot produce a pass,
+including for empty roots. Code inputs and referenced file content bind input identity
+and continuation. The execution-only native input hook is not a new snapshot format
+or browser capability. Document-only/WASM snapshots still report required code
+unavailable. No indexer, query language, provider framework or controller is added.
 Required sources are explicit, unique, and never inferred from query variables,
 columns or possible paths. Unknown sources are invalid declarations. The
 `external` source requires declared external fact inputs.
@@ -760,7 +767,11 @@ outcome. `mara-engine`'s `query_views` module defines both formats;
 Node, the shared TypeScript client and worker/WASM. MCP uses `query_view` and
 `query_report` (`subject.kind` is `gate` or `documentation_rules`). Both accept
 `render: "markdown"`; CLI human output uses the same renderer and `--format json`
-returns the structured format.
+returns the structured format. CLI `query --help` and its execute/gate/view/report
+subcommand help describe the corresponding MCP operations and native indexing
+boundary. The shipped [Mara skill](../skills/mara/SKILL.md#queries-gates-views-and-reports)
+provides typed input, selection, continuation and report-subject examples; use
+matching executable/skill versions.
 
 Factual view format 1 (`kind: "query_view"`) preserves the page's `definition`,
 `definition_file`, `input_identity`, `evaluation_complete`, `unavailable_reason`,

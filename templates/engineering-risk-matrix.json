@@ -1,0 +1,405 @@
+{
+  "mapping": "risk_matrix",
+  "entries": [
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "rare"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "minimal"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "LOW"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "rare"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "minor"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "LOW"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "rare"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "moderate"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "LOW"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "rare"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "major"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "MEDIUM"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "rare"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "severe"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "MEDIUM"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "unlikely"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "minimal"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "LOW"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "unlikely"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "minor"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "LOW"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "unlikely"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "moderate"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "MEDIUM"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "unlikely"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "major"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "MEDIUM"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "unlikely"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "severe"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "HIGH"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "possible"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "minimal"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "LOW"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "possible"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "minor"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "MEDIUM"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "possible"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "moderate"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "MEDIUM"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "possible"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "major"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "HIGH"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "possible"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "severe"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "HIGH"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "likely"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "minimal"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "MEDIUM"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "likely"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "minor"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "MEDIUM"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "likely"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "moderate"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "HIGH"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "likely"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "major"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "HIGH"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "likely"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "severe"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "HIGH"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "almost-certain"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "minimal"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "MEDIUM"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "almost-certain"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "minor"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "HIGH"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "almost-certain"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "moderate"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "HIGH"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "almost-certain"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "major"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "HIGH"
+      }
+    },
+    {
+      "keys": {
+        "likelihood": {
+          "type": "text",
+          "value": "almost-certain"
+        },
+        "consequence": {
+          "type": "text",
+          "value": "severe"
+        }
+      },
+      "value": {
+        "type": "text",
+        "value": "HIGH"
+      }
+    }
+  ]
+}

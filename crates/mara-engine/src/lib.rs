@@ -67,6 +67,8 @@ pub enum Template {
     Minimal,
     Empty,
     Engineering,
+    #[serde(rename = "engineering-legacy")]
+    EngineeringLegacy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

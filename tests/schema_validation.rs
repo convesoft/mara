@@ -654,9 +654,12 @@ fn rule_fixture() -> TempDir {
     let fixture = fixture();
     let root = fixture.path();
     assert!(
-        mara(root, &["project", "init", "--template", "engineering"])
-            .status
-            .success()
+        mara(
+            root,
+            &["project", "init", "--template", "engineering-legacy"]
+        )
+        .status
+        .success()
     );
     let path = root.join(".mara/schema.yaml");
     let mut schema: Value = serde_saphyr::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -793,7 +796,7 @@ fn schema_validation_reports_guidance_errors_with_stable_codes() {
 // @mara checks REQ-SCHEMA-DISCOVERY
 #[test]
 fn schema_validation_preserves_source_and_does_not_read_the_corpus() {
-    for template in ["minimal", "empty", "engineering"] {
+    for template in ["minimal", "empty", "engineering", "engineering-legacy"] {
         let fixture = fixture();
         let root = fixture.path();
         assert!(

@@ -68,7 +68,7 @@ fn policy_input_identity(
 ) -> String {
     let bytes = serde_json::to_vec(&(
         "query-policy-input-v2", // Includes the revised named-query stream ordering.
-        engine.source_fingerprint(),
+        engine.query_fingerprint(),
         target,
         fact_snapshots,
         mappings,
@@ -919,7 +919,7 @@ impl crate::SourceEngine {
             }
         }
         let mut identity_parts = vec![
-            self.source_fingerprint().into(),
+            self.query_fingerprint(),
             request.gate_file.clone(),
             request.gate.clone(),
             serde_json::to_string(&request.scope).unwrap_or_default(),

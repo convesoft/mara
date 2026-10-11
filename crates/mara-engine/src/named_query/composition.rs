@@ -30,6 +30,7 @@ struct EvaluationContext<'a> {
     store: &'a Store,
     max_rows: u32,
     prepared: &'a BTreeMap<String, facts::Prepared<'a>>,
+    code_unavailable: Option<String>,
 }
 
 #[derive(Default)]
@@ -68,7 +69,7 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
     let identity = hash(&(
         "named-query-5",
         env!("CARGO_PKG_VERSION"),
-        engine.source_fingerprint(),
+        engine.query_fingerprint(),
         &identity_request,
     ));
     let mut page = Page {
@@ -87,7 +88,12 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
         has_more: false,
         next_cursor: None,
     };
-    let start = cursor_position(request.cursor.as_deref(), &page.input_identity)?;
+    // Native code identity is known only after resolving the reachable definitions.
+    let mut start = if engine.native_query_code.is_none() {
+        cursor_position(request.cursor.as_deref(), &page.input_identity)?
+    } else {
+        0
+    };
 
     let mut definitions = BTreeMap::new();
     let mut files = BTreeSet::new();
@@ -142,6 +148,22 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
         Err(e) => return unavailable(page, format!("schema input unavailable: {e}"), start),
     };
     let order = reachable_definitions(&request.definition, &definitions)?;
+    if order.iter().any(|id| {
+        definitions[id]
+            .definition
+            .required_fact_sources
+            .contains(&FactSource::Code)
+    }) && let Some(loader) = &engine.native_query_code
+    {
+        loader.inputs();
+    }
+    page.input_identity = hash(&(
+        "named-query-5",
+        env!("CARGO_PKG_VERSION"),
+        engine.query_fingerprint(),
+        &identity_request,
+    ));
+    start = cursor_position(request.cursor.as_deref(), &page.input_identity)?;
     let mut compiled = BTreeMap::new();
     // Preserve the strict loaded-set behavior: unused definitions are still validated.
     for (id, loaded) in &definitions {
@@ -163,7 +185,7 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
     }
     let inputs = facts::inputs(&request, &declared_inputs, &declared_mappings)?;
 
-    let (project, _, corpus) = match engine.corpus() {
+    let (project, _, corpus) = match engine.query_corpus() {
         Ok(v) => v,
         Err(e) => return unavailable(page, format!("source input unavailable: {e}"), start),
     };
@@ -186,7 +208,7 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
     }) {
         return unavailable(page, "graph source prerequisites are invalid".into(), start);
     }
-    let graph = prepare(&project, &corpus, &schema, engine.source_fingerprint())
+    let graph = prepare(&project, &corpus, &schema, &engine.query_fingerprint())
         .map_err(|e| Error::definition(&selected_definition.file, e))?;
     for (id, loaded) in &definitions {
         let query = &mut compiled
@@ -241,10 +263,8 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
             .required_fact_sources
             .contains(&FactSource::Code)
     }) {
-        page.evaluation_complete = false;
-        page.unavailable_reason = Some(format!(
-            "required code facts for named definition {id} were not supplied to this snapshot"
-        ));
+        page.unavailable_reason = native::code_unavailable(engine.native_query_code.as_deref(), id);
+        page.evaluation_complete = page.unavailable_reason.is_none();
     }
 
     let store =
@@ -287,6 +307,7 @@ pub(super) fn execute(engine: &SourceEngine, request: Request) -> Result<Page, E
         store: &store,
         max_rows: request.max_rows,
         prepared: &prepared,
+        code_unavailable: page.unavailable_reason.clone(),
     };
     let mut records = vec![];
     for (_, (root, source)) in selected {
@@ -680,15 +701,12 @@ fn evaluate_definition(
     ));
     // A required source this host cannot supply makes the definition incomplete from the start;
     // known graph bindings and derived values are still retained without exact counts.
-    let code_missing = definition.required_fact_sources.contains(&FactSource::Code);
+    let code_missing = definition.required_fact_sources.contains(&FactSource::Code)
+        && context.code_unavailable.is_some();
     let mut result = QueryEvaluation {
         bindings: vec![],
         complete: !code_missing,
-        unavailable_reason: code_missing.then(|| {
-            format!(
-                "required code facts for named definition {id} were not supplied to this snapshot"
-            )
-        }),
+        unavailable_reason: code_missing.then(|| context.code_unavailable.clone().unwrap()),
     };
 
     for dependency in &definition.dependencies {

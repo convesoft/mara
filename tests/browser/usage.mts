@@ -10,7 +10,7 @@ export async function typedBrowserUsage(): Promise<void> {
   const client: WasmClient = await createWasmClient({ snapshot });
   const shared: MaraClient<MemoryProjectInitParams> = client;
   try {
-    await shared.projectInit({ name: 'Typed café 中文 👩🏽‍💻', template: 'engineering' });
+    await shared.projectInit({ name: 'Typed café 中文 👩🏽‍💻', template: 'engineering-legacy' });
     await client.schemaGet();
     await client.schemaList({ kind: 'flavour' });
     await client.schemaValidate();

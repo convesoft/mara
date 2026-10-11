@@ -1531,18 +1531,18 @@ fn twelve_discriminating_witnesses_on_real_native_paths() {
         v["result"]["roots"][0]["conditions"][0]["state"],
         "not_applicable"
     );
-    // 12: native-only input is unavailable on every document-only semantic path.
+    // 12: code is unavailable on document-only hosts. Native execution now supplies
+    // it; live native coverage/absence/index failures are checked in engineering_template.
     let mut changed = s.clone();
     definitions(&mut changed, |v| {
         v["definitions"][0]["required_fact_sources"] = json!(["documents", "code"])
     });
-    let v = c.run(
-        &host,
-        12,
-        "required-code-unavailable",
-        changed,
-        "query_execute",
-        supports(&["SUB-LINKED"]),
+    let params = supports(&["SUB-LINKED"]);
+    let changed = inputs(changed, "query_execute", &params);
+    let v = portable(changed.clone(), "query_execute", params.clone());
+    c.cases.push(
+        json!({"witness":12,"name":"required-code-unavailable", "snapshot":changed,
+        "operation":"query_execute", "params":params, "outcome":v.clone()}),
     );
     assert_eq!(v["result"]["evaluation_complete"], false);
     if let Some(path) = std::env::var_os("MARA_QUERY_CATALOG_REPORT") {

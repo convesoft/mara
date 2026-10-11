@@ -49,9 +49,12 @@ struct Cli {
     command: Command,
 }
 
+const NATIVE_QUERY_HELP: &str = "Native hosts lazily collect code only when a selected definition or dependency requires it. Indexing may invoke trusted project-configured commands and build tools. With complete code inputs, no matching links is known absence; failed indexing is unavailable. Document-only/WASM hosts cannot supply native code facts. Supplied test results are not fetched, run or authenticated by Mara.";
+
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Execute raw named facts in the embedded engine. No policy pass/fail semantics.
+    /// Execute named facts, evaluate contextual gates, and render factual views or policy reports.
+    #[command(after_help = NATIVE_QUERY_HELP)]
     Query {
         #[command(subcommand)]
         command: QueryCommand,
@@ -159,6 +162,7 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum QueryCommand {
     /// Evaluate a request-local gate over explicit scope/context; results are not permissions or actions.
+    #[command(after_help = NATIVE_QUERY_HELP)]
     Gate {
         /// Exact gate identity from the request-local YAML gate file.
         gate: String,
@@ -199,7 +203,8 @@ enum QueryCommand {
         #[arg(long, required = true)]
         max_rows: u32,
     },
-    /// Load an explicit definition set and execute an exact named SELECT.
+    /// Load an explicit definition set and execute an exact named factual SELECT; no policy verdict.
+    #[command(after_help = NATIVE_QUERY_HELP)]
     Execute {
         /// Exact definition identity.
         definition: String,
@@ -242,7 +247,7 @@ enum QueryCommand {
     },
     /// Render a factual table/relationship view over one exact named SELECT page; not a policy evaluation.
     #[command(
-        after_help = "Default output is a factual Markdown view; --format json returns query view format 1 and includes the same page when a renderer is requested. An empty root is shown as a complete empty result, never as a failure. The view preserves returned bindings, source links, input identity, counts and completeness; follow --cursor with unchanged inputs until has_more is false. It does not change project policy or re-run traversal as presentation."
+        after_help = "Default output is a factual Markdown view; --format json returns query view format 1 and includes the same page when a renderer is requested. With complete inputs, an empty root is shown as an empty result, never as a failure. The view preserves returned bindings, source links, input identity, counts and completeness; follow --cursor with unchanged inputs until has_more is false. It does not change project policy or re-run traversal as presentation. Native hosts lazily collect code only when a selected definition or dependency requires it. Indexing may invoke trusted project-configured commands and build tools. With complete code inputs, no matching links is known absence; failed indexing is unavailable. Document-only/WASM hosts cannot supply native code facts. Supplied test results are not fetched, run or authenticated by Mara."
     )]
     View {
         /// Exact definition identity.
@@ -286,7 +291,7 @@ enum QueryCommand {
     },
     /// Render a source-linked evaluation report over gate or documentation-rule outcomes.
     #[command(
-        after_help = "Default output is a Markdown report; --format json returns evaluation report format 1. A report identifies each obligation, its outcome and applicability, and qualifying or missing support; it never grants permission or changes documentation validity."
+        after_help = "Default output is a Markdown report; --format json returns evaluation report format 1. A report identifies each obligation, its outcome and applicability, and qualifying or missing support; it never grants permission or changes documentation validity. Native hosts lazily collect code only when a selected definition or dependency requires it. Indexing may invoke trusted project-configured commands and build tools. With complete code inputs, no matching links is known absence; failed indexing is unavailable. Document-only/WASM hosts cannot supply native code facts. Supplied test results are not fetched, run or authenticated by Mara."
     )]
     Report {
         #[command(subcommand)]
@@ -297,6 +302,7 @@ enum QueryCommand {
 #[derive(Debug, Subcommand)]
 enum QueryReportCommand {
     /// Render the evaluation report for one request-local gate; results are not permissions or actions.
+    #[command(after_help = NATIVE_QUERY_HELP)]
     Gate {
         /// Exact gate identity from the request-local YAML gate file.
         gate: String,
@@ -338,6 +344,7 @@ enum QueryReportCommand {
         max_rows: u32,
     },
     /// Render the evaluation report for enabled project documentation rules.
+    #[command(after_help = NATIVE_QUERY_HELP)]
     Rules {
         /// Exact item ID/MID; omit to report enabled rules project-wide.
         #[arg(long = "id")]
@@ -421,7 +428,7 @@ enum ProjectCommand {
     Init {
         /// Destination; omit to use --project, or the current directory only when --project is also omitted. Cannot combine with --project.
         path: Option<PathBuf>,
-        /// Bundled schema: minimal (default), empty, or engineering with policy/check files.
+        /// Bundled profile: minimal (default), empty, engineering, or engineering-legacy.
         #[arg(long, value_enum, default_value_t)]
         template: CliTemplate,
     },
@@ -500,6 +507,7 @@ enum CliTemplate {
     Minimal,
     Empty,
     Engineering,
+    EngineeringLegacy,
 }
 
 impl From<CliTemplate> for Template {
@@ -508,6 +516,7 @@ impl From<CliTemplate> for Template {
             CliTemplate::Minimal => Self::Minimal,
             CliTemplate::Empty => Self::Empty,
             CliTemplate::Engineering => Self::Engineering,
+            CliTemplate::EngineeringLegacy => Self::EngineeringLegacy,
         }
     }
 }

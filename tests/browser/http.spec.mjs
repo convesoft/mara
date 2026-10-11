@@ -99,7 +99,7 @@ test('installed HTTP ESM facade uses an authorized real daemon without replay or
       let ticks = 0;
       const timer = setInterval(() => ticks++, 0);
       try {
-        const init = await client.projectInit({ template: 'engineering' });
+        const init = await client.projectInit({ template: 'engineering-legacy' });
         assert(init.project.root === project && init.created.length === 5, 'Native initialization');
         const schema = await client.schemaGet();
         assert(schema.kind === 'schema', 'Schema read');

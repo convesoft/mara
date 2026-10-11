@@ -22,7 +22,7 @@ bound target and rejects a request-level `project` override.
 
 The initialization result's `created` list reports every source installed by the
 selected template, using project-relative paths in normalized path order.
-Engineering includes all three rule/check files, not only configuration/schema.
+Include every source in the selected engineering profile, not only configuration/schema; [[REQ-ENGINEERING-TEMPLATE]] defines the two profiles.
 :::
 
 :::mara requirement REQ-PROJECT-DISCOVERY
@@ -102,28 +102,15 @@ Each operation resolves one project. Workspace aggregation and cross-project ope
 :derives_from: SCN-START-ENGINEERING-KNOWLEDGE
 :kind: functional
 
-Offer an optional `engineering` template with the reusable engineering vocabulary
-and incremental knowledge policies defined by the bundled template files. Keep `minimal`
-as the default and retain `empty`. Initialization preserves
-[[REQ-PROJECT-INITIALIZATION]] and creates no starter Markdown, product items or MIDs.
+Offer `engineering` for the current model and `engineering-legacy` for the previous profile, with `minimal` as the default and `empty` retained. The user requested the new template from the Engineering process source supplied in `.temp`, then explicitly selected template assets/documentation on the existing engine only. [[DES-ENGINEERING-PROFILE]] defines semantics and delivery limits.
 
-All templates install `.mara/project.toml` and `.mara/schema.yaml`.
-Engineering additionally installs enabled `.mara/engineering-rules.yaml` and
-request-local `.mara/engineering-checks.yaml` and `.mara/engineering-execution.yaml`.
-Its configuration uses format 2; minimal and empty retain format 1. All schemas
-use format 3.
+All templates embed and install `.mara/project.toml` and schema format 3 at `.mara/schema.yaml`. Minimal and empty use project format 1. Engineering-legacy uses format 2 and preserves the previous installed filenames and bytes: `.mara/engineering-rules.yaml`, `.mara/engineering-checks.yaml` and `.mara/engineering-execution.yaml`.
 
-Embed template source files in the executable. Generate configuration from the
-destination name and selected template. Preserve all existing destination files;
-on initialization failure remove only files created by that attempt. Bundled
-template changes never silently rewrite previously initialized projects.
+Engineering uses project format 3 and additionally installs `.mara/engineering-rules.yaml`, `.mara/engineering-policy.yaml`, `.mara/engineering-queries.json`, `.mara/engineering-shapes.ttl`, `.mara/engineering-gates.yaml`, `.mara/engineering-risk-matrix.json` and `.mara/engineering-views.json`. Structural rules and query-backed acceptance policies are enabled. Gates, views and the tailored risk mapping are request-local inputs, not automatic execution or deployment authority.
 
-The bundled realization check supports accepted requirement and design roots,
-including mixed selections. Both can qualify through direct implementation;
-only a requirement can also qualify through an accepted satisfying design.
-Missing realization is a failed coverage result, not an invalid check request.
+Generate configuration from the destination name and selected template. Preserve [[REQ-PROJECT-INITIALIZATION]]: report every installed source, never overwrite project-owned files, and remove only this attempt's created files on failure. Create no starter Markdown, product items, MIDs, controller package or AGENTS.md changes. Template updates never rewrite existing projects or the repository's self-hosted schema/policies.
 
-Lifecycle, acceptance and selected-scope interpretation follow [[DES-ENGINEERING-PROFILE]].
+Legacy realization continues to accept requirement/design roots and mixed selections: direct realization, or requirement coverage through an accepted satisfying design. New-model evaluations never silently substitute legacy semantics; unsupported or incomplete facts cannot establish a pass.
 :::
 
 :::mara requirement REQ-FLAVOUR-AUTHORING-GUIDANCE
@@ -183,11 +170,11 @@ Omitting a key, supplying the wrong type, using blank entries, or naming an unkn
 :validates: SCN-CHOOSE-KNOWLEDGE-FLAVOUR
 :verifies: DES-ENGINEERING-PROFILE
 
-Run `cargo test --locked --test project_bootstrap --test trace_matrix` against the candidate binary. The test run must exercise the complete authoring flow below through real CLI and MCP requests. Exercise current, named, and explicit initialization targets; default, empty, and engineering templates; refusal to overwrite project-owned files; nearest and explicit project selection; bound and unbound stdio MCP; and schema guidance inspection and rejection.
+Run the selected project_bootstrap, engineering_template and trace_matrix tests against the candidate binary. Exercise current, named and explicit initialization targets; minimal, empty, engineering and engineering-legacy; refusal to overwrite project-owned sources; nearest/explicit project selection; bound/unbound stdio MCP; and schema guidance inspection and rejection.
 
-Initialize an engineering project, create each supported knowledge flavour, add valid typed relationships, inspect both directions through CLI and MCP, reject invalid endpoints without changing source, and validate the resulting project. Exercise the bundled realization check on design-only and mixed requirement/design selections, first without realization and then with a direct implementation of the design. Both cases must evaluate completely, with failed then passed coverage and equivalent CLI/MCP results.
+The legacy authoring workflow continues to create and connect every old flavour through CLI/MCP and exercise design-only and mixed requirement/design realization, with complete failed-then-passed coverage. New-profile checks initialize the eleven-flavour schema, author drafts through actual MCP requests, add/read basis relations through CLI/MCP, reject invalid verification endpoints without source changes, and evaluate accepted basis, lifecycle, terminology, risk ancestry, selected execution facts and explicitly required validation through the real engine. Missing native code facts keep new implementation-dependent gates unavailable; those checks do not claim full .temp runtime conformance.
 
-Fixtures live in disposable directories with their own configuration and Git state. Child processes use explicit working directories and isolated Git/configuration inputs. Pass only when real processes return the expected results and rejected requests preserve source. This checks project bootstrap and demonstrates the engineering authoring scenario; detailed mutation, retrieval, and rule-engine checks remain separate.
+Exercise portable initialization for both names without publication. Fixture projects use their own configuration, document copies and Git state outside the checkout. Check source preservation, complete validity and actual result states, not transport success or registered test links. Broader engine and installed-host acceptance remain their existing verification gates.
 :::
 
 :::mara verification VER-PROJECT-INSPECTION
@@ -312,5 +299,5 @@ A schema defines project-owned flavours and relations, with no hardcoded busines
 
 Custom fields use lowercase snake_case names and flat string, integer, number, boolean or enum values. required and repeatable default to false. Enum fields require a nonempty list of unique nonempty values without surrounding whitespace; other field types cannot declare values. mid, flavour, id, title and body are reserved structural names and cannot be custom fields. Relation names cannot collide with a custom field on an eligible author flavour. Typed relationship declarations follow [[DES-CANONICAL-TRACE-RELATIONS]], rather than using custom fields for edges.
 
-Bundled minimal, empty and engineering schemas are editable starting points under [[REQ-ENGINEERING-TEMPLATE]]. Their exact flavour/relation inventories reside in the template files and are available through schema get; there is no second hand-maintained inventory. Item scalar conformance follows [[DES-CORPUS-CONFORMANCE]]. [[implemented_by:code:src/lib.rs]]
+Bundled minimal, empty, engineering and engineering-legacy schemas are editable starting points under [[REQ-ENGINEERING-TEMPLATE]]. Their exact flavour/relation inventories reside in the template files and are available through schema get; there is no second hand-maintained inventory. Item scalar conformance follows [[DES-CORPUS-CONFORMANCE]]. [[implemented_by:code:src/lib.rs]]
 :::

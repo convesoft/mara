@@ -161,7 +161,7 @@ fn document(id: &str, mid: &str, title: &str) -> String {
     )
 }
 fn seeded(root: &Path) {
-    mara::initialize_project(root, Template::Engineering).unwrap();
+    mara::initialize_project(root, Template::EngineeringLegacy).unwrap();
     fs::write(
         root.join("a.mara.md"),
         document("REQ-A", "01ARZ3NDEKTSV4RRFFQ69G5F00", "A"),

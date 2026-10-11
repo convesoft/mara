@@ -1,0 +1,22 @@
+format_version: 1
+invariants:
+  - id: requirement-acceptance
+    definition: requirement_knowledge
+    shape: urn:mara:engineering:requirement-knowledge
+    flavours: [requirement]
+    severity: error
+  - id: design-acceptance
+    definition: design_knowledge
+    shape: urn:mara:engineering:design-knowledge
+    flavours: [design]
+    severity: error
+  - id: terminology
+    definition: term_validity
+    shape: urn:mara:engineering:term-validity
+    flavours: [term]
+    severity: error
+  - id: relation-lifecycle
+    definition: relation_lifecycle
+    shape: urn:mara:engineering:lifecycle
+    flavours: [goal, need, scenario, requirement, design, decision, risk, term, evidence, verification, validation]
+    severity: error

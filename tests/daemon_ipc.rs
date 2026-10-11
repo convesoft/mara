@@ -786,7 +786,7 @@ fn real_socket_dispatches_complete_surface_and_guarded_filesystem_mutations() {
     c.ok(
         other.path(),
         "project_init",
-        json!({"template":"engineering"}),
+        json!({"template":"engineering-legacy"}),
     );
     c.ok(other.path(), "item_create", json!({"flavour":"requirement","id":"REQ-A","file":"a.mara.md","title":"Trace root","fields":[{"key":"status","value":"draft"}],"body":"Draft."}));
     let trace = c.ok(other.path(), "trace_matrix", json!({"ids":["REQ-A"],"check":{"files":[".mara/engineering-checks.yaml"],"shape":"urn:mara:rule:intent"}}));

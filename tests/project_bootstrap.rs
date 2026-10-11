@@ -102,7 +102,7 @@ fn refuses_to_overwrite_an_existing_project_or_target_file() {
 // @mara checks REQ-PORTABLE-DOCUMENT-ENGINE
 #[test]
 fn initialization_reports_every_created_template_source_in_path_order() {
-    for template in ["minimal", "empty", "engineering"] {
+    for template in ["minimal", "empty", "engineering", "engineering-legacy"] {
         let fixture = fixture();
         let output = mara(
             fixture.path(),
@@ -118,6 +118,18 @@ fn initialization_reports_every_created_template_source_in_path_order() {
         assert!(output.status.success(), "{}", stderr(&output));
         let result: Value = serde_json::from_slice(&output.stdout).unwrap();
         let expected = if template == "engineering" {
+            json!([
+                ".mara/engineering-gates.yaml",
+                ".mara/engineering-policy.yaml",
+                ".mara/engineering-queries.json",
+                ".mara/engineering-risk-matrix.json",
+                ".mara/engineering-rules.yaml",
+                ".mara/engineering-shapes.ttl",
+                ".mara/engineering-views.json",
+                ".mara/project.toml",
+                ".mara/schema.yaml"
+            ])
+        } else if template == "engineering-legacy" {
             json!([
                 ".mara/engineering-checks.yaml",
                 ".mara/engineering-execution.yaml",
@@ -172,7 +184,7 @@ fn real_cli_initializes_projects_resolved_by_nearest_and_explicit_roots() {
 
 // @mara checks REQ-ENGINEERING-TEMPLATE
 #[test]
-fn engineering_init_preserves_existing_policy_and_check_files() {
+fn legacy_engineering_init_preserves_existing_policy_and_check_files() {
     for file in [
         "engineering-rules.yaml",
         "engineering-checks.yaml",
@@ -182,8 +194,37 @@ fn engineering_init_preserves_existing_policy_and_check_files() {
         let root = fixture.path();
         fs::create_dir(root.join(".mara")).unwrap();
         fs::write(root.join(".mara").join(file), "project-owned content").unwrap();
-        let init = mara(root, &["project", "init", "--template", "engineering"]);
+        let init = mara(
+            root,
+            &["project", "init", "--template", "engineering-legacy"],
+        );
         assert!(!init.status.success());
+        assert_eq!(fs::read_dir(root.join(".mara")).unwrap().count(), 1);
+        assert_eq!(
+            fs::read_to_string(root.join(".mara").join(file)).unwrap(),
+            "project-owned content"
+        );
+    }
+}
+
+// @mara checks REQ-ENGINEERING-TEMPLATE
+#[test]
+fn engineering_init_preserves_every_existing_new_profile_asset() {
+    for file in [
+        "engineering-rules.yaml",
+        "engineering-policy.yaml",
+        "engineering-queries.json",
+        "engineering-shapes.ttl",
+        "engineering-gates.yaml",
+        "engineering-risk-matrix.json",
+        "engineering-views.json",
+    ] {
+        let fixture = fixture();
+        let root = fixture.path();
+        fs::create_dir(root.join(".mara")).unwrap();
+        fs::write(root.join(".mara").join(file), "project-owned content").unwrap();
+        let output = mara(root, &["project", "init", "--template", "engineering"]);
+        assert!(!output.status.success());
         assert_eq!(fs::read_dir(root.join(".mara")).unwrap().count(), 1);
         assert_eq!(
             fs::read_to_string(root.join(".mara").join(file)).unwrap(),
@@ -197,7 +238,12 @@ fn engineering_init_preserves_existing_policy_and_check_files() {
 // @mara checks REQ-SCHEMA-DISCOVERY
 #[test]
 fn bundled_templates_initialize_and_inspect_equally_through_cli_and_mcp() {
-    for (template, flavour_count) in [("minimal", 4), ("empty", 0), ("engineering", 11)] {
+    for (template, flavour_count) in [
+        ("minimal", 4),
+        ("empty", 0),
+        ("engineering", 11),
+        ("engineering-legacy", 11),
+    ] {
         let fixture = fixture();
         let cli_root = fixture.path().join("cli");
         let mcp_root = fixture.path().join("mcp");
@@ -265,10 +311,16 @@ fn bundled_templates_initialize_and_inspect_equally_through_cli_and_mcp() {
             assert_eq!(fs::read_dir(root).unwrap().count(), 1);
             assert_eq!(
                 fs::read_dir(root.join(".mara")).unwrap().count(),
-                if template == "engineering" { 5 } else { 2 }
+                match template {
+                    "engineering" => 9,
+                    "engineering-legacy" => 5,
+                    _ => 2,
+                }
             );
             let config = fs::read_to_string(root.join(".mara/project.toml")).unwrap();
             assert!(config.starts_with(if template == "engineering" {
+                "format_version = 3"
+            } else if template == "engineering-legacy" {
                 "format_version = 2"
             } else {
                 "format_version = 1"
@@ -837,13 +889,13 @@ fn engineering_workflow_creates_connects_and_retrieves_through_cli_and_mcp() {
         if use_mcp {
             let result = call(
                 "project_init",
-                json!({"project":fixture.path(),"template":"engineering"}),
+                json!({"project":fixture.path(),"template":"engineering-legacy"}),
             );
             assert_eq!(result["isError"], false, "{result}");
         } else {
             let result = mara(
                 fixture.path(),
-                &["project", "init", "--template", "engineering"],
+                &["project", "init", "--template", "engineering-legacy"],
             );
             assert!(result.status.success(), "{}", stderr(&result));
         }
@@ -966,7 +1018,10 @@ fn engineering_workflow_creates_connects_and_retrieves_through_cli_and_mcp() {
 fn engineering_realization_accepts_requirements_and_designs() {
     let fixture = fixture();
     let root = fixture.path();
-    let init = mara(root, &["project", "init", "--template", "engineering"]);
+    let init = mara(
+        root,
+        &["project", "init", "--template", "engineering-legacy"],
+    );
     assert!(init.status.success(), "{}", stderr(&init));
     fs::write(
         root.join("export.mara.md"),

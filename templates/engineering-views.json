@@ -1,0 +1,949 @@
+{
+  "format_version": 1,
+  "definitions": [
+    {
+      "id": "view_requirement_implementation_and_verification",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        },
+        "implementation": {
+          "type": "code",
+          "optional": true
+        },
+        "design": {
+          "type": "item",
+          "optional": true,
+          "flavours": [
+            "design"
+          ]
+        },
+        "route": {
+          "type": "text",
+          "optional": true
+        },
+        "verification": {
+          "type": "item",
+          "flavours": [
+            "verification"
+          ],
+          "optional": true
+        },
+        "verification_status": {
+          "type": "text",
+          "optional": true
+        },
+        "result": {
+          "type": "text",
+          "optional": true
+        },
+        "definition_revision": {
+          "type": "text",
+          "optional": true
+        },
+        "applicable": {
+          "type": "boolean",
+          "optional": true
+        }
+      },
+      "parameters": {
+        "candidate": {
+          "type": "text",
+          "required": true
+        }
+      },
+      "dependencies": [
+        {
+          "name": "implementation",
+          "definition": "implemented",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "implementation": "implementation",
+              "design": "design",
+              "route": "route"
+            },
+            "support": "implementation_edges"
+          }
+        },
+        {
+          "name": "execution",
+          "definition": "verification_status",
+          "root": "root",
+          "parameters": {
+            "candidate": "candidate"
+          },
+          "projections": {
+            "columns": {
+              "verification": "verification",
+              "status": "verification_status",
+              "result": "result",
+              "definition_revision": "definition_revision",
+              "applicable": "applicable"
+            },
+            "support": "execution_edges",
+            "facts": "execution_facts"
+          }
+        }
+      ],
+      "support_columns": [
+        "implementation_edges",
+        "execution_edges"
+      ],
+      "facts_columns": [
+        "execution_facts"
+      ],
+      "select": "SELECT ?root ?status ?implementation ?design ?route ?verification ?verification_status ?result ?definition_revision ?applicable ?implementation_edges ?execution_edges ?execution_facts WHERE {\n?root <urn:mara:field:status> ?status .\n\nOPTIONAL { ?root <urn:mara:query:input:implementation> ?implementation_row .\nOPTIONAL { ?implementation_row <urn:mara:query:column:implementation:implementation> ?implementation }\nOPTIONAL { ?implementation_row <urn:mara:query:column:implementation:design> ?design }\nOPTIONAL { ?implementation_row <urn:mara:query:column:implementation:route> ?route }\nOPTIONAL { ?implementation_row <urn:mara:query:column:implementation:implementation_edges> ?implementation_edges }\n}\nOPTIONAL { ?root <urn:mara:query:input:execution> ?execution_row .\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:verification> ?verification }\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:verification_status> ?verification_status }\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:result> ?result }\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:definition_revision> ?definition_revision }\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:applicable> ?applicable }\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:execution_edges> ?execution_edges }\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:execution_facts> ?execution_facts }\n}\n}"
+    },
+    {
+      "id": "view_delivery_readiness",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        },
+        "basis_status": {
+          "type": "text",
+          "optional": true
+        },
+        "definition_status": {
+          "type": "text",
+          "optional": true
+        },
+        "implementation": {
+          "type": "code",
+          "optional": true
+        },
+        "design": {
+          "type": "item",
+          "optional": true,
+          "flavours": [
+            "design"
+          ]
+        },
+        "route": {
+          "type": "text",
+          "optional": true
+        },
+        "verification": {
+          "type": "item",
+          "flavours": [
+            "verification"
+          ],
+          "optional": true
+        },
+        "verification_status": {
+          "type": "text",
+          "optional": true
+        },
+        "result": {
+          "type": "text",
+          "optional": true
+        },
+        "definition_revision": {
+          "type": "text",
+          "optional": true
+        },
+        "applicable": {
+          "type": "boolean",
+          "optional": true
+        },
+        "risk": {
+          "type": "item",
+          "flavours": [
+            "risk"
+          ],
+          "optional": true
+        },
+        "threatened": {
+          "type": "item",
+          "optional": true
+        },
+        "level": {
+          "type": "text",
+          "optional": true
+        },
+        "risk_accepted": {
+          "type": "boolean",
+          "optional": true
+        }
+      },
+      "parameters": {
+        "candidate": {
+          "type": "text",
+          "required": true
+        }
+      },
+      "dependencies": [
+        {
+          "name": "knowledge",
+          "definition": "requirement_knowledge",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "basis_status": "basis_status",
+              "verification_status": "definition_status"
+            },
+            "support": "knowledge_edges"
+          }
+        },
+        {
+          "name": "implementation",
+          "definition": "implemented",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "implementation": "implementation",
+              "design": "design",
+              "route": "route"
+            },
+            "support": "implementation_edges"
+          }
+        },
+        {
+          "name": "execution",
+          "definition": "verification_status",
+          "root": "root",
+          "parameters": {
+            "candidate": "candidate"
+          },
+          "projections": {
+            "columns": {
+              "verification": "verification",
+              "status": "verification_status",
+              "result": "result",
+              "definition_revision": "definition_revision",
+              "applicable": "applicable"
+            },
+            "support": "execution_edges",
+            "facts": "execution_facts"
+          }
+        },
+        {
+          "name": "risk",
+          "definition": "scoped_risk_levels",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "risk": "risk",
+              "target": "threatened",
+              "level": "level",
+              "accepted": "risk_accepted"
+            },
+            "support": "risk_edges"
+          }
+        }
+      ],
+      "support_columns": [
+        "knowledge_edges",
+        "implementation_edges",
+        "execution_edges",
+        "risk_edges"
+      ],
+      "facts_columns": [
+        "execution_facts"
+      ],
+      "select": "SELECT ?root ?status ?basis_status ?definition_status ?implementation ?design ?route ?verification ?verification_status ?result ?definition_revision ?applicable ?risk ?threatened ?level ?risk_accepted ?knowledge_edges ?implementation_edges ?execution_edges ?risk_edges ?execution_facts WHERE {\n?root <urn:mara:field:status> ?status .\n\nOPTIONAL { ?root <urn:mara:query:input:knowledge> ?knowledge_row .\nOPTIONAL { ?knowledge_row <urn:mara:query:column:knowledge:basis_status> ?basis_status }\nOPTIONAL { ?knowledge_row <urn:mara:query:column:knowledge:definition_status> ?definition_status }\nOPTIONAL { ?knowledge_row <urn:mara:query:column:knowledge:knowledge_edges> ?knowledge_edges }\n}\nOPTIONAL { ?root <urn:mara:query:input:implementation> ?implementation_row .\nOPTIONAL { ?implementation_row <urn:mara:query:column:implementation:implementation> ?implementation }\nOPTIONAL { ?implementation_row <urn:mara:query:column:implementation:design> ?design }\nOPTIONAL { ?implementation_row <urn:mara:query:column:implementation:route> ?route }\nOPTIONAL { ?implementation_row <urn:mara:query:column:implementation:implementation_edges> ?implementation_edges }\n}\nOPTIONAL { ?root <urn:mara:query:input:execution> ?execution_row .\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:verification> ?verification }\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:verification_status> ?verification_status }\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:result> ?result }\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:definition_revision> ?definition_revision }\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:applicable> ?applicable }\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:execution_edges> ?execution_edges }\nOPTIONAL { ?execution_row <urn:mara:query:column:execution:execution_facts> ?execution_facts }\n}\nOPTIONAL { ?root <urn:mara:query:input:risk> ?risk_row .\nOPTIONAL { ?risk_row <urn:mara:query:column:risk:risk> ?risk }\nOPTIONAL { ?risk_row <urn:mara:query:column:risk:threatened> ?threatened }\nOPTIONAL { ?risk_row <urn:mara:query:column:risk:level> ?level }\nOPTIONAL { ?risk_row <urn:mara:query:column:risk:risk_accepted> ?risk_accepted }\nOPTIONAL { ?risk_row <urn:mara:query:column:risk:risk_edges> ?risk_edges }\n}\n}"
+    },
+    {
+      "id": "view_risk_relevance_and_treatment",
+      "root_flavours": [
+        "requirement"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        },
+        "mitigation": {
+          "type": "item",
+          "optional": true
+        },
+        "acceptance": {
+          "type": "item",
+          "optional": true
+        },
+        "risk": {
+          "type": "item",
+          "flavours": [
+            "risk"
+          ],
+          "optional": true
+        },
+        "risk_status": {
+          "type": "text",
+          "optional": true
+        },
+        "target": {
+          "type": "item",
+          "optional": true
+        },
+        "ancestor": {
+          "type": "item",
+          "flavours": [
+            "requirement"
+          ],
+          "optional": true
+        },
+        "context_kind": {
+          "type": "text",
+          "optional": true
+        },
+        "likelihood": {
+          "type": "text",
+          "optional": true
+        },
+        "consequence": {
+          "type": "text",
+          "optional": true
+        },
+        "level": {
+          "type": "text",
+          "optional": true
+        },
+        "risk_accepted": {
+          "type": "boolean",
+          "optional": true
+        }
+      },
+      "parameters": {},
+      "dependencies": [
+        {
+          "name": "relevance",
+          "definition": "relevant_risks",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "risk": "risk",
+              "status": "risk_status",
+              "target": "target",
+              "ancestor": "ancestor",
+              "kind": "context_kind"
+            },
+            "support": "relevance_edges"
+          }
+        },
+        {
+          "name": "assessment",
+          "definition": "scoped_risk_levels",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "risk": "risk",
+              "likelihood": "likelihood",
+              "consequence": "consequence",
+              "level": "level",
+              "accepted": "risk_accepted"
+            },
+            "support": "assessment_edges"
+          }
+        }
+      ],
+      "support_columns": [
+        "relevance_edges",
+        "assessment_edges"
+      ],
+      "facts_columns": [],
+      "select": "SELECT ?root ?status ?mitigation ?acceptance ?risk ?risk_status ?target ?ancestor ?context_kind ?likelihood ?consequence ?level ?risk_accepted ?relevance_edges ?assessment_edges WHERE {\n?root <urn:mara:field:status> ?status .\n\nOPTIONAL { ?root <urn:mara:query:input:relevance> ?relevance_row .\nOPTIONAL { ?relevance_row <urn:mara:query:column:relevance:risk> ?risk }\nOPTIONAL { ?relevance_row <urn:mara:query:column:relevance:risk_status> ?risk_status }\nOPTIONAL { ?relevance_row <urn:mara:query:column:relevance:target> ?target }\nOPTIONAL { ?relevance_row <urn:mara:query:column:relevance:ancestor> ?ancestor }\nOPTIONAL { ?relevance_row <urn:mara:query:column:relevance:context_kind> ?context_kind }\nOPTIONAL { ?relevance_row <urn:mara:query:column:relevance:relevance_edges> ?relevance_edges }\n}\nOPTIONAL { ?root <urn:mara:query:input:assessment> ?assessment_row .\n?assessment_row <urn:mara:query:column:assessment:risk> ?risk .\nOPTIONAL { ?assessment_row <urn:mara:query:column:assessment:likelihood> ?likelihood }\nOPTIONAL { ?assessment_row <urn:mara:query:column:assessment:consequence> ?consequence }\nOPTIONAL { ?assessment_row <urn:mara:query:column:assessment:level> ?level }\nOPTIONAL { ?assessment_row <urn:mara:query:column:assessment:risk_accepted> ?risk_accepted }\nOPTIONAL { ?assessment_row <urn:mara:query:column:assessment:assessment_edges> ?assessment_edges }\n}\nOPTIONAL { FILTER(BOUND(?risk)) ?mitigation <urn:mara:relation:mitigates> ?risk }\nOPTIONAL { FILTER(BOUND(?risk)) ?acceptance <urn:mara:relation:accepts> ?risk }\n}"
+    },
+    {
+      "id": "view_engineering_basis_and_rationale",
+      "root_flavours": [
+        "requirement",
+        "design"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        },
+        "decision": {
+          "type": "item",
+          "optional": true
+        },
+        "evidence": {
+          "type": "item",
+          "optional": true
+        },
+        "requirement_basis": {
+          "type": "item",
+          "optional": true
+        },
+        "requirement_relation": {
+          "type": "iri",
+          "optional": true
+        },
+        "requirement_basis_status": {
+          "type": "text",
+          "optional": true
+        },
+        "design_basis": {
+          "type": "item",
+          "optional": true
+        },
+        "design_relation": {
+          "type": "iri",
+          "optional": true
+        },
+        "design_basis_status": {
+          "type": "text",
+          "optional": true
+        }
+      },
+      "parameters": {},
+      "dependencies": [
+        {
+          "name": "requirement_basis",
+          "definition": "view_input_requirement_basis",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "basis": "requirement_basis",
+              "relation": "requirement_relation",
+              "status": "requirement_basis_status"
+            },
+            "support": "requirement_basis_edges"
+          }
+        },
+        {
+          "name": "design_basis",
+          "definition": "view_input_design_basis",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "basis": "design_basis",
+              "relation": "design_relation",
+              "status": "design_basis_status"
+            },
+            "support": "design_basis_edges"
+          }
+        }
+      ],
+      "support_columns": [
+        "requirement_basis_edges",
+        "design_basis_edges"
+      ],
+      "facts_columns": [],
+      "select": "SELECT ?root ?status ?decision ?evidence ?requirement_basis ?requirement_relation ?requirement_basis_status ?design_basis ?design_relation ?design_basis_status ?requirement_basis_edges ?design_basis_edges WHERE {\n?root <urn:mara:field:status> ?status .\nOPTIONAL { ?decision <urn:mara:relation:justifies> ?root } OPTIONAL { ?evidence <urn:mara:relation:supports> ?root }\nOPTIONAL { ?root <urn:mara:query:input:requirement_basis> ?requirement_basis_row .\nOPTIONAL { ?requirement_basis_row <urn:mara:query:column:requirement_basis:requirement_basis> ?requirement_basis }\nOPTIONAL { ?requirement_basis_row <urn:mara:query:column:requirement_basis:requirement_relation> ?requirement_relation }\nOPTIONAL { ?requirement_basis_row <urn:mara:query:column:requirement_basis:requirement_basis_status> ?requirement_basis_status }\nOPTIONAL { ?requirement_basis_row <urn:mara:query:column:requirement_basis:requirement_basis_edges> ?requirement_basis_edges }\n}\nOPTIONAL { ?root <urn:mara:query:input:design_basis> ?design_basis_row .\nOPTIONAL { ?design_basis_row <urn:mara:query:column:design_basis:design_basis> ?design_basis }\nOPTIONAL { ?design_basis_row <urn:mara:query:column:design_basis:design_relation> ?design_relation }\nOPTIONAL { ?design_basis_row <urn:mara:query:column:design_basis:design_basis_status> ?design_basis_status }\nOPTIONAL { ?design_basis_row <urn:mara:query:column:design_basis:design_basis_edges> ?design_basis_edges }\n}\n}"
+    },
+    {
+      "id": "view_outcome_coverage_and_validation",
+      "root_flavours": [
+        "need",
+        "goal"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        },
+        "contributor": {
+          "type": "item",
+          "optional": true
+        },
+        "scenario": {
+          "type": "item",
+          "optional": true
+        },
+        "validation": {
+          "type": "item",
+          "flavours": [
+            "validation"
+          ],
+          "optional": true
+        },
+        "validation_status": {
+          "type": "text",
+          "optional": true
+        },
+        "result": {
+          "type": "text",
+          "optional": true
+        },
+        "definition_revision": {
+          "type": "text",
+          "optional": true
+        },
+        "applicable": {
+          "type": "boolean",
+          "optional": true
+        },
+        "validation_summary": {
+          "type": "text",
+          "optional": true
+        },
+        "validation_count": {
+          "type": "integer",
+          "optional": true
+        }
+      },
+      "parameters": {
+        "context": {
+          "type": "text",
+          "required": true
+        }
+      },
+      "dependencies": [
+        {
+          "name": "validation",
+          "definition": "validation_status",
+          "root": "root",
+          "parameters": {
+            "context": "context"
+          },
+          "projections": {
+            "columns": {
+              "validation": "validation",
+              "status": "validation_status",
+              "result": "result",
+              "definition_revision": "definition_revision",
+              "applicable": "applicable",
+              "summary": "validation_summary",
+              "validation_count": "validation_count"
+            },
+            "support": "validation_edges",
+            "facts": "validation_facts"
+          }
+        }
+      ],
+      "support_columns": [
+        "validation_edges"
+      ],
+      "facts_columns": [
+        "validation_facts"
+      ],
+      "select": "SELECT ?root ?status ?contributor ?scenario ?validation ?validation_status ?result ?definition_revision ?applicable ?validation_edges ?validation_facts ?validation_summary ?validation_count WHERE {\n?root <urn:mara:field:status> ?status .\nOPTIONAL { ?contributor (<urn:mara:relation:satisfies>|<urn:mara:relation:contributes_to>) ?root }\nOPTIONAL { ?validation <urn:mara:relation:validates> ?root ; <urn:mara:relation:exercises> ?scenario }\nOPTIONAL { ?root <urn:mara:query:input:validation> ?validation_row .\nOPTIONAL { ?validation_row <urn:mara:query:column:validation:validation> ?validation }\nOPTIONAL { ?validation_row <urn:mara:query:column:validation:validation_status> ?validation_status }\nOPTIONAL { ?validation_row <urn:mara:query:column:validation:result> ?result }\nOPTIONAL { ?validation_row <urn:mara:query:column:validation:definition_revision> ?definition_revision }\nOPTIONAL { ?validation_row <urn:mara:query:column:validation:applicable> ?applicable }\nOPTIONAL { ?validation_row <urn:mara:query:column:validation:validation_summary> ?validation_summary }\nOPTIONAL { ?validation_row <urn:mara:query:column:validation:validation_count> ?validation_count }\nOPTIONAL { ?validation_row <urn:mara:query:column:validation:validation_edges> ?validation_edges }\nOPTIONAL { ?validation_row <urn:mara:query:column:validation:validation_facts> ?validation_facts }\n}\n}"
+    },
+    {
+      "id": "view_knowledge_validity",
+      "root_flavours": [
+        "goal",
+        "need",
+        "scenario",
+        "requirement",
+        "design",
+        "decision",
+        "risk",
+        "term",
+        "evidence",
+        "verification",
+        "validation"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        },
+        "requirement_basis_status": {
+          "type": "text",
+          "optional": true
+        },
+        "verification_status": {
+          "type": "text",
+          "optional": true
+        },
+        "design_basis_status": {
+          "type": "text",
+          "optional": true
+        },
+        "collision_status": {
+          "type": "text",
+          "optional": true
+        },
+        "repeats_title": {
+          "type": "boolean",
+          "optional": true
+        },
+        "relation": {
+          "type": "iri",
+          "optional": true
+        },
+        "target": {
+          "type": "item",
+          "optional": true
+        },
+        "target_status": {
+          "type": "text",
+          "optional": true
+        },
+        "compatible": {
+          "type": "boolean",
+          "optional": true
+        }
+      },
+      "parameters": {},
+      "dependencies": [
+        {
+          "name": "requirement",
+          "definition": "view_input_requirement_knowledge",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "basis_status": "requirement_basis_status",
+              "verification_status": "verification_status"
+            },
+            "support": "requirement_edges"
+          }
+        },
+        {
+          "name": "design",
+          "definition": "view_input_design_knowledge",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "basis_status": "design_basis_status"
+            },
+            "support": "design_edges"
+          }
+        },
+        {
+          "name": "term",
+          "definition": "view_input_term_validity",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "collision_status": "collision_status",
+              "repeats_title": "repeats_title"
+            }
+          }
+        },
+        {
+          "name": "lifecycle",
+          "definition": "relation_lifecycle",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "relation": "relation",
+              "target": "target",
+              "target_status": "target_status",
+              "compatible": "compatible"
+            },
+            "support": "lifecycle_edges"
+          }
+        }
+      ],
+      "support_columns": [
+        "requirement_edges",
+        "design_edges",
+        "lifecycle_edges"
+      ],
+      "facts_columns": [],
+      "select": "SELECT ?root ?status ?requirement_basis_status ?verification_status ?design_basis_status ?collision_status ?repeats_title ?relation ?target ?target_status ?compatible ?requirement_edges ?design_edges ?lifecycle_edges WHERE {\n?root <urn:mara:field:status> ?status .\n\nOPTIONAL { ?root <urn:mara:query:input:requirement> ?requirement_row .\nOPTIONAL { ?requirement_row <urn:mara:query:column:requirement:requirement_basis_status> ?requirement_basis_status }\nOPTIONAL { ?requirement_row <urn:mara:query:column:requirement:verification_status> ?verification_status }\nOPTIONAL { ?requirement_row <urn:mara:query:column:requirement:requirement_edges> ?requirement_edges }\n}\nOPTIONAL { ?root <urn:mara:query:input:design> ?design_row .\nOPTIONAL { ?design_row <urn:mara:query:column:design:design_basis_status> ?design_basis_status }\nOPTIONAL { ?design_row <urn:mara:query:column:design:design_edges> ?design_edges }\n}\nOPTIONAL { ?root <urn:mara:query:input:term> ?term_row .\nOPTIONAL { ?term_row <urn:mara:query:column:term:collision_status> ?collision_status }\nOPTIONAL { ?term_row <urn:mara:query:column:term:repeats_title> ?repeats_title }\n}\nOPTIONAL { ?root <urn:mara:query:input:lifecycle> ?lifecycle_row .\nOPTIONAL { ?lifecycle_row <urn:mara:query:column:lifecycle:relation> ?relation }\nOPTIONAL { ?lifecycle_row <urn:mara:query:column:lifecycle:target> ?target }\nOPTIONAL { ?lifecycle_row <urn:mara:query:column:lifecycle:target_status> ?target_status }\nOPTIONAL { ?lifecycle_row <urn:mara:query:column:lifecycle:compatible> ?compatible }\nOPTIONAL { ?lifecycle_row <urn:mara:query:column:lifecycle:lifecycle_edges> ?lifecycle_edges }\n}\n}"
+    },
+    {
+      "id": "view_change_impact",
+      "root_flavours": [
+        "goal",
+        "need",
+        "scenario",
+        "requirement",
+        "design",
+        "decision",
+        "risk",
+        "term",
+        "evidence",
+        "verification",
+        "validation"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "affected": {
+          "type": "item"
+        },
+        "status": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?affected ?status WHERE { ?root (<urn:mara:relation:contributes_to>|^<urn:mara:relation:contributes_to>|<urn:mara:relation:satisfies>|^<urn:mara:relation:satisfies>|<urn:mara:relation:decomposes>|^<urn:mara:relation:decomposes>|<urn:mara:relation:derives_from>|^<urn:mara:relation:derives_from>|<urn:mara:relation:supersedes>|^<urn:mara:relation:supersedes>|<urn:mara:relation:justifies>|^<urn:mara:relation:justifies>|<urn:mara:relation:accepts>|^<urn:mara:relation:accepts>|<urn:mara:relation:threatens>|^<urn:mara:relation:threatens>|<urn:mara:relation:mitigates>|^<urn:mara:relation:mitigates>|<urn:mara:relation:verifies>|^<urn:mara:relation:verifies>|<urn:mara:relation:validates>|^<urn:mara:relation:validates>|<urn:mara:relation:exercises>|^<urn:mara:relation:exercises>|<urn:mara:relation:supports>|^<urn:mara:relation:supports>) ?affected . ?affected <urn:mara:field:status> ?status }"
+    },
+    {
+      "id": "view_input_requirement_basis",
+      "root_flavours": [
+        "goal",
+        "need",
+        "scenario",
+        "requirement",
+        "design",
+        "decision",
+        "risk",
+        "term",
+        "evidence",
+        "verification",
+        "validation"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "basis": {
+          "type": "item"
+        },
+        "flavour": {
+          "type": "iri"
+        },
+        "relation": {
+          "type": "iri"
+        },
+        "status": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?basis ?flavour ?relation ?status ?edge WHERE {\nVALUES ?view_root_flavour { <urn:mara:flavour:requirement> }\n?root a ?view_root_flavour .\n{ ?root <urn:mara:relation:satisfies> ?basis . BIND(<urn:mara:relation:satisfies> AS ?relation) ?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?basis ; <urn:mara:query:relation> <urn:mara:relation:satisfies> . }\nUNION { ?root <urn:mara:relation:decomposes> ?basis . BIND(<urn:mara:relation:decomposes> AS ?relation) ?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?basis ; <urn:mara:query:relation> <urn:mara:relation:decomposes> . }\nUNION { ?root <urn:mara:relation:derives_from> ?basis . BIND(<urn:mara:relation:derives_from> AS ?relation) ?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?basis ; <urn:mara:query:relation> <urn:mara:relation:derives_from> . }\nUNION { ?basis <urn:mara:relation:justifies> ?root . BIND(<urn:mara:relation:justifies> AS ?relation) ?edge <urn:mara:query:source> ?basis ; <urn:mara:query:target> ?root ; <urn:mara:query:relation> <urn:mara:relation:justifies> . }\n?basis a ?flavour ; <urn:mara:field:status> ?status .\n}",
+      "support_columns": [
+        "edge"
+      ]
+    },
+    {
+      "id": "view_input_design_basis",
+      "root_flavours": [
+        "goal",
+        "need",
+        "scenario",
+        "requirement",
+        "design",
+        "decision",
+        "risk",
+        "term",
+        "evidence",
+        "verification",
+        "validation"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "basis": {
+          "type": "item"
+        },
+        "flavour": {
+          "type": "iri"
+        },
+        "relation": {
+          "type": "iri"
+        },
+        "status": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?basis ?flavour ?relation ?status ?edge WHERE {\nVALUES ?view_root_flavour { <urn:mara:flavour:design> }\n?root a ?view_root_flavour .\n{ ?root <urn:mara:relation:satisfies> ?basis . BIND(<urn:mara:relation:satisfies> AS ?relation) ?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?basis ; <urn:mara:query:relation> <urn:mara:relation:satisfies> . }\nUNION { ?root <urn:mara:relation:contributes_to> ?basis . BIND(<urn:mara:relation:contributes_to> AS ?relation) ?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?basis ; <urn:mara:query:relation> <urn:mara:relation:contributes_to> . }\nUNION { ?root <urn:mara:relation:decomposes> ?basis . BIND(<urn:mara:relation:decomposes> AS ?relation) ?edge <urn:mara:query:source> ?root ; <urn:mara:query:target> ?basis ; <urn:mara:query:relation> <urn:mara:relation:decomposes> . }\n?basis a ?flavour ; <urn:mara:field:status> ?status .\n}",
+      "support_columns": [
+        "edge"
+      ]
+    },
+    {
+      "id": "view_input_requirement_knowledge",
+      "root_flavours": [
+        "goal",
+        "need",
+        "scenario",
+        "requirement",
+        "design",
+        "decision",
+        "risk",
+        "term",
+        "evidence",
+        "verification",
+        "validation"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        },
+        "basis_status": {
+          "type": "text",
+          "optional": true
+        },
+        "verification_status": {
+          "type": "text",
+          "optional": true
+        }
+      },
+      "select": "SELECT ?root ?status ?basis_status ?verification_status ?basis_support ?verification_edge WHERE {\nVALUES ?view_root_flavour { <urn:mara:flavour:requirement> }\n?root a ?view_root_flavour .\n?root <urn:mara:field:status> ?status . OPTIONAL { ?root <urn:mara:query:input:basis> ?basis_row .\n?basis_row <urn:mara:query:column:basis:status> ?basis_status . OPTIONAL { ?basis_row <urn:mara:query:column:basis:basis_support> ?basis_support } }\nOPTIONAL { ?verification <urn:mara:relation:verifies> ?root ; <urn:mara:field:status> ?verification_status . ?verification_edge <urn:mara:query:source> ?verification ; <urn:mara:query:target> ?root ; <urn:mara:query:relation> <urn:mara:relation:verifies> . }\n}",
+      "dependencies": [
+        {
+          "name": "basis",
+          "definition": "view_input_requirement_basis",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "status": "status"
+            },
+            "support": "basis_support"
+          }
+        }
+      ],
+      "support_columns": [
+        "basis_support",
+        "verification_edge"
+      ]
+    },
+    {
+      "id": "view_input_design_knowledge",
+      "root_flavours": [
+        "goal",
+        "need",
+        "scenario",
+        "requirement",
+        "design",
+        "decision",
+        "risk",
+        "term",
+        "evidence",
+        "verification",
+        "validation"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        },
+        "basis_status": {
+          "type": "text",
+          "optional": true
+        },
+        "verification_status": {
+          "type": "text",
+          "optional": true
+        }
+      },
+      "select": "SELECT ?root ?status ?basis_status ?verification_status ?basis_support WHERE {\nVALUES ?view_root_flavour { <urn:mara:flavour:design> }\n?root a ?view_root_flavour .\n?root <urn:mara:field:status> ?status . OPTIONAL { ?root <urn:mara:query:input:basis> ?basis_row .\n?basis_row <urn:mara:query:column:basis:status> ?basis_status . OPTIONAL { ?basis_row <urn:mara:query:column:basis:basis_support> ?basis_support } }\n}",
+      "dependencies": [
+        {
+          "name": "basis",
+          "definition": "view_input_design_basis",
+          "root": "root",
+          "parameters": {},
+          "projections": {
+            "columns": {
+              "status": "status"
+            },
+            "support": "basis_support"
+          }
+        }
+      ],
+      "support_columns": [
+        "basis_support"
+      ]
+    },
+    {
+      "id": "view_input_term_validity",
+      "root_flavours": [
+        "goal",
+        "need",
+        "scenario",
+        "requirement",
+        "design",
+        "decision",
+        "risk",
+        "term",
+        "evidence",
+        "verification",
+        "validation"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "status": {
+          "type": "text"
+        },
+        "collision_status": {
+          "type": "text",
+          "optional": true
+        },
+        "repeats_title": {
+          "type": "boolean"
+        }
+      },
+      "select": "SELECT ?root ?status ?collision_status ?repeats_title WHERE {\nVALUES ?view_root_flavour { <urn:mara:flavour:term> }\n?root a ?view_root_flavour .\n?root <urn:mara:field:status> ?status .\nBIND(EXISTS { ?root <urn:mara:query:nfc-casefold:title> ?name ; <urn:mara:query:nfc-casefold:field:aliases> ?name } AS ?repeats_title)\nOPTIONAL { ?root <urn:mara:query:input:collisions> ?collisions_row .\n?collisions_row <urn:mara:query:column:collisions:status> ?collision_status . }\n}",
+      "dependencies": [
+        {
+          "name": "collisions",
+          "definition": "view_input_term_collisions",
+          "root": "root",
+          "projections": {
+            "columns": {
+              "status": "status"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "view_input_term_collisions",
+      "root_flavours": [
+        "goal",
+        "need",
+        "scenario",
+        "requirement",
+        "design",
+        "decision",
+        "risk",
+        "term",
+        "evidence",
+        "verification",
+        "validation"
+      ],
+      "required_fact_sources": [
+        "documents"
+      ],
+      "columns": {
+        "other": {
+          "type": "item",
+          "flavours": [
+            "term"
+          ]
+        },
+        "status": {
+          "type": "text"
+        },
+        "matched": {
+          "type": "text"
+        },
+        "kind": {
+          "type": "text"
+        }
+      },
+      "select": "SELECT ?root ?other ?status ?matched ?kind WHERE {\nVALUES ?view_root_flavour { <urn:mara:flavour:term> }\n?root a ?view_root_flavour .\n{ ?root <urn:mara:query:nfc-casefold:title> ?matched . ?other <urn:mara:query:nfc-casefold:title> ?matched . BIND(\"title/title\" AS ?kind) }\nUNION { ?root <urn:mara:query:nfc-casefold:title> ?matched . ?other <urn:mara:query:nfc-casefold:field:aliases> ?matched . BIND(\"title/alias\" AS ?kind) }\nUNION { ?root <urn:mara:query:nfc-casefold:field:aliases> ?matched . ?other <urn:mara:query:nfc-casefold:title> ?matched . BIND(\"alias/title\" AS ?kind) }\nUNION { ?root <urn:mara:query:nfc-casefold:field:aliases> ?matched . ?other <urn:mara:query:nfc-casefold:field:aliases> ?matched . BIND(\"alias/alias\" AS ?kind) }\n?other a <urn:mara:flavour:term> ; <urn:mara:field:status> ?status . FILTER(!sameTerm(?root,?other))\n}"
+    }
+  ]
+}

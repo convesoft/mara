@@ -9,7 +9,7 @@ import { createClient } from '@convesoft/mara/client';
 
 // @mara checks REQ-SHARED-TYPESCRIPT-CLIENT
 async function documentUsage(client: MaraClient) {
-  const initialized = await client.projectInit({ template: 'engineering' });
+  const initialized = await client.projectInit({ template: 'engineering-legacy' });
   await mkdir(initialized.project.root + '/docs');
   const a = await client.itemCreate({ flavour: 'requirement', id: 'REQ-A', file: 'docs/a.mara.md', title: 'Typed API',
     body: 'Typed owning data.', fields: [{ key: 'status', value: 'draft' }] });
@@ -94,11 +94,11 @@ const boundary = async (adapter: ClientAdapter): Promise<MaraClient> => createCl
 void boundary;
 async function memoryBoundary(adapter: ClientAdapter<MemoryProjectInitParams>) {
   const client = await createClient<MemoryProjectInitParams>(adapter);
-  const result = await client.projectInit({ name: 'Memory workspace', template: 'engineering' });
+  const result = await client.projectInit({ name: 'Memory workspace', template: 'engineering-legacy' });
   const name: string = result.project.name;
   void name;
   // @ts-expect-error memory initialization requires a name
-  client.projectInit({ template: 'engineering' });
+  client.projectInit({ template: 'engineering-legacy' });
   // @ts-expect-error memory initialization params cannot be omitted
   client.projectInit();
   // @ts-expect-error native project override is not a memory initialization input

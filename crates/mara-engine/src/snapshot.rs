@@ -111,7 +111,9 @@ pub struct SourceEngine {
     selection: SelectionInputs,
     fingerprint: String,
     base_identity: Option<String>,
-    native_paths: bool,
+    pub(crate) native_paths: bool,
+    pub(crate) native_query_code:
+        Option<std::sync::Arc<crate::named_query::native::NativeCodeLoader>>,
 }
 /// Outcomes from a separate rule adapter. These are inputs, not engine-generated proof.
 /// They bind exact source state and the validation target to prevent stale reuse.
@@ -222,6 +224,7 @@ impl SourceEngine {
             fingerprint,
             base_identity: snapshot.base_identity,
             native_paths,
+            native_query_code: None,
         })
     }
     pub fn source_fingerprint(&self) -> &str {

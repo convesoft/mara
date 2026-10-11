@@ -66,7 +66,9 @@ mara --format json get REQ-ACCESS
 
 Inspect the schema before choosing a flavour or relation. See
 [initialization and project context](docs/project.mara.md),
-[retrieval](docs/retrieval.mara.md), and [trace matrices](docs/traceability.mara.md)
-for their full contracts.
+[retrieval](docs/retrieval.mara.md), and [engineering templates](docs/engineering-template.mara.md)
+for their full contracts. Use `--template engineering-legacy` for the previous
+profile; existing projects are never migrated. New named implementation/readiness
+queries have explicit runtime limits in the profile documentation.
 
 Licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

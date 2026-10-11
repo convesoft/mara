@@ -54,11 +54,46 @@ fn sources(w: &mut MemoryWorkspace) -> Value {
     call(w, "workspace_sources", json!({})).unwrap()
 }
 
+// @mara checks REQ-ENGINEERING-TEMPLATE
+// @mara checks REQ-BROWSER-LOCAL-WORKSPACE
+#[test]
+fn both_engineering_profiles_initialize_and_validate_in_memory_without_publication() {
+    for (template, expected_files) in [("engineering", 9), ("engineering-legacy", 5)] {
+        let mut w = empty();
+        let result = call(
+            &mut w,
+            "project_init",
+            json!({"name":"Engineering", "template":template}),
+        )
+        .unwrap();
+        assert_eq!(result["created"].as_array().unwrap().len(), expected_files);
+        assert_eq!(
+            call(&mut w, "schema_validate", json!({})).unwrap()["valid"],
+            true
+        );
+        assert_eq!(
+            call(&mut w, "project_validate", json!({})).unwrap()["valid"],
+            true
+        );
+        let before = sources(&mut w);
+        assert_eq!(before["base"]["files"], json!([]));
+        assert!(
+            call(
+                &mut w,
+                "project_init",
+                json!({"name":"Again", "template":template})
+            )
+            .is_err()
+        );
+        assert_eq!(sources(&mut w), before);
+    }
+}
+
 // @mara checks REQ-BROWSER-LOCAL-WORKSPACE
 #[test]
 fn dispatcher_applies_every_semantic_mutation_and_retains_base() {
     let mut w = empty();
-    init(&mut w, "engineering");
+    init(&mut w, "engineering-legacy");
     let a = create(&mut w, "REQ-A");
     create(&mut w, "REQ-B");
     assert!(a["complete"] == true);
@@ -105,7 +140,7 @@ fn dispatcher_applies_every_semantic_mutation_and_retains_base() {
 #[test]
 fn replacement_normalizes_complete_inventory_and_refuses_missing_inputs_atomically() {
     let mut w = empty();
-    init(&mut w, "engineering");
+    init(&mut w, "engineering-legacy");
     create(&mut w, "REQ-A");
     let mut snapshot = w.current_snapshot();
     snapshot.files[0].path = format!("./{}", snapshot.files[0].path);
@@ -196,7 +231,7 @@ fn custom_schema_invalid_configuration_keeps_recovering_validation_available() {
 #[test]
 fn unavailable_code_refuses_all_mutations_but_not_reads_or_schema_checks() {
     let mut w = empty();
-    init(&mut w, "engineering");
+    init(&mut w, "engineering-legacy");
     create(&mut w, "REQ-A");
     let mut snapshot = w.current_snapshot();
     let config = snapshot
@@ -271,7 +306,7 @@ fn unavailable_code_refuses_all_mutations_but_not_reads_or_schema_checks() {
 #[test]
 fn selection_ignores_and_rejected_edits_preserve_state_and_continuation() {
     let mut w = empty();
-    init(&mut w, "engineering");
+    init(&mut w, "engineering-legacy");
     create(&mut w, "REQ-A");
     create(&mut w, "REQ-B");
     let mut snapshot = w.current_snapshot();

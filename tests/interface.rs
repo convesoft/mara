@@ -108,6 +108,68 @@ fn undeclared_mcp_arguments_are_rejected_before_backfill_or_other_operations() {
 }
 
 // @mara implements VER-INTERFACE-PARITY
+// @mara checks REQ-QUERY-ENGINE-SURFACES
+#[test]
+fn query_help_and_mcp_descriptions_explain_native_acquisition_without_running_checks() {
+    let fixture = fixture();
+    for args in [
+        &["query", "--help"][..],
+        &["query", "execute", "--help"][..],
+        &["query", "gate", "--help"][..],
+        &["query", "view", "--help"][..],
+        &["query", "report", "--help"][..],
+        &["query", "report", "gate", "--help"][..],
+        &["query", "report", "rules", "--help"][..],
+    ] {
+        let result = mara(fixture.path(), args);
+        assert!(result.status.success(), "{args:?}: {}", stderr(&result));
+        let help = stdout(&result);
+        for meaning in [
+            "lazily",
+            "trusted",
+            "build tools",
+            "known absence",
+            "unavailable",
+            "Document-only/WASM",
+            "not fetched, run or authenticated",
+        ] {
+            assert!(help.contains(meaning), "{args:?} omitted {meaning}: {help}");
+        }
+    }
+    let group = stdout(&mara(fixture.path(), &["query", "--help"]));
+    assert!(group.contains("contextual gates") && group.contains("policy reports"));
+    let responses = mcp_exchange(
+        fixture.path(),
+        &[
+            mcp_initialize(1),
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            mcp_request(2, "tools/list", json!({})),
+        ],
+    );
+    let tools = mcp_response(&responses, 2)["result"]["tools"]
+        .as_array()
+        .unwrap();
+    for name in ["query_execute", "query_gate", "query_view", "query_report"] {
+        let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
+        let description = tool["description"].as_str().unwrap().to_lowercase();
+        for meaning in [
+            "lazily",
+            "trusted",
+            "build tools",
+            "unavailable",
+            "document-only/wasm",
+        ] {
+            assert!(
+                description.contains(meaning),
+                "{name} omitted {meaning}: {description}"
+            );
+        }
+        assert!(!description.contains("nothing is fetched, executed or persisted"));
+        assert!(description.contains("does not fetch, run or authenticate"));
+    }
+}
+
+// @mara implements VER-INTERFACE-PARITY
 // @mara checks REQ-SURFACE-PARITY
 #[test]
 fn every_cli_command_argument_and_option_has_rendered_guidance() {

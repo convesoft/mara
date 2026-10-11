@@ -60,7 +60,7 @@ test('real module worker runs the WASM memory workspace, rules and Unicode', asy
     let exported;
     try {
       const caps = shared.capabilities;
-      const initialized = await shared.projectInit({ name: 'café 中文 👩🏽‍💻', template: 'engineering' });
+      const initialized = await shared.projectInit({ name: 'café 中文 👩🏽‍💻', template: 'engineering-legacy' });
       assert(pageTick, 'worker computation blocked the page event loop');
       assert(caps.mutation_persistence === 'memory' && !caps.code.indexing &&
         !caps.code.native_index_import && !caps.native_recovery, 'capabilities');

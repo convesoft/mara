@@ -7,7 +7,7 @@ import path from 'node:path';
 
 // @mara checks REQ-PORTABLE-DOCUMENT-ENGINE
 // @mara implements VER-BROWSER-DOCUMENT-ENGINE
-for (const template of ['minimal', 'empty', 'engineering']) test(`installed native/worker initialization parity: ${template}`, async ({ page }, info) => {
+for (const template of ['minimal', 'empty', 'engineering', 'engineering-legacy']) test(`installed native/worker initialization parity: ${template}`, async ({ page }, info) => {
   const root = await mkdtemp(path.join(process.env.TMPDIR, 'init-parity-'));
   try {
     const calls = [['projectInit', { template }], ['schemaGet', {}], ['schemaValidate', {}], ['projectMidBackfill', {}]];

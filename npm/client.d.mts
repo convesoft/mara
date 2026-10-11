@@ -155,7 +155,7 @@ export interface SchemaGetParams extends ProjectSelection { kind?: SchemaKind | 
 export type ValidationParams = PageParams & ProjectSelection;
 export interface ProjectValidationParams extends ValidationParams, QueryInputs { paths?: string[] }
 export interface ItemValidationParams extends ValidationParams, QueryInputs { id: string }
-export type Template = 'minimal' | 'empty' | 'engineering';
+export type Template = 'minimal' | 'empty' | 'engineering' | 'engineering-legacy';
 export interface ProjectInitParams extends ProjectSelection { template?: Template }
 /** Existing worker/WASM initialization; no native project override or filesystem selection. */
 export interface MemoryProjectInitParams { name: string; template?: Template }

@@ -202,7 +202,7 @@ fn lifecycle_and_routing_share_explicit_and_environment_endpoint_selection() {
             "project",
             "init",
             "--template",
-            "engineering",
+            "engineering-legacy",
         ]);
         explicit(&[
             "--execution-mode",

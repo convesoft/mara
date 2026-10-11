@@ -1,10 +1,12 @@
 //! Named factual SELECT execution. Hosts supply sources; policies do not gate facts.
 mod composition;
 mod facts;
+pub(crate) mod native;
 mod signature;
 pub use crate::factual_graph::{Edge, Endpoint, Occurrence, Support};
 use crate::factual_graph::{PreparedGraph, hash, prepare};
 use crate::{ItemSource, SourceEngine};
+pub use native::NativeCodeInputs;
 use oxigraph::model::{Literal, NamedNode, Term};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -560,6 +562,7 @@ pub(crate) fn graph_source_prerequisites_valid(diagnostics: &[crate::Diagnostic]
 pub(crate) struct QueryInputPreflight {
     pub(crate) definitions: BTreeMap<String, Definition>,
     unavailable: BTreeMap<String, Option<String>>,
+    native_code: Option<std::sync::Arc<native::NativeCodeLoader>>,
 }
 impl QueryInputPreflight {
     /// Required unavailable inputs for a definition and its declared dependencies.
@@ -573,10 +576,10 @@ impl QueryInputPreflight {
                 return None;
             }
             let definition = preflight.definitions.get(id)?;
-            if definition.required_fact_sources.contains(&FactSource::Code) {
-                return Some(format!(
-                    "required code facts for named definition {id} were not supplied to this snapshot"
-                ));
+            if definition.required_fact_sources.contains(&FactSource::Code)
+                && let Some(reason) = native::code_unavailable(preflight.native_code.as_deref(), id)
+            {
+                return Some(reason);
             }
             if let Some(reason) = preflight
                 .unavailable
@@ -726,6 +729,7 @@ impl SourceEngine {
         Ok(QueryInputPreflight {
             definitions,
             unavailable,
+            native_code: self.native_query_code.clone(),
         })
     }
 

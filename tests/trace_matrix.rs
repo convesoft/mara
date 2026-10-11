@@ -1253,7 +1253,7 @@ fn engineering_profile_gates_acceptance_and_separates_coverage_from_results() {
             stdout(&output)
         );
     };
-    run(&["project", "init", "--template", "engineering"]);
+    run(&["project", "init", "--template", "engineering-legacy"]);
     for (flavour, id) in [
         ("goal", "GOAL-EXPORT"),
         ("scenario", "SCN-EXPORT"),

@@ -9,7 +9,7 @@ export async function useHttp(endpoint: string, token: string, project: string):
   if (result.has_more) await client.search({ ...input, cursor: result.next_cursor });
   const validation = await client.projectValidate();
   const invalid: boolean = !validation.valid; // fulfilled data, not exception
-  await client.projectInit({ template: 'engineering' });
+  await client.projectInit({ template: 'engineering-legacy' });
   await client.projectMidBackfill();
   await client.projectTransactionRollback();
   await client.projectRefresh();

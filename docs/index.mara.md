@@ -15,7 +15,7 @@ Selection and interpretation of recorded results follow
 - [Planned JavaScript and browser integration](integration.mara.md)
 - [Safe schema and vocabulary editing](schema-evolution.mara.md)
 - [Migration to 0.3](migration-0.3.mara.md)
-- [Engineering profile and workflow](engineering-template.mara.md)
+- [Current and legacy engineering templates](engineering-template.mara.md)
 - [Issue and bounded-scope delivery conventions](delivery.mara.md)
 - [Impact-based Rust development, review and full verification](testing.mara.md)
 - [Release preparation and public guidance](release.mara.md)

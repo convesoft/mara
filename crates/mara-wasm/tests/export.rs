@@ -25,7 +25,7 @@ fn workspace() -> MemoryWorkspace {
     call(
         &mut w,
         "project_init",
-        json!({"name":"Export", "template":"engineering"}),
+        json!({"name":"Export", "template":"engineering-legacy"}),
     )
     .unwrap();
     call(

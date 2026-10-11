@@ -1,6 +1,6 @@
 ---
 name: mara
-description: Use Mara to discover and read items and narrative, or author and validate structured project knowledge in Git-tracked *.mara.md files.
+description: Use Mara to discover, author and validate project knowledge, execute named factual queries, evaluate contextual gates, and render factual views or policy reports.
 ---
 
 # Mara project knowledge
@@ -11,7 +11,8 @@ for structured results. The same operation selection, authoring, continuation,
 and validation rules apply to both surfaces.
 
 This skill ships with 0.4.0-alpha.1. Its knowledge-operation interface uses schema format 3,
-discovery format 2, relationship format 1, validation format 1, and trace
+discovery format 2, relationship format 1, validation format 1, trace format 1,
+named-query definitions format 1, factual query pages format 3, and gate/view/report
 format 1. Typed inline relationships, inverse aliases, symmetric edges,
 external targets, graph policies, YAML current-state rules, and matrices are
 implemented. Use the skill shipped with the selected executable or
@@ -46,18 +47,20 @@ executable or runner rather than assuming a PATH installation or changing versio
 - Treat each operation as scoped to one project. Do not infer workspace or
   cross-project behavior.
 
-If the intended root has no `.mara/project.toml` and the user wants to start a
-Mara project, call `project_init` with the absolute root, or omit `project` when
-the MCP server was started with that root bound by `--project`. Use the default
-`minimal` template unless the user explicitly requests `empty` or `engineering`.
-Pass the selected name as `template` to `project_init`.
-`engineering` includes engineering flavours, selection guidance, and traceability
-relations. It also installs enabled `.mara/engineering-rules.yaml` and request-local
-`.mara/engineering-checks.yaml` and `.mara/engineering-execution.yaml`; no starter
-items are generated. The CLI equivalent
-is `"${mara_cli[@]}" --project /absolute/project --format json project init --template <template>`,
-where `<template>` is the selected `minimal`, `empty`, or `engineering` name.
-Do not create or modify `AGENTS.md` as part of Mara onboarding.
+If the intended root has no `.mara/project.toml`, initialize only when the user
+requests a Mara project. Use the default `minimal` unless they select `empty`,
+`engineering` or `engineering-legacy`. Pass the absolute project root unless
+the server was started bound to it. The CLI equivalent is
+`"${mara_cli[@]}" --project /absolute/project --format json project init --template NAME`.
+
+Engineering installs the current eleven-flavour vocabulary, structural rules,
+query-backed acceptance policies, domain projections, request-local gates,
+factual views and a tailored risk mapping. Engineering-legacy retains the old
+schema, policy and trace-check files. Inspect every path in `created`; neither
+profile generates starter items, migrates existing projects, packages a
+controller or changes `AGENTS.md`. Detailed semantics and runtime limits are in
+`docs/engineering-template.mara.md` and `docs/engineering-legacy.mara.md` in the
+Mara repository.
 
 ## Choose vocabulary from the schema
 
@@ -87,32 +90,21 @@ reinitialize or replace the schema with a template. Require `valid:true` from
 both `schema_validate` and `project_validate` (CLI `schema validate` and
 `project validate`).
 
-For the engineering template, inspect `schema_get` relation declarations before
-connecting items. `verification` describes a repeatable check; `evidence`
-records its result. Engineering relations are `verifies` (verification →
-requirement/design), `validates` (verification → goal/scenario), `evidences`
-(evidence → verification), `realizes` (artifact → requirement/design), code `implements`
-(→ requirement/design/verification) and code `checks` (→ requirement/design),
-`affects` (risk → affected knowledge), and `mitigates`
-(requirement/design/decision/verification → risk). Add only meaningful links;
-no complete trace chain or placeholder items are required. Existing projects
-do not gain these declarations automatically.
+For engineering projects, inspect the actual schema before connecting items.
+The current profile separates need, requirement, design, verification and
+validation. Evidence is a durable conclusion, not a routine test-run record.
+A requirement's basis and incoming verification must be accepted before it
+qualifies as authoritative knowledge; implementation and passing runs are
+separate claims. Risk assessment dimensions and verification/validation methods
+are optional on drafts and required at acceptance. Status never means ready,
+implemented, verified, released or task completion.
 
-New engineering items require `status`. Use `draft` while classifications and
-links are incomplete; `accepted` enables the bundled knowledge policies, and
-`retired` excludes an item from accepted coverage. Requirements
-and designs need `kind` when accepted; verification needs `method`, evidence needs
-`result`, `captured_at` and `subject_revision`, and risk needs `treatment`. Inspect
-the schema for enum values and optional fields. A status of accepted does not
-claim implementation or passing tests.
-
-Use `.mara/engineering-checks.yaml` with shape IRIs `urn:mara:rule:intent`,
-`urn:mara:rule:realization`, `urn:mara:rule:verification` or
-`urn:mara:rule:validation` on appropriate accepted roots. For execution, use
-`.mara/engineering-execution.yaml` with `urn:mara:rule:execution` on accepted
-verifications and bind `subject_revision` to the actual tested identity. This
-requires accepted evidence with `result: passed` at that revision; historical
-passing evidence and code associations do not establish a current execution result.
+For engineering-legacy, the old classifications, evidence provenance fields,
+risk treatment and trace-check vocabulary remain unchanged. Its request-local
+files are `.mara/engineering-checks.yaml` (intent, realization, verification,
+validation) and `.mara/engineering-execution.yaml` (execution with the exact
+`subject_revision` parameter). Do not assume the old and new ontologies are
+equivalent or replace an existing project's schema with either template.
 
 ## Choose the operation
 
@@ -133,7 +125,9 @@ inspect `<command> --help` for positional arguments and options.
 | Add or remove an existing item's typed edge | `relation_add` or `relation_remove` | `relation add`, `relation remove` |
 | Delete an item; resolve reported relation/mention blockers | `item_delete` | `item delete` |
 | Check an item or whole-project integrity | `item_validate` or `project_validate` | `item validate`, `project validate` |
-| Inspect coverage for selected roots | `trace_matrix` | `trace matrix` |
+| Execute named facts or render a factual view | `query_execute`, `query_view` | `query execute`, `query view` |
+| Evaluate a request-local gate or explain policy results | `query_gate`, `query_report` | `query gate`, `query report` |
+| Inspect legacy trace coverage for selected roots | `trace_matrix` | `trace matrix` |
 
 Validation (`project_validate`, `item_validate`, `schema_validate`) returns
 `valid`, `evaluation_complete`, `summary`, `diagnostics`, and output
@@ -394,6 +388,172 @@ restart after source, schema, or rule changes. CLI defaults to Markdown for
 this command; `--format json` returns trace format 1. MCP returns JSON and
 accepts `render:"markdown"` for the matching Markdown page. The output is a
 projection, not a saved source of project knowledge.
+
+## Queries, gates, views and reports
+
+These operations work with project-owned definitions, not only the engineering
+template. Read the actual definition/gate files to find exact identities, root
+flavours, required inputs and parameters; do not invent query names or an implicit
+project-wide selection. There is no separate query-list/get MCP operation.
+Definitions use JSON format 1; gates use request-local YAML; referenced SHACL
+shapes use explicit Turtle files.
+
+### Choose facts, policy or presentation
+
+- `query_execute` / `query execute`: typed distinct factual bindings, selected
+  roots, counts and explicit support. No pass/fail verdict.
+- `query_gate` / `query gate`: contextual conditions over explicit scope.
+  States are passed, failed, not_applicable and unavailable. A passed gate is
+  neither documentation validity nor permission to release/deploy.
+- `query_view` / `query view`: a factual table/relationship page over the same
+  query bindings. Presentation does not widen scope or repair incomplete facts.
+- `query_report` / `query report gate|rules`: explain gate or enabled
+  documentation-rule outcomes and qualifying/missing support. Use ordinary
+  item/project validation to determine documentation validity. A gate file does
+  not enable project policy.
+
+Factual query pages use format 3; gates, views and evaluation reports use
+format 1. Match each operation's envelope, not a shared guessed result shape.
+
+### Inputs and continuation
+
+Execute/view MCP inputs are `definition_files`, `definition`, `selection`,
+positive `max_rows` and explicit `limit` (1–100), plus optional `parameters`,
+`fact_snapshots`, `mappings`, `cursor` and view `render:"markdown"`.
+CLI defaults `--limit` to 20 and human views/reports to Markdown; `--format json`
+returns structured results. `max_rows` is an observed solution-row budget, not
+page size, traversal deadline or proof of bounded work.
+
+Selection/scope is either `{all:true}` or exact `ids`, `flavours`, `fields`
+and/or project-relative `paths`. OR within a category; AND across categories
+(and OR within one field key). `all` is exclusive of filters; omission never
+means all. CLI uses `--all` or repeatable `--id`, `--flavour`, `--field KEY=VALUE`
+and `--path`. IDs/MIDs identify one root; unknown IDs fail.
+
+MCP bindings are `[{name:"candidate",value:{type:"text",value:"actual-identity"}}]`.
+CLI uses `--param 'candidate={"type":"text","value":"actual-identity"}'`.
+Bind only declared parameters with their declared types; duplicate, missing,
+unused or wrongly typed bindings fail. Candidate/context values are opaque;
+resolve a Git ref yourself before passing its actual identity.
+
+Supply facts/mappings explicitly through MCP arrays or repeatable CLI
+`--fact-file` / `--mapping-file`. Snapshots declare an identity, typed coverage
+keys and records. Missing records inside declared complete coverage are known
+absence, interpreted by the definition (engineering execution uses PENDING).
+Missing/partial/out-of-coverage required inputs remain unavailable. Providers
+must reconcile records and establish applicability to the actual candidate or
+context and current definition revision. Mara does not fetch, run, authenticate
+or persist supplied execution facts. Missing mapping keys are unavailable unless
+the definition explicitly declares a fallback.
+
+For execute/view, read `evaluation_complete` independently of `has_more`.
+Counts may be unavailable while known bindings/support remain visible. With
+complete inputs, no matches is an empty factual result, not a failed policy.
+Follow `next_cursor` with every other input unchanged until `has_more:false`;
+a page is not the whole result. Document/code, definition, parameter, fact,
+mapping or control changes invalidate continuation. Gates/reports are not
+execute/view page streams and have no query cursor/limit inputs.
+
+### Native code is acquired, execution results are supplied
+
+Native hosts lazily reuse the existing code index and canonical relationships
+when the selected definition or a reachable dependency requires code. Unused
+code definitions do not trigger indexing for a document-only query. File-only
+code links need no language adapter. Symbol links require a configured indexer;
+comment associations additionally need matching grammar/query assets (see Code endpoints).
+
+Indexing may invoke trusted project-configured commands and build tools. This
+is different from running verification/validation methods: Mara consumes those
+providers' supplied results. Complete native code inputs with no matching
+implementation are known missing coverage, not unavailable. Indexing or
+referenced-input failures remain unavailable; declared code coverage does not
+prove code correctness. Frozen code inputs/content bind identity and continuation.
+Document-only/browser/WASM hosts cannot supply native code facts; required
+implementation-dependent evaluations there stay incomplete/unavailable.
+
+### Current engineering profile examples
+
+Use actual project IDs and candidate/context identities in place of these
+illustrative values. The domain catalog and fact-file format are in
+`docs/engineering-workflow.mara.md`; the limits and policy contract are in
+`docs/engineering-template.mara.md`. Preserve matching installed versions.
+
+Raw facts through CLI and MCP:
+
+```sh
+"${mara_cli[@]}" --project /absolute/project --format json query execute requirement_basis \
+  --definition-file .mara/engineering-queries.json --id REQ-EXPORT \
+  --max-rows 10000 --limit 20
+```
+
+```json
+{
+  "definition_files": [".mara/engineering-queries.json"],
+  "definition": "requirement_basis",
+  "selection": {"ids": ["REQ-EXPORT"]},
+  "max_rows": 10000,
+  "limit": 20
+}
+```
+
+Pass that JSON to `query_execute`. For `query_view`, use the same fields with
+`render:"markdown"`; engineering `view_...` compositions require both
+engineering-queries.json and engineering-views.json. For example:
+
+```sh
+"${mara_cli[@]}" --project /absolute/project query view view_engineering_basis_and_rationale \
+  --definition-file .mara/engineering-queries.json \
+  --definition-file .mara/engineering-views.json --id REQ-EXPORT \
+  --max-rows 10000 --limit 20
+```
+
+Gate example: pass this JSON to `query_gate`, supplying the contents of the
+installed engineering-risk-matrix.json as the one `mappings` array entry:
+
+```json
+{
+  "definition_files": [".mara/engineering-queries.json"],
+  "gate_file": ".mara/engineering-gates.yaml",
+  "shape_files": [".mara/engineering-shapes.ttl"],
+  "gate": "implementation_ready",
+  "scope": {"ids": ["REQ-EXPORT"]},
+  "max_rows": 10000
+}
+```
+
+```sh
+"${mara_cli[@]}" --project /absolute/project --format json query gate implementation_ready \
+  --definition-file .mara/engineering-queries.json \
+  --gate-file .mara/engineering-gates.yaml --shape-file .mara/engineering-shapes.ttl \
+  --mapping-file .mara/engineering-risk-matrix.json --id REQ-EXPORT --max-rows 10000
+```
+
+implementation_ready checks accepted knowledge/lifecycle/risk, not code.
+verified additionally requires native implementation coverage and applicable PASS
+results for every accepted verification; supply a typed candidate and
+verification_results snapshot. release_ready is the requirement-side gate, not
+a complete release claim. Evaluate each externally selected required_validation
+with its validation root, typed context and validation_results snapshot; different
+contexts require separate requests and external AND composition. An empty required
+validation list does not claim that stakeholder outcomes are validated.
+
+For a gate report, substitute CLI `query report gate` with the same gate inputs.
+MCP `query_report` wraps those inputs as
+`{subject:{kind:"gate", ...gateInputs},render:"markdown"}`. Gate scope/context
+belong inside subject; project and render remain tool-level fields.
+For enabled rules, use CLI `query report rules` (optional `--id ID`) or:
+
+```json
+{
+  "subject": {"kind": "documentation_rules", "target": {"kind": "project"}},
+  "render": "markdown"
+}
+```
+
+For an item rule report use `target:{kind:"item",id:"ACTUAL-ID"}`. Fact snapshots
+and mappings for reports go inside subject; MCP `project` remains a tool-level
+field. Consult `tools/list` and each CLI `--help` for the matching invocation.
+Never reinterpret unavailable as pass or a configured gate as authority to act.
 
 ## Preserve authored references
 

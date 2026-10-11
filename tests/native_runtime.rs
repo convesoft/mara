@@ -217,7 +217,7 @@ fn embedded_rules_trace_and_selection_keep_native_inputs_and_results() {
     let root = fixture.path();
     let runtime = NativeRuntime::new(None, root.to_owned()).unwrap();
     runtime
-        .project_initialize(Some(root.to_owned()), Template::Engineering)
+        .project_initialize(Some(root.to_owned()), Template::EngineeringLegacy)
         .unwrap();
     assert!(runtime.schema_validate().unwrap().valid);
     assert!(runtime.project_validate(&[]).unwrap().valid);

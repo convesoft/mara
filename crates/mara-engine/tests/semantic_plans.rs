@@ -140,7 +140,12 @@ fn real_document_only_planner_executes_all_operations_without_publication() {
 // @mara checks DES-SEMANTIC-CHANGE-PLANS
 #[test]
 fn templates_and_initialization_preserve_sources_and_refuse_overwrite() {
-    for template in [Template::Minimal, Template::Empty, Template::Engineering] {
+    for template in [
+        Template::Minimal,
+        Template::Empty,
+        Template::Engineering,
+        Template::EngineeringLegacy,
+    ] {
         let mut engine = empty();
         let plan = engine
             .plan_initialize("Name \"with quotes\"", template)
@@ -153,10 +158,10 @@ fn templates_and_initialization_preserve_sources_and_refuse_overwrite() {
         );
         assert_eq!(
             plan.changes().len(),
-            if template == Template::Engineering {
-                5
-            } else {
-                2
+            match template {
+                Template::Engineering => 9,
+                Template::EngineeringLegacy => 5,
+                Template::Minimal | Template::Empty => 2,
             }
         );
         engine.apply_plan(plan).unwrap();

@@ -94,7 +94,7 @@ for (const mode of ['direct', undefined, 'daemon-required']) {
       const caps = await call('capabilities');
       assert.equal(caps.mutation_persistence, 'filesystem');
       assert.equal(caps.code.indexing, true);
-      const initialized = await call('project_init', { template: 'engineering' });
+      const initialized = await call('project_init', { template: 'engineering-legacy' });
       assert.equal(initialized.project.root, root);
       assert.equal(initialized.created.length, 5); // Every installed engineering source is reported.
       assert.ok(await readFile(path.join(root, '.mara/engineering-checks.yaml'), 'utf8'));

@@ -58,7 +58,7 @@ test('public bundled WASM factory matches the real native shared facade', async 
     const client = await starting;
     const assert = (value, message) => { if (!value) throw new Error(message); };
     try {
-      await client.projectInit({ name: 'Parity café', template: 'engineering' });
+      await client.projectInit({ name: 'Parity café', template: 'engineering-legacy' });
       const snapshot = (await client.workspaceSources()).current;
       snapshot.base_identity = 'fixture-original-base';
       snapshot.files.find(f => f.path === '.mara/engineering-rules.yaml').content =
