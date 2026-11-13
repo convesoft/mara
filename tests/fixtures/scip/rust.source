@@ -1,2 +1,0 @@
-// @mara code_implements REQ-A
-pub fn run() -> u32 { 42 }

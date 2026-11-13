@@ -1,2 +1,0 @@
-int parse(int value) { return value + 1; }
-int parse(double value) { return int(value) + 2; }
