@@ -1,0 +1,8 @@
+{
+  "deniedMcpServers": [
+    { "serverName": "mara" }
+  ],
+  "skillOverrides": {
+    "mara": "off"
+  }
+}
