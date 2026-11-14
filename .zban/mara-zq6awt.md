@@ -2,6 +2,8 @@
 title: pulldown-cmark ends a script, pre, style or textarea HTML block only at a lowercase end tag
 status: todo
 type: bug
+tags:
+  - maintainer
 discovered_from: mara-t6xn9z
 created_at: 2026-11-14T15:26:41Z
 ---
