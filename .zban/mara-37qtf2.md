@@ -1,6 +1,6 @@
 ---
 title: Self-host this repository's documents
-status: todo
+status: in-progress
 type: task
 parent: mara-t1rffa
 blocked_by:
