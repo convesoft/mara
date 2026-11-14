@@ -1,6 +1,6 @@
 ---
 title: Scaffold the repository
-status: todo
+status: in-progress
 type: task
 parent: mara-t1rffa
 created_at: 2026-11-13T22:10:06Z
