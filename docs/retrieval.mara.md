@@ -102,7 +102,38 @@ A read returns at most a bounded number of records and bytes, with a cursor whil
 
 ---
 
+<a id="01M7CMW719S9H8FQKRFWWQ6NQK"></a>
+
+### Page limits
+
+| Type | Requirement |
+| --- | --- |
+| ID | REQ-PAGE-LIMITS |
+| Status | Draft |
+| Satisfies | [NEED-BOUNDED-RETRIEVAL](product.mara.md#01M7BF6H6GBKEHK5BQ8NDX7JG5) |
+
+A page holds 20 records unless the request asks for another number from 1 to 100, and at most 65,536 bytes. The numbers are those of 0.3.0 and provisional.
+
+---
+
 ## Design
+
+---
+
+<a id="01M7CMW710P9V73WXFQ15PBYBS"></a>
+
+### Narrative units
+
+| Type | Design |
+| --- | --- |
+| ID | DES-NARRATIVE-UNITS |
+| Status | Accepted |
+| Satisfies | [REQ-SEARCH-ITEMS-AND-NARRATIVE](#01M7BF6HA7YSRRQ2BWS54AEGSG) |
+| Satisfies | [REQ-READ-NODE](#01M7BF6HB1DC9AFHM890ERAJCK) |
+
+- A narrative unit is a heading and the blocks up to the next heading in the same region. Blocks before a region's first heading form one unit.
+- Search returns a unit as `<path>:<line>`, the line where it starts.
+- `get <path>:<line>` reads the unit or item that contains that line. `get <path>` reads the whole document.
 
 ---
 
@@ -125,5 +156,5 @@ A read returns at most a bounded number of records and bytes, with a cursor whil
 
 ## Open questions
 
-- The unit of narrative that search returns and `get` reads: a whole region, or a section or block inside it.
 - Whether inspecting the authored occurrences of one relation stays its own operation (`relation get` in 0.3.0) or becomes part of `related`.
+- How `get` pages a node whose content exceeds one page.

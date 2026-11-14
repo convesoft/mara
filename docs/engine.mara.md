@@ -47,7 +47,7 @@ A host that cannot provide a capability, such as grammar-level code links in the
 | Satisfies | [REQ-SAME-RESULT-ON-EVERY-HOST](#01M7BF6GXHZNABX9R7NKPNGJNM) |
 
 - The engine is a library over file contents: no filesystem, processes, threads, clocks or network. It compiles to WASM.
-- Hosts (CLI, daemon, Node library, browser worker) supply contents and own I/O, watching, caching and process management.
+- Hosts (CLI, daemon, Node library, browser worker) supply contents and own I/O, watching, caching and process management. They also supply the time and the random bytes of each new MID.
 
 ---
 
@@ -61,7 +61,8 @@ A host that cannot provide a capability, such as grammar-level code links in the
 | Status | Accepted |
 | Satisfies | [REQ-WORK-FOLLOWS-CHANGE](performance.mara.md#01M7BF6H3A6YQ43351V9YSV3SQ) |
 
-- Inputs are only the files the configuration declares ([DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27)): documents, schema, the configuration itself, code files and grammar assets. `.git` and undeclared files are never read or hashed.
+- Inputs are only the files the configuration declares ([DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27)): documents, schema, the configuration itself, programs, code files and grammar assets. `.git` and undeclared files are never read or hashed.
+- A document or code file that a `.gitignore` file in the project tree ignores is never an input. Those `.gitignore` files are inputs themselves; Git's global excludes and `.git/info/exclude` are never read.
 - A file is re-hashed (BLAKE3) only when its size, mtime, ctime or inode changes. A file modified within 2 s of the check is re-hashed anyway, so a same-tick edit is detected.
 - Derived values are keyed by content:
 

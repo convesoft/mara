@@ -73,5 +73,7 @@ At grammar level, declarations come from `tags.scm`, and comments are recognized
 
 ## Open questions
 
-- What renaming an ID does to `@mara` markers that use the old ID: rewrite the code, refuse, or report.
 - How `get` and `related` address a code endpoint.
+- How the schema declares a relation whose source is code, such as `Implements`.
+- Whether `project validate` scans code, to report markers whose ID does not resolve and to feed invariants over code links. [VER-WORK-COUNTERS](verification.mara.md#01M7BF6HGG6ET88HS641Y5676G) expects no code scan from a document operation.
+- Whether deleting an item is refused while a code marker names it.

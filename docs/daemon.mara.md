@@ -60,9 +60,9 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 | Status | Accepted |
 | Satisfies | [REQ-FIRST-CALL-IN-PROCESS](#01M7BF6GQK5GM340Z7CP4C83B8) |
 
-- A lock in the daemon's runtime directory (`$XDG_RUNTIME_DIR/mara/`, mode 0700) ensures a single instance when several clients start it at once. The socket path stays under the 108-byte Unix limit.
+- Each Mara version has its own lock and socket in the runtime directory (`$XDG_RUNTIME_DIR/mara/`, mode 0700). The lock ensures one instance per version when several clients start it at once; the socket path stays under the 108-byte Unix limit.
+- A client connects only to the daemon of its own version. Daemons of different versions run side by side.
 - A client falls back to direct mode only before it dispatches a request. A dispatched request is never replayed on another backend.
-- A client of a different Mara version asks the running daemon to finish in-flight work and exit, then starts its own.
 - The daemon exits after an idle period with no requests and no connected clients.
 - No client starts a daemon when `CI` is set, `MARA_NO_DAEMON=1` is set or the direct-mode flag is given.
 - `mara daemon status | start | stop` give explicit control.
@@ -81,8 +81,16 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 | Satisfies | [REQ-READS-DURING-VALIDATION](performance.mara.md#01M7BF6H3T3589901T1AE0ADHM) |
 
 - One session per canonical project root. Git worktrees are separate projects.
-- Watch mode is on by default. The daemon watches only directories that contain declared inputs and honours ignore rules (inotify watch limits are per user).
+- Watch mode is on by default. The daemon watches only directories that contain inputs ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)); inotify watch limits are per user.
 - It debounces bursts such as a branch checkout and re-derives in the background. A watcher overflow or error triggers a full rescan.
 - Readers take the current snapshot without locks. Writers queue per project ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)); there is no global lock.
 - Long work runs on worker threads with cancellation. Protocol handlers never block each other.
 - Caches live in memory.
+
+---
+
+## Open questions
+
+- How a request notices a new input file without walking the tree each time: watcher events, or directory timestamps.
+- The length of the idle period, and whether a session's snapshot and watches are dropped after an idle period of their own.
+- How the loopback listener is enabled, how a browser obtains the session token, and where allowed origins and projects are set.

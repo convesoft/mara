@@ -10,5 +10,6 @@ created_at: 2026-11-13T22:10:06Z
 
 Context: REQ-PROJECT-INIT in docs/project.mara.md; DES-ENGINEERING-VOCABULARY in docs/vocabulary.mara.md.
 
-- [ ] Decide which template applies when none is named (open question on docs/project.mara.md)
+- [x] Decide which template applies when none is named: `engineering` (REQ-PROJECT-INIT)
+- [ ] Decide the inverse relation names (open question on docs/vocabulary.mara.md)
 - [ ] Templates embedded in the binary; existing files are never overwritten; created files are reported

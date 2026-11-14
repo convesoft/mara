@@ -33,6 +33,8 @@
 | Satisfies | [REQ-AGENT-GUIDE](#01M7BGRHWB2MGXEY5G41YP8E0G) |
 
 - One template compiled into the binary is rendered per surface: operations appear as commands in `mara prime` and as tools in the MCP instructions.
+- The guide depends only on the binary. It lists none of the project's types or relations and sends the agent to schema inspection first ([REQ-SCHEMA-INSPECTION](project.mara.md#01M7BF6H9F8E7RB3XBSE0EKAR3)).
+- Sections: find and read, author, repair after hand edits, validate.
 - Operation, option and tool names in the guide come from the definitions that the CLI and the MCP tool schemas use. Tests compare them in both directions.
 - The project is the one found where the surface starts ([REQ-ONE-PROJECT-PER-OPERATION](project.mara.md#01M7BF6H8ND7YSXFMWCM0KXAAY)): the working directory or `--project` for `prime`, the server's start for MCP.
 
@@ -44,9 +46,3 @@
 - The full guide opens with the same fixed heading in both renderings, so a project's agent instructions can send an agent to `mara prime` only when its context lacks the guide.
 - The MCP rendering stays within 3,800 characters; Claude Code truncates server instructions at 4,096. It leaves out what the tool schemas carry.
 - Project conventions stay in the project's own agent instructions.
-
----
-
-## Open questions
-
-- The guide's sections, and whether it lists the project's own types and relations.

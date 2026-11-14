@@ -42,10 +42,12 @@
 | ID | ADR-RELATIONS-ONLY-IN-TABLE |
 | Status | Accepted |
 | Justifies | [DES-RELATION-LINKS](identity.mara.md#01M7BF6H29JGHG65SV91K6D11V) |
+| Justifies | [REQ-EDIT-RELATIONS](authoring.mara.md#01M7BF6GN8DJ66NPBMQK83H9PW) |
 
 - Chosen: one row on the source item, under the forward relation name, holding a Markdown link.
 - Rejected: `[[ID]]` and `[[relation:target]]` syntax. It is not Markdown and does not navigate on GitHub.
 - Rejected: rows under the inverse name on the target item. One edge would have two spellings.
+- Rejected: an inverse name in `relation add`, written as the forward row on the other item. The operation would edit an item it was not pointed at.
 
 ---
 
@@ -61,6 +63,23 @@
 
 - Chosen: order the writes so that an interruption leaves only states validation reports. The MID in each link fragment keeps identity intact meanwhile.
 - Rejected: a journal of preimages with an explicit rollback command, as in 0.3.0. It adds transaction state that blocks writers, and recovery code.
+- Rejected: fix removing one copy after an interrupted move. Fix would delete an item and guess between the copies.
+
+---
+
+<a id="01M7CMW6Y0WFD4W6951906MXQY"></a>
+
+### Keep configuration and schema as TOML files under `.mara/`
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-TOML-PROJECT-FILES |
+| Status | Accepted |
+| Justifies | [DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27) |
+
+- Chosen: `.mara/config.toml` and `.mara/schema.toml`, each with its own format version starting at 1.
+- Rejected: the 0.3.0 names, `.mara/project.toml` and `.mara/schema.yaml`. YAML needs a second parser, and the format versions would continue at 4.
+- Rejected: one `mara.toml` at the project root. A schema edit would change the configuration hash, and `project init` could not write the schema as its own file.
 
 ---
 
@@ -76,6 +95,23 @@
 
 - Chosen: a dispatcher package with one optional dependency per platform.
 - Rejected: an install-time downloader. It depends on lifecycle scripts, which restricted environments disable.
+
+---
+
+<a id="01M7CMW6YNXSQAS7H0ATKG4GH0"></a>
+
+### Keep the 0.3.0 platforms and Node version
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-KEEP-PLATFORMS-AND-NODE |
+| Status | Accepted |
+| Justifies | [DES-PACKAGES](distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8) |
+
+- Chosen: Linux x64 and arm64 (glibc), macOS arm64 and Node 24, as in 0.3.0.
+- Rejected until requested: Windows. It needs a Soufflé MSVC build, a patch for explanations (the explain console throws `No explain/explore provenance on Windows`) and named-pipe IPC for the daemon.
+- Rejected until requested: Intel macOS and musl Linux.
+- Rejected: Node 22. It reaches end of life in April 2027.
 
 ---
 
@@ -107,3 +143,18 @@
 - Chosen: outside a project, `mara prime` and the MCP instructions say how to initialize one, and nothing more.
 - Rejected: the full guide everywhere. It fills the context of projects that do not rely on Mara.
 - Rejected: no output at all. Nothing would tell a user or agent how to start.
+
+---
+
+<a id="01M7CMW6YBVK2FYK2AQA7XAT6Y"></a>
+
+### Keep the agent guide independent of the project's schema
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-STATIC-AGENT-GUIDE |
+| Status | Accepted |
+| Justifies | [DES-AGENT-GUIDE](agents.mara.md#01M7BGRHWQHQJJHC6XCXVDWDM8) |
+
+- Chosen: one guide per binary, which sends the agent to schema inspection.
+- Rejected: listing the project's types and ID prefixes. MCP instructions are sent once per connection, so the list goes stale after a schema edit, and a large schema exceeds the size limit.

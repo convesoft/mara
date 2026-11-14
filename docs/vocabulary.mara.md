@@ -53,3 +53,4 @@ Every type has `Status`: `Draft`, `Accepted` or `Retired`.
 ## Open questions
 
 - Which invariants, gates and views the template ships as programs. The `engineering` template at commit `d7f0e73` (`templates/engineering-*`) is the starting point.
+- The inverse name of each relation, which [DES-SCHEMA-MODEL](project.mara.md#01M7BF6HA0KG3R3AATWM1P2X1G) requires. The schema at commit `d7f0e73` (`templates/engineering-schema.yaml`) has one for each, such as `satisfied_by` and `gives_rise_to`.

@@ -18,6 +18,22 @@
 
 ---
 
+<a id="01M7CMW6YZ0S1DPP7T8AD7A3DQ"></a>
+
+### Filter inputs through the project's `.gitignore` files
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-GITIGNORE-FILTERS-INPUTS |
+| Status | Accepted |
+| Justifies | [DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY) |
+
+- Chosen: include patterns select documents and code files, and `.gitignore` files in the project tree exclude them.
+- Rejected: configuration patterns only. Every project would list `target/`, `node_modules/` and its build output itself.
+- Rejected: Git's global excludes and `.git/info/exclude`. They differ per machine, so hosts would disagree.
+
+---
+
 <a id="01M7BF6GS1109M3YV9WHTT4XTK"></a>
 
 ### Keep caches in memory
@@ -46,6 +62,21 @@
 
 - Chosen: clients start the daemon in the background; it watches declared inputs, so the next request is already warm, and exits when idle.
 - Rejected: explicit start only, as in 0.4.0-alpha.1. The CLI never started a daemon, so most calls ran cold.
+
+---
+
+<a id="01M7CMW6Z9MMB1705N02S9CCYG"></a>
+
+### Run one daemon per Mara version
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-DAEMON-PER-VERSION |
+| Status | Accepted |
+| Justifies | [DES-DAEMON-LIFECYCLE](daemon.mara.md#01M7BF6GR80WA207P4BBFWW671) |
+
+- Chosen: each version has its own lock and socket. Daemons of different versions coexist and exit when idle.
+- Rejected: one daemon per OS user that exits when a client of another version arrives. Projects pinned to different versions would stop each other's daemon on every call and never run warm.
 
 ---
 
@@ -95,6 +126,24 @@
 - Chosen: Soufflé's command-line contract: a bundled child process natively, the Emscripten build in the browser worker.
 - Rejected: the C++ interface ([`souffle/SouffleInterface.h`](https://souffle-lang.github.io/interface)) and [SWIG](https://souffle-lang.github.io/swig). They run only programs translated with `souffle -g` and compiled; the interpreter's `ProgInterface` leaves `run()` and `loadAll()` empty (`src/interpreter/ProgInterface.h:258`). Every rule change would need a C++ compiler on the user's machine, and none of it works in a browser.
 - Rejected: in-process evaluation. Even with `SOUFFLE_ALLOW_SIGNALS` (`src/include/souffle/SignalHandler.h:96`), integer division by zero raises SIGFPE, and any C++ exception reaches `SignalHandler::error()`, which calls `exit(1)` (`SignalHandler.h:148–154`). A child process contains both.
+
+---
+
+<a id="01M7CMW6ZGC0PY8DVYNQDSBPRH"></a>
+
+### Refuse program constructs that reach outside the evaluation
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-PROGRAM-PROFILE |
+| Status | Accepted |
+| Justifies | [DES-PROGRAM-PROFILE](rules.mara.md#01M7CMW7051QVPFDWQBMB1A6K6) |
+| Justifies | [REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0) |
+
+- Chosen: a scan before every run refuses the constructs that read, write or execute outside the evaluation ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)), and a time limit bounds each evaluation.
+- Rejected: trusting programs like build scripts. Validating an untrusted checkout would run its code.
+- Rejected: sandboxing the child process with Landlock, seccomp or `sandbox-exec`. It is platform-specific and fails on kernels without Landlock.
+- Rejected: forbidding records, ADTs and `autoinc()` to bound evaluation. Plain recursion with arithmetic or `cat` never ends either.
 
 ---
 

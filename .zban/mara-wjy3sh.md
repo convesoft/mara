@@ -10,6 +10,6 @@ created_at: 2026-11-13T22:10:06Z
 
 Context: docs/migration.mara.md (REQ-CONVERT-DIRECTIVE-CORPUS).
 
-- [ ] Decide the open questions on docs/migration.mara.md
-- [ ] Converter keeps every MID, ID, field value and relation
+- [x] Decide the open questions on docs/migration.mara.md (DES-CONVERSION-MAPPING)
+- [ ] Converter rewrites documents, schema and configuration as DES-CONVERSION-MAPPING describes, and reports what it leaves out
 - [ ] Test on the 0.3.0 corpus: `git show v0.3.0:docs/`

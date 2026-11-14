@@ -32,6 +32,20 @@ Mara evaluates externally supplied records, such as verification results, as giv
 
 ---
 
+<a id="01M7CMW6ZTAJHSF5BR9SF9KR86"></a>
+
+### Programs only compute
+
+| Type | Requirement |
+| --- | --- |
+| ID | REQ-PROGRAMS-ONLY-COMPUTE |
+| Status | Accepted |
+| Satisfies | [NEED-PROJECT-LOGIC](product.mara.md#01M7BF6H74D5GX045CWVY9106D) |
+
+Evaluating a program reads only the facts Mara supplies, writes only the outputs Mara collects and loads no native code. A program that could do otherwise is refused before it runs, and its outcome is unavailable.
+
+---
+
 ## Design
 
 ---
@@ -90,6 +104,7 @@ Mara ships a versioned declarations file, `mara.dl`, that starts with `.once`; p
 ```
 
 - Each relation is `.input`. Mara writes one TSV file per relation, once per document snapshot.
+- Types, statuses, field keys, enum values and relation names are schema names (`requirement`, `derives_from`), never labels.
 - The distinct subtypes `Mid`, `Id` and `Path` make Soufflé reject rules that mix identities.
 - `edge` rows carry the location of each occurrence, so a relation authored twice yields two rows. Programs that count distinct relationships project away `path` and `line`.
 - `source_complete` marks an externally supplied source as complete.
@@ -99,8 +114,31 @@ Mara ships a versioned declarations file, `mara.dl`, that starts with `.once`; p
 
 ---
 
+<a id="01M7CMW7051QVPFDWQBMB1A6K6"></a>
+
+### Admitted program profile
+
+| Type | Design |
+| --- | --- |
+| ID | DES-PROGRAM-PROFILE |
+| Status | Accepted |
+| Satisfies | [REQ-PROGRAMS-ONLY-COMPUTE](#01M7CMW6ZTAJHSF5BR9SF9KR86) |
+
+Before every run the host scans each program file, outside comments and strings, and refuses:
+
+| Construct | It would |
+| --- | --- |
+| `.functor` | Load a shared library and run its code |
+| `.pragma` | Set Soufflé options, library paths included |
+| `.input`, `.output` or `.printsize` with parameters | Read or write any file or database |
+| `.include` of a file other than `mara.dl` and the declared programs | Read an undeclared file |
+
+- A refusal is reported like a compile error ([REQ-PROGRAM-FAULTS-REPORTED](rules-evaluation.mara.md#01M7BF6HCZ88PSSQTFKXE8KJ81)).
+- Everything else in Soufflé is admitted, records, ADTs and `autoinc()` included. Time is bounded instead ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)).
+
+---
+
 ## Open questions
 
-- Where programs live, how their outputs are registered as invariants, gates or views, and how an invariant violation is reported.
-- The admitted program profile: records, ADTs and `autoinc()` can make evaluation unbounded. Forbid them, or bound evaluation time.
+- How a program's outputs are registered as invariants, gates or views, and how an invariant violation names its item and message.
 - Whether `mara` offers a compile-only program check; a run against empty facts costs 2–6 ms. Editor support for `.dl` is community-only and stale: VS Code `W4RH4WK.souffle-syntax` (highlighting, 2018) and `i-daridis.souffle-lang-server` (2023), plus a `tree-sitter-souffle` grammar.

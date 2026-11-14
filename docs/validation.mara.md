@@ -81,13 +81,26 @@ Implemented in Rust, always on, linear in items plus edges.
 | Document structure | [DES-REGIONS](format.mara.md#01M7BF6GZ5V5HWV00MDZN68Z06), [DES-ITEM-STRUCTURE](format.mara.md#01M7BF6GZDTNNW0Z0MX7FEG6ZF) |
 | Metadata | Required fields, allowed values, undeclared keys ([DES-METADATA-TABLE](format.mara.md#01M7BF6GZNS6VM3T94VS9A5HTD)) |
 | Identity | MID form and uniqueness, ID prefix and uniqueness ([DES-MID-ANCHOR](identity.mara.md#01M7BF6H1MB5RR3RS43B3CJHAR), [DES-ITEM-IDS](identity.mara.md#01M7BF6H1ZBTKWTF9ZXEJ8EBGS)) |
-| Links | Relation and mention targets exist; paths and link text are current ([DES-RELATION-LINKS](identity.mara.md#01M7BF6H29JGHG65SV91K6D11V)) |
+| Links | Relation and mention targets exist; paths and relation link text are current ([DES-RELATION-LINKS](identity.mara.md#01M7BF6H29JGHG65SV91K6D11V)) |
 | Relations | Target type allowed for the source type, same-type relations, acyclic relations ([DES-SCHEMA-MODEL](project.mara.md#01M7BF6HA0KG3R3AATWM1P2X1G)) |
 
 Conditional obligations, such as "an accepted Verification verifies an accepted Requirement", are project logic ([DES-RULE-CONSUMERS](rules.mara.md#01M7BF6HE529B61Q2ZNXFQ1JXE)).
 
 ---
 
-## Open questions
+<a id="01M7CMW71GXWZS8HPVVTYPENDK"></a>
 
-- Diagnostic codes and the result format, including the format for invariant violations.
+### Diagnostics
+
+| Type | Design |
+| --- | --- |
+| ID | DES-DIAGNOSTICS |
+| Status | Accepted |
+| Satisfies | [REQ-REPORT-EVERY-PROBLEM](#01M7BF6HEVWZ2490K493GDP8KC) |
+| Satisfies | [REQ-VALIDITY-COVERS-WHOLE-PROJECT](#01M7BF6HF8R0Q5BK349ESZ2PS7) |
+
+- A diagnostic has a code, a severity (`error` or `warning`), a message, a path and a line, and the ID and MID of the item it concerns.
+- Codes are stable kebab-case names such as `stale-link-path`. An invariant violation carries the invariant's name.
+- Every built-in check failure is an error. A warning comes only from an invariant that declares that severity.
+- A result carries the project's validity and its error and warning counts, then one page of diagnostics in path and line order.
+- The CLI prints each diagnostic as `<path>:<line>: <severity>[<code>]: <message>`.

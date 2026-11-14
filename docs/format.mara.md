@@ -102,7 +102,8 @@ An item region holds, in order:
 
 - Every item has `Type`, `ID` and `Status` rows.
 - Anchor, heading and `Type` row make a region an item. Markdown without them is never an item.
-- An incomplete item is reported, kept in diagnostics and repaired by fix ([REQ-ONE-FIX-OPERATION](authoring.mara.md#01M7BF6GNPRRHNP2TRX7MKZRRH)). It is either a region that starts with an anchor but lacks the heading or the `Type` row, or a region that starts with a heading followed by a table with a `Type` row but has no anchor.
+- An incomplete item is reported and kept in diagnostics. It is either a region that starts with an anchor but lacks the heading or the `Type` row, or a region that starts with a heading followed by a table with a `Type` row but has no anchor.
+- Fix adds the missing anchor ([REQ-ONE-FIX-OPERATION](authoring.mara.md#01M7BF6GNPRRHNP2TRX7MKZRRH)). An anchor without a heading or a `Type` row stays reported until the author completes the item.
 
 ---
 
@@ -123,3 +124,9 @@ An item region holds, in order:
 - The table ends at the first blank line. A non-blank line directly after the table is a malformed row and an error.
 - A key the schema does not define for the item's type is an error, even when another type defines it. A value outside a field's allowed set is an error. There is no "allow unknown keys" setting: a new field is declared in the schema.
 - Keys and enum values are written as labels derived from schema names: `_` becomes a space and the first letter is capitalized (`derives_from` → `Derives from`, `almost-certain` → `Almost-certain`, type `requirement` → `Requirement`). Reading matches labels case-insensitively; writing uses the derived label.
+
+---
+
+## Open questions
+
+- Whether a YAML front matter block at the start of a document is accepted. Today its closing `---` forms a setext heading, which is an error.

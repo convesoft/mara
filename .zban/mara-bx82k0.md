@@ -15,5 +15,7 @@ Context: docs/rules.mara.md (REQ-PROJECT-AUTHORED-LOGIC, REQ-EXTERNAL-RECORDS-AS
 - [ ] Child-process evaluation keyed by snapshot, program hash and parameters
 - [ ] Invariants in validation; query, view, gate and report operations in CLI and MCP
 - [ ] Explanations from provenance mode with document locations
-- [ ] Compile errors and runtime faults reported; never a passing outcome
+- [ ] Profile scan before every run (REQ-PROGRAMS-ONLY-COMPUTE, DES-PROGRAM-PROFILE)
+- [ ] Time limit (REQ-EVALUATION-TIME-LIMIT)
+- [ ] Compile errors, runtime faults, refused programs and timeouts reported; never a passing outcome
 - [ ] VER-WORK-COUNTERS rows for `souffle` runs pass

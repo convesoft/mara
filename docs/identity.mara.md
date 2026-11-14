@@ -49,7 +49,7 @@ An item's MID never changes when its title, ID or file changes, and every link t
 | Satisfies | [REQ-STABLE-IDENTITY](#01M7BF6H1AN6G9GP3DV62342WJ) |
 
 - Every item of every type has exactly one `ID` row, unique in the project. The schema cannot make IDs optional.
-- An ID starts with its type's prefix. Prefer a readable slug: `REQ-PHISHING-RESISTANT-AUTH`.
+- An ID matches `[A-Z][A-Z0-9]*(-[A-Z0-9]+)+` and starts with its type's prefix. Prefer a readable slug: `REQ-PHISHING-RESISTANT-AUTH`.
 - The ID is the relation link text, the CLI and MCP handle, and the grep target. It is a renameable alias; the MID is the identity.
 
 ---
@@ -69,7 +69,7 @@ An item's MID never changes when its title, ID or file changes, and every link t
 - The value is a Markdown link: `[<ID>](<relative-path>#<MID>)`, or `[<ID>](#<MID>)` within the same file.
 - The fragment MID is the identity. The path is the file that currently contains that MID, relative to the linking file. The link text is the target's current ID.
 - A stale path, stale link text or a bare-ID value is a diagnostic.
-- Any body or narrative link whose fragment is a known MID is a mention. Typed relations exist only in the metadata table.
+- Any body or narrative link whose fragment is a known MID is a mention. Its text is free; its path is checked like a relation link's. Typed relations exist only in the metadata table.
 
 ---
 

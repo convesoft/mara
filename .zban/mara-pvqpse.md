@@ -10,6 +10,6 @@ created_at: 2026-11-13T22:10:06Z
 
 Context: REQ-ONE-FIX-OPERATION in docs/authoring.mara.md; incomplete items in DES-ITEM-STRUCTURE; link diagnostics in DES-RELATION-LINKS.
 
-- [ ] Repairs incomplete items, bare-ID relation values, stale link paths and text, malformed item formatting
+- [ ] Adds missing anchors and rewrites bare-ID relation values, stale link paths and text, malformed item formatting; never deletes an item or supplies a heading, type or ID
 - [ ] Rewrites the stale links an interrupted move or rename leaves
 - [ ] Changes nothing in a valid project

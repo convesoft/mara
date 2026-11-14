@@ -63,7 +63,7 @@ In a browser the engine runs as WASM in a worker over supplied file contents. Ed
 | Mode | Host | Input access |
 | --- | --- | --- |
 | CLI, direct | In-process | Filesystem |
-| Daemon | One per OS user; serves CLI, MCP and Node over native IPC, browsers over loopback HTTP | Filesystem |
+| Daemon | One per OS user and Mara version; serves CLI, MCP and Node over native IPC, browsers over loopback HTTP | Filesystem |
 | Node library | Embedded or through the daemon | Filesystem |
 | Browser through daemon | Loopback HTTP ([REQ-BROWSER-ACCESS-AUTHORIZED](daemon.mara.md#01M7BF6GR0N9J4C8Z5QQ4CSCB7)) | Daemon's filesystem |
 | Browser, local | Engine as WASM in a worker | Supplied file contents |
@@ -96,3 +96,9 @@ Names follow the 0.3.0 CLI where the capability is kept.
 | `prime` | Prints the agent guide ([DES-AGENT-GUIDE](agents.mara.md#01M7BGRHWQHQJJHC6XCXVDWDM8)) |
 
 - An MCP server takes the project on each call, or is bound to one project when started with `--project`.
+
+---
+
+## Open questions
+
+- How the Node library embeds the engine: the native addon of [DES-PACKAGES](distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8), or the WASM build.

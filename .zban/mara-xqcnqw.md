@@ -10,6 +10,7 @@ created_at: 2026-11-13T22:10:06Z
 
 Context: docs/daemon.mara.md (REQ-NEVER-STALE, DES-DAEMON-SESSIONS); REQ-READS-DURING-VALIDATION in docs/performance.mara.md.
 
+- [ ] Decide new-file detection, the idle period and session eviction (open questions on docs/daemon.mara.md)
 - [ ] One session per canonical project root
 - [ ] Watching with debounce and full rescan on overflow; stat check on every request
 - [ ] Lock-free reads, per-project write queue, cancellable worker threads

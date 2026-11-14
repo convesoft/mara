@@ -42,7 +42,7 @@ An edit that is refused, or whose target files changed after the snapshot it was
 | Status | Accepted |
 | Satisfies | [NEED-SAFE-AUTHORING](product.mara.md#01M7BF6H67YSV2DQ3QYBVQCN9V) |
 
-An edit interrupted between files never loses an item. It leaves at worst a duplicate item, stale link paths or stale link text, each reported by validation.
+An edit interrupted between files never loses an item. It leaves at worst a duplicate item, stale link paths, stale link text or code markers whose ID does not resolve yet, each reported as a diagnostic.
 
 ---
 
@@ -69,15 +69,9 @@ For each file:
 
 Order across files:
 
-| Operation | Order |
-| --- | --- |
-| Move | Destination file, then removal from the source file, then inbound link paths |
-| Rename | The item's `ID` row, then inbound link text |
+| Operation | Order | Rerunning an interrupted operation |
+| --- | --- | --- |
+| Move | Destination file, then removal from the source file, then inbound link paths | Works while the item is in both files: the move skips the first step when the two copies are identical |
+| Rename | Code markers that name the old ID, then the item's `ID` row, then inbound link text | Works while the old ID still resolves |
 
 Fix rewrites the stale links an interruption leaves ([REQ-ONE-FIX-OPERATION](authoring.mara.md#01M7BF6GNPRRHNP2TRX7MKZRRH)).
-
----
-
-## Open questions
-
-- How the duplicate left by a move interrupted after its first step is resolved: rerunning the move, or fix choosing a copy.

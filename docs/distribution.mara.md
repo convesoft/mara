@@ -36,6 +36,7 @@
 - A native package holds the CLI binary, the Node addon and the `souffle` binary. The browser package holds the engine and Soufflé WASM modules.
 - Every package carries the same version.
 - Platforms: Linux x64 and arm64 (glibc), macOS arm64.
+- Node 24 or later.
 
 ---
 
@@ -57,6 +58,5 @@
 
 ## Open questions
 
-- Soufflé builds on macOS and Windows were not tried. Its own CI builds with MSVC, but its explain console throws on Windows (`No explain/explore provenance on Windows`), so explanations need a patch there.
-- Whether v0.4.0 adds a platform; 0.3.0 did not support Windows, Intel macOS or musl Linux.
-- The minimum Node version; 0.3.0 required Node 24.
+- The Soufflé build for macOS arm64 was never tried.
+- Whether alpha slices are published to npm under the `next` tag.

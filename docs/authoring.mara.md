@@ -14,7 +14,7 @@
 | Status | Accepted |
 | Satisfies | [NEED-SAFE-AUTHORING](product.mara.md#01M7BF6H67YSV2DQ3QYBVQCN9V) |
 
-Creating an item writes a complete item with a newly generated MID into a named document, at its end or at a given line outside every existing item. The caller supplies an ID or accepts one proposed from the type prefix and a title slug. A caller never supplies a MID.
+Creating an item writes a complete item with a newly generated MID into a named document, at its end or at a given line outside every existing item. It creates the document when none exists and the path would be an input ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)). The caller supplies an ID or accepts one proposed from the type prefix and a title slug, and never supplies a MID.
 
 ---
 
@@ -56,7 +56,7 @@ Moving an item to another document or position keeps its MID and content. It rew
 | Status | Accepted |
 | Satisfies | [NEED-SAFE-AUTHORING](product.mara.md#01M7BF6H67YSV2DQ3QYBVQCN9V) |
 
-Renaming an ID keeps the MID and rewrites the link text of every inbound link. It leaves no alias: the old ID no longer resolves.
+Renaming an ID keeps the MID and rewrites the text of every inbound relation link, every mention whose text is exactly the old ID, and every code marker that names the old ID ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)). It leaves no alias: the old ID no longer resolves.
 
 ---
 
@@ -84,7 +84,7 @@ Deleting an item is refused while a relation or mention in another item or in na
 | Status | Accepted |
 | Satisfies | [NEED-SAFE-AUTHORING](product.mara.md#01M7BF6H67YSV2DQ3QYBVQCN9V) |
 
-Adding a relation writes one canonical link row on the source item and is refused when the schema does not allow that relation between the two types. Removing a relation deletes that row.
+Adding a relation writes one canonical link row on the source item and is refused when the schema does not allow that relation between the two types. Removing a relation deletes that row. Both take only the forward relation name: a request with an inverse name is refused and names the forward request.
 
 ---
 
@@ -98,7 +98,7 @@ Adding a relation writes one canonical link row on the source item and is refuse
 | Status | Accepted |
 | Satisfies | [NEED-SAFE-AUTHORING](product.mara.md#01M7BF6H67YSV2DQ3QYBVQCN9V) |
 
-A single explicit fix operation repairs incomplete items, bare-ID relation values, stale link paths and link text, and malformed item formatting. No other operation repairs source.
+A single explicit fix operation adds the anchor an item lacks and rewrites bare-ID relation values, stale link paths and link text, and malformed item formatting. It never deletes an item and never supplies a missing heading, type or ID. No other operation repairs source.
 
 ---
 
@@ -120,9 +120,3 @@ A single explicit fix operation repairs incomplete items, bare-ID relation value
 - A single writer produces every anchor, metadata table and relation link. No operation formats item syntax itself.
 - It generates the MID together with the anchor, and writes labels and links in their canonical form ([DES-METADATA-TABLE](format.mara.md#01M7BF6GZNS6VM3T94VS9A5HTD), [DES-RELATION-LINKS](identity.mara.md#01M7BF6H29JGHG65SV91K6D11V)).
 - Updates and moves keep the existing anchor.
-
----
-
-## Open questions
-
-- Whether adding a relation accepts the inverse name and writes the row on the other item.
