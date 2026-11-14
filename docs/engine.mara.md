@@ -64,7 +64,7 @@ A host that cannot provide a capability, such as grammar-level code links in the
 - Inputs are only the files the configuration declares ([DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27)): documents, schema, the configuration itself, programs, code files and grammar assets. `.git` and undeclared files are never read or hashed.
 - A document or code file that a `.gitignore` file in the project tree ignores is never an input. Those `.gitignore` files are inputs themselves; Git's global excludes and `.git/info/exclude` are never read.
 - A file is re-hashed (BLAKE3) only when its size, mtime, ctime or inode changes. A file modified within 2 s of the check is re-hashed anyway, so a same-tick edit is detected.
-- Each request also stats the directories that can hold inputs and lists a directory again only when its mtime changed. That is how added, removed and renamed files are found without walking the tree.
+- Each request also stats the directories that can hold inputs and lists a directory again only when its mtime, ctime or inode changed, or when it was modified in the last 2 s. That is how added, removed and renamed files are found without walking the tree.
 - Derived values are keyed by content:
 
 | Value | Key |

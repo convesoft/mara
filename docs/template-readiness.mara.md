@@ -89,17 +89,17 @@ A gate of the `engineering` template passes only when every named item is proven
 | Status | Accepted |
 | Satisfies | [REQ-TEMPLATE-GATES-PROVE-READINESS](#01M7CT60MNF0XPXR9NB6X74F3B) |
 
-| Gate | Subjects | An item fails when |
-| --- | --- | --- |
-| `implementation-ready` | Requirements | It is not accepted, it breaks an acceptance or lifecycle rule, or a blocking risk is relevant to it ([DES-TEMPLATE-RISK-LEVEL](template.mara.md#01M7CT60MFPF2Y871JJDZP5K0T)) |
-| `verified` | Requirements | It is not accepted; it has no accepted Verification; all code was read and `implemented` has no row for it; or an accepted Verification of it has a counting result other than `pass`, or none although the input is complete |
-| `release-ready` | Requirements and Validations | A Requirement fails either gate above. A Validation is not accepted, has no context, has a counting result other than `pass`, or has none although the input is complete |
+| Gate | Subjects | An item fails when | An item is unavailable when |
+| --- | --- | --- | --- |
+| `implementation-ready` | Requirements | It is not accepted, it breaks an acceptance or lifecycle rule, or a blocking risk is relevant to it ([DES-TEMPLATE-RISK-LEVEL](template.mara.md#01M7CT60MFPF2Y871JJDZP5K0T)) | A relevant accepted risk has no level |
+| `verified` | Requirements | It is not accepted; it has no accepted Verification; all code was read and `implemented` has no row for it; or an accepted Verification has, for this requirement, a counting result other than `pass`, or none although the input is complete | `implemented` has no row for it and code was not read completely; or an accepted Verification has no counting result for it and the input is not complete |
+| `release-ready` | Requirements and Validations | A Requirement fails either gate above. A Validation is not accepted, validates no accepted Need or Goal, has no context, or has, for a Need or Goal it validates, a counting result other than `pass`, or none although the input is complete | A Requirement is unavailable in either gate above. A Validation has no counting result for a Need or Goal it validates and the input is not complete |
 
-- An item is unavailable when a relevant accepted risk has no level, when `implemented` has no row for it and code was not read completely, or when a result is absent and its input is not complete. A known failure stands beside it.
+- A failure stands beside an unavailable fact: the item is failed ([DES-GATE-OUTCOME](rules.mara.md#01M7CT60KEEZRJCPJ0CPT7YT5B)).
+- A Validation must pass for every Need or Goal it validates.
 - Every accepted Verification of a requirement must pass; one pass does not cover another.
 - No gate requires a Design, and none adds decomposed, parent or sibling requirements to the named items.
 - `release-ready` judges only the Validations a request names. Naming none claims no validation.
-- Mara computes each outcome from these relations ([DES-GATE-OUTCOME](rules.mara.md#01M7CT60KEEZRJCPJ0CPT7YT5B)).
 
 ---
 

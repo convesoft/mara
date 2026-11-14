@@ -55,17 +55,45 @@ Mara ships a versioned declarations file, `mara.dl`, that starts with `.once`; p
 | ID | DES-PROGRAM-PROFILE |
 | Status | Accepted |
 | Satisfies | [REQ-PROGRAMS-ONLY-COMPUTE](rules.mara.md#01M7CMW6ZTAJHSF5BR9SF9KR86) |
+| Mitigates | [RISK-SOUFFLE-REACHES-OUTSIDE](#01M7CYC90BZBBXGC0CZ66W8ZEV) |
 
-Before every run the host copies `mara.dl` and the declared program files into a private directory, scans each copy outside comments and strings, and runs Soufflé on the copies. It refuses:
+Before every run the host copies `mara.dl` and the declared program files into a private directory, scans each copy outside comments and strings, and runs Soufflé on the copies. A program passes only when each of its directives is admitted:
 
-| Construct | It would |
+| Directive | Admitted |
 | --- | --- |
-| `.functor` | Load a shared library and run its code |
-| `.pragma` | Set Soufflé options, library paths included |
-| `.input`, `.output` or `.printsize` with parameters | Read or write any file or database |
-| `.include` of a file other than `mara.dl` and the declared programs | Read an undeclared file |
-| `autoinc()` | Give values that depend on evaluation order, and abort explanations |
+| `.decl`, `.type`, `.comp`, `.init`, `.override`, `.plan`, `.once`, `.limitsize` | Always |
+| `.input`, `.output`, `.printsize` | Without parameters |
+| `.include` | Of `mara.dl` and the declared programs |
 
+- Every other directive is refused, `.functor`, `.pragma` and `.lattice` among them.
+- A line that starts with `#` is refused: `#line` makes a diagnostic print the first line of any file, also with the preprocessor off.
+- `autoinc()` is refused: its values depend on evaluation order, and it aborts explanations.
 - A refusal is reported like a compile error ([REQ-PROGRAM-FAULTS-REPORTED](rules-evaluation.mara.md#01M7BF6HCZ88PSSQTFKXE8KJ81)).
-- Everything else in Soufflé is admitted, records and ADTs included. Time is bounded instead ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)).
+- Records and ADTs are admitted. Time is bounded instead ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)).
 - Soufflé runs with library loading off and never in the project's directory ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)).
+
+---
+
+## Risks
+
+---
+
+<a id="01M7CYC90BZBBXGC0CZ66W8ZEV"></a>
+
+### A program reaches outside its evaluation
+
+| Type | Risk |
+| --- | --- |
+| ID | RISK-SOUFFLE-REACHES-OUTSIDE |
+| Status | Accepted |
+| Likelihood | Unlikely |
+| Consequence | Severe |
+| Threatens | [REQ-PROGRAMS-ONLY-COMPUTE](rules.mara.md#01M7CMW6ZTAJHSF5BR9SF9KR86) |
+
+A construct that the scan admits, or a memory fault in Soufflé, lets a program from an untrusted checkout read or write files or run code as the user who validates it. Two reviews each found one way past the earlier scan ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)).
+
+---
+
+## Open questions
+
+- Whether the `souffle` child process also runs in an operating-system sandbox, or an accepted Decision accepts [RISK-SOUFFLE-REACHES-OUTSIDE](#01M7CYC90BZBBXGC0CZ66W8ZEV). The maintainer decides before the release.

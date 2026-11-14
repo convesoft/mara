@@ -152,3 +152,4 @@ A page holds 20 records unless the request asks for another number from 1 to 100
 - A cursor carries the key of its result ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)), which covers every layer and definition the result reads, so staleness is detected exactly.
 - Internal consumers call evaluate-all APIs, never the public paged API in a loop.
 - `get` returns a node larger than one page in consecutive portions: its metadata rows first, then its content cut at line boundaries, or at a character boundary inside a line or value longer than a page. The portions concatenate to the exact content.
+- A record of any other read that cannot fit one page fails the read with a diagnostic that names the record. Nothing is cut silently.

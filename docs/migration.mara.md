@@ -35,17 +35,21 @@ A one-shot converter rewrites a 0.3.0 project (its `:::mara` documents, schema a
 | 0.3.0 source | Becomes |
 | --- | --- |
 | `[[ID]]` or `[[MID]]` mention | Mention link ([DES-RELATION-LINKS](identity.mara.md#01M7BF6H29JGHG65SV91K6D11V)) |
-| Inline typed relation in an item body | Relation row on that item, and a mention link in place |
+| Relation assertion in an item: a metadata row or an inline typed relation, under the forward or the inverse name | One row on the source item of its directed edge, written once; an inline form also leaves a mention link in place |
 | Inline typed relation in narrative outside an item | Mention link; reported |
 | Symmetric relation, or relation whose target is not an item | No row; an inline occurrence keeps its text; reported |
+| Thematic break inside an item body | `<hr>` |
+| Setext heading inside an item body | ATX heading of the same level |
+| Item with an empty body | Converted as it is; reported for the author to complete |
 | Flavour | Type |
 | `status` fields of the flavours | The schema's status list: the union of their values |
 | Field of type `string` | Field of kind `text` |
+| Field of type `integer`, `number` or `boolean` | Field of kind `text`; reported |
 | Relation with source and target lists | Every source type allows every listed target type |
 | YAML rule files, SCIP commands, schema guidance other than `description` | Left out; reported |
 
 - Items of a flavour without a `status` field get the status the user names for the run.
-- A valid 0.3.0 project converts into a valid project.
+- A valid 0.3.0 project converts into a valid project, except for the items reported for the author to complete.
 
 ---
 

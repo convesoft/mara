@@ -65,11 +65,11 @@ An evaluation still running at its time limit is stopped, and its outcome is una
 - It runs only programs that pass the profile scan, on the scanned copies in a private directory ([DES-PROGRAM-PROFILE](rules-facts.mara.md#01M7CMW7051QVPFDWQBMB1A6K6)).
 - `project validate` compiles every declared program, by a run against empty facts (2–6 ms) when no invariant uses it. There is no compile-only operation.
 - Native: `souffle --no-preprocessor -l "" -F <facts> -D <out> <program>.dl` as a child process, single-threaded, with the private directory as its working directory. `-l ""` stops Soufflé from loading a `libfunctors.so`, which it otherwise does for every program.
-- Browser: compile `souffle.wasm` once per worker. For each evaluation, create a fresh instance, write programs and facts into its in-memory filesystem and read the outputs back. The module is built with `-sEXIT_RUNTIME=1` or exports `callMain`, so the host receives the exit code of `main`.
+- Browser: Soufflé runs in a worker of its own, apart from the one that holds the workspace. Compile `souffle.wasm` once per such worker. For each evaluation, create a fresh instance, write programs and facts into its in-memory filesystem and read the outputs back. The module is built with `-sEXIT_RUNTIME=1` or exports `callMain`, so the host receives the exit code of `main`.
 - Mara reads only the output relations a consumer names. An `.output` in an included file is also written and is not a result.
 - Explanations run on demand in provenance mode (`-t explain`), driven on stdin by `format json`, then `explain <relation>(<args>)`. Use JSON: the text proof format garbles negated atoms. In the browser the host supplies that input through the module's `stdin` hook. When provenance mode aborts, as it does on an ADT constructor in a rule body and on a subsumption clause, the host reports the explanation as unavailable.
 - A runtime fault such as integer division by zero ends the child process with the rule's location natively, and with a `divide by zero` trap without location in WASM.
-- At the time limit ([REQ-EVALUATION-TIME-LIMIT](#01M7CMW70G711Z67QEWW5Z0MK0)) the host kills the child process natively and terminates the worker in the browser.
+- At the time limit ([REQ-EVALUATION-TIME-LIMIT](#01M7CMW70G711Z67QEWW5Z0MK0)) the host kills the child process natively and terminates the Soufflé worker in the browser; the workspace and its unexported edits are not in that worker.
 
 ---
 
@@ -124,6 +124,7 @@ The trial gates approximate the gates of the `engineering` template at commit `d
 | ID | EVD-SOUFFLE-PROGRAM-REACH |
 | Status | Accepted |
 | Supports | [ADR-PROGRAM-PROFILE](decisions-rules.mara.md#01M7CMW6ZGC0PY8DVYNQDSBPRH) |
+| Supports | [RISK-SOUFFLE-REACHES-OUTSIDE](rules-facts.mara.md#01M7CYC90BZBBXGC0CZ66W8ZEV) |
 
 The static binary of [EVD-SOUFFLE-TRIAL](#01M7BF6HDDJJ0Y0WWT6RK17CDN), run on 2026-11-14 as `souffle --no-preprocessor -F <facts> -D <out> <program>.dl`.
 
@@ -135,6 +136,7 @@ The static binary of [EVD-SOUFFLE-TRIAL](#01M7BF6HDDJJ0Y0WWT6RK17CDN), run on 20
 | `.pragma "library-dir"` and `.pragma "libraries"` naming a library elsewhere | Loaded that library and ran its code |
 | `.pragma "output-dir"` | No effect; `-D` won |
 | Any program, with a `libfunctors.so` in the working directory or on `LD_LIBRARY_PATH` | Loaded the library and ran its constructor, with no `.functor` in the program. `-l ""` prevented it |
+| `#line 1 "<file>"` or `# 1 "<file>"` before a faulty declaration | The diagnostic printed the first line of that file, with `--no-preprocessor` |
 | `-t explain` on a rule with `autoinc()`, on a rule with an ADT constructor in its body, or on a program with a subsumption clause | Aborted; normal evaluation of the same programs succeeded |
 | `-t explain` with records, aggregates, negation, components or `eqrel` | Explained |
 | `nat(0). nat(x + 1) :- nat(x).` | Still running when killed after 5 s |

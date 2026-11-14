@@ -12,4 +12,4 @@ Context: REQ-MOVE-ITEM and REQ-RENAME-ID in docs/authoring.mara.md; REQ-INTERRUP
 
 - [x] Decide how the duplicate left by an interrupted move is resolved: rerunning the move (DES-WRITE-PROCEDURE)
 - [ ] `item move` and `item rename` in the documented write order
-- [ ] Test: interrupting between files never loses an item and leaves only reported states
+- [ ] Test: interrupting between files never loses an item and leaves only reported states; rerunning an interrupted move of an item with relative links completes it

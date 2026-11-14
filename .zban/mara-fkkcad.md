@@ -9,5 +9,5 @@ created_at: 2026-11-13T22:10:06Z
 Context: REQ-BROWSER-ACCESS-AUTHORIZED in docs/daemon.mara.md.
 
 - [x] Decide how the listener is enabled and how a browser obtains the session token (DES-BROWSER-LISTENER)
-- [ ] Loopback-only listener, started only by `mara daemon start --http`; port and token printed
+- [ ] Loopback-only listener, started only by `mara daemon start --http`; port and token printed; such a daemon stays until `mara daemon stop`
 - [ ] Session token, allowed origins and allowed projects checked before any project access

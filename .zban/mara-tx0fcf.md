@@ -16,5 +16,5 @@ Design input, on the maintainer's machine: `~/Work/local/workspace/projects/mara
 
 - [x] Decide with the maintainer which invariants, queries, gates and views ship; record them as items
 - [ ] Programs for the acceptance and lifecycle invariants, the queries, the three gates, the three views and the risk matrix, installed by `project init`
-- [ ] The cases of VER-TEMPLATE-CASES that need no code links pass. The others (`implemented`, `verified`, `release-ready`) are unavailable until code links exist and are tested as unavailable here; mara-yhxq5x makes them pass
+- [ ] The cases of VER-TEMPLATE-CASES that need no code links pass. Without code links, `verified` and `release-ready` are tested for what they can show: a known failure fails and everything else is unavailable; mara-yhxq5x makes the remaining cases pass
 - [ ] This repository adopts the invariants, with `requirement-verified` as a warning until the last slice

@@ -23,7 +23,7 @@ On every pull request, Rust integration tests run the real CLI and daemon on a g
 | One document edited | 1 parse, 1 snapshot build, 0 code scans |
 | One code file edited | 1 code scan, 0 document parses |
 | An operation that reads no code ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)) and runs no program | 0 subprocesses, 0 code scans |
-| Validation or gate, unchanged snapshot and rules | 0 `souffle` runs |
+| Validation or gate with an unchanged evaluation key ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)) | 0 `souffle` runs |
 | Validation or gate after a change | At most 1 `souffle` run per program and set of supplied inputs |
 | Unrelated file, `.git` change, failed request, idle period | No invalidation |
 
@@ -81,7 +81,9 @@ Rust integration tests run the real CLI on disposable projects initialized from 
 | Result for another candidate, or for an older revision of the verification or of the requirement | Does not count |
 | Risk on a parent requirement, on its need or on that need's goal | Relevant to the child requirement; a sibling requirement is not judged |
 | HIGH risk with a mitigation | Blocks until it is reassessed or an accepted decision accepts it |
-| Named validation without a passing result in its context | `release-ready` fails; a validation that is not named does not block |
+| Named validation whose result is absent from a complete input, or is not a pass | `release-ready` fails; a validation that is not named does not block |
+| Validation of two needs with a pass for only one of them | `release-ready` fails |
+| A failure and an unavailable fact on the same item | Failed |
 | Risk without a level, unread code, or a result absent from an incomplete input | Unavailable, never passed |
 | Accepted requirement without an accepted verification | `verified` fails |
 | A failing row of each template invariant and gate | Has an explanation |

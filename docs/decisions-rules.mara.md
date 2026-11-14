@@ -63,9 +63,9 @@
 | Justifies | [DES-PROGRAM-PROFILE](rules-facts.mara.md#01M7CMW7051QVPFDWQBMB1A6K6) |
 | Justifies | [REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0) |
 
-- Chosen: a scan before every run refuses the constructs that read, write or execute outside the evaluation ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)), and a time limit bounds each evaluation. Soufflé runs on the scanned copies in a private directory with library loading off, because it loads a `libfunctors.so` for any program.
+- Chosen: a scan before every run admits only listed directives and refuses `#` lines and `autoinc()` ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)); a time limit bounds each evaluation; Soufflé runs on the scanned copies in a private directory with library loading off.
+- Rejected: a list of refused constructs. Reviews found two ways past it: the `libfunctors.so` that Soufflé loads for any program, and `#line`.
 - Rejected: trusting programs like build scripts. Validating an untrusted checkout would run its code.
-- Rejected: sandboxing the child process with Landlock, seccomp or `sandbox-exec`. It is platform-specific and fails on kernels without Landlock.
 - Rejected: forbidding records and ADTs to bound evaluation. Plain recursion with arithmetic or `cat` never ends either.
 - Rejected: refusing every construct that Soufflé cannot explain. The list cannot be proven complete, so an explanation it cannot produce is reported as unavailable. Only `autoinc()` is refused, because its values also depend on evaluation order.
 

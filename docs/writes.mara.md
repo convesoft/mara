@@ -28,7 +28,7 @@ A write changes only the spans its operation requires. All other bytes, includin
 | Status | Accepted |
 | Satisfies | [NEED-SAFE-AUTHORING](product.mara.md#01M7BF6H67YSV2DQ3QYBVQCN9V) |
 
-An edit that Mara refuses leaves every file byte-identical. Mara refuses an edit when any file it would write changed after the snapshot the edit was computed against.
+An edit that Mara refuses leaves every file byte-identical. Mara refuses an edit when it finds, before its first write, that a file it would write changed after the snapshot the edit was computed against.
 
 ---
 
@@ -42,7 +42,7 @@ An edit that Mara refuses leaves every file byte-identical. Mara refuses an edit
 | Status | Accepted |
 | Satisfies | [NEED-SAFE-AUTHORING](product.mara.md#01M7BF6H67YSV2DQ3QYBVQCN9V) |
 
-An edit interrupted between files never loses an item. It leaves at worst a duplicate item, stale link paths, stale link text or code markers whose ID does not resolve yet, each reported as a diagnostic.
+An edit interrupted between files, or stopped because a file changed after its first write, never loses an item. It leaves at worst a duplicate item, stale link paths, stale link text or code markers whose ID does not resolve yet, each reported as a diagnostic.
 
 ---
 
@@ -90,7 +90,7 @@ Order across files:
 
 | Operation | Order | Rerunning an interrupted operation |
 | --- | --- | --- |
-| Move | Destination file, then removal from the source file, then inbound link paths | Works while the item is in both files: the move skips the first step when the two copies are identical |
+| Move | Destination file, then removal from the source file, then inbound link paths | Works while the item is in both files: the move skips the first step when the destination already holds the item as the move would write it |
 | Rename | Code markers that name the old ID, then the item's `ID` row, then inbound link text | Works while the old ID still resolves |
 
 Fix rewrites the stale links an interruption leaves ([REQ-ONE-FIX-OPERATION](authoring.mara.md#01M7BF6GNPRRHNP2TRX7MKZRRH)).

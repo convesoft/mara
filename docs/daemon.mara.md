@@ -63,7 +63,7 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 - Each Mara version has its own lock and socket in the runtime directory (`$XDG_RUNTIME_DIR/mara/`, mode 0700). The lock ensures one instance per version when several clients start it at once; the socket path stays under the 108-byte Unix limit.
 - A client connects only to the daemon of its own version. Daemons of different versions run side by side.
 - A client falls back to direct mode only before it dispatches a request. A dispatched request is never replayed on another backend.
-- The daemon exits when its last session is dropped ([DES-IDLE-SESSIONS](#01M7CQ57TBWFN78CCMEAY6XFTF)).
+- The daemon exits when its last session is dropped ([DES-IDLE-SESSIONS](#01M7CQ57TBWFN78CCMEAY6XFTF)), unless it listens for browsers ([DES-BROWSER-LISTENER](#01M7CQ57TJY788DMPBN4BX1SEM)).
 - No client starts a daemon when `CI` is set, `MARA_NO_DAEMON=1` is set or the direct-mode flag is given.
 - `mara daemon status | start | stop` give explicit control.
 
@@ -100,7 +100,7 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 | Decomposes | [DES-DAEMON-SESSIONS](#01M7BF6GRG3NJZTA29TYVRVFT7) |
 
 - A session is dropped, with its snapshot and watches, after 30 minutes without a request. The number is provisional.
-- A connected client does not keep a session or the daemon alive. Its next call starts a daemon again ([REQ-FIRST-CALL-IN-PROCESS](#01M7BF6GQK5GM340Z7CP4C83B8)).
+- A connected native client does not keep a session or the daemon alive. Its next call starts a daemon again ([REQ-FIRST-CALL-IN-PROCESS](#01M7BF6GQK5GM340Z7CP4C83B8)).
 
 ---
 
@@ -117,3 +117,4 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 - The listener is off unless `mara daemon start --http --allow-origin <origin> --allow-project <path>` starts it. Both options repeat, and no wildcard origin is accepted.
 - The command prints the port and a token generated for that daemon run. `mara daemon status` prints them again.
 - Nothing is persisted, and a daemon started on demand never listens on HTTP.
+- A daemon that listens for browsers runs until `mara daemon stop`, because a browser cannot start one. Its idle sessions are still dropped.

@@ -13,3 +13,4 @@ Context: docs/migration.mara.md (REQ-CONVERT-DIRECTIVE-CORPUS).
 - [x] Decide the open questions on docs/migration.mara.md (DES-CONVERSION-MAPPING)
 - [ ] Converter rewrites documents, schema and configuration as DES-CONVERSION-MAPPING describes, and reports what it leaves out
 - [ ] Test on the 0.3.0 corpus: `git show v0.3.0:docs/`
+- [ ] Fixtures for the rest of DES-CONVERSION-MAPPING: relations written from the target, thematic breaks and setext headings in bodies, integer, number and boolean fields, empty bodies
