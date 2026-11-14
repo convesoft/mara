@@ -9,5 +9,5 @@ created_at: 2026-11-13T22:10:06Z
 Context: DES-SOUFFLE-BUILD in docs/distribution.mara.md; build findings in EVD-SOUFFLE-TRIAL.
 
 - [ ] Native build with a static C++ runtime and without OpenMP for Linux x64 and arm64
-- [ ] macOS arm64 build, which was never tried (open question on docs/distribution.mara.md)
+- [x] macOS arm64 build: moved to mara-ag4ees, which defers everything for macOS to the last step
 - [ ] The binary is available to tests and packaging

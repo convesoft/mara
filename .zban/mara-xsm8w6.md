@@ -12,4 +12,5 @@ Context: DES-RULE-EXECUTION in docs/rules-evaluation.mara.md; DES-SOUFFLE-BUILD 
 
 - [ ] Emscripten build of the pinned Soufflé in CI, with the documented patch
 - [ ] Fresh instance per evaluation on an in-memory filesystem
+- [ ] Explanations: the console input is supplied through the `stdin` hook (DES-RULE-EXECUTION, EVD-SOUFFLE-TRIAL)
 - [ ] Test: native and WASM outputs are identical for the engineering template's programs

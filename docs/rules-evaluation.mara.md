@@ -68,7 +68,7 @@ An evaluation still running at its time limit is stopped, and its outcome is una
 - Native: `souffle --no-preprocessor -F <facts> -D <out> <program>.dl` as a child process, single-threaded.
 - Browser: compile `souffle.wasm` once per worker. For each evaluation, create a fresh instance, write programs and facts into its in-memory filesystem and read the outputs back. The module is built with `-sEXIT_RUNTIME=1` or exports `callMain`, so the host receives the exit code of `main`.
 - Mara reads only the output relations a consumer names. An `.output` in an included file is also written and is not a result.
-- Explanations run on demand in provenance mode (`-t explain`), driven on stdin by `format json`, then `explain <relation>(<args>)`. Use JSON: the text proof format garbles negated atoms.
+- Explanations run on demand in provenance mode (`-t explain`), driven on stdin by `format json`, then `explain <relation>(<args>)`. Use JSON: the text proof format garbles negated atoms. In the browser the host supplies that input through the module's `stdin` hook.
 - A runtime fault such as integer division by zero ends the child process with the rule's location natively, and with a `divide by zero` trap without location in WASM.
 - At the time limit the host kills the child process natively and terminates the worker in the browser.
 
@@ -106,6 +106,7 @@ Soufflé 2.5, 2026-11-13. Corpora: 1× = 200 items and 266 edges, 16× = 3,200 a
 | Provenance mode overhead at 16× | 1.5× (21.0 against 14.2 ms) |
 | WASM gate time: empty, 1×, 16×, 64× | 11.9, 13.4, 21.7, 44.8 ms |
 | Native against WASM outputs, all programs at 16× | Identical (6,696 rows) |
+| WASM explanation, 2026-11-14: console input from the module's `stdin` hook, under Node 26 | Two proofs, one through a negated atom, byte-identical to native; 110 ms at 16× |
 | Native binary, static C++ runtime, no OpenMP | 15 MB stripped, 2.6 MB xz; needs only libc and libm |
 | WASM module | 6.1 MB, 1.2 MB gzip, 0.7 MB Brotli |
 | Build time, 10 jobs | Native 107–120 s; Emscripten 66 s |
@@ -138,9 +139,3 @@ The static binary of [EVD-SOUFFLE-TRIAL](#01M7BF6HDDJJ0Y0WWT6RK17CDN), run on 20
 | `s("a"). s(cat(x, "a")) :- s(x).` | Still running when killed after 5 s |
 
 The last two programs use no records, ADTs or `autoinc()`.
-
----
-
-## Open questions
-
-- Explanations in the browser: the trial drove the `explain` console on stdin only natively.
