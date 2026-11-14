@@ -84,6 +84,8 @@ Implemented in Rust, always on, linear in items plus edges.
 | Links | Relation and mention targets exist; paths and relation link text are current ([DES-RELATION-LINKS](identity.mara.md#01M7BF6H29JGHG65SV91K6D11V)) |
 | Relations | Target type allowed for the source type, same-type relations, acyclic relations ([DES-SCHEMA-MODEL](project.mara.md#01M7BF6HA0KG3R3AATWM1P2X1G)) |
 
+Parsing reports the Document structure failures and the malformed metadata rows of each document on its own.
+
 Conditional obligations, such as "an accepted Verification verifies an accepted Requirement", are project logic ([DES-RULE-CONSUMERS](rules.mara.md#01M7BF6HE529B61Q2ZNXFQ1JXE)).
 
 ---

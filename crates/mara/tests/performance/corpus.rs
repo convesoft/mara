@@ -723,6 +723,7 @@ impl Rng {
 mod tests {
     use std::path::PathBuf;
 
+    use mara_engine::document;
     use mara_engine::work::WorkCounts;
 
     use super::*;
@@ -776,6 +777,51 @@ mod tests {
         assert_eq!((schema.types.len(), schema.relations.len()), (11, 14));
         assert!(schema.types["term"].fields["aliases"].repeatable);
         assert!(schema.relations["supersedes"].same_type && schema.relations["supersedes"].acyclic);
+    }
+
+    /// The generator writes the current item format: every declared document parses without
+    /// diagnostics into the items generated for it, with one parse each.
+    #[test]
+    fn writes_the_current_item_format() {
+        for size in PULL_REQUEST_SIZES {
+            let corpus = Corpus::generate(size, SEED);
+            let mut work = WorkCounts::default();
+            let (mut documents, mut items) = (0, 0);
+            for (path, contents) in files(corpus.root()) {
+                // `docs/**/*.mara.md`, except what `.gitignore` excludes.
+                let name = path.to_string_lossy();
+                if !name.starts_with("docs/")
+                    || name.starts_with("docs/generated/")
+                    || !name.ends_with(".mara.md")
+                {
+                    continue;
+                }
+                let parsed = document::parse(&contents, &mut work);
+                let diagnostics: Vec<String> =
+                    parsed.diagnostics(&name).map(|d| d.to_string()).collect();
+                assert!(diagnostics.is_empty(), "{}", diagnostics.join("\n"));
+                // With lone-CR line endings the document reads alike (DES-REGIONS).
+                let lone_cr: Vec<u8> = contents
+                    .iter()
+                    .map(|&byte| if byte == b'\n' { b'\r' } else { byte })
+                    .collect();
+                let reread = document::parse(&lone_cr, &mut WorkCounts::default());
+                assert_eq!(reread, parsed, "{name} with lone CR");
+                documents += 1;
+                items += parsed.items.len();
+            }
+            let expected = (corpus.documents, corpus.items);
+            assert_eq!(
+                (documents, items),
+                expected,
+                "documents and items at {size}×"
+            );
+            let parses = WorkCounts {
+                parses: documents as u64,
+                ..WorkCounts::default()
+            };
+            assert_eq!(work, parses, "work at {size}×");
+        }
     }
 
     /// Every file below `root` with its contents, by relative path.

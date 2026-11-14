@@ -69,7 +69,7 @@ A host that cannot provide a capability, such as grammar-level code links in the
 
 | Value | Key |
 | --- | --- |
-| Parsed document | Parser version + file hash. The schema is applied later, so a schema edit does not re-parse documents |
+| Parsed document | Parser version + file hash. The parse depends on neither the path nor the schema, which are applied later, so a schema edit does not re-parse documents |
 | Code markers of one file | Scanner version + language configuration hash + grammar hash + file hash |
 | Document snapshot | Sorted (path, parsed-document key) pairs + schema hash + configuration hash |
 | Code layer | Sorted (path, code-marker key) pairs |

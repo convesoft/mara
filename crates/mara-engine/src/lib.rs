@@ -3,6 +3,7 @@
 
 pub mod config;
 pub mod diagnostic;
+pub mod document;
 pub mod schema;
 mod toml_file;
 pub mod work;

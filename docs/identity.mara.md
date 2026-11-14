@@ -33,7 +33,8 @@ An item's MID never changes when its title, ID or file changes, and every link t
 | Satisfies | [REQ-STABLE-IDENTITY](#01M7BF6H1AN6G9GP3DV62342WJ) |
 
 - A MID is a canonical uppercase 26-character ULID, unique in the project and stored only in an HTML anchor: `<a id="<MID>"></a>`.
-- The anchor is its own paragraph, followed by a blank line and the item heading. An anchor merged into another paragraph is an error.
+- The anchor is its own paragraph, followed by a blank line and the item heading. Reading takes only this exact spelling as an anchor, a misplaced one included: an opening tag alone is none. An anchor merged into another paragraph, placed inside another block, or not followed by a blank line, is an error (`merged-anchor`); an anchor on the last line of a file has no blank line after it. An item whose anchor lacks only that blank line still loads.
+- Inside an HTML block, a line that is exactly the anchor, apart from the spaces, tabs and line ending around it, is an anchor placed inside that block, and nothing else there is one. So an anchor line inside an HTML comment or a `script` block is reported too, and an anchor that shares its line with other HTML is not.
 - Anchors and links keep the uppercase MID.
 
 ---
@@ -66,10 +67,10 @@ An item's MID never changes when its title, ID or file changes, and every link t
 | Satisfies | [REQ-STABLE-IDENTITY](#01M7BF6H1AN6G9GP3DV62342WJ) |
 
 - A relation is a metadata row on the source item, keyed by the forward relation name. Inverse names (`Satisfied by`) appear only in reading and navigation.
-- The value is a Markdown link: `[<ID>](<relative-path>#<MID>)`, or `[<ID>](#<MID>)` within the same file.
+- The value is a Markdown link: `[<ID>](<relative-path>#<MID>)`, or `[<ID>](#<MID>)` within the same file. A value is a link only when the link is the whole cell, in any form: inline, reference (`[text][label]`, `[label][]` or `[label]`) or autolink. A link's location covers all of its source.
 - The fragment MID is the identity. The path is the file that currently contains that MID, relative to the linking file. The link text is the target's current ID.
 - A stale path, stale link text or a bare-ID value is a diagnostic.
-- Any body or narrative link that is not an absolute URL and whose fragment has MID form is a mention. Its text is free; its target and path are checked like a relation link's. Typed relations exist only in the metadata table.
+- Any body or narrative link that is not an absolute URL (one with a scheme, such as `https:`) and whose fragment has MID form is a mention. Its text is free; its target and path are checked like a relation link's. Links in an item's heading count as body links. Typed relations exist only in the metadata table.
 
 ---
 

@@ -13,9 +13,9 @@ Goal: `project validate`, `item validate` and `schema validate` report every bui
 Context: docs/validation.mara.md (REQ-REPORT-EVERY-PROBLEM, REQ-VALIDITY-COVERS-WHOLE-PROJECT, REQ-READS-NEVER-WRITE, REQ-INVALID-ROWS-REPORTED, DES-SCHEMA-CHECKS, DES-DIAGNOSTICS).
 
 - [x] Decide diagnostic codes and the result format (DES-DIAGNOSTICS)
-- [ ] Built-in checks, linear in items plus edges
+- [ ] Built-in checks, linear in items plus edges. The Document structure check and malformed rows are the parser's own diagnostics, `mara_engine::document::Document::diagnostics` (DES-SCHEMA-CHECKS, mara-t6xn9z)
 - [ ] CLI operations with human and JSON output
-- [ ] VER-SCALING covers validation
+- [ ] VER-SCALING covers validation, which times the cold parse of every document: the parser has no case of its own (DES-PERFORMANCE-HARNESS, mara-t6xn9z)
 - [ ] The cold rows of VER-WORK-COUNTERS (docs/verification.mara.md) pass through the real CLI for the validation operations: a cold request, `.git` and undeclared files, an operation that reads no code (moved here from mara-8d6cnw by the maintainer, mara-63dn2d)
 - [ ] VER-SEEDED-PROBLEMS, VER-CUSTOM-SCHEMA and VER-GITHUB-RENDERING pass (docs/verification-documents.mara.md)
 - [ ] The `project validate` case of VER-INVALID-ROWS passes, and VER-NESTED-PROJECTS and VER-UNCHANGED-SOURCES pass for the validation operations

@@ -105,6 +105,7 @@ Tests:
 - The counter and scaling tests are the `performance` integration test of the `mara` crate, with the generator. They run the real binary with an empty environment.
 - A case is the arguments and the exit status of one invocation. The harness asserts the status before it accepts the counts or the timing. Each operation adds its case to both tests.
 - Two cases without an operation pin today's behaviour and stay: `mara --debug-stats` exits 0, and `mara --debug-stats --no-such-option` exits 2 after a diagnostic. Neither does work, and the first does not grow. Changing either behaviour changes its case.
+- Engine code that runs inside operations, such as the document parser, adds no case: it counts its own work, and the cases of the operations that run it assert and time that work.
 - The tests check the stats line against their own list of counter names, never against `WorkCounts`.
 - The scaling test runs on a release build only. One warm-up round, then five timed rounds that each run every size once. Growth per doubling between adjacent sizes s₁ < s₂ is (t₂ / t₁)^(1 / log₂(s₂ / s₁)) of their median times.
 - The 64× run (`--ignored`) asserts counts only. The growth limit applies from 1× to 16×.
