@@ -73,6 +73,18 @@ One orchestrator starts a worker for each ready issue and integrates its branch.
 - Every persisted or public format has its own version, starting at 1.
 - Stop when the issue's outcome works and its checks pass. File follow-up work in zban.
 
+## Local checks
+
+Run them from the repository root; each must exit 0. `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins. The `wasm32` build is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9).
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked --config 'build.warnings="deny"'
+cargo test --workspace --locked
+cargo build --package mara-engine --target wasm32-unknown-unknown --locked
+zban check
+```
+
 ## Review
 
 - Review against the issue, the Mara items it names and the real workflow.
@@ -91,5 +103,5 @@ One orchestrator starts a worker for each ready issue and integrates its branch.
 - One branch and worktree per zban issue, cut from the integration branch's tip. The orchestrator first sets the issue `in-progress` on the integration branch, so no two workers take the same issue.
 - Before its branch is integrated, a worker rebases it onto the integration branch's tip and reruns its checks. Rebasing its own unmerged branch is allowed.
 - A worker never merges into the integration branch. The orchestrator integrates one branch at a time: squash merge into one commit, then delete the branch. Follow-up work starts from the new tip.
-- No CI exists until the last slice (`mara-4dr2p2`), and no workflow file is added before it. Run the checks locally before handing over a branch and again before integrating it.
+- No CI exists until the last slice (`mara-4dr2p2`), and no workflow file is added before it. Run the [local checks](#local-checks) before handing over a branch and again before integrating it.
 - The integration branch reaches `origin/main` only by fast-forward: `git push origin chore/clear-worktree-for-rewrite:main`, with branch protection lifted for that push. Never squash it and never use GitHub's "Rebase and merge": both change commit SHAs, and `d7f0e73` and the alpha tags must stay on `main`.

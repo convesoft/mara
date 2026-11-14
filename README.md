@@ -4,7 +4,7 @@ Mara keeps project knowledge (goals, requirements, designs, decisions and the li
 
 ## Status
 
-v0.4.0 is a rewrite from scratch and cannot be used yet: this repository holds its specification and task list, and no code.
+v0.4.0 is a rewrite from scratch and cannot be used yet: this repository holds its specification, its task list and the code written so far.
 
 The last release is 0.3.0 (`npx -y @convesoft/mara@0.3.0`, source at tag `v0.3.0`). It uses the `:::mara` syntax that v0.4.0 replaces; see [migration](docs/migration.mara.md).
 

@@ -46,7 +46,7 @@ A host that cannot provide a capability, such as grammar-level code links in the
 | Status | Accepted |
 | Satisfies | [REQ-SAME-RESULT-ON-EVERY-HOST](#01M7BF6GXHZNABX9R7NKPNGJNM) |
 
-- The engine is a library over file contents: no filesystem, processes, threads, clocks or network. It compiles to WASM.
+- The engine is a library over file contents, the `mara-engine` crate: no filesystem, processes, threads, clocks or network. It compiles to WASM for `wasm32-unknown-unknown`.
 - Hosts (CLI, daemon, Node library, browser worker) supply contents and own I/O, watching, caching and process management. They also supply the time and the random bytes of each new MID.
 
 ---
