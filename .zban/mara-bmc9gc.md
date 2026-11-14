@@ -1,6 +1,6 @@
 ---
 title: "Read operations: search, get, relation list, item list, schema inspection"
-status: todo
+status: in-progress
 type: feature
 parent: mara-t1rffa
 blocked_by:

@@ -1,6 +1,6 @@
 ---
 title: Validate projects and items
-status: todo
+status: in-progress
 type: feature
 parent: mara-t1rffa
 blocked_by:

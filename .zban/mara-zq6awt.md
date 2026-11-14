@@ -2,8 +2,11 @@
 title: pulldown-cmark ends a script, pre, style or textarea HTML block only at a lowercase end tag
 status: todo
 type: bug
+priority: deferred
 tags:
   - maintainer
+  - deferred
+parent: mara-qzp1gd
 discovered_from: mara-t6xn9z
 created_at: 2026-11-14T15:26:41Z
 ---
@@ -26,3 +29,5 @@ let a = 1;
 
 - [ ] Report both divergences upstream to `pulldown-cmark`, with the input above
 - [ ] Once a fixed release exists: pin it, remove `html-end-tag-case` and its sentence in DES-REGIONS, and turn its test into one that the input above yields a code span
+
+Deferred by the maintainer on 2026-11-14: "Defer upstream reporting to the very end". The `html-end-tag-case` error stays until then. Reporting upstream posts to an external project, so it needs the maintainer's go-ahead when the time comes.

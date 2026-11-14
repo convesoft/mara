@@ -3,6 +3,9 @@ title: Measure the snapshot rebuild after one edit against the warm read budget
 status: todo
 type: task
 priority: low
+parent: mara-0mxw21
+blocked_by:
+  - mara-17gykj
 related:
   - mara-p27z9t
 discovered_from: mara-8d6cnw
