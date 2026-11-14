@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+ignore = "0.4"
 mara-engine = { path = "../mara-engine" }
 
 [dev-dependencies]

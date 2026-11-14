@@ -1,11 +1,15 @@
 //! The event pass: top-level blocks grouped into regions, each read as an item or as narrative.
 
+use std::collections::BTreeMap;
 use std::ops::Range;
 
 use pulldown_cmark::{Event, LinkType, Tag, TagEnd};
 
 use super::html::{HtmlBlock, HtmlLine};
-use super::{Document, Item, LineIndex, Link, Problem, Row, is_mid, label_name, lines};
+use super::{
+    Document, Item, LineIndex, Link, Posting, Problem, Row, Word, Zone, is_mid, label_name, lines,
+    words,
+};
 
 /// Reads the events of one document in order.
 pub(super) struct Reader<'t> {
@@ -18,6 +22,8 @@ pub(super) struct Reader<'t> {
     region: Vec<Block>,
     /// A thematic break inside the open top-level block ends the region after that block.
     break_pending: bool,
+    /// The search words of the items read so far, with their postings.
+    words: BTreeMap<String, Vec<Posting>>,
     document: Document,
 }
 
@@ -30,6 +36,8 @@ struct Block {
     links: Vec<Link>,
     /// The MID anchors in the block, with their offsets, unless the block is one.
     anchors: Vec<(String, usize)>,
+    /// The block's text, without HTML or link destinations.
+    plain: String,
 }
 
 enum Kind {
@@ -75,6 +83,8 @@ struct Cell {
     span: Range<usize>,
     /// As written, with `\|` read as `|`.
     text: String,
+    /// The cell's text without Markdown syntax, link destinations or HTML.
+    plain: String,
     /// The indices of the cell's links in [`Block::links`].
     links: Range<usize>,
 }
@@ -88,6 +98,8 @@ struct OpenBlock {
     anchors: Vec<(String, usize)>,
     /// The HTML block being read, if any.
     html: HtmlBlock,
+    /// The block's text, with a space at each boundary inside it.
+    plain: String,
 }
 
 /// A link whose end has not been seen.
@@ -109,11 +121,27 @@ enum OpenKind {
         row: Option<TableRow>,
         /// The open cell's span and the index of its first link.
         cell: Option<(Range<usize>, usize)>,
+        /// The open cell's text.
+        cell_plain: String,
     },
     Other,
 }
 
 impl OpenBlock {
+    /// A boundary inside the block, which separates the words on either side of it.
+    /// Every text being collected gets it: the block's, and an open metadata cell's.
+    fn boundary(&mut self) {
+        self.plain.push(' ');
+        if let OpenKind::Table {
+            cell: Some(_),
+            cell_plain,
+            ..
+        } = &mut self.kind
+        {
+            cell_plain.push(' ');
+        }
+    }
+
     /// Text that is not inline HTML, in an inline context.
     fn not_html(&mut self) {
         if let OpenKind::Paragraph { html_only, .. } = &mut self.kind {
@@ -123,8 +151,15 @@ impl OpenBlock {
 
     fn text(&mut self, text: &str) {
         self.not_html();
-        if let OpenKind::Heading(title) = &mut self.kind {
-            title.push_str(text);
+        self.plain.push_str(text);
+        match &mut self.kind {
+            OpenKind::Heading(title) => title.push_str(text),
+            OpenKind::Table {
+                cell: Some(_),
+                cell_plain,
+                ..
+            } => cell_plain.push_str(text),
+            _ => {}
         }
         if let Some(link) = self.open_links.last_mut() {
             link.text.push_str(text);
@@ -157,6 +192,7 @@ impl OpenBlock {
             span: self.span,
             links: self.links,
             anchors,
+            plain: self.plain,
         }
     }
 }
@@ -240,6 +276,7 @@ impl<'t> Reader<'t> {
             block: None,
             region: Vec::new(),
             break_pending: false,
+            words: BTreeMap::new(),
             document: Document::default(),
         }
     }
@@ -266,7 +303,12 @@ impl<'t> Reader<'t> {
                 }
             }
             Event::Rule if self.depth == 0 => self.end_region(Some(span.start)),
-            Event::Rule => self.break_pending = true,
+            Event::Rule => {
+                self.break_pending = true;
+                if let Some(block) = &mut self.block {
+                    block.boundary();
+                }
+            }
             Event::Text(text) | Event::Code(text) => {
                 if let Some(block) = &mut self.block {
                     block.text(&text);
@@ -279,6 +321,7 @@ impl<'t> Reader<'t> {
             }
             Event::InlineHtml(html) => {
                 if let Some(block) = &mut self.block {
+                    block.boundary();
                     // Only the full spelling `<a id="<MID>"></a>` is an anchor (DES-MID-ANCHOR).
                     let mid = html
                         .strip_prefix("<a id=\"")
@@ -328,6 +371,10 @@ impl<'t> Reader<'t> {
         }
         self.end_region(None);
         self.document.problems.sort_by_key(|problem| problem.line);
+        self.document.words = std::mem::take(&mut self.words)
+            .into_iter()
+            .map(|(text, postings)| Word { text, postings })
+            .collect();
         self.document
     }
 
@@ -342,6 +389,7 @@ impl<'t> Reader<'t> {
                 rows: Vec::new(),
                 row: None,
                 cell: None,
+                cell_plain: String::new(),
             },
             _ => OpenKind::Other,
         };
@@ -352,6 +400,7 @@ impl<'t> Reader<'t> {
             open_links: Vec::new(),
             anchors: Vec::new(),
             html: HtmlBlock::default(),
+            plain: String::new(),
         }
     }
 
@@ -362,6 +411,9 @@ impl<'t> Reader<'t> {
         };
         if nested {
             block.not_html();
+        }
+        if !is_inline(&tag) {
+            block.boundary();
         }
         match (tag, &mut block.kind) {
             (
@@ -400,6 +452,9 @@ impl<'t> Reader<'t> {
         let Some(block) = &mut self.block else {
             return;
         };
+        if !is_inline_end(&tag) {
+            block.boundary();
+        }
         match (tag, &mut block.kind) {
             (TagEnd::Link, _) => {
                 if let Some(mut link) = block.open_links.pop() {
@@ -412,13 +467,23 @@ impl<'t> Reader<'t> {
                     block.links.push(link);
                 }
             }
-            (TagEnd::TableCell, OpenKind::Table { row, cell, .. }) => {
+            (
+                TagEnd::TableCell,
+                OpenKind::Table {
+                    row,
+                    cell,
+                    cell_plain,
+                    ..
+                },
+            ) => {
+                let plain = std::mem::take(cell_plain);
                 if let (Some(row), Some((span, first_link))) = (row, cell.take()) {
                     // The parser adds empty cells at the end of the row for missing ones.
                     if span.start < row.span.end {
                         let span = trim(text, &span);
                         row.cells.push(Cell {
                             text: text[span.clone()].replace("\\|", "|"),
+                            plain,
                             span,
                             links: first_link..block.links.len(),
                         });
@@ -569,9 +634,13 @@ impl<'t> Reader<'t> {
         if !rows.iter().any(|row| row.name == "type") {
             missing.push("it has no metadata table with a `Type` row after its heading");
         }
-        let (Some(Anchor { mid, .. }), Some(title), Some(table), true) =
-            (&head.anchor, title, head.table, missing.is_empty())
-        else {
+        let (Some(Anchor { mid, .. }), Some(title), Some(heading), Some(table), true) = (
+            &head.anchor,
+            title,
+            head.heading,
+            head.table,
+            missing.is_empty(),
+        ) else {
             if !missing.is_empty() {
                 let message = format!("the item {name} is not read: {}", missing.join("; "));
                 self.problem("incomplete-item", start, message);
@@ -585,6 +654,7 @@ impl<'t> Reader<'t> {
             None => end..end,
         };
         let mid = mid.clone();
+        self.add_words(&mid, &blocks[heading], &rows, &blocks[table + 1..]);
         let mut mentions = Vec::new();
         for (index, block) in blocks.into_iter().enumerate() {
             if index != table {
@@ -635,6 +705,7 @@ impl<'t> Reader<'t> {
                 key: key.text.clone(),
                 name: label_name(&key.text),
                 value: value.text.clone(),
+                text: value.plain.split_whitespace().collect::<Vec<_>>().join(" "),
                 link,
                 line: self.lines.line(row.span.start),
             });
@@ -648,6 +719,39 @@ impl<'t> Reader<'t> {
             self.problem("malformed-row", next, message);
         }
         read
+    }
+
+    /// Adds the search words of the next item, zone by zone, so that each word's postings stay
+    /// in item and zone order (DES-SNAPSHOT). Every text comes from the event pass: no link
+    /// destination and no HTML.
+    fn add_words(&mut self, mid: &str, heading: &Block, rows: &[Row], body: &[Block]) {
+        let item = self.document.items.len();
+        let (ids, values): (Vec<&Row>, Vec<&Row>) = rows.iter().partition(|row| row.name == "id");
+        let id = std::iter::once(mid).chain(ids.into_iter().map(|row| row.text.as_str()));
+        let zones: [(Zone, Vec<&str>); 4] = [
+            (Zone::Id, id.collect()),
+            (Zone::Title, vec![heading.plain.as_str()]),
+            (
+                Zone::Metadata,
+                values.into_iter().map(|row| row.text.as_str()).collect(),
+            ),
+            (
+                Zone::Body,
+                body.iter().map(|block| block.plain.as_str()).collect(),
+            ),
+        ];
+        for (zone, texts) in zones {
+            let posting = Posting { item, zone };
+            for word in texts.into_iter().flat_map(words) {
+                let postings = match self.words.get_mut(&word) {
+                    Some(postings) => postings,
+                    None => self.words.entry(word).or_default(),
+                };
+                if postings.last() != Some(&posting) {
+                    postings.push(posting);
+                }
+            }
+        }
     }
 
     /// Whether the line after the one that holds byte `offset` exists and is blank.
@@ -679,4 +783,31 @@ fn trim(text: &str, span: &Range<usize>) -> Range<usize> {
     let start = span.start + (source.len() - source.trim_start_matches(blank).len());
     let end = span.end - (source.len() - source.trim_end_matches(blank).len());
     start..end.max(start)
+}
+
+/// Whether `tag` is inline, so that its text continues the text around it.
+fn is_inline(tag: &Tag<'_>) -> bool {
+    matches!(
+        tag,
+        Tag::Emphasis
+            | Tag::Strong
+            | Tag::Strikethrough
+            | Tag::Superscript
+            | Tag::Subscript
+            | Tag::Link { .. }
+            | Tag::Image { .. }
+    )
+}
+
+fn is_inline_end(tag: &TagEnd) -> bool {
+    matches!(
+        tag,
+        TagEnd::Emphasis
+            | TagEnd::Strong
+            | TagEnd::Strikethrough
+            | TagEnd::Superscript
+            | TagEnd::Subscript
+            | TagEnd::Link
+            | TagEnd::Image
+    )
 }

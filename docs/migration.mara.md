@@ -47,6 +47,7 @@ A one-shot converter rewrites a 0.3.0 project (its `:::mara` documents, schema a
 | Field of type `integer`, `number` or `boolean` | Field of kind `text`; reported |
 | Relation with source and target lists | Every source type allows every listed target type |
 | YAML rule files, SCIP commands, schema guidance other than `description` | Left out; reported |
+| Include pattern with brace alternatives or a character class | Kept as written, where they match themselves ([DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27)); reported |
 
 - An item without a status gets the status the user names for the run.
 - When two values of one field, or two statuses, become the same label ([DES-METADATA-TABLE](format.mara.md#01M7BF6GZNS6VM3T94VS9A5HTD)), the converter writes nothing and reports each pair.
@@ -65,6 +66,7 @@ A one-shot converter rewrites a 0.3.0 project (its `:::mara` documents, schema a
 | `[[ID]]` mentions, inline typed relations, authoring a relation from its target | Links and rows on the source item ([DES-RELATION-LINKS](identity.mara.md#01M7BF6H29JGHG65SV91K6D11V)) |
 | YAML rule files | Soufflé programs ([DES-RULE-CONSUMERS](rules.mara.md#01M7BF6HE529B61Q2ZNXFQ1JXE)) |
 | SCIP indexers | Comment markers ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)) |
+| Brace alternatives and character classes in include patterns | `**`, `*` and `?` ([DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27)) |
 | Mutation journal and `project transaction rollback` | Ordered writes ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) |
 | `project mid backfill` | Fix ([REQ-ONE-FIX-OPERATION](authoring.mara.md#01M7BF6GNPRRHNP2TRX7MKZRRH)) |
 | Standalone agent skill | `mara prime` and the MCP server instructions ([DES-AGENT-GUIDE](agents.mara.md#01M7BGRHWQHQJJHC6XCXVDWDM8)) |

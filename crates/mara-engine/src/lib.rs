@@ -4,6 +4,9 @@
 pub mod config;
 pub mod diagnostic;
 pub mod document;
+pub mod hash;
+pub mod pattern;
 pub mod schema;
+pub mod snapshot;
 mod toml_file;
 pub mod work;

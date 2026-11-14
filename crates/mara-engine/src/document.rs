@@ -3,7 +3,8 @@
 //! DES-RELATION-LINKS in `docs/identity.mara.md`.
 //!
 //! One `pulldown-cmark` pass per document (DES-SNAPSHOT). The result depends only on the bytes:
-//! the schema and the path are applied later (DES-INPUTS-AND-KEYS).
+//! the schema and the path are applied later (DES-INPUTS-AND-KEYS), so it is keyed by
+//! [`DocumentKey`].
 
 mod html;
 mod region;
@@ -16,7 +17,29 @@ use std::ops::Range;
 use pulldown_cmark::{Options, Parser};
 
 use crate::diagnostic::{Diagnostic, Severity};
+use crate::hash::Hash;
 use crate::work::WorkCounts;
+
+/// The version of everything [`parse`] derives from a document's bytes, search words included.
+/// A change to any of it takes a new version, which changes every [`DocumentKey`].
+pub const PARSER_VERSION: u32 = 1;
+
+/// The key of a parsed document: parser version and file hash (DES-INPUTS-AND-KEYS).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DocumentKey {
+    pub parser_version: u32,
+    pub file: Hash,
+}
+
+impl DocumentKey {
+    /// The key of the document whose contents hash to `file`.
+    pub fn new(file: Hash) -> DocumentKey {
+        DocumentKey {
+            parser_version: PARSER_VERSION,
+            file,
+        }
+    }
+}
 
 /// A parsed document.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -25,8 +48,46 @@ pub struct Document {
     pub items: Vec<Item>,
     /// Mentions outside every item, in source order.
     pub mentions: Vec<Link>,
+    /// The search words of the items, each once, in byte order (DES-SNAPSHOT).
+    pub words: Vec<Word>,
     /// In line order.
     problems: Vec<Problem>,
+}
+
+/// A search word ([`words`]) and the items whose text holds it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Word {
+    pub text: String,
+    /// Each item and zone once, in item order, then zone order.
+    pub postings: Vec<Posting>,
+}
+
+/// An item that holds a word, and the zone of the item that holds it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Posting {
+    /// The item's index in [`Document::items`]; in a snapshot, its index in the snapshot.
+    pub item: usize,
+    pub zone: Zone,
+}
+
+/// Where in an item a search word occurs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Zone {
+    /// The MID or an `ID` value.
+    Id,
+    Title,
+    /// Another metadata value; for a link, its text.
+    Metadata,
+    /// The text of the body: neither HTML nor link destinations.
+    Body,
+}
+
+/// The search words of `text`: each maximal run of letters and digits, lowercased. Queries and
+/// documents are normalized alike by this one function.
+pub fn words(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(str::to_lowercase)
 }
 
 /// A complete item: anchor, heading and a metadata table with a `Type` row.
@@ -67,6 +128,9 @@ pub struct Row {
     pub name: String,
     /// The value as written, with `\|` read as `|`.
     pub value: String,
+    /// The value's text without Markdown syntax: a link's text without its destination, and no
+    /// HTML. Each run of spaces, and each HTML tag, is one space.
+    pub text: String,
     /// The link that is the whole value, if it is one.
     pub link: Option<Link>,
     pub line: usize,

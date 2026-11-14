@@ -2,7 +2,10 @@
 //!
 //! Each operation adds its arguments and exit status to `growth_per_doubling`.
 
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
+
+use mara::inputs::Inputs;
+use mara_engine::work::WorkCounts;
 
 use crate::corpus::Corpus;
 use crate::{PULL_REQUEST_SIZES, SEED, cli};
@@ -26,18 +29,25 @@ fn growth_per_doubling() {
         .map(|&size| (size, Corpus::generate(size, SEED)))
         .collect();
     // Without an operation: the CLI's start-up does not grow with the corpus.
-    check_growth(&corpora, &[], 0);
+    check_growth(&corpora, "mara", |corpus| {
+        cli::run(corpus.root(), &[], 0);
+    });
+    // Below the CLI, the part of every operation that grows with the project: the inventory, a
+    // cold read, hash and parse of every input, and the snapshot build.
+    check_growth(&corpora, "a cold snapshot build", |corpus| {
+        let mut inputs = Inputs::new(corpus.root().to_owned());
+        inputs.snapshot(SystemTime::now(), &mut WorkCounts::default());
+    });
 }
 
-/// Times `mara <args>`, which must exit with `status`, on every corpus. Interleaves sizes so
-/// that machine load affects them alike, and fails when the median grows faster than [`LIMIT`]
-/// per doubling.
-fn check_growth(corpora: &[(usize, Corpus)], args: &[&str], status: i32) {
+/// Times `run`, named `name`, on every corpus. Interleaves sizes so that machine load affects
+/// them alike, and fails when the median grows faster than [`LIMIT`] per doubling.
+fn check_growth(corpora: &[(usize, Corpus)], name: &str, mut run: impl FnMut(&Corpus)) {
     let mut times: Vec<Vec<Duration>> = vec![Vec::with_capacity(ROUNDS); corpora.len()];
     for round in 0..=ROUNDS {
         for ((_, corpus), times) in corpora.iter().zip(&mut times) {
             let start = Instant::now();
-            cli::run(corpus.root(), args, status);
+            run(corpus);
             if round > 0 {
                 times.push(start.elapsed());
             }
@@ -57,7 +67,7 @@ fn check_growth(corpora: &[(usize, Corpus)], args: &[&str], status: i32) {
         let growth = (large_time.as_secs_f64() / small_time.as_secs_f64()).powf(1.0 / doublings);
         assert!(
             growth <= LIMIT,
-            "mara {args:?} grows {growth:.2}× per doubling from {small}× to {large}×; medians {medians:?}"
+            "{name} grows {growth:.2}× per doubling from {small}× to {large}×; medians {medians:?}"
         );
     }
 }

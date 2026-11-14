@@ -941,3 +941,238 @@ fn reports_each_problem_alike_with_every_line_ending() {
         assert_eq!(problems(&document), [(4, "invalid-utf8")], "{ending:?}");
     }
 }
+
+#[test]
+fn normalizes_words_alike_for_documents_and_queries() {
+    let normalized: Vec<String> = words("Hello, WORLD-wide 42x ÄBC _x_ façade").collect();
+    assert_eq!(
+        normalized,
+        ["hello", "world", "wide", "42x", "äbc", "x", "façade"]
+    );
+}
+
+#[test]
+fn keeps_each_word_once_per_item_and_zone_in_byte_order() {
+    let text = format!(
+        "{}\n---\n\n{}",
+        item(A, "Zeta zeta"),
+        item(B, "Alpha").replace("Body of Alpha.", "Zeta and alpha, *alpha*.")
+    );
+    let document = parse_text(&text);
+    let words: Vec<(&str, Vec<(usize, Zone)>)> = document
+        .words
+        .iter()
+        .filter(|word| ["alpha", "zeta"].contains(&word.text.as_str()))
+        .map(|word| {
+            let postings = word.postings.iter().map(|p| (p.item, p.zone)).collect();
+            (word.text.as_str(), postings)
+        })
+        .collect();
+    assert_eq!(
+        words,
+        [
+            (
+                "alpha",
+                vec![(1, Zone::Id), (1, Zone::Title), (1, Zone::Body)]
+            ),
+            (
+                "zeta",
+                vec![
+                    (0, Zone::Id),
+                    (0, Zone::Title),
+                    (0, Zone::Body),
+                    (1, Zone::Body)
+                ]
+            ),
+        ]
+    );
+    let all: Vec<&str> = document
+        .words
+        .iter()
+        .map(|word| word.text.as_str())
+        .collect();
+    let mut sorted = all.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(all, sorted);
+}
+
+#[test]
+fn the_document_key_is_the_parser_version_and_the_file_hash() {
+    let hash = crate::hash::Hash::of_file(b"x", &mut WorkCounts::default());
+    let key = DocumentKey::new(hash);
+    assert_eq!((key.parser_version, key.file), (PARSER_VERSION, hash));
+}
+
+/// The words of `zone` in the document's only item.
+fn zone_words(document: &Document, zone: Zone) -> Vec<&str> {
+    document
+        .words
+        .iter()
+        .filter(|word| word.postings.iter().any(|posting| posting.zone == zone))
+        .map(|word| word.text.as_str())
+        .collect()
+}
+
+/// An item whose body is `body`, with `rows` after its `Type` row and `title` as its heading.
+fn item_with(title: &str, rows: &str, body: &str) -> String {
+    format!(
+        "<a id=\"{A}\"></a>\n\n### {title}\n\n| Type | Requirement |\n| --- | --- |\n\
+         | ID | REQ-X |\n{rows}\n{body}"
+    )
+}
+
+#[test]
+fn every_block_boundary_separates_words() {
+    // The review's reproduction: a body of exactly two list entries.
+    let document = parse_text(&item_with("T", "", "- alpha\n- beta\n"));
+    assert_eq!(problems(&document), []);
+    assert_eq!(zone_words(&document, Zone::Body), ["alpha", "beta"]);
+
+    let body = "p1\n\np2\nsoft1\nsoft2  \nhard1\n\n#### head1\n\nafter1\n\n> quote1\n>\n> quote2\n\n\
+                ```\ncode1\ncode2\n```\n\n- outer1\n  - inner1\n- outer2\n\n| c1 | c2 |\n| --- | --- |\n\
+                | c3 | c4 |\n\nhtml1<br>html2\n\nem*ph*asis co`de`span li[n](x)k\n\n1. ord1\n2. ord2\n";
+    let document = parse_text(&item_with("T", "", body));
+    let mut expected = vec![
+        "after1", "c1", "c2", "c3", "c4", "code1", "code2", "codespan", "emphasis", "hard1",
+        "head1", "html1", "html2", "inner1", "link", "ord1", "ord2", "outer1", "outer2", "p1",
+        "p2", "quote1", "quote2", "soft1", "soft2",
+    ];
+    expected.sort_unstable();
+    assert_eq!(zone_words(&document, Zone::Body), expected);
+}
+
+#[test]
+fn no_destination_or_html_is_indexed() {
+    // The review's reproduction: a link inside other metadata text.
+    let rows = "| Description | See [label](https://secret.example/hidden) now |\n\
+                | Owner | [Whole](https://whole.example/x) |\n| Note | a <b>bold</b> c |\n";
+    let body = "![alt words](https://img.example/pic.png) and [ref text][r], [r] and\n\
+                <https://auto.example/page>.\n\n[r]: https://refdest.example/x\n";
+    let text = item_with("Title [tl](https://titledest.example/y)", rows, body);
+    let document = parse_text(&text);
+    assert_eq!(problems(&document), []);
+    let row = |name: &str| {
+        let rows = &document.items[0].rows;
+        rows.iter()
+            .find(|row| row.name == name)
+            .unwrap()
+            .text
+            .as_str()
+    };
+    assert_eq!(row("description"), "See label now");
+    assert_eq!(row("owner"), "Whole");
+    assert_eq!(row("note"), "a bold c");
+    assert_eq!(
+        zone_words(&document, Zone::Metadata),
+        [
+            "a",
+            "bold",
+            "c",
+            "label",
+            "now",
+            "requirement",
+            "see",
+            "whole"
+        ]
+    );
+    assert_eq!(zone_words(&document, Zone::Title), ["title", "tl"]);
+    // An autolink's text is its address, which is what GitHub shows.
+    assert_eq!(
+        zone_words(&document, Zone::Body),
+        [
+            "alt", "and", "auto", "example", "https", "page", "r", "ref", "text", "words"
+        ]
+    );
+    for hidden in [
+        "secret",
+        "hidden",
+        "img",
+        "pic",
+        "png",
+        "refdest",
+        "titledest",
+        "b",
+    ] {
+        assert!(
+            document.words.iter().all(|word| word.text != hidden),
+            "{hidden} is indexed"
+        );
+    }
+}
+
+/// Every word boundary of DES-SNAPSHOT in every place that search text is collected from: the
+/// title, a metadata value and the body. `None` marks a place where Markdown cannot put that
+/// boundary: a table cell and an ATX heading hold one line of inline content.
+#[test]
+fn every_boundary_separates_words_in_every_place() {
+    type Places = [Option<&'static str>; 3];
+    let boundaries: [(&str, Places); 6] = [
+        ("block boundary", [None, None, Some("- alpha\n- beta")]),
+        (
+            "table cell boundary",
+            [None, None, Some("| alpha | beta |\n| --- | --- |")],
+        ),
+        (
+            "soft line break",
+            [Some("alpha\nbeta\n==="), None, Some("alpha\nbeta")],
+        ),
+        (
+            "hard line break",
+            [Some("alpha\\\nbeta\n==="), None, Some("alpha  \nbeta")],
+        ),
+        (
+            "inline HTML tag",
+            [
+                Some("### alpha<br>beta"),
+                Some("alpha<br>beta"),
+                Some("alpha<br>beta"),
+            ],
+        ),
+        (
+            "HTML block",
+            [None, None, Some("- alpha\n  <!-- a comment -->\n  beta")],
+        ),
+    ];
+    for (boundary, places) in boundaries {
+        for (zone, snippet) in [Zone::Title, Zone::Metadata, Zone::Body]
+            .into_iter()
+            .zip(places)
+        {
+            let Some(snippet) = snippet else { continue };
+            let text = match zone {
+                Zone::Title => format!(
+                    "<a id=\"{A}\"></a>\n\n{snippet}\n\n| Type | Requirement |\n| --- | --- |\n\
+                     | ID | REQ-X |\n\nBody.\n"
+                ),
+                Zone::Metadata => {
+                    item_with("T", &format!("| Description | {snippet} |\n"), "Body.\n")
+                }
+                _ => item_with("T", "", &format!("{snippet}\n")),
+            };
+            let document = parse_text(&text);
+            assert_eq!(document.items.len(), 1, "{boundary} in {zone:?}: {text:?}");
+            let words = zone_words(&document, zone);
+            assert!(
+                words.contains(&"alpha") && words.contains(&"beta"),
+                "{boundary} in {zone:?}: {words:?}"
+            );
+            assert!(!words.contains(&"alphabeta"), "{boundary} in {zone:?}");
+        }
+    }
+}
+
+/// The review's reproduction: an unspaced HTML tag in a metadata value.
+#[test]
+fn an_html_tag_in_a_metadata_value_separates_words() {
+    let document = parse_text(&item_with(
+        "T",
+        "| Description | alpha<br>beta |\n",
+        "Body.\n",
+    ));
+    assert_eq!(document.items[0].rows[2].text, "alpha beta");
+    assert_eq!(
+        zone_words(&document, Zone::Metadata),
+        ["alpha", "beta", "requirement"]
+    );
+}

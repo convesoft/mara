@@ -20,7 +20,7 @@ Cold rows hold in every host and run through the real CLI from 0.4.0-alpha.1:
 
 | Situation | Expectation |
 | --- | --- |
-| Cold request | For each input it reads, 1 file read and 1 hash; 1 parse per document; 1 snapshot build |
+| Cold request, two documents with the same contents included | For each input it reads, 1 file read and 1 hash; 1 parse per distinct document content ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)); 1 snapshot build |
 | `.git` and undeclared files | 0 file reads, 0 hashes |
 | An operation that reads no code ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)) and runs no program | 0 subprocesses, 0 code scans |
 
@@ -28,8 +28,8 @@ Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANG
 
 | Situation | Expectation |
 | --- | --- |
-| Unchanged warm request, no input modified in the last 2 s | 0 hashes, 0 parses, 0 snapshot builds |
-| Unchanged warm request, an input modified in the last 2 s | That input hashed again; 0 parses, 0 snapshot builds |
+| Unchanged warm request, every input last hashed by a check at least 2 s after its mtime and ctime ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)) | 0 hashes, 0 parses, 0 snapshot builds |
+| Unchanged warm request, an input last hashed by a check less than 2 s after its mtime or ctime | That input hashed again; 0 parses, 0 snapshot builds |
 | One document edited | 1 parse, 1 snapshot build, 0 code scans |
 | One code file edited | 1 code scan, 0 document parses |
 | Validation or gate with an unchanged evaluation key ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)) | 0 `souffle` runs |

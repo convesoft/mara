@@ -78,7 +78,7 @@ fn select_error(start: &Path, project: Option<&Path>) -> SelectError {
 }
 
 /// Loads the project at `root` and returns it with the number of files loading read, after
-/// checking that loading counted no other work.
+/// checking that loading hashed each of them once, from the same read, and did no other work.
 fn load_counting(root: PathBuf) -> (Project, u64) {
     let mut work = WorkCounts::default();
     let project = load(root, &mut work);
@@ -87,8 +87,14 @@ fn load_counting(root: PathBuf) -> (Project, u64) {
         work,
         WorkCounts {
             file_reads: reads,
+            hashes: reads,
             ..WorkCounts::default()
         }
+    );
+    assert_eq!(
+        (project.config_hash.is_some(), project.schema_hash.is_some()),
+        (reads >= 1, reads == 2),
+        "a hash for each file read"
     );
     (project, reads)
 }

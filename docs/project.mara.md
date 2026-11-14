@@ -83,29 +83,30 @@ Schema inspection lists the types and relations and returns each one's descripti
 - `.mara/project.toml` without `.mara/config.toml` marks a 0.3.0 project. Every operation except the conversion ([REQ-CONVERT-DIRECTIVE-CORPUS](migration.mara.md#01M7BF6H30RYJTH5Z2YERBJ690)) refuses it and names the conversion.
 - Selection starts at the working directory and stops at the nearest directory, itself included, whose `.mara/` holds an entry named `config.toml` or `project.toml`. `--project` names that directory itself, relative to the working directory, and is not searched from. A directory that cannot be examined stops the search with an error. The project root is the selected directory with symlinks resolved.
 - Every setting of the example is required, and a host test loads the example from this page. Until 0.4.0, a setting the binary does not implement yet is unknown; adding it keeps `format_version` 1.
-- A path or pattern is relative to the project root, with `/` between non-empty parts and no `.` or `..` part. Loading checks nothing else of a pattern.
+- A path or pattern is relative to the project root, with `/` between non-empty parts and no `.` or `..` part. Loading checks nothing else of a pattern. In a pattern, a part `**` matches any number of path parts, none included; in any other part, `*` matches any run of characters, `?` one character, and every other character itself, so no pattern is invalid. Unlike 0.3.0, braces and character classes are no syntax: `{`, `}`, `[` and `]` match themselves.
 - Mara follows no symbolic link in a project's own files. Loading refuses `.mara`, `.mara/config.toml` or a component of the schema path that is a symbolic link, with `symbolic-link` at line 1 of the configuration for the first two and at the line that names the schema otherwise. The ancestor search, `--project` and the check below refuse a `.mara` that is a symbolic link the same way; none follows or skips it. The rule is checked on the path as it is when Mara reads it; a process that changes the project's files during a load is outside what it covers.
 - A schema path, as written, with a component that is another project's root is `outside-project` at the line that names it, and the schema is not read.
 - Every operation that reads documents or the schema, except validation, refuses a project whose configuration or schema has an error and reports those diagnostics. `prime`, `project init` and `project convert` are unaffected.
 - A `format_version` other than 1 is an error, and nothing else in its file, or in `[documents]`, is read. A missing `format_version` is an error, and the rest of its file or table is read as version 1. Any other problem leaves out only the setting it concerns.
-- A configuration or schema that cannot be read is reported at line 1 of the configuration, or at the line that names the schema. Problems of selection, configuration and schema have these codes ([DES-DIAGNOSTICS](validation.mara.md#01M7CMW71GXWZS8HPVVTYPENDK)):
+- A configuration or schema that cannot be read is reported at line 1 of the configuration, or at the line that names the schema. Problems of selection, configuration and schema, and of the input inventory, have these codes ([DES-DIAGNOSTICS](validation.mara.md#01M7CMW71GXWZS8HPVVTYPENDK)). The inventory reports at the path of the input concerned, at the line [DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY) gives:
 
-| Code | Problem |
-| --- | --- |
-| `no-project` | No project root at or above the working directory |
-| `not-a-project` | `--project` names a directory whose `.mara/` holds no `config.toml` |
-| `legacy-project` | The selected directory is the root of a 0.3.0 project |
-| `io-error` | A file or directory cannot be read |
-| `outside-project` | The schema path enters another project's root |
-| `symbolic-link` | `.mara`, the configuration or a component of the schema path is a symbolic link |
-| `toml-syntax` | The configuration or schema is not UTF-8 TOML |
-| `unsupported-format-version` | A `format_version` other than 1 |
-| `unknown-key` | A key the format does not define |
-| `missing-key` | A required key is absent |
-| `invalid-value` | A value of the wrong type or form |
-| `duplicate-name` | A name repeated where it must be unique |
-| `undeclared-type` | A relation names a type the schema does not declare |
-| `reserved-name` | A type named `code`, or a field or relation named `type`, `id` or `status` |
+| Code | Problem | Reported by |
+| --- | --- | --- |
+| `no-project` | No project root at or above the working directory | Selection |
+| `not-a-project` | `--project` names a directory whose `.mara/` holds no `config.toml` | Selection |
+| `legacy-project` | The selected directory is the root of a 0.3.0 project | Selection |
+| `io-error` | A file or directory cannot be read; in the inventory, also an input or `.gitignore` that is not a regular file, or a name that is not UTF-8 | Selection, loading, inventory |
+| `outside-project` | The schema path enters another project's root | Loading |
+| `symbolic-link` | `.mara`, the configuration or a component of the schema path is a symbolic link; in the inventory, a matched document, a `.gitignore` or a subdirectory's `.mara` | Selection, loading, inventory |
+| `unsupported-gitignore` | A `.gitignore` the `ignore` crate cannot take: a line that is not UTF-8, or patterns it cannot compile | Inventory |
+| `toml-syntax` | The configuration or schema is not UTF-8 TOML | Loading |
+| `unsupported-format-version` | A `format_version` other than 1 | Loading |
+| `unknown-key` | A key the format does not define | Loading |
+| `missing-key` | A required key is absent | Loading |
+| `invalid-value` | A value of the wrong type or form | Loading |
+| `duplicate-name` | A name repeated where it must be unique | Loading |
+| `undeclared-type` | A relation names a type the schema does not declare | Loading |
+| `reserved-name` | A type named `code`, or a field or relation named `type`, `id` or `status` | Loading |
 
 ```toml
 format_version = 1

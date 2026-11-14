@@ -2,16 +2,19 @@
 //! (REQ-ONE-PROJECT-PER-OPERATION and DES-PROJECT-CONFIGURATION in `docs/project.mara.md`).
 
 use std::fmt;
-use std::fs;
+use std::fs::{self, Metadata};
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::SystemTime;
 
-use mara_engine::config::{
-    CONFIG_PATH, Config, LEGACY_CONFIG_PATH, PathSetting, Root, parse_config,
-};
+use mara_engine::config::{CONFIG_PATH, Config, LEGACY_CONFIG_PATH, Root, parse_config};
 use mara_engine::diagnostic::{Diagnostic, Severity};
+use mara_engine::hash::Hash;
 use mara_engine::schema::{Schema, parse_schema};
 use mara_engine::work::WorkCounts;
+
+use crate::tracked::{self, Check, Reads, Tracked};
 
 /// Why no project was selected.
 #[derive(Debug)]
@@ -147,62 +150,139 @@ fn absent(error: &io::Error) -> bool {
 pub struct Project {
     pub root: PathBuf,
     pub config: Config,
+    /// The hash of the configuration file as read: `None` when it could not be read.
+    pub config_hash: Option<Hash>,
     /// `None` when no schema could be read.
-    pub schema: Option<Schema>,
+    pub schema: Option<Arc<Schema>>,
+    /// The hash of the schema file as read: `None` when it could not be read.
+    pub schema_hash: Option<Hash>,
     /// Every problem of the configuration and the schema, in path and line order.
     pub diagnostics: Vec<Diagnostic>,
+}
+
+impl Project {
+    /// Whether the configuration or the schema has an error. Every operation that reads
+    /// documents or the schema, except validation, then refuses the project
+    /// (DES-PROJECT-CONFIGURATION).
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == Severity::Error)
+    }
 }
 
 /// Reads the configuration and the schema of the project at `root`. A file that cannot be read
 /// becomes a diagnostic: at line 1 of the configuration, or at the configuration line that
 /// names the schema. So does a path to either that holds a symbolic link, and a schema path
-/// that enters another project. Each file it reads counts in `work.file_reads`.
+/// that enters another project. Each file it reads counts one file read and one hash in `work`.
 pub fn load(root: PathBuf, work: &mut WorkCounts) -> Project {
     let root = fs::canonicalize(&root).unwrap_or(root);
-    let mut diagnostics = Vec::new();
-    let config = match read(&root, CONFIG_PATH, 1, work) {
-        Ok(bytes) => {
-            let (config, problems) = parse_config(&bytes);
-            diagnostics.extend(problems);
-            config
-        }
-        Err(diagnostic) => {
-            diagnostics.push(diagnostic);
-            Config::default()
-        }
-    };
-    let schema = config.schema.as_ref().and_then(|setting: &PathSetting| {
-        match read(&root, &setting.path, setting.line, work) {
-            Ok(bytes) => {
-                let (parsed, problems) = parse_schema(&setting.path, &bytes);
-                diagnostics.extend(problems);
-                parsed
+    let mut reads = Reads::default();
+    ProjectFiles::default().load(root, SystemTime::now(), work, &mut reads)
+}
+
+/// The configuration and the schema as last read, with what was read of them, kept between
+/// requests so that a file whose stat is unchanged is neither read nor parsed again.
+#[derive(Debug, Default)]
+pub(crate) struct ProjectFiles {
+    config: Option<Tracked<(Config, Vec<Diagnostic>)>>,
+    /// With the path it was read from.
+    schema: Option<(String, Tracked<SchemaFile>)>,
+}
+
+type SchemaFile = (Option<Arc<Schema>>, Vec<Diagnostic>);
+
+impl ProjectFiles {
+    /// [`load`] in a request that began at `now`, reading only the files whose stat changed.
+    /// What it reads joins `reads`, for the request's other roles of the same files.
+    pub(crate) fn load(
+        &mut self,
+        root: PathBuf,
+        now: SystemTime,
+        work: &mut WorkCounts,
+        reads: &mut Reads,
+    ) -> Project {
+        let mut diagnostics = Vec::new();
+        let previous = self.config.take();
+        let mut request = Request { now, work, reads };
+        let config = track(&root, CONFIG_PATH, 1, previous, &mut request, parse_config);
+        let (config, config_hash) = match config {
+            Ok(tracked) => {
+                let (config, problems) = &tracked.value;
+                diagnostics.extend_from_slice(problems);
+                let read = (config.clone(), Some(tracked.hash));
+                self.config = Some(tracked);
+                read
             }
             Err(diagnostic) => {
                 diagnostics.push(diagnostic);
-                None
+                (Config::default(), None)
+            }
+        };
+        let (mut schema, mut schema_hash) = (None, None);
+        let previous = self.schema.take();
+        if let Some(setting) = &config.schema {
+            let path = setting.path.as_str();
+            let previous = previous
+                .filter(|(read_from, _)| read_from == path)
+                .map(|(_, tracked)| tracked);
+            let parse = |bytes: &[u8]| {
+                let (schema, problems) = parse_schema(path, bytes);
+                (schema.map(Arc::new), problems)
+            };
+            match track(&root, path, setting.line, previous, &mut request, parse) {
+                Ok(tracked) => {
+                    let (read, problems) = &tracked.value;
+                    diagnostics.extend_from_slice(problems);
+                    (schema, schema_hash) = (read.clone(), Some(tracked.hash));
+                    self.schema = Some((path.to_owned(), tracked));
+                }
+                Err(diagnostic) => diagnostics.push(diagnostic),
             }
         }
-    });
-    diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
-    Project {
-        root,
-        config,
-        schema,
-        diagnostics,
+        diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+        Project {
+            root,
+            config,
+            config_hash,
+            schema,
+            schema_hash,
+            diagnostics,
+        }
     }
 }
 
-/// Reads the project file at `relative`, a `/`-separated path below `root` named at `line` of the
-/// configuration. Each component of the path as written is checked first, without following
-/// it: a symbolic link is refused, and so is a directory that is the root of another project.
-/// Only a file whose contents were read counts as a file read.
-fn read(
+/// Checks the project file at `relative` ([`check`]) and derives its value from its contents
+/// with `derive` when they changed.
+fn track<T>(
     root: &Path,
     relative: &str,
     line: usize,
-    work: &mut WorkCounts,
-) -> Result<Vec<u8>, Diagnostic> {
+    previous: Option<Tracked<T>>,
+    request: &mut Request<'_>,
+    derive: impl FnOnce(&[u8]) -> T,
+) -> Result<Tracked<T>, Diagnostic> {
+    Ok(match check(root, relative, line, previous, request)? {
+        Check::Kept(tracked) => tracked,
+        Check::Read(read) => {
+            let value = derive(&read.contents);
+            read.with(value)
+        }
+    })
+}
+
+/// Checks the project file at `relative`, a `/`-separated path below `root` named at `line` of
+/// the configuration, and reads it when its stat changed ([`tracked::check`]). Each component
+/// of the path as written is checked first, without following it: a symbolic link is refused,
+/// and so is a directory that is the root of another project. Only a file whose contents were
+/// read counts as a file read.
+fn check<T>(
+    root: &Path,
+    relative: &str,
+    line: usize,
+    previous: Option<Tracked<T>>,
+    request: &mut Request<'_>,
+) -> Result<Check<T>, Diagnostic> {
     let at = |code, message| Diagnostic {
         code,
         severity: Severity::Error,
@@ -212,12 +292,15 @@ fn read(
     };
     let parts: Vec<&str> = relative.split('/').collect();
     let mut path = root.to_owned();
+    let mut last: Option<Metadata> = None;
     for (index, part) in parts.iter().enumerate() {
         path.push(part);
         let shown = parts[..=index].join("/");
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
-            Err(error) if absent(&error) => break,
+            Err(error) if absent(&error) => {
+                return Err(io_error(CONFIG_PATH, line, relative, &error));
+            }
             Err(error) => return Err(io_error(CONFIG_PATH, line, &shown, &error)),
         };
         if metadata.file_type().is_symlink() {
@@ -243,14 +326,22 @@ fn read(
                 Err(error) => return Err(at("io-error", error.to_string())),
             }
         }
+        last = Some(metadata);
     }
-    let bytes = fs::read(root.join(relative))
-        .map_err(|error| io_error(CONFIG_PATH, line, relative, &error))?;
-    work.file_reads += 1;
-    Ok(bytes)
+    let metadata = last.expect("a configured path has a part");
+    let Request { now, work, reads } = request;
+    tracked::check(&path, &metadata, previous, *now, work, reads, true)
+        .map_err(|error| io_error(CONFIG_PATH, line, relative, &error))
 }
 
-const SYMBOLIC_LINK: &str = "symbolic-link";
+/// The request a project file is read in.
+struct Request<'r> {
+    now: SystemTime,
+    work: &'r mut WorkCounts,
+    reads: &'r mut Reads,
+}
+
+pub(crate) const SYMBOLIC_LINK: &str = "symbolic-link";
 
 fn symbolic_link_message(path: &dyn fmt::Display) -> String {
     format!(
