@@ -1,4 +1,8 @@
 //! Mara's engine: a library over supplied file contents that does no I/O (DES-ENGINE-BOUNDARY in
 //! `docs/engine.mara.md`).
 
+pub mod config;
+pub mod diagnostic;
+pub mod schema;
+mod toml_file;
 pub mod work;

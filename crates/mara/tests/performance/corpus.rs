@@ -756,6 +756,26 @@ mod tests {
         assert!(shapes.iter().all(|shape| *shape == shapes[0]), "{shapes:?}");
     }
 
+    #[test]
+    fn the_configuration_and_the_schema_load_without_diagnostics() {
+        let corpus = Corpus::generate(1, SEED);
+        let root = mara::project::select(corpus.root(), None).expect("the corpus is a project");
+        let project = mara::project::load(root);
+        assert_eq!(project.diagnostics, []);
+        let include: Vec<&str> = project
+            .config
+            .include
+            .iter()
+            .flatten()
+            .map(|pattern| pattern.path.as_str())
+            .collect();
+        assert_eq!(include, ["docs/**/*.mara.md"]);
+        let schema = project.schema.expect("the schema loads");
+        assert_eq!((schema.types.len(), schema.relations.len()), (11, 14));
+        assert!(schema.types["term"].fields["aliases"].repeatable);
+        assert!(schema.relations["supersedes"].same_type && schema.relations["supersedes"].acyclic);
+    }
+
     /// Every file below `root` with its contents, by relative path.
     fn files(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
         let mut files = Vec::new();

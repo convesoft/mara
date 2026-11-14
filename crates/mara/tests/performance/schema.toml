@@ -43,6 +43,7 @@ description = "A canonical definition whose ambiguity affects engineering work."
 
 [types.term.fields.aliases]
 kind = "text"
+repeatable = true
 
 [types.evidence]
 id_prefix = "EVD-"
@@ -55,6 +56,7 @@ description = "How requirement conformity is established."
 [types.verification.fields.methods]
 kind = "enum"
 values = ["test", "analysis", "inspection", "demonstration"]
+repeatable = true
 
 [types.validation]
 id_prefix = "VAL-"
@@ -63,6 +65,7 @@ description = "How need satisfaction or goal achievement is established."
 [types.validation.fields.methods]
 kind = "enum"
 values = ["test", "analysis", "inspection", "demonstration"]
+repeatable = true
 
 [relations.contributes_to]
 inverse = "contributed_to_by"
@@ -78,6 +81,7 @@ targets = { requirement = ["need"], design = ["requirement"] }
 inverse = "decomposed_by"
 description = "The source is a part of the target."
 targets = { need = ["need"], requirement = ["requirement"], design = ["design"] }
+same_type = true
 
 [relations.derives_from]
 inverse = "gives_rise_to"
@@ -88,6 +92,8 @@ targets = { requirement = ["requirement"] }
 inverse = "superseded_by"
 description = "The source replaces the target."
 targets = { goal = ["goal"], need = ["need"], scenario = ["scenario"], requirement = ["requirement"], design = ["design"], decision = ["decision"], term = ["term"], verification = ["verification"], validation = ["validation"] }
+same_type = true
+acyclic = true
 
 [relations.justifies]
 inverse = "justified_by"
