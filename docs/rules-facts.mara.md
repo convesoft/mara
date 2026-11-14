@@ -57,20 +57,24 @@ Mara ships a versioned declarations file, `mara.dl`, that starts with `.once`; p
 | Satisfies | [REQ-PROGRAMS-ONLY-COMPUTE](rules.mara.md#01M7CMW6ZTAJHSF5BR9SF9KR86) |
 | Mitigates | [RISK-SOUFFLE-REACHES-OUTSIDE](#01M7CYC90BZBBXGC0CZ66W8ZEV) |
 
-Before every run the host copies `mara.dl` and the declared program files into a private directory, scans each copy outside comments and strings, and runs Soufflé on the copies. A program passes only when each of its directives is admitted:
+Before every run the host copies `mara.dl` and the declared program files into a private directory, scans each copy by Soufflé's own lexical rules, and runs Soufflé on the copies. A program passes only when every word that Soufflé reserves in it is on this list:
 
-| Directive | Admitted |
+| Kind | Admitted |
 | --- | --- |
-| `.decl`, `.type`, `.comp`, `.init`, `.override`, `.plan`, `.once`, `.limitsize` | Always |
-| `.include` | Of `mara.dl` and the declared programs |
+| Directive | `.decl`, `.type`, `.comp`, `.init`, `.override`, `.plan`, `.once`, `.limitsize`; `.include` of `mara.dl` and the declared programs |
+| Relation qualifier | `inline`, `no_inline`, `magic`, `no_magic`, `brie`, `btree`, `eqrel`, `overridable` |
+| Type | `symbol`, `number` and the types built from them: subtypes, unions, records, ADTs |
+| Function | `cat`, `strlen`, `substr`, `to_string`, `to_number`, `contains`, `match`, `range`, `min`, `max`, `count`, `sum`, the bitwise and logical operators, arithmetic and comparison |
+| Other word | `as`, `true`, `false`, `nil`, `__LINE__`, and `$` in front of an ADT constructor |
 
-- Every other directive is refused, `.functor`, `.pragma` and `.lattice` among them. So are `.input`, `.output` and `.printsize`: a program only declares relations and rules, and Mara generates its input and output.
-- A `#` outside strings and comments is refused wherever it stands: `#line` makes a diagnostic print the first line of any file, also with the preprocessor off and also after other text on the line.
-- `__FILE__` and `__INCL__` are refused: they yield the private directory's path, which differs from run to run.
-- The scan follows Soufflé's own lexical rules: a directive may follow other text on a line, and block comments do not nest.
-- `autoinc()` is refused: its values depend on evaluation order, and it aborts explanations.
-- A refusal is reported like a compile error ([REQ-PROGRAM-FAULTS-REPORTED](rules-evaluation.mara.md#01M7BF6HCZ88PSSQTFKXE8KJ81)).
-- Records and ADTs are admitted. Time is bounded instead ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)).
+- Everything else is refused, and a refusal is reported like a compile error ([REQ-PROGRAM-FAULTS-REPORTED](rules-evaluation.mara.md#01M7BF6HCZ88PSSQTFKXE8KJ81)). [EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG) shows what each group below did when it passed.
+- Reaching outside: `.functor`, `.pragma`, `.lattice`, `@` functors, `#` outside strings and comments, `__FILE__`, `__INCL__`.
+- Input and output, which Mara generates: `.input`, `.output`, `.printsize` and the relation qualifiers `input`, `output`, `printsize`.
+- Values that depend on evaluation order: `autoinc()`, a bare `$`, `ord`, `choice-domain`, `recursive_iteration_cnt`.
+- Values that differ between hosts or do not survive the JSON files: `float`, `unsigned`, `mean`, `to_float`, `to_unsigned`.
+- A directive may follow other text on a line, and block comments do not nest.
+- A relation that crosses the boundary (a fact relation, a supplied input, a consumed output) has only `symbol` and `number` columns, or subtypes of them. Records and ADTs stay inside a program.
+- Time is bounded ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)).
 - Soufflé runs with library loading off and never in the project's directory ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)).
 
 ---

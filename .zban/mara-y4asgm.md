@@ -11,5 +11,6 @@ Context: DES-FACT-BRIDGE in docs/rules-facts.mara.md; DES-REQUEST-INPUTS in docs
 - [ ] `mara.dl` format version 1, with only vocabulary-free relation declarations: items, titles, revisions, fields, folded text, edges
 - [ ] One JSON file per fact relation, written once per document snapshot
 - [ ] Inputs supplied by a request, inline or from a JSON file of rows; a missing input refuses the request
+- [ ] Every supplied row checked before the run: column count, string for a symbol, signed 32-bit integer for a number; a wrong row refuses the request with its row and column (DES-REQUEST-INPUTS)
 - [ ] `source_complete` from `--complete`
 - [ ] Test: values with tabs, newlines, quotes and backslashes reach a program and come back unchanged, natively and in WASM
