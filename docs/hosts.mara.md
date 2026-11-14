@@ -105,7 +105,11 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 | Code | Failure |
 | --- | --- |
 | `invalid-argument` | An option or argument the operation does not declare, a missing, repeated or malformed one (exit status 2) |
+| `invalid-project` | The configuration or the schema has an error, so a read refuses the project; `diagnostics` holds their diagnostics |
 | `unknown-item` | No item has the ID or MID given |
 | `ambiguous-item` | Several items have the ID or MID given |
+| `unknown-node` | A path, or path and line, names no document, item or narrative unit that the read takes |
+| `unknown-declaration` | The schema declares no type or relation of the name given |
+| `invalid-utf8` | `get` of a document that is not UTF-8 |
 | `stale-cursor` | The cursor belongs to another result |
 | `record-too-large` | A record exceeds a page ([DES-PAGING](retrieval.mara.md#01M7BF6HCCWQH6P13ZR2YHAPS0)) |

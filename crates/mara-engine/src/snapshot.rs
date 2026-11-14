@@ -1,25 +1,30 @@
-//! The document snapshot of one input generation: items, ID and MID maps, forward and inverse
-//! edges, item spans and the token index (DES-SNAPSHOT and DES-INPUTS-AND-KEYS in
+//! The document snapshot of one input generation: items, narrative units, ID and MID maps,
+//! forward and inverse edges, item spans and the token index (DES-SNAPSHOT and DES-INPUTS-AND-KEYS in
 //! `docs/engine.mara.md`).
 //!
 //! A snapshot is assembled from per-file results ([`ParsedFile`]) that the host keeps by their
 //! [`DocumentKey`], so a one-file change re-parses that file and then rebuilds the indexes in one
 //! linear pass.
 
+mod spelling;
 #[cfg(test)]
 mod tests;
 
 use std::collections::HashMap;
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
-use crate::document::{self, Document, DocumentKey, Item, Link, Posting, is_mid, label_name};
+use crate::document::{
+    self, Document, DocumentKey, Item, Link, Node, Posting, Unit, Zone, is_mid, label_name,
+};
 use crate::hash::{Hash, KeyHasher};
 use crate::schema::Schema;
 use crate::work::WorkCounts;
 
+pub use spelling::{LONGEST_TOLERANT, Spellings, edits_allowed};
+
 /// The version of what [`SnapshotInputs::build`] derives, part of every [`SnapshotKey`].
-pub const SNAPSHOT_VERSION: u32 = 1;
+pub const SNAPSHOT_VERSION: u32 = 2;
 
 /// One document's contents and their parse: the per-file result.
 #[derive(Debug, PartialEq, Eq)]
@@ -108,20 +113,22 @@ impl SnapshotInputs {
             documents,
             schema,
         } = self;
-        let items: usize = documents
-            .iter()
-            .map(|input| input.file.document.items.len())
-            .sum();
+        let count = |of: fn(&Document) -> usize| -> usize {
+            documents.iter().map(|input| of(&input.file.document)).sum()
+        };
+        let (items, units) = (count(|d| d.items.len()), count(|d| d.units.len()));
         let mut snapshot = Snapshot {
             key,
             schema,
             documents: Vec::with_capacity(documents.len()),
             items: Vec::with_capacity(items),
+            units: Vec::with_capacity(units),
             edges: Vec::new(),
             mids: HashMap::with_capacity(items),
             ids: HashMap::with_capacity(items),
             incoming: HashMap::new(),
             words: HashMap::new(),
+            spellings: [OnceLock::new(), OnceLock::new()],
         };
         for input in documents {
             snapshot.add_document(input);
@@ -139,6 +146,8 @@ pub struct Snapshot {
     documents: Vec<SnapshotDocument>,
     /// In path order, then source order.
     items: Vec<ItemEntry>,
+    /// In path order, then source order.
+    units: Vec<UnitEntry>,
     /// By source: each item's in row order, then mention order, then each document's narrative.
     edges: Vec<Edge>,
     /// The items with each MID, and with each `ID` value. A repeated key keeps every item.
@@ -146,8 +155,10 @@ pub struct Snapshot {
     ids: HashMap<String, Vec<usize>>,
     /// The edges to each MID, whether or not an item has it.
     incoming: HashMap<String, Vec<usize>>,
-    /// The postings of each search word, by snapshot item.
+    /// The postings of each search word, by snapshot item or unit.
     words: HashMap<String, Vec<Posting>>,
+    /// The vocabulary indexes of one and of two edits ([`Snapshot::spellings`]).
+    spellings: [OnceLock<Spellings>; 2],
 }
 
 /// A document of a snapshot.
@@ -158,6 +169,8 @@ pub struct SnapshotDocument {
     pub file: Arc<ParsedFile>,
     /// Its items among the snapshot's items.
     pub items: Range<usize>,
+    /// Its narrative units among the snapshot's units.
+    pub units: Range<usize>,
     /// Its mentions outside every item among the snapshot's edges.
     pub narrative: Range<usize>,
 }
@@ -170,6 +183,14 @@ pub struct ItemEntry {
     pub index: usize,
     /// Its outgoing edges among the snapshot's edges.
     pub edges: Range<usize>,
+}
+
+/// Where a narrative unit of a snapshot is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UnitEntry {
+    pub document: usize,
+    /// The unit's index among its document's units.
+    pub index: usize,
 }
 
 /// A link to a MID from an item's metadata or text, or from the narrative.
@@ -226,6 +247,41 @@ impl Snapshot {
         &self.documents[entry.document].file.document.items[entry.index]
     }
 
+    /// The narrative units, in path order, then source order.
+    pub fn units(&self) -> &[UnitEntry] {
+        &self.units
+    }
+
+    /// The unit at `index` of [`Snapshot::units`]. Its span and lines refer to its document's
+    /// contents.
+    pub fn unit(&self, index: usize) -> &Unit {
+        let entry = self.units[index];
+        &self.documents[entry.document].file.document.units[entry.index]
+    }
+
+    /// The document of `node`, and the byte where the node starts in it: the order of search
+    /// results and other mixed lists of nodes.
+    pub fn position(&self, node: Node) -> (usize, usize) {
+        match node {
+            Node::Item(item) => (self.items[item].document, self.item(item).span.start),
+            Node::Unit(unit) => (self.units[unit].document, self.unit(unit).span.start),
+        }
+    }
+
+    /// The unit that holds the mention of `edge`, an edge outside every item.
+    pub fn narrative_unit(&self, edge: &Edge) -> Option<usize> {
+        let EdgeSource::Narrative(mention) = edge.source else {
+            return None;
+        };
+        let document = &self.documents[edge.document];
+        let units = &document.file.document.units;
+        let local = units.partition_point(|unit| unit.mentions.end <= mention);
+        units
+            .get(local)
+            .filter(|unit| unit.mentions.contains(&mention))
+            .map(|_| document.units.start + local)
+    }
+
     /// The items whose MID is `mid`: one, unless the project repeats it.
     pub fn items_with_mid(&self, mid: &str) -> &[usize] {
         self.mids.get(mid).map_or(&[], Vec::as_slice)
@@ -278,16 +334,39 @@ impl Snapshot {
         }
     }
 
-    /// The items whose text holds `word`, a normalized word ([`document::words`]), in item
-    /// order, then zone order.
+    /// The nodes whose text holds `word`, a normalized word ([`document::words`]), each in path
+    /// and source order of the items, then of the units, then in zone order.
     pub fn postings(&self, word: &str) -> &[Posting] {
         self.words.get(word).map_or(&[], Vec::as_slice)
+    }
+
+    /// The vocabulary index of matches within `edits` edits, 1 or 2 (REQ-TYPO-TOLERANT-SEARCH):
+    /// the words with a posting outside the ID and MID zone whose length a query word allowed
+    /// `edits` can reach ([`spelling::reachable`]), 3 to 8 characters for one edit and 6 to 20 for
+    /// two. Built from the token index on its first use, then kept with the snapshot
+    /// (DES-SNAPSHOT).
+    pub fn spellings(&self, edits: usize) -> &Spellings {
+        let edits = edits.clamp(1, 2);
+        self.spellings[edits - 1].get_or_init(|| {
+            let lengths = spelling::reachable(edits);
+            let reachable = self.words.iter().filter(|(word, postings)| {
+                lengths.contains(&word.chars().count())
+                    && postings.iter().any(|posting| posting.zone != Zone::Id)
+            });
+            Spellings::new(reachable.map(|(word, _)| word.as_str()), edits)
+        })
     }
 
     fn add_document(&mut self, input: DocumentInput) {
         let index = self.documents.len();
         let document = &input.file.document;
         let first = self.items.len();
+        let first_unit = self.units.len();
+        self.units
+            .extend((0..document.units.len()).map(|local| UnitEntry {
+                document: index,
+                index: local,
+            }));
         for (local, item) in document.items.iter().enumerate() {
             let at = self.items.len();
             add(&mut self.mids, &item.mid, at);
@@ -320,8 +399,11 @@ impl Snapshot {
         }
         for word in &document.words {
             let postings = word.postings.iter().map(|posting| Posting {
-                item: first + posting.item,
-                zone: posting.zone,
+                node: match posting.node {
+                    Node::Item(item) => Node::Item(first + item),
+                    Node::Unit(unit) => Node::Unit(first_unit + unit),
+                },
+                ..*posting
             });
             match self.words.get_mut(&word.text) {
                 Some(all) => all.extend(postings),
@@ -332,6 +414,7 @@ impl Snapshot {
         }
         self.documents.push(SnapshotDocument {
             items: first..self.items.len(),
+            units: first_unit..self.units.len(),
             narrative: narrative..self.edges.len(),
             path: input.path,
             key: input.key,

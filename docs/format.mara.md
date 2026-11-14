@@ -75,7 +75,7 @@ A Mara document is GitHub-flavoured Markdown that GitHub renders as documentatio
 | Satisfies | [REQ-SOURCE-IS-PUBLISHED-FORM](#01M7BF6GYWE2DT7WSXQH2QPNPA) |
 
 - Mara documents are `*.mara.md` files matched by the project's include patterns. Other `.md` files are never scanned.
-- A file that is not UTF-8 is an error (`invalid-utf8`), and none of its items is read.
+- A file that is not UTF-8 is an error (`invalid-utf8`), and none of its items is read. So is a file of more than 4,294,967,295 bytes (2³² − 1), the most whose every byte offset fits 32 bits (`document-too-large`), and it is not parsed.
 - A UTF-8 byte order mark at the very start of a file is skipped. A line ends at LF, CRLF or a lone CR. `pulldown-cmark` does not end fenced code, indented code or an HTML block at a lone CR, so the parser reads each lone CR as LF before its one Markdown pass; one byte replaces one, so offsets and lines stay those of the file.
 - A YAML front matter block at the very start of a file, after any byte order mark (a `---` line, YAML lines, a `---` line), is skipped. It is neither a region boundary nor narrative, and writes preserve it.
 - Writers never start a file with `---`, so a leading `---` always opens front matter, and a narrative-only first region after one is read as front matter. Each line of the block that is `<a id="<MID>"></a>` with only spaces or tabs around it is an error at that line (`item-in-front-matter`); the block is still skipped.

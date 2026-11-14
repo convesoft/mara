@@ -1,0 +1,465 @@
+//! `search`, `get`, `relation list`, `item list`, `schema list` and `schema get`
+//! (`docs/retrieval.mara.md`, `docs/retrieval-requests.mara.md` and REQ-SCHEMA-INSPECTION in
+//! `docs/project.mara.md`).
+//!
+//! Each refuses a project whose configuration or schema has an error, with those diagnostics
+//! (DES-PROJECT-CONFIGURATION).
+
+use std::fmt::Write as _;
+use std::sync::Arc;
+
+use mara::inputs::Inputs;
+use mara::project::Project;
+use mara_engine::diagnostic::Diagnostic;
+use mara_engine::paging::Cursor;
+use mara_engine::read::{
+    self, Connection, ConnectionKind, Declaration, Direction, Documents, Filters, ItemSummary,
+    Neighbour, NodeSummary, Paging, Portion, ReadError, SchemaLayer, SearchHit,
+};
+use mara_engine::schema::FieldKind;
+
+use super::validate::PATH;
+use super::{
+    Args, CURSOR, Context, Failure, LIMIT, Operation, Opt, Response, SUCCESS, project_path,
+};
+
+pub const SEARCH: Operation = Operation {
+    words: &["search"],
+    arguments: &["query"],
+    options: &[TYPE, FIELD, RELATION, PATH, ID, LIMIT, CURSOR],
+    run: search,
+};
+
+pub const GET: Operation = Operation {
+    words: &["get"],
+    arguments: &["node"],
+    options: &[CURSOR],
+    run: get,
+};
+
+pub const RELATION_LIST: Operation = Operation {
+    words: &["relation", "list"],
+    arguments: &["node"],
+    options: &[RELATION, LIMIT, CURSOR],
+    run: relation_list,
+};
+
+pub const ITEM_LIST: Operation = Operation {
+    words: &["item", "list"],
+    arguments: &[],
+    options: &[TYPE, FIELD, RELATION, PATH, ID, LIMIT, CURSOR],
+    run: item_list,
+};
+
+pub const SCHEMA_LIST: Operation = Operation {
+    words: &["schema", "list"],
+    arguments: &[],
+    options: &[LIMIT, CURSOR],
+    run: schema_list,
+};
+
+pub const SCHEMA_GET: Operation = Operation {
+    words: &["schema", "get"],
+    arguments: &["name"],
+    options: &[LIMIT, CURSOR],
+    run: schema_get,
+};
+
+/// `--type <name>`: items of this type. Repeatable (DES-SEARCH-REQUESTS).
+const TYPE: Opt = Opt {
+    name: "type",
+    value: "name",
+    repeatable: true,
+    check: |_| Ok(()),
+};
+
+/// `--field <key>=<value>`: items with this row. Repeatable.
+const FIELD: Opt = Opt {
+    name: "field",
+    value: "key=value",
+    repeatable: true,
+    check: |value| match value.split_once('=') {
+        Some((key, _)) if !key.is_empty() => Ok(()),
+        _ => Err(format!("a field filter is `<key>=<value>`, not `{value}`")),
+    },
+};
+
+/// `--relation <name>`: connections of this relation, by its forward or inverse name.
+/// Repeatable.
+const RELATION: Opt = Opt {
+    name: "relation",
+    value: "name",
+    repeatable: true,
+    check: |_| Ok(()),
+};
+
+/// `--id <id-or-mid>`: the items with this `ID` value or MID. Repeatable.
+const ID: Opt = Opt {
+    name: "id",
+    value: "id-or-mid",
+    repeatable: true,
+    check: |_| Ok(()),
+};
+
+/// Selects and loads the project, refusing one whose configuration or schema has an error.
+fn open(context: &mut Context) -> Result<(Inputs, Arc<Project>), Failure> {
+    let mut inputs = Inputs::new(context.root()?);
+    let project = inputs.project(context.now, context.work);
+    if project.has_errors() {
+        let message = "the project's configuration or schema has errors, so Mara reads none of \
+                       its documents or its schema until they are fixed"
+            .to_owned();
+        return Err(Failure {
+            diagnostics: project.diagnostics.clone(),
+            ..Failure::new("invalid-project", message)
+        });
+    }
+    Ok((inputs, project))
+}
+
+/// Runs `read` on the documents of the project.
+fn with_documents(
+    context: &mut Context,
+    read: impl FnOnce(&Documents<'_>) -> Result<Response, ReadError>,
+) -> Result<Response, Failure> {
+    let (mut inputs, _) = open(context)?;
+    let generation = inputs.snapshot(context.now, context.work);
+    let documents = Documents {
+        snapshot: &generation.snapshot,
+        diagnostics: &generation.diagnostics,
+    };
+    read(&documents).map_err(failure)
+}
+
+/// Runs `read` on the schema of the project. Reads no document.
+fn with_schema(
+    context: &mut Context,
+    read: impl FnOnce(&SchemaLayer<'_>) -> Result<Response, ReadError>,
+) -> Result<Response, Failure> {
+    let (_, project) = open(context)?;
+    // A project without errors has a schema; one without is refused like any other.
+    let Some(schema) = project.schema.as_deref() else {
+        let message = "the project has no schema that Mara could read".to_owned();
+        return Err(Failure::new("invalid-project", message));
+    };
+    let path = project
+        .config
+        .schema
+        .as_ref()
+        .map_or("", |s| s.path.as_str());
+    let layer = SchemaLayer {
+        schema,
+        key: read::schema_layer(project.config_hash, project.schema_hash),
+        path,
+    };
+    read(&layer).map_err(failure)
+}
+
+fn failure(error: ReadError) -> Failure {
+    let diagnostics = match &error {
+        ReadError::TooLarge(diagnostic) => vec![(**diagnostic).clone()],
+        _ => Vec::new(),
+    };
+    Failure {
+        diagnostics,
+        ..Failure::new(error.code(), error.to_string())
+    }
+}
+
+fn paging<'c>(args: &Args, cursor: &'c Option<Cursor>) -> Paging<'c> {
+    Paging {
+        limit: args.limit(),
+        cursor: cursor.as_ref(),
+    }
+}
+
+fn filters(args: &Args) -> Filters {
+    let values = |name| args.values(name).map(str::to_owned).collect();
+    Filters {
+        types: values(TYPE.name),
+        fields: args
+            .values(FIELD.name)
+            .filter_map(|value| value.split_once('='))
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect(),
+        relations: values(RELATION.name),
+        paths: args
+            .values(PATH.name)
+            // Cannot fire: the option's check ran `project_path` on it before the operation.
+            .map(|path| project_path(path).expect("checked before the operation ran"))
+            .collect(),
+        ids: values(ID.name),
+    }
+}
+
+fn search(context: &mut Context, args: &Args) -> Result<Response, Failure> {
+    let cursor = args.cursor();
+    with_documents(context, |documents| {
+        let page = read::search(
+            documents,
+            args.argument(0),
+            &filters(args),
+            &paging(args, &cursor),
+        )?;
+        Ok(respond(
+            page.json,
+            |out| hits(out, &page.records),
+            documents.diagnostics,
+            page.next_cursor,
+        ))
+    })
+}
+
+fn item_list(context: &mut Context, args: &Args) -> Result<Response, Failure> {
+    let cursor = args.cursor();
+    with_documents(context, |documents| {
+        let page = read::item_list(documents, &filters(args), &paging(args, &cursor))?;
+        let human = |out: &mut String| {
+            for item in &page.records {
+                let _ = writeln!(out, "{}", item_line(item));
+            }
+        };
+        Ok(respond(
+            page.json.clone(),
+            human,
+            documents.diagnostics,
+            page.next_cursor,
+        ))
+    })
+}
+
+fn relation_list(context: &mut Context, args: &Args) -> Result<Response, Failure> {
+    let cursor = args.cursor();
+    let names: Vec<String> = args.values(RELATION.name).map(str::to_owned).collect();
+    with_documents(context, |documents| {
+        let page =
+            read::relation_list(documents, args.argument(0), &names, &paging(args, &cursor))?;
+        let human = |out: &mut String| {
+            let _ = writeln!(out, "{}", node_line(&page.node));
+            for connection in &page.page.records {
+                connection_line(out, connection);
+            }
+        };
+        Ok(respond(
+            page.page.json.clone(),
+            human,
+            documents.diagnostics,
+            page.page.next_cursor,
+        ))
+    })
+}
+
+fn get(context: &mut Context, args: &Args) -> Result<Response, Failure> {
+    let cursor = args.cursor();
+    with_documents(context, |documents| {
+        let portion = read::get(documents, args.argument(0), cursor.as_ref())?;
+        let human = |out: &mut String| portion_lines(out, &portion);
+        Ok(respond(
+            portion.json.clone(),
+            human,
+            documents.diagnostics,
+            portion.next_cursor,
+        ))
+    })
+}
+
+fn schema_list(context: &mut Context, args: &Args) -> Result<Response, Failure> {
+    let cursor = args.cursor();
+    with_schema(context, |layer| {
+        let page = read::schema_list(layer, &paging(args, &cursor))?;
+        let human = |out: &mut String| page.records.iter().for_each(|d| declaration_line(out, d));
+        Ok(respond(page.json.clone(), human, &[], page.next_cursor))
+    })
+}
+
+fn schema_get(context: &mut Context, args: &Args) -> Result<Response, Failure> {
+    let cursor = args.cursor();
+    with_schema(context, |layer| {
+        let page = read::schema_get(layer, args.argument(0), &paging(args, &cursor))?;
+        let human = |out: &mut String| page.records.iter().for_each(|d| declaration(out, d));
+        Ok(respond(page.json.clone(), human, &[], page.next_cursor))
+    })
+}
+
+/// A successful read: its JSON form, and its human form of the records that `human` writes,
+/// then the inventory's diagnostics that a page shows and how many others there are, then the
+/// next cursor (DES-READ-RESULTS).
+fn respond(
+    json: String,
+    human: impl FnOnce(&mut String),
+    diagnostics: &[Diagnostic],
+    next_cursor: Option<Cursor>,
+) -> Response {
+    let mut out = String::new();
+    human(&mut out);
+    let shown = read::shown_diagnostics(diagnostics);
+    for diagnostic in &diagnostics[..shown] {
+        let _ = writeln!(out, "{diagnostic}");
+    }
+    if shown < diagnostics.len() {
+        let more = diagnostics.len() - shown;
+        let _ = writeln!(
+            out,
+            "and {more} more problems with the project's inputs: `mara project validate` reports \
+             each of them"
+        );
+    }
+    if let Some(cursor) = next_cursor {
+        let _ = writeln!(out, "more: repeat with `--cursor {cursor}`");
+    }
+    Response {
+        json,
+        human: out,
+        status: SUCCESS,
+    }
+}
+
+/// How a node reads in one line, starting with `<path>:<line>: `.
+fn node_line(node: &NodeSummary) -> String {
+    match node {
+        NodeSummary::Item(item) => item_line(item),
+        NodeSummary::Unit {
+            path,
+            line,
+            heading,
+        } => format!(
+            "{path}:{line}: {}",
+            heading.as_deref().unwrap_or("(narrative)")
+        ),
+        NodeSummary::Document { path } => path.clone(),
+    }
+}
+
+fn item_line(item: &ItemSummary) -> String {
+    format!(
+        "{}:{}: {} ({}) {}",
+        item.path,
+        item.line,
+        item.id.as_deref().unwrap_or(&item.mid),
+        item.type_name,
+        item.title
+    )
+}
+
+fn hits(out: &mut String, hits: &[SearchHit]) {
+    for hit in hits {
+        let _ = writeln!(out, "{}", node_line(&hit.node));
+        let _ = writeln!(out, "    {}: {}", hit.excerpt.line, hit.excerpt.text);
+    }
+}
+
+/// A schema name as a label: `_` as a space, the first letter capitalized (DES-METADATA-TABLE).
+fn label(name: &str) -> String {
+    let mut chars = name.chars();
+    let first = chars.next().map(|c| c.to_ascii_uppercase());
+    let rest = chars.map(|c| if c == '_' { ' ' } else { c });
+    first.into_iter().chain(rest).collect()
+}
+
+fn connection_line(out: &mut String, connection: &Connection) {
+    let name = match (connection.kind, &connection.relation, connection.direction) {
+        (ConnectionKind::Relation, Some(relation), _) => label(relation),
+        (_, _, Direction::Outgoing) => "Mentions".to_owned(),
+        (_, _, Direction::Incoming) => "Mentioned by".to_owned(),
+    };
+    let neighbour = match &connection.neighbour {
+        Neighbour::Node(node) => node_line(node),
+        Neighbour::Unresolved { mid } => format!("{mid}, which no item has"),
+    };
+    let source = &connection.source;
+    let _ = writeln!(
+        out,
+        "  {name} {neighbour}  [at {}:{}]",
+        source.path, source.line
+    );
+}
+
+fn portion_lines(out: &mut String, portion: &Portion) {
+    let _ = writeln!(out, "{}", node_line(&portion.node));
+    if let NodeSummary::Item(item) = &portion.node {
+        let _ = writeln!(out, "MID: {}", item.mid);
+    }
+    if let Some(revision) = &portion.revision {
+        let _ = writeln!(out, "revision: {revision}");
+    }
+    let path = portion.node.location().0;
+    for row in &portion.rows {
+        let more = if row.partial {
+            " (continued on the next page)"
+        } else {
+            ""
+        };
+        let _ = writeln!(out, "{path}:{}: {}: {}{more}", row.line, row.key, row.value);
+    }
+    if !portion.content.is_empty() {
+        out.push('\n');
+        out.push_str(&portion.content);
+        if !portion.content.ends_with(['\n', '\r']) {
+            out.push('\n');
+        }
+    }
+}
+
+/// One declaration in one line, as `schema list` shows it.
+fn declaration_line(out: &mut String, declaration: &Declaration<'_>) {
+    let _ = match declaration {
+        Declaration::Type {
+            name, declaration, ..
+        } => writeln!(
+            out,
+            "type {name} ({}): {}",
+            declaration.id_prefix.as_deref().unwrap_or("no ID prefix"),
+            declaration.description
+        ),
+        Declaration::Relation { name, declaration } => writeln!(
+            out,
+            "relation {name} ({}): {}",
+            declaration.inverse.as_deref().unwrap_or("no inverse"),
+            declaration.description
+        ),
+    };
+}
+
+/// A whole declaration, as `schema get` shows it.
+fn declaration(out: &mut String, declaration: &Declaration<'_>) {
+    match declaration {
+        Declaration::Type {
+            name,
+            declaration,
+            statuses,
+        } => {
+            let _ = writeln!(out, "type {name}");
+            if let Some(prefix) = &declaration.id_prefix {
+                let _ = writeln!(out, "  ID prefix: {prefix}");
+            }
+            let _ = writeln!(out, "  description: {}", declaration.description);
+            let _ = writeln!(out, "  statuses: {}", statuses.join(", "));
+            for (field, decl) in &declaration.fields {
+                let kind = match &decl.kind {
+                    FieldKind::Text => "text".to_owned(),
+                    FieldKind::Enum(values) => format!("enum of {}", values.join(", ")),
+                };
+                let required = if decl.required { ", required" } else { "" };
+                let repeatable = if decl.repeatable { ", repeatable" } else { "" };
+                let _ = writeln!(out, "  field {field}: {kind}{required}{repeatable}");
+            }
+        }
+        Declaration::Relation { name, declaration } => {
+            let _ = writeln!(out, "relation {name}");
+            if let Some(inverse) = &declaration.inverse {
+                let _ = writeln!(out, "  inverse: {inverse}");
+            }
+            let _ = writeln!(out, "  description: {}", declaration.description);
+            for (source, targets) in &declaration.targets {
+                let _ = writeln!(out, "  targets of {source}: {}", targets.join(", "));
+            }
+            let yes = |flag: bool| if flag { "yes" } else { "no" };
+            let _ = writeln!(
+                out,
+                "  same type: {}; acyclic: {}",
+                yes(declaration.same_type),
+                yes(declaration.acyclic)
+            );
+        }
+    }
+}

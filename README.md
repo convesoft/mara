@@ -4,7 +4,7 @@ Mara keeps project knowledge (goals, requirements, designs, decisions and the li
 
 ## Status
 
-v0.4.0 is a rewrite from scratch, not yet released. Built from this repository (`cargo build --package mara`), `mara` only validates: `project validate`, `item validate <ID or MID>` and `schema validate` run the [built-in checks](docs/validation.mara.md) on a project's configuration, schema and documents and report each failure with its location. The configuration and schema are written by hand ([project and schema](docs/project.mara.md)); this repository's [.mara/](.mara/config.toml) is an example.
+v0.4.0 is a rewrite from scratch, not yet released. Built from this repository (`cargo build --package mara`), `mara` validates and reads but does not write: `project validate`, `item validate <ID or MID>` and `schema validate` run the [built-in checks](docs/validation.mara.md) on a project's configuration, schema and documents and report each failure with its location; `search`, `get`, `relation list`, `item list`, `schema list` and `schema get` [read](docs/retrieval.mara.md) a project's items, narrative, links and schema. The configuration, schema and documents are written by hand ([project and schema](docs/project.mara.md)); this repository's [.mara/](.mara/config.toml) is an example.
 
 The last release is 0.3.0 (`npx -y @convesoft/mara@0.3.0`, source at tag `v0.3.0`). It uses the `:::mara` syntax that v0.4.0 replaces; see [migration](docs/migration.mara.md).
 

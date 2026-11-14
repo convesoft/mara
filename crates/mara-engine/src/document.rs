@@ -22,7 +22,7 @@ use crate::work::WorkCounts;
 
 /// The version of everything [`parse`] derives from a document's bytes, search words included.
 /// A change to any of it takes a new version, which changes every [`DocumentKey`].
-pub const PARSER_VERSION: u32 = 1;
+pub const PARSER_VERSION: u32 = 7;
 
 /// The key of a parsed document: parser version and file hash (DES-INPUTS-AND-KEYS).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -46,48 +46,89 @@ impl DocumentKey {
 pub struct Document {
     /// Items in source order.
     pub items: Vec<Item>,
+    /// Narrative units in source order (DES-NARRATIVE-UNITS).
+    pub units: Vec<Unit>,
     /// Mentions outside every item, in source order.
     pub mentions: Vec<Link>,
-    /// The search words of the items, each once, in byte order (DES-SNAPSHOT).
+    /// The search words of the items and narrative units, each once, in byte order
+    /// (DES-SNAPSHOT).
     pub words: Vec<Word>,
     /// In line order.
     problems: Vec<Problem>,
 }
 
-/// A search word ([`words`]) and the items whose text holds it.
+/// A search word ([`words`]) and the items and narrative units whose text holds it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Word {
     pub text: String,
-    /// Each item and zone once, in item order, then zone order.
+    /// Each node and zone once, in source order of the nodes, then zone order.
     pub postings: Vec<Posting>,
 }
 
-/// An item that holds a word, and the zone of the item that holds it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+/// A node that holds a word, the zone of the node that holds it, and where it first occurs
+/// there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Posting {
-    /// The item's index in [`Document::items`]; in a snapshot, its index in the snapshot.
-    pub item: usize,
+    pub node: Node,
     pub zone: Zone,
+    /// The byte of the document where the word's first occurrence in the zone starts, from the
+    /// parser's source ranges; for a word that starts in a decoded entity, or in a code span over
+    /// several lines, where that entity or code span starts (DES-SEARCH-REQUESTS). A parsed
+    /// document holds at most [`MAX_DOCUMENT_BYTES`], so every offset fits.
+    pub at: u32,
 }
 
-/// Where in an item a search word occurs.
+/// An item or a narrative unit: its index in [`Document::items`] or [`Document::units`]; in a
+/// snapshot, its index among the snapshot's items or units.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Node {
+    Item(usize),
+    Unit(usize),
+}
+
+/// Where in a node a search word occurs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Zone {
-    /// The MID or an `ID` value.
+    /// The MID or an `ID` value of an item.
     Id,
+    /// The heading of an item.
     Title,
-    /// Another metadata value; for a link, its text.
+    /// A heading in an item's body, or the heading that starts a narrative unit.
+    Heading,
+    /// Another metadata value of an item; for a link, its text.
     Metadata,
-    /// The text of the body: neither HTML nor link destinations.
+    /// Any other text: neither HTML nor link destinations.
     Body,
 }
 
+impl Zone {
+    /// Whether a match here outranks one in the body or a field (REQ-SEARCH-RANKING).
+    pub fn ranks_high(self) -> bool {
+        matches!(self, Zone::Id | Zone::Title | Zone::Heading)
+    }
+}
+
 /// The search words of `text`: each maximal run of letters and digits, lowercased. Queries and
-/// documents are normalized alike by this one function.
+/// documents are normalized alike by this function and [`word_spans`].
 pub fn words(text: &str) -> impl Iterator<Item = String> + '_ {
-    text.split(|c: char| !c.is_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .map(str::to_lowercase)
+    word_spans(text).map(|(_, word)| word.to_lowercase())
+}
+
+/// Each maximal run of letters and digits in `text`, with its byte offset, as written.
+pub fn word_spans(text: &str) -> impl Iterator<Item = (usize, &str)> {
+    let mut chars = text.char_indices().peekable();
+    std::iter::from_fn(move || {
+        let (start, _) = chars.find(|(_, c)| c.is_alphanumeric())?;
+        let mut end = text.len();
+        while let Some(&(at, c)) = chars.peek() {
+            if !c.is_alphanumeric() {
+                end = at;
+                break;
+            }
+            chars.next();
+        }
+        Some((start, &text[start..end]))
+    })
 }
 
 /// A complete item: anchor, heading and a metadata table with a `Type` row.
@@ -107,6 +148,9 @@ pub struct Item {
     pub line: usize,
     /// The line of the item's last byte.
     pub end_line: usize,
+    /// Bytes of the text after the anchor in its paragraph, when the anchor is merged into one;
+    /// empty, at the item's start, otherwise. It starts the item's body (DES-NARRATIVE-UNITS).
+    pub lead: Range<usize>,
     /// Bytes of the blocks after the metadata table; empty at the table's end when there are none.
     pub body: Range<usize>,
 }
@@ -119,6 +163,20 @@ impl Item {
             .find(|row| row.name == name)
             .map(|row| row.value.as_str())
     }
+}
+
+/// A narrative unit: in a region that is no item, a heading and the blocks up to the next
+/// heading, or the blocks before the region's first heading (DES-NARRATIVE-UNITS).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Unit {
+    /// The text of the heading that starts the unit, without its Markdown syntax.
+    pub heading: Option<String>,
+    /// Bytes from the start of its first block to the end of its last.
+    pub span: Range<usize>,
+    /// The line where it starts.
+    pub line: usize,
+    /// Its mentions among [`Document::mentions`].
+    pub mentions: Range<usize>,
 }
 
 /// One `Key | Value` row of a metadata table.
@@ -191,9 +249,32 @@ impl Document {
     }
 }
 
+/// The most bytes of a document: every byte offset of it fits the `u32` of a [`Posting`]. A
+/// longer document is refused before it is read (DES-REGIONS).
+pub const MAX_DOCUMENT_BYTES: usize = u32::MAX as usize;
+
 /// Parses the contents of one document and counts one parse in `work`.
 pub fn parse(bytes: &[u8], work: &mut WorkCounts) -> Document {
+    parse_within(bytes, MAX_DOCUMENT_BYTES, work)
+}
+
+/// [`parse`], refusing a document of more than `limit` bytes, at most [`MAX_DOCUMENT_BYTES`].
+fn parse_within(bytes: &[u8], limit: usize, work: &mut WorkCounts) -> Document {
     work.parses += 1;
+    if bytes.len() > limit.min(MAX_DOCUMENT_BYTES) {
+        return Document {
+            problems: vec![Problem {
+                code: "document-too-large",
+                message: format!(
+                    "the document holds {} bytes, more than the {limit} Mara reads, so none of its \
+                     items is read: split it into smaller documents",
+                    bytes.len()
+                ),
+                line: 1,
+            }],
+            ..Document::default()
+        };
+    }
     let lines = LineIndex::new(bytes);
     let text = match std::str::from_utf8(bytes) {
         Ok(text) => text,

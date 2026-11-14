@@ -6,6 +6,7 @@
 //! [`Failure`]. Arguments are checked before the function runs. Each operation also adds its
 //! case to the performance harness (`crates/mara/tests/performance/`).
 
+mod read;
 mod validate;
 
 use std::ffi::OsString;
@@ -22,7 +23,17 @@ use mara_engine::work::WorkCounts;
 use mara::project::{self, SelectError};
 
 /// Every operation, in the order the usage lists them.
-const OPERATIONS: &[Operation] = &[validate::PROJECT, validate::ITEM, validate::SCHEMA];
+const OPERATIONS: &[Operation] = &[
+    validate::PROJECT,
+    validate::ITEM,
+    validate::SCHEMA,
+    read::SEARCH,
+    read::GET,
+    read::RELATION_LIST,
+    read::ITEM_LIST,
+    read::SCHEMA_LIST,
+    read::SCHEMA_GET,
+];
 
 /// The exit status of a valid result, or of a successful operation.
 pub const SUCCESS: u8 = 0;

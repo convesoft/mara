@@ -8,6 +8,7 @@ pub mod hash;
 pub mod json;
 pub mod paging;
 pub mod pattern;
+pub mod read;
 pub mod schema;
 pub mod snapshot;
 mod toml_file;

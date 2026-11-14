@@ -41,7 +41,7 @@ pub const SCHEMA: Operation = Operation {
 
 /// `--path <path>`: report only diagnostics in this file or directory, relative to the project
 /// root ([`project_path`]). Repeatable.
-const PATH: Opt = Opt {
+pub(super) const PATH: Opt = Opt {
     name: "path",
     value: "path",
     repeatable: true,

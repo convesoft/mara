@@ -65,8 +65,18 @@ pub struct Filled {
 /// Takes records from `records` until `limit` are taken or the next would take the page past
 /// [`PAGE_BYTES`]. Each record is serialized once (DES-PAGING). A first record that alone
 /// cannot fit fails the page with its index in `records`.
-pub fn fill(mut records: impl Iterator<Item = String>, limit: usize) -> Result<Filled, usize> {
-    let budget = PAGE_BYTES - ENVELOPE_BYTES;
+pub fn fill(records: impl Iterator<Item = String>, limit: usize) -> Result<Filled, usize> {
+    fill_within(records, limit, ENVELOPE_BYTES)
+}
+
+/// [`fill`] for a page whose JSON form holds at most `envelope` bytes besides its records, such
+/// as a result that repeats the node it reads or carries diagnostics.
+pub fn fill_within(
+    mut records: impl Iterator<Item = String>,
+    limit: usize,
+    envelope: usize,
+) -> Result<Filled, usize> {
+    let budget = PAGE_BYTES.saturating_sub(envelope);
     let mut filled = Filled {
         records: Vec::new(),
         more: false,

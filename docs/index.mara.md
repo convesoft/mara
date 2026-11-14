@@ -11,6 +11,7 @@
 | [Write safety](writes.mara.md) | What a write preserves, write order |
 | [Migration](migration.mara.md) | Conversion from 0.3.0, dropped capabilities |
 | [Retrieval](retrieval.mara.md) | Search, get, relation list, item list, narrative units, paging |
+| [Read requests and results](retrieval-requests.mara.md) | Search filters, ranking within a group, excerpts, result formats |
 | [Validation](validation.mara.md) | Built-in checks, diagnostics |
 | [Engineering template: knowledge rules](template.mara.md) | Acceptance rules, relation lifecycle, risk level |
 | [Engineering template: readiness](template-readiness.mara.md) | Queries, result inputs, gates, views |

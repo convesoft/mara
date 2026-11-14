@@ -42,7 +42,7 @@ Results that match every word exactly precede results that need typo tolerance. 
 | Status | Accepted |
 | Satisfies | [NEED-BOUNDED-RETRIEVAL](product.mara.md#01M7BF6H6GBKEHK5BQ8NDX7JG5) |
 
-Search also matches a word within one edit of a query word of 4–7 characters, or two edits of a longer one. ID and MID values match only exactly.
+Search also matches a word within one edit of a query word of 4–7 characters, or two edits of a longer one. An edit inserts, deletes or substitutes one character, or swaps two adjacent characters that no other edit touches (optimal string alignment). A query word of more than 18 characters, and ID and MID values, match only exactly.
 
 ---
 
@@ -84,7 +84,7 @@ Search also matches a word within one edit of a query word of 4–7 characters, 
 | Status | Accepted |
 | Satisfies | [NEED-BOUNDED-RETRIEVAL](product.mara.md#01M7BF6H6GBKEHK5BQ8NDX7JG5) |
 
-`item list` returns compact item summaries in path and source order, narrowed by the same filters as search.
+`item list` returns compact item summaries in path and source order, narrowed by the same filters as search. A summary holds the item's ID, MID, type, title, path and line.
 
 ---
 
@@ -112,7 +112,7 @@ A read returns at most a bounded number of records and bytes, with a cursor whil
 | Status | Draft |
 | Satisfies | [NEED-BOUNDED-RETRIEVAL](product.mara.md#01M7BF6H6GBKEHK5BQ8NDX7JG5) |
 
-A page holds 20 records unless the request asks for another number from 1 to 100, and at most 65,536 bytes. The numbers are those of 0.3.0 and provisional.
+A page holds 20 records unless the request asks for another number from 1 to 100, and at most 65,536 bytes; a request for another number is refused before anything runs. `get` takes no number of records: its pages are bounded by bytes alone. The numbers are those of 0.3.0 and provisional.
 
 ---
 
@@ -132,8 +132,9 @@ A page holds 20 records unless the request asks for another number from 1 to 100
 | Satisfies | [REQ-READ-NODE](#01M7BF6HB1DC9AFHM890ERAJCK) |
 
 - A narrative unit is a heading and the blocks up to the next heading in the same region. Blocks before a region's first heading form one unit.
-- Search returns a unit as `<path>:<line>`, the line where it starts.
-- `get <path>:<line>` reads the unit or item that contains that line. `get <path>` reads the whole document.
+- Every region that is no item is narrative, that of an incomplete item included. Text before an item's merged anchor is a unit of its own; the text after the anchor in its paragraph starts the item's body, so search indexes it as body text and `get` of the item returns its content from that text on, the heading and the table as written included. The item's span and its validation do not change.
+- Search returns a unit as `<path>:<line>`, the line where it starts, the path being from the project root.
+- `get <path>:<line>` reads the unit or item that contains that line, the one that starts first when the line holds a merged anchor. `get <path>` reads the whole document. A line that no item or unit contains, such as a `---` line, names nothing.
 
 ---
 
@@ -150,6 +151,8 @@ A page holds 20 records unless the request asks for another number from 1 to 100
 - Each (snapshot, normalized request) result is computed once into a bounded result cache. Pages are slices of it.
 - Byte budgets use per-record sizes computed once, never by re-serializing the page after each record.
 - A cursor carries the key of its result ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)), which covers every layer and definition the result reads, so staleness is detected exactly.
+- A read's result key covers the key of the layer it reads, every input of the request but the page size and the cursor, so a walk may change its page size, and the code, path, line and message of the inventory's diagnostics that a read of documents carries. The layer of `schema list` and `schema get` is the configuration and schema files as read; that of every other read, the document snapshot. A cursor of another result is stale. `get`'s cursor offset counts the bytes of the row values, then of the content, before its page.
 - Internal consumers call evaluate-all APIs, never the public paged API in a loop.
 - `get` returns a node larger than one page in consecutive portions: its metadata rows first, then its content cut at line boundaries, or at a character boundary inside a line or value longer than a page. The portions concatenate to the exact content.
+- A row whose value is cut is `partial` on each page but the one that ends it; the parts of its value concatenate to it.
 - A record of any other read that cannot fit one page fails the read with a diagnostic that names the record. Nothing is cut silently.

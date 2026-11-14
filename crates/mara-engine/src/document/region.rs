@@ -7,8 +7,8 @@ use pulldown_cmark::{Event, LinkType, Tag, TagEnd};
 
 use super::html::{HtmlBlock, HtmlLine};
 use super::{
-    Document, Item, LineIndex, Link, Posting, Problem, Row, Word, Zone, is_mid, label_name, lines,
-    words,
+    Document, Item, LineIndex, Link, Node, Posting, Problem, Row, Unit, Word, Zone, is_mid,
+    label_name, lines, word_spans,
 };
 
 /// Reads the events of one document in order.
@@ -22,7 +22,7 @@ pub(super) struct Reader<'t> {
     region: Vec<Block>,
     /// A thematic break inside the open top-level block ends the region after that block.
     break_pending: bool,
-    /// The search words of the items read so far, with their postings.
+    /// The search words of the nodes read so far, with their postings.
     words: BTreeMap<String, Vec<Posting>>,
     document: Document,
 }
@@ -34,10 +34,105 @@ struct Block {
     span: Range<usize>,
     /// Every link in the block, in source order.
     links: Vec<Link>,
-    /// The MID anchors in the block, with their offsets, unless the block is one.
-    anchors: Vec<(String, usize)>,
-    /// The block's text, without HTML or link destinations.
-    plain: String,
+    /// The MID anchors in the block, unless the block is one.
+    anchors: Vec<BlockAnchor>,
+    /// The block's text, without HTML, link destinations or the text of nested headings.
+    plain: Prose,
+    /// The text of the headings inside the block, such as one in a block quote or a list.
+    headings: Prose,
+}
+
+/// A MID anchor inside a block: its MID, its offset, and how much of the block's text precedes
+/// it.
+struct BlockAnchor {
+    mid: String,
+    offset: usize,
+    before: usize,
+}
+
+/// Text without Markdown syntax, link destinations or HTML, with where each piece of it starts
+/// in the source, so that each word has a source offset (DES-SNAPSHOT).
+#[derive(Clone, Default)]
+struct Prose {
+    text: String,
+    /// Each piece of `text` in order: where it starts in `text`, and its range in the source.
+    marks: Vec<Mark>,
+}
+
+/// A piece of collected text: where it starts in the text, the source range it was read from,
+/// and whether that range holds exactly its characters.
+#[derive(Clone, Copy, Debug)]
+struct Mark {
+    at: usize,
+    source: (usize, usize),
+    exact: bool,
+}
+
+impl Prose {
+    /// The piece `text`, read from `source`, which holds exactly its characters when `exact`.
+    fn push(&mut self, text: &str, source: Range<usize>, exact: bool) {
+        self.marks.push(Mark {
+            at: self.text.len(),
+            source: (source.start, source.end),
+            exact,
+        });
+        self.text.push_str(text);
+    }
+
+    /// A space that ends the word before it.
+    fn space(&mut self) {
+        self.text.push(' ');
+    }
+
+    /// The text up to byte `end`, with its marks.
+    fn until(&self, end: usize) -> Words<'_> {
+        Words {
+            text: &self.text[..end],
+            start: 0,
+            marks: &self.marks,
+        }
+    }
+
+    /// The text from byte `start` on, with its marks.
+    fn after(&self, start: usize) -> Words<'_> {
+        Words {
+            text: &self.text,
+            start,
+            marks: &self.marks,
+        }
+    }
+
+    fn words(&self) -> Words<'_> {
+        self.until(self.text.len())
+    }
+}
+
+/// A text whose words are indexed, with the source offset of each of its pieces.
+#[derive(Clone, Copy)]
+struct Words<'t> {
+    text: &'t str,
+    /// Where the indexed part of `text` starts.
+    start: usize,
+    /// The pieces of `text`, in order.
+    marks: &'t [Mark],
+}
+
+impl Words<'_> {
+    /// The source offset of byte `at` of the text, where a word starts: in an exact piece, at the
+    /// same distance from the start of its source range as in the text; in any other piece, at
+    /// the start of its source range.
+    fn source(&self, at: usize) -> usize {
+        let piece = self.marks.partition_point(|mark| mark.at <= at);
+        // Cannot fire: text grows only by `Prose::push`, which marks it, and by spaces, which
+        // hold no word, so a word starts at or after the first mark.
+        let mark = self.marks[piece.checked_sub(1).expect("a word lies in a piece")];
+        let (start, end) = mark.source;
+        let distance = at - mark.at;
+        match mark.exact && distance < end - start {
+            true => start + distance,
+            false => start,
+        }
+    }
 }
 
 enum Kind {
@@ -84,7 +179,7 @@ struct Cell {
     /// As written, with `\|` read as `|`.
     text: String,
     /// The cell's text without Markdown syntax, link destinations or HTML.
-    plain: String,
+    plain: Prose,
     /// The indices of the cell's links in [`Block::links`].
     links: Range<usize>,
 }
@@ -94,12 +189,16 @@ struct OpenBlock {
     span: Range<usize>,
     links: Vec<Link>,
     open_links: Vec<OpenLink>,
-    /// The MID anchors `<a id="<MID>"></a>` in the block, with their offsets.
-    anchors: Vec<(String, usize)>,
+    /// The MID anchors `<a id="<MID>"></a>` in the block.
+    anchors: Vec<BlockAnchor>,
     /// The HTML block being read, if any.
     html: HtmlBlock,
     /// The block's text, with a space at each boundary inside it.
-    plain: String,
+    plain: Prose,
+    /// The text of the headings nested in the block.
+    headings: Prose,
+    /// A nested heading is open.
+    in_heading: bool,
 }
 
 /// A link whose end has not been seen.
@@ -122,7 +221,7 @@ enum OpenKind {
         /// The open cell's span and the index of its first link.
         cell: Option<(Range<usize>, usize)>,
         /// The open cell's text.
-        cell_plain: String,
+        cell_plain: Prose,
     },
     Other,
 }
@@ -131,14 +230,14 @@ impl OpenBlock {
     /// A boundary inside the block, which separates the words on either side of it.
     /// Every text being collected gets it: the block's, and an open metadata cell's.
     fn boundary(&mut self) {
-        self.plain.push(' ');
+        self.prose().space();
         if let OpenKind::Table {
             cell: Some(_),
             cell_plain,
             ..
         } = &mut self.kind
         {
-            cell_plain.push(' ');
+            cell_plain.space();
         }
     }
 
@@ -149,20 +248,46 @@ impl OpenBlock {
         }
     }
 
-    fn text(&mut self, text: &str) {
+    /// The text being collected: a nested heading's, or the block's own.
+    fn prose(&mut self) -> &mut Prose {
+        if self.in_heading {
+            &mut self.headings
+        } else {
+            &mut self.plain
+        }
+    }
+
+    /// The MID anchor `mid` at `offset`, after the text collected so far.
+    fn anchor(&mut self, mid: &str, offset: usize) {
+        let before = self.plain.text.len();
+        self.anchors.push(BlockAnchor {
+            mid: mid.to_owned(),
+            offset,
+            before,
+        });
+    }
+
+    /// `rendered`, the text the Markdown parser read, in the runs `runs` with their source
+    /// ranges ([`align`]). The runs together are the whole rendered text.
+    fn text(&mut self, rendered: &str, runs: &[Run]) {
         self.not_html();
-        self.plain.push_str(text);
-        match &mut self.kind {
-            OpenKind::Heading(title) => title.push_str(text),
-            OpenKind::Table {
+        for run in runs {
+            let piece = &rendered[run.rendered.clone()];
+            self.prose().push(piece, run.source.clone(), run.exact);
+            if let OpenKind::Table {
                 cell: Some(_),
                 cell_plain,
                 ..
-            } => cell_plain.push_str(text),
-            _ => {}
+            } = &mut self.kind
+            {
+                cell_plain.push(piece, run.source.clone(), run.exact);
+            }
+        }
+        if let OpenKind::Heading(title) = &mut self.kind {
+            title.push_str(rendered);
         }
         if let Some(link) = self.open_links.last_mut() {
-            link.text.push_str(text);
+            link.text.push_str(rendered);
         }
     }
 
@@ -193,6 +318,7 @@ impl OpenBlock {
             links: self.links,
             anchors,
             plain: self.plain,
+            headings: self.headings,
         }
     }
 }
@@ -212,6 +338,8 @@ struct Anchor {
     offset: usize,
     /// The anchor is a paragraph of its own.
     exact: bool,
+    /// How much of the first block's text precedes it.
+    before: usize,
 }
 
 impl Head {
@@ -226,15 +354,17 @@ impl Head {
                 mid: mid.clone(),
                 offset: span.start,
                 exact: true,
+                before: 0,
             }),
             Some(Block {
                 kind: Kind::Paragraph,
                 anchors,
                 ..
             }) if anchors.len() == 1 => Some(Anchor {
-                mid: anchors[0].0.clone(),
-                offset: anchors[0].1,
+                mid: anchors[0].mid.clone(),
+                offset: anchors[0].offset,
                 exact: false,
+                before: anchors[0].before,
             }),
             _ => None,
         };
@@ -309,14 +439,34 @@ impl<'t> Reader<'t> {
                     block.boundary();
                 }
             }
-            Event::Text(text) | Event::Code(text) => {
+            Event::Text(text) => {
+                let runs = align(self.text, &text, span, false);
                 if let Some(block) = &mut self.block {
-                    block.text(&text);
+                    block.text(&text, &runs);
+                }
+            }
+            Event::Code(text) => {
+                // The span holds the backtick runs around the code.
+                let source = &self.text[span.clone()];
+                let opening = source.bytes().take_while(|&b| b == b'`').count();
+                let closing = source[opening..]
+                    .bytes()
+                    .rev()
+                    .take_while(|&b| b == b'`')
+                    .count();
+                let content = span.start + opening..span.end - closing;
+                // A code span over several lines is one run at its start (DES-SEARCH-REQUESTS).
+                let runs = match source.contains(['\n', '\r']) {
+                    true => vec![inexact(0..text.len(), span.start..span.start + 1)],
+                    false => align(self.text, &text, content, true),
+                };
+                if let Some(block) = &mut self.block {
+                    block.text(&text, &runs);
                 }
             }
             Event::SoftBreak | Event::HardBreak => {
                 if let Some(block) = &mut self.block {
-                    block.text(" ");
+                    block.text(" ", &[inexact(0..1, span)]);
                 }
             }
             Event::InlineHtml(html) => {
@@ -328,7 +478,7 @@ impl<'t> Reader<'t> {
                         .and_then(|rest| rest.strip_suffix("\">"))
                         .filter(|mid| is_mid(mid) && self.text[span.end..].starts_with("</a>"));
                     if let Some(mid) = mid {
-                        block.anchors.push((mid.to_owned(), span.start));
+                        block.anchor(mid, span.start);
                     }
                     if let OpenKind::Paragraph { html: all, .. } = &mut block.kind {
                         all.push_str(&html);
@@ -341,7 +491,7 @@ impl<'t> Reader<'t> {
                     let mut offset = span.start;
                     for line in lines(&html) {
                         match block.html.line(line) {
-                            HtmlLine::Anchor(mid) => block.anchors.push((mid.to_owned(), offset)),
+                            HtmlLine::Anchor(mid) => block.anchor(mid, offset),
                             HtmlLine::EndTagCase(end) => end_tags.push((end, offset)),
                             HtmlLine::Other => {}
                         }
@@ -389,7 +539,7 @@ impl<'t> Reader<'t> {
                 rows: Vec::new(),
                 row: None,
                 cell: None,
-                cell_plain: String::new(),
+                cell_plain: Prose::default(),
             },
             _ => OpenKind::Other,
         };
@@ -400,7 +550,9 @@ impl<'t> Reader<'t> {
             open_links: Vec::new(),
             anchors: Vec::new(),
             html: HtmlBlock::default(),
-            plain: String::new(),
+            plain: Prose::default(),
+            headings: Prose::default(),
+            in_heading: false,
         }
     }
 
@@ -414,6 +566,11 @@ impl<'t> Reader<'t> {
         }
         if !is_inline(&tag) {
             block.boundary();
+        }
+        // A heading inside another block, such as a block quote or a list, collects its text
+        // apart, for the heading zone (DES-SNAPSHOT).
+        if nested && matches!(tag, Tag::Heading { .. }) {
+            block.in_heading = true;
         }
         match (tag, &mut block.kind) {
             (
@@ -453,6 +610,10 @@ impl<'t> Reader<'t> {
             return;
         };
         if !is_inline_end(&tag) {
+            block.boundary();
+        }
+        if matches!(tag, TagEnd::Heading(_)) && block.in_heading {
+            block.in_heading = false;
             block.boundary();
         }
         match (tag, &mut block.kind) {
@@ -526,7 +687,7 @@ impl<'t> Reader<'t> {
     fn push(&mut self, open: OpenBlock) {
         let mut block = open.finish();
         block.span = trim(self.text, &block.span);
-        for (mid, offset) in &block.anchors {
+        for BlockAnchor { mid, offset, .. } in &block.anchors {
             let message = format!(
                 "the anchor of MID {mid} must be a paragraph of its own, `<a id=\"{mid}\"></a>`, \
                  at the start of a region"
@@ -559,23 +720,64 @@ impl<'t> Reader<'t> {
         if head.is_item(&blocks) {
             self.read_item(head, blocks, next);
         } else {
-            self.read_mentions(blocks, None);
+            self.read_narrative(blocks, None);
         }
     }
 
-    /// Adds the mentions of `blocks`, except those in the block at `table`, to the narrative.
-    fn read_mentions(&mut self, blocks: Vec<Block>, table: Option<usize>) {
-        for (index, block) in blocks.into_iter().enumerate() {
-            if Some(index) != table {
-                let mentions = block.links.into_iter().filter(Link::is_mention);
-                self.document.mentions.extend(mentions);
+    /// Reads a region that is no item as narrative units, each a heading and the blocks up to the
+    /// next one, or the blocks before the first heading, and adds its mentions, except those in
+    /// the block at `table`, to the narrative (DES-NARRATIVE-UNITS).
+    fn read_narrative(&mut self, mut blocks: Vec<Block>, table: Option<usize>) {
+        let mut start = 0;
+        for end in 1..=blocks.len() {
+            if end == blocks.len() || matches!(blocks[end].kind, Kind::Heading(_)) {
+                let table = table.and_then(|table| table.checked_sub(start));
+                self.read_unit(&mut blocks[start..end], table);
+                start = end;
             }
         }
     }
 
+    /// Adds the narrative unit of `blocks`, the first of which may be its heading, with the
+    /// mentions of every block but the one at `table`.
+    fn read_unit(&mut self, blocks: &mut [Block], table: Option<usize>) {
+        let (Some(first), Some(last)) = (blocks.first(), blocks.last()) else {
+            return;
+        };
+        let span = first.span.start..last.span.end;
+        let heading = match &first.kind {
+            Kind::Heading(title) => Some(title.clone()),
+            _ => None,
+        };
+        let mentions = self.document.mentions.len();
+        for (index, block) in blocks.iter_mut().enumerate() {
+            if Some(index) != table {
+                let links = std::mem::take(&mut block.links);
+                let mentions = links.into_iter().filter(Link::is_mention);
+                self.document.mentions.extend(mentions);
+            }
+        }
+        let (mut headings, mut body) = (Vec::new(), Vec::new());
+        for (index, block) in blocks.iter().enumerate() {
+            match index == 0 && heading.is_some() {
+                true => headings.push(block.plain.words()),
+                false => body.push(block.plain.words()),
+            }
+            headings.push(block.headings.words());
+        }
+        let node = Node::Unit(self.document.units.len());
+        self.add_words(node, [(Zone::Heading, headings), (Zone::Body, body)]);
+        self.document.units.push(Unit {
+            heading,
+            line: self.lines.line(span.start),
+            span,
+            mentions: mentions..self.document.mentions.len(),
+        });
+    }
+
     /// Reads a region meant as an item, reporting each problem of its structure, and keeps it
     /// as an item when it has an anchor, a heading and a `Type` row (DES-ITEM-STRUCTURE).
-    fn read_item(&mut self, head: Head, blocks: Vec<Block>, next: Option<usize>) {
+    fn read_item(&mut self, head: Head, mut blocks: Vec<Block>, next: Option<usize>) {
         // An item starts at its anchor, even one merged into its first block.
         let start = head
             .anchor
@@ -598,7 +800,7 @@ impl<'t> Reader<'t> {
             (None, Some(anchor)) => format!("with MID {}", anchor.mid),
             (None, None) => String::new(),
         };
-        let rows = match head.table.map(|index| (index, &blocks[index])) {
+        let (rows, values) = match head.table.map(|index| (index, &blocks[index])) {
             Some((
                 index,
                 table @ Block {
@@ -614,7 +816,7 @@ impl<'t> Reader<'t> {
                 }
                 rows
             }
-            _ => Vec::new(),
+            _ => (Vec::new(), Vec::new()),
         };
 
         let mut missing = Vec::new();
@@ -645,7 +847,7 @@ impl<'t> Reader<'t> {
                 let message = format!("the item {name} is not read: {}", missing.join("; "));
                 self.problem("incomplete-item", start, message);
             }
-            return self.read_mentions(blocks, head.table);
+            return self.read_narrative(blocks, head.table);
         };
 
         let end = blocks.last().map_or(start, |block| block.span.end);
@@ -654,11 +856,26 @@ impl<'t> Reader<'t> {
             None => end..end,
         };
         let mid = mid.clone();
-        self.add_words(&mid, &blocks[heading], &rows, &blocks[table + 1..]);
+        // Text before a merged anchor is narrative: a unit of its own. The text after it in its
+        // paragraph starts the item's body (DES-NARRATIVE-UNITS).
+        let merged = head.anchor.as_ref().filter(|anchor| !anchor.exact);
+        let prefix = merged.map_or(0, |anchor| anchor.before);
+        let first = &blocks[0];
+        let before = trim(self.text, &(first.span.start..start));
+        let lead = match merged {
+            Some(anchor) => {
+                // The anchor is exactly `<a id="<MID>"></a>` (DES-MID-ANCHOR).
+                let anchor_end = start + format!("<a id=\"{}\"></a>", anchor.mid).len();
+                trim(self.text, &(anchor_end.min(first.span.end)..first.span.end))
+            }
+            None => start..start,
+        };
+        let narrative = self.document.mentions.len();
         let mut mentions = Vec::new();
-        for (index, block) in blocks.into_iter().enumerate() {
+        for (index, block) in blocks.iter_mut().enumerate() {
             if index != table {
-                for link in block.links.into_iter().filter(Link::is_mention) {
+                let links = std::mem::take(&mut block.links);
+                for link in links.into_iter().filter(Link::is_mention) {
                     // Text before a merged anchor is narrative.
                     if link.span.start < start {
                         self.document.mentions.push(link);
@@ -668,6 +885,26 @@ impl<'t> Reader<'t> {
                 }
             }
         }
+        if !before.is_empty() {
+            let node = Node::Unit(self.document.units.len());
+            self.add_words(node, [(Zone::Body, vec![blocks[0].plain.until(prefix)])]);
+            self.document.units.push(Unit {
+                heading: None,
+                line: self.lines.line(before.start),
+                span: before,
+                mentions: narrative..self.document.mentions.len(),
+            });
+        }
+        let words = ItemWords {
+            mid: &mid,
+            anchor: start,
+            heading: &blocks[heading],
+            rows: &rows,
+            values: &values,
+            lead: merged.map(|_| blocks[0].plain.after(prefix)),
+            body: &blocks[table + 1..],
+        };
+        self.add_item_words(&words);
         self.document.items.push(Item {
             mid,
             title,
@@ -676,14 +913,23 @@ impl<'t> Reader<'t> {
             span: start..end,
             line: self.lines.line(start),
             end_line: self.lines.line(end.saturating_sub(1).max(start)),
+            lead,
             body,
         });
     }
 
     /// The rows of the metadata table `table` that have a key and a value, reporting malformed
-    /// ones. `next` is where the block after the table starts, if any (DES-METADATA-TABLE).
-    fn metadata_rows(&mut self, table: &Block, rows: &[TableRow], next: Option<usize>) -> Vec<Row> {
+    /// ones, with the text of each value and where its pieces start. `next` is where the block
+    /// after the table
+    /// starts, if any (DES-METADATA-TABLE).
+    fn metadata_rows(
+        &mut self,
+        table: &Block,
+        rows: &[TableRow],
+        next: Option<usize>,
+    ) -> (Vec<Row>, Vec<Prose>) {
         let mut read = Vec::with_capacity(rows.len());
+        let mut values = Vec::with_capacity(rows.len());
         for row in rows {
             let Some((key, value)) = row.key_value() else {
                 let message = "this metadata row lacks a key or a value: a row is \
@@ -706,10 +952,16 @@ impl<'t> Reader<'t> {
                 key: key.text.clone(),
                 name: label_name(&key.text),
                 value: value.text.clone(),
-                text: value.plain.split_whitespace().collect::<Vec<_>>().join(" "),
+                text: value
+                    .plain
+                    .text
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" "),
                 link,
                 line: self.lines.line(row.span.start),
             });
+            values.push(value.plain.clone());
         }
         if let Some(next) = next
             && self.lines.line(next) == self.lines.line(table.span.end.saturating_sub(1)) + 1
@@ -719,37 +971,73 @@ impl<'t> Reader<'t> {
                     .to_owned();
             self.problem("malformed-row", next, message);
         }
-        read
+        (read, values)
     }
 
-    /// Adds the search words of the next item, zone by zone, so that each word's postings stay
-    /// in item and zone order (DES-SNAPSHOT). Every text comes from the event pass: no link
-    /// destination and no HTML.
-    fn add_words(&mut self, mid: &str, heading: &Block, rows: &[Row], body: &[Block]) {
-        let item = self.document.items.len();
-        let (ids, values): (Vec<&Row>, Vec<&Row>) = rows.iter().partition(|row| row.name == "id");
-        let id = std::iter::once(mid).chain(ids.into_iter().map(|row| row.text.as_str()));
-        let zones: [(Zone, Vec<&str>); 4] = [
-            (Zone::Id, id.collect()),
-            (Zone::Title, vec![heading.plain.as_str()]),
-            (
-                Zone::Metadata,
-                values.into_iter().map(|row| row.text.as_str()).collect(),
-            ),
-            (
-                Zone::Body,
-                body.iter().map(|block| block.plain.as_str()).collect(),
-            ),
-        ];
+    /// Adds the search words of the next item, zone by zone (DES-SNAPSHOT). Every text comes
+    /// from the event pass: no link destination and no HTML.
+    fn add_item_words(&mut self, item: &ItemWords<'_>) {
+        let node = Node::Item(self.document.items.len());
+        // The MID stands after `<a id="` in its anchor.
+        let mid = item.anchor + "<a id=\"".len();
+        let anchor = [Mark {
+            at: 0,
+            source: (mid, mid + item.mid.len()),
+            exact: true,
+        }];
+        let rows = |id: bool| -> Vec<Words<'_>> {
+            let rows = item.rows.iter().zip(item.values);
+            rows.filter(|(row, _)| (row.name == "id") == id)
+                .map(|(_, value)| value.words())
+                .collect()
+        };
+        let mut ids = vec![Words {
+            text: item.mid,
+            start: 0,
+            marks: &anchor,
+        }];
+        ids.extend(rows(true));
+        let (mut headings, mut other) = (Vec::new(), Vec::new());
+        other.extend(item.lead);
+        for block in item.body {
+            match block.kind {
+                Kind::Heading(_) => headings.push(block.plain.words()),
+                _ => other.push(block.plain.words()),
+            }
+            headings.push(block.headings.words());
+        }
+        self.add_words(
+            node,
+            [
+                (Zone::Id, ids),
+                (Zone::Title, vec![item.heading.plain.words()]),
+                (Zone::Heading, headings),
+                (Zone::Metadata, rows(false)),
+                (Zone::Body, other),
+            ],
+        );
+    }
+
+    /// Adds the words of `node`'s texts, zone by zone in zone order, so that each word's
+    /// postings stay in node order, then zone order. A posting keeps the source offset of the
+    /// word's first occurrence in its zone.
+    fn add_words<const N: usize>(&mut self, node: Node, zones: [(Zone, Vec<Words<'_>>); N]) {
         for (zone, texts) in zones {
-            let posting = Posting { item, zone };
-            for word in texts.into_iter().flat_map(words) {
-                let postings = match self.words.get_mut(&word) {
-                    Some(postings) => postings,
-                    None => self.words.entry(word).or_default(),
-                };
-                if postings.last() != Some(&posting) {
-                    postings.push(posting);
+            for text in texts {
+                let part = &text.text[text.start..];
+                for (at, word) in word_spans(part).map(|(at, word)| (text.start + at, word)) {
+                    let word = word.to_lowercase();
+                    let postings = match self.words.get_mut(&word) {
+                        Some(postings) => postings,
+                        None => self.words.entry(word).or_default(),
+                    };
+                    let seen = postings.last();
+                    if seen.is_none_or(|last| (last.node, last.zone) != (node, zone)) {
+                        // A parsed document holds at most `MAX_DOCUMENT_BYTES` bytes.
+                        let at = u32::try_from(text.source(at))
+                            .expect("an offset in a parsed document fits 32 bits");
+                        postings.push(Posting { node, zone, at });
+                    }
                 }
             }
         }
@@ -775,6 +1063,101 @@ impl<'t> Reader<'t> {
             line,
         });
     }
+}
+
+/// A run of rendered text, and the source range it was read from: exactly its characters when
+/// `exact`, else something CommonMark renders as it.
+struct Run {
+    rendered: Range<usize>,
+    source: Range<usize>,
+    exact: bool,
+}
+
+/// The run of the rendered text `rendered`, read from `source` in some way not followed here.
+fn inexact(rendered: Range<usize>, source: Range<usize>) -> Run {
+    Run {
+        rendered,
+        source,
+        exact: false,
+    }
+}
+
+/// Aligns `rendered`, the text the Markdown parser read from `source`, a range of `text` within
+/// one line or a code block's lines, with that range, by the only differences CommonMark allows
+/// there: a backslash escape read as its character (`\|` read as `|` in a table cell) and, in a
+/// code span (`code`), one space stripped at each end when both ends hold one and not every
+/// character is one. The runs it returns are the whole rendered text, each run that equals its
+/// source exact. Rendered text that does not follow from its source by these rules, such as a
+/// decoded entity, is one run at the start of its source.
+fn align(text: &str, rendered: &str, source: Range<usize>, code: bool) -> Vec<Run> {
+    let whole = || vec![inexact(0..rendered.len(), source.clone())];
+    let Some(slice) = text.get(source.clone()) else {
+        return whole();
+    };
+    // Each character of the source, with its range.
+    let units: Vec<(Range<usize>, char)> = slice
+        .char_indices()
+        .map(|(at, c)| (source.start + at..source.start + at + c.len_utf8(), c))
+        .collect();
+    let mut units = &units[..];
+    let space = |unit: &(Range<usize>, char)| unit.1 == ' ';
+    if code
+        && units.len() >= 2
+        && space(&units[0])
+        && space(&units[units.len() - 1])
+        && !units.iter().all(space)
+    {
+        units = &units[1..units.len() - 1];
+    }
+    let mut runs: Vec<Run> = Vec::new();
+    let mut next = 0;
+    for (at, c) in rendered.char_indices() {
+        let end = at + c.len_utf8();
+        let Some((range, char)) = units.get(next) else {
+            return whole();
+        };
+        if *char == c {
+            match runs.last_mut() {
+                Some(run) if run.rendered.end == at && run.source.end == range.start => {
+                    run.rendered.end = end;
+                    run.source.end = range.end;
+                }
+                _ => runs.push(Run {
+                    rendered: at..end,
+                    source: range.clone(),
+                    exact: true,
+                }),
+            }
+            next += 1;
+        } else if *char == '\\' && units.get(next + 1).is_some_and(|escaped| escaped.1 == c) {
+            runs.push(Run {
+                rendered: at..end,
+                source: units[next + 1].0.clone(),
+                exact: true,
+            });
+            next += 2;
+        } else {
+            return whole();
+        }
+    }
+    if next != units.len() {
+        return whole();
+    }
+    runs
+}
+
+/// What an item's search words come from.
+struct ItemWords<'i> {
+    mid: &'i str,
+    /// Where the item, and its anchor, start.
+    anchor: usize,
+    heading: &'i Block,
+    rows: &'i [Row],
+    /// The text of each row's value.
+    values: &'i [Prose],
+    /// The text after a merged anchor in its paragraph.
+    lead: Option<Words<'i>>,
+    body: &'i [Block],
 }
 
 /// `span` without the spaces, tabs and line endings around its text.

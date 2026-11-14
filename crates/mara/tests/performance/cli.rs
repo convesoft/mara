@@ -29,6 +29,8 @@ pub enum Reads {
     /// The configuration, the schema, the `.gitignore` files and every document, which it
     /// parses into a snapshot and checks.
     Checked,
+    /// The same inputs into a snapshot, without checks.
+    Documents,
 }
 
 /// Each operation's case on `corpus`. An operation adds its case here, and both tests run it.
@@ -42,6 +44,12 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
         case(&["project", "validate"], Reads::Checked),
         case(&["item", "validate", &corpus.first_id], Reads::Checked),
         case(&["schema", "validate"], Reads::Schema),
+        case(&["search", "cache"], Reads::Documents),
+        case(&["get", &corpus.first_id], Reads::Documents),
+        case(&["relation", "list", &corpus.first_id], Reads::Documents),
+        case(&["item", "list"], Reads::Documents),
+        case(&["schema", "list"], Reads::Schema),
+        case(&["schema", "get", "requirement"], Reads::Schema),
     ]
 }
 

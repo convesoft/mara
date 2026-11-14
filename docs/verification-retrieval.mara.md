@@ -25,6 +25,7 @@ Rust integration tests run `search` with the real CLI on a disposable project wh
 | A filter by type, field value, relation, path or ID | Exactly the results that match it; a filter value one edit away from a real one matches nothing |
 | Exact and one-edit matches in titles, headings, bodies and fields, and exact matches in IDs, across several files | Exact matches first; within each group, ID, title and heading matches before body and field matches; ties in path and source order |
 | A query word one edit away from a corpus word, at 3, 4 and 7 characters; two edits away, at 7 and 8; three edits away, at 12 | Matches at 4 and 7 with one edit and at 8 with two, and no other |
+| A query word of 18 characters two edits from a word of 20, and one of 19 characters one edit from a word | The first matches; the second matches only itself |
 | An ID or MID one edit away | No match |
 
 ---
@@ -109,7 +110,7 @@ Rust integration tests run each read operation with the real CLI on a disposable
 | Case | Expectation |
 | --- | --- |
 | Following every cursor from the first page | Each record exactly once; every page within the record and byte limits; no cursor on the last page |
-| A cursor used after a document edit | Rejected as stale |
+| A cursor used after an edit of an input the result reads | Rejected as stale |
 | A cursor used after a change to an undeclared file | Accepted |
 | `get` of an item larger than one page, with a line longer than a page | Consecutive portions, metadata rows first, that concatenate to the exact content |
 | Any other read with a record larger than one page | Fails with a diagnostic that names the record |
@@ -127,12 +128,13 @@ Rust integration tests run each read operation with the real CLI on a disposable
 | Methods | Test |
 | Verifies | [REQ-PAGE-LIMITS](retrieval.mara.md#01M7CMW719S9H8FQKRFWWQ6NQK) |
 
-Rust integration tests run each read operation with the real CLI on a disposable project with more than 100 results.
+Rust integration tests run `search`, `relation list`, `item list` and `schema list` with the real CLI on a disposable project with more than 100 results.
 
 | Case | Expectation |
 | --- | --- |
 | No limit requested | 20 records per page |
 | A limit of 1, and of 100 | That many records per page |
+| A limit of 0, of 101, or not a number | Refused before anything runs |
 | Records larger than 65,536 bytes together | No page's JSON exceeds 65,536 bytes |
 
 ---

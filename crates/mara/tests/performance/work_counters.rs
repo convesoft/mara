@@ -79,6 +79,13 @@ fn cold_counts_at(size: usize) {
                 check_steps: run.work.check_steps,
                 ..WorkCounts::default()
             },
+            Reads::Documents => WorkCounts {
+                file_reads: documents + 3,
+                hashes: documents + 3,
+                parses: documents - 1,
+                snapshot_builds: 1,
+                ..WorkCounts::default()
+            },
         };
         assert_eq!(run.work, expected, "{name}");
         // Built-in checks visit each item twice and each edge once, and the items and edges of

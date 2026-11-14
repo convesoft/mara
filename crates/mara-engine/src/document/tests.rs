@@ -836,7 +836,7 @@ fn mixed_endings(text: &str) -> String {
 fn without_spans(mut document: Document) -> Document {
     let clear = |link: &mut Link| link.span = 0..0;
     for item in &mut document.items {
-        (item.span, item.body) = (0..0, 0..0);
+        (item.span, item.lead, item.body) = (0..0, 0..0, 0..0);
         item.rows
             .iter_mut()
             .filter_map(|row| row.link.as_mut())
@@ -844,6 +844,12 @@ fn without_spans(mut document: Document) -> Document {
         item.mentions.iter_mut().for_each(clear);
     }
     document.mentions.iter_mut().for_each(clear);
+    for unit in &mut document.units {
+        unit.span = 0..0;
+    }
+    for word in &mut document.words {
+        word.postings.iter_mut().for_each(|posting| posting.at = 0);
+    }
     document
 }
 
@@ -964,7 +970,7 @@ fn keeps_each_word_once_per_item_and_zone_in_byte_order() {
         .iter()
         .filter(|word| ["alpha", "zeta"].contains(&word.text.as_str()))
         .map(|word| {
-            let postings = word.postings.iter().map(|p| (p.item, p.zone)).collect();
+            let postings = word.postings.iter().map(|p| (item_of(p), p.zone)).collect();
             (word.text.as_str(), postings)
         })
         .collect();
@@ -1004,6 +1010,14 @@ fn the_document_key_is_the_parser_version_and_the_file_hash() {
     assert_eq!((key.parser_version, key.file), (PARSER_VERSION, hash));
 }
 
+/// The index of the item of `posting`.
+fn item_of(posting: &Posting) -> usize {
+    match posting.node {
+        Node::Item(item) => item,
+        Node::Unit(unit) => panic!("unit {unit} instead of an item"),
+    }
+}
+
 /// The words of `zone` in the document's only item.
 fn zone_words(document: &Document, zone: Zone) -> Vec<&str> {
     document
@@ -1035,11 +1049,13 @@ fn every_block_boundary_separates_words() {
     let document = parse_text(&item_with("T", "", body));
     let mut expected = vec![
         "after1", "c1", "c2", "c3", "c4", "code1", "code2", "codespan", "emphasis", "hard1",
-        "head1", "html1", "html2", "inner1", "link", "ord1", "ord2", "outer1", "outer2", "p1",
-        "p2", "quote1", "quote2", "soft1", "soft2",
+        "html1", "html2", "inner1", "link", "ord1", "ord2", "outer1", "outer2", "p1", "p2",
+        "quote1", "quote2", "soft1", "soft2",
     ];
     expected.sort_unstable();
     assert_eq!(zone_words(&document, Zone::Body), expected);
+    // A heading in the body ranks as a heading (REQ-SEARCH-RANKING).
+    assert_eq!(zone_words(&document, Zone::Heading), ["head1"]);
 }
 
 #[test]
@@ -1175,4 +1191,139 @@ fn an_html_tag_in_a_metadata_value_separates_words() {
         zone_words(&document, Zone::Metadata),
         ["alpha", "beta", "requirement"]
     );
+}
+
+#[test]
+fn splits_the_narrative_into_units_at_headings_and_region_boundaries() {
+    let text = format!(
+        "Lead text with [one](#{A}).\n\n# First\n\nUnder first.\n\n## Second\n\n> Quoted [two](#{B}).\n\n\
+         ---\n\nAfter the break.\n\n---\n\n{}\n---\n\n### Not an item\n\n| Type | Requirement |\n\
+         | --- | --- |\n| ID | REQ-Y |\n\nIts text.\n",
+        item(A, "X")
+    );
+    let document = parse_text(&text);
+    let units: Vec<(Option<&str>, usize, &str)> = document
+        .units
+        .iter()
+        .map(|unit| (unit.heading.as_deref(), unit.line, &text[unit.span.clone()]))
+        .collect();
+    assert_eq!(
+        units,
+        [
+            (None, 1, &*format!("Lead text with [one](#{A}).")),
+            (Some("First"), 3, "# First\n\nUnder first."),
+            (
+                Some("Second"),
+                7,
+                &*format!("## Second\n\n> Quoted [two](#{B}).")
+            ),
+            (None, 13, "After the break."),
+            (
+                Some("Not an item"),
+                30,
+                "### Not an item\n\n| Type | Requirement |\n| --- | --- |\n| ID | REQ-Y |\n\nIts text."
+            ),
+        ]
+    );
+    let mentions: Vec<_> = document.units.iter().map(|u| u.mentions.clone()).collect();
+    assert_eq!(mentions, [0..1, 1..1, 1..2, 2..2, 2..2]);
+    assert_eq!(document.mentions.len(), 2);
+    let unit_words = |zone: Zone| -> Vec<&str> {
+        let mut found: Vec<&str> = document
+            .words
+            .iter()
+            .filter(|word| {
+                word.postings
+                    .iter()
+                    .any(|p| p.zone == zone && matches!(p.node, Node::Unit(_)))
+            })
+            .map(|word| word.text.as_str())
+            .collect();
+        found.sort_unstable();
+        found
+    };
+    assert_eq!(
+        unit_words(Zone::Heading),
+        ["an", "first", "item", "not", "second"]
+    );
+    assert!(unit_words(Zone::Body).contains(&"quoted"));
+    assert!(unit_words(Zone::Body).contains(&"lead"));
+}
+
+#[test]
+fn text_before_a_merged_anchor_is_a_unit_of_its_own() {
+    let text = format!(
+        "Before [it](#{B}) <a id=\"{A}\"></a> afterword\n\n### T\n\n| Type | Requirement |\n\
+         | --- | --- |\n| ID | REQ-T |\n\nBody.\n"
+    );
+    let document = parse_text(&text);
+    assert_eq!(ids(&document), ["REQ-T"]);
+    assert_eq!(document.units.len(), 1);
+    let unit = &document.units[0];
+    assert_eq!(&text[unit.span.clone()], format!("Before [it](#{B})"));
+    assert_eq!((unit.line, unit.mentions.clone()), (1, 0..1));
+    let before = document.words.iter().find(|word| word.text == "before");
+    let postings = &before.expect("the narrative text is indexed").postings;
+    assert_eq!(postings[0].node, Node::Unit(0));
+    // The text after the anchor starts the item's body.
+    let item = &document.items[0];
+    assert_eq!(&text[item.lead.clone()], "afterword");
+    assert_eq!(item.span.start, text.find("<a id").unwrap());
+    let after = document.words.iter().find(|word| word.text == "afterword");
+    let posting = after
+        .expect("the text after the anchor is indexed")
+        .postings[0];
+    assert_eq!((posting.node, posting.zone), (Node::Item(0), Zone::Body));
+    assert!(text[posting.at as usize..].starts_with("afterword"));
+    // Without text after the anchor, the lead is empty.
+    let plain = parse_text(&item_with("T", "", "Body.\n"));
+    assert!(plain.items[0].lead.is_empty());
+}
+
+#[test]
+fn refuses_a_document_longer_than_its_offsets_can_reach() {
+    let text = item(A, "LIMIT");
+    let at_limit = parse_within(text.as_bytes(), text.len(), &mut WorkCounts::default());
+    assert_eq!((problems(&at_limit), at_limit.items.len()), (vec![], 1));
+    let mut work = WorkCounts::default();
+    let over = parse_within(text.as_bytes(), text.len() - 1, &mut work);
+    assert_eq!(problems(&over), [(1, "document-too-large")]);
+    assert!(over.items.is_empty() && over.units.is_empty() && over.words.is_empty());
+    assert_eq!(work.parses, 1);
+    assert_eq!(MAX_DOCUMENT_BYTES as u64, u64::from(u32::MAX));
+}
+
+#[test]
+fn nested_headings_are_headings_and_each_word_keeps_its_source_offset() {
+    let text = item_with(
+        "T",
+        "| Owner | Ann Lee |\n",
+        "> #### Quoted heading\n\n- ### Listed\n\nAn inter**nation**al `code` [link](https://x.example/dest) word.\n",
+    );
+    let document = parse_text(&text);
+    assert_eq!(problems(&document), []);
+    assert_eq!(
+        zone_words(&document, Zone::Heading),
+        ["heading", "listed", "quoted"]
+    );
+    let at = |word: &str| -> &str {
+        let found = document.words.iter().find(|w| w.text == word).expect(word);
+        &text[found.postings[0].at as usize..]
+    };
+    for (word, source) in [
+        ("international", "inter**"),
+        ("code", "code`"),
+        ("link", "link]"),
+        ("word", "word."),
+        ("quoted", "Quoted"),
+        ("lee", "Lee |"),
+        ("t", "T\n"),
+    ] {
+        assert!(
+            at(word).starts_with(source),
+            "{word}: {:?}",
+            &at(word)[..12]
+        );
+    }
+    assert!(at(&A.to_lowercase()).starts_with(A));
 }

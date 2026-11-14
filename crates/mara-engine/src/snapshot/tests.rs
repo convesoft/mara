@@ -1,7 +1,7 @@
 //! Tests of the snapshot.
 
 use super::*;
-use crate::document::Zone;
+use crate::document::{Node, Zone};
 use crate::schema::parse_schema;
 
 const A: &str = "01M7D8DZ2663WP3A037SR2HJH2";
@@ -214,50 +214,70 @@ fn without_a_schema_only_mentions_are_edges() {
 }
 
 #[test]
-fn indexes_the_words_of_each_item_by_zone() {
+fn indexes_the_words_of_each_item_and_unit_by_zone() {
+    use Node::{Item, Unit};
     let snapshot = example();
-    let postings = |word: &str| -> Vec<(usize, Zone)> {
+    let postings = |word: &str| -> Vec<(Node, Zone)> {
         snapshot
             .postings(word)
             .iter()
-            .map(|posting| (posting.item, posting.zone))
+            .map(|posting| (posting.node, posting.zone))
             .collect()
     };
     assert_eq!(
         postings("alpha"),
         [
-            (0, Zone::Id),
-            (0, Zone::Title),
-            (1, Zone::Body),
-            (2, Zone::Id)
+            (Item(0), Zone::Id),
+            (Item(0), Zone::Title),
+            (Item(1), Zone::Body),
+            (Item(2), Zone::Id)
         ]
     );
     assert_eq!(
         postings("beta"),
         [
-            (0, Zone::Metadata),
-            (1, Zone::Id),
-            (1, Zone::Title),
-            (1, Zone::Body)
+            (Item(0), Zone::Metadata),
+            (Item(1), Zone::Id),
+            (Item(1), Zone::Title),
+            (Item(1), Zone::Body)
         ]
     );
-    assert_eq!(postings(&A.to_lowercase()), [(0, Zone::Id)]);
+    assert_eq!(postings(&A.to_lowercase()), [(Item(0), Zone::Id)]);
     assert_eq!(
         postings("requirement"),
         [
-            (0, Zone::Metadata),
-            (1, Zone::Metadata),
-            (2, Zone::Metadata)
+            (Item(0), Zone::Metadata),
+            (Item(1), Zone::Metadata),
+            (Item(2), Zone::Metadata)
         ]
     );
-    assert_eq!(postings("someone"), [(0, Zone::Metadata)]);
-    assert_eq!(postings("code"), [(0, Zone::Body)]);
-    assert_eq!(postings("link"), [(0, Zone::Body)]);
-    // Link destinations, HTML and the narrative are not item text.
-    for word in ["dest", "example", "hidden", "comment", "narrative", "intro"] {
+    assert_eq!(postings("someone"), [(Item(0), Zone::Metadata)]);
+    assert_eq!(postings("code"), [(Item(0), Zone::Body)]);
+    assert_eq!(postings("link"), [(Item(0), Zone::Body)]);
+    // The narrative of `docs/a.mara.md` is its own unit.
+    assert_eq!(postings("intro"), [(Unit(0), Zone::Heading)]);
+    assert_eq!(postings("narrative"), [(Unit(0), Zone::Body)]);
+    // Link destinations and HTML are no text.
+    for word in ["dest", "example", "hidden", "comment"] {
         assert_eq!(postings(word), [], "{word}");
     }
     assert_eq!(postings("Alpha"), [], "words are looked up normalized");
+}
+
+#[test]
+fn keeps_narrative_units_and_the_unit_of_each_narrative_mention() {
+    let snapshot = example();
+    assert_eq!(snapshot.units().len(), 1);
+    let unit = snapshot.unit(0);
+    assert_eq!((unit.heading.as_deref(), unit.line), (Some("Intro"), 1));
+    assert_eq!(snapshot.documents()[0].units, 0..1);
+    assert_eq!(snapshot.documents()[1].units, 1..1);
+    let edge = snapshot.narrative(0)[0];
+    assert_eq!(snapshot.narrative_unit(&edge), Some(0));
+    let from_item = snapshot.outgoing(0)[0];
+    assert_eq!(snapshot.narrative_unit(&from_item), None);
+    assert_eq!(snapshot.position(Node::Unit(0)), (0, 0));
+    assert_eq!(snapshot.position(Node::Item(0)).0, 0);
 }
 
 #[test]

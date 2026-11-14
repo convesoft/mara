@@ -17,6 +17,11 @@ impl Hash {
         Hash(*blake3::hash(contents).as_bytes())
     }
 
+    /// Hashes bytes that are no input file, such as an item's region, and counts nothing.
+    pub fn of_bytes(bytes: &[u8]) -> Hash {
+        Hash(*blake3::hash(bytes).as_bytes())
+    }
+
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }

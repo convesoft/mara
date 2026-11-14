@@ -59,6 +59,21 @@ fn growth_per_doubling() {
     check_growth(&hubs, "mara project validate on a hub", |_, hub| {
         cli::run(hub.root(), &["project", "validate"], 0);
     });
+    // Search with a vocabulary and a query that grow together: query words allowed one edit,
+    // two, and none beyond 18 characters, and a mix. Candidates come from the vocabulary index,
+    // never from a scan of every word per query word. At 16× each query stays within the 128 KiB
+    // that one argument may take.
+    for (words, lengths) in VOCABULARIES {
+        let vocabularies: Vec<(usize, Vocabulary)> = PULL_REQUEST_SIZES
+            .iter()
+            .map(|&size| (size, Vocabulary::generate(words * size, lengths.clone())))
+            .collect();
+        let name = format!("mara search <every word of {lengths:?} letters>");
+        check_growth(&vocabularies, &name, |_, vocabulary| {
+            let args = ["search", vocabulary.query.as_str(), "--format", "json"];
+            cli::run(vocabulary.dir.path(), &args, 0);
+        });
+    }
     // Below the CLI, the part of every operation that grows with the project: the inventory, a
     // cold read, hash and parse of every input, and the snapshot build.
     check_growth(&corpora, "a cold snapshot build", |_, corpus| {
@@ -174,4 +189,74 @@ fn median(times: &[Duration]) -> Duration {
 fn middle(mut values: Vec<f64>) -> f64 {
     values.sort_unstable_by(f64::total_cmp);
     values[values.len() / 2]
+}
+
+/// Distinct words at 1× and their lengths, of each vocabulary project.
+const VOCABULARIES: [(usize, std::ops::RangeInclusive<usize>); 6] = [
+    (500, 7..=7),
+    (500, 9..=9),
+    (300, 19..=19),
+    (200, 32..=32),
+    (30, 200..=200),
+    (400, 3..=30),
+];
+
+/// A project whose one narrative unit holds distinct words of the given lengths, and a query of
+/// all of them.
+struct Vocabulary {
+    dir: tempfile::TempDir,
+    query: String,
+}
+
+impl Vocabulary {
+    fn generate(count: usize, lengths: std::ops::RangeInclusive<usize>) -> Vocabulary {
+        let dir = tempfile::Builder::new()
+            .prefix("mara-vocabulary-")
+            .tempdir()
+            .expect("create a temporary directory");
+        // SplitMix64, as the corpus generator draws.
+        let mut state = SEED;
+        let mut next = || {
+            state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        };
+        let mut words = std::collections::BTreeSet::new();
+        while words.len() < count {
+            let span = (lengths.end() - lengths.start() + 1) as u64;
+            let length = lengths.start() + (next() % span) as usize;
+            let word: String = (0..length)
+                .map(|_| char::from(b'a' + (next() % 26) as u8))
+                .collect();
+            words.insert(word);
+        }
+        let words: Vec<String> = words.into_iter().collect();
+        let mut text = String::from("# Words\n\n");
+        for line in words.chunks(10) {
+            text.push_str(&line.join(" "));
+            text.push('\n');
+        }
+        let write = |path: &str, contents: &str| {
+            let path = dir.path().join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, contents).unwrap();
+        };
+        write(
+            ".mara/config.toml",
+            "format_version = 1\nschema = \".mara/schema.toml\"\n\n[documents]\nformat_version = 1\n\
+             include = [\"docs/**/*.mara.md\"]\n",
+        );
+        write(
+            ".mara/schema.toml",
+            "format_version = 1\nstatuses = [\"draft\"]\n\n[types.note]\nid_prefix = \"NOTE-\"\n\
+             description = \"A note.\"\n",
+        );
+        write("docs/words.mara.md", &text);
+        Vocabulary {
+            dir,
+            query: words.join(" "),
+        }
+    }
 }
