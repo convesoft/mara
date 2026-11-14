@@ -63,12 +63,12 @@
 | Justifies | [DES-PROGRAM-PROFILE](rules-facts.mara.md#01M7CMW7051QVPFDWQBMB1A6K6) |
 | Justifies | [REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0) |
 
-- Chosen: a scan before every run admits only listed directives, relation qualifiers, types and functions ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)); a time limit bounds each evaluation; Soufflé runs on the scanned copies in a private directory with library loading off.
-- Rejected: a list of refused constructs. Four reviews each found ways past one: the `libfunctors.so` that Soufflé loads for any program, `#line`, the `output` qualifier, `choice-domain`.
-- Rejected: patching Soufflé's JSON reader and writer to carry floats, unsigned numbers and ADTs. Numbers are signed 32-bit integers instead, which also removes a difference between the native and the browser build.
+- Chosen: Mara parses every program against the grammar of a small admitted language, with types resolved, and runs stock Soufflé 2.5 only on programs that pass, on parsed copies in a private directory with library loading off; a time limit bounds each evaluation ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)).
+- Rejected: lists of refused or admitted words. Five reviews each found ways past one, and a word list cannot express literal types, casts or column types.
+- Rejected: an evaluator inside the engine for the same language. It has no trial behind it and would reverse the choice of Soufflé; it stays the alternative if this boundary keeps failing.
+- Rejected: patching Soufflé or tracking its master. The behaviours left out are by design upstream or differ between the two builds, and a fork must be verified again on every update.
 - Rejected: trusting programs like build scripts. Validating an untrusted checkout would run its code.
-- Rejected: forbidding records and ADTs to bound evaluation. Plain recursion with arithmetic or `cat` never ends either.
-- Rejected: refusing every construct that Soufflé cannot explain. The list cannot be proven complete, so an explanation it cannot produce is reported as unavailable. Constructs whose values depend on evaluation order are refused for that reason, not for this one.
+- Rejected: forbidding records to bound evaluation. Plain recursion with arithmetic or `cat` never ends either.
 
 ---
 

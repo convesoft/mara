@@ -62,17 +62,17 @@ An evaluation still running at its time limit is stopped, and its outcome is una
 | Satisfies | [REQ-PROGRAM-FAULTS-REPORTED](#01M7BF6HCZ88PSSQTFKXE8KJ81) |
 
 - An evaluation is keyed by the keys of the layers it reads (the document snapshot, and the code layer when the program uses code links), the hash of the program with every file it includes, and the inputs the request supplied with their completeness marks ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY), [DES-REQUEST-INPUTS](rules.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)).
-- It runs only programs that pass the profile scan, on the scanned copies in a private directory ([DES-PROGRAM-PROFILE](rules-facts.mara.md#01M7CMW7051QVPFDWQBMB1A6K6)).
+- It runs only programs that Mara's parser admits, on the parsed copies in a private directory ([DES-PROGRAM-PROFILE](rules-facts.mara.md#01M7CMW7051QVPFDWQBMB1A6K6)).
 - `project validate` compiles every declared program, by a run against empty facts (2–6 ms) when no invariant uses it. There is no compile-only operation.
 - For each run the host generates a wrapper program in the private directory. It includes the consumer's program and holds one `.input` directive for each fact relation and supplied input and one `.output` directive for each relation that a configuration entry names in that program, all as JSON files in that directory (`IO=jsonfile`, `format=list`). JSON keeps tabs, newlines and quotes in values, which Soufflé's default tab-separated files do not.
 - Native: `souffle --no-preprocessor -l "" <wrapper>.dl` as a child process, single-threaded, with the private directory as its working directory. `-l ""` stops Soufflé from loading a `libfunctors.so`, which it otherwise does for every program.
 - Browser: Soufflé runs in a worker of its own, apart from the one that holds the workspace. Compile `souffle.wasm` once per such worker. For each evaluation, create a fresh instance, write programs and facts into its in-memory filesystem and read the outputs back. The module is built with `-sEXIT_RUNTIME=1` or exports `callMain`, so the host receives the exit code of `main`.
 - Every consumer of a program reads the same run: the outputs do not depend on which consumer asked.
 - Numbers are signed 32-bit integers on every host. A row in an output file that does not fit the relation's columns, or a value that is not valid UTF-8 (`substr` counts bytes), is a fault.
-- Explanations run on demand in provenance mode (`-t explain`), driven on stdin by `format json`, then `explain <relation>(<args>)`. Use JSON: the text proof format garbles negated atoms. In the browser the host supplies that input through the module's `stdin` hook. When provenance mode aborts, as it does on an ADT constructor in a rule body and on a subsumption clause, the host reports the explanation as unavailable.
-- The `explain` command does not decode escapes, and a default-depth proof holds unresolved `subproof` references. The host expands them, checks that the proof it gets back is for the row it asked about, and reports the explanation as unavailable when the row's values cannot be written in the command (quotes, backslashes, control characters), when the reply is not valid JSON, or when the exchange passes the time limit.
+- Explanations run on demand in provenance mode (`-t explain`), driven on stdin by `format json`, then `explain <relation>(<args>)`. Use JSON: the text proof format garbles negated atoms. In the browser the host supplies that input through the module's `stdin` hook. When provenance mode aborts, the host reports the explanation as unavailable.
+- The `explain` command does not decode escapes, and a default-depth proof holds unresolved `subproof` references. The host expands them, checks that the proof it gets back is for the row it asked about, and reports the explanation as unavailable when the row's values cannot be written in the command (quotes, backslashes, control characters, negative numbers), when the reply is not valid JSON, when a branch ends in an aggregate's internal relation, or when the exchange passes the time limit. It leaves constraint leaves out: Soufflé prints internal numbers for symbols there.
 - A runtime fault such as integer division by zero ends the child process with the rule's location natively, and with a `divide by zero` trap without location in WASM.
-- Soufflé's compile diagnostics name a file and a line. Anything else it prints on stderr during a run, such as `warning: wrong pattern provided` for a bad `match` pattern, is a runtime fault, also when it exits with 0.
+- Soufflé's compile diagnostics name a file and a line. Anything else it prints on stderr during a run, such as the warning for a `substr` out of range, is a runtime fault, also when it exits with 0.
 - At the time limit ([REQ-EVALUATION-TIME-LIMIT](#01M7CMW70G711Z67QEWW5Z0MK0)) the host kills the child process natively and terminates the Soufflé worker in the browser; the workspace and its unexported edits are not in that worker.
 
 ---
@@ -152,6 +152,13 @@ The static binary of [EVD-SOUFFLE-TRIAL](#01M7BF6HDDJJ0Y0WWT6RK17CDN), run on 20
 | `+`, `*`, shifts, `/` and `%` at the limits of 32 bits, `strlen`, `to_number` of a hexadecimal string | The same on both hosts; division by zero and an unparsable `to_number` fail on both |
 | `match("[", m)` in a rule | `warning: wrong pattern provided`, exit 0, no rows |
 | `explain` for a row whose value holds a newline, written as an escape | A proof for another row, whose value holds a backslash and `n` |
+| `r(as(n, symbol)) :- a(n).` with `a(0)` | Segmentation fault natively; a row with an empty symbol in WASM |
+| `.decl a(x: number) magic` with a subsumption clause, read by a gate condition | The clause is dropped: the condition has no row, on both hosts; with `no_magic` it has one |
+| `match("\\cI", "\t")` | No row natively, one row in WASM, no message on either |
+| `x % y` with −2147483648 and −1 | Arithmetic exception natively; 0 in WASM, so a condition on it passes |
+| `to_number(2147483648.0)`, a float literal without the word `float` | −2147483648 natively, 2147483647 in WASM |
+| `explain` of `r(x) :- a(x), x < "z".` | A leaf `4 < 5`: internal numbers instead of the symbols |
+| Upstream on 2026-11-14 | 2.5 is the latest release. Fixed on master only: `magic` with subsumption (issue 2322) and an explanation fix (2585). By design: `choice-domain` order, the `libfunctors.so` load, `#line`, unchecked `as`. Unchanged on master: the JSON reader |
 | `-t explain` on a rule with `autoinc()`, on a rule with an ADT constructor in its body, or on a program with a subsumption clause | Aborted; normal evaluation of the same programs succeeded |
 | `-t explain` with records, aggregates, negation, components or `eqrel` | Explained |
 | `nat(0). nat(x + 1) :- nat(x).` | Still running when killed after 5 s |

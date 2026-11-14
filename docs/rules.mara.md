@@ -14,7 +14,7 @@
 | Status | Accepted |
 | Satisfies | [NEED-PROJECT-LOGIC](product.mara.md#01M7BF6H74D5GX045CWVY9106D) |
 
-A project defines invariants, named queries, gates and views as Soufflé Datalog programs over the facts Mara supplies. Adding or changing a program needs no compiler and no change to Mara.
+A project defines invariants, named queries, gates and views as Soufflé Datalog programs, in the admitted language ([DES-PROGRAM-PROFILE](rules-facts.mara.md#01M7CMW7051QVPFDWQBMB1A6K6)), over the facts Mara supplies. Adding or changing a program needs no compiler and no change to Mara.
 
 ---
 
