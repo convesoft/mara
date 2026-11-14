@@ -13,7 +13,7 @@ Goal: an immutable snapshot assembled from per-file results, rebuilt only for wh
 
 Context: docs/engine.mara.md (DES-INPUTS-AND-KEYS, DES-SNAPSHOT); REQ-WORK-FOLLOWS-CHANGE in docs/performance.mara.md.
 
-- [ ] Inventory of declared inputs, filtered by the project's `.gitignore` files; stat check of files and directories; BLAKE3 hashing
+- [ ] Inventory of declared inputs, filtered by the project's `.gitignore` files and without nested projects (DES-PROJECT-CONFIGURATION); stat check of files and directories; BLAKE3 hashing
 - [ ] Content keys for parsed documents and the document snapshot
 - [ ] Snapshot: items, ID and MID maps, forward and inverse edges, item spans, token index
-- [ ] VER-WORK-COUNTERS rows for an unchanged request, one edited document and unrelated changes pass
+- [ ] The cold rows of VER-WORK-COUNTERS pass through the real CLI: a cold request, `.git` and undeclared files, an operation that reads no code. The warm rows wait for the daemon (mara-p27z9t)

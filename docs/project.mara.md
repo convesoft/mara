@@ -76,6 +76,7 @@ Schema inspection lists the types and relations and returns each one's descripti
 
 - The configuration is `.mara/config.toml`. The directory that contains `.mara/` is the project root.
 - It declares every input by a path or pattern relative to the project root: document include patterns, the schema, Soufflé programs, and code languages with their extensions, comment prefixes and grammar pin (version and checksum).
+- A directory below the project root whose `.mara/` holds `config.toml` or `project.toml` is the root of another project. Nothing below it is an input, even where a pattern matches. A `config.toml` outside a `.mara/` directory makes no project.
 - `project init` writes the schema to `.mara/schema.toml` and programs under `.mara/rules/`.
 - The configuration and the schema are TOML. Each carries its own `format_version`, starting at 1. The configuration also holds the version of the document syntax, `[documents] format_version`.
 - An unknown setting is an error.

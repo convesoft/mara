@@ -14,5 +14,7 @@ Context: docs/validation.mara.md (REQ-REPORT-EVERY-PROBLEM, REQ-VALIDITY-COVERS-
 
 - [x] Decide diagnostic codes and the result format (DES-DIAGNOSTICS)
 - [ ] Built-in checks, linear in items plus edges
-- [ ] CLI operations with human and JSON output; exit status reflects the whole project
-- [ ] Scaling test covers validation
+- [ ] CLI operations with human and JSON output
+- [ ] VER-SCALING covers validation
+- [ ] VER-SEEDED-PROBLEMS, VER-CUSTOM-SCHEMA and VER-GITHUB-RENDERING pass (docs/verification-documents.mara.md)
+- [ ] The `project validate` case of VER-INVALID-ROWS passes, and VER-NESTED-PROJECTS and VER-UNCHANGED-SOURCES pass for the validation operations

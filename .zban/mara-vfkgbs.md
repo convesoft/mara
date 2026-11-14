@@ -15,3 +15,4 @@ Context: REQ-NODE-LIBRARY in docs/hosts.mara.md; DES-PACKAGES in docs/distributi
 - [x] Decide how Node embeds the engine: the native addon (ADR-NODE-NATIVE-ADDON)
 - [ ] One typed asynchronous ESM client over the embedded, daemon, HTTP and worker backends
 - [ ] The same test suite passes against each backend
+- [ ] The Node library and browser parity cases of VER-HOST-COMPARISON (docs/verification.mara.md) pass

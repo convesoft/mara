@@ -16,13 +16,22 @@
 
 On every pull request, Rust integration tests run the real CLI and daemon on a generated corpus and assert the work counters ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)) exactly. They also assert the bounds of [REQ-NEAR-LINEAR-SCALING](performance.mara.md#01M7BF6H3K1M4HMG6CW2B85VQK) on built-in checks and program runs.
 
+Cold rows hold in every host and run through the real CLI from 0.4.0-alpha.1:
+
+| Situation | Expectation |
+| --- | --- |
+| Cold request | For each input it reads, 1 file read and 1 hash; 1 parse per document; 1 snapshot build |
+| `.git` and undeclared files | 0 file reads, 0 hashes |
+| An operation that reads no code ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)) and runs no program | 0 subprocesses, 0 code scans |
+
+Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANGE](performance.mara.md#01M7BF6H3A6YQ43351V9YSV3SQ)) and run against the daemon from 0.4.0-alpha.4:
+
 | Situation | Expectation |
 | --- | --- |
 | Unchanged warm request, no input modified in the last 2 s | 0 hashes, 0 parses, 0 snapshot builds |
 | Unchanged warm request, an input modified in the last 2 s | That input hashed again; 0 parses, 0 snapshot builds |
 | One document edited | 1 parse, 1 snapshot build, 0 code scans |
 | One code file edited | 1 code scan, 0 document parses |
-| An operation that reads no code ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)) and runs no program | 0 subprocesses, 0 code scans |
 | Validation or gate with an unchanged evaluation key ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)) | 0 `souffle` runs |
 | Validation or gate after a change | At most 1 `souffle` run per program and set of supplied inputs |
 | Unrelated file, `.git` change, failed request, idle period | No invalidation |
@@ -57,6 +66,33 @@ On every pull request, Rust integration tests time each operation on a release b
 | Verifies | [REQ-READS-DURING-VALIDATION](performance.mara.md#01M7BF6H3T3589901T1AE0ADHM) |
 
 Nightly on a reference machine, `hyperfine` times release builds end to end against the budgets in each mode: CLI direct, daemon cold, daemon warm, daemon after a watched edit, and browser-local WASM once it exists. One run issues a read during a long validation of the same project.
+
+---
+
+<a id="01M7D3NAQHP8HX0X0GCZMXD1Q9"></a>
+
+### Compare hosts on the same project
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-HOST-COMPARISON |
+| Status | Accepted |
+| Methods | Test |
+| Methods | Inspection |
+| Verifies | [REQ-SAME-RESULT-ON-EVERY-HOST](engine.mara.md#01M7BF6GXHZNABX9R7NKPNGJNM) |
+
+Rust integration tests run each operation on the same disposable project in CLI direct mode and in each other host that supports it, and require identical JSON results. Each parity case starts when its host exists:
+
+| Host compared with CLI direct mode | From |
+| --- | --- |
+| Daemon | 0.4.0-alpha.4 |
+| Node library, embedded and through the daemon | 0.4.0-alpha.6 |
+| Browser, through the daemon and local WASM | 0.4.0-alpha.6 |
+
+Architecture checks run from 0.4.0-alpha.1. They guard [DES-ENGINE-BOUNDARY](engine.mara.md#01M7BF6GY13YX9PD76M0TQG8YK) and do not establish the requirement without the parity cases:
+
+- The local checks build the engine crate for `wasm32`.
+- Review of each change to the engine crate finds no filesystem, process, thread, clock or network access in its code or dependencies.
 
 ---
 

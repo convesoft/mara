@@ -14,7 +14,7 @@
 | Status | Accepted |
 | Satisfies | [NEED-INTERACTIVE-SPEED](product.mara.md#01M7BF6H83C0SM1C8RHDHMBXZ2) |
 
-A request performs derivation work only for inputs that changed since the previous request and that the request reads. Unchanged inputs, undeclared files, `.git`, failed requests and idle time cause none.
+A request performs derivation work only for inputs it reads; undeclared files and `.git` cause none. A host that keeps state between requests also limits that work to inputs that changed since the previous request: unchanged inputs, failed requests and idle time cause none.
 
 ---
 

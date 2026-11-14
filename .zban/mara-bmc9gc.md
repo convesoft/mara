@@ -16,4 +16,7 @@ Context: docs/retrieval.mara.md (all requirements, DES-NARRATIVE-UNITS, DES-PAGI
 - [ ] `search` with filters, ranking and typo tolerance
 - [ ] `get`, `relation list`, `item list`, `schema get` and `schema list`
 - [ ] Paging with cursors that carry the snapshot key
-- [ ] Scaling test covers each operation
+- [ ] VER-SCALING covers each operation
+- [ ] VER-SEARCH-CASES, VER-NODE-READS, VER-ITEM-LIST, VER-CURSOR-WALK, VER-PAGE-LIMITS and VER-SCHEMA-INSPECTION pass (docs/verification-retrieval.mara.md)
+- [ ] VER-ONE-HOP passes except its code-link case, which waits for code links (mara-d005q9)
+- [ ] VER-MID-RESOLUTION and the `get` case of VER-INVALID-ROWS pass, and VER-NESTED-PROJECTS and VER-UNCHANGED-SOURCES pass for the read operations (docs/verification-documents.mara.md)

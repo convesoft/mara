@@ -12,4 +12,4 @@ Context: AGENTS.md (Engineering); DES-ENGINE-BOUNDARY in docs/engine.mara.md.
 
 - [ ] Cargo workspace with an engine crate that does no I/O and a CLI crate; `Cargo.lock` committed; toolchain pinned
 - [ ] `LICENSE-MIT` and `LICENSE-APACHE` restored (the texts are in `git show d7f0e73:LICENSE-MIT` and `:LICENSE-APACHE`)
-- [ ] Local checks, with their commands listed in AGENTS.md: format, lint, tests, and a `wasm32` build of the engine crate (CI waits for mara-4dr2p2)
+- [ ] Local checks, with their commands listed in AGENTS.md: format, lint, tests, and the engine crate's `wasm32` build that VER-HOST-COMPARISON (docs/verification.mara.md) requires (CI waits for mara-4dr2p2)

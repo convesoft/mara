@@ -11,7 +11,7 @@ created_at: 2026-11-13T22:10:06Z
 
 Goal: an operation finds its project and knows the project's vocabulary.
 
-Context: docs/project.mara.md (REQ-ONE-PROJECT-PER-OPERATION, REQ-SCHEMA-DEFINES-VOCABULARY, DES-PROJECT-CONFIGURATION, DES-SCHEMA-MODEL).
+Context: docs/project.mara.md (REQ-ONE-PROJECT-PER-OPERATION, REQ-SCHEMA-DEFINES-VOCABULARY, DES-PROJECT-CONFIGURATION, DES-SCHEMA-MODEL). Verified end to end, through `project validate` (mara-000f9q), by VER-NESTED-PROJECTS and VER-CUSTOM-SCHEMA in docs/verification-documents.mara.md.
 
 - [x] Decide where the document syntax version is recorded: `[documents] format_version` (DES-PROJECT-CONFIGURATION)
 - [ ] Project selection by ancestor search and by `--project`
