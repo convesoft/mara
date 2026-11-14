@@ -48,8 +48,4 @@ Every type has `Status`: `Draft`, `Accepted` or `Retired`.
 
 `Implements` (code → Requirement, Design, Verification; shown on the target as `Implemented by`) comes only from code markers ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)), never from a metadata table.
 
----
-
-## Open questions
-
-- Which invariants, gates and views the template ships as programs. The `engineering` template at commit `d7f0e73` (`templates/engineering-*`) is the starting point.
+The template's rules, queries, gates and views are on [knowledge rules](template.mara.md) and [readiness](template-readiness.mara.md).

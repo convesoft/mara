@@ -10,10 +10,11 @@ blocked_by:
 created_at: 2026-11-13T22:10:06Z
 ---
 
-Context: docs/rules.mara.md (REQ-PROJECT-AUTHORED-LOGIC, REQ-EXTERNAL-RECORDS-AS-SUPPLIED, DES-RULE-CONSUMERS); docs/rules-evaluation.mara.md (REQ-EXPLAIN-OUTCOMES, REQ-PROGRAM-FAULTS-REPORTED, DES-RULE-EXECUTION).
+Context: docs/rules.mara.md (REQ-PROJECT-AUTHORED-LOGIC, REQ-EXTERNAL-RECORDS-AS-SUPPLIED, DES-RULE-CONSUMERS, DES-GATE-OUTCOME); docs/rules-evaluation.mara.md (REQ-EXPLAIN-OUTCOMES, REQ-PROGRAM-FAULTS-REPORTED, DES-RULE-EXECUTION).
 
-- [ ] Child-process evaluation keyed by snapshot, program hash and parameters
-- [ ] Invariants in validation; query, view, gate and report operations in CLI and MCP
+- [ ] Child-process evaluation keyed by snapshot, program hash and supplied inputs
+- [ ] Invariants in validation; named queries, views and gates; `query execute`, `view`, `gate`, `report` and `list` in CLI and MCP
+- [ ] Gate outcome per named item from subject, condition and unavailable relations (DES-GATE-OUTCOME)
 - [ ] Explanations from provenance mode with document locations
 - [ ] Profile scan before every run (REQ-PROGRAMS-ONLY-COMPUTE, DES-PROGRAM-PROFILE)
 - [ ] Time limit (REQ-EVALUATION-TIME-LIMIT)

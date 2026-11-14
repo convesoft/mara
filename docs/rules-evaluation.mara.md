@@ -60,17 +60,16 @@ An evaluation still running at its time limit is stopped, and its outcome is una
 | Status | Accepted |
 | Satisfies | [REQ-EXPLAIN-OUTCOMES](#01M7BF6HCQX66B3MYRH5BZM6BE) |
 | Satisfies | [REQ-PROGRAM-FAULTS-REPORTED](#01M7BF6HCZ88PSSQTFKXE8KJ81) |
-| Satisfies | [REQ-EVALUATION-TIME-LIMIT](#01M7CMW70G711Z67QEWW5Z0MK0) |
 
-- An evaluation is keyed by document snapshot key, program hash and parameter set ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)).
-- It runs only programs that pass the profile scan ([DES-PROGRAM-PROFILE](rules.mara.md#01M7CMW7051QVPFDWQBMB1A6K6)).
+- An evaluation is keyed by document snapshot key, program hash and the inputs the request supplied ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY), [DES-REQUEST-INPUTS](rules.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)).
+- It runs only programs that pass the profile scan ([DES-PROGRAM-PROFILE](rules-facts.mara.md#01M7CMW7051QVPFDWQBMB1A6K6)).
 - `project validate` compiles every declared program, by a run against empty facts (2–6 ms) when no invariant uses it. There is no compile-only operation.
 - Native: `souffle --no-preprocessor -F <facts> -D <out> <program>.dl` as a child process, single-threaded.
 - Browser: compile `souffle.wasm` once per worker. For each evaluation, create a fresh instance, write programs and facts into its in-memory filesystem and read the outputs back. The module is built with `-sEXIT_RUNTIME=1` or exports `callMain`, so the host receives the exit code of `main`.
 - Mara reads only the output relations a consumer names. An `.output` in an included file is also written and is not a result.
 - Explanations run on demand in provenance mode (`-t explain`), driven on stdin by `format json`, then `explain <relation>(<args>)`. Use JSON: the text proof format garbles negated atoms. In the browser the host supplies that input through the module's `stdin` hook.
 - A runtime fault such as integer division by zero ends the child process with the rule's location natively, and with a `divide by zero` trap without location in WASM.
-- At the time limit the host kills the child process natively and terminates the worker in the browser.
+- At the time limit ([REQ-EVALUATION-TIME-LIMIT](#01M7CMW70G711Z67QEWW5Z0MK0)) the host kills the child process natively and terminates the worker in the browser.
 
 ---
 
@@ -86,8 +85,8 @@ An evaluation still running at its time limit is stopped, and its outcome is una
 | --- | --- |
 | ID | EVD-SOUFFLE-TRIAL |
 | Status | Accepted |
-| Supports | [ADR-SOUFFLE-DATALOG](decisions-runtime.mara.md#01M7BF6GSZ16MZQAGBY5M9TDKZ) |
-| Supports | [ADR-SOUFFLE-AS-PROCESS](decisions-runtime.mara.md#01M7BF6GT9PVXSKV1ANGEWA7WR) |
+| Supports | [ADR-SOUFFLE-DATALOG](decisions-rules.mara.md#01M7BF6GSZ16MZQAGBY5M9TDKZ) |
+| Supports | [ADR-SOUFFLE-AS-PROCESS](decisions-rules.mara.md#01M7BF6GT9PVXSKV1ANGEWA7WR) |
 
 Soufflé 2.5, 2026-11-13. Corpora: 1× = 200 items and 266 edges, 16× = 3,200 and 4,256, 64× = 12,800 and 17,024. Times include process start and program compilation.
 
@@ -124,7 +123,7 @@ The trial gates approximate the gates of the `engineering` template at commit `d
 | --- | --- |
 | ID | EVD-SOUFFLE-PROGRAM-REACH |
 | Status | Accepted |
-| Supports | [ADR-PROGRAM-PROFILE](decisions-runtime.mara.md#01M7CMW6ZGC0PY8DVYNQDSBPRH) |
+| Supports | [ADR-PROGRAM-PROFILE](decisions-rules.mara.md#01M7CMW6ZGC0PY8DVYNQDSBPRH) |
 
 The static binary of [EVD-SOUFFLE-TRIAL](#01M7BF6HDDJJ0Y0WWT6RK17CDN), run on 2026-11-14 as `souffle --no-preprocessor -F <facts> -D <out> <program>.dl`.
 

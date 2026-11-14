@@ -8,10 +8,13 @@ blocked_by:
 created_at: 2026-11-13T22:10:06Z
 ---
 
-Goal: the `engineering` template ships the invariants, gates and views that make its vocabulary useful.
+Goal: the `engineering` template ships the invariants, queries, gates and views that make its vocabulary useful.
 
-Context: open question on docs/vocabulary.mara.md. The previous logic is in `git show d7f0e73:templates/` (rules, policy, gates, risk matrix, views) and `git show d7f0e73:docs/engineering-template.mara.md`. The trial gates in EVD-SOUFFLE-TRIAL only approximate it.
+Context: docs/template.mara.md (REQ-TEMPLATE-ACCEPTANCE-RULES, DES-TEMPLATE-ACCEPTANCE, DES-TEMPLATE-RELATION-LIFECYCLE, DES-TEMPLATE-RISK-LEVEL); docs/template-readiness.mara.md (REQ-TEMPLATE-GATES-PROVE-READINESS, DES-TEMPLATE-QUERIES, DES-TEMPLATE-INPUTS, DES-TEMPLATE-GATES, DES-TEMPLATE-VIEWS); VER-TEMPLATE-CASES in docs/verification.mara.md.
 
-- [ ] Decide with the maintainer which invariants, gates and views ship; record them as items
-- [ ] Programs written and installed by `project init --template engineering`
-- [ ] This repository adopts the invariants it can meet
+Design input, on the maintainer's machine: `~/Work/local/workspace/projects/mara-rewrite-design/engineering-template-inputs/README.md` and the Space export beside it. The previous encoding is in `git show d7f0e73:templates/` and `git show d7f0e73:docs/engineering-template.mara.md`; its helper queries, view shims and separate `required_validation` gate were limits of the old engine and are not ported.
+
+- [x] Decide with the maintainer which invariants, queries, gates and views ship; record them as items
+- [ ] Programs for the acceptance and lifecycle invariants, the ten queries, the three gates, the three views and the risk matrix, installed by `project init`
+- [ ] VER-TEMPLATE-CASES passes
+- [ ] This repository adopts the invariants, with `requirement-verified` as a warning until the last slice

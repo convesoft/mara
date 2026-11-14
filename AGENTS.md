@@ -25,7 +25,8 @@ For every document in this repository, this file included:
 - An undecided matter is a plain bullet under `## Open questions` on its topic page, never an item. Settling it adds or changes an item and removes the bullet.
 - `Accepted` means decided, not built. `Draft` marks a proposal or a provisional number.
 - Add only relations that carry meaning. Never add an item or a link just to complete a chain.
-- Update the affected items in the same change as the code. When you implement a requirement, add its Verification item.
+- Update the affected items in the same change as the code.
+- A requirement is Accepted together with its Verification item. The rewrite is the exception: until 0.4.0 ships, write a slice's Verification items before work on the slice starts.
 - Ask before deciding anything that changes user-visible behaviour, a persisted format, data safety or scope. Small reversible choices need no question.
 
 ### Writing items by hand

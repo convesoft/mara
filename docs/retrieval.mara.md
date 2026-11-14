@@ -56,7 +56,7 @@ Search also matches a word within one edit of a query word of 4–7 characters, 
 | Status | Accepted |
 | Satisfies | [NEED-BOUNDED-RETRIEVAL](product.mara.md#01M7BF6H6GBKEHK5BQ8NDX7JG5) |
 
-`get` returns one item by ID or MID, or a document or narrative unit returned by search: its content, its metadata rows in source order and its location. It returns no neighbours.
+`get` returns one item by ID or MID, or a document or narrative unit returned by search: its content, its metadata rows in source order, its location and, for an item, its revision ([DES-FACT-BRIDGE](rules-facts.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)). It returns no neighbours.
 
 ---
 

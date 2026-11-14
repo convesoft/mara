@@ -28,7 +28,7 @@ An operation uses the nearest ancestor directory that holds a project configurat
 | Status | Accepted |
 | Satisfies | [NEED-STRUCTURED-KNOWLEDGE](product.mara.md#01M7BF6H61ST5R4855YZKCNJHC) |
 
-`project init` writes a project configuration and the schema of a template into the current or a named directory: `engineering` unless `empty` is named. It refuses to overwrite an existing file and reports every file it created.
+`project init` writes a project configuration and the schema and programs of a template into the current or a named directory: `engineering` unless `empty` is named. It refuses to overwrite an existing file and reports every file it created.
 
 ---
 

@@ -89,7 +89,7 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 | `item` | `create`, `update`, `move`, `rename`, `delete`, `list`, `validate` |
 | `relation` | `add`, `remove`, `list` |
 | Top level | `search`, `get` |
-| `query` | `execute`, `view`, `gate`, `report` |
+| `query` | `execute`, `view`, `gate`, `report`, `list` |
 | `code` | `add` |
 | `daemon` | `status`, `start`, `stop` |
 | `mcp` | Serves the document operations (every group above except `code` and `daemon`) over stdio |

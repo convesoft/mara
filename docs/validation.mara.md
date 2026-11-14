@@ -79,7 +79,7 @@ Implemented in Rust, always on, linear in items plus edges.
 | Check | Rules |
 | --- | --- |
 | Document structure | [DES-REGIONS](format.mara.md#01M7BF6GZ5V5HWV00MDZN68Z06), [DES-ITEM-STRUCTURE](format.mara.md#01M7BF6GZDTNNW0Z0MX7FEG6ZF) |
-| Metadata | Required fields, allowed values, undeclared keys ([DES-METADATA-TABLE](format.mara.md#01M7BF6GZNS6VM3T94VS9A5HTD)) |
+| Metadata | Required fields, allowed values, undeclared keys, repeated rows ([DES-METADATA-TABLE](format.mara.md#01M7BF6GZNS6VM3T94VS9A5HTD)) |
 | Identity | MID form and uniqueness, ID prefix and uniqueness ([DES-MID-ANCHOR](identity.mara.md#01M7BF6H1MB5RR3RS43B3CJHAR), [DES-ITEM-IDS](identity.mara.md#01M7BF6H1ZBTKWTF9ZXEJ8EBGS)) |
 | Links | Relation and mention targets exist; paths and relation link text are current ([DES-RELATION-LINKS](identity.mara.md#01M7BF6H29JGHG65SV91K6D11V)) |
 | Relations | Target type allowed for the source type, same-type relations, acyclic relations ([DES-SCHEMA-MODEL](project.mara.md#01M7BF6HA0KG3R3AATWM1P2X1G)) |

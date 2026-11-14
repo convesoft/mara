@@ -62,15 +62,18 @@ Evaluating a program reads only the facts Mara supplies, writes only the outputs
 
 One program's output relations serve several consumers; presentation never defines different facts.
 
-| Consumer | Defined by | Effect |
+| Consumer | Configuration entry | Effect |
 | --- | --- | --- |
-| Raw query | A request that names a declared program and one of its output relations | Returns the output rows |
-| View | A configuration entry: program and relation | Renders the same rows |
-| Invariant | A configuration entry: program, relation, severity and message | Evaluated by validation; an error-severity failure makes documentation invalid |
-| Gate | A configuration entry: program, condition relations and parameters | Requested by name for a scope and context; a failure fails the gate and never changes documentation validity |
-| Report | A request that names an invariant or a gate | Explains its outcome |
+| Query | Program and relation | Returns the output rows |
+| View | Program and relation | Renders the same rows |
+| Invariant | Program, relation, severity and message | Evaluated by validation; an error-severity failure makes documentation invalid |
+| Gate | Program; subject, condition and unavailable relations | Judges the items a request names ([DES-GATE-OUTCOME](#01M7CT60KEEZRJCPJ0CPT7YT5B)); never changes documentation validity |
 
-- Each row of an invariant relation or of a gate's condition relation is one failure. Its first column is the MID of the item concerned, which gives the failure its path and line.
+- Every entry has a name and a description, and lists the inputs a request must supply ([DES-REQUEST-INPUTS](#01M7CT60KMGA2M9WMQ8RRJREPG)). `query list` shows them all.
+- A request addresses a consumer only by its name. A relation without an entry is not reachable.
+- The first column of a consumed relation is the MID of the item its row is about. It gives a failure its path and line, and a query or view request that names items gets only their rows.
+- A row of an invariant relation is one failure.
+- `query report` explains one row of an invariant or gate outcome ([REQ-EXPLAIN-OUTCOMES](rules-evaluation.mara.md#01M7BF6HCQX66B3MYRH5BZM6BE)).
 - An empty result has no pass or fail meaning of its own; the consumer defines it.
 - A gate reports conditions, not permission to release, deploy or act.
 
@@ -78,87 +81,65 @@ One program's output relations serve several consumers; presentation never defin
 [rules]
 programs = [".mara/rules/*.dl"]
 
+[queries.requirement-basis]
+program = ".mara/rules/engineering.dl"
+relation = "requirement_basis"
+description = "Basis candidates of a requirement, with their status"
+
 [invariants.requirement-verified]
 program = ".mara/rules/engineering.dl"
 relation = "unverified_requirement"
 severity = "error"
 message = "Accepted requirement has no accepted verification"
 
-[gates.implementation-ready]
+[gates.verified]
 program = ".mara/rules/gates.dl"
-conditions = ["not_accepted", "blocking_risk"]
-parameters = ["threshold"]
-
-[views.coverage]
-program = ".mara/rules/engineering.dl"
-relation = "coverage"
+description = "Named requirements are implemented and pass every accepted verification"
+subjects = ["requirement"]
+conditions = ["not_accepted", "not_implemented", "verification_not_passed"]
+unavailable = ["code_unavailable", "result_unavailable"]
+inputs = ["candidate", "verification_result"]
 ```
 
 ---
 
-<a id="01M7BF6HEHHJ7XZM8HDFXK115J"></a>
+<a id="01M7CT60KEEZRJCPJ0CPT7YT5B"></a>
 
-### Fact bridge
+### Gate scope and outcome
 
 | Type | Design |
 | --- | --- |
-| ID | DES-FACT-BRIDGE |
+| ID | DES-GATE-OUTCOME |
 | Status | Accepted |
 | Satisfies | [REQ-PROJECT-AUTHORED-LOGIC](#01M7BF6HDMR4G13G7VFDA770ZN) |
 | Satisfies | [REQ-EXTERNAL-RECORDS-AS-SUPPLIED](#01M7BF6HDVZSZM8E9BAEF7NNQ0) |
 
-Mara ships a versioned declarations file, `mara.dl`, that starts with `.once`; programs include it with `.include "mara.dl"`. Trial version:
+A gate request names the items to judge; an empty scope is refused. Mara judges each named item by the rows of the gate's relations whose first column is that item:
 
-```souffle
-.type Mid <: symbol
-.type Id <: symbol
-.type Type <: symbol
-.type Status <: symbol
-.type Rel <: symbol
-.type Path <: symbol
+| Rows for the item | Item outcome |
+| --- | --- |
+| None in a subject relation | Not applicable: the gate cannot judge this item |
+| Any in a condition relation | Failed |
+| Otherwise, any in an unavailable relation | Unavailable |
+| Otherwise | Passed |
 
-.decl item(mid: Mid, type: Type, id: Id, status: Status, path: Path, line: number)
-.decl field(mid: Mid, key: symbol, value: symbol)
-.decl edge(rel: Rel, src: Mid, dst: Mid, path: Path, line: number)
-.decl verification_result(ver: Mid, result: symbol, revision: symbol)
-.decl source_complete(source: symbol)
-```
-
-- Each relation is `.input`. Mara writes one TSV file per relation, once per document snapshot.
-- Types, statuses, field keys, enum values and relation names are schema names (`requirement`, `derives_from`), never labels.
-- The distinct subtypes `Mid`, `Id` and `Path` make Soufflé reject rules that mix identities.
-- `edge` rows carry the location of each occurrence, so a relation authored twice yields two rows. Programs that count distinct relationships project away `path` and `line`.
-- `source_complete` marks an externally supplied source as complete.
-- A gate parameter is a one-row input relation, for example `threshold(value: number)`.
-- Code links ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)) become a further input relation.
-- The file's format version starts at 1 and changes only with a released contract change, never for internal iterations.
+- The gate passes only when every named item passed. It is failed when an item failed or is not applicable, and unavailable otherwise.
+- The result lists each item's outcome with the rows that caused it.
 
 ---
 
-<a id="01M7CMW7051QVPFDWQBMB1A6K6"></a>
+<a id="01M7CT60KMGA2M9WMQ8RRJREPG"></a>
 
-### Admitted program profile
+### Inputs a request supplies
 
 | Type | Design |
 | --- | --- |
-| ID | DES-PROGRAM-PROFILE |
+| ID | DES-REQUEST-INPUTS |
 | Status | Accepted |
-| Satisfies | [REQ-PROGRAMS-ONLY-COMPUTE](#01M7CMW6ZTAJHSF5BR9SF9KR86) |
+| Satisfies | [REQ-EXTERNAL-RECORDS-AS-SUPPLIED](#01M7BF6HDVZSZM8E9BAEF7NNQ0) |
 
-Before every run the host scans each program file, outside comments and strings, and refuses:
-
-| Construct | It would |
-| --- | --- |
-| `.functor` | Load a shared library and run its code |
-| `.pragma` | Set Soufflé options, library paths included |
-| `.input`, `.output` or `.printsize` with parameters | Read or write any file or database |
-| `.include` of a file other than `mara.dl` and the declared programs | Read an undeclared file |
-
-- A refusal is reported like a compile error ([REQ-PROGRAM-FAULTS-REPORTED](rules-evaluation.mara.md#01M7BF6HCZ88PSSQTFKXE8KJ81)).
-- Everything else in Soufflé is admitted, records, ADTs and `autoinc()` included. Time is bounded instead ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)).
-
----
-
-## Open questions
-
-- The scope and context of a gate, how a program reports an unavailable outcome, and how external records are supplied.
+- An input is an `.input` relation that a program declares itself, such as a candidate or verification results. `mara.dl` declares none ([DES-FACT-BRIDGE](rules-facts.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)).
+- A request supplies each input its consumer lists: one value inline (`--input candidate=abc123`), or a TSV file in the relation's column order (`--input verification_result=@results.tsv`). MCP passes the rows.
+- A request that omits a listed input is refused and names it.
+- `--complete <input>` states that the input holds every record of its source; Mara then adds `source_complete("<input>")`. Mara itself adds `source_complete("code")` when it has read all code ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)).
+- Inputs are never stored. They are part of the evaluation key ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)).

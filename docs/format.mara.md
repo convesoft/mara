@@ -120,7 +120,7 @@ An item region holds, in order:
 
 - The first block after the heading is a two-column GFM table in which every row, the header row included, is `Key | Value`.
 - The header row holds the first property; the writer puts `Type` there. Row order is otherwise free.
-- A multi-valued property repeats its key row, one value per row. Values are never comma-separated or nested.
+- A multi-valued property repeats its key row, one value per row. Values are never comma-separated or nested. A row that repeats the key and value of another row is an error.
 - `|` inside a value is written `\|`. Column padding is optional.
 - The table ends at the first blank line. A non-blank line directly after the table is a malformed row and an error.
 - A key the schema does not define for the item's type is an error, even when another type defines it. A value outside a field's allowed set is an error. There is no "allow unknown keys" setting: a new field is declared in the schema.
