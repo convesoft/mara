@@ -27,7 +27,7 @@ For every document in this repository, this file included:
 - Add only relations that carry meaning. Never add an item or a link just to complete a chain.
 - Update the affected items in the same change as the code.
 - A requirement is Accepted together with its Verification item. The rewrite is the exception: until 0.4.0 ships, a slice's Verification items are written before its work starts, by the issue that blocks the slice's epic.
-- Ask before deciding anything that changes user-visible behaviour, a persisted format, data safety or scope. Small reversible choices need no question.
+- Ask before deciding anything that changes user-visible behaviour, a persisted format, data safety or scope. Small reversible choices need no question. Until 0.4.0 is published, [Deciding during the rewrite](#deciding-during-the-rewrite) replaces this rule.
 
 ### Writing items by hand
 
@@ -48,6 +48,17 @@ Until Mara can write the new format:
 - Work lives in zban issues under `.zban/`. `zban prime` prints the workflow; change issues only with `zban`.
 - One epic per release slice, `0.4.0-alpha.1` to `0.4.0`. Each issue has one outcome and names the Mara IDs it implements.
 - A decision made while working goes into a Mara document, not only into an issue.
+
+## Deciding during the rewrite
+
+One orchestrator starts a worker for each ready issue and integrates its branch.
+
+- A worker decides what the docs leave open: follow the docs, then 0.3.0 where the capability is kept, then the simplest option. It writes the decision into the item it belongs to and lists it under `## Decisions made` when it closes the issue.
+- A worker never decides alone to contradict an Accepted item, to add or drop a capability, or to loosen a requirement on data safety or security. It stops work on the issue and reports the question, with its recommended answer, to the orchestrator.
+- The orchestrator files such a question as an issue tagged `maintainer` that blocks the original issue, sets that issue back to `todo` and continues with other ready issues. It stops only when none is ready.
+- No worker starts an issue tagged `maintainer` or `deferred`.
+- When a slice's epic closes, the orchestrator appends the `## Decisions made` lists of its issues to the slice's review issue. That issue blocks the release, not the next slice. An overturned decision becomes a new issue.
+- A worker changes nothing outside its worktree and its temporary directories.
 
 ## Engineering
 
@@ -77,8 +88,8 @@ Until Mara can write the new format:
 ### Until the rewrite is on `main`
 
 - The rewrite integrates on `chore/clear-worktree-for-rewrite`.
-- One branch and worktree per zban issue, cut from the integration branch's tip. Whoever starts a worker first sets its issue `in-progress` on the integration branch, so no two workers take the same issue.
+- One branch and worktree per zban issue, cut from the integration branch's tip. The orchestrator first sets the issue `in-progress` on the integration branch, so no two workers take the same issue.
 - Before its branch is integrated, a worker rebases it onto the integration branch's tip and reruns its checks. Rebasing its own unmerged branch is allowed.
-- A worker never merges into the integration branch. Whoever coordinates the workers integrates one branch at a time: squash merge into one commit, then delete the branch. Follow-up work starts from the new tip.
+- A worker never merges into the integration branch. The orchestrator integrates one branch at a time: squash merge into one commit, then delete the branch. Follow-up work starts from the new tip.
 - No CI exists until the last slice (`mara-4dr2p2`), and no workflow file is added before it. Run the checks locally before handing over a branch and again before integrating it.
 - The integration branch reaches `origin/main` only by fast-forward: `git push origin chore/clear-worktree-for-rewrite:main`, with branch protection lifted for that push. Never squash it and never use GitHub's "Rebase and merge": both change commit SHAs, and `d7f0e73` and the alpha tags must stay on `main`.

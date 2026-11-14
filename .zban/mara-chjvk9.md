@@ -2,6 +2,8 @@
 title: Release workflow
 status: todo
 type: task
+tags:
+  - maintainer
 parent: mara-qzp1gd
 blocked_by:
   - mara-a4m588
@@ -9,6 +11,12 @@ blocked_by:
   - mara-b60px3
   - mara-a4rbz4
   - mara-4dr2p2
+  - mara-5ynggq
+  - mara-5sqeze
+  - mara-46j65e
+  - mara-b8cpdm
+  - mara-7ztypp
+  - mara-9a1zjp
 created_at: 2026-11-13T22:10:06Z
 ---
 
