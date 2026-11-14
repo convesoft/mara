@@ -64,14 +64,14 @@ Before every run the host copies `mara.dl` and the declared program files into a
 | Types | `symbol`; `number`, a signed 32-bit integer; subtypes, unions and records of them |
 | Relations | `.decl` with the qualifiers `inline`, `no_inline`, `brie`, `btree`, `eqrel`, `overridable` |
 | Structure | `.type`, `.comp`, `.init`, `.override`, `.plan`, `.once`; `.include` of `mara.dl` and the declared programs |
-| Rules | Facts, rules, negation, recursion, comparison, `+`, `-`, `*`, `/`, the bitwise and logical operators, `range` |
+| Rules | Facts, rules, negation, recursion, comparison, `+`, `-`, `*`, the bitwise and logical operators, `range` |
 | Text | `cat`, `strlen`, `substr`, `contains`, `to_string`, `to_number` |
 | Aggregates | `count`, `sum`, `min`, `max` |
 
 - A refusal is reported like a compile error, at the place the parser stopped ([REQ-PROGRAM-FAULTS-REPORTED](rules-evaluation.mara.md#01M7BF6HCZ88PSSQTFKXE8KJ81)). [EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG) shows what each construct below did in Soufflé.
 - Left out because it reaches outside: every input and output directive and qualifier, which Mara generates; `.functor`, `.pragma`, `.lattice`, `@` functors, `#` directives, `__FILE__`, `__INCL__`.
 - Left out because its value depends on evaluation order: `autoinc()`, a bare `$`, `ord`, `choice-domain`, `recursive_iteration_cnt`, `.limitsize`.
-- Left out because the native and the browser build differ, or Soufflé gets it wrong: `float` and `unsigned` types and literals, `mean`, `to_float`, `to_unsigned`, `as` casts, `match`, `%`, `^`, `magic`, subsumption, ADTs.
+- Left out because the native and the browser build differ, or Soufflé gets it wrong: `float` and `unsigned` types and literals, `mean`, `to_float`, `to_unsigned`, `as` casts, `match`, `/`, `%`, `^`, `magic`, subsumption, ADTs.
 - A relation that crosses the boundary (a fact relation, a supplied input, a consumed output) has only `symbol` and `number` columns, or subtypes of them. The parser checks this on the resolved types.
 - Time is bounded ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)).
 - Soufflé runs with library loading off and never in the project's directory ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)).

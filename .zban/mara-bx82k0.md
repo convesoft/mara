@@ -24,6 +24,6 @@ Context: docs/rules.mara.md (REQ-PROJECT-AUTHORED-LOGIC, REQ-EXTERNAL-RECORDS-AS
 - [ ] Tests, reaching outside: a `libfunctors.so` beside a harmless program or on the library path is not loaded; `#line` at the start of a line, after other text and after a block comment is refused; `__FILE__` is refused; no diagnostic shows another file
 - [ ] Tests, input and output: the `output`, `printsize` and `input` qualifiers and the I/O directives are refused; nothing but the generated files is written
 - [ ] Tests, determinism: two consumers of one program get the same rows; the admitted functions and operators give the same results natively and in WASM on the boundary cases of the review probes
-- [ ] Tests, faults: an out-of-range `substr` and a division by zero make the outcome unavailable, natively and in WASM
+- [ ] Tests, faults: an out-of-range `substr` and `to_number` of text that is not a number make the outcome unavailable, natively and in WASM; `to_number("7junk")` is 7 and a negative `substr` length means the rest of the text, on both
 - [ ] Tests, explanations: a row whose value holds a newline, a quote or a negative number, and a proof that ends in an aggregate, are reported as not explainable; constraint leaves are left out
 - [ ] VER-WORK-COUNTERS rows for `souffle` runs pass

@@ -71,7 +71,7 @@ An evaluation still running at its time limit is stopped, and its outcome is una
 - Numbers are signed 32-bit integers on every host. A row in an output file that does not fit the relation's columns, or a value that is not valid UTF-8 (`substr` counts bytes), is a fault.
 - Explanations run on demand in provenance mode (`-t explain`), driven on stdin by `format json`, then `explain <relation>(<args>)`. Use JSON: the text proof format garbles negated atoms. In the browser the host supplies that input through the module's `stdin` hook. When provenance mode aborts, the host reports the explanation as unavailable.
 - The `explain` command does not decode escapes, and a default-depth proof holds unresolved `subproof` references. The host expands them, checks that the proof it gets back is for the row it asked about, and reports the explanation as unavailable when the row's values cannot be written in the command (quotes, backslashes, control characters, negative numbers), when the reply is not valid JSON, when a branch ends in an aggregate's internal relation, or when the exchange passes the time limit. It leaves constraint leaves out: Soufflé prints internal numbers for symbols there.
-- A runtime fault such as integer division by zero ends the child process with the rule's location natively, and with a `divide by zero` trap without location in WASM.
+- A runtime fault such as `to_number` of text that is not a number ends the child process with the rule's location natively, and aborts the module without a location in WASM.
 - Soufflé's compile diagnostics name a file and a line. Anything else it prints on stderr during a run, such as the warning for a `substr` out of range, is a runtime fault, also when it exits with 0.
 - At the time limit ([REQ-EVALUATION-TIME-LIMIT](#01M7CMW70G711Z67QEWW5Z0MK0)) the host kills the child process natively and terminates the Soufflé worker in the browser; the workspace and its unexported edits are not in that worker.
 
@@ -156,6 +156,7 @@ The static binary of [EVD-SOUFFLE-TRIAL](#01M7BF6HDDJJ0Y0WWT6RK17CDN), run on 20
 | `.decl a(x: number) magic` with a subsumption clause, read by a gate condition | The clause is dropped: the condition has no row, on both hosts; with `no_magic` it has one |
 | `match("\\cI", "\t")` | No row natively, one row in WASM, no message on either |
 | `x % y` with −2147483648 and −1 | Arithmetic exception natively; 0 in WASM, so a condition on it passes |
+| `x / 0` | Arithmetic exception on x64 and a trap in WASM. On ARM64 the division instruction does not trap and yields 0: read from Soufflé's code and the compiled instruction, not run |
 | `to_number(2147483648.0)`, a float literal without the word `float` | −2147483648 natively, 2147483647 in WASM |
 | `explain` of `r(x) :- a(x), x < "z".` | A leaf `4 < 5`: internal numbers instead of the symbols |
 | Upstream on 2026-11-14 | 2.5 is the latest release. Fixed on master only: `magic` with subsumption (issue 2322) and an explanation fix (2585). By design: `choice-domain` order, the `libfunctors.so` load, `#line`, unchecked `as`. Unchanged on master: the JSON reader |
