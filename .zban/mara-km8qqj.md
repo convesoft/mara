@@ -1,6 +1,6 @@
 ---
 title: Write the Verification items for the alpha.1 requirements
-status: todo
+status: in-progress
 type: task
 priority: high
 created_at: 2026-11-14T10:43:23Z
