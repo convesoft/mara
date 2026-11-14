@@ -215,6 +215,7 @@ name = "mara"
 version = "0.4.0-alpha.1"
 dependencies = [
  "ignore",
+ "libc",
  "mara-engine",
  "serde_json",
  "tempfile",

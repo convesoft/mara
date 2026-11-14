@@ -1,13 +1,16 @@
 //! Runs the real `mara` binary with `--debug-stats`, and lists the operation cases that the
 //! counter and scaling tests run.
 
+use std::io::Read;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::thread;
 
 use mara_engine::work::WorkCounts;
 use serde_json::{Map, Value};
 
 use crate::corpus::Corpus;
+use crate::cpu_time;
 
 /// One invocation of an operation on a corpus: a case of DES-PERFORMANCE-HARNESS.
 pub struct Case {
@@ -63,15 +66,37 @@ pub struct Run {
 
 /// Runs `mara --debug-stats <args>` in `directory` with an empty environment, so it reaches no
 /// user configuration or daemon. Requires exit status `status`, then reads the stats line that
-/// the process writes last on stderr.
+/// the process writes last on stderr. The process's CPU time counts in [`cpu_time::now`].
 pub fn run(directory: &Path, args: &[impl AsRef<std::ffi::OsStr>], status: i32) -> Run {
-    let output = Command::new(env!("CARGO_BIN_EXE_mara"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mara"))
         .arg("--debug-stats")
         .args(args)
         .current_dir(directory)
         .env_clear()
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .expect("start mara");
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let errors = thread::spawn(move || {
+        let mut buffer = Vec::new();
+        stderr.read_to_end(&mut buffer).map(|_| buffer)
+    });
+    let mut stdout = Vec::new();
+    let mut stdout_pipe = child.stdout.take().expect("piped stdout");
+    stdout_pipe
+        .read_to_end(&mut stdout)
+        .expect("read the stdout of mara");
+    let stderr = errors
+        .join()
+        .expect("read the stderr of mara")
+        .expect("read the stderr of mara");
+    let output = Output {
+        status: cpu_time::wait(child),
+        stdout,
+        stderr,
+    };
     assert_eq!(
         output.status.code(),
         Some(status),

@@ -4,6 +4,7 @@
 
 mod cli;
 mod corpus;
+mod cpu_time;
 mod scaling;
 mod work_counters;
 

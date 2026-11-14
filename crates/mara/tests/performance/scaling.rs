@@ -1,19 +1,25 @@
-//! VER-SCALING: growth per doubling of each operation's time on a release build.
+//! VER-SCALING: growth per doubling of each operation's CPU time on a release build.
 //!
 //! Each operation adds its case to `cli::cases`, which `growth_per_doubling` times.
 
-use std::time::{Duration, Instant, SystemTime};
+use std::f64::consts::FRAC_PI_2;
+use std::time::{Duration, SystemTime};
 
 use mara::inputs::Inputs;
 use mara_engine::work::WorkCounts;
 
 use crate::corpus::{Corpus, Hub, Shape, Stress};
-use crate::{PULL_REQUEST_SIZES, SEED, cli};
+use crate::{PULL_REQUEST_SIZES, SEED, cli, cpu_time};
 
 /// Most growth of time per doubling of corpus size (REQ-NEAR-LINEAR-SCALING).
 const LIMIT: f64 = 2.3;
 /// Timed rounds after one warm-up round; each round runs every size once.
 const ROUNDS: usize = 5;
+/// Standard errors by which two adjacent sizes must grow less than [`LIMIT`] after the rounds to
+/// pass without more runs.
+const MARGIN: f64 = 4.0;
+/// Timed runs of each size of a pair that does not pass after the rounds.
+const RUNS: usize = 60;
 
 #[test]
 #[cfg_attr(
@@ -85,35 +91,87 @@ fn per_row_growth_per_doubling() {
     }
 }
 
-/// Times `run`, named `name`, on every corpus, given with its index. Interleaves sizes so that
-/// machine load affects them alike, and fails when the median grows faster than [`LIMIT`] per
+/// Times `run`, named `name`, on every corpus, given with its index, in CPU time: the calling
+/// thread's and that of the processes [`cli::run`] waits for ([`cpu_time::now`]). Interleaves
+/// sizes so that machine load affects them alike. After the rounds, looks once: two adjacent
+/// sizes that grow more than [`MARGIN`] standard errors below [`LIMIT`] pass; every other pair
+/// gets [`RUNS`] runs of both sizes and fails when the median grows faster than [`LIMIT`] per
 /// doubling.
 fn check_growth<P>(corpora: &[(usize, P)], name: &str, mut run: impl FnMut(usize, &P)) {
-    let mut times: Vec<Vec<Duration>> = vec![Vec::with_capacity(ROUNDS); corpora.len()];
+    let mut time = |at: usize| {
+        let start = cpu_time::now();
+        run(at, &corpora[at].1);
+        cpu_time::now() - start
+    };
+    let mut times: Vec<Vec<Duration>> = vec![Vec::with_capacity(RUNS); corpora.len()];
     for round in 0..=ROUNDS {
-        for (at, ((_, corpus), times)) in corpora.iter().zip(&mut times).enumerate() {
-            let start = Instant::now();
-            run(at, corpus);
+        for (at, times) in times.iter_mut().enumerate() {
+            let elapsed = time(at);
             if round > 0 {
-                times.push(start.elapsed());
+                times.push(elapsed);
             }
         }
     }
-    let medians: Vec<(usize, Duration)> = corpora
-        .iter()
-        .zip(&mut times)
-        .map(|((size, _), times)| {
-            times.sort();
-            (*size, times[times.len() / 2])
-        })
+    let judged: Vec<usize> = (1..corpora.len())
+        .filter(|&at| !clearly_below(corpora, &times, at))
         .collect();
-    for pair in medians.windows(2) {
-        let ((small, small_time), (large, large_time)) = (pair[0], pair[1]);
-        let doublings = (large as f64 / small as f64).log2();
-        let growth = (large_time.as_secs_f64() / small_time.as_secs_f64()).powf(1.0 / doublings);
+    let mut extended: Vec<usize> = judged.iter().flat_map(|&at| [at - 1, at]).collect();
+    extended.dedup();
+    for _ in ROUNDS..RUNS {
+        for &at in &extended {
+            let elapsed = time(at);
+            times[at].push(elapsed);
+        }
+    }
+    let medians: Vec<(usize, Duration, usize)> = corpora
+        .iter()
+        .zip(&times)
+        .map(|((size, _), times)| (*size, median(times), times.len()))
+        .collect();
+    for at in judged {
+        let (small, large) = (corpora[at - 1].0, corpora[at].0);
+        let ratio = median(&times[at]).as_secs_f64() / median(&times[at - 1]).as_secs_f64();
+        let growth = ratio.powf(1.0 / doublings(corpora, at));
         assert!(
             growth <= LIMIT,
-            "{name} grows {growth:.2}× per doubling from {small}× to {large}×; medians {medians:?}"
+            "{name} grows {growth:.2}× per doubling from {small}× to {large}×; median CPU time \
+             and timed runs per size {medians:?}"
         );
     }
+}
+
+/// Whether the median time grows more than [`MARGIN`] standard errors below [`LIMIT`] from the
+/// size before the one at `at` to that size. The standard error of a median's logarithm is
+/// √(π/2) times that of a mean, from the standard deviation of the runs' logarithms around their
+/// size's mean, pooled over the two sizes.
+fn clearly_below<P>(corpora: &[(usize, P)], times: &[Vec<Duration>], at: usize) -> bool {
+    let logs = |times: &[Duration]| -> Vec<f64> {
+        times.iter().map(|time| time.as_secs_f64().ln()).collect()
+    };
+    let (small, large) = (logs(&times[at - 1]), logs(&times[at]));
+    let squares = |logs: &[f64]| {
+        let mean = logs.iter().sum::<f64>() / logs.len() as f64;
+        logs.iter().map(|log| (log - mean).powi(2)).sum::<f64>()
+    };
+    let (n_small, n_large) = (small.len() as f64, large.len() as f64);
+    let deviation = ((squares(&small) + squares(&large)) / (n_small + n_large - 2.0)).sqrt();
+    let doublings = doublings(corpora, at);
+    let error = FRAC_PI_2.sqrt() * deviation * (1.0 / n_small + 1.0 / n_large).sqrt() / doublings;
+    let growth = (middle(large) - middle(small)) / doublings;
+    growth + MARGIN * error < LIMIT.ln()
+}
+
+fn doublings<P>(corpora: &[(usize, P)], at: usize) -> f64 {
+    (corpora[at].0 as f64 / corpora[at - 1].0 as f64).log2()
+}
+
+fn median(times: &[Duration]) -> Duration {
+    let mut sorted = times.to_vec();
+    sorted.sort_unstable();
+    sorted[sorted.len() / 2]
+}
+
+fn middle(mut values: Vec<f64>) -> f64 {
+    values.sort_unstable_by(f64::total_cmp);
+    values[values.len() / 2]
 }
