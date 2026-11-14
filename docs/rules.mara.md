@@ -138,8 +138,8 @@ A gate request names the items to judge; an empty scope is refused. Mara judges 
 | Status | Accepted |
 | Satisfies | [REQ-EXTERNAL-RECORDS-AS-SUPPLIED](#01M7BF6HDVZSZM8E9BAEF7NNQ0) |
 
-- An input is an `.input` relation that a program declares itself, such as a candidate or verification results. `mara.dl` declares none ([DES-FACT-BRIDGE](rules-facts.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)).
-- A request supplies each input its consumer lists: one value inline (`--input candidate=abc123`), or a TSV file in the relation's column order (`--input verification_result=@results.tsv`). MCP passes the rows.
+- An input is a relation that a program declares and its consumer lists as an input, such as a candidate or verification results. `mara.dl` declares none ([DES-FACT-BRIDGE](rules-facts.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)).
+- A request supplies each input its consumer lists: one value inline (`--input candidate=abc123`), or a JSON file holding a list of rows in the relation's column order (`--input verification_result=@results.json`). MCP passes the rows.
 - A request that omits a listed input is refused and names it.
 - `--complete <input>` states that the input holds every record of its source; Mara then adds `source_complete("<input>")`. Mara itself adds `source_complete("code")` when it has read all code ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)).
 - Inputs are never stored. They are part of the evaluation key ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)).

@@ -165,3 +165,20 @@
 
 - Chosen: a result carries the revision of its Verification or Validation and of the Requirement, Need or Goal it was produced for, and counts only while both are current.
 - Rejected: the revision of the Verification or Validation alone. A requirement that changes while its verification stays the same would keep its old passes.
+
+---
+
+<a id="01M7CZA3GYB8DH1YPKH0T06JZP"></a>
+
+### Generate every input and output directive, as JSON
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-GENERATED-JSON-IO |
+| Status | Accepted |
+| Justifies | [DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH) |
+| Justifies | [DES-FACT-BRIDGE](rules-facts.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J) |
+
+- Chosen: programs hold no input or output directive. Mara generates them for the relations a run needs and uses Soufflé's JSON files; a run at 16× takes 18 ms instead of 14 ms ([EVD-SOUFFLE-TRIAL](rules-evaluation.mara.md#01M7BF6HDDJJ0Y0WWT6RK17CDN)).
+- Rejected: Soufflé's default tab-separated files. A tab or a newline in a value reads as a column or row break ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)).
+- Rejected: escaping values in tab-separated files. A program can still build such a value, and rules would see the escaped text.

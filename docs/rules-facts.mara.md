@@ -34,7 +34,7 @@ Mara ships a versioned declarations file, `mara.dl`, that starts with `.once`; p
 .decl source_complete(source: symbol)
 ```
 
-- Each relation is `.input`. Mara writes one TSV file per relation, once per document snapshot.
+- `mara.dl` only declares the relations. For each run Mara writes their facts, one JSON file per relation and once per document snapshot, and generates the directives that read them ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)).
 - Types, statuses, field keys, enum values and relation names are schema names (`requirement`, `derives_from`), never labels.
 - The distinct subtypes `Mid`, `Id` and `Path` make Soufflé reject rules that mix identities.
 - `revision` is the hash of the item's region. `get` returns the same value, so whoever records a result can record the definition it belongs to.
@@ -62,11 +62,12 @@ Before every run the host copies `mara.dl` and the declared program files into a
 | Directive | Admitted |
 | --- | --- |
 | `.decl`, `.type`, `.comp`, `.init`, `.override`, `.plan`, `.once`, `.limitsize` | Always |
-| `.input`, `.output`, `.printsize` | Without parameters |
 | `.include` | Of `mara.dl` and the declared programs |
 
-- Every other directive is refused, `.functor`, `.pragma` and `.lattice` among them.
-- A line that starts with `#` is refused: `#line` makes a diagnostic print the first line of any file, also with the preprocessor off.
+- Every other directive is refused, `.functor`, `.pragma` and `.lattice` among them. So are `.input`, `.output` and `.printsize`: a program only declares relations and rules, and Mara generates its input and output.
+- A `#` outside strings and comments is refused wherever it stands: `#line` makes a diagnostic print the first line of any file, also with the preprocessor off and also after other text on the line.
+- `__FILE__` and `__INCL__` are refused: they yield the private directory's path, which differs from run to run.
+- The scan follows Soufflé's own lexical rules: a directive may follow other text on a line, and block comments do not nest.
 - `autoinc()` is refused: its values depend on evaluation order, and it aborts explanations.
 - A refusal is reported like a compile error ([REQ-PROGRAM-FAULTS-REPORTED](rules-evaluation.mara.md#01M7BF6HCZ88PSSQTFKXE8KJ81)).
 - Records and ADTs are admitted. Time is bounded instead ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)).
@@ -96,4 +97,4 @@ A construct that the scan admits, or a memory fault in Soufflé, lets a program 
 
 ## Open questions
 
-- Whether the `souffle` child process also runs in an operating-system sandbox, or an accepted Decision accepts [RISK-SOUFFLE-REACHES-OUTSIDE](#01M7CYC90BZBBXGC0CZ66W8ZEV). The maintainer decides before the release.
+- Whether the `souffle` child process also runs in an operating-system sandbox, or an accepted Decision accepts [RISK-SOUFFLE-REACHES-OUTSIDE](#01M7CYC90BZBBXGC0CZ66W8ZEV), and whether an evaluation gets limits on output size and memory besides time. The maintainer decides before the release.

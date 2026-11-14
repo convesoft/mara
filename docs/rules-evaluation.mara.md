@@ -64,9 +64,10 @@ An evaluation still running at its time limit is stopped, and its outcome is una
 - An evaluation is keyed by the keys of the layers it reads (the document snapshot, and the code layer when the program uses code links), the hash of the program with every file it includes, and the inputs the request supplied with their completeness marks ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY), [DES-REQUEST-INPUTS](rules.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)).
 - It runs only programs that pass the profile scan, on the scanned copies in a private directory ([DES-PROGRAM-PROFILE](rules-facts.mara.md#01M7CMW7051QVPFDWQBMB1A6K6)).
 - `project validate` compiles every declared program, by a run against empty facts (2–6 ms) when no invariant uses it. There is no compile-only operation.
-- Native: `souffle --no-preprocessor -l "" -F <facts> -D <out> <program>.dl` as a child process, single-threaded, with the private directory as its working directory. `-l ""` stops Soufflé from loading a `libfunctors.so`, which it otherwise does for every program.
+- For each run the host generates a wrapper program in the private directory. It includes the consumer's program and holds one `.input` directive for each fact relation and supplied input and one `.output` directive for each relation the consumer names, all as JSON files in that directory (`IO=jsonfile`, `format=list`). JSON keeps tabs, newlines and quotes in values, which Soufflé's default tab-separated files do not.
+- Native: `souffle --no-preprocessor -l "" <wrapper>.dl` as a child process, single-threaded, with the private directory as its working directory. `-l ""` stops Soufflé from loading a `libfunctors.so`, which it otherwise does for every program.
 - Browser: Soufflé runs in a worker of its own, apart from the one that holds the workspace. Compile `souffle.wasm` once per such worker. For each evaluation, create a fresh instance, write programs and facts into its in-memory filesystem and read the outputs back. The module is built with `-sEXIT_RUNTIME=1` or exports `callMain`, so the host receives the exit code of `main`.
-- Mara reads only the output relations a consumer names. An `.output` in an included file is also written and is not a result.
+- Only the relations a consumer names are written.
 - Explanations run on demand in provenance mode (`-t explain`), driven on stdin by `format json`, then `explain <relation>(<args>)`. Use JSON: the text proof format garbles negated atoms. In the browser the host supplies that input through the module's `stdin` hook. When provenance mode aborts, as it does on an ADT constructor in a rule body and on a subsumption clause, the host reports the explanation as unavailable.
 - A runtime fault such as integer division by zero ends the child process with the rule's location natively, and with a `divide by zero` trap without location in WASM.
 - At the time limit ([REQ-EVALUATION-TIME-LIMIT](#01M7CMW70G711Z67QEWW5Z0MK0)) the host kills the child process natively and terminates the Soufflé worker in the browser; the workspace and its unexported edits are not in that worker.
@@ -105,6 +106,7 @@ Soufflé 2.5, 2026-11-13. Corpora: 1× = 200 items and 266 edges, 16× = 3,200 a
 | Provenance mode overhead at 16× | 1.5× (21.0 against 14.2 ms) |
 | WASM gate time: empty, 1×, 16×, 64× | 11.9, 13.4, 21.7, 44.8 ms |
 | Native against WASM outputs, all programs at 16× | Identical (6,696 rows) |
+| JSON facts and outputs through generated directives, 2026-11-14 | Tabs, newlines, quotes and backslashes in values round-trip exactly; a component's relation is written; trial gate at 16×: 18 ms against 14 ms tab-separated, same 960 rows |
 | WASM explanation, 2026-11-14: console input from the module's `stdin` hook, under Node 26 | Two proofs, one through a negated atom, byte-identical to native; 110 ms at 16× |
 | Native binary, static C++ runtime, no OpenMP | 15 MB stripped, 2.6 MB xz; needs only libc and libm |
 | WASM module | 6.1 MB, 1.2 MB gzip, 0.7 MB Brotli |
@@ -126,7 +128,7 @@ The trial gates approximate the gates of the `engineering` template at commit `d
 | Supports | [ADR-PROGRAM-PROFILE](decisions-rules.mara.md#01M7CMW6ZGC0PY8DVYNQDSBPRH) |
 | Supports | [RISK-SOUFFLE-REACHES-OUTSIDE](rules-facts.mara.md#01M7CYC90BZBBXGC0CZ66W8ZEV) |
 
-The static binary of [EVD-SOUFFLE-TRIAL](#01M7BF6HDDJJ0Y0WWT6RK17CDN), run on 2026-11-14 as `souffle --no-preprocessor -F <facts> -D <out> <program>.dl`.
+The static binary of [EVD-SOUFFLE-TRIAL](#01M7BF6HDDJJ0Y0WWT6RK17CDN), run on 2026-11-14 as `souffle --no-preprocessor -F <facts> -D <out> <program>.dl`, from the fourth row on with `-l ""` where stated.
 
 | Program | Result |
 | --- | --- |
@@ -137,6 +139,9 @@ The static binary of [EVD-SOUFFLE-TRIAL](#01M7BF6HDDJJ0Y0WWT6RK17CDN), run on 20
 | `.pragma "output-dir"` | No effect; `-D` won |
 | Any program, with a `libfunctors.so` in the working directory or on `LD_LIBRARY_PATH` | Loaded the library and ran its constructor, with no `.functor` in the program. `-l ""` prevented it |
 | `#line 1 "<file>"` or `# 1 "<file>"` before a faulty declaration | The diagnostic printed the first line of that file, with `--no-preprocessor` |
+| `#line 1 "<file>"` after other text on the same line | The same file read |
+| `__FILE__` in a fact | The absolute path of the program in its private directory, different in each directory |
+| Default tab-separated output of one row whose value holds a newline and a tab | The same bytes as two separate rows |
 | `-t explain` on a rule with `autoinc()`, on a rule with an ADT constructor in its body, or on a program with a subsumption clause | Aborted; normal evaluation of the same programs succeeded |
 | `-t explain` with records, aggregates, negation, components or `eqrel` | Explained |
 | `nat(0). nat(x + 1) :- nat(x).` | Still running when killed after 5 s |

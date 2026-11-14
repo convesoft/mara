@@ -48,7 +48,8 @@ A one-shot converter rewrites a 0.3.0 project (its `:::mara` documents, schema a
 | Relation with source and target lists | Every source type allows every listed target type |
 | YAML rule files, SCIP commands, schema guidance other than `description` | Left out; reported |
 
-- Items of a flavour without a `status` field get the status the user names for the run.
+- An item without a status gets the status the user names for the run.
+- When two values of one field, or two statuses, become the same label ([DES-METADATA-TABLE](format.mara.md#01M7BF6GZNS6VM3T94VS9A5HTD)), the converter writes nothing and reports each pair.
 - A valid 0.3.0 project converts into a valid project, except for the items reported for the author to complete.
 
 ---

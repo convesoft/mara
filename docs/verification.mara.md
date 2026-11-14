@@ -77,14 +77,14 @@ Rust integration tests run the real CLI on disposable projects initialized from 
 | Case | Expectation |
 | --- | --- |
 | Accepted requirement with only a draft basis, or only a draft verification | Validation error; the same items as drafts are valid |
-| Requirement with two accepted verifications, one of them passing | `verified` fails until both pass |
+| Requirement with two accepted verifications, one passing and the other failing or absent from a complete input | `verified` fails |
 | Result for another candidate, or for an older revision of the verification or of the requirement | Does not count |
 | Risk on a parent requirement, on its need or on that need's goal | Relevant to the child requirement; a sibling requirement is not judged |
 | HIGH risk with a mitigation | Blocks until it is reassessed or an accepted decision accepts it |
 | Named validation whose result is absent from a complete input, or is not a pass | `release-ready` fails; a validation that is not named does not block |
-| Validation of two needs with a pass for only one of them | `release-ready` fails |
+| Validation of two needs with a pass for one and, for the other, a failing result or none in a complete input | `release-ready` fails |
 | A failure and an unavailable fact on the same item | Failed |
-| Risk without a level, unread code, or a result absent from an incomplete input | Unavailable, never passed |
+| Item whose only missing fact is a risk level, an implementation link while code is unread, or a result absent from an incomplete input | Unavailable, never passed |
 | Accepted requirement without an accepted verification | `verified` fails |
 | A failing row of each template invariant and gate | Has an explanation |
 | `C supersedes B supersedes A` after B retires | Valid |
