@@ -1,6 +1,6 @@
 ---
 title: Build the performance harness
-status: todo
+status: in-progress
 type: task
 parent: mara-t1rffa
 blocked_by:
