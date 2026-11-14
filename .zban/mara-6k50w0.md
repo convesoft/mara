@@ -4,6 +4,7 @@ status: todo
 type: epic
 blocked_by:
   - mara-t1rffa
+  - mara-4y2cp4
 created_at: 2026-11-13T22:10:06Z
 ---
 

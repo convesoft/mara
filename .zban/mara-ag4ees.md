@@ -7,6 +7,7 @@ tags:
 parent: mara-qzp1gd
 blocked_by:
   - mara-a4m588
+  - mara-4dr2p2
 created_at: 2026-11-14T09:57:08Z
 ---
 
@@ -19,7 +20,7 @@ Everything connected to macOS is deferred to this issue on purpose (maintainer's
 
 Until this issue starts:
 
-- CI runs on Linux runners only. No workflow has a macOS job.
+- No workflow has a macOS job. CI itself starts with mara-4dr2p2, which this issue follows.
 - No other issue builds, tests or packages anything for macOS, or asks the maintainer to try something on a Mac.
 - macOS arm64 stays a supported platform of 0.4.0. This issue delivers it; the release waits for it.
 

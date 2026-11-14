@@ -8,8 +8,8 @@ blocked_by:
 created_at: 2026-11-13T22:10:06Z
 ---
 
-Goal: the built `mara` validates `docs/` in CI, replacing hand checks.
+Goal: the built `mara` validates `docs/`, replacing hand checks.
 
 - [ ] Project configuration and the engineering schema added to this repository
-- [ ] `mara project validate` passes on `docs/` and runs in CI
+- [ ] `mara project validate` passes on `docs/` and joins the local checks (CI waits for mara-4dr2p2)
 - [ ] README status updated

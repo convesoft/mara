@@ -14,5 +14,5 @@ Context: docs/performance.mara.md (DES-PERFORMANCE-HARNESS, REQ-WORK-FOLLOWS-CHA
 
 - [ ] Seeded corpus generator for 1×, 4×, 16× and 64×, writing into temporary directories
 - [ ] Work counters in engine and hosts, exposed by a debug stats option
-- [ ] Counter test and scaling test as ordinary Rust integration tests, run in CI
+- [ ] Counter test and scaling test as ordinary Rust integration tests, part of the local checks (CI waits for mara-4dr2p2)
 - [ ] `[profile.profiling]` as described under Profiling
