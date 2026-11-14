@@ -20,6 +20,7 @@ For every document in this repository, this file included:
 
 - Engineering knowledge lives in `docs/*.mara.md`, listed in [docs/index.mara.md](docs/index.mara.md). README, this file and zban issues link to it and never restate it.
 - Syntax: [item format](docs/format.mara.md) and [identity and links](docs/identity.mara.md). Types and relations: [engineering vocabulary](docs/vocabulary.mara.md).
+- [.mara/config.toml](.mara/config.toml) makes `docs/` a Mara project. Its schema, [.mara/schema.toml](.mara/schema.toml), is the engineering vocabulary and changes only with that page. The [local checks](#local-checks) validate the project with the worktree's binary.
 - Layout follows the `mara-docs-layout` skill; the 200-line limit above replaces its 500-line signal.
 - Make an item only for knowledge that needs its own identity, relations or verification. Everything else is narrative.
 - An undecided matter is a plain bullet under `## Open questions` on its topic page, never an item. Settling it adds or changes an item and removes the bullet.
@@ -81,6 +82,7 @@ Run them from the repository root; each must exit 0. `rustup` installs the toolc
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked --config 'build.warnings="deny"'
 cargo test --workspace --locked
+cargo run --package mara --locked --quiet -- project validate
 cargo test --package mara --test performance --release --locked
 cargo build --package mara-engine --target wasm32-unknown-unknown --locked
 zban check

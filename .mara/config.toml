@@ -1,0 +1,6 @@
+format_version = 1
+schema = ".mara/schema.toml"
+
+[documents]
+format_version = 1
+include = ["docs/**/*.mara.md"]
