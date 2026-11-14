@@ -63,10 +63,11 @@
 | Justifies | [DES-PROGRAM-PROFILE](rules-facts.mara.md#01M7CMW7051QVPFDWQBMB1A6K6) |
 | Justifies | [REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0) |
 
-- Chosen: a scan before every run refuses the constructs that read, write or execute outside the evaluation ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)), and a time limit bounds each evaluation.
+- Chosen: a scan before every run refuses the constructs that read, write or execute outside the evaluation ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)), and a time limit bounds each evaluation. Soufflé runs on the scanned copies in a private directory with library loading off, because it loads a `libfunctors.so` for any program.
 - Rejected: trusting programs like build scripts. Validating an untrusted checkout would run its code.
 - Rejected: sandboxing the child process with Landlock, seccomp or `sandbox-exec`. It is platform-specific and fails on kernels without Landlock.
-- Rejected: forbidding records, ADTs and `autoinc()` to bound evaluation. Plain recursion with arithmetic or `cat` never ends either.
+- Rejected: forbidding records and ADTs to bound evaluation. Plain recursion with arithmetic or `cat` never ends either.
+- Rejected: refusing every construct that Soufflé cannot explain. The list cannot be proven complete, so an explanation it cannot produce is reported as unavailable. Only `autoinc()` is refused, because its values also depend on evaluation order.
 
 ---
 
@@ -149,3 +150,18 @@
 
 - Chosen: a `Supersedes` link stays valid after the replacing item retires.
 - Rejected: requiring an accepted source for every `Supersedes` link. A second replacement would invalidate the lineage that the first one records.
+
+---
+
+<a id="01M7CXC2NESPHY4HB3QXEDTAJ2"></a>
+
+### Bind a result to the revision of what it checks
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-RESULTS-BOUND-TO-BOTH-REVISIONS |
+| Status | Accepted |
+| Justifies | [DES-TEMPLATE-INPUTS](template-readiness.mara.md#01M7CT60N3AT6378YRQ62A5NM3) |
+
+- Chosen: a result carries the revision of its Verification or Validation and of the Requirement, Need or Goal it was produced for, and counts only while both are current.
+- Rejected: the revision of the Verification or Validation alone. A requirement that changes while its verification stays the same would keep its old passes.

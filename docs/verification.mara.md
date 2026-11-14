@@ -14,11 +14,12 @@
 | Verifies | [REQ-WORK-FOLLOWS-CHANGE](performance.mara.md#01M7BF6H3A6YQ43351V9YSV3SQ) |
 | Verifies | [REQ-NEAR-LINEAR-SCALING](performance.mara.md#01M7BF6H3K1M4HMG6CW2B85VQK) |
 
-On every pull request, Rust integration tests run the real CLI and daemon on a generated corpus and assert the work counters ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)) exactly. They also assert the rule-evaluation bound of [REQ-NEAR-LINEAR-SCALING](performance.mara.md#01M7BF6H3K1M4HMG6CW2B85VQK).
+On every pull request, Rust integration tests run the real CLI and daemon on a generated corpus and assert the work counters ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)) exactly. They also assert the bounds of [REQ-NEAR-LINEAR-SCALING](performance.mara.md#01M7BF6H3K1M4HMG6CW2B85VQK) on built-in checks and program runs.
 
 | Situation | Expectation |
 | --- | --- |
-| Unchanged warm request | 0 hashes, 0 parses, 0 snapshot builds |
+| Unchanged warm request, no input modified in the last 2 s | 0 hashes, 0 parses, 0 snapshot builds |
+| Unchanged warm request, an input modified in the last 2 s | That input hashed again; 0 parses, 0 snapshot builds |
 | One document edited | 1 parse, 1 snapshot build, 0 code scans |
 | One code file edited | 1 code scan, 0 document parses |
 | An operation that reads no code ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)) and runs no program | 0 subprocesses, 0 code scans |
@@ -77,11 +78,13 @@ Rust integration tests run the real CLI on disposable projects initialized from 
 | --- | --- |
 | Accepted requirement with only a draft basis, or only a draft verification | Validation error; the same items as drafts are valid |
 | Requirement with two accepted verifications, one of them passing | `verified` fails until both pass |
-| Result for another candidate, or for an older revision of the verification | Does not count |
+| Result for another candidate, or for an older revision of the verification or of the requirement | Does not count |
 | Risk on a parent requirement, on its need or on that need's goal | Relevant to the child requirement; a sibling requirement is not judged |
 | HIGH risk with a mitigation | Blocks until it is reassessed or an accepted decision accepts it |
 | Named validation without a passing result in its context | `release-ready` fails; a validation that is not named does not block |
 | Risk without a level, unread code, or a result absent from an incomplete input | Unavailable, never passed |
+| Accepted requirement without an accepted verification | `verified` fails |
+| A failing row of each template invariant and gate | Has an explanation |
 | `C supersedes B supersedes A` after B retires | Valid |
 | Requirement implemented only through a design | Counts when the design is accepted, not when it is draft |
 | A view and a gate over the same items | Report the same facts |

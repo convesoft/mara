@@ -4,7 +4,7 @@
 
 - v0.4.0 is a rewrite from scratch. `docs/` specifies it and zban holds the work.
 - The previous implementation is commit `d7f0e73` (branch `plan-execution-architecture`). Read it with `git show d7f0e73:<path>`. Carry over understanding, never text, and never modify it.
-- The installed `mara` CLI, MCP tools and `mara` skill implement the old `:::mara` format. Never author with them.
+- The installed `mara` CLI, MCP tools and `mara` skill implement the old `:::mara` format. Never use them, also after the rewrite can author: use the binary built in your worktree until 0.4.0 is installed.
 
 ## Writing rules
 

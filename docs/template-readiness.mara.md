@@ -44,10 +44,13 @@ A gate of the `engineering` template passes only when every named item is proven
 | `relevant-risks` | Requirement: each relevant risk with its status and the node it threatens |
 | `verification-status` | Requirement: each Verification with its status and its result for the candidate |
 | `validation-status` | Need or Goal: each Validation with its status and its result in its context, and one summary row |
+| `result-stamps` | Verification or Validation: each item it verifies or validates, with the current revision of both; what a recorder copies into its results |
 
 - A query keeps items of every status. Invariants, gates and views decide which statuses count.
 - Invariants, gates and views are written over these relations, so they cannot disagree.
 - A lookup along one relation gets no query; `relation list` answers it.
+- Invariants live in a program without the per-requirement closures (`risk-scope`, `relevant-risks`), so validation never computes them.
+- The template's programs use only constructs that Soufflé can explain ([REQ-EXPLAIN-OUTCOMES](rules-evaluation.mara.md#01M7BF6HCQX66B3MYRH5BZM6BE)).
 
 ---
 
@@ -64,12 +67,12 @@ A gate of the `engineering` template passes only when every named item is proven
 | Input | Columns |
 | --- | --- |
 | `candidate` | Candidate identity; one row |
-| `verification_result` | Verification ID, candidate, revision of the Verification, result |
+| `verification_result` | Verification ID, Requirement ID, candidate, revision of each, result |
 | `validation_context` | Validation ID, context; one row for each Validation the request names |
-| `validation_result` | Validation ID, context, revision of the Validation, result |
+| `validation_result` | Validation ID, Need or Goal ID, context, revision of each, result |
 
 - A result is `pass`, `fail`, `inconclusive` or `error`. A context is opaque text, such as a deployment or an observation window.
-- A result counts only when its candidate or context is the requested one and its revision is the item's current revision ([DES-FACT-BRIDGE](rules-facts.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)).
+- A result counts only when its candidate or context is the requested one and both revisions are the items' current revisions ([DES-FACT-BRIDGE](rules-facts.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)).
 - When several results count, the worst wins: `fail`, `error`, `inconclusive`, `pass`.
 - Without a counting result the status is `pending` when the input is complete and `unavailable` when it is not ([DES-REQUEST-INPUTS](rules.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)).
 - The summary row of `validation-status` is the worst status of the target's accepted Validations, with `pending` and `unavailable` ranked between `inconclusive` and `pass`. A target without an accepted Validation is not validated.
@@ -89,10 +92,10 @@ A gate of the `engineering` template passes only when every named item is proven
 | Gate | Subjects | An item fails when |
 | --- | --- | --- |
 | `implementation-ready` | Requirements | It is not accepted, it breaks an acceptance or lifecycle rule, or a blocking risk is relevant to it ([DES-TEMPLATE-RISK-LEVEL](template.mara.md#01M7CT60MFPF2Y871JJDZP5K0T)) |
-| `verified` | Requirements | It is not accepted, `implemented` has no row for it, or one of its accepted Verifications has no counting `pass` for the candidate |
-| `release-ready` | Requirements and Validations | A Requirement fails either gate above. A Validation is not accepted, has no context, or has no counting `pass` in it |
+| `verified` | Requirements | It is not accepted; it has no accepted Verification; all code was read and `implemented` has no row for it; or an accepted Verification of it has a counting result other than `pass`, or none although the input is complete |
+| `release-ready` | Requirements and Validations | A Requirement fails either gate above. A Validation is not accepted, has no context, has a counting result other than `pass`, or has none although the input is complete |
 
-- An item is unavailable when a relevant accepted risk has no level, when code was not read completely, or when a result is absent from an incomplete input.
+- An item is unavailable when a relevant accepted risk has no level, when `implemented` has no row for it and code was not read completely, or when a result is absent and its input is not complete. A known failure stands beside it.
 - Every accepted Verification of a requirement must pass; one pass does not cover another.
 - No gate requires a Design, and none adds decomposed, parent or sibling requirements to the named items.
 - `release-ready` judges only the Validations a request names. Naming none claims no validation.

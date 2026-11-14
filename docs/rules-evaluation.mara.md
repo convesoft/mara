@@ -14,7 +14,7 @@
 | Status | Accepted |
 | Satisfies | [NEED-CONFORMANCE-FEEDBACK](product.mara.md#01M7BF6H6S3P42Y9TQ30T38WG6) |
 
-For any row of an invariant or gate outcome, Mara returns an explanation whose leaves are input facts with document path and line.
+For a row of an invariant or gate outcome, Mara returns an explanation whose leaves are input facts with document path and line, or reports that Soufflé cannot explain that program. The outcome stands either way.
 
 ---
 
@@ -61,13 +61,13 @@ An evaluation still running at its time limit is stopped, and its outcome is una
 | Satisfies | [REQ-EXPLAIN-OUTCOMES](#01M7BF6HCQX66B3MYRH5BZM6BE) |
 | Satisfies | [REQ-PROGRAM-FAULTS-REPORTED](#01M7BF6HCZ88PSSQTFKXE8KJ81) |
 
-- An evaluation is keyed by document snapshot key, program hash and the inputs the request supplied ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY), [DES-REQUEST-INPUTS](rules.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)).
-- It runs only programs that pass the profile scan ([DES-PROGRAM-PROFILE](rules-facts.mara.md#01M7CMW7051QVPFDWQBMB1A6K6)).
+- An evaluation is keyed by the keys of the layers it reads (the document snapshot, and the code layer when the program uses code links), the hash of the program with every file it includes, and the inputs the request supplied with their completeness marks ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY), [DES-REQUEST-INPUTS](rules.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)).
+- It runs only programs that pass the profile scan, on the scanned copies in a private directory ([DES-PROGRAM-PROFILE](rules-facts.mara.md#01M7CMW7051QVPFDWQBMB1A6K6)).
 - `project validate` compiles every declared program, by a run against empty facts (2–6 ms) when no invariant uses it. There is no compile-only operation.
-- Native: `souffle --no-preprocessor -F <facts> -D <out> <program>.dl` as a child process, single-threaded.
+- Native: `souffle --no-preprocessor -l "" -F <facts> -D <out> <program>.dl` as a child process, single-threaded, with the private directory as its working directory. `-l ""` stops Soufflé from loading a `libfunctors.so`, which it otherwise does for every program.
 - Browser: compile `souffle.wasm` once per worker. For each evaluation, create a fresh instance, write programs and facts into its in-memory filesystem and read the outputs back. The module is built with `-sEXIT_RUNTIME=1` or exports `callMain`, so the host receives the exit code of `main`.
 - Mara reads only the output relations a consumer names. An `.output` in an included file is also written and is not a result.
-- Explanations run on demand in provenance mode (`-t explain`), driven on stdin by `format json`, then `explain <relation>(<args>)`. Use JSON: the text proof format garbles negated atoms. In the browser the host supplies that input through the module's `stdin` hook.
+- Explanations run on demand in provenance mode (`-t explain`), driven on stdin by `format json`, then `explain <relation>(<args>)`. Use JSON: the text proof format garbles negated atoms. In the browser the host supplies that input through the module's `stdin` hook. When provenance mode aborts, as it does on an ADT constructor in a rule body and on a subsumption clause, the host reports the explanation as unavailable.
 - A runtime fault such as integer division by zero ends the child process with the rule's location natively, and with a `divide by zero` trap without location in WASM.
 - At the time limit ([REQ-EVALUATION-TIME-LIMIT](#01M7CMW70G711Z67QEWW5Z0MK0)) the host kills the child process natively and terminates the worker in the browser.
 
@@ -134,7 +134,10 @@ The static binary of [EVD-SOUFFLE-TRIAL](#01M7BF6HDDJJ0Y0WWT6RK17CDN), run on 20
 | `.functor f(x: number): number`, with a `libfunctors.so` in the working directory | Loaded the library and ran its code |
 | `.pragma "library-dir"` and `.pragma "libraries"` naming a library elsewhere | Loaded that library and ran its code |
 | `.pragma "output-dir"` | No effect; `-D` won |
+| Any program, with a `libfunctors.so` in the working directory or on `LD_LIBRARY_PATH` | Loaded the library and ran its constructor, with no `.functor` in the program. `-l ""` prevented it |
+| `-t explain` on a rule with `autoinc()`, on a rule with an ADT constructor in its body, or on a program with a subsumption clause | Aborted; normal evaluation of the same programs succeeded |
+| `-t explain` with records, aggregates, negation, components or `eqrel` | Explained |
 | `nat(0). nat(x + 1) :- nat(x).` | Still running when killed after 5 s |
 | `s("a"). s(cat(x, "a")) :- s(x).` | Still running when killed after 5 s |
 
-The last two programs use no records, ADTs or `autoinc()`.
+The two programs that never ended use no records, ADTs or `autoinc()`.

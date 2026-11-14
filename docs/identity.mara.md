@@ -69,7 +69,7 @@ An item's MID never changes when its title, ID or file changes, and every link t
 - The value is a Markdown link: `[<ID>](<relative-path>#<MID>)`, or `[<ID>](#<MID>)` within the same file.
 - The fragment MID is the identity. The path is the file that currently contains that MID, relative to the linking file. The link text is the target's current ID.
 - A stale path, stale link text or a bare-ID value is a diagnostic.
-- Any body or narrative link whose fragment is a known MID is a mention. Its text is free; its path is checked like a relation link's. Typed relations exist only in the metadata table.
+- Any body or narrative link that is not an absolute URL and whose fragment has MID form is a mention. Its text is free; its target and path are checked like a relation link's. Typed relations exist only in the metadata table.
 
 ---
 

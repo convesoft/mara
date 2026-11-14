@@ -83,7 +83,7 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 - One session per canonical project root. Git worktrees are separate projects.
 - Watch mode is on by default. The daemon watches only directories that contain inputs ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)); inotify watch limits are per user.
 - It debounces bursts such as a branch checkout and re-derives in the background. A watcher overflow or error triggers a full rescan.
-- Readers take the current snapshot without locks. Writers queue per project ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)); there is no global lock.
+- Readers take the current snapshot without locks. Writers queue per project and take the project's write lock ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)); there is no global lock.
 - Long work runs on worker threads with cancellation. Protocol handlers never block each other.
 - Caches live in memory.
 

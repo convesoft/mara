@@ -61,7 +61,7 @@
 | Status | Accepted |
 | Justifies | [DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) |
 
-- Chosen: order the writes so that an interruption leaves only states validation reports. The MID in each link fragment keeps identity intact meanwhile.
+- Chosen: check every target before the first write, then order the writes so that an interruption leaves only states validation reports. The MID in each link fragment keeps identity intact meanwhile, and one write lock per project serializes Mara's writers.
 - Rejected: a journal of preimages with an explicit rollback command, as in 0.3.0. It adds transaction state that blocks writers, and recovery code.
 - Rejected: fix removing one copy after an interrupted move. Fix would delete an item and guess between the copies.
 

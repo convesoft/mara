@@ -28,7 +28,7 @@ A request performs derivation work only for inputs that changed since the previo
 | Status | Accepted |
 | Satisfies | [NEED-INTERACTIVE-SPEED](product.mara.md#01M7BF6H83C0SM1C8RHDHMBXZ2) |
 
-From 1× to 16× corpus size, each operation's time grows at most 2.3× per doubling. Validation performs at most c × (items + edges) rule evaluations.
+On the generated corpus ([DES-PERFORMANCE-HARNESS](#01M7BF6H4HKH0B0TXQZM3VXASA)), each operation's time grows at most 2.3× per doubling from 1× to 16×. Built-in checks do work linear in items plus edges, and validation runs each program once.
 
 ---
 
@@ -77,13 +77,14 @@ On the reference machine at 16× corpus size, a cold CLI read takes at most 200 
 
 Counters:
 
-- Engine and hosts count file reads, hashes, parses, snapshot builds, code scans, subprocess spawns and rule evaluations.
+- Engine and hosts count file reads, hashes, parses, snapshot builds, code scans, subprocess spawns, built-in check steps and program runs.
 - A debug stats option exposes the counts, so tests check the real CLI and daemon.
 
 Corpus generator:
 
 - Deterministic and seeded; writes the current item format.
 - Produces items across documents with realistic relation counts and body sizes, and code files carrying markers.
+- Chains of `Decomposes` and `Derives from` have a depth and fan-out that do not grow with corpus size: a larger corpus has more clusters, not deeper ones.
 - Sizes: 1× (about 200 items), 4× and 16× on every pull request; 64× nightly.
 - Generates into disposable temporary directories, never into the checkout.
 

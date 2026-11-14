@@ -13,4 +13,5 @@ Context: docs/code.mara.md (REQ-CODE-MARKER-LINKS, DES-CODE-MARKERS); code keys 
 - [ ] Per-file scan keyed by content; code layer; edges in `relation list`
 - [ ] `item rename` rewrites the markers that name the old ID, before the `ID` row (REQ-RENAME-ID, DES-WRITE-PROCEDURE)
 - [ ] Code links as an input relation for programs
+- [ ] The code-dependent cases of VER-TEMPLATE-CASES pass: `implemented`, `verified`, `release-ready`
 - [ ] VER-WORK-COUNTERS rows for code scans pass

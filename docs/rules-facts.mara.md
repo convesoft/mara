@@ -56,7 +56,7 @@ Mara ships a versioned declarations file, `mara.dl`, that starts with `.once`; p
 | Status | Accepted |
 | Satisfies | [REQ-PROGRAMS-ONLY-COMPUTE](rules.mara.md#01M7CMW6ZTAJHSF5BR9SF9KR86) |
 
-Before every run the host scans each program file, outside comments and strings, and refuses:
+Before every run the host copies `mara.dl` and the declared program files into a private directory, scans each copy outside comments and strings, and runs Soufflé on the copies. It refuses:
 
 | Construct | It would |
 | --- | --- |
@@ -64,6 +64,8 @@ Before every run the host scans each program file, outside comments and strings,
 | `.pragma` | Set Soufflé options, library paths included |
 | `.input`, `.output` or `.printsize` with parameters | Read or write any file or database |
 | `.include` of a file other than `mara.dl` and the declared programs | Read an undeclared file |
+| `autoinc()` | Give values that depend on evaluation order, and abort explanations |
 
 - A refusal is reported like a compile error ([REQ-PROGRAM-FAULTS-REPORTED](rules-evaluation.mara.md#01M7BF6HCZ88PSSQTFKXE8KJ81)).
-- Everything else in Soufflé is admitted, records, ADTs and `autoinc()` included. Time is bounded instead ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)).
+- Everything else in Soufflé is admitted, records and ADTs included. Time is bounded instead ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)).
+- Soufflé runs with library loading off and never in the project's directory ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)).

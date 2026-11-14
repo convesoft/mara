@@ -28,7 +28,7 @@ A comment `@mara <relation> <ID>` in a code file creates an edge from that code 
 | Status | Accepted |
 | Satisfies | [NEED-CODE-LINKS](product.mara.md#01M7BF6H7D3K8R07DTSRVVGX0G) |
 
-No operation other than `mara code add` uses the network. With a grammar missing, scanning falls back to the basic level and reports a diagnostic.
+No operation other than `mara code add` connects to another machine. With a grammar missing, scanning falls back to the basic level and reports a diagnostic.
 
 ---
 
