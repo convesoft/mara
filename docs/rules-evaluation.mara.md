@@ -68,7 +68,7 @@ An evaluation still running at its time limit is stopped, and its outcome is una
 - Native: `souffle --no-preprocessor -l "" <wrapper>.dl` as a child process, single-threaded, with the private directory as its working directory. `-l ""` stops Soufflé from loading a `libfunctors.so`, which it otherwise does for every program.
 - Browser: Soufflé runs in a worker of its own, apart from the one that holds the workspace. Compile `souffle.wasm` once per such worker. For each evaluation, create a fresh instance, write programs and facts into its in-memory filesystem and read the outputs back. The module is built with `-sEXIT_RUNTIME=1` or exports `callMain`, so the host receives the exit code of `main`.
 - Every consumer of a program reads the same run: the outputs do not depend on which consumer asked.
-- Numbers are signed 32-bit integers on every host. A row in an output file that does not fit the relation's columns is a fault.
+- Numbers are signed 32-bit integers on every host. A row in an output file that does not fit the relation's columns, or a value that is not valid UTF-8 (`substr` counts bytes), is a fault.
 - Explanations run on demand in provenance mode (`-t explain`), driven on stdin by `format json`, then `explain <relation>(<args>)`. Use JSON: the text proof format garbles negated atoms. In the browser the host supplies that input through the module's `stdin` hook. When provenance mode aborts, as it does on an ADT constructor in a rule body and on a subsumption clause, the host reports the explanation as unavailable.
 - The `explain` command does not decode escapes, and a default-depth proof holds unresolved `subproof` references. The host expands them, checks that the proof it gets back is for the row it asked about, and reports the explanation as unavailable when the row's values cannot be written in the command (quotes, backslashes, control characters), when the reply is not valid JSON, or when the exchange passes the time limit.
 - A runtime fault such as integer division by zero ends the child process with the rule's location natively, and with a `divide by zero` trap without location in WASM.
@@ -148,6 +148,8 @@ The static binary of [EVD-SOUFFLE-TRIAL](#01M7BF6HDDJJ0Y0WWT6RK17CDN), run on 20
 | `.decl r(x: symbol) output printsize`, under a wrapper without output directives | Wrote `r.csv` in the working directory |
 | `choice-domain`, with the wrapper writing one more relation | A different answer for the same input: `("a","c")` became `("a","b")` |
 | JSON input of 1.5 into a `float` column, and of `"not-a-number"` into a `number` column | 1.4013e-45 and 0, without an error |
+| `2 ^ 40` | −2147483648 natively, 2147483647 in WASM |
+| `+`, `*`, shifts, `/` and `%` at the limits of 32 bits, `strlen`, `to_number` of a hexadecimal string | The same on both hosts; division by zero and an unparsable `to_number` fail on both |
 | `match("[", m)` in a rule | `warning: wrong pattern provided`, exit 0, no rows |
 | `explain` for a row whose value holds a newline, written as an escape | A proof for another row, whose value holds a backslash and `n` |
 | `-t explain` on a rule with `autoinc()`, on a rule with an ADT constructor in its body, or on a program with a subsumption clause | Aborted; normal evaluation of the same programs succeeded |

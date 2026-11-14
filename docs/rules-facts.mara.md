@@ -61,17 +61,17 @@ Before every run the host copies `mara.dl` and the declared program files into a
 
 | Kind | Admitted |
 | --- | --- |
-| Directive | `.decl`, `.type`, `.comp`, `.init`, `.override`, `.plan`, `.once`, `.limitsize`; `.include` of `mara.dl` and the declared programs |
+| Directive | `.decl`, `.type`, `.comp`, `.init`, `.override`, `.plan`, `.once`; `.include` of `mara.dl` and the declared programs |
 | Relation qualifier | `inline`, `no_inline`, `magic`, `no_magic`, `brie`, `btree`, `eqrel`, `overridable` |
 | Type | `symbol`, `number` and the types built from them: subtypes, unions, records, ADTs |
-| Function | `cat`, `strlen`, `substr`, `to_string`, `to_number`, `contains`, `match`, `range`, `min`, `max`, `count`, `sum`, the bitwise and logical operators, arithmetic and comparison |
+| Function | `cat`, `strlen`, `substr`, `to_string`, `to_number`, `contains`, `match`, `range`, `min`, `max`, `count`, `sum`, the bitwise and logical operators, `+`, `-`, `*`, `/`, `%` and comparison |
 | Other word | `as`, `true`, `false`, `nil`, `__LINE__`, and `$` in front of an ADT constructor |
 
 - Everything else is refused, and a refusal is reported like a compile error ([REQ-PROGRAM-FAULTS-REPORTED](rules-evaluation.mara.md#01M7BF6HCZ88PSSQTFKXE8KJ81)). [EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG) shows what each group below did when it passed.
 - Reaching outside: `.functor`, `.pragma`, `.lattice`, `@` functors, `#` outside strings and comments, `__FILE__`, `__INCL__`.
 - Input and output, which Mara generates: `.input`, `.output`, `.printsize` and the relation qualifiers `input`, `output`, `printsize`.
-- Values that depend on evaluation order: `autoinc()`, a bare `$`, `ord`, `choice-domain`, `recursive_iteration_cnt`.
-- Values that differ between hosts or do not survive the JSON files: `float`, `unsigned`, `mean`, `to_float`, `to_unsigned`.
+- Values that depend on evaluation order: `autoinc()`, a bare `$`, `ord`, `choice-domain`, `recursive_iteration_cnt`, `.limitsize`.
+- Values that differ between hosts or do not survive the JSON files: `float`, `unsigned`, `mean`, `to_float`, `to_unsigned`, and the power operator `^`.
 - A directive may follow other text on a line, and block comments do not nest.
 - A relation that crosses the boundary (a fact relation, a supplied input, a consumed output) has only `symbol` and `number` columns, or subtypes of them. Records and ADTs stay inside a program.
 - Time is bounded ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)).
