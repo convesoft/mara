@@ -73,3 +73,11 @@ Until Mara can write the new format:
 - Commit a completed, verified change as one logical commit unless told otherwise. Stage only intended files, and include the zban issue files the change touches.
 - Never amend, rewrite history or push without authorization.
 - Semantic Versioning. Tag releasable slices with annotated `vX.Y.Z[-prerelease]` tags; generate the changelog with `git-cliff` at release time.
+
+### Until the rewrite is on `main`
+
+- The rewrite integrates on `chore/clear-worktree-for-rewrite`.
+- One branch and worktree per zban issue, cut from the integration branch's tip. Whoever starts a worker first sets its issue `in-progress` on the integration branch, so no two workers take the same issue.
+- Before its branch is integrated, a worker rebases it onto the integration branch's tip and reruns its checks. Rebasing its own unmerged branch is allowed.
+- A worker never merges into the integration branch. Whoever coordinates the workers integrates one branch at a time: squash merge into one commit, then delete the branch. Follow-up work starts from the new tip.
+- The integration branch reaches `origin/main` only by fast-forward: `git push origin chore/clear-worktree-for-rewrite:main`, with branch protection lifted for that push. Never squash it and never use GitHub's "Rebase and merge": both change commit SHAs, and `d7f0e73` and the alpha tags must stay on `main`.
