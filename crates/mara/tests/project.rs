@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mara::project::{Project, SelectError, load, select};
 use mara_engine::schema::FieldKind;
+use mara_engine::work::WorkCounts;
 
 /// A directory under `std::env::temp_dir()`, removed when dropped.
 struct TempDir(PathBuf);
@@ -74,6 +75,22 @@ fn nested() -> (TempDir, PathBuf, PathBuf) {
 
 fn select_error(start: &Path, project: Option<&Path>) -> SelectError {
     select(start, project).expect_err("no project should be selected")
+}
+
+/// Loads the project at `root` and returns it with the number of files loading read, after
+/// checking that loading counted no other work.
+fn load_counting(root: PathBuf) -> (Project, u64) {
+    let mut work = WorkCounts::default();
+    let project = load(root, &mut work);
+    let reads = work.file_reads;
+    assert_eq!(
+        work,
+        WorkCounts {
+            file_reads: reads,
+            ..WorkCounts::default()
+        }
+    );
+    (project, reads)
 }
 
 #[test]
@@ -175,7 +192,8 @@ fn a_directory_that_cannot_be_searched_stops_the_search() {
 fn loads_the_configuration_and_the_schema() {
     let dir = TempDir::new();
     let root = project(&dir, "p");
-    let project = load(root.clone());
+    let (project, reads) = load_counting(root.clone());
+    assert_eq!(reads, 2);
     assert_eq!(project.root, root);
     assert_eq!(project.diagnostics, []);
     let include = project.config.include.unwrap();
@@ -186,6 +204,47 @@ fn loads_the_configuration_and_the_schema() {
     let schema = project.schema.unwrap();
     assert_eq!(schema.statuses, ["open", "closed"]);
     assert_eq!(schema.types["finding"].id_prefix.as_deref(), Some("FND-"));
+}
+
+/// Gives the project at `relative` a configuration that names a schema file of its own,
+/// `.mara/{name}.toml`, whose only status is `name`. The schema at `.mara/schema.toml` stays.
+fn own_schema(dir: &TempDir, relative: &str, name: &str) {
+    dir.write(
+        &format!("{relative}/.mara/config.toml"),
+        &CONFIG.replace(".mara/schema.toml", &format!(".mara/{name}.toml")),
+    );
+    dir.write(
+        &format!("{relative}/.mara/{name}.toml"),
+        &SCHEMA.replace("[\"open\", \"closed\"]", &format!("[\"{name}\"]")),
+    );
+}
+
+/// VER-NESTED-PROJECTS below the CLI: selecting and loading either of two nested projects
+/// reads that project's configuration and the schema it names, and no other file.
+#[test]
+fn a_nested_project_reads_only_its_own_configuration_and_schema() {
+    let (dir, outer, inner) = nested();
+    own_schema(&dir, "outer", "outer");
+    own_schema(&dir, "outer/inner", "inner");
+    for (start, named, root, name) in [
+        (inner.join("docs"), None, &inner, "inner"),
+        (outer.join("docs"), None, &outer, "outer"),
+        (inner.join("docs"), Some(&outer), &outer, "outer"),
+        (outer.join("docs"), Some(&inner), &inner, "inner"),
+    ] {
+        let case = format!("{name} from {}", start.display());
+        let selected = select(&start, named.map(PathBuf::as_path)).unwrap();
+        let (project, reads) = load_counting(selected);
+        assert_eq!(&project.root, root, "{case}");
+        assert_eq!(project.diagnostics, [], "{case}");
+        assert_eq!(
+            project.config.schema.unwrap().path,
+            format!(".mara/{name}.toml"),
+            "{case}"
+        );
+        assert_eq!(project.schema.unwrap().statuses, [name], "{case}");
+        assert_eq!(reads, 2, "{case}");
+    }
 }
 
 #[test]
@@ -200,7 +259,7 @@ fn reports_problems_of_both_files_by_path_and_line() {
         "p/vocabulary/schema.toml",
         "format_version = 1\nstatuses = [\"open\"]\n\n[types.code]\nid_prefix = \"C-\"\ndescription = \"Reserved.\"\n\n[types.finding]\nid_prefix = \"FND-\"\ndescription = \"Found.\"\n",
     );
-    let project = load(root);
+    let project = load(root, &mut WorkCounts::default());
     let printed: Vec<String> = project
         .diagnostics
         .iter()
@@ -223,7 +282,8 @@ fn reports_a_missing_schema_at_the_line_that_names_it() {
     let dir = TempDir::new();
     let root = project(&dir, "p");
     fs::remove_file(root.join(".mara/schema.toml")).unwrap();
-    let project = load(root);
+    let (project, reads) = load_counting(root);
+    assert_eq!(reads, 1, "a read that fails is no file read");
     assert_eq!(project.schema, None);
     assert_eq!(project.diagnostics.len(), 1);
     let diagnostic = &project.diagnostics[0];
@@ -248,7 +308,8 @@ fn reports_an_unreadable_configuration() {
         .unwrap()
         .to_owned();
     assert_eq!(select(&root, None).unwrap(), root);
-    let project = load(root);
+    let (project, reads) = load_counting(root);
+    assert_eq!(reads, 0, "a read that fails is no file read");
     assert_eq!(project.schema, None);
     assert_eq!(project.diagnostics.len(), 1);
     assert_eq!(
@@ -266,9 +327,12 @@ fn outer_schema(dir: &TempDir, schema: &str) {
     );
 }
 
-/// Requires that loading read no schema and reported exactly one diagnostic: `code` at `line`
-/// of the configuration, with a message that contains `expected`.
-fn assert_refused(project: &Project, line: usize, code: &str, expected: &str) {
+/// Loads the project at `root` and requires that loading reported exactly one diagnostic: `code`
+/// at `line` of the configuration, with a message that contains `expected`. The refused file is
+/// not read: no schema is, and at line 1 neither is the configuration.
+fn assert_refused(root: PathBuf, line: usize, code: &str, expected: &str) -> Project {
+    let (project, reads) = load_counting(root);
+    assert_eq!(reads, u64::from(line != 1), "{code} at line {line}");
     assert_eq!(project.schema, None);
     let printed: Vec<String> = project
         .diagnostics
@@ -279,10 +343,11 @@ fn assert_refused(project: &Project, line: usize, code: &str, expected: &str) {
     let prefix = format!(".mara/config.toml:{line}: error[{code}]: ");
     assert!(printed[0].starts_with(&prefix), "{}", printed[0]);
     assert!(printed[0].contains(expected), "{}", printed[0]);
+    project
 }
 
-fn assert_outside_project(project: &Project, expected: &str) {
-    assert_refused(project, 2, "outside-project", expected);
+fn assert_outside_project(root: PathBuf, expected: &str) {
+    assert_refused(root, 2, "outside-project", expected);
 }
 
 #[test]
@@ -290,16 +355,16 @@ fn a_nested_project_never_supplies_the_schema() {
     let (dir, outer, _inner) = nested();
     outer_schema(&dir, "inner/.mara/schema.toml");
     assert_eq!(select(&outer, None).unwrap(), outer);
-    assert_outside_project(&load(outer.clone()), "in the project at inner");
+    assert_outside_project(outer.clone(), "in the project at inner");
 
     dir.write("outer/old/.mara/project.toml", "format_version = 3\n");
     dir.write("outer/old/.mara/schema.toml", SCHEMA);
     outer_schema(&dir, "old/.mara/schema.toml");
-    assert_outside_project(&load(outer.clone()), "in the project at old");
+    assert_outside_project(outer.clone(), "in the project at old");
 
     dir.write("outer/old/vocabulary/schema.toml", SCHEMA);
     outer_schema(&dir, "old/vocabulary/schema.toml");
-    assert_outside_project(&load(outer), "in the project at old");
+    assert_outside_project(outer, "in the project at old");
 }
 
 #[cfg(unix)]
@@ -316,12 +381,7 @@ fn a_mara_directory_that_is_a_symbolic_link_is_refused() {
         assert!(error.to_string().contains("linked/.mara"), "{error}");
     }
     assert_eq!(select_error(&dir.0, Some(&linked)).code(), "symbolic-link");
-    assert_refused(
-        &load(linked),
-        1,
-        "symbolic-link",
-        ".mara is a symbolic link",
-    );
+    assert_refused(linked, 1, "symbolic-link", ".mara is a symbolic link");
 
     // In a nested project the search stops there, so the outer project is not used instead.
     let (dir, outer, inner) = nested();
@@ -333,10 +393,10 @@ fn a_mara_directory_that_is_a_symbolic_link_is_refused() {
     );
     assert_eq!(select(&outer.join("docs"), None).unwrap(), outer);
     outer_schema(&dir, "inner/.mara/schema.toml");
-    assert_refused(&load(outer.clone()), 2, "symbolic-link", "inner/.mara");
+    assert_refused(outer.clone(), 2, "symbolic-link", "inner/.mara");
     dir.write("outer/inner/schema.toml", SCHEMA);
     outer_schema(&dir, "inner/schema.toml");
-    assert_refused(&load(outer), 2, "symbolic-link", "inner/.mara");
+    assert_refused(outer, 2, "symbolic-link", "inner/.mara");
 }
 
 #[cfg(unix)]
@@ -355,9 +415,8 @@ fn a_configuration_that_is_a_symbolic_link_is_refused() {
     )
     .unwrap();
     assert_eq!(select(&outer, None).unwrap(), outer);
-    let project = load(outer);
+    let project = assert_refused(outer, 1, "symbolic-link", ".mara/config.toml");
     assert_eq!(project.config, Default::default());
-    assert_refused(&project, 1, "symbolic-link", ".mara/config.toml");
 }
 
 #[cfg(unix)]
@@ -371,40 +430,35 @@ fn a_schema_path_with_a_symbolic_link_is_refused() {
     symlink(inner.join(".mara"), outer.join("shared")).unwrap();
     outer_schema(&dir, "shared/schema.toml");
     assert_refused(
-        &load(outer.clone()),
+        outer.clone(),
         2,
         "symbolic-link",
         "shared is a symbolic link",
     );
     symlink(outer.join(".mara"), outer.join("own")).unwrap();
     outer_schema(&dir, "own/schema.toml");
-    assert_refused(
-        &load(outer.clone()),
-        2,
-        "symbolic-link",
-        "own is a symbolic link",
-    );
+    assert_refused(outer.clone(), 2, "symbolic-link", "own is a symbolic link");
 
     // A schema file that is a link: inside the project, out of it, and below a nested root back
     // into the outer project.
     symlink(outer.join(".mara/schema.toml"), outer.join("alias.toml")).unwrap();
     outer_schema(&dir, "alias.toml");
-    assert_refused(&load(outer.clone()), 2, "symbolic-link", "alias.toml");
+    assert_refused(outer.clone(), 2, "symbolic-link", "alias.toml");
     symlink(
         store.join(".mara/schema.toml"),
         outer.join("elsewhere.toml"),
     )
     .unwrap();
     outer_schema(&dir, "elsewhere.toml");
-    assert_refused(&load(outer.clone()), 2, "symbolic-link", "elsewhere.toml");
+    assert_refused(outer.clone(), 2, "symbolic-link", "elsewhere.toml");
     symlink(outer.join(".mara/schema.toml"), inner.join("back.toml")).unwrap();
     outer_schema(&dir, "inner/back.toml");
-    assert_outside_project(&load(outer.clone()), "in the project at inner");
+    assert_outside_project(outer.clone(), "in the project at inner");
 
     // The schema at `.mara/schema.toml` when `.mara` itself is a link.
     fs::remove_dir_all(outer.join(".mara")).unwrap();
     symlink(store.join(".mara"), outer.join(".mara")).unwrap();
-    assert_refused(&load(outer), 1, "symbolic-link", ".mara is a symbolic link");
+    assert_refused(outer, 1, "symbolic-link", ".mara is a symbolic link");
 }
 
 /// The examples of DES-PROJECT-CONFIGURATION and DES-SCHEMA-MODEL, taken from the page as
@@ -421,7 +475,7 @@ fn the_documented_examples_load_as_a_project() {
         documented_example("DES-SCHEMA-MODEL"),
     );
     let root = select(&dir.path("p"), None).unwrap();
-    let project = load(root);
+    let project = load(root, &mut WorkCounts::default());
     assert_eq!(project.diagnostics, []);
     let include = project.config.include.unwrap();
     assert_eq!(

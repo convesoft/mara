@@ -11,6 +11,7 @@ use mara_engine::config::{
 };
 use mara_engine::diagnostic::{Diagnostic, Severity};
 use mara_engine::schema::{Schema, parse_schema};
+use mara_engine::work::WorkCounts;
 
 /// Why no project was selected.
 #[derive(Debug)]
@@ -155,11 +156,11 @@ pub struct Project {
 /// Reads the configuration and the schema of the project at `root`. A file that cannot be read
 /// becomes a diagnostic: at line 1 of the configuration, or at the configuration line that
 /// names the schema. So does a path to either that holds a symbolic link, and a schema path
-/// that enters another project.
-pub fn load(root: PathBuf) -> Project {
+/// that enters another project. Each file it reads counts in `work.file_reads`.
+pub fn load(root: PathBuf, work: &mut WorkCounts) -> Project {
     let root = fs::canonicalize(&root).unwrap_or(root);
     let mut diagnostics = Vec::new();
-    let config = match read(&root, CONFIG_PATH, 1) {
+    let config = match read(&root, CONFIG_PATH, 1, work) {
         Ok(bytes) => {
             let (config, problems) = parse_config(&bytes);
             diagnostics.extend(problems);
@@ -171,7 +172,7 @@ pub fn load(root: PathBuf) -> Project {
         }
     };
     let schema = config.schema.as_ref().and_then(|setting: &PathSetting| {
-        match read(&root, &setting.path, setting.line) {
+        match read(&root, &setting.path, setting.line, work) {
             Ok(bytes) => {
                 let (parsed, problems) = parse_schema(&setting.path, &bytes);
                 diagnostics.extend(problems);
@@ -195,7 +196,13 @@ pub fn load(root: PathBuf) -> Project {
 /// Reads the project file at `relative`, a `/`-separated path below `root` named at `line` of the
 /// configuration. Each component of the path as written is checked first, without following
 /// it: a symbolic link is refused, and so is a directory that is the root of another project.
-fn read(root: &Path, relative: &str, line: usize) -> Result<Vec<u8>, Diagnostic> {
+/// Only a file whose contents were read counts as a file read.
+fn read(
+    root: &Path,
+    relative: &str,
+    line: usize,
+    work: &mut WorkCounts,
+) -> Result<Vec<u8>, Diagnostic> {
     let at = |code, message| Diagnostic {
         code,
         severity: Severity::Error,
@@ -237,7 +244,10 @@ fn read(root: &Path, relative: &str, line: usize) -> Result<Vec<u8>, Diagnostic>
             }
         }
     }
-    fs::read(root.join(relative)).map_err(|error| io_error(CONFIG_PATH, line, relative, &error))
+    let bytes = fs::read(root.join(relative))
+        .map_err(|error| io_error(CONFIG_PATH, line, relative, &error))?;
+    work.file_reads += 1;
+    Ok(bytes)
 }
 
 const SYMBOLIC_LINK: &str = "symbolic-link";

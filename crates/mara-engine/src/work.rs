@@ -6,7 +6,7 @@
 /// work, adds its own I/O and reports the total. The code that does a piece of work counts it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WorkCounts {
-    /// Input files read by the host.
+    /// Reads of input files' contents by the host. Stats and failed reads are none.
     pub file_reads: u64,
     /// Files hashed.
     pub hashes: u64,

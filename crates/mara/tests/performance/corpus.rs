@@ -723,6 +723,8 @@ impl Rng {
 mod tests {
     use std::path::PathBuf;
 
+    use mara_engine::work::WorkCounts;
+
     use super::*;
     use crate::{PULL_REQUEST_SIZES, SEED};
 
@@ -760,7 +762,7 @@ mod tests {
     fn the_configuration_and_the_schema_load_without_diagnostics() {
         let corpus = Corpus::generate(1, SEED);
         let root = mara::project::select(corpus.root(), None).expect("the corpus is a project");
-        let project = mara::project::load(root);
+        let project = mara::project::load(root, &mut WorkCounts::default());
         assert_eq!(project.diagnostics, []);
         let include: Vec<&str> = project
             .config
