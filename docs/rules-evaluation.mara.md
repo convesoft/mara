@@ -64,6 +64,7 @@ An evaluation still running at its time limit is stopped, and its outcome is una
 
 - An evaluation is keyed by document snapshot key, program hash and parameter set ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)).
 - It runs only programs that pass the profile scan ([DES-PROGRAM-PROFILE](rules.mara.md#01M7CMW7051QVPFDWQBMB1A6K6)).
+- `project validate` compiles every declared program, by a run against empty facts (2–6 ms) when no invariant uses it. There is no compile-only operation.
 - Native: `souffle --no-preprocessor -F <facts> -D <out> <program>.dl` as a child process, single-threaded.
 - Browser: compile `souffle.wasm` once per worker. For each evaluation, create a fresh instance, write programs and facts into its in-memory filesystem and read the outputs back. The module is built with `-sEXIT_RUNTIME=1` or exports `callMain`, so the host receives the exit code of `main`.
 - Mara reads only the output relations a consumer names. An `.output` in an included file is also written and is not a result.

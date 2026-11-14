@@ -10,15 +10,15 @@
 | [Authoring](authoring.mara.md) | Create, update, move, rename, delete, relations, fix |
 | [Write safety](writes.mara.md) | What a write preserves, write order |
 | [Migration](migration.mara.md) | Conversion from 0.3.0, dropped capabilities |
-| [Retrieval](retrieval.mara.md) | Search, get, related, list, narrative units, paging |
+| [Retrieval](retrieval.mara.md) | Search, get, relation list, item list, narrative units, paging |
 | [Validation](validation.mara.md) | Built-in checks, diagnostics |
 | [Rules](rules.mara.md) | Soufflé programs, consumers, fact bridge, admitted profile |
 | [Rule evaluation](rules-evaluation.mara.md) | Running Soufflé, time limit, explanations, trial results |
 | [Engine](engine.mara.md) | Engine boundary, inputs, cache keys, snapshot |
-| [Hosts](hosts.mara.md) | Execution modes, CLI and MCP, Node, browser |
+| [Hosts](hosts.mara.md) | Execution modes, operations, CLI and MCP, Node, browser |
 | [Agent guidance](agents.mara.md) | `mara prime`, MCP server instructions |
-| [Daemon](daemon.mara.md) | Lifecycle, sessions, watching |
-| [Code links](code.mara.md) | Comment markers, grammars |
+| [Daemon](daemon.mara.md) | Lifecycle, sessions, watching, browser listener |
+| [Code links](code.mara.md) | Comment markers, grammars, operations that read code |
 | [Performance](performance.mara.md) | Work and time obligations, test harness, profiling |
 | [Verification](verification.mara.md) | How requirements are checked |
 | [Distribution](distribution.mara.md) | Packages, bundled Soufflé |

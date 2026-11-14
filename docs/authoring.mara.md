@@ -70,7 +70,7 @@ Renaming an ID keeps the MID and rewrites the text of every inbound relation lin
 | Status | Accepted |
 | Satisfies | [NEED-SAFE-AUTHORING](product.mara.md#01M7BF6H67YSV2DQ3QYBVQCN9V) |
 
-Deleting an item is refused while a relation or mention in another item or in narrative targets its MID. The refusal lists each such location.
+Deleting an item is refused while a relation or mention in another item or in narrative targets its MID, or a code marker names its ID. The refusal lists each such location.
 
 ---
 

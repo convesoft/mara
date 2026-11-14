@@ -115,6 +115,37 @@
 
 ---
 
+<a id="01M7CQ57SQY6M97NEDTA27K5WE"></a>
+
+### Embed Mara in Node through a native addon
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-NODE-NATIVE-ADDON |
+| Status | Accepted |
+| Justifies | [DES-PACKAGES](distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8) |
+
+- Chosen: an N-API addon over the same Rust host code as the CLI, shipped in the native packages.
+- Rejected: the WASM engine with a host written in JavaScript. A second host would have to match the Rust one in file access, hashing, caching and running Soufflé.
+
+---
+
+<a id="01M7CQ57SDRGXWJPC1CAK82Z98"></a>
+
+### Name every operation `<group> <verb>`
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-GROUP-VERB-COMMANDS |
+| Status | Accepted |
+| Justifies | [DES-OPERATIONS](hosts.mara.md#01M7BF6H124JRJAQSYVQ21Q2JS) |
+
+- Chosen: `<group> <verb>` for every operation. Only `search` and `get` stay top-level, because they return items, narrative and code alike.
+- Rejected: a top-level `related`, as in 0.3.0. It lists relations from outside the `relation` group.
+- Rejected: `relation get`, as in 0.3.0. A relation is one row, which `relation list` already returns with its location.
+
+---
+
 <a id="01M7BGRHX3NVNZS0NGQ0BKPSH1"></a>
 
 ### Deliver agent guidance from the binary, not a skill

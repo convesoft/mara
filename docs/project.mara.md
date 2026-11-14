@@ -77,7 +77,7 @@ Schema inspection lists the types and relations and returns each one's descripti
 - The configuration is `.mara/config.toml`. The directory that contains `.mara/` is the project root.
 - It declares every input by a path or pattern relative to the project root: document include patterns, the schema, Soufflé programs, and code languages with their extensions, comment prefixes and grammar pin (version and checksum).
 - `project init` writes the schema to `.mara/schema.toml` and programs under `.mara/rules/`.
-- The configuration and the schema are TOML. Each carries its own `format_version`, starting at 1.
+- The configuration and the schema are TOML. Each carries its own `format_version`, starting at 1. The configuration also holds the version of the document syntax, `[documents] format_version`.
 - An unknown setting is an error.
 - `.mara/project.toml` without `.mara/config.toml` marks a 0.3.0 project. Every operation except the conversion ([REQ-CONVERT-DIRECTIVE-CORPUS](migration.mara.md#01M7BF6H30RYJTH5Z2YERBJ690)) refuses it and names the conversion.
 
@@ -86,6 +86,7 @@ format_version = 1
 schema = ".mara/schema.toml"
 
 [documents]
+format_version = 1
 include = ["docs/**/*.mara.md"]
 ```
 
@@ -109,7 +110,8 @@ include = ["docs/**/*.mara.md"]
 | Field | Name, value kind (`text` or `enum`), allowed values, required, repeatable |
 | Relation | Forward name, inverse name, description, allowed target types per source type, same-type constraint, acyclic constraint |
 
-"Type" replaces the term "flavour" used before v0.4.0.
+- The source `code` in a relation's targets stands for code markers ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)). No type may be named `code`.
+- "Type" replaces the term "flavour" used before v0.4.0.
 
 ```toml
 format_version = 1
@@ -127,10 +129,9 @@ values = ["rare", "unlikely", "possible", "likely", "almost-certain"]
 inverse = "satisfied_by"
 description = "The source is intended to fulfil the target."
 targets = { requirement = ["need"], design = ["requirement"] }
+
+[relations.implements]
+inverse = "implemented_by"
+description = "Code realizes the target."
+targets = { code = ["requirement", "design", "verification"] }
 ```
-
----
-
-## Open questions
-
-- Where the version of the document syntax is recorded: the configuration's `format_version`, or a key of its own.

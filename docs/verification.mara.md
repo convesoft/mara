@@ -21,7 +21,7 @@ On every pull request, Rust integration tests run the real CLI and daemon on a g
 | Unchanged warm request | 0 hashes, 0 parses, 0 snapshot builds |
 | One document edited | 1 parse, 1 snapshot build, 0 code scans |
 | One code file edited | 1 code scan, 0 document parses |
-| Any document operation | 0 subprocesses, 0 code scans |
+| An operation that reads no code ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)) and runs no program | 0 subprocesses, 0 code scans |
 | Validation or gate, unchanged snapshot and rules | 0 `souffle` runs |
 | Validation or gate after a change | At most 1 `souffle` run per program and parameter set |
 | Unrelated file, `.git` change, failed request, idle period | No invalidation |

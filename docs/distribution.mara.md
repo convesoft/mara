@@ -37,6 +37,7 @@
 - Every package carries the same version.
 - Platforms: Linux x64 and arm64 (glibc), macOS arm64.
 - Node 24 or later.
+- The first npm release is 0.4.0. Alpha slices are Git tags only.
 
 ---
 
@@ -59,4 +60,3 @@
 ## Open questions
 
 - The Soufflé build for macOS arm64 was never tried.
-- Whether alpha slices are published to npm under the `next` tag.

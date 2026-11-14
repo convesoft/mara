@@ -13,7 +13,7 @@ Goal: an operation finds its project and knows the project's vocabulary.
 
 Context: docs/project.mara.md (REQ-ONE-PROJECT-PER-OPERATION, REQ-SCHEMA-DEFINES-VOCABULARY, DES-PROJECT-CONFIGURATION, DES-SCHEMA-MODEL).
 
-- [ ] Decide where the document syntax version is recorded (open question on docs/project.mara.md)
+- [x] Decide where the document syntax version is recorded: `[documents] format_version` (DES-PROJECT-CONFIGURATION)
 - [ ] Project selection by ancestor search and by `--project`
 - [ ] Configuration loading; unknown settings are errors; a 0.3.0 project is refused and pointed to the conversion
 - [ ] Schema loading: types, fields, relations with per-source target types

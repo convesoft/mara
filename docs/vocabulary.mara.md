@@ -30,27 +30,26 @@ Every type has `Status`: `Draft`, `Accepted` or `Retired`.
 | Verification | `VER-` | How requirement conformity is established | `Methods`: repeatable; Test, Analysis, Inspection, Demonstration |
 | Validation | `VAL-` | How need satisfaction or goal achievement is established | `Methods`: repeatable; Test, Analysis, Inspection, Demonstration |
 
-| Key on the source item | Source → target types | Constraint |
-| --- | --- | --- |
-| Contributes to | Need, Design → Goal | |
-| Satisfies | Requirement → Need; Design → Requirement | |
-| Decomposes | Need, Requirement, Design → the same type | Child → parent |
-| Derives from | Requirement → Requirement | |
-| Supersedes | Goal, Need, Scenario, Requirement, Design, Decision, Term, Verification, Validation → the same type | No cycles |
-| Justifies | Decision → Requirement, Design | |
-| Accepts | Decision → Risk | |
-| Threatens | Risk → Goal, Need, Requirement | |
-| Mitigates | Requirement, Design → Risk | |
-| Verifies | Verification → Requirement | |
-| Validates | Validation → Need, Goal | |
-| Exercises | Validation → Scenario | |
-| Supports | Evidence → Goal, Need, Requirement, Design, Decision, Risk | |
+| Key on the source item | Shown on the target as | Source → target types | Constraint |
+| --- | --- | --- | --- |
+| Contributes to | Contributed to by | Need, Design → Goal | |
+| Satisfies | Satisfied by | Requirement → Need; Design → Requirement | |
+| Decomposes | Decomposed by | Need, Requirement, Design → the same type | Child → parent |
+| Derives from | Gives rise to | Requirement → Requirement | |
+| Supersedes | Superseded by | Goal, Need, Scenario, Requirement, Design, Decision, Term, Verification, Validation → the same type | No cycles |
+| Justifies | Justified by | Decision → Requirement, Design | |
+| Accepts | Accepted by | Decision → Risk | |
+| Threatens | Threatened by | Risk → Goal, Need, Requirement | |
+| Mitigates | Mitigated by | Requirement, Design → Risk | |
+| Verifies | Verified by | Verification → Requirement | |
+| Validates | Validated by | Validation → Need, Goal | |
+| Exercises | Exercised by | Validation → Scenario | |
+| Supports | Supported by | Evidence → Goal, Need, Requirement, Design, Decision, Risk | |
 
-`Implements` (code → Requirement, Design, Verification) comes only from code markers ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)), never from a metadata table.
+`Implements` (code → Requirement, Design, Verification; shown on the target as `Implemented by`) comes only from code markers ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)), never from a metadata table.
 
 ---
 
 ## Open questions
 
 - Which invariants, gates and views the template ships as programs. The `engineering` template at commit `d7f0e73` (`templates/engineering-*`) is the starting point.
-- The inverse name of each relation, which [DES-SCHEMA-MODEL](project.mara.md#01M7BF6HA0KG3R3AATWM1P2X1G) requires. The schema at commit `d7f0e73` (`templates/engineering-schema.yaml`) has one for each, such as `satisfied_by` and `gives_rise_to`.

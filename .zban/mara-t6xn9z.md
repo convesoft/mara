@@ -13,7 +13,7 @@ Goal: one pass per file turns a `*.mara.md` document into items, metadata, links
 
 Context: docs/format.mara.md (DES-REGIONS, DES-ITEM-STRUCTURE, DES-METADATA-TABLE); docs/identity.mara.md (DES-MID-ANCHOR, DES-ITEM-IDS, DES-RELATION-LINKS); DES-SNAPSHOT in docs/engine.mara.md for the single `pulldown-cmark` pass.
 
-- [ ] Decide whether YAML front matter is accepted (open question on docs/format.mara.md)
+- [x] Decide whether YAML front matter is accepted: skipped at the start of a file (DES-REGIONS)
 - [ ] Regions, items and incomplete items
 - [ ] Metadata table with label matching
 - [ ] Relation links and mentions

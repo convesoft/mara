@@ -75,6 +75,7 @@ A Mara document is GitHub-flavoured Markdown that GitHub renders as documentatio
 | Satisfies | [REQ-SOURCE-IS-PUBLISHED-FORM](#01M7BF6GYWE2DT7WSXQH2QPNPA) |
 
 - Mara documents are `*.mara.md` files matched by the project's include patterns. Other `.md` files are never scanned.
+- A YAML front matter block at the very start of a file (a `---` line, YAML lines, a `---` line) is skipped. It is neither a region boundary nor narrative, and writes preserve it.
 - Every thematic break (`---`, `***`, `___`) outside code is a region boundary. Start and end of file are implicit boundaries.
 - A region whose first block is a MID anchor is an item. Any other region is ordinary Markdown.
 - An item ends only at a thematic break or end of file. Headings never end an item, items contain no thematic breaks, and items do not nest.
@@ -124,9 +125,3 @@ An item region holds, in order:
 - The table ends at the first blank line. A non-blank line directly after the table is a malformed row and an error.
 - A key the schema does not define for the item's type is an error, even when another type defines it. A value outside a field's allowed set is an error. There is no "allow unknown keys" setting: a new field is declared in the schema.
 - Keys and enum values are written as labels derived from schema names: `_` becomes a space and the first letter is capitalized (`derives_from` → `Derives from`, `almost-certain` → `Almost-certain`, type `requirement` → `Requirement`). Reading matches labels case-insensitively; writing uses the derived label.
-
----
-
-## Open questions
-
-- Whether a YAML front matter block at the start of a document is accepted. Today its closing `---` forms a setext heading, which is an error.

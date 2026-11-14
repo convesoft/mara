@@ -62,16 +62,37 @@ Evaluating a program reads only the facts Mara supplies, writes only the outputs
 
 One program's output relations serve several consumers; presentation never defines different facts.
 
-| Consumer | Registered by | Effect |
+| Consumer | Defined by | Effect |
 | --- | --- | --- |
-| Raw query | Request | Returns the output rows |
-| View | Request | Renders the same rows |
-| Invariant | Project configuration | Evaluated by validation; an error-severity failure makes documentation invalid |
-| Gate | Request, for a scope and context | Fails the gate; never changes documentation validity |
-| Report | Request | Explains an invariant or gate outcome |
+| Raw query | A request that names a declared program and one of its output relations | Returns the output rows |
+| View | A configuration entry: program and relation | Renders the same rows |
+| Invariant | A configuration entry: program, relation, severity and message | Evaluated by validation; an error-severity failure makes documentation invalid |
+| Gate | A configuration entry: program, condition relations and parameters | Requested by name for a scope and context; a failure fails the gate and never changes documentation validity |
+| Report | A request that names an invariant or a gate | Explains its outcome |
 
+- Each row of an invariant relation or of a gate's condition relation is one failure. Its first column is the MID of the item concerned, which gives the failure its path and line.
 - An empty result has no pass or fail meaning of its own; the consumer defines it.
 - A gate reports conditions, not permission to release, deploy or act.
+
+```toml
+[rules]
+programs = [".mara/rules/*.dl"]
+
+[invariants.requirement-verified]
+program = ".mara/rules/engineering.dl"
+relation = "unverified_requirement"
+severity = "error"
+message = "Accepted requirement has no accepted verification"
+
+[gates.implementation-ready]
+program = ".mara/rules/gates.dl"
+conditions = ["not_accepted", "blocking_risk"]
+parameters = ["threshold"]
+
+[views.coverage]
+program = ".mara/rules/engineering.dl"
+relation = "coverage"
+```
 
 ---
 
@@ -140,5 +161,4 @@ Before every run the host scans each program file, outside comments and strings,
 
 ## Open questions
 
-- How a program's outputs are registered as invariants, gates or views, and how an invariant violation names its item and message.
-- Whether `mara` offers a compile-only program check; a run against empty facts costs 2–6 ms. Editor support for `.dl` is community-only and stale: VS Code `W4RH4WK.souffle-syntax` (highlighting, 2018) and `i-daridis.souffle-lang-server` (2023), plus a `tree-sitter-souffle` grammar.
+- The scope and context of a gate, how a program reports an unavailable outcome, and how external records are supplied.

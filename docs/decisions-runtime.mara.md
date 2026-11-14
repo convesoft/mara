@@ -80,6 +80,21 @@
 
 ---
 
+<a id="01M7CQ57T4TYP96W06VB9P2W96"></a>
+
+### Enable browser access only by flags on `daemon start`
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-HTTP-BY-FLAG |
+| Status | Accepted |
+| Justifies | [DES-BROWSER-LISTENER](daemon.mara.md#01M7CQ57TJY788DMPBN4BX1SEM) |
+
+- Chosen: the user turns the listener on and names origins and projects when starting the daemon. Nothing is persisted.
+- Rejected: allowed origins in the project configuration. A cloned repository could grant a web origin access to itself.
+
+---
+
 <a id="01M7BF6GSKJFB28V4HFVSED44G"></a>
 
 ### Link code through comment markers, not SCIP
@@ -110,6 +125,21 @@
 - Rejected: GraphQL. Computed fields need custom resolvers or Mara-specific directives.
 - Rejected: SPARQL. It has no modules or typed input and output declarations, so it needed a JSON wrapper plus separate SHACL constraints.
 - Rejected: Rego (`regorus`). It forbids recursive rules.
+
+---
+
+<a id="01M7CQ57SYJ9BH5XMVVV9F6QA3"></a>
+
+### Register invariants, gates and views in the configuration
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-CONSUMERS-IN-CONFIGURATION |
+| Status | Accepted |
+| Justifies | [DES-RULE-CONSUMERS](rules.mara.md#01M7BF6HE529B61Q2ZNXFQ1JXE) |
+
+- Chosen: named configuration entries that point at a program's output relations. Programs stay plain Soufflé.
+- Rejected: output relations that register themselves by name, such as `invariant_error_<name>`. Names would carry hidden meaning, and a message has no place.
 
 ---
 

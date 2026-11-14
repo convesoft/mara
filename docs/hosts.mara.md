@@ -64,7 +64,7 @@ In a browser the engine runs as WASM in a worker over supplied file contents. Ed
 | --- | --- | --- |
 | CLI, direct | In-process | Filesystem |
 | Daemon | One per OS user and Mara version; serves CLI, MCP and Node over native IPC, browsers over loopback HTTP | Filesystem |
-| Node library | Embedded or through the daemon | Filesystem |
+| Node library | Embedded through the native addon ([DES-PACKAGES](distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8)), or through the daemon | Filesystem |
 | Browser through daemon | Loopback HTTP ([REQ-BROWSER-ACCESS-AUTHORIZED](daemon.mara.md#01M7BF6GR0N9J4C8Z5QQ4CSCB7)) | Daemon's filesystem |
 | Browser, local | Engine as WASM in a worker | Supplied file contents |
 
@@ -77,28 +77,22 @@ In a browser the engine runs as WASM in a worker over supplied file contents. Ed
 | Type | Design |
 | --- | --- |
 | ID | DES-OPERATIONS |
-| Status | Draft |
+| Status | Accepted |
 | Satisfies | [REQ-CLI-MCP-PARITY](#01M7BF6H00N50GBQGCYF4RSR1Z) |
 
-Names follow the 0.3.0 CLI where the capability is kept.
+Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is named `<group>_<verb>`.
 
 | Group | Operations |
 | --- | --- |
-| `project` | `init`, `validate`, `fix`, one-shot conversion |
+| `project` | `init`, `validate`, `fix`, `convert` |
 | `schema` | `get`, `list`, `validate` |
 | `item` | `create`, `update`, `move`, `rename`, `delete`, `list`, `validate` |
-| `relation` | `add`, `remove` |
-| Read | `search`, `get`, `related` |
-| Rules | Query, view, gate, report |
+| `relation` | `add`, `remove`, `list` |
+| Top level | `search`, `get` |
+| `query` | `execute`, `view`, `gate`, `report` |
 | `code` | `add` |
 | `daemon` | `status`, `start`, `stop` |
 | `mcp` | Serves the document operations (every group above except `code` and `daemon`) over stdio |
 | `prime` | Prints the agent guide ([DES-AGENT-GUIDE](agents.mara.md#01M7BGRHWQHQJJHC6XCXVDWDM8)) |
 
 - An MCP server takes the project on each call, or is bound to one project when started with `--project`.
-
----
-
-## Open questions
-
-- How the Node library embeds the engine: the native addon of [DES-PACKAGES](distribution.mara.md#01M7BF6GWZ72PGJNA3VQNZMDC8), or the WASM build.

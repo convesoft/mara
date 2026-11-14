@@ -70,7 +70,7 @@ Search also matches a word within one edit of a query word of 4–7 characters, 
 | Status | Accepted |
 | Satisfies | [NEED-BOUNDED-RETRIEVAL](product.mara.md#01M7BF6H6GBKEHK5BQ8NDX7JG5) |
 
-`related` returns the connections one hop from a node: outgoing relations, incoming relations under their inverse name, mentions and code links, each with its source location. It never expands a second hop.
+`relation list` takes one node and returns the connections one hop from it: outgoing relations, incoming relations under their inverse name, mentions and code links, each with its source location. It narrows by relation name and never expands a second hop.
 
 ---
 
@@ -151,10 +151,4 @@ A page holds 20 records unless the request asks for another number from 1 to 100
 - Byte budgets use per-record sizes computed once, never by re-serializing the page after each record.
 - A cursor carries the snapshot key ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)), so staleness is detected exactly.
 - Internal consumers call evaluate-all APIs, never the public paged API in a loop.
-
----
-
-## Open questions
-
-- Whether inspecting the authored occurrences of one relation stays its own operation (`relation get` in 0.3.0) or becomes part of `related`.
-- How `get` pages a node whose content exceeds one page.
+- `get` returns a node larger than one page in consecutive portions: its metadata rows first, then its content cut at line boundaries. The portions concatenate to the exact content.
