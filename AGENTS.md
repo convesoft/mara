@@ -75,12 +75,13 @@ One orchestrator starts a worker for each ready issue and integrates its branch.
 
 ## Local checks
 
-Run them from the repository root; each must exit 0. `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins. The `wasm32` build is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9).
+Run them from the repository root; each must exit 0. `rustup` installs the toolchain, components and target that `rust-toolchain.toml` pins. The `wasm32` build is an architecture check of [VER-HOST-COMPARISON](docs/verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9). The release test times a release build for [VER-SCALING](docs/verification.mara.md#01M7BF6HGRNQ5SJVNP89G1CCBW).
 
 ```sh
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked --config 'build.warnings="deny"'
 cargo test --workspace --locked
+cargo test --package mara --test performance --release --locked
 cargo build --package mara-engine --target wasm32-unknown-unknown --locked
 zban check
 ```

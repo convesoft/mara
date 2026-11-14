@@ -79,6 +79,10 @@ Counters:
 
 - Engine and hosts count file reads, hashes, parses, snapshot builds, code scans, subprocess spawns, built-in check steps and program runs.
 - A debug stats option exposes the counts, so tests check the real CLI and daemon.
+- The counts of one request are one `WorkCounts` value (`mara-engine`, module `work`). The host creates it and passes it by `&mut` to each engine call that does counted work. The code that does a piece of work counts it.
+- A built-in check step is one item or edge that a built-in check visits.
+- `--debug-stats` makes the stats line the last line on stderr, after any diagnostic: also when the request fails or its arguments are rejected. Stdout stays the operation's.
+- The stats line is a JSON object of exactly `format_version` (1) and `file_reads`, `hashes`, `parses`, `snapshot_builds`, `code_scans`, `subprocess_spawns`, `check_steps` and `program_runs`. Key order carries no meaning.
 
 Corpus generator:
 
@@ -87,6 +91,22 @@ Corpus generator:
 - Chains of `Decomposes` and `Derives from` have a depth and fan-out that do not grow with corpus size: a larger corpus has more clusters, not deeper ones.
 - Sizes: 1× (about 200 items), 4× and 16× on every pull request; 64× nightly.
 - Generates into disposable temporary directories, never into the checkout.
+- A seed and a size give byte-identical files on every machine and toolchain. The generator draws from SplitMix64, written in the test, never from a library generator. Each cluster draws from its own stream, keyed by seed and cluster number. A MID is a fixed timestamp plus the item number, then seeded random bits.
+- 1× is 8 clusters. A cluster is 25 items of every engineering type in three documents, and 12 Rust files carrying `@mara implements` markers. It links only to itself and to the previous cluster, so a smaller corpus's clusters reappear unchanged in every larger one.
+- Chains are at most 2 edges deep, with at most 2 chain edges into one item.
+- Accepted items obey the engineering template's acceptance and lifecycle rules, and no built-in check fails.
+- The configuration is the example of [DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27). The schema is the engineering vocabulary, written with only the keys that [DES-SCHEMA-MODEL](project.mara.md#01M7BF6HA0KG3R3AATWM1P2X1G) shows, so each Verification and Validation has one method and each Term one alias.
+- The configuration declares no code language and no program until their syntax exists. The issue that defines it declares them in the generated configuration.
+- Each corpus also holds a `.git` directory, a `.gitignore`, ignored build output, an ignored document, a document outside the include patterns and a README.
+
+Tests:
+
+- The counter and scaling tests are the `performance` integration test of the `mara` crate, with the generator. They run the real binary with an empty environment.
+- A case is the arguments and the exit status of one invocation. The harness asserts the status before it accepts the counts or the timing. Each operation adds its case to both tests.
+- Two cases without an operation pin today's behaviour and stay: `mara --debug-stats` exits 0, and `mara --debug-stats --no-such-option` exits 2 after a diagnostic. Neither does work, and the first does not grow. Changing either behaviour changes its case.
+- The tests check the stats line against their own list of counter names, never against `WorkCounts`.
+- The scaling test runs on a release build only. One warm-up round, then five timed rounds that each run every size once. Growth per doubling between adjacent sizes s₁ < s₂ is (t₂ / t₁)^(1 / log₂(s₂ / s₁)) of their median times.
+- The 64× run (`--ignored`) asserts counts only. The growth limit applies from 1× to 16×.
 
 ---
 
