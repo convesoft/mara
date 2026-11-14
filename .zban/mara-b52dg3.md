@@ -1,6 +1,6 @@
 ---
 title: Load the project configuration and schema
-status: todo
+status: in-progress
 type: feature
 parent: mara-t1rffa
 blocked_by:

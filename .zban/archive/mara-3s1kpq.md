@@ -1,6 +1,6 @@
 ---
 title: Decide how mara-b52dg3 proceeds after two review rounds ended with the same defects
-status: todo
+status: done
 type: task
 tags:
   - maintainer
@@ -8,6 +8,7 @@ parent: mara-t1rffa
 related:
   - mara-b52dg3
 created_at: 2026-11-14T14:30:04Z
+closed_at: 2026-11-14T14:38:42Z
 ---
 
 Goal: mara-b52dg3 "Load the project configuration and schema" can be integrated.
@@ -30,4 +31,10 @@ Options:
 - B: one more round keeping symbolic links allowed where they stay inside the project: check the nested-project boundary at every component of the path as written and at every link hop, for the configuration and the schema. More code and more cases; the likeliest to need a fourth round.
 - C: integrate with isolation for paths without symbolic links and file the link cases as a follow-up issue. Leaves a known gap in the isolation the maintainer decided; not recommended.
 
-- [ ] Option chosen and sent to the worker of mara-b52dg3
+- [x] Option chosen and sent to the worker of mara-b52dg3
+
+## Summary of Changes
+
+Decided by the maintainer on 2026-11-14: option A, chosen as "A: no symlinks (Recommended)": "One more round by the same worker. Mara follows no symbolic link when it reads .mara, .mara/config.toml or any component of the schema path: such a path is refused with a diagnostic. Schema names are collected before declarations are validated; further hidden-error combinations found later become follow-up issues. Cost: no symlinked configuration or schema at all."
+
+The orchestrator set mara-b52dg3 back to `in-progress` and sent the answer, with the open findings of the second review, to its worker in the same thread. The worker writes the rule into DES-PROJECT-CONFIGURATION. Check: `zban check`.

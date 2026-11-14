@@ -17,4 +17,4 @@ Context: docs/engine.mara.md (DES-INPUTS-AND-KEYS, DES-SNAPSHOT); REQ-WORK-FOLLO
 - [ ] Inventory of declared inputs, filtered by the project's `.gitignore` files and without nested projects (DES-PROJECT-CONFIGURATION); stat check of files and directories; BLAKE3 hashing
 - [ ] Content keys for parsed documents and the document snapshot
 - [ ] Snapshot: items, ID and MID maps, forward and inverse edges, item spans, token index
-- [ ] The cold rows of VER-WORK-COUNTERS pass through the real CLI: a cold request, `.git` and undeclared files, an operation that reads no code. The warm rows wait for the daemon (mara-p27z9t)
+- [ ] File reads, hashes, parses and snapshot builds are counted where they happen (DES-PERFORMANCE-HARNESS) and tested below the CLI. The cold rows of VER-WORK-COUNTERS are asserted through the real CLI by mara-000f9q and mara-bmc9gc, each for its own operations (decided by the maintainer, mara-63dn2d). The warm rows wait for the daemon (mara-p27z9t)

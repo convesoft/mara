@@ -1,6 +1,6 @@
 ---
 title: Decide which issue asserts the cold counter rows, since mara-8d6cnw has no CLI operation to run
-status: todo
+status: done
 type: task
 tags:
   - maintainer
@@ -10,6 +10,7 @@ related:
   - mara-bmc9gc
 discovered_from: mara-csmk0c
 created_at: 2026-11-14T14:12:43Z
+closed_at: 2026-11-14T14:38:38Z
 ---
 
 Goal: the cold rows of VER-WORK-COUNTERS (docs/verification.mara.md) are asserted through the real CLI by an issue that has an operation to run.
@@ -22,4 +23,10 @@ Options:
 - B: mara-8d6cnw adds the first operation (for example `item list` from mara-bmc9gc) to assert the rows. Moves scope between issues.
 - C: reorder the issues so that an operation lands before mara-8d6cnw closes.
 
-- [ ] Option chosen and the affected issues' items updated
+- [x] Option chosen and the affected issues' items updated
+
+## Summary of Changes
+
+Decided by the maintainer on 2026-11-14: option A, chosen as "A: move to operations (Recommended)": "Move the cold-row item from mara-8d6cnw to mara-000f9q and mara-bmc9gc, each asserting the rows for its own operations through the real CLI. mara-8d6cnw counts reads, hashes, parses and snapshot builds where they happen and tests them below the CLI. Still within alpha.1."
+
+The orchestrator changed the items with `zban`: mara-8d6cnw's last item now asks for counting where the work happens, tested below the CLI; mara-000f9q and mara-bmc9gc each gained an item for the cold rows of VER-WORK-COUNTERS through the real CLI. No document changed: VER-WORK-COUNTERS names no issue. Check: `zban check`.
