@@ -58,6 +58,17 @@ pub struct RelationDecl {
     pub acyclic: bool,
 }
 
+impl Schema {
+    /// The relation `name` when an item of type `source` may have it: the type is declared and
+    /// is a source of the relation (DES-SCHEMA-MODEL). A row of any other item that is keyed by
+    /// `name` is no relation of that item (DES-SNAPSHOT).
+    pub fn relation_from(&self, source: &str, name: &str) -> Option<&RelationDecl> {
+        self.relations.get(name).filter(|relation| {
+            self.types.contains_key(source) && relation.targets.contains_key(source)
+        })
+    }
+}
+
 /// Reads the contents of the schema file at `path`, relative to the project root. Every
 /// problem becomes a diagnostic. There is no schema when the file is not TOML or has another
 /// format version.

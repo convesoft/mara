@@ -6,7 +6,7 @@ use std::ops::Range;
 use toml::Spanned;
 use toml::de::{DeTable, DeValue};
 
-use crate::diagnostic::{Diagnostic, Severity};
+use crate::diagnostic::Diagnostic;
 
 pub(crate) type Key<'i> = Spanned<Cow<'i, str>>;
 pub(crate) type Value<'i> = Spanned<DeValue<'i>>;
@@ -73,13 +73,8 @@ impl<'p> TomlFile<'p> {
 
     pub(crate) fn error(&mut self, code: &'static str, span: Range<usize>, message: String) {
         let line = self.line(span.start);
-        self.diagnostics.push(Diagnostic {
-            code,
-            severity: Severity::Error,
-            message,
-            path: self.path.to_owned(),
-            line,
-        });
+        let diagnostic = Diagnostic::error(code, self.path, line, message);
+        self.diagnostics.push(diagnostic);
     }
 
     /// Checks `format_version` of `table`, whose header is at `at`. Returns `false` for a

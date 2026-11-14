@@ -1,10 +1,46 @@
-//! Runs the real `mara` binary with `--debug-stats`.
+//! Runs the real `mara` binary with `--debug-stats`, and lists the operation cases that the
+//! counter and scaling tests run.
 
 use std::path::Path;
 use std::process::{Command, Output};
 
 use mara_engine::work::WorkCounts;
 use serde_json::{Map, Value};
+
+use crate::corpus::Corpus;
+
+/// One invocation of an operation on a corpus: a case of DES-PERFORMANCE-HARNESS.
+pub struct Case {
+    pub args: Vec<String>,
+    /// The exit status on a generated corpus.
+    pub status: i32,
+    /// The inputs it reads, which set its cold work counts.
+    pub reads: Reads,
+}
+
+/// What an operation reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reads {
+    /// The configuration and the schema.
+    Schema,
+    /// The configuration, the schema, the `.gitignore` files and every document, which it
+    /// parses into a snapshot and checks.
+    Checked,
+}
+
+/// Each operation's case on `corpus`. An operation adds its case here, and both tests run it.
+pub fn cases(corpus: &Corpus) -> Vec<Case> {
+    let case = |args: &[&str], reads| Case {
+        args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+        status: 0,
+        reads,
+    };
+    vec![
+        case(&["project", "validate"], Reads::Checked),
+        case(&["item", "validate", &corpus.first_id], Reads::Checked),
+        case(&["schema", "validate"], Reads::Schema),
+    ]
+}
 
 /// The counters of the stats line (DES-PERFORMANCE-HARNESS), written here independently of
 /// `WorkCounts`, so a dropped or renamed counter fails.
@@ -28,7 +64,7 @@ pub struct Run {
 /// Runs `mara --debug-stats <args>` in `directory` with an empty environment, so it reaches no
 /// user configuration or daemon. Requires exit status `status`, then reads the stats line that
 /// the process writes last on stderr.
-pub fn run(directory: &Path, args: &[&str], status: i32) -> Run {
+pub fn run(directory: &Path, args: &[impl AsRef<std::ffi::OsStr>], status: i32) -> Run {
     let output = Command::new(env!("CARGO_BIN_EXE_mara"))
         .arg("--debug-stats")
         .args(args)
@@ -39,15 +75,22 @@ pub fn run(directory: &Path, args: &[&str], status: i32) -> Run {
     assert_eq!(
         output.status.code(),
         Some(status),
-        "exit status of mara {args:?}; {output:?}"
+        "exit status of mara {:?}; {output:?}",
+        shown(args)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     let line = stderr
         .lines()
         .last()
-        .unwrap_or_else(|| panic!("mara {args:?} wrote no stats line; {output:?}"));
+        .unwrap_or_else(|| panic!("mara {:?} wrote no stats line; {output:?}", shown(args)));
     let work = parse(line).unwrap_or_else(|problem| panic!("stats line {line:?}: {problem}"));
     Run { output, work }
+}
+
+fn shown(args: &[impl AsRef<std::ffi::OsStr>]) -> Vec<String> {
+    args.iter()
+        .map(|arg| arg.as_ref().to_string_lossy().into_owned())
+        .collect()
 }
 
 /// Parses a stats line: a JSON object of exactly `format_version` 1 and the [`COUNTERS`].

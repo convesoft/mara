@@ -110,6 +110,8 @@ Tests:
 - The tests check the stats line against their own list of counter names, never against `WorkCounts`.
 - The scaling test runs on a release build only. One warm-up round, then five timed rounds that each run every size once. Growth per doubling between adjacent sizes s₁ < s₂ is (t₂ / t₁)^(1 / log₂(s₂ / s₁)) of their median times.
 - The 64× run (`--ignored`) asserts counts only. The growth limit applies from 1× to 16×.
+- Both tests also run `project validate` on a hub project: 1000 × size items that link to one item whose `Type` and `ID` rows follow 1000 × size other rows, so late metadata meets many incoming edges.
+- Check steps do not count work per row, per holder of a shared key or per finding; scaling cases gate it, each on a project of one shape: an item with 1000 × size repeated `ID`, `Type` or `Status` rows, other values of a single-valued enum field, relation rows to one target or to as many targets, or undeclared keys; 500 × size items that share one ID or one MID; 1000 × size broken links on one line.
 
 ---
 

@@ -1,0 +1,592 @@
+//! The command line: arguments, operations, output and exit status (REQ-CLI-MCP-PARITY and
+//! DES-OPERATIONS in `docs/hosts.mara.md`).
+//!
+//! An operation is an [`Operation`] in [`OPERATIONS`]: its words, positional arguments and
+//! options, and a function from a [`Context`] and its [`Args`] to a [`Response`] or a
+//! [`Failure`]. Arguments are checked before the function runs. Each operation also adds its
+//! case to the performance harness (`crates/mara/tests/performance/`).
+
+mod validate;
+
+use std::ffi::OsString;
+use std::fmt::Write as _;
+use std::path::PathBuf;
+use std::time::SystemTime;
+
+use mara_engine::diagnostic::Diagnostic;
+use mara_engine::json::Object;
+use mara_engine::paging::{self, Cursor};
+use mara_engine::validation;
+use mara_engine::work::WorkCounts;
+
+use mara::project::{self, SelectError};
+
+/// Every operation, in the order the usage lists them.
+const OPERATIONS: &[Operation] = &[validate::PROJECT, validate::ITEM, validate::SCHEMA];
+
+/// The exit status of a valid result, or of a successful operation.
+pub const SUCCESS: u8 = 0;
+/// The exit status of an invalid result, or of a request that failed.
+pub const FAILURE: u8 = 1;
+/// The exit status of rejected arguments: nothing ran.
+pub const REJECTED: u8 = 2;
+
+/// Version of the JSON form of results and failures.
+pub const FORMAT_VERSION: u64 = 1;
+
+/// A CLI operation, and an MCP tool of the same inputs and results.
+pub struct Operation {
+    /// The words that name it, such as `["project", "validate"]`.
+    pub words: &'static [&'static str],
+    /// Its positional arguments, by name. Each is required.
+    pub arguments: &'static [&'static str],
+    pub options: &'static [Opt],
+    pub run: fn(&mut Context, &Args) -> Result<Response, Failure>,
+}
+
+/// An option with a value: `--<name> <value>` or `--<name>=<value>`.
+pub struct Opt {
+    pub name: &'static str,
+    /// What the value is, as the usage names it.
+    pub value: &'static str,
+    pub repeatable: bool,
+    /// Checks a value before anything runs, with the reason it is rejected.
+    pub check: fn(&str) -> Result<(), String>,
+}
+
+/// `--project <dir>`: the project root, relative to the working directory (DES-PROJECT-CONFIGURATION).
+const PROJECT: Opt = Opt {
+    name: "project",
+    value: "dir",
+    repeatable: false,
+    check: |_| Ok(()),
+};
+
+/// `--format human|json`: how results and failures are printed.
+const FORMAT: Opt = Opt {
+    name: "format",
+    value: "human|json",
+    repeatable: false,
+    check: |value| match value {
+        "human" | "json" => Ok(()),
+        _ => Err(format!("the format is `human` or `json`, not `{value}`")),
+    },
+};
+
+/// The flag that prints the work counts (DES-PERFORMANCE-HARNESS).
+const DEBUG_STATS: &str = "debug-stats";
+
+/// `--limit <n>`: records per page (REQ-PAGE-LIMITS).
+pub const LIMIT: Opt = Opt {
+    name: "limit",
+    value: "n",
+    repeatable: false,
+    check: |value| paging::parse_limit(value).map(drop),
+};
+
+/// `--cursor <cursor>`: where the next page starts (DES-PAGING).
+pub const CURSOR: Opt = Opt {
+    name: "cursor",
+    value: "cursor",
+    repeatable: false,
+    check: |value| match Cursor::parse(value) {
+        Some(_) => Ok(()),
+        None => Err(format!(
+            "`{value}` is not a cursor: pass the `next_cursor` of the previous page"
+        )),
+    },
+};
+
+/// A path relative to the project root as an option names it, in the form diagnostics carry:
+/// empty and `.` parts and a trailing `/` dropped, as 0.3.0 read it. An absolute path, a `..`
+/// part, and a path that names the root itself are refused.
+pub fn project_path(text: &str) -> Result<String, String> {
+    let refuse = |why: &str| {
+        Err(format!(
+            "`{text}` is {why}: name a file or directory relative to the project root"
+        ))
+    };
+    if text.starts_with('/') {
+        return refuse("absolute");
+    }
+    let mut parts = Vec::new();
+    for part in text.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => return refuse("not below the project root"),
+            part => parts.push(part),
+        }
+    }
+    if parts.is_empty() {
+        return refuse("the project root itself; leave the option out for the whole project");
+    }
+    Ok(parts.join("/"))
+}
+
+/// The values of an operation's options and its positional arguments, as checked.
+#[derive(Debug, Default)]
+pub struct Args {
+    options: Vec<(&'static str, String)>,
+    arguments: Vec<String>,
+}
+
+impl Args {
+    /// The value of the option `name`, if given.
+    pub fn value(&self, name: &str) -> Option<&str> {
+        self.values(name).next()
+    }
+
+    /// Every value of the option `name`, in the order given.
+    pub fn values<'a>(&'a self, name: &str) -> impl Iterator<Item = &'a str> + use<'a> {
+        let name = name.to_owned();
+        self.options
+            .iter()
+            .filter(move |(option, _)| *option == name)
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// The positional argument at `index`, which [`Operation::arguments`] declares.
+    pub fn argument(&self, index: usize) -> &str {
+        &self.arguments[index]
+    }
+
+    /// `--limit`, or the default number of records per page.
+    pub fn limit(&self) -> usize {
+        self.value(LIMIT.name)
+            .map_or(paging::DEFAULT_LIMIT, |value| {
+                paging::parse_limit(value).expect("checked before the operation ran")
+            })
+    }
+
+    /// `--cursor`, if given.
+    pub fn cursor(&self) -> Option<Cursor> {
+        self.value(CURSOR.name)
+            .map(|value| Cursor::parse(value).expect("checked before the operation ran"))
+    }
+}
+
+/// What every operation of one request shares.
+pub struct Context<'w> {
+    pub work: &'w mut WorkCounts,
+    /// When the request began.
+    pub now: SystemTime,
+    project: Option<PathBuf>,
+}
+
+impl Context<'_> {
+    /// The root of the project the request runs against (REQ-ONE-PROJECT-PER-OPERATION).
+    pub fn root(&self) -> Result<PathBuf, Failure> {
+        let start = std::env::current_dir().map_err(|error| {
+            Failure::new(
+                "io-error",
+                format!("cannot read the working directory: {error}"),
+            )
+        })?;
+        project::select(&start, self.project.as_deref()).map_err(Failure::from)
+    }
+}
+
+/// The result of an operation.
+pub struct Response {
+    /// The JSON form, which MCP returns.
+    pub json: String,
+    /// The human form, printed on stdout.
+    pub human: String,
+    pub status: u8,
+}
+
+/// Why a request returns no result.
+#[derive(Debug)]
+pub struct Failure {
+    pub code: &'static str,
+    pub message: String,
+    /// The problems in project files that caused it.
+    pub diagnostics: Vec<Diagnostic>,
+    pub status: u8,
+}
+
+impl Failure {
+    /// A failed request: exit status [`FAILURE`].
+    pub fn new(code: &'static str, message: String) -> Failure {
+        Failure {
+            code,
+            message,
+            diagnostics: Vec::new(),
+            status: FAILURE,
+        }
+    }
+
+    /// Rejected arguments: exit status [`REJECTED`].
+    fn rejected(message: String) -> Failure {
+        Failure {
+            status: REJECTED,
+            ..Failure::new(
+                "invalid-argument",
+                format!("{message}; run `mara` for the usage"),
+            )
+        }
+    }
+
+    /// `{"format_version":1,"error":{"code","message","diagnostics"}}`.
+    fn json(&self) -> String {
+        let records: Vec<String> = self
+            .diagnostics
+            .iter()
+            .map(|diagnostic| {
+                let mut record = String::new();
+                diagnostic.write_json(&mut record);
+                record
+            })
+            .collect();
+        let mut out = String::new();
+        let mut object = Object::new(&mut out);
+        object.number("format_version", FORMAT_VERSION);
+        let mut error = Object::new(object.key("error"));
+        error.string("code", self.code);
+        error.string("message", &self.message);
+        error.array("diagnostics", records.iter().map(String::as_str));
+        error.end();
+        object.end();
+        out
+    }
+
+    /// `mara: error[<code>]: <message>`, then each diagnostic.
+    fn human(&self) -> String {
+        let mut out = format!("mara: error[{}]: {}\n", self.code, self.message);
+        for diagnostic in &self.diagnostics {
+            writeln!(out, "{diagnostic}").expect("writing to a String cannot fail");
+        }
+        out
+    }
+}
+
+impl From<SelectError> for Failure {
+    /// Keeps the location of a problem with a directory's `.mara` as a diagnostic.
+    fn from(error: SelectError) -> Failure {
+        Failure {
+            diagnostics: error.diagnostic().into_iter().collect(),
+            ..Failure::new(error.code(), error.to_string())
+        }
+    }
+}
+
+/// Runs the request that `arguments` make, prints its result or failure and returns the exit
+/// status.
+pub fn run(arguments: &[OsString], work: &mut WorkCounts) -> u8 {
+    let json = requested_json(arguments);
+    let outcome = parse(arguments).and_then(|(operation, args)| {
+        let Some(operation) = operation else {
+            print(&mut std::io::stdout(), &usage());
+            return Ok(None);
+        };
+        let mut context = Context {
+            work,
+            now: SystemTime::now(),
+            project: args.value(PROJECT.name).map(PathBuf::from),
+        };
+        (operation.run)(&mut context, &args).map(Some)
+    });
+    match outcome {
+        Ok(None) => SUCCESS,
+        Ok(Some(response)) => {
+            let text = if json {
+                response.json + "\n"
+            } else {
+                response.human
+            };
+            print(&mut std::io::stdout(), &text);
+            response.status
+        }
+        Err(failure) => {
+            if json {
+                print(&mut std::io::stdout(), &(failure.json() + "\n"));
+            } else {
+                print(&mut std::io::stderr(), &failure.human());
+            }
+            failure.status
+        }
+    }
+}
+
+/// Writes `text`, ignoring a closed stream: the exit status still tells the outcome.
+fn print(stream: &mut dyn std::io::Write, text: &str) {
+    let _ = stream.write_all(text.as_bytes());
+    let _ = stream.flush();
+}
+
+/// Whether `--format json` is among `arguments`, so that rejected arguments are reported in
+/// that form too.
+fn requested_json(arguments: &[OsString]) -> bool {
+    let mut json = false;
+    let mut iter = arguments.iter().map(|argument| argument.to_str());
+    while let Some(argument) = iter.next() {
+        let value = match argument {
+            Some("--format") => iter.next().flatten(),
+            Some(argument) => argument.strip_prefix("--format="),
+            None => None,
+        };
+        match value {
+            Some("json") => json = true,
+            Some("human") => json = false,
+            _ => {}
+        }
+    }
+    json
+}
+
+/// The operation that `arguments` name, if any, and its checked arguments. Global options may
+/// stand anywhere; an operation's options follow its words.
+fn parse(arguments: &[OsString]) -> Result<(Option<&'static Operation>, Args), Failure> {
+    let mut words: Vec<&str> = Vec::new();
+    let mut operation: Option<&'static Operation> = None;
+    let mut args = Args::default();
+    let mut iter = arguments.iter();
+    fn text(argument: &OsString) -> Result<&str, Failure> {
+        argument.to_str().ok_or_else(|| {
+            let shown = argument.to_string_lossy();
+            Failure::rejected(format!("the argument `{shown}` is not UTF-8"))
+        })
+    }
+    while let Some(argument) = iter.next() {
+        let argument = text(argument)?;
+        if let Some(option) = argument.strip_prefix("--") {
+            let (name, inline) = match option.split_once('=') {
+                Some((name, value)) => (name, Some(value)),
+                None => (option, None),
+            };
+            if name == DEBUG_STATS {
+                if inline.is_some() {
+                    return Err(Failure::rejected(format!(
+                        "`--{DEBUG_STATS}` takes no value"
+                    )));
+                }
+                continue;
+            }
+            let own = operation.map_or(&[][..], |operation| operation.options);
+            let Some(option) = [PROJECT, FORMAT]
+                .iter()
+                .chain(own)
+                .find(|option| option.name == name)
+            else {
+                let place = match operation {
+                    Some(operation) => format!(" of `{}`", operation.words.join(" ")),
+                    None => String::new(),
+                };
+                return Err(Failure::rejected(format!(
+                    "unknown option `--{name}`{place}"
+                )));
+            };
+            let value = match inline {
+                Some(value) => value,
+                None => match iter.next() {
+                    Some(value) => text(value)?,
+                    None => {
+                        return Err(Failure::rejected(format!(
+                            "`--{name}` needs a value: `--{name} <{}>`",
+                            option.value
+                        )));
+                    }
+                },
+            };
+            (option.check)(value)
+                .map_err(|reason| Failure::rejected(format!("`--{name}`: {reason}")))?;
+            if !option.repeatable && args.value(option.name).is_some() {
+                return Err(Failure::rejected(format!("`--{name}` is given twice")));
+            }
+            args.options.push((option.name, value.to_owned()));
+        } else if argument.starts_with('-') {
+            return Err(Failure::rejected(format!("unknown option `{argument}`")));
+        } else if let Some(operation) = operation {
+            if args.arguments.len() == operation.arguments.len() {
+                return Err(Failure::rejected(format!(
+                    "unexpected argument `{argument}`: `{}` takes {}",
+                    operation.words.join(" "),
+                    describe_arguments(operation)
+                )));
+            }
+            args.arguments.push(argument.to_owned());
+        } else {
+            words.push(argument);
+            operation = OPERATIONS.iter().find(|operation| operation.words == words);
+            if operation.is_none() && !OPERATIONS.iter().any(|o| o.words.starts_with(&words)) {
+                return Err(Failure::rejected(format!(
+                    "unknown operation `{}`",
+                    words.join(" ")
+                )));
+            }
+        }
+    }
+    match operation {
+        None if !words.is_empty() => {
+            let named: Vec<String> = OPERATIONS
+                .iter()
+                .filter(|operation| operation.words.starts_with(&words))
+                .map(|operation| format!("`{}`", operation.words.join(" ")))
+                .collect();
+            let count = named.len();
+            Err(Failure::rejected(format!(
+                "`{}` is not an operation; the operations it starts: {}",
+                words.join(" "),
+                validation::list(named, count)
+            )))
+        }
+        Some(operation) if args.arguments.len() < operation.arguments.len() => {
+            Err(Failure::rejected(format!(
+                "`{}` takes {}",
+                operation.words.join(" "),
+                describe_arguments(operation)
+            )))
+        }
+        operation => Ok((operation, args)),
+    }
+}
+
+/// The positional arguments of `operation`, for a message.
+fn describe_arguments(operation: &Operation) -> String {
+    match operation.arguments {
+        [] => "no argument".to_owned(),
+        arguments => {
+            let names: Vec<String> = arguments.iter().map(|name| format!("<{name}>")).collect();
+            names.join(" ")
+        }
+    }
+}
+
+/// What bare `mara` prints.
+fn usage() -> String {
+    let option = |option: &Opt| {
+        let repeat = if option.repeatable { "..." } else { "" };
+        format!(" [--{} <{}>]{repeat}", option.name, option.value)
+    };
+    let mut out = format!(
+        "Usage: mara{}{} [--{DEBUG_STATS}] <operation>\n\nOperations:\n",
+        option(&PROJECT),
+        option(&FORMAT)
+    );
+    for operation in OPERATIONS {
+        let mut line = format!("  mara {}", operation.words.join(" "));
+        for argument in operation.arguments {
+            write!(line, " <{argument}>").expect("writing to a String cannot fail");
+        }
+        for opt in operation.options {
+            line.push_str(&option(opt));
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arguments(text: &str) -> Vec<OsString> {
+        text.split_whitespace().map(OsString::from).collect()
+    }
+
+    fn rejected(text: &str) -> String {
+        match parse(&arguments(text)) {
+            Ok(_) => panic!("{text:?} was accepted"),
+            Err(failure) => {
+                assert_eq!(
+                    (failure.code, failure.status),
+                    ("invalid-argument", REJECTED)
+                );
+                failure.message
+            }
+        }
+    }
+
+    #[test]
+    fn reads_global_options_anywhere_and_operation_options_after_the_operation() {
+        let (operation, args) = parse(&arguments(
+            "--format json project --project=x validate --path a --path b",
+        ))
+        .unwrap();
+        assert_eq!(operation.unwrap().words, ["project", "validate"]);
+        assert_eq!(args.value("format"), Some("json"));
+        assert_eq!(args.value("project"), Some("x"));
+        assert_eq!(args.values("path").collect::<Vec<_>>(), ["a", "b"]);
+        let (operation, args) = parse(&arguments("item validate REQ-A --limit 5")).unwrap();
+        assert_eq!(operation.unwrap().words, ["item", "validate"]);
+        assert_eq!((args.argument(0), args.limit()), ("REQ-A", 5));
+        let (operation, _) = parse(&arguments("--debug-stats")).unwrap();
+        assert!(operation.is_none());
+    }
+
+    #[test]
+    fn rejects_every_undeclared_or_malformed_argument() {
+        for (text, expected) in [
+            ("--no-such-option", "unknown option `--no-such-option`"),
+            ("--limit 1 project validate", "unknown option `--limit`"),
+            (
+                "schema validate --path a",
+                "unknown option `--path` of `schema validate`",
+            ),
+            ("project validate -x", "unknown option `-x`"),
+            (
+                "project",
+                "`project` is not an operation; the operations it starts: `project validate`",
+            ),
+            ("project check", "unknown operation `project check`"),
+            ("item validate", "`item validate` takes <id-or-mid>"),
+            ("item validate A B", "unexpected argument `B`"),
+            ("project validate extra", "unexpected argument `extra`"),
+            ("project validate --limit", "`--limit` needs a value"),
+            (
+                "project validate --limit 0",
+                "`--limit`: a page holds 1 to 100",
+            ),
+            (
+                "project validate --limit 1 --limit 2",
+                "`--limit` is given twice",
+            ),
+            (
+                "project validate --cursor x",
+                "`--cursor`: `x` is not a cursor",
+            ),
+            (
+                "--format xml",
+                "`--format`: the format is `human` or `json`",
+            ),
+            ("--debug-stats=1", "takes no value"),
+        ] {
+            let message = rejected(text);
+            assert!(message.contains(expected), "{text:?}: {message}");
+        }
+    }
+
+    #[test]
+    fn normalizes_project_paths_and_refuses_those_outside() {
+        for (text, path) in [
+            ("docs", "docs"),
+            ("docs/", "docs"),
+            ("./docs", "docs"),
+            ("./docs/./a.mara.md", "docs/a.mara.md"),
+            ("docs//links/", "docs/links"),
+        ] {
+            assert_eq!(project_path(text).as_deref(), Ok(path), "{text:?}");
+        }
+        for text in ["", ".", "./", "/docs", "../docs", "docs/../x", "docs/.."] {
+            assert!(project_path(text).is_err(), "{text:?}");
+        }
+    }
+
+    #[test]
+    fn finds_the_requested_format_even_in_rejected_arguments() {
+        assert!(requested_json(&arguments("--bogus --format json")));
+        assert!(requested_json(&arguments("--format=json")));
+        assert!(!requested_json(&arguments("--format json --format human")));
+        assert!(!requested_json(&arguments("project validate")));
+    }
+
+    #[test]
+    fn lists_every_operation_in_the_usage() {
+        let usage = usage();
+        for operation in OPERATIONS {
+            assert!(usage.contains(&operation.words.join(" ")), "{usage}");
+        }
+        assert!(usage.contains("mara item validate <id-or-mid> [--limit <n>] [--cursor <cursor>]"));
+    }
+}

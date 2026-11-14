@@ -75,6 +75,10 @@ pub struct Corpus {
     pub items: usize,
     /// Declared documents.
     pub documents: usize,
+    /// Relation links and mentions in declared documents.
+    pub edges: usize,
+    /// The ID of the first item, the same at every size.
+    pub first_id: String,
     /// Edges on the longest chain of `Decomposes` and `Derives from`.
     pub max_chain_depth: usize,
     /// Most `Decomposes` and `Derives from` edges into one item.
@@ -114,10 +118,16 @@ impl Corpus {
         write_project_files(root, size, seed, &mut rng, items.len());
         write_git_directory(root, &mut rng, &written);
         let (max_chain_depth, max_fan_out) = chain_shape(&items);
+        let edges = items
+            .iter()
+            .map(|item| item.relations.len() + item.mentions.len())
+            .sum();
         Corpus {
             dir,
             items: items.len(),
             documents: documents.len(),
+            edges,
+            first_id: items[0].id.clone(),
             max_chain_depth,
             max_fan_out,
         }
@@ -620,6 +630,214 @@ fn write(root: &Path, path: &str, contents: &[u8]) {
     fs::create_dir_all(parent)
         .unwrap_or_else(|error| panic!("create {}: {error}", parent.display()));
     fs::write(&path, contents).unwrap_or_else(|error| panic!("write {}: {error}", path.display()));
+}
+
+/// The schema of the stress projects: requirements with a single-valued enum field, and an
+/// acyclic relation between requirements.
+const STRESS_SCHEMA: &str = "format_version = 1\nstatuses = [\"draft\"]\n\n\
+    [types.requirement]\nid_prefix = \"REQ-\"\ndescription = \"An obligation.\"\n\n\
+    [types.requirement.fields.priority]\nkind = \"enum\"\nvalues = [\"low\", \"high\"]\n\n\
+    [relations.refines]\ninverse = \"refined_by\"\ndescription = \"Refines.\"\n\
+    targets = { requirement = [\"requirement\"] }\nacyclic = true\n";
+
+/// A shape that one item-and-edge check step does not measure: very many rows, holders or
+/// findings where a check could do work per row, per holder or per finding. Each has its own
+/// project ([`Stress`]), and the scaling test times `project validate` on it.
+#[derive(Clone, Copy, Debug)]
+pub enum Shape {
+    /// One item repeats its `ID` row.
+    RepeatedId,
+    /// One item repeats its `Type` row.
+    RepeatedType,
+    /// One item repeats its `Status` row.
+    RepeatedStatus,
+    /// One item gives a single-valued enum field another invalid value in each row.
+    RepeatedEnum,
+    /// One item repeats a relation row to one target.
+    RepeatedRelation,
+    /// One item has a relation row to each of very many targets.
+    ManyTargets,
+    /// One item has very many undeclared keys.
+    UndeclaredKeys,
+    /// Very many items share one ID.
+    SharedId,
+    /// Very many items share one MID.
+    SharedMid,
+    /// One line holds very many broken links.
+    FindingsOnOneLine,
+}
+
+impl Shape {
+    pub const ALL: [Shape; 10] = [
+        Shape::RepeatedId,
+        Shape::RepeatedType,
+        Shape::RepeatedStatus,
+        Shape::RepeatedEnum,
+        Shape::RepeatedRelation,
+        Shape::ManyTargets,
+        Shape::UndeclaredKeys,
+        Shape::SharedId,
+        Shape::SharedMid,
+        Shape::FindingsOnOneLine,
+    ];
+
+    /// The exit status of `project validate` on the shape's project: only `ManyTargets` is
+    /// valid.
+    pub fn status(self) -> i32 {
+        match self {
+            Shape::ManyTargets => 0,
+            _ => 1,
+        }
+    }
+}
+
+/// The project of one [`Shape`].
+pub struct Stress {
+    dir: TempDir,
+}
+
+impl Stress {
+    /// The project of `shape` at `size`: 1000 × size rows or findings of one item, or 500 × size
+    /// items, which take longer to parse, in documents of at most 100.
+    pub fn generate(shape: Shape, size: usize) -> Stress {
+        let dir = tempfile::Builder::new()
+            .prefix("mara-stress-")
+            .tempdir()
+            .expect("create a temporary directory for the stress project");
+        let root = dir.path();
+        write(root, ".mara/config.toml", CONFIG.as_bytes());
+        write(root, ".mara/schema.toml", STRESS_SCHEMA.as_bytes());
+        let count = match shape {
+            Shape::ManyTargets | Shape::SharedId | Shape::SharedMid => size * Hub::PER_SIZE / 2,
+            _ => size * Hub::PER_SIZE,
+        };
+        let mid = |number: usize| format!("01M70000{number:018}");
+        let item = |mid: &str, id: &str, rows: &str, body: &str| {
+            format!(
+                "\n---\n\n<a id=\"{mid}\"></a>\n\n### Item {id}\n\n| Type | Requirement |\n\
+                 | --- | --- |\n| ID | {id} |\n| Status | Draft |\n{rows}\n{body}\n"
+            )
+        };
+        let rows = |row: &dyn Fn(usize) -> String| (0..count).map(row).collect::<String>();
+        let subject = |rows: String, body: &str| item(&mid(0), "REQ-A", &rows, body);
+        let target = |number: usize| item(&mid(number), &format!("REQ-T{number}"), "", "Target.");
+        let items: Vec<String> = match shape {
+            Shape::RepeatedId => vec![subject(rows(&|_| "| ID | REQ-A |\n".into()), "A.")],
+            Shape::RepeatedType => {
+                vec![subject(rows(&|_| "| Type | Requirement |\n".into()), "A.")]
+            }
+            Shape::RepeatedStatus => vec![subject(rows(&|_| "| Status | Draft |\n".into()), "A.")],
+            Shape::RepeatedEnum => {
+                vec![subject(
+                    rows(&|n| format!("| Priority | Value-{n} |\n")),
+                    "A.",
+                )]
+            }
+            Shape::RepeatedRelation => {
+                let link = format!("| Refines | [REQ-T1](#{}) |\n", mid(1));
+                vec![subject(rows(&|_| link.clone()), "A."), target(1)]
+            }
+            Shape::ManyTargets => {
+                // Target `n` is item `n`, in document `n / PER_DOCUMENT`.
+                let link = |n: usize| {
+                    let (n, document) = (n + 1, (n + 1) / Hub::PER_DOCUMENT);
+                    format!(
+                        "| Refines | [REQ-T{n}](p{document:06}.mara.md#{}) |\n",
+                        mid(n)
+                    )
+                };
+                let mut items = vec![subject(rows(&link), "A.")];
+                items.extend((1..=count).map(target));
+                items
+            }
+            Shape::UndeclaredKeys => vec![subject(rows(&|n| format!("| Key {n} | x |\n")), "A.")],
+            Shape::SharedId => (0..count)
+                .map(|n| item(&mid(n), "REQ-SAME", "", "One of many."))
+                .collect(),
+            Shape::SharedMid => (0..count)
+                .map(|n| item(&mid(0), &format!("REQ-M{n}"), "", "One of many."))
+                .collect(),
+            Shape::FindingsOnOneLine => {
+                let links = rows(&|n| format!("[gone](#{}) ", mid(n + 1)));
+                vec![subject(String::new(), &links)]
+            }
+        };
+        for (index, chunk) in items.chunks(Hub::PER_DOCUMENT).enumerate() {
+            let text = format!("# Part {index}\n{}", chunk.concat());
+            write(root, &format!("docs/p{index:06}.mara.md"), text.as_bytes());
+        }
+        Stress { dir }
+    }
+
+    /// The project root.
+    pub fn root(&self) -> &Path {
+        self.dir.path()
+    }
+}
+
+/// A project in which every item but one links to that one, whose `Type` and `ID` rows follow
+/// as many other rows: late metadata and many incoming edges at once.
+pub struct Hub {
+    dir: TempDir,
+    pub items: usize,
+    pub edges: usize,
+}
+
+impl Hub {
+    /// Sources and rows per unit of size.
+    const PER_SIZE: usize = 1_000;
+    /// Sources per document.
+    const PER_DOCUMENT: usize = 100;
+
+    /// The hub of `size` × 1000 sources under `$TMPDIR`. Its schema declares `refines` acyclic,
+    /// so the cycle pass visits every edge too. The project is valid.
+    pub fn generate(size: usize) -> Hub {
+        let dir = tempfile::Builder::new()
+            .prefix("mara-hub-")
+            .tempdir()
+            .expect("create a temporary directory for the hub");
+        let root = dir.path();
+        let sources = size * Self::PER_SIZE;
+        let mid = |number: usize| format!("01M70000{number:018}");
+        write(root, ".mara/config.toml", CONFIG.as_bytes());
+        let schema = "format_version = 1\nstatuses = [\"draft\"]\n\n\
+            [types.requirement]\nid_prefix = \"REQ-\"\ndescription = \"An obligation.\"\n\n\
+            [types.requirement.fields.tags]\nkind = \"text\"\nrepeatable = true\n\n\
+            [relations.refines]\ninverse = \"refined_by\"\ndescription = \"Refines.\"\n\
+            targets = { requirement = [\"requirement\"] }\nacyclic = true\n";
+        write(root, ".mara/schema.toml", schema.as_bytes());
+        let mut hub = format!("# Hub\n\n---\n\n<a id=\"{}\"></a>\n\n### Hub\n\n", mid(0));
+        hub.push_str("| Tags | tag-0 |\n| --- | --- |\n");
+        for tag in 1..sources {
+            let _ = writeln!(hub, "| Tags | tag-{tag} |");
+        }
+        hub.push_str("| Type | Requirement |\n| ID | REQ-HUB |\n| Status | Draft |\n\nThe hub.\n");
+        write(root, "docs/hub.mara.md", hub.as_bytes());
+        for first in (1..=sources).step_by(Self::PER_DOCUMENT) {
+            let mut text = format!("# Sources from {first}\n");
+            for number in first..(first + Self::PER_DOCUMENT).min(sources + 1) {
+                let _ = write!(
+                    text,
+                    "\n---\n\n<a id=\"{}\"></a>\n\n### Source {number}\n\n\
+                     | Type | Requirement |\n| --- | --- |\n| ID | REQ-S{number} |\n\
+                     | Status | Draft |\n| Refines | [REQ-HUB](hub.mara.md#{}) |\n\nA source.\n",
+                    mid(number),
+                    mid(0)
+                );
+            }
+            write(root, &format!("docs/s{first:06}.mara.md"), text.as_bytes());
+        }
+        Hub {
+            dir,
+            items: sources + 1,
+            edges: sources,
+        }
+    }
+
+    /// The project root.
+    pub fn root(&self) -> &Path {
+        self.dir.path()
+    }
 }
 
 /// Edges on the longest chain of `Decomposes` and `Derives from`, and the most such edges into

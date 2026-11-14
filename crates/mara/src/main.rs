@@ -1,31 +1,21 @@
 //! The `mara` command line.
 
+mod cli;
 mod debug_stats;
 
+use std::ffi::OsString;
 use std::process::ExitCode;
 
 use mara_engine::work::WorkCounts;
 
 fn main() -> ExitCode {
-    let mut debug_stats = false;
-    let mut undeclared = None;
-    for argument in std::env::args_os().skip(1) {
-        if argument == "--debug-stats" {
-            debug_stats = true;
-        } else if undeclared.is_none() {
-            undeclared = Some(argument);
-        }
-    }
-    let work = WorkCounts::default();
-    let status = match undeclared {
-        Some(argument) => {
-            eprintln!("mara: unknown argument `{}`", argument.to_string_lossy());
-            ExitCode::from(2)
-        }
-        None => ExitCode::SUCCESS,
-    };
+    let arguments: Vec<OsString> = std::env::args_os().skip(1).collect();
+    let debug_stats = arguments.iter().any(|argument| argument == "--debug-stats");
+    let mut work = WorkCounts::default();
+    let status = cli::run(&arguments, &mut work);
+    // The stats line comes last on stderr, also after rejected arguments.
     if debug_stats {
         eprintln!("{}", debug_stats::line(&work));
     }
-    status
+    ExitCode::from(status)
 }

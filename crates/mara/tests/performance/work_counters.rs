@@ -1,7 +1,7 @@
 //! VER-WORK-COUNTERS: exact work counts of cold requests through the real CLI, and of input
 //! tracking and the snapshot build below it.
 //!
-//! Each operation adds its case to `cold_counts_at`, with its exit status. The warm rows run
+//! Each operation adds its case to `cli::cases`, which `cold_counts_at` runs. The warm rows run
 //! against the daemon (0.4.0-alpha.4).
 
 use std::fs;
@@ -10,7 +10,8 @@ use std::time::{Duration, SystemTime};
 use mara::inputs::{Generation, Inputs};
 use mara_engine::work::WorkCounts;
 
-use crate::corpus::Corpus;
+use crate::cli::Reads;
+use crate::corpus::{Corpus, Hub};
 use crate::{NIGHTLY_SIZE, PULL_REQUEST_SIZES, SEED, cli};
 
 #[test]
@@ -29,9 +30,9 @@ fn cold_counts_64x() {
 fn cold_counts_at(size: usize) {
     let corpus = Corpus::generate(size, SEED);
 
-    // Without an operation the CLI reads nothing, `.git` and undeclared files included. The
-    // exit status is what `mara` does today.
-    let run = cli::run(corpus.root(), &[], 0);
+    // Without an operation the CLI prints its usage and reads nothing, `.git` and undeclared
+    // files included.
+    let run = cli::run(corpus.root(), &[] as &[&str], 0);
     assert_eq!(run.work, WorkCounts::default(), "no operation at {size}×");
 
     // An undeclared argument is rejected before anything runs (REQ-CLI-MCP-PARITY), with its
@@ -50,6 +51,70 @@ fn cold_counts_at(size: usize) {
             .any(|line| line.contains("--no-such-option")),
         "no diagnostic before the stats line: {stderr:?}"
     );
+
+    // Two documents with the same contents are parsed once (DES-INPUTS-AND-KEYS). Narrative
+    // without items keeps the corpus valid.
+    let shared = "# Shared notes\n\nThe same narrative in two documents.\n";
+    for path in ["docs/a000/shared-1.mara.md", "docs/a000/shared-2.mara.md"] {
+        fs::write(corpus.root().join(path), shared).unwrap();
+    }
+    let documents = corpus.documents as u64 + 2;
+    for case in cli::cases(&corpus) {
+        let run = cli::run(corpus.root(), &case.args, case.status);
+        let name = format!("mara {} at {size}×", case.args.join(" "));
+        // The configuration and the schema; for a check, also the root `.gitignore` and every
+        // document. `.git`, ignored and undeclared files are never read. No code is read and
+        // no program runs.
+        let expected = match case.reads {
+            Reads::Schema => WorkCounts {
+                file_reads: 2,
+                hashes: 2,
+                ..WorkCounts::default()
+            },
+            Reads::Checked => WorkCounts {
+                file_reads: documents + 3,
+                hashes: documents + 3,
+                parses: documents - 1,
+                snapshot_builds: 1,
+                check_steps: run.work.check_steps,
+                ..WorkCounts::default()
+            },
+        };
+        assert_eq!(run.work, expected, "{name}");
+        // Built-in checks visit each item twice and each edge once, and the items and edges of
+        // acyclic relations once more (REQ-NEAR-LINEAR-SCALING).
+        if case.reads == Reads::Checked {
+            let steps = run.work.check_steps;
+            let (items, edges) = (corpus.items as u64, corpus.edges as u64);
+            assert!(
+                (2 * items + edges..=3 * items + 2 * edges).contains(&steps),
+                "{name}: {steps} check steps for {items} items and {edges} edges"
+            );
+        }
+    }
+}
+
+/// Late metadata and many incoming edges: each visit's work is bounded, so the check steps are
+/// exactly the visits (DES-PERFORMANCE-HARNESS).
+#[test]
+fn hub_counts() {
+    for size in PULL_REQUEST_SIZES {
+        let hub = Hub::generate(size);
+        let run = cli::run(hub.root(), &["project", "validate"], 0);
+        let documents = hub.edges.div_ceil(100) as u64 + 1;
+        let (items, edges) = (hub.items as u64, hub.edges as u64);
+        let expected = WorkCounts {
+            file_reads: documents + 2,
+            hashes: documents + 2,
+            parses: documents,
+            snapshot_builds: 1,
+            // The facts and item passes, the edge pass, and the cycle pass over every edge and
+            // item of the acyclic `refines`.
+            check_steps: 2 * items + edges + (items + edges),
+            ..WorkCounts::default()
+        };
+        assert_eq!(run.work, expected, "hub at {size}×");
+    }
 }
 
 /// Input tracking and the snapshot build below the CLI: a cold build, then builds in the same

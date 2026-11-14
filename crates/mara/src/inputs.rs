@@ -15,7 +15,7 @@ use std::time::SystemTime;
 use ignore::Match;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use mara_engine::config::Config;
-use mara_engine::diagnostic::{Diagnostic, Severity};
+use mara_engine::diagnostic::Diagnostic;
 use mara_engine::document::DocumentKey;
 use mara_engine::pattern::{Patterns, Positions};
 use mara_engine::snapshot::{DocumentInput, ParsedFile, Snapshot, SnapshotInputs};
@@ -415,13 +415,8 @@ impl<'w> Walk<'w> {
     }
 
     fn problem_at(&mut self, code: &'static str, path: String, line: usize, message: String) {
-        self.diagnostics.push(Diagnostic {
-            code,
-            severity: Severity::Error,
-            message,
-            path,
-            line,
-        });
+        self.diagnostics
+            .push(Diagnostic::error(code, path, line, message));
     }
 }
 

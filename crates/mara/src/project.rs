@@ -52,6 +52,32 @@ impl SelectError {
             Self::Io { .. } => "io-error",
         }
     }
+
+    /// A problem with a directory's `.mara` as a diagnostic of that directory's project: at
+    /// line 1 of its configuration, as loading reports it, or of the file in `.mara` that
+    /// cannot be examined (DES-PROJECT-CONFIGURATION). Every other selection problem lies
+    /// outside any project and has no location.
+    pub fn diagnostic(&self) -> Option<Diagnostic> {
+        let (Self::SymbolicLink { path } | Self::Io { path, .. }) = self else {
+            return None;
+        };
+        fn name(path: &Path) -> Option<&str> {
+            path.file_name().and_then(|name| name.to_str())
+        }
+        let relative = if name(path) == Some(".mara") {
+            CONFIG_PATH.to_owned()
+        } else if path.parent().and_then(name) == Some(".mara") {
+            format!(".mara/{}", name(path)?)
+        } else {
+            return None;
+        };
+        Some(Diagnostic::error(
+            self.code(),
+            relative,
+            1,
+            self.to_string(),
+        ))
+    }
 }
 
 impl fmt::Display for SelectError {
@@ -215,7 +241,7 @@ impl ProjectFiles {
                 read
             }
             Err(diagnostic) => {
-                diagnostics.push(diagnostic);
+                diagnostics.push(*diagnostic);
                 (Config::default(), None)
             }
         };
@@ -237,7 +263,7 @@ impl ProjectFiles {
                     (schema, schema_hash) = (read.clone(), Some(tracked.hash));
                     self.schema = Some((path.to_owned(), tracked));
                 }
-                Err(diagnostic) => diagnostics.push(diagnostic),
+                Err(diagnostic) => diagnostics.push(*diagnostic),
             }
         }
         diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
@@ -261,7 +287,7 @@ fn track<T>(
     previous: Option<Tracked<T>>,
     request: &mut Request<'_>,
     derive: impl FnOnce(&[u8]) -> T,
-) -> Result<Tracked<T>, Diagnostic> {
+) -> Result<Tracked<T>, Box<Diagnostic>> {
     Ok(match check(root, relative, line, previous, request)? {
         Check::Kept(tracked) => tracked,
         Check::Read(read) => {
@@ -282,14 +308,8 @@ fn check<T>(
     line: usize,
     previous: Option<Tracked<T>>,
     request: &mut Request<'_>,
-) -> Result<Check<T>, Diagnostic> {
-    let at = |code, message| Diagnostic {
-        code,
-        severity: Severity::Error,
-        message,
-        path: CONFIG_PATH.to_owned(),
-        line,
-    };
+) -> Result<Check<T>, Box<Diagnostic>> {
+    let at = |code, message| Box::new(Diagnostic::error(code, CONFIG_PATH, line, message));
     let parts: Vec<&str> = relative.split('/').collect();
     let mut path = root.to_owned();
     let mut last: Option<Metadata> = None;
@@ -349,12 +369,7 @@ fn symbolic_link_message(path: &dyn fmt::Display) -> String {
     )
 }
 
-fn io_error(path: &str, line: usize, unreadable: &str, error: &io::Error) -> Diagnostic {
-    Diagnostic {
-        code: "io-error",
-        severity: Severity::Error,
-        message: format!("cannot read {unreadable}: {error}"),
-        path: path.to_owned(),
-        line,
-    }
+fn io_error(path: &str, line: usize, unreadable: &str, error: &io::Error) -> Box<Diagnostic> {
+    let message = format!("cannot read {unreadable}: {error}");
+    Box::new(Diagnostic::error("io-error", path, line, message))
 }

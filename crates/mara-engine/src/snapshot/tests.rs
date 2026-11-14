@@ -110,6 +110,38 @@ fn holds_documents_by_path_and_items_in_source_order() {
 }
 
 #[test]
+fn a_row_is_a_relation_edge_only_where_the_items_type_is_a_source() {
+    let schema = format!(
+        "{SCHEMA}\n[types.note]\nid_prefix = \"NOTE-\"\ndescription = \"A note.\"\n\n\
+         [types.note.fields.satisfies]\nkind = \"text\"\n\n\
+         [relations.implements]\ninverse = \"implemented_by\"\ndescription = \"Code.\"\n\
+         targets = {{ code = [\"requirement\"] }}\n"
+    );
+    let (schema, diagnostics) = parse_schema(".mara/schema.toml", schema.as_bytes());
+    assert_eq!(diagnostics, []);
+    let link = format!("| Satisfies | [REQ-BETA](#{B}) |\n| Implements | [REQ-BETA](#{B}) |\n");
+    let typed = |mid: &str, kind: &str| {
+        item(mid, "Typed", "", "")
+            .replace("| Type | Requirement |", &format!("| Type | {kind} |"))
+            .replace("| --- | --- |\n", &format!("| --- | --- |\n{link}"))
+    };
+    let text = [typed(A, "Requirement"), typed(B, "Note"), typed(C, "Code")].join("\n---\n\n");
+    let snapshot = build(
+        vec![input("a.mara.md", &text)],
+        Some(Arc::new(schema.unwrap())),
+    );
+    let relations: Vec<Vec<Option<&str>>> = (0..3)
+        .map(|item| {
+            let outgoing = snapshot.outgoing(item).iter();
+            outgoing.map(|edge| snapshot.relation(edge)).collect()
+        })
+        .collect();
+    // A requirement is a source of `satisfies`; a note has a field of that name; an item of
+    // type `Code` is of no declared type, and the `code` source stands for code markers.
+    assert_eq!(relations, [vec![Some("satisfies")], vec![], vec![]]);
+}
+
+#[test]
 fn maps_mids_and_ids_to_every_item_that_has_them() {
     let snapshot = example();
     assert_eq!(snapshot.items_with_mid(A), [0]);
@@ -118,6 +150,11 @@ fn maps_mids_and_ids_to_every_item_that_has_them() {
     assert_eq!(snapshot.items_with_id("REQ-ALPHA"), [0, 2]);
     assert_eq!(snapshot.items_with_id("REQ-BETA"), [1]);
     assert_eq!(snapshot.items_with_id("REQ-GAMMA"), [] as [usize; 0]);
+    // An item that repeats its `ID` row is held once, under each of its values.
+    let rows = "| ID | REQ-A |\n| ID | REQ-B |\n| ID | REQ-A |\n| Status | Draft |\n";
+    let snapshot = build(vec![input("a.mara.md", &item(A, "A", rows, "A."))], None);
+    assert_eq!(snapshot.items_with_id("REQ-A"), [0]);
+    assert_eq!(snapshot.items_with_id("REQ-B"), [0]);
 }
 
 #[test]

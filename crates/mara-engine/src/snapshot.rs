@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::document::{self, Document, DocumentKey, Item, Link, Posting, is_mid};
+use crate::document::{self, Document, DocumentKey, Item, Link, Posting, is_mid, label_name};
 use crate::hash::{Hash, KeyHasher};
 use crate::schema::Schema;
 use crate::work::WorkCounts;
@@ -98,8 +98,9 @@ impl SnapshotInputs {
     }
 
     /// Builds the snapshot in one pass over the documents' items, rows, links and words, and
-    /// counts one snapshot build in `work`. A row is a relation edge when the schema declares
-    /// a relation of its name and its value is a link to a MID; every mention is an edge.
+    /// counts one snapshot build in `work`. A row is a relation edge when the item's type is a
+    /// source of a relation of the row's name ([`Schema::relation_from`]) and its value is a
+    /// link to a MID; every mention is an edge.
     pub fn build(self, work: &mut WorkCounts) -> Snapshot {
         work.snapshot_builds += 1;
         let SnapshotInputs {
@@ -230,7 +231,8 @@ impl Snapshot {
         self.mids.get(mid).map_or(&[], Vec::as_slice)
     }
 
-    /// The items with an `ID` row whose value is `id`: one, unless the project repeats it.
+    /// The items with an `ID` row whose value is `id`, each once: one, unless the project
+    /// repeats it.
     pub fn items_with_id(&self, id: &str) -> &[usize] {
         self.ids.get(id).map_or(&[], Vec::as_slice)
     }
@@ -293,11 +295,12 @@ impl Snapshot {
                 add(&mut self.ids, &row.value, at);
             }
             let start = self.edges.len();
+            let kind = label_name(item.value("type").unwrap_or_default());
             for (row, value) in item.rows.iter().enumerate() {
                 let relation = self
                     .schema
                     .as_ref()
-                    .is_some_and(|schema| schema.relations.contains_key(&value.name));
+                    .is_some_and(|schema| schema.relation_from(&kind, &value.name).is_some());
                 if let Some(link) = value.link.as_ref().filter(|_| relation) {
                     self.add_edge(index, Some(at), EdgeSource::Row(row), link);
                 }
@@ -350,9 +353,11 @@ impl Snapshot {
     }
 }
 
-/// Adds `value` to the values of `key`, copying the key only when it is new.
+/// Adds `value` to the values of `key` unless it is already the last of them, so that an item
+/// that repeats an `ID` row is held once. Copies the key only when it is new.
 fn add(map: &mut HashMap<String, Vec<usize>>, key: &str, value: usize) {
     match map.get_mut(key) {
+        Some(values) if values.last() == Some(&value) => {}
         Some(values) => values.push(value),
         None => {
             map.insert(key.to_owned(), vec![value]);

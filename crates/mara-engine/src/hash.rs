@@ -20,6 +20,24 @@ impl Hash {
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
+
+    /// The hash whose lowercase hexadecimal form ([`fmt::Display`]) is `text`.
+    pub fn from_hex(text: &str) -> Option<Hash> {
+        let bytes = text.as_bytes();
+        if bytes.len() != 64 {
+            return None;
+        }
+        let digit = |byte: u8| match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            _ => None,
+        };
+        let mut hash = [0; 32];
+        for (index, pair) in bytes.chunks(2).enumerate() {
+            hash[index] = digit(pair[0])? << 4 | digit(pair[1])?;
+        }
+        Some(Hash(hash))
+    }
 }
 
 impl fmt::Display for Hash {
@@ -125,5 +143,14 @@ mod tests {
         };
         let zero = Hash([0; 32]);
         assert_ne!(optional(None), optional(Some(&zero)));
+    }
+
+    #[test]
+    fn reads_back_its_hexadecimal_form() {
+        let hash = Hash::of_file(b"a", &mut WorkCounts::default());
+        assert_eq!(Hash::from_hex(&hash.to_string()), Some(hash));
+        assert_eq!(Hash::from_hex(&hash.to_string().to_uppercase()), None);
+        assert_eq!(Hash::from_hex("ab"), None);
+        assert_eq!(Hash::from_hex(&"g".repeat(64)), None);
     }
 }

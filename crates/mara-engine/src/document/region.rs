@@ -675,6 +675,7 @@ impl<'t> Reader<'t> {
             mentions,
             span: start..end,
             line: self.lines.line(start),
+            end_line: self.lines.line(end.saturating_sub(1).max(start)),
             body,
         });
     }

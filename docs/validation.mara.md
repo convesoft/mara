@@ -84,7 +84,34 @@ Implemented in Rust, always on, linear in items plus edges.
 | Links | Relation and mention targets exist; paths and relation link text are current ([DES-RELATION-LINKS](identity.mara.md#01M7BF6H29JGHG65SV91K6D11V)) |
 | Relations | Target type allowed for the source type, same-type relations, acyclic relations ([DES-SCHEMA-MODEL](project.mara.md#01M7BF6HA0KG3R3AATWM1P2X1G)) |
 
-Parsing reports the Document structure failures and the malformed metadata rows of each document on its own.
+Parsing reports the Document structure failures and the malformed metadata rows of each document on its own, with the codes of the pages linked above. The other checks have these codes:
+
+| Code | Problem | Reported at |
+| --- | --- | --- |
+| `undeclared-type` | A `Type` value names no type of the schema | The row |
+| `missing-row` | No `ID` or `Status` row, or no row of a required field | The anchor |
+| `duplicate-row` | The row repeats the key and value of an earlier row | The later row |
+| `repeated-key` | Another value for `Type`, `ID`, `Status` or a field that is not repeatable | The later row |
+| `undeclared-key` | A key that is no field of the item's type and no relation that leads from it | The row |
+| `invalid-value` | A `Status` outside the schema's statuses, or a value outside its field's values | The row |
+| `invalid-id` | An `ID` value not of the form of [DES-ITEM-IDS](identity.mara.md#01M7BF6H1ZBTKWTF9ZXEJ8EBGS) | The row |
+| `wrong-id-prefix` | An `ID` value without its type's prefix | The row |
+| `duplicate-mid` | An earlier item has the MID | The anchor |
+| `duplicate-id` | An earlier item has the ID | The `ID` row |
+| `bare-id-value` | A relation row's value that is an ID, not a link | The row |
+| `invalid-relation-value` | Any other relation row's value that is no link to a MID | The row |
+| `broken-link` | No item has the link's MID | The link |
+| `stale-link-path` | The link's path, resolved from the linking file, does not name the file that holds the MID | The link |
+| `stale-link-text` | A relation link's text is not the target's ID | The link |
+| `disallowed-target` | The relation does not lead from the source's type to the target's | The link |
+| `relation-cycle` | Links of an acyclic relation form a cycle | Its first link |
+
+- Earlier and first are in path and line order. A problem that several items share, a repeated MID or ID or a cycle, is reported once to the project and to the validation of each item it concerns, there at that item's own anchor, row or link.
+- The first `Type` row gives the item's type. A row's key names a field of that type, a relation that the type is a source of ([DES-SNAPSHOT](engine.mara.md#01M7BF6GYM8NPPGY9RZRF38EGE)), or neither, which is `undeclared-key`; only a relation row is an edge.
+- Every row's value is checked on its own, a repeated one included. The first row of a single-valued key gives the item's value for the other checks. A shared problem stays once per item when rows repeat: an exact repeat of an `ID` row has its own form and prefix checked, not the uniqueness of its value.
+- A check that needs a declaration the schema lacks does not run: without a schema, or for an item of an undeclared type. The problem that keeps the declaration out is reported instead.
+- A link path is percent-decoded and resolved like a relative URL. An absolute path, or one that leaves the project root, is stale. A link to a MID that several items have is not checked further.
+- A message quotes at most 100 characters of a value, and lists at most 10 names followed by `and <N> more` for the rest.
 
 Conditional obligations, such as "an accepted Verification verifies an accepted Requirement", are project logic ([DES-RULE-CONSUMERS](rules.mara.md#01M7BF6HE529B61Q2ZNXFQ1JXE)).
 
@@ -106,3 +133,8 @@ Conditional obligations, such as "an accepted Verification verifies an accepted 
 - Every built-in check failure is an error. A warning comes only from an invariant that declares that severity.
 - A result carries the project's validity and its error and warning counts, then one page of diagnostics in path and line order.
 - The CLI prints each diagnostic as `<path>:<line>: <severity>[<code>]: <message>`.
+- Validity and counts cover the target. `project validate` targets the whole project. `item validate <ID or MID>` targets the diagnostics of that item and fails with `unknown-item` or `ambiguous-item` when no item or several have the handle. `schema validate` targets the diagnostics of the schema file and those of the configuration at the line that names the schema, or every configuration diagnostic when it names no schema, and reads no document.
+- `--limit` and `--cursor` page every target ([REQ-PAGE-LIMITS](retrieval.mara.md#01M7CMW719S9H8FQKRFWWQ6NQK), [DES-PAGING](retrieval.mara.md#01M7BF6HCCWQH6P13ZR2YHAPS0)). `project validate --path <path>`, repeatable and relative to the project root, keeps the diagnostics in that file or below that directory. As in 0.3.0, empty and `.` parts and a trailing `/` are dropped, and an absolute path, a `..` part or the root itself is rejected. The normalized paths, sorted and without repeats, enter the result key.
+- A result's key also covers the code, path and line of each diagnostic that no input key covers, such as an input that cannot be read.
+- The JSON result is `format_version` (1), `valid`, `errors`, `warnings`, `diagnostics` and `next_cursor`, `null` on the last page. A diagnostic is `code`, `severity`, `message`, `path`, `line`, `id` and `mid`; `id` and `mid` are `null` outside an item.
+- The human form prints the page's diagnostics, then `valid` or `invalid` with the counts, then the next cursor.

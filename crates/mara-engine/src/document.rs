@@ -16,7 +16,7 @@ use std::ops::Range;
 
 use pulldown_cmark::{Options, Parser};
 
-use crate::diagnostic::{Diagnostic, Severity};
+use crate::diagnostic::Diagnostic;
 use crate::hash::Hash;
 use crate::work::WorkCounts;
 
@@ -105,6 +105,8 @@ pub struct Item {
     pub span: Range<usize>,
     /// The anchor's line.
     pub line: usize,
+    /// The line of the item's last byte.
+    pub end_line: usize,
     /// Bytes of the blocks after the metadata table; empty at the table's end when there are none.
     pub body: Range<usize>,
 }
@@ -183,12 +185,8 @@ impl Document {
     /// The problems found, as diagnostics of the document at `path`, in line order. Every one is
     /// an error.
     pub fn diagnostics<'a>(&'a self, path: &'a str) -> impl Iterator<Item = Diagnostic> + 'a {
-        self.problems.iter().map(move |problem| Diagnostic {
-            code: problem.code,
-            severity: Severity::Error,
-            message: problem.message.clone(),
-            path: path.to_owned(),
-            line: problem.line,
+        self.problems.iter().map(move |problem| {
+            Diagnostic::error(problem.code, path, problem.line, problem.message.clone())
         })
     }
 }

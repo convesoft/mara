@@ -96,3 +96,16 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 | `prime` | Prints the agent guide ([DES-AGENT-GUIDE](agents.mara.md#01M7BGRHWQHQJJHC6XCXVDWDM8)) |
 
 - An MCP server takes the project on each call, or is bound to one project when started with `--project`.
+- The CLI's global options stand anywhere: `--project <dir>`, `--format human|json` (default `human`) and `--debug-stats` ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)). An operation's options follow its words, as `--<name> <value>` or `--<name>=<value>`. Bare `mara` prints the usage and exits 0.
+- Exit status: 0 for a valid result or a successful operation, 1 for an invalid result or a failed request, 2 for rejected arguments.
+- `--format json` prints one JSON object on stdout: the result, or `{"format_version": 1, "error": {"code", "message", "diagnostics"}}` when the request fails, `diagnostics` holding the problems in project files that caused it. Each result also carries `format_version` 1.
+- The human form prints a result on stdout, and a failure on stderr as `mara: error[<code>]: <message>` followed by its diagnostics ([DES-DIAGNOSTICS](validation.mara.md#01M7CMW71GXWZS8HPVVTYPENDK)).
+- Besides the selection codes of [DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27), a request fails with these codes; a failure's message lists names as a diagnostic's does ([DES-SCHEMA-CHECKS](validation.mara.md#01M7BF6HG7AQZ9FM38CMT4BTHR)):
+
+| Code | Failure |
+| --- | --- |
+| `invalid-argument` | An option or argument the operation does not declare, a missing, repeated or malformed one (exit status 2) |
+| `unknown-item` | No item has the ID or MID given |
+| `ambiguous-item` | Several items have the ID or MID given |
+| `stale-cursor` | The cursor belongs to another result |
+| `record-too-large` | A record exceeds a page ([DES-PAGING](retrieval.mara.md#01M7BF6HCCWQH6P13ZR2YHAPS0)) |
