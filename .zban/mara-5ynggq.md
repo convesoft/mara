@@ -186,3 +186,18 @@ Filed: mara-kx7fhh (the hub case catches the per-edge row scan by only 0.06–0.
 Snapshot build at 16× and 64× (median of three alternating rounds against 1fa35f4, release): build 22.9 → 25.0 ms and 99.4 → 116.5 ms; parse 40.9 → 45.1 ms and 166 → 183 ms; the vocabulary index, built on first use, 0.5 ms and 2.3 ms.
 
 Checks: the six local checks of AGENTS.md at the final head, and the 64× cases.
+
+## Reviewed by the maintainer
+
+The orchestrator puts the listed decisions to the maintainer as questions and records each answer here. A decision not named below has not been reviewed yet.
+
+### 2026-11-15, first batch: four decisions accepted
+
+Each entry gives the question as asked and the chosen option with its description, word for word.
+
+- mara-8d6cnw, a `.gitignore` that cannot be applied. Question: "alpha.1 review (mara-5ynggq), worker decision on `.gitignore`: when a `.gitignore` cannot be applied (unreadable, a symbolic link, or a pattern the `ignore` crate refuses), Mara reports an error at that file and treats nothing in its directory or below as an input, because any file there might be one it ignores. Accept?" Answer: "Accept (Recommended) — Keep it. One bad `.gitignore` hides the documents below it until it is fixed, but always with an error naming the file, and Mara never reads a file Git would ignore." Not chosen: ignoring that file's patterns.
+- mara-8d6cnw, symbolic links among documents. Question: "alpha.1 review, worker decision on symbolic links among documents: Mara follows no link. A link that an include pattern matches as a document is the error `symbolic-link` and is not read; any other link, including a linked directory, is skipped silently like an undeclared file. Accept?" Answer: "Accept (Recommended) — Keep it. No operation can read a file outside the project through a link, and links no pattern declares (such as this repository's `CLAUDE.md`) cause no noise. Documents inside a linked directory are silently not part of the project." Not chosen: reporting linked directories; following links inside the project.
+- mara-b52dg3, a missing `format_version`. Question: "alpha.1 review, worker decision on configuration and schema files: a file without `format_version` is an error; the rest of the file is still checked as version 1 so that its other problems are reported. Accept?" Answer: "Accept (Recommended) — Keep it. Every `.mara/config.toml` and schema file must state `format_version = 1`, as the Accepted item says each file carries one. A hand-written file that omits it does not load until the line is added." Not chosen: defaulting to 1.
+- mara-b52dg3, `--project`. Question: "alpha.1 review, worker decision on `--project`: the option names the project root itself (the directory that holds `.mara`), relative to the working directory, and is not searched upward from. `--project docs/` inside a project is refused with `not-a-project`. Accept?" Answer: "Accept (Recommended) — Keep it. An explicit `--project` never silently selects a different project than the one named; without the option Mara still searches upward from the working directory." Not chosen: searching upward from the named directory.
+
+Asked but not answered (the dialog was dismissed), still open: the page limit outside 1–100 being refused instead of clamped (mara-bmc9gc); the typo-tolerance rule (mara-bmc9gc); a relation row whose type is not a source of the relation being `undeclared-key` and no edge (mara-000f9q); bare `mara` printing the usage with exit status 0 (mara-000f9q).
