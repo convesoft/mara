@@ -443,7 +443,7 @@ fn join(directory: &str, name: &str) -> String {
 
 /// Whether the `.gitignore` files `ignores`, root first, ignore `path`. The deepest file that
 /// has a matching pattern decides, and within a file the last matching pattern, as in Git.
-fn ignored(ignores: &[(String, Arc<Gitignore>)], path: &str, is_dir: bool) -> bool {
+pub(crate) fn ignored(ignores: &[(String, Arc<Gitignore>)], path: &str, is_dir: bool) -> bool {
     ignores
         .iter()
         .rev()
@@ -469,7 +469,7 @@ const UNSUPPORTED_GITIGNORE: &str = "unsupported-gitignore";
 /// skipped, and a CR before each LF removed. The crate takes a pattern only as text, and its
 /// reasons are kept: a line that is not UTF-8, and a pattern it cannot compile, give the line;
 /// a pattern set it cannot compile gives line 1. A file with any of them is never used in part.
-fn compile_gitignore(contents: &[u8]) -> Result<Gitignore, (usize, String)> {
+pub(crate) fn compile_gitignore(contents: &[u8]) -> Result<Gitignore, (usize, String)> {
     // The root `.` keeps the matcher from stripping any prefix of the paths it is given.
     let mut builder = GitignoreBuilder::new(".");
     let contents = contents.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(contents);

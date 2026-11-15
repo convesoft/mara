@@ -3,6 +3,7 @@
 //! (DES-PERFORMANCE-HARNESS in `docs/performance.mara.md`).
 
 mod cli;
+mod convert;
 mod corpus;
 mod cpu_time;
 mod init;

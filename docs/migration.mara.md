@@ -45,15 +45,31 @@ A one-shot converter rewrites a 0.3.0 project (its `:::mara` documents, schema a
 | `status` fields of the flavours | The schema's status list: the union of their values |
 | Field of type `string` | Field of kind `text` |
 | Field of type `integer`, `number` or `boolean` | Field of kind `text`; reported |
-| Relation with source and target lists | Every source type allows every listed target type |
+| Relation with source and target lists | Every source type allows every listed target type; with `same_flavour`, each source type that is also a target allows only itself |
+| Relation without an inverse name | Inverse name `inverse_of_<name>`; reported |
+| `code_source` relation | Source `code` with the listed targets |
+| `acyclic` of severity `error`; of severity `warning`, or `cardinality` | `acyclic = true`; left out and reported |
+| `[[ID]]` or `[[MID]]` that names no item; relation row whose target names no item | Kept as text and reported; a row with the bare value, or, under the inverse name, left out and reported |
 | YAML rule files, SCIP commands, schema guidance other than `description` | Left out; reported |
 | Include pattern with brace alternatives or a character class | Kept as written, where they match themselves ([DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27)); reported |
 
-- An item without a status gets the status the user names for the run.
+- An item without a status gets the status the user names for the run, `project convert --status <status>`, a status name or label. It joins the status list when no flavour has it. Without it, items without a status, or flavours with no status value, refuse the run with `invalid-argument` and a diagnostic at each such item.
+- Each `:::mara` block becomes an item in its place, with the item writer's anchor, heading, table and separators ([DES-ITEM-WRITER](authoring.mara.md#01M7BF6GP2Z6R1VCQMQ6ZZB218)). Its heading is one level below the last narrative heading before it, at most 6, or level 2 when none precedes it. Its title is its `:title:`, or its ID when it has none. A block without a valid `:mid:` gets a new MID. Both are reported.
+- A metadata key that the item's flavour declares as a field is a field, even when another flavour's relation has that name.
+- Rows follow `Type` and `ID` in metadata order, a missing status after `ID`, then the rows that inline relations and other items' inverse assertions give it, in path and line order.
+- A `<hr>` that text follows directly gets a blank line after it, so that it opens no HTML block that takes the text in.
+- Narrative keeps its bytes but for its mentions: a setext heading there stays, and validation reports it.
+- Documents are found as 0.3.0 found them: the include patterns read with `globset`, brace alternatives and character classes included, and `.gitignore` files applied. `.git`, symbolic links and other projects' roots are skipped, as in the input inventory ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)). The YAML schema is read with `granit-parser`, the parser 0.3.0 used. Flags take the spellings 0.3.0 took: `true`, `yes`, `y`, `on` and their opposites, in any case. A value that cannot be read as what its key needs is left out and reported. A YAML merge key `<<` is not applied: what it would bring in is left out, and the merge key is reported.
+- Values that become no schema name refuse the run like two values that become one label.
+- The converted schema is `.mara/schema.toml`. The 0.3.0 configuration, schema and rule files stay where they are.
+- Each converted document is parsed once before anything is written, and the run is refused with `unreadable-edit` unless the document reads exactly the items written, with their rows ([ADR-READ-BACK-EVERY-EDIT](authoring.mara.md#01M7FH6HEWNYQ66F5KE912BQSM)). The check compares each item's MID, its rows' keys and values and whether its body holds anything, and that no other item appears; unlike the writer's read-back, it does not compare narrative or references.
+- A document that holds items and no `:::mara` block is already converted. A rerun changes in it only the rows that other documents' assertions give its items, and computes no entry from it, since its lines are no longer those the report names.
+- The report entry of a generated MID names it. A rerun gives the block, found by its document and ID, the MID that a recorded entry names, so that the links converted documents already hold keep resolving.
+- `project convert` of a project that is not a 0.3.0 project fails with `not-a-legacy-project`.
 - When two values of one field, or two statuses, become the same label ([DES-METADATA-TABLE](format.mara.md#01M7BF6GZNS6VM3T94VS9A5HTD)), the converter writes nothing and reports each pair.
 - A valid 0.3.0 project converts into a valid project, except for the items reported for the author to complete.
 - The converter writes each file as [DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) does: the report file first, then the documents, and the configuration last. An interrupted run leaves a 0.3.0 project that every other operation refuses with `legacy-project`; a rerun keeps the documents already converted and writes the files an uninterrupted run writes ([ADR-CONVERSION-RERUN](#01M7F9N0J8E9GJPCEATS4MQX7T)).
-- The report file, `.mara/conversion-report.json`, holds the whole report before any document is written and stays as the record of the conversion ([ADR-CONVERSION-REPORT-FILE](#01M7FCAD62YSR955FCEE8AEDR7)). It is a JSON object of `format_version` (1) and `entries`, in path and line order. An entry is the `path` of the 0.3.0 file it concerns, relative to the project root, a `line` there and a `message`. The result returns the same entries.
+- The report file, `.mara/conversion-report.json`, holds the whole report before any document is written and stays as the record of the conversion ([ADR-CONVERSION-REPORT-FILE](#01M7FCAD62YSR955FCEE8AEDR7)). It is a JSON object of `format_version` (1) and `entries`, in path, line and message order, one entry per line. An entry is the `path` of the 0.3.0 file it concerns, relative to the project root, a `line` there and a `message`. The result is `format_version` (1), the `files` written, in order, and the same `entries`.
 - A rerun keeps every entry already in the report file, adds each entry it computes that the file does not hold with the same path, line and message, writes the whole report to the file and returns it. No recorded entry is ever dropped: one whose line no longer matches its file stays as recorded, and when the rerun finds the same omission at another line, the report holds both.
 - An existing report file that is not a regular file, cannot be read as that object, or has another `format_version` refuses the conversion with a diagnostic at that file, and nothing is written.
 

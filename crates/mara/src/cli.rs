@@ -7,6 +7,7 @@
 //! case to the performance harness (`crates/mara/tests/performance/`).
 
 mod author;
+mod convert;
 mod fix;
 mod init;
 mod read;
@@ -32,6 +33,7 @@ const OPERATIONS: &[Operation] = &[
     validate::PROJECT,
     init::PROJECT,
     fix::PROJECT,
+    convert::PROJECT_CONVERT,
     validate::ITEM,
     validate::SCHEMA,
     read::SEARCH,

@@ -101,6 +101,7 @@ Order across files:
 | Move | Destination file, then removal from the source file, then inbound link paths | Works while the item is in both files: the move skips the first step when the destination already holds the item as the move would write it, wherever in that file |
 | Rename | Code markers that name the old ID and the text of mentions whose text is the old ID, then the item's `ID` row, then the text of inbound relation links ([ADR-MENTIONS-BEFORE-ID-ROW](#01M7FAG325QB1J18HQQQFMBJDS)) | Works while the old ID still resolves; after the `ID` row only stale relation link text is left |
 | Fix | Each changed document in path order ([DES-FIX-REPAIRS](authoring-requests.mara.md#01M7FWM48HHP0HHM6S86P6R499)) | Works: each document's repairs depend on no other document |
+| Conversion | The report file, each changed document in path order, the schema, the configuration last ([DES-CONVERSION-MAPPING](migration.mara.md#01M7CMW71TXDY6VCTJS7XNSQRM)) | Works: until the configuration is written the project is a 0.3.0 project, which a rerun completes ([ADR-CONVERSION-RERUN](migration.mara.md#01M7F9N0J8E9GJPCEATS4MQX7T)) |
 
 - A file is written once, with every change the edit makes to it, at the first step that changes it, other files of one step in path order. A rename writes the item's file at the `ID` row step, after every other file with mention text.
 

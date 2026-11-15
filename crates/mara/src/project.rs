@@ -110,6 +110,14 @@ impl std::error::Error for SelectError {}
 /// or else the nearest of `start` and its ancestors that is a project root. A 0.3.0 project is
 /// refused.
 pub fn select(start: &Path, project: Option<&Path>) -> Result<PathBuf, SelectError> {
+    match find(start, project)? {
+        (root, Root::Project) => Ok(root),
+        (root, Root::Legacy) => Err(SelectError::Legacy { root }),
+    }
+}
+
+/// [`select`], keeping a 0.3.0 project's root with its kind: the conversion's selection.
+pub fn find(start: &Path, project: Option<&Path>) -> Result<(PathBuf, Root), SelectError> {
     let canonical =
         |path: PathBuf| fs::canonicalize(&path).map_err(|error| SelectError::Io { path, error });
     let start = canonical(start.to_owned())?;
@@ -130,10 +138,7 @@ pub fn select(start: &Path, project: Option<&Path>) -> Result<PathBuf, SelectErr
             return Err(SelectError::NoProject { start });
         }
     };
-    match kind {
-        Root::Project => Ok(root),
-        Root::Legacy => Err(SelectError::Legacy { root }),
-    }
+    Ok((root, kind))
 }
 
 /// Whether `directory` is the root of a project or of a 0.3.0 project. A `.mara` that is a
