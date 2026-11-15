@@ -1,6 +1,6 @@
 ---
 title: Item writer and write procedure
-status: todo
+status: in-progress
 type: feature
 parent: mara-6k50w0
 created_at: 2026-11-13T22:10:06Z
