@@ -52,6 +52,48 @@ A one-shot converter rewrites a 0.3.0 project (its `:::mara` documents, schema a
 - An item without a status gets the status the user names for the run.
 - When two values of one field, or two statuses, become the same label ([DES-METADATA-TABLE](format.mara.md#01M7BF6GZNS6VM3T94VS9A5HTD)), the converter writes nothing and reports each pair.
 - A valid 0.3.0 project converts into a valid project, except for the items reported for the author to complete.
+- The converter writes each file as [DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) does: the report file first, then the documents, and the configuration last. An interrupted run leaves a 0.3.0 project that every other operation refuses with `legacy-project`; a rerun keeps the documents already converted and writes the files an uninterrupted run writes ([ADR-CONVERSION-RERUN](#01M7F9N0J8E9GJPCEATS4MQX7T)).
+- The report file, `.mara/conversion-report.json`, holds the whole report before any document is written and stays as the record of the conversion ([ADR-CONVERSION-REPORT-FILE](#01M7FCAD62YSR955FCEE8AEDR7)). It is a JSON object of `format_version` (1) and `entries`, in path and line order. An entry is the `path` of the 0.3.0 file it concerns, relative to the project root, a `line` there and a `message`. The result returns the same entries.
+- A rerun keeps every entry already in the report file, adds each entry it computes that the file does not hold with the same path, line and message, writes the whole report to the file and returns it. No recorded entry is ever dropped: one whose line no longer matches its file stays as recorded, and when the rerun finds the same omission at another line, the report holds both.
+- An existing report file that is not a regular file, cannot be read as that object, or has another `format_version` refuses the conversion with a diagnostic at that file, and nothing is written.
+
+---
+
+## Decisions
+
+---
+
+<a id="01M7F9N0J8E9GJPCEATS4MQX7T"></a>
+
+### Complete an interrupted conversion by rerunning it
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-CONVERSION-RERUN |
+| Status | Accepted |
+| Justifies | [REQ-INTERRUPTED-EDIT-LOSES-NOTHING](writes.mara.md#01M7BF6HJ3758Y06V61901ZSKK) |
+| Justifies | [DES-CONVERSION-MAPPING](#01M7CMW71TXDY6VCTJS7XNSQRM) |
+
+- Chosen by the maintainer on 2026-11-15: the documents first and the configuration last, so an interrupted conversion leaves a 0.3.0 project that rerunning the conversion completes, and that leftover joins those of [REQ-INTERRUPTED-EDIT-LOSES-NOTHING](writes.mara.md#01M7BF6HJ3758Y06V61901ZSKK). No user data is lost.
+- Rejected: holding the conversion to the leftovers of the other edits. A partly converted project is none of them.
+- Rejected: the configuration first. A 0.4.0 project would read the unconverted `:::mara` blocks as narrative, so their items would drop out without a diagnostic.
+
+---
+
+<a id="01M7FCAD62YSR955FCEE8AEDR7"></a>
+
+### Keep the conversion report in a file written before the documents
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-CONVERSION-REPORT-FILE |
+| Status | Accepted |
+| Justifies | [REQ-CONVERT-DIRECTIVE-CORPUS](#01M7BF6H30RYJTH5Z2YERBJ690) |
+| Justifies | [DES-CONVERSION-MAPPING](#01M7CMW71TXDY6VCTJS7XNSQRM) |
+
+- Chosen by the maintainer on 2026-11-15: before writing any document, the converter writes the whole report to a file in the project with its own format version. The file stays as the record of the conversion, and a rerun keeps the entries of documents already converted and returns the whole report. It is complete on every surface and survives a power loss, at the cost of one persisted file in every converted project.
+- Rejected: printing the report before the first write. With `--format json`, through MCP or with a lost terminal, an interrupted run would still lose the omissions of the documents it had converted.
+- Rejected: keeping the dropped text in the converted document as an HTML comment. Every conversion's output would carry it.
 
 ---
 

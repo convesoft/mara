@@ -1,0 +1,133 @@
+# Write verification
+
+---
+
+<a id="01M7F74J164RHHPWYRT5W0JQV9"></a>
+
+### Keep every byte a write does not need
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-PRESERVED-BYTES |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-MINIMAL-REWRITE](writes.mara.md#01M7BF6HHH01T5XJNAF7DM433R) |
+
+Rust integration tests run each operation that writes documents, `item create`, `item update`, `item move`, `item rename`, `item delete`, `relation add`, `relation remove`, `project fix` and `project convert`, with the real CLI on disposable projects. Their documents have CRLF line endings in one file and LF in another, a byte order mark, front matter, irregular table padding in the items each operation edits, `*` and `_` emphasis, trailing spaces, no final newline, and file modes 0600 and 0644.
+
+| Case | Expectation |
+| --- | --- |
+| Each operation | Every file it changes differs from its former contents only in the spans the operation requires; the bytes before and after each span, the other rows of an edited table included, are identical |
+| Each operation | A changed file keeps its mode; every other file keeps its name, bytes and mtime |
+| `project convert` | Narrative outside directive blocks, `[[ID]]` and `[[MID]]` mentions and inline typed relations is byte-identical |
+
+---
+
+<a id="01M7F74J2P251MSZKVK231NBR5"></a>
+
+### Refuse an edit without writing
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-REFUSED-EDITS |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-REFUSED-EDIT-CHANGES-NOTHING](writes.mara.md#01M7BF6HHTMM6D6QAF0BHFBCE6) |
+
+Rust integration tests run each operation that [VER-PRESERVED-BYTES](#01M7F74J164RHHPWYRT5W0JQV9) lists, and `project init`, with the real CLI on disposable projects. After each refusal, no file in the project tree has been created, deleted or modified: names, bytes and mtimes are unchanged.
+
+| Case | Expectation |
+| --- | --- |
+| Each refusal that the operation's own Verification item lists | Refused; nothing changed |
+| A project whose configuration or schema has an error, for each operation but `project init` and `project convert`; an unknown or ambiguous ID; an undeclared option | Refused with `invalid-project`, `unknown-item`, `ambiguous-item` or `invalid-argument`; nothing changed |
+| A file the edit will write, changed by another program while the writer waits at the pause before step 2 ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)): the only file of a single-file edit, and the first and a later file of a multi-file edit; for `item create` into a new document, that document created | Refused: nothing replaced, every file unchanged except the one the test changed, and no temporary file left. Establishes the check of step 2 for every target |
+| The first or only file the edit replaces, changed by another program while the writer waits at its pause before that file's second check; for `item create` into a new document, that document created | Refused: nothing replaced, that file keeps the other program's contents, every other file is unchanged and no temporary file is left. Establishes the check before the first rename, single-file edits included |
+
+---
+
+<a id="01M7F74J3SE8HJ3S6ZNG3G2DYJ"></a>
+
+### Stop each multi-file edit between its files
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-INTERRUPTED-EDITS |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-INTERRUPTED-EDIT-LOSES-NOTHING](writes.mara.md#01M7BF6HJ3758Y06V61901ZSKK) |
+
+Rust integration tests run `item move`, `item rename`, `project fix` and `project convert` with the real CLI, on Linux, on disposable projects whose items have relations and mentions across three directories. Each run stops the operation at one file it writes, F, in one of four ways, and the runs cover every F and every way. For the first two ways, F is a document or code file padded with narrative or comments so that its new contents are larger than those of every other file the operation writes. The last two use the pause before a file's second check ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) in the debug binary, and let every other stop go on at once. The test learns the order in which the operation replaces files from the paths those pauses report in an uninterrupted run; for a move and a rename it is that of [DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17), and for a conversion that of [DES-CONVERSION-MAPPING](migration.mara.md#01M7CMW71TXDY6VCTJS7XNSQRM).
+
+| Stop | How the test causes it | Files afterwards, and what the case establishes |
+| --- | --- | --- |
+| Killed | `setrlimit` in the child before `exec` sets `RLIMIT_FSIZE` between the largest other new contents and F's new contents; `SIGXFSZ` keeps its default action, so the kernel kills the process while it writes F's temporary file | F holds its former contents, or none if the operation creates it, and every other file its former or its new contents, byte for byte; for a move or rename, exactly the files before F in the order hold their new contents |
+| Temporary write fails | The same limit, with `SIGXFSZ` ignored before `exec`: the write fails with `EFBIG` | As when killed; exit status 1 with a diagnostic; no temporary file is left |
+| Changed at its pause point | The writer waits at F's pause point, F not being the first file it replaces; the test changes F, then removes `paused` | The files before F hold their new contents, F the test's contents and every later file its former contents; exit status 1 with a diagnostic that names F. Establishes the check before F's rename; [VER-REFUSED-EDITS](#01M7F74J2P251MSZKVK231NBR5) covers the first file |
+| Rename fails | The writer waits at F's pause point, after writing F's temporary file; the test removes write permission from F's directory, removes `paused`, and restores the permission after the process exits | As when killed; exit status 1 with a diagnostic. Establishes a failed rename |
+
+- A change after F's second check and before its rename stays undetected, as [DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) states; no case claims more.
+- No temporary file, left or removed, is ever read as an input.
+- A conversion writes its report file first: "Killed" and "Temporary write fails" stop it there with any limit below the report's size.
+- "Rename fails" needs a user without `CAP_DAC_OVERRIDE`; run as root, the test fails and says so.
+
+| Case | Expectation |
+| --- | --- |
+| Each stop | Every item is still in some file with its MID, rows and body |
+| Each stop of a move, rename or fix | `project validate` reports every duplicate item, stale link path, stale link text and unresolved code marker left, and the project has no other new diagnostic |
+| A conversion stopped while it writes the report file | No document is converted and no report file is in place |
+| A conversion stopped after a document whose conversion leaves something out | The report file holds that omission |
+| Each stop of a conversion, then a rerun | Before the rerun, the project is a 0.3.0 project that every other operation refuses with `legacy-project`; after it, the project's files, the report file included, are those of an uninterrupted conversion, and the rerun returns every entry of that report |
+| A move stopped while the item is in both files, then rerun; the item's own links are relative | The move completes and the project gains no diagnostic |
+| A rename stopped before its `ID` row, then rerun | The rename completes |
+| A rename stopped after its `ID` row | Every mention whose text was the old ID carries the new ID; the only leftover is stale relation link text, which `project validate` reports and `project fix` rewrites ([VER-FIX-CASES](#01M7F74HZVJPEQRJWABH3NTDW5)) |
+| A rename stopped after rewriting code markers, from 0.4.0-alpha.5 (mara-yhxq5x) | The markers' ID is reported as unresolved; a rerun completes the rename |
+
+---
+
+<a id="01M7F74J4HC0VT3K1YJDDNKJ0P"></a>
+
+### Run Mara writers at the same time
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-CONCURRENT-WRITERS |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-WRITERS-SERIALIZED](writes.mara.md#01M7CXC2N8EZYVHGY7T2GPPB3X) |
+
+Rust integration tests start real Mara writers on one disposable project at the same time.
+
+| Case | Expectation |
+| --- | --- |
+| Ten `item create` processes, with distinct titles, started at once on one document | Every item a process reports as created is in the document; every other process reports a refusal; the project gains no diagnostic |
+| A write started while the test holds the project's write lock as a Mara writer does; the test changes a file the write targets, then releases the lock | No file changes while the lock is held; then the write is applied to the changed contents or refused |
+| A CLI write and an MCP `item_create` call at once | As for two CLI writes |
+| A daemon of another Mara version, from 0.4.0-alpha.4 (mara-0mxw21), and an embedded Node host, from 0.4.0-alpha.6 (mara-xzfeyj), each writing at the same time as the CLI | As for two CLI writes |
+
+---
+
+<a id="01M7F74HZVJPEQRJWABH3NTDW5"></a>
+
+### Repair only what fix may repair
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-FIX-CASES |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-ONE-FIX-OPERATION](authoring.mara.md#01M7BF6GNPRRHNP2TRX7MKZRRH) |
+
+Rust integration tests run `project fix` with the real CLI on disposable projects.
+
+| Case | Expectation |
+| --- | --- |
+| A heading and a table with a `Type` row but no anchor | An anchor with a new MID is added, and the item loads |
+| A bare-ID relation value that names one item | The canonical link to that item |
+| A stale link path in a relation and in a mention, and stale relation link text | The current path and ID; mention text unchanged |
+| A `missing-separator`, an anchor that lacks only its blank line, and a setext heading in an item's heading place | A `---` with a blank line on each side before the anchor; a blank line after the anchor; an ATX heading of the same level |
+| After each of these | No diagnostic of the repaired kind is left |
+| An anchor without a heading or `Type` row, an item without an `ID` row, a bare ID that names no item, and a broken link | Unchanged and still reported: no heading, type or ID is supplied |
+| Two copies of one item | Both are kept |
+| Stale link paths and text in several files, as a move or rename stopped by [VER-INTERRUPTED-EDITS](#01M7F74J3SE8HJ3S6ZNG3G2DYJ) leaves them | No stale link path or text is left |
+| A valid project | Names, bytes and mtimes unchanged |
+| Each other operation that [VER-PRESERVED-BYTES](#01M7F74J164RHHPWYRT5W0JQV9) lists, on a project with the problems above outside what it edits | Those problems stay as they were |

@@ -28,7 +28,7 @@ A request performs derivation work only for inputs it reads; undeclared files an
 | Status | Accepted |
 | Satisfies | [NEED-INTERACTIVE-SPEED](product.mara.md#01M7BF6H83C0SM1C8RHDHMBXZ2) |
 
-On the generated corpus ([DES-PERFORMANCE-HARNESS](#01M7BF6H4HKH0B0TXQZM3VXASA)), each operation's time grows at most 2.3× per doubling from 1× to 16×. Built-in checks do work linear in items plus edges, and validation runs each program once.
+On the generated corpus ([DES-PERFORMANCE-HARNESS](#01M7BF6H4HKH0B0TXQZM3VXASA)), each operation's time except that of `project convert` grows at most 2.3× per doubling from 1× to 16× ([ADR-NO-CONVERTER-SCALING](decisions-runtime.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)). Built-in checks do work linear in items plus edges, and validation runs each program once.
 
 ---
 
@@ -104,6 +104,7 @@ Tests:
 
 - The counter and scaling tests are the `performance` integration test of the `mara` crate, with the generator. They run the real binary with an empty environment.
 - A case is the arguments and the exit status of one invocation. The harness asserts the status before it accepts the counts or the timing. Each operation adds its case to both tests.
+- `project convert` has no scaling case. Its counter case runs the real CLI on a small fixed 0.3.0 input, a hand-written fixture of the test and not generator output ([ADR-NO-CONVERTER-SCALING](decisions-runtime.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)).
 - Two cases without an operation pin today's behaviour and stay: `mara --debug-stats` exits 0, and `mara --debug-stats --no-such-option` exits 2 after a diagnostic. Neither does work, and the first does not grow. Changing either behaviour changes its case.
 - Engine code that runs inside operations, such as the document parser, adds no case: it counts its own work, and the cases of the operations that run it assert and time that work.
 - Input tracking and the snapshot build also have cases below the CLI, in the same target: exact counts of a cold build and of later builds in the same process (nothing changed, one document edited, undeclared files changed) at every size, and the growth of a cold build's time.
@@ -115,7 +116,8 @@ Tests:
 - The scaling test holds on a machine shared with other builds and tests, or with a CPU-bound process on every hardware thread. Unchanged code passed beside a looping 16-job release build (load 14–31), other projects' tests (load 9–20) and 32 spinning processes on 32 hardware threads (load 50–58).
 - It is not defined for a machine whose memory bandwidth other processes saturate, where unchanged code exceeded the limit beside 8 processes writing 64 MiB buffers. A failure there is rerun without that load.
 - The 64× run (`--ignored`) asserts counts only. The growth limit applies from 1× to 16×.
-- Both tests also run `project validate` on a hub project: 1000 × size items that link to one item whose `Type` and `ID` rows follow 1000 × size other rows, so late metadata meets many incoming edges. The other rows' keys alternate between `Tags` and `No`, as long as `Type` and `ID`, so a scan of the hub's rows for either compares every other key in full.
+- A case that writes starts each run from the same files: before the run, outside the timed span, the test restores what the previous run wrote.
+- Both tests also run `project validate`, `item rename` and `item move` of the hub item, and `project fix` after the hub item is moved to another directory by hand, on a hub project: 1000 × size items that link to one item whose `Type` and `ID` rows follow 1000 × size other rows, so late metadata meets many incoming edges. The other rows' keys alternate between `Tags` and `No`, as long as `Type` and `ID`, so a scan of the hub's rows for either compares every other key in full.
 - Check steps do not count work per row, per holder of a shared key or per finding; scaling cases gate it, each on a project of one shape: an item with 1000 × size repeated `ID`, `Type` or `Status` rows, other values of a single-valued enum field, relation rows to one target or to as many targets, or undeclared keys; 500 × size items that share one ID or one MID; 1000 × size broken links on one line.
 
 ---

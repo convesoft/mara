@@ -24,6 +24,14 @@ Cold rows hold in every host and run through the real CLI from 0.4.0-alpha.1:
 | `.git` and undeclared files | 0 file reads, 0 hashes |
 | An operation that reads no code ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)) and runs no program | 0 subprocesses, 0 code scans |
 
+Cold rows of the operations that 0.4.0-alpha.2 adds hold in every host and run through the real CLI from 0.4.0-alpha.2. The checks of [DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) read and hash a file again only when [DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY) would:
+
+| Situation | Expectation |
+| --- | --- |
+| A write by a direct CLI call, every file it writes last changed at least 2 s before the write starts | The counts of a cold request and nothing more: no read, hash, parse or snapshot build before or after the renames ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) steps 3 and 4) |
+| `prime`, `project init` | 0 file reads, 0 hashes, 0 parses, 0 snapshot builds |
+| `project convert`, on the small fixed 0.3.0 input of [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) | No read or hash of `.git` or of a file that the 0.3.0 configuration does not declare, except a report file that an earlier run left ([DES-CONVERSION-MAPPING](migration.mara.md#01M7CMW71TXDY6VCTJS7XNSQRM)) |
+
 Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANGE](performance.mara.md#01M7BF6H3A6YQ43351V9YSV3SQ)) and run against the daemon from 0.4.0-alpha.4:
 
 | Situation | Expectation |
@@ -31,6 +39,9 @@ Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANG
 | Unchanged warm request, every input last hashed by a check at least 2 s after its mtime and ctime ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)) | 0 hashes, 0 parses, 0 snapshot builds |
 | Unchanged warm request, an input last hashed by a check less than 2 s after its mtime or ctime | That input hashed again; 0 parses, 0 snapshot builds |
 | One document edited | 1 parse, 1 snapshot build, 0 code scans |
+| A write that gives each file it writes contents no file of the session had before | 1 parse per distinct content written, 1 snapshot build; no parse of another file |
+| A write that gives a file the contents of another input, such as `item delete` of the only item that tells two documents apart | No parse for that file |
+| A write that is the host's first request, every file it writes last changed at least 2 s before | The counts of a cold request, no read or hash before the renames, then the parses and snapshot build of the two write rows above |
 | One code file edited | 1 code scan, 0 document parses |
 | Validation or gate with an unchanged evaluation key ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)) | 0 `souffle` runs |
 | Validation or gate after a change | At most 1 `souffle` run per program and set of supplied inputs |
@@ -49,7 +60,7 @@ Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANG
 | Methods | Test |
 | Verifies | [REQ-NEAR-LINEAR-SCALING](performance.mara.md#01M7BF6H3K1M4HMG6CW2B85VQK) |
 
-On every pull request, Rust integration tests time each operation on a release build at each pull-request corpus size (median of runs). They fail when growth per doubling exceeds the limit.
+On every pull request, Rust integration tests time each operation except `project convert` ([ADR-NO-CONVERTER-SCALING](decisions-runtime.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)) on a release build at each pull-request corpus size (median of runs). They fail when growth per doubling exceeds the limit.
 
 ---
 

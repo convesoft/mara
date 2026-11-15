@@ -165,3 +165,20 @@
 - Rejected: four times as many `Tags` rows. The scan for the ID grew 2.92 at load 10, but the hub took 60% more CPU time per run (198 to 316 ms at 16×).
 - Rejected: a block of `Tags` rows, then a block of as many `No` rows. Both scans grew 3.15 quiet, but the hub took 11% more CPU time per run, and correct code failed the gate in 2 of 2 runs beside the memory-writing processes (2.35, 2.36).
 - Rejected: only `No` rows. The scan for the ID grew 3.09 quiet, but the scan for the type fell to 2.54.
+
+---
+
+<a id="01M7F9N0JK7BSWE98V9VTCGBV0"></a>
+
+### Exempt the converter from the scaling test
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-NO-CONVERTER-SCALING |
+| Status | Accepted |
+| Justifies | [REQ-NEAR-LINEAR-SCALING](performance.mara.md#01M7BF6H3K1M4HMG6CW2B85VQK) |
+| Justifies | [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) |
+
+- Chosen by the maintainer on 2026-11-15: `project convert` has no scaling case, and its counter case runs on a small fixed 0.3.0 input. Each user runs the conversion once.
+- Rejected: a 0.3.0 mode of the corpus generator. It is test tooling for one operation.
+- Rejected: copies of the `v0.3.0` corpus at 1×, 4× and 16× with their MIDs and IDs made unique. It is test tooling for one operation too.

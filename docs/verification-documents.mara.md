@@ -23,6 +23,7 @@ Rust integration tests run the real CLI on disposable projects.
 | A document that starts with YAML front matter | Test | No diagnostic |
 | Same-file, cross-directory and table-cell relation links and mentions in a project that validates without diagnostics | Test | Each link's path, resolved from the linking file, names the file that holds the anchor of its MID |
 | GitHub's handling of those links | Analysis | They have the forms that [EVD-GITHUB-FRAGMENT-MATCHING](identity.mara.md#01M7BF6H2MHAVK1Z5HCXR1V289) found GitHub to navigate to their target |
+| Items and links written by `item create`, `relation add` and `item move`, in a new document too, from 0.4.0-alpha.2 | Test | As for the hand-written links; no written file starts with `---` |
 | The CLI's operations | Inspection | None writes documents in another format |
 
 ---
@@ -44,6 +45,7 @@ Rust integration tests run the real CLI on a disposable project in which another
 | --- | --- |
 | `get` of the MID | The item, with its new title, ID and location |
 | `relation list` of the item | The incoming relation and the mention, at their unchanged source locations |
+| The same three changes made with `item update`, `item rename` and `item move`, from 0.4.0-alpha.2 | The same results, and the anchor keeps the MID |
 
 ---
 
@@ -69,6 +71,7 @@ Rust integration tests run each CLI operation on a disposable project that holds
 | Run from the outer project when a subdirectory holds a `config.toml` outside any `.mara/` directory | The subdirectory's documents are inputs of the outer project |
 | Run outside every project | Fails with a diagnostic and parses no document |
 | A directory with `.mara/project.toml` and no `.mara/config.toml` | Refused with a diagnostic that names the conversion |
+| A write run from the outer project that names a document path below the inner project's root, from 0.4.0-alpha.2 | Refused; no file of either project changes |
 
 ---
 
