@@ -1,6 +1,6 @@
 ---
 title: Write the Verification items for the alpha.2 requirements
-status: todo
+status: in-progress
 type: task
 priority: high
 blocked_by:

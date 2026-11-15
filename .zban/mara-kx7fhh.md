@@ -1,6 +1,6 @@
 ---
 title: Hub case catches a per-edge row scan with a thin margin on a busy machine
-status: todo
+status: in-progress
 type: task
 priority: low
 related:
