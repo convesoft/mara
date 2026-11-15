@@ -98,8 +98,10 @@ Order across files:
 
 | Operation | Order | Rerunning an interrupted operation |
 | --- | --- | --- |
-| Move | Destination file, then removal from the source file, then inbound link paths | Works while the item is in both files: the move skips the first step when the destination already holds the item as the move would write it |
+| Move | Destination file, then removal from the source file, then inbound link paths | Works while the item is in both files: the move skips the first step when the destination already holds the item as the move would write it, wherever in that file |
 | Rename | Code markers that name the old ID and the text of mentions whose text is the old ID, then the item's `ID` row, then the text of inbound relation links ([ADR-MENTIONS-BEFORE-ID-ROW](#01M7FAG325QB1J18HQQQFMBJDS)) | Works while the old ID still resolves; after the `ID` row only stale relation link text is left |
+
+- A file is written once, with every change the edit makes to it, at the first step that changes it, other files of one step in path order. A rename writes the item's file at the `ID` row step, after every other file with mention text.
 
 Fix rewrites the stale links an interruption leaves ([REQ-ONE-FIX-OPERATION](authoring.mara.md#01M7BF6GNPRRHNP2TRX7MKZRRH)).
 

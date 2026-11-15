@@ -457,7 +457,7 @@ pub fn is_mid(text: &str) -> bool {
 }
 
 /// Whether a link destination starts with a URL scheme, as an absolute URL does.
-fn has_scheme(destination: &str) -> bool {
+pub(crate) fn has_scheme(destination: &str) -> bool {
     let Some((scheme, _)) = destination.split_once(':') else {
         return false;
     };

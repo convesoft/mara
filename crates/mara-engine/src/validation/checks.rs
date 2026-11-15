@@ -643,7 +643,7 @@ fn shared(holders: &[usize], index: usize) -> Option<(usize, bool)> {
 }
 
 /// Whether `text` has the form of an ID: `[A-Z][A-Z0-9]*(-[A-Z0-9]+)+` (DES-ITEM-IDS).
-fn is_id(text: &str) -> bool {
+pub fn is_id(text: &str) -> bool {
     let part = |part: &str| {
         !part.is_empty()
             && part
@@ -683,7 +683,7 @@ fn quote(text: &str) -> String {
 /// The project path that a link's `path`, written in the document at `from`, names: the
 /// document itself when it is empty. `None` when it is absolute, leaves the project root or is
 /// not UTF-8 once percent-decoded.
-fn resolve(from: &str, path: &str) -> Option<String> {
+pub(crate) fn resolve(from: &str, path: &str) -> Option<String> {
     if path.is_empty() {
         return Some(from.to_owned());
     }

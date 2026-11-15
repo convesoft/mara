@@ -12,6 +12,7 @@ use mara_engine::work::WorkCounts;
 
 use crate::cli::Reads;
 use crate::corpus::{Corpus, Hub};
+use crate::restore::{self, Written};
 use crate::{NIGHTLY_SIZE, PULL_REQUEST_SIZES, SEED, cli};
 
 #[test]
@@ -59,8 +60,21 @@ fn cold_counts_at(size: usize) {
         fs::write(corpus.root().join(path), shared).unwrap();
     }
     let documents = corpus.documents as u64 + 2;
+    let mut last_write = SystemTime::now();
     for case in cli::cases(&corpus) {
-        let run = cli::run(corpus.root(), &case.args, case.status);
+        let mut written = None;
+        let run = match case.reads {
+            // Every file it writes last changed at least 2 s before.
+            Reads::Writes => {
+                restore::settle(last_write);
+                let mut run = None;
+                written = Some(Written::learn(corpus.root(), || {
+                    run = Some(cli::run(corpus.root(), &case.args, case.status));
+                }));
+                run.expect("the case ran")
+            }
+            _ => cli::run(corpus.root(), &case.args, case.status),
+        };
         let name = format!("mara {} at {size}×", case.args.join(" "));
         // The configuration and the schema; for a check, also the root `.gitignore` and every
         // document. `.git`, ignored and undeclared files are never read. No code is read and
@@ -86,8 +100,22 @@ fn cold_counts_at(size: usize) {
                 snapshot_builds: 1,
                 ..WorkCounts::default()
             },
+            // A cold request, then 1 parse per distinct content written, before the renames,
+            // and nothing after them (DES-WRITE-PROCEDURE, ADR-READ-BACK-EVERY-EDIT).
+            Reads::Writes => WorkCounts {
+                file_reads: documents + 3,
+                hashes: documents + 3,
+                parses: documents - 1 + written.as_ref().map_or(0, Written::distinct),
+                snapshot_builds: 1,
+                ..WorkCounts::default()
+            },
         };
         assert_eq!(run.work, expected, "{name}");
+        if let Some(written) = written {
+            assert!(!written.contents.is_empty(), "{name} wrote nothing");
+            written.restore();
+            last_write = SystemTime::now();
+        }
         // Built-in checks visit each item twice and each edge once, and the items and edges of
         // acyclic relations once more (REQ-NEAR-LINEAR-SCALING).
         if case.reads == Reads::Checked {
@@ -107,6 +135,7 @@ fn cold_counts_at(size: usize) {
 fn hub_counts() {
     for size in PULL_REQUEST_SIZES {
         let hub = Hub::generate(size);
+        let generated = SystemTime::now();
         let run = cli::run(hub.root(), &["project", "validate"], 0);
         let documents = hub.edges.div_ceil(100) as u64 + 1;
         let (items, edges) = (hub.items as u64, hub.edges as u64);
@@ -121,7 +150,40 @@ fn hub_counts() {
             ..WorkCounts::default()
         };
         assert_eq!(run.work, expected, "hub at {size}×");
+        // A rename and a move of the hub rewrite every edge's link (DES-PERFORMANCE-HARNESS).
+        let mut last_write = generated;
+        for args in hub_writes() {
+            restore::settle(last_write);
+            let mut run = None;
+            let written = Written::learn(hub.root(), || run = Some(cli::run(hub.root(), &args, 0)));
+            let expected = WorkCounts {
+                file_reads: documents + 2,
+                hashes: documents + 2,
+                parses: documents + written.distinct(),
+                snapshot_builds: 1,
+                ..WorkCounts::default()
+            };
+            assert_eq!(
+                written.contents.len() as u64,
+                documents + u64::from(args[1] == "move")
+            );
+            assert_eq!(
+                run.expect("the case ran").work,
+                expected,
+                "{args:?} at {size}×"
+            );
+            written.restore();
+            last_write = SystemTime::now();
+        }
     }
+}
+
+/// The rename and the move of the hub item.
+pub fn hub_writes() -> [[&'static str; 4]; 2] {
+    [
+        ["item", "rename", "REQ-HUB", "REQ-HUB-RENAMED"],
+        ["item", "move", "REQ-HUB", "docs/moved/hub.mara.md"],
+    ]
 }
 
 /// Input tracking and the snapshot build below the CLI: a cold build, then builds in the same

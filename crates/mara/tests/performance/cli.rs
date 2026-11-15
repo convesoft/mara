@@ -31,6 +31,9 @@ pub enum Reads {
     Checked,
     /// The same inputs into a snapshot, without checks.
     Documents,
+    /// The same inputs, then a write: the files it writes are restored after each run
+    /// (`restore`).
+    Writes,
 }
 
 /// Each operation's case on `corpus`. An operation adds its case here, and both tests run it.
@@ -40,6 +43,7 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
         status: 0,
         reads,
     };
+    let renamed = format!("{}-RENAMED", corpus.first_id);
     vec![
         case(&["project", "validate"], Reads::Checked),
         case(&["item", "validate", &corpus.first_id], Reads::Checked),
@@ -50,6 +54,14 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
         case(&["item", "list"], Reads::Documents),
         case(&["schema", "list"], Reads::Schema),
         case(&["schema", "get", "requirement"], Reads::Schema),
+        case(
+            &["item", "move", &corpus.first_id, "docs/moved/first.mara.md"],
+            Reads::Writes,
+        ),
+        case(
+            &["item", "rename", &corpus.first_id, &renamed],
+            Reads::Writes,
+        ),
     ]
 }
 

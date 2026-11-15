@@ -139,6 +139,30 @@ A single explicit fix operation adds the anchor an item lacks and rewrites bare-
 
 ---
 
+<a id="01M7FWNBFDHGXN2TH1BK08GKCK"></a>
+
+### Move and rename edits
+
+| Type | Design |
+| --- | --- |
+| ID | DES-MOVE-AND-RENAME |
+| Status | Accepted |
+| Satisfies | [REQ-MOVE-ITEM](#01M7BF6GMB197M9NE49NZN0A29) |
+| Satisfies | [REQ-RENAME-ID](#01M7BF6GMNEZ9PYCWYKQZGY9YN) |
+
+- `item move <id-or-mid> <path> [--line <n>]`, as in 0.3.0: the path is relative to the project root; the item goes before line `n` of the destination as it is now, a line outside every item, or at its end. A line inside an item or past the end is refused with `invalid-position`.
+- A destination that is no document yet is created when it would be an input ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)); otherwise the move is refused with `not-an-input`, or `symbolic-link` for a link on its path.
+- The moved item keeps its bytes, line endings included. Its own relation links and mentions name the same files from the destination, those to itself the destination; every relation link and mention to it elsewhere names the destination. Only path bytes change, and a link whose path already resolves to the right file keeps them. A link that a definition decides gets its path through the definition, written with every link and image that uses it ([DES-ITEM-WRITER](#01M7BF6GP2Z6R1VCQMQ6ZZB218)).
+- Other relative links of the moved item, to files that are no documents or to images, keep their bytes, so a move to another directory breaks them.
+- A link, image or footnote reference of the moved item that uses a definition outside the item, after its last block or at the end of the page, refuses the move with `unreadable-edit` at that reference: the definition would stay behind.
+- A move to where the item is, a line among the blank lines and separators around it, writes no item.
+- An ID or MID that several items have is refused with `ambiguous-item`, except for the two copies that an interrupted move leaves ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)).
+- `item rename <id-or-mid> <new-id>`: a new ID without the form of [DES-ITEM-IDS](identity.mara.md#01M7BF6H1ZBTKWTF9ZXEJ8EBGS) is rejected with `invalid-argument`; one without the prefix of the item's type, or that another item has, is refused with the code of the diagnostic it would cause, `wrong-id-prefix` or `duplicate-id`. An item without an `ID` row is refused with `missing-row`.
+- A rename rewrites the `ID` rows that hold the old ID, the text of each mention that reads exactly the old ID and the text of each relation link to the item that does not read the new ID. Inside the brackets, the old text written once as it reads is replaced, so emphasis stays; otherwise the whole text is. A collapsed or shortcut reference becomes the full reference `[<new ID>][<label>]`, which uses the same definition.
+- Both results hold the item as `get` summarizes it, where it is afterwards, `files` in write order and the inventory's `diagnostics`; a move adds `from` with its former path and line, a rename `old_id`.
+
+---
+
 ## Decisions
 
 ---

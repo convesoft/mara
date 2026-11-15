@@ -9,6 +9,8 @@ use mara::inputs::Inputs;
 use mara_engine::work::WorkCounts;
 
 use crate::corpus::{Corpus, Hub, Shape, Stress};
+use crate::restore::Written;
+use crate::work_counters::hub_writes;
 use crate::{PULL_REQUEST_SIZES, SEED, cli, cpu_time};
 
 /// Most growth of time per doubling of corpus size (REQ-NEAR-LINEAR-SCALING).
@@ -46,10 +48,15 @@ fn growth_per_doubling() {
         .collect();
     for index in 0..cases[0].len() {
         let name = format!("mara {}", cases[0][index].args.join(" "));
-        check_growth(&corpora, &name, |at, corpus| {
+        let run = |at: usize, corpus: &Corpus| {
             let case = &cases[at][index];
             cli::run(corpus.root(), &case.args, case.status);
-        });
+        };
+        if cases[0][index].reads == cli::Reads::Writes {
+            check_writes(&corpora, &name, run, |corpus| corpus.root());
+        } else {
+            check_growth(&corpora, &name, run);
+        }
     }
     // Late metadata and many incoming edges: every check reads an item's `Type` and `ID` once.
     let hubs: Vec<(usize, Hub)> = PULL_REQUEST_SIZES
@@ -59,6 +66,13 @@ fn growth_per_doubling() {
     check_growth(&hubs, "mara project validate on a hub", |_, hub| {
         cli::run(hub.root(), &["project", "validate"], 0);
     });
+    for args in hub_writes() {
+        let name = format!("mara {} on a hub", args.join(" "));
+        let run = |_: usize, hub: &Hub| {
+            cli::run(hub.root(), &args, 0);
+        };
+        check_writes(&hubs, &name, run, |hub| hub.root());
+    }
     // Search with a vocabulary and a query that grow together: query words allowed one edit,
     // two, and none beyond 18 characters, and a mix. Candidates come from the vocabulary index,
     // never from a scan of every word per query word. At 16× each query stays within the 128 KiB
@@ -106,14 +120,43 @@ fn per_row_growth_per_doubling() {
     }
 }
 
+/// [`check_growth`] of a case that writes: before each timed run, the files that the previous
+/// run wrote are restored outside the timed span.
+fn check_writes<P>(
+    corpora: &[(usize, P)],
+    name: &str,
+    mut run: impl FnMut(usize, &P),
+    root: impl Fn(&P) -> &std::path::Path,
+) {
+    let written: Vec<Written> = (corpora.iter().enumerate())
+        .map(|(at, (_, corpus))| Written::learn(root(corpus), || run(at, corpus)))
+        .collect();
+    check_growth_after(corpora, name, |at| written[at].restore(), run);
+    for written in &written {
+        written.restore();
+    }
+}
+
+/// [`check_growth_after`] with nothing to do before each run.
+pub fn check_growth<P>(corpora: &[(usize, P)], name: &str, run: impl FnMut(usize, &P)) {
+    check_growth_after(corpora, name, |_| {}, run);
+}
+
 /// Times `run`, named `name`, on every corpus, given with its index, in CPU time: the calling
 /// thread's and that of the processes [`cli::run`] waits for ([`cpu_time::now`]). Interleaves
 /// sizes so that machine load affects them alike. After the rounds, looks once: two adjacent
 /// sizes that grow more than [`MARGIN`] standard errors below [`LIMIT`] pass; every other pair
 /// gets [`RUNS`] runs of both sizes and fails when the median grows faster than [`LIMIT`] per
 /// doubling.
-pub fn check_growth<P>(corpora: &[(usize, P)], name: &str, mut run: impl FnMut(usize, &P)) {
+/// `prepare` runs before each timed run, outside the timed span.
+fn check_growth_after<P>(
+    corpora: &[(usize, P)],
+    name: &str,
+    mut prepare: impl FnMut(usize),
+    mut run: impl FnMut(usize, &P),
+) {
     let mut time = |at: usize| {
+        prepare(at);
         let start = cpu_time::now();
         run(at, &corpora[at].1);
         cpu_time::now() - start

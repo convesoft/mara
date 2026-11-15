@@ -110,9 +110,12 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 | `ambiguous-item` | Several items have the ID or MID given |
 | `unknown-node` | A path, or path and line, names no document, item or narrative unit that the read takes |
 | `unknown-declaration` | The schema declares no type or relation of the name given |
-| `invalid-utf8` | `get` of a document that is not UTF-8 |
+| `invalid-utf8` | `get` or an edit of a document that is not UTF-8 |
 | `changed-file` | A file the edit writes changed after the edit was computed, or appeared where it creates one ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) |
 | `existing-file` | A file `project init` would write exists, or `.mara` is no directory ([DES-PROJECT-INIT](init.mara.md#01M7FVWHVXW71CWC0HJ52NTEQJ)); nothing is written |
 | `unreadable-edit` | The new contents of a document would not read back as the edit writes them, or would change how text it does not touch reads, such as an item inside an unclosed code block or a link reference definition that other text uses removed ([DES-ITEM-WRITER](authoring.mara.md#01M7BF6GP2Z6R1VCQMQ6ZZB218)); nothing is written |
+| `invalid-position` | A line where an edit would put an item lies inside an item or past the end of the document ([DES-MOVE-AND-RENAME](authoring.mara.md#01M7FWNBFDHGXN2TH1BK08GKCK)) |
+| `not-an-input` | A document that an edit would create would be no input of the project ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)) |
+| `duplicate-id`, `wrong-id-prefix`, `missing-row` | A rename would cause that diagnostic, or the item has no `ID` row to rename ([DES-MOVE-AND-RENAME](authoring.mara.md#01M7FWNBFDHGXN2TH1BK08GKCK)) |
 | `stale-cursor` | The cursor belongs to another result |
 | `record-too-large` | A record exceeds a page ([DES-PAGING](retrieval.mara.md#01M7BF6HCCWQH6P13ZR2YHAPS0)) |

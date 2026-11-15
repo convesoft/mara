@@ -5,6 +5,9 @@ mod checks;
 #[cfg(test)]
 mod tests;
 
+pub use checks::is_id;
+pub(crate) use checks::resolve;
+
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::hash::{Hash, KeyHasher};
 use crate::json::Object;

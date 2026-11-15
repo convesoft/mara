@@ -8,6 +8,7 @@
 
 mod init;
 mod read;
+mod relink;
 mod validate;
 
 use std::ffi::OsString;
@@ -36,6 +37,8 @@ const OPERATIONS: &[Operation] = &[
     read::ITEM_LIST,
     read::SCHEMA_LIST,
     read::SCHEMA_GET,
+    relink::ITEM_MOVE,
+    relink::ITEM_RENAME,
 ];
 
 /// The exit status of a valid result, or of a successful operation.

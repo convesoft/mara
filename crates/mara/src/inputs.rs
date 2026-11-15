@@ -6,6 +6,8 @@
 //! The CLI starts each request with a new [`Inputs`], so it reads everything once. A host that
 //! keeps one between requests does work only for what changed.
 
+mod admit;
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -24,6 +26,8 @@ use mara_engine::work::WorkCounts;
 use crate::project::{Project, ProjectFiles, SYMBOLIC_LINK, SelectError, recognize};
 use crate::tracked::{self, Check, Kind, Listing, Reads, Tracked};
 use crate::write::{Basis, Version};
+
+pub use admit::{Inadmissible, NOT_AN_INPUT};
 
 /// The inputs of the project at one root, as of the last request.
 #[derive(Debug)]
