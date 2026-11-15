@@ -6,6 +6,7 @@
 //! [`Failure`]. Arguments are checked before the function runs. Each operation also adds its
 //! case to the performance harness (`crates/mara/tests/performance/`).
 
+mod author;
 mod init;
 mod read;
 mod relink;
@@ -39,6 +40,11 @@ const OPERATIONS: &[Operation] = &[
     read::SCHEMA_GET,
     relink::ITEM_MOVE,
     relink::ITEM_RENAME,
+    author::ITEM_CREATE,
+    author::ITEM_UPDATE,
+    author::ITEM_DELETE,
+    author::RELATION_ADD,
+    author::RELATION_REMOVE,
 ];
 
 /// The exit status of a valid result, or of a successful operation.

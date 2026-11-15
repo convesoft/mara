@@ -44,6 +44,11 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
         reads,
     };
     let renamed = format!("{}-RENAMED", corpus.first_id);
+    // Each single-file write changes a document of the first two clusters, the same at every
+    // size, and no two of them the same document.
+    let id = |index: usize| corpus.ids[index].0.as_str();
+    let path = |index: usize| corpus.ids[index].1.as_str();
+    let (second, untargeted) = (25, corpus.untargeted);
     vec![
         case(&["project", "validate"], Reads::Checked),
         case(&["item", "validate", &corpus.first_id], Reads::Checked),
@@ -60,6 +65,40 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
         ),
         case(
             &["item", "rename", &corpus.first_id, &renamed],
+            Reads::Writes,
+        ),
+        case(
+            &[
+                "item",
+                "create",
+                "requirement",
+                path(second),
+                "--title",
+                "Created by the harness",
+                "--field",
+                "status=draft",
+                "--body",
+                "Text.",
+            ],
+            Reads::Writes,
+        ),
+        case(
+            &["item", "update", id(0), "--title", "Updated by the harness"],
+            Reads::Writes,
+        ),
+        case(&["item", "delete", id(untargeted)], Reads::Writes),
+        case(
+            &[
+                "relation",
+                "add",
+                id(second + 13),
+                "satisfies",
+                id(second + 7),
+            ],
+            Reads::Writes,
+        ),
+        case(
+            &["relation", "remove", id(13), "satisfies", id(5)],
             Reads::Writes,
         ),
     ]

@@ -83,6 +83,11 @@ pub struct Corpus {
     pub max_chain_depth: usize,
     /// Most `Decomposes` and `Derives from` edges into one item.
     pub max_fan_out: usize,
+    /// The ID and the document path of every item, cluster by cluster, each in template order.
+    pub ids: Vec<(String, String)>,
+    /// The index in `ids` of the first verification of the first cluster that no relation or
+    /// mention targets, the same at every size.
+    pub untargeted: usize,
 }
 
 impl Corpus {
@@ -122,6 +127,18 @@ impl Corpus {
             .iter()
             .map(|item| item.relations.len() + item.mentions.len())
             .sum();
+        let targeted: std::collections::HashSet<usize> = items
+            .iter()
+            .flat_map(|item| {
+                item.relations
+                    .iter()
+                    .map(|&(_, target)| target)
+                    .chain(item.mentions.iter().copied())
+            })
+            .collect();
+        let untargeted = (20..24)
+            .find(|index| !targeted.contains(index))
+            .expect("a verification of the first cluster that nothing targets");
         Corpus {
             dir,
             items: items.len(),
@@ -130,6 +147,11 @@ impl Corpus {
             first_id: items[0].id.clone(),
             max_chain_depth,
             max_fan_out,
+            ids: items
+                .iter()
+                .map(|item| (item.id.clone(), documents[item.document].path.clone()))
+                .collect(),
+            untargeted,
         }
     }
 

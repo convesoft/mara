@@ -100,7 +100,7 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 - Exit status: 0 for a valid result or a successful operation, 1 for an invalid result or a failed request, 2 for rejected arguments.
 - `--format json` prints one JSON object on stdout: the result, or `{"format_version": 1, "error": {"code", "message", "diagnostics"}}` when the request fails, `diagnostics` holding the problems in project files that caused it. Each result also carries `format_version` 1.
 - The human form prints a result on stdout, and a failure on stderr as `mara: error[<code>]: <message>` followed by its diagnostics ([DES-DIAGNOSTICS](validation.mara.md#01M7CMW71GXWZS8HPVVTYPENDK)).
-- Besides the selection codes of [DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27), a request fails with these codes; a failure's message lists names as a diagnostic's does ([DES-SCHEMA-CHECKS](validation.mara.md#01M7BF6HG7AQZ9FM38CMT4BTHR)):
+- Besides the selection codes of [DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27) and the write codes of [DES-AUTHORING-REQUESTS](authoring-requests.mara.md#01M7FWQ5YB6X95VCRVSP1FGQ46), a request fails with these codes; a failure's message lists names as a diagnostic's does ([DES-SCHEMA-CHECKS](validation.mara.md#01M7BF6HG7AQZ9FM38CMT4BTHR)):
 
 | Code | Failure |
 | --- | --- |

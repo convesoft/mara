@@ -51,13 +51,17 @@ fn renames_an_id_wherever_it_is_a_handle() {
             .contains(&format!("<a id=\"{X}\"></a>"))
     );
 
-    // The old ID no longer resolves.
+    // The old ID no longer resolves; `relation add` given it as source or target writes nothing.
+    let tree = project.tree();
     for args in [
         &["get", "REQ-MOVED"][..],
         &["item", "validate", "REQ-MOVED"],
+        &["relation", "add", "REQ-MOVED", "refines", "REQ-DEST"],
+        &["relation", "add", "REQ-THIRD", "refines", "REQ-MOVED"],
     ] {
         let result = project.json(args, 1);
         assert_eq!(result["error"]["code"], "unknown-item", "{args:?}");
+        unchanged(&tree, &project.tree(), &args.join(" "));
     }
     // `get` and `relation list` of the MID (VER-MID-RESOLUTION).
     let got = project.json(&["get", X], 0);

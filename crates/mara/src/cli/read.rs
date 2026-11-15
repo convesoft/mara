@@ -103,7 +103,7 @@ const ID: Opt = Opt {
 };
 
 /// Selects and loads the project, refusing one whose configuration or schema has an error.
-fn open(context: &mut Context) -> Result<(Inputs, Arc<Project>), Failure> {
+pub(super) fn open(context: &mut Context) -> Result<(Inputs, Arc<Project>), Failure> {
     let mut inputs = Inputs::new(context.root()?);
     let project = inputs.project(context.now, context.work);
     if project.has_errors() {

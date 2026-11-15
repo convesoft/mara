@@ -9,6 +9,7 @@
 | [Project initialization](init.mara.md) | `project init`: templates, file order, refusals |
 | [Engineering vocabulary](vocabulary.mara.md) | Types and relations of the `engineering` template |
 | [Authoring](authoring.mara.md) | Create, update, move, rename, delete, relations, fix |
+| [Write requests and results](authoring-requests.mara.md) | Arguments, results and refusals of create, update, delete and relation edits |
 | [Write safety](writes.mara.md) | What a write preserves, write order |
 | [Migration](migration.mara.md) | Conversion from 0.3.0, dropped capabilities |
 | [Retrieval](retrieval.mara.md) | Search, get, relation list, item list, narrative units, paging |

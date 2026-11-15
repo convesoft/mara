@@ -23,6 +23,7 @@ use crate::paging::{Cursor, DEFAULT_LIMIT};
 use crate::snapshot::Snapshot;
 
 pub use node::{ItemSummary, NodeSummary, Portion, RowPart, get};
+pub(crate) use node::{Named, resolve};
 pub use page::{DIAGNOSTIC_BYTES, shown_diagnostics};
 pub use relations::{
     Connection, ConnectionKind, Direction, Location, Neighbour, RelationPage, relation_list,

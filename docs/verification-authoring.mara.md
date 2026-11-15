@@ -18,7 +18,7 @@ Rust integration tests run `item create` with the real CLI on a disposable proje
 | Case | Expectation |
 | --- | --- |
 | No position | The item ends the document |
-| Line 1, a line in narrative, and a separator line between two items | The item starts at that line; the content around it is unchanged and no neighbour merges with it |
+| Line 1, a line in narrative, and a separator line between two items | The item starts at that line, after the separator that the writer puts there when the line before needs one ([DES-ITEM-WRITER](authoring.mara.md#01M7BF6GP2Z6R1VCQMQ6ZZB218)); the content around it is unchanged and no neighbour merges with it |
 | A line inside an item | Refused |
 | A new path that the include patterns match | The document is created and does not start with `---` |
 | A new path outside the include patterns, ignored by a `.gitignore`, or below another project's root | Refused; no file or directory is created |
@@ -47,6 +47,7 @@ Rust integration tests run `item update` with the real CLI on a disposable proje
 | A new title | Only the heading text changes |
 | A new `Status`, a new value of the single-valued field, and new values of the repeatable field | Only those rows change, one row per value |
 | A new body | Only the body changes |
+| `--clear-field` of the repeatable field | Only its rows go |
 | Title, a field and the body in one request | Those three change |
 | After each of these | The anchor, the `Type` and `ID` rows, the relation rows and the other item are byte-identical |
 | A request that names a new type, ID or MID, or a relation | Rejected or refused; files byte-identical |
