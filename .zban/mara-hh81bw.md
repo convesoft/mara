@@ -2,8 +2,10 @@
 title: Measure the snapshot rebuild after one edit against the warm read budget
 status: todo
 type: task
-priority: low
-parent: mara-0mxw21
+priority: deferred
+tags:
+  - deferred
+  - backlog
 blocked_by:
   - mara-17gykj
 related:
@@ -18,3 +20,7 @@ Context: after one edit, a host that keeps state re-parses one document and rebu
 
 - [ ] Time a warm read after one edit through the daemon at 16× and 64× (with mara-p27z9t)
 - [ ] If it exceeds the budget, make the token-index merge cheaper (smaller postings, fewer allocations per new word, or reuse of the unchanged documents' part of the index) and measure again
+
+## Moved to the backlog, 2026-11-15
+
+One-time sweep under the maintainer's amended rules of 2026-11-15: low priority, the budget it measures against is Draft, and mara-p27z9t (daemon performance tests) times the warm read anyway. Nothing here starts without the maintainer.

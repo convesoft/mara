@@ -1,9 +1,11 @@
 ---
 title: "Read-back guard: close the six findings of re-check 3 on the item writer"
-status: in-progress
+status: todo
 type: bug
-priority: high
-parent: mara-6k50w0
+priority: deferred
+tags:
+  - deferred
+  - backlog
 related:
   - mara-6ex559
   - mara-jnvzxr
@@ -48,3 +50,16 @@ Passed in re-check 3 and not to be re-opened: the D1/D2 cases of re-check 2; 144
 - [ ] D4: `insert`, `remove` and the guard are near-linear for many splices in one edit
 - [ ] D5: the wall-clock test is replaced by tests that fail on a planted quadratic path and cannot fail without a fault, in the way docs/verification.mara.md prescribes (work counters, or the release `performance` harness)
 - [ ] DES-ITEM-WRITER and ADR-READ-BACK-EVERY-EDIT state the rule as built
+
+## Moved to the backlog, 2026-11-15
+
+The maintainer amended the orchestration rules on 2026-11-15: a finding is fixed now only if a realistic setup reaches it (documents and projects as users actually write them, and the documented CLI and MCP usage); exotic findings go to the backlog, which is looked at after the first release and in which nothing starts without the maintainer. This replaces the decision above that this issue must close before the alpha.2 slice can close. The worker that had started was stopped before it changed anything.
+
+The orchestrator's triage of the six findings, all exotic:
+
+- D1 needs a zero-length splice next to a change of a link reference definition. No operation emits a zero-length splice.
+- D2 needs an edit that writes an unclosed `<!--` at the start of a paragraph and leaves the rest of the paragraph unwritten. The operations replace a whole title, row value or body.
+- D3 needs a footnote that is defined inside the bytes an edit writes and used outside them, for example a body update of the item that holds the page's footnote definitions. The result is a refusal with a diagnostic, not lost data.
+- D4 needs as many blank lines in one gap, or as many front matter lines, as the edit has insertions or removals.
+- D5: the timing test has a 20× threshold against measured ratios of 0.1 to 0.9, and no false failure has been seen. If it ever fails without a fault, pull this finding back.
+- D6 needs two footnote labels that differ only by Unicode case folding, such as `ß` and `SS`.
