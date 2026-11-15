@@ -23,6 +23,7 @@ use mara_engine::work::WorkCounts;
 
 use crate::project::{Project, ProjectFiles, SYMBOLIC_LINK, SelectError, recognize};
 use crate::tracked::{self, Check, Kind, Listing, Reads, Tracked};
+use crate::write::{Basis, Version};
 
 /// The inputs of the project at one root, as of the last request.
 #[derive(Debug)]
@@ -93,6 +94,13 @@ impl Inputs {
         let project = Arc::new(project);
         self.project = Some((now, Arc::clone(&project)));
         project
+    }
+
+    /// The basis of the document at `path` for an edit: the contents that the last snapshot
+    /// holds, as that request read them. `None` when it holds no document at `path`.
+    pub fn basis(&self, path: &str) -> Option<Basis> {
+        let tracked = self.state.documents.get(path)?;
+        Some(Basis::Contents(Version::of(tracked)))
     }
 
     /// Lists the inputs in the request that began at `now`, reads and hashes those whose stat

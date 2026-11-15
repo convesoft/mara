@@ -687,6 +687,7 @@ impl<'t> Reader<'t> {
     fn push(&mut self, open: OpenBlock) {
         let mut block = open.finish();
         block.span = trim(self.text, &block.span);
+        self.document.blocks.push(block.span.clone());
         for BlockAnchor { mid, offset, .. } in &block.anchors {
             let message = format!(
                 "the anchor of MID {mid} must be a paragraph of its own, `<a id=\"{mid}\"></a>`, \
@@ -914,6 +915,7 @@ impl<'t> Reader<'t> {
             line: self.lines.line(start),
             end_line: self.lines.line(end.saturating_sub(1).max(start)),
             lead,
+            table: blocks[table].span.clone(),
             body,
         });
     }
@@ -960,6 +962,8 @@ impl<'t> Reader<'t> {
                     .join(" "),
                 link,
                 line: self.lines.line(row.span.start),
+                span: trim(self.text, &row.span),
+                value_span: value.span.clone(),
             });
             values.push(value.plain.clone());
         }

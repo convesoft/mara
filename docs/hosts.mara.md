@@ -111,5 +111,7 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 | `unknown-node` | A path, or path and line, names no document, item or narrative unit that the read takes |
 | `unknown-declaration` | The schema declares no type or relation of the name given |
 | `invalid-utf8` | `get` of a document that is not UTF-8 |
+| `changed-file` | A file the edit writes changed after the edit was computed, or appeared where it creates one ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) |
+| `unreadable-edit` | The new contents of a document would not read back as the edit writes them, or would change how text it does not touch reads, such as an item inside an unclosed code block or a link reference definition that other text uses removed ([DES-ITEM-WRITER](authoring.mara.md#01M7BF6GP2Z6R1VCQMQ6ZZB218)); nothing is written |
 | `stale-cursor` | The cursor belongs to another result |
 | `record-too-large` | A record exceeds a page ([DES-PAGING](retrieval.mara.md#01M7BF6HCCWQH6P13ZR2YHAPS0)) |

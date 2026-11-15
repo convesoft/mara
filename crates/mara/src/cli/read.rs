@@ -17,6 +17,7 @@ use mara_engine::read::{
     Neighbour, NodeSummary, Paging, Portion, ReadError, SchemaLayer, SearchHit,
 };
 use mara_engine::schema::FieldKind;
+use mara_engine::write::label;
 
 use super::validate::PATH;
 use super::{
@@ -346,14 +347,6 @@ fn hits(out: &mut String, hits: &[SearchHit]) {
         let _ = writeln!(out, "{}", node_line(&hit.node));
         let _ = writeln!(out, "    {}: {}", hit.excerpt.line, hit.excerpt.text);
     }
-}
-
-/// A schema name as a label: `_` as a space, the first letter capitalized (DES-METADATA-TABLE).
-fn label(name: &str) -> String {
-    let mut chars = name.chars();
-    let first = chars.next().map(|c| c.to_ascii_uppercase());
-    let rest = chars.map(|c| if c == '_' { ' ' } else { c });
-    first.into_iter().chain(rest).collect()
 }
 
 fn connection_line(out: &mut String, connection: &Connection) {

@@ -12,9 +12,10 @@ mod region;
 mod tests;
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::ops::Range;
 
-use pulldown_cmark::{Options, Parser};
+use pulldown_cmark::{Event, LinkType, Options, Parser, Tag};
 
 use crate::diagnostic::Diagnostic;
 use crate::hash::Hash;
@@ -22,7 +23,7 @@ use crate::work::WorkCounts;
 
 /// The version of everything [`parse`] derives from a document's bytes, search words included.
 /// A change to any of it takes a new version, which changes every [`DocumentKey`].
-pub const PARSER_VERSION: u32 = 7;
+pub const PARSER_VERSION: u32 = 10;
 
 /// The key of a parsed document: parser version and file hash (DES-INPUTS-AND-KEYS).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -53,6 +54,13 @@ pub struct Document {
     /// The search words of the items and narrative units, each once, in byte order
     /// (DES-SNAPSHOT).
     pub words: Vec<Word>,
+    /// Bytes of each top-level block, in source order.
+    pub blocks: Vec<Range<usize>>,
+    /// Bytes of each link reference definition that a link can resolve to, the first of its
+    /// label, in source order.
+    pub definitions: Vec<Range<usize>>,
+    /// Every link, image and footnote reference, in source order, as resolved.
+    pub references: Vec<Reference>,
     /// In line order.
     problems: Vec<Problem>,
 }
@@ -151,6 +159,8 @@ pub struct Item {
     /// Bytes of the text after the anchor in its paragraph, when the anchor is merged into one;
     /// empty, at the item's start, otherwise. It starts the item's body (DES-NARRATIVE-UNITS).
     pub lead: Range<usize>,
+    /// Bytes of the metadata table, from its first `|` to the end of its last row's text.
+    pub table: Range<usize>,
     /// Bytes of the blocks after the metadata table; empty at the table's end when there are none.
     pub body: Range<usize>,
 }
@@ -194,6 +204,10 @@ pub struct Row {
     /// The link that is the whole value, if it is one.
     pub link: Option<Link>,
     pub line: usize,
+    /// Bytes of the row's text, without the spaces and line ending around it.
+    pub span: Range<usize>,
+    /// Bytes of the value as written, without the spaces around it.
+    pub value_span: Range<usize>,
 }
 
 /// A Markdown link.
@@ -208,6 +222,31 @@ pub struct Link {
     /// Bytes of the whole link.
     pub span: Range<usize>,
     pub line: usize,
+}
+
+/// A link, an image or a footnote reference, as the parser resolves it. Link reference
+/// definitions and footnote definitions are document-wide, so what it reads as can depend on
+/// text elsewhere in the document.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Reference {
+    pub kind: ReferenceKind,
+    /// Bytes of the whole link, image or footnote reference.
+    pub span: Range<usize>,
+    /// Where a link or an image leads, as resolved; a footnote reference's label.
+    pub destination: String,
+    /// A link's or an image's title, as resolved.
+    pub title: String,
+    /// Bytes of the definition that decides it: the link reference definition of a reference
+    /// link or image, the first of its label, or the first footnote definition of a footnote
+    /// reference's label. `None` for an inline link, image or autolink.
+    pub definition: Option<Range<usize>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReferenceKind {
+    Link,
+    Image,
+    Footnote,
 }
 
 impl Link {
@@ -310,10 +349,86 @@ fn parse_within(bytes: &[u8], limit: usize, work: &mut WorkCounts) -> Document {
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS;
     let mut reader = region::Reader::new(text, lines);
-    for (event, span) in Parser::new_ext(&text[start..], options).into_offset_iter() {
-        reader.event(event, span.start + start..span.end + start);
+    let at = |span: Range<usize>| span.start + start..span.end + start;
+    let mut references = Vec::new();
+    // The first footnote definition of each label, which its references lead to.
+    let mut footnotes: HashMap<String, Range<usize>> = HashMap::new();
+    let mut events = Parser::new_ext(&text[start..], options).into_offset_iter();
+    while let Some((event, span)) = events.next() {
+        let span = at(span);
+        match &event {
+            Event::Start(
+                Tag::Link {
+                    link_type,
+                    dest_url,
+                    title,
+                    id,
+                }
+                | Tag::Image {
+                    link_type,
+                    dest_url,
+                    title,
+                    id,
+                },
+            ) => {
+                let kind = match &event {
+                    Event::Start(Tag::Image { .. }) => ReferenceKind::Image,
+                    _ => ReferenceKind::Link,
+                };
+                // A reference resolves to the first definition of its label (CommonMark).
+                let definition = match link_type {
+                    LinkType::Reference | LinkType::Collapsed | LinkType::Shortcut => events
+                        .reference_definitions()
+                        .get(id)
+                        .map(|definition| at(definition.span.clone())),
+                    _ => None,
+                };
+                // The parser's span of a collapsed reference `[label][]` ends before `[]`.
+                let mut span = span.clone();
+                if *link_type == LinkType::Collapsed && text[span.end..].starts_with("[]") {
+                    span.end += 2;
+                }
+                references.push(Reference {
+                    kind,
+                    span,
+                    destination: dest_url.to_string(),
+                    title: title.to_string(),
+                    definition,
+                });
+            }
+            Event::FootnoteReference(label) => references.push(Reference {
+                kind: ReferenceKind::Footnote,
+                span: span.clone(),
+                destination: label.to_string(),
+                title: String::new(),
+                definition: None,
+            }),
+            Event::Start(Tag::FootnoteDefinition(label)) => {
+                // Without the blank lines after it, as the reader keeps a block.
+                let end = span.start + text[span.clone()].trim_end().len();
+                footnotes
+                    .entry(label.to_lowercase())
+                    .or_insert(span.start..end);
+            }
+            _ => {}
+        }
+        reader.event(event, span);
     }
+    for reference in &mut references {
+        if reference.kind == ReferenceKind::Footnote {
+            let label = reference.destination.to_lowercase();
+            reference.definition = footnotes.get(&label).cloned();
+        }
+    }
+    let mut definitions: Vec<Range<usize>> = events
+        .reference_definitions()
+        .iter()
+        .map(|(_, definition)| at(definition.span.clone()))
+        .collect();
+    definitions.sort_by_key(|definition| definition.start);
     let mut document = reader.finish();
+    document.definitions = definitions;
+    document.references = references;
     // The front matter precedes every other line, so its problems come first.
     document.problems.splice(0..0, skipped);
     document
@@ -353,7 +468,7 @@ fn has_scheme(destination: &str) -> bool {
 
 /// Where the Markdown starts: after a UTF-8 byte order mark and a YAML front matter block. Also
 /// the MID anchor lines of that block, with their offsets (DES-REGIONS).
-fn front_matter(text: &str) -> (usize, Vec<(&str, usize)>) {
+pub(crate) fn front_matter(text: &str) -> (usize, Vec<(&str, usize)>) {
     let bom = if text.starts_with('\u{feff}') { 3 } else { 0 };
     let is_fence = |line: &str| line.trim_end() == "---";
     let mut rest = lines(&text[bom..]);
@@ -401,7 +516,7 @@ fn anchor_line(line: &str) -> Option<&str> {
 }
 
 /// The lines of `text`, each with its line ending: `\n`, `\r\n` or a lone `\r`.
-fn lines(text: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn lines(text: &str) -> impl Iterator<Item = &str> {
     let mut rest = text;
     std::iter::from_fn(move || {
         if rest.is_empty() {

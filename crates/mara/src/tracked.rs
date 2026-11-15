@@ -87,8 +87,25 @@ pub(crate) struct Read {
     pub(crate) contents: Vec<u8>,
 }
 
+impl<T> Tracked<T> {
+    /// The same check of the same contents, with another value.
+    pub(crate) fn with_value<U>(&self, value: U) -> Tracked<U> {
+        Tracked {
+            stat: self.stat,
+            checked: self.checked,
+            hash: self.hash,
+            value,
+        }
+    }
+}
+
 impl Read {
     pub(crate) fn with<T>(self, value: T) -> Tracked<T> {
+        self.with_value(value)
+    }
+
+    /// This check of these contents, with `value`, keeping the contents.
+    pub(crate) fn with_value<T>(&self, value: T) -> Tracked<T> {
         Tracked {
             stat: self.stat,
             checked: self.checked,

@@ -95,9 +95,9 @@ Schema inspection lists the types and relations and returns each one's descripti
 | `no-project` | No project root at or above the working directory | Selection |
 | `not-a-project` | `--project` names a directory whose `.mara/` holds no `config.toml` | Selection |
 | `legacy-project` | The selected directory is the root of a 0.3.0 project | Selection |
-| `io-error` | A file or directory cannot be read; in the inventory, also an input or `.gitignore` that is not a regular file, or a name that is not UTF-8 | Selection, loading, inventory |
+| `io-error` | A file or directory cannot be read; in the inventory, also an input or `.gitignore` that is not a regular file, or a name that is not UTF-8; in a write, a file that cannot be written | Selection, loading, inventory, writes |
 | `outside-project` | The schema path enters another project's root | Loading |
-| `symbolic-link` | `.mara`, the configuration or a component of the schema path is a symbolic link; in the inventory, a matched document, a `.gitignore` or a subdirectory's `.mara` | Selection, loading, inventory |
+| `symbolic-link` | `.mara`, the configuration or a component of the schema path is a symbolic link; in the inventory, a matched document, a `.gitignore` or a subdirectory's `.mara`; in a write, a file it writes or a directory above it ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) | Selection, loading, inventory, writes |
 | `unsupported-gitignore` | A `.gitignore` the `ignore` crate cannot take: a line that is not UTF-8, or patterns it cannot compile | Inventory |
 | `toml-syntax` | The configuration or schema is not UTF-8 TOML | Loading |
 | `unsupported-format-version` | A `format_version` other than 1 | Loading |

@@ -26,8 +26,9 @@ pub use spelling::{LONGEST_TOLERANT, Spellings, edits_allowed};
 /// The version of what [`SnapshotInputs::build`] derives, part of every [`SnapshotKey`].
 pub const SNAPSHOT_VERSION: u32 = 2;
 
-/// One document's contents and their parse: the per-file result.
-#[derive(Debug, PartialEq, Eq)]
+/// One document's contents and their parse: the per-file result. The default is an empty
+/// document, as a document that does not exist yet reads.
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct ParsedFile {
     /// The file's bytes. Every span and line of the document refers to them.
     pub contents: Box<[u8]>,

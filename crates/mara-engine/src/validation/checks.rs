@@ -11,6 +11,7 @@ use crate::document::{Link, Row, is_mid, label_name};
 use crate::schema::{FieldKind, RelationDecl, Schema, TypeDecl};
 use crate::snapshot::{Edge, Snapshot};
 use crate::work::WorkCounts;
+use crate::write::{label, link, relative};
 
 /// The most characters of a value that a message quotes, so that a diagnostic stays small.
 const QUOTED: usize = 100;
@@ -369,10 +370,9 @@ impl<'s, 'w> Checker<'s, 'w> {
         if row.link.is_none() && is_id(&row.value) {
             let replacement = match self.snapshot.items_with_id(&row.value) {
                 &[target] => {
-                    let from = self.path(index);
-                    let path = relative(from, self.path(target));
+                    let (from, to) = (self.path(index), self.path(target));
                     let mid = &self.snapshot.item(target).mid;
-                    format!(": write `[{}]({path}#{mid})`", row.value)
+                    format!(": write `{}`", link(&row.value, mid, from, to))
                 }
                 [] => ", and no item has this ID".to_owned(),
                 _ => String::new(),
@@ -659,16 +659,6 @@ fn is_id(text: &str) -> bool {
         && rest.into_iter().all(part)
 }
 
-/// The label of a schema name: `_` as a space and the first letter capitalized
-/// (DES-METADATA-TABLE).
-fn label(name: &str) -> String {
-    let mut label = name.replace('_', " ");
-    if let Some(first) = label.get_mut(..1) {
-        first.make_ascii_uppercase();
-    }
-    label
-}
-
 /// The labels of `names`, each in backticks, as [`list`] lists them.
 fn labels(names: &[String]) -> String {
     list(
@@ -740,26 +730,6 @@ fn percent_decode(path: &str) -> Option<String> {
         }
     }
     String::from_utf8(decoded).ok()
-}
-
-/// The path of `to` relative to the document at `from`, empty when they are the same file.
-fn relative(from: &str, to: &str) -> String {
-    if from == to {
-        return String::new();
-    }
-    let mut directory: Vec<&str> = from.split('/').collect();
-    directory.pop();
-    let target: Vec<&str> = to.split('/').collect();
-    let (target_directory, file) = target.split_at(target.len() - 1);
-    let common = directory
-        .iter()
-        .zip(target_directory)
-        .take_while(|(a, b)| a == b)
-        .count();
-    let mut parts: Vec<&str> = vec![".."; directory.len() - common];
-    parts.extend(&target_directory[common..]);
-    parts.extend(file);
-    parts.join("/")
 }
 
 /// The strongly connected component of each node of the graph `adjacency`, by Tarjan's
@@ -836,13 +806,6 @@ mod tests {
     }
 
     #[test]
-    fn derives_labels_from_names() {
-        assert_eq!(label("derives_from"), "Derives from");
-        assert_eq!(label("almost-certain"), "Almost-certain");
-        assert_eq!(label(""), "");
-    }
-
-    #[test]
     fn resolves_link_paths_from_the_linking_file() {
         let cases = [
             ("docs/a.mara.md", "", Some("docs/a.mara.md")),
@@ -868,18 +831,12 @@ mod tests {
     }
 
     #[test]
-    fn writes_relative_paths() {
-        assert_eq!(relative("docs/a.mara.md", "docs/a.mara.md"), "");
-        assert_eq!(relative("docs/a.mara.md", "docs/b.mara.md"), "b.mara.md");
-        assert_eq!(
-            relative("docs/x/a.mara.md", "docs/y/b.mara.md"),
-            "../y/b.mara.md"
-        );
-        assert_eq!(relative("a.mara.md", "docs/b.mara.md"), "docs/b.mara.md");
-        assert_eq!(relative("docs/a.mara.md", "b.mara.md"), "../b.mara.md");
+    fn resolves_the_paths_the_writer_writes() {
         for (from, to) in [
             ("docs/x/a.mara.md", "docs/y/b.mara.md"),
             ("a.mara.md", "d/e/f.mara.md"),
+            ("d/e/f.mara.md", "a.mara.md"),
+            ("a.mara.md", "my notes (1)#%.mara.md"),
         ] {
             assert_eq!(resolve(from, &relative(from, to)).as_deref(), Some(to));
         }

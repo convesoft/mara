@@ -21,6 +21,7 @@ use mara_engine::validation;
 use mara_engine::work::WorkCounts;
 
 use mara::project::{self, SelectError};
+use mara::write::WriteError;
 
 /// Every operation, in the order the usage lists them.
 const OPERATIONS: &[Operation] = &[
@@ -268,6 +269,17 @@ impl Failure {
             writeln!(out, "{diagnostic}").expect("writing to a String cannot fail");
         }
         out
+    }
+}
+
+impl From<WriteError> for Failure {
+    /// A refused or stopped edit, with a diagnostic at the file concerned
+    /// (DES-WRITE-PROCEDURE).
+    fn from(error: WriteError) -> Failure {
+        Failure {
+            diagnostics: vec![error.diagnostic()],
+            ..Failure::new(error.code, error.message)
+        }
     }
 }
 

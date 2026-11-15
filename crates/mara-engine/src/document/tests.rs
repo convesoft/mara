@@ -835,12 +835,15 @@ fn mixed_endings(text: &str) -> String {
 /// `document` without byte spans, which CRLF line endings shift.
 fn without_spans(mut document: Document) -> Document {
     let clear = |link: &mut Link| link.span = 0..0;
+    document.blocks.clear();
+    document.definitions.clear();
+    document.references.clear();
     for item in &mut document.items {
-        (item.span, item.lead, item.body) = (0..0, 0..0, 0..0);
-        item.rows
-            .iter_mut()
-            .filter_map(|row| row.link.as_mut())
-            .for_each(clear);
+        (item.span, item.lead, item.table, item.body) = (0..0, 0..0, 0..0, 0..0);
+        for row in &mut item.rows {
+            (row.span, row.value_span) = (0..0, 0..0);
+            row.link.iter_mut().for_each(clear);
+        }
         item.mentions.iter_mut().for_each(clear);
     }
     document.mentions.iter_mut().for_each(clear);
@@ -1326,4 +1329,74 @@ fn nested_headings_are_headings_and_each_word_keeps_its_source_offset() {
         );
     }
     assert!(at(&A.to_lowercase()).starts_with(A));
+}
+
+#[test]
+fn records_every_reference_with_what_resolves_it_and_the_blocks() {
+    let text = format!(
+        "---\nx: 1\n---\nSee [a][r], [r][], [R], [inline](#{A}), ![img][r], <https://x.test> and \
+         a note[^n].\n\n[r]: #{B} \"Title\"\n[r]: #{C}\n\n[^n]: The note.\n\n- one\n- two\n"
+    );
+    let document = parse_text(&text);
+    let at = |needle: &str| {
+        let start = text.find(needle).unwrap();
+        start..start + needle.len()
+    };
+    let first = at(&format!("[r]: #{B} \"Title\""));
+    let note = at("[^n]: The note.");
+    let references: Vec<_> = document
+        .references
+        .iter()
+        .map(|reference| {
+            let source = &text[reference.span.clone()];
+            let resolved = (reference.destination.as_str(), reference.title.as_str());
+            (
+                reference.kind,
+                source,
+                resolved,
+                reference.definition.clone(),
+            )
+        })
+        .collect();
+    let linked = (format!("#{B}"), "Title");
+    let linked = (linked.0.as_str(), linked.1);
+    let inline = format!("[inline](#{A})");
+    let inline_target = format!("#{A}");
+    assert_eq!(
+        references,
+        [
+            (ReferenceKind::Link, "[a][r]", linked, Some(first.clone())),
+            (ReferenceKind::Link, "[r][]", linked, Some(first.clone())),
+            (ReferenceKind::Link, "[R]", linked, Some(first.clone())),
+            (
+                ReferenceKind::Link,
+                inline.as_str(),
+                (inline_target.as_str(), ""),
+                None
+            ),
+            (
+                ReferenceKind::Image,
+                "![img][r]",
+                linked,
+                Some(first.clone())
+            ),
+            (
+                ReferenceKind::Link,
+                "<https://x.test>",
+                ("https://x.test", ""),
+                None
+            ),
+            (
+                ReferenceKind::Footnote,
+                "[^n]",
+                ("n", ""),
+                Some(note.clone())
+            ),
+        ]
+    );
+    let paragraph = text.find("See").unwrap()..text.find("[^n].").unwrap() + 5;
+    let list = text.find("- one").unwrap()..text.len() - 1;
+    assert_eq!(document.blocks, [paragraph, note, list]);
+    // A later definition of a label resolves nothing.
+    assert_eq!(document.definitions, [first]);
 }

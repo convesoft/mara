@@ -28,7 +28,7 @@ Cold rows of the operations that 0.4.0-alpha.2 adds hold in every host and run t
 
 | Situation | Expectation |
 | --- | --- |
-| A write by a direct CLI call, every file it writes last changed at least 2 s before the write starts | The counts of a cold request and nothing more: no read, hash, parse or snapshot build before or after the renames ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) steps 3 and 4) |
+| A write by a direct CLI call, every file it writes last changed at least 2 s before the write starts | The counts of a cold request plus 1 parse per distinct content written, before the renames ([ADR-READ-BACK-EVERY-EDIT](authoring.mara.md#01M7FH6HEWNYQ66F5KE912BQSM)), and nothing more: no read, hash or snapshot build before or after the renames, and no parse after them ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) steps 3 and 4) |
 | `prime`, `project init` | 0 file reads, 0 hashes, 0 parses, 0 snapshot builds |
 | `project convert`, on the small fixed 0.3.0 input of [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) | No read or hash of `.git` or of a file that the 0.3.0 configuration does not declare, except a report file that an earlier run left ([DES-CONVERSION-MAPPING](migration.mara.md#01M7CMW71TXDY6VCTJS7XNSQRM)) |
 
@@ -41,7 +41,7 @@ Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANG
 | One document edited | 1 parse, 1 snapshot build, 0 code scans |
 | A write that gives each file it writes contents no file of the session had before | 1 parse per distinct content written, 1 snapshot build; no parse of another file |
 | A write that gives a file the contents of another input, such as `item delete` of the only item that tells two documents apart | No parse for that file |
-| A write that is the host's first request, every file it writes last changed at least 2 s before | The counts of a cold request, no read or hash before the renames, then the parses and snapshot build of the two write rows above |
+| A write that is the host's first request, every file it writes last changed at least 2 s before | The counts of a cold request, no read or hash before the renames, the parses of the two write rows above, made by the read-back before the renames, then their snapshot build |
 | One code file edited | 1 code scan, 0 document parses |
 | Validation or gate with an unchanged evaluation key ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)) | 0 `souffle` runs |
 | Validation or gate after a change | At most 1 `souffle` run per program and set of supplied inputs |
