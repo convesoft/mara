@@ -1,6 +1,6 @@
 ---
 title: MCP server with CLI parity
-status: todo
+status: in-progress
 type: feature
 parent: mara-6k50w0
 blocked_by:
