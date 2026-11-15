@@ -1,6 +1,6 @@
 ---
 title: project init with the engineering and empty templates
-status: todo
+status: in-progress
 type: feature
 parent: mara-6k50w0
 blocked_by:
