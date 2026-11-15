@@ -6,6 +6,7 @@
 | [Item format](format.mara.md) | Regions, item structure, metadata table |
 | [Identity and links](identity.mara.md) | MID, ID, relation links, mentions |
 | [Project and schema](project.mara.md) | Project selection, init, configuration and schema files |
+| [Project initialization](init.mara.md) | `project init`: templates, file order, refusals |
 | [Engineering vocabulary](vocabulary.mara.md) | Types and relations of the `engineering` template |
 | [Authoring](authoring.mara.md) | Create, update, move, rename, delete, relations, fix |
 | [Write safety](writes.mara.md) | What a write preserves, write order |

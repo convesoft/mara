@@ -112,7 +112,7 @@ fn per_row_growth_per_doubling() {
 /// sizes that grow more than [`MARGIN`] standard errors below [`LIMIT`] pass; every other pair
 /// gets [`RUNS`] runs of both sizes and fails when the median grows faster than [`LIMIT`] per
 /// doubling.
-fn check_growth<P>(corpora: &[(usize, P)], name: &str, mut run: impl FnMut(usize, &P)) {
+pub fn check_growth<P>(corpora: &[(usize, P)], name: &str, mut run: impl FnMut(usize, &P)) {
     let mut time = |at: usize| {
         let start = cpu_time::now();
         run(at, &corpora[at].1);

@@ -33,8 +33,8 @@ schema = ".mara/schema.toml"
 format_version = 1
 include = ["docs/**/*.mara.md"]
 "#;
-/// The engineering vocabulary (DES-ENGINEERING-VOCABULARY) in the syntax of DES-SCHEMA-MODEL.
-const SCHEMA: &str = include_str!("schema.toml");
+/// The engineering vocabulary (DES-ENGINEERING-VOCABULARY): the `engineering` template's schema.
+const SCHEMA: &str = include_str!("../../templates/engineering/schema.toml");
 const GITIGNORE: &str = "/target/\n/docs/generated/\n";
 
 static WORDS: LazyLock<Vec<&str>> = LazyLock::new(|| {

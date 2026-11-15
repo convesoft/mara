@@ -6,6 +6,7 @@
 //! [`Failure`]. Arguments are checked before the function runs. Each operation also adds its
 //! case to the performance harness (`crates/mara/tests/performance/`).
 
+mod init;
 mod read;
 mod validate;
 
@@ -26,6 +27,7 @@ use mara::write::WriteError;
 /// Every operation, in the order the usage lists them.
 const OPERATIONS: &[Operation] = &[
     validate::PROJECT,
+    init::PROJECT,
     validate::ITEM,
     validate::SCHEMA,
     read::SEARCH,

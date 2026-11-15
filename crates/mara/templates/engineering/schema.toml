@@ -7,11 +7,11 @@ description = "A desired stakeholder or engineering outcome and why it matters."
 
 [types.need]
 id_prefix = "NEED-"
-description = "A stakeholder capability, condition or result."
+description = "A stakeholder capability, condition or result, without prescribing realization."
 
 [types.scenario]
 id_prefix = "SCN-"
-description = "A concrete operational situation or flow and its outcomes."
+description = "A concrete operational situation or flow and its outcomes, in prose."
 
 [types.requirement]
 id_prefix = "REQ-"
@@ -47,7 +47,7 @@ repeatable = true
 
 [types.evidence]
 id_prefix = "EVD-"
-description = "A durable empirical or analytical conclusion with provenance."
+description = "A durable empirical or analytical conclusion with provenance, not a routine CI run."
 
 [types.verification]
 id_prefix = "VER-"
@@ -102,7 +102,7 @@ targets = { decision = ["requirement", "design"] }
 
 [relations.accepts]
 inverse = "accepted_by"
-description = "The source accepts the target risk."
+description = "The source accepts the target risk as it stands."
 targets = { decision = ["risk"] }
 
 [relations.threatens]
@@ -122,12 +122,12 @@ targets = { verification = ["requirement"] }
 
 [relations.validates]
 inverse = "validated_by"
-description = "The source establishes satisfaction of the target."
+description = "The source establishes that the target is satisfied or achieved."
 targets = { validation = ["need", "goal"] }
 
 [relations.exercises]
 inverse = "exercised_by"
-description = "The source runs through the target scenario."
+description = "The source runs through the target."
 targets = { validation = ["scenario"] }
 
 [relations.supports]
@@ -137,5 +137,5 @@ targets = { evidence = ["goal", "need", "requirement", "design", "decision", "ri
 
 [relations.implements]
 inverse = "implemented_by"
-description = "Code realizes the target."
+description = "The code realizes the target."
 targets = { code = ["requirement", "design", "verification"] }
