@@ -69,3 +69,32 @@ Failure codes, besides those of [DES-OPERATIONS](hosts.mara.md#01M7BF6H124JRJAQS
 | `inverse-relation` | A relation given by its inverse name; the message names the forward request |
 | `targeted-item` | A delete of an item that another item or narrative targets; `diagnostics` holds each link |
 | `missing-relation` | A `relation remove` of a row the source does not have |
+
+---
+
+<a id="01M7FWM48HHP0HHM6S86P6R499"></a>
+
+### Fix repairs
+
+| Type | Design |
+| --- | --- |
+| ID | DES-FIX-REPAIRS |
+| Status | Accepted |
+| Satisfies | [REQ-ONE-FIX-OPERATION](authoring.mara.md#01M7BF6GNPRRHNP2TRX7MKZRRH) |
+
+`project fix` takes no argument and refuses a project whose configuration or schema has an error, as every operation but validation does ([DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27)). It repairs these problems and no other:
+
+| Problem | Repair |
+| --- | --- |
+| `incomplete-item` of a region that starts with a heading followed by a table with a `Type` row | An anchor with a new MID that no item has, and a blank line, before the heading, in a splice that holds the whole region |
+| `missing-separator` | A `---` line before the anchor, with a blank line on each side |
+| `merged-anchor` of an anchor that lacks only the blank line after it | That blank line |
+| `setext-heading` of one line of text in an item's heading place | An ATX heading of the same level and text |
+| `bare-id-value` that names one item | The relation link to it ([DES-ITEM-WRITER](authoring.mara.md#01M7BF6GP2Z6R1VCQMQ6ZZB218)) |
+| `stale-link-path` or `stale-link-text` of a relation | The relation link, as the writer writes it: the target's ID, or the link's text when the target has none |
+| `stale-link-path` of a mention | Only the path; for a reference link, the path in its definition, in one splice with every link that uses it |
+
+- A link whose destination is written with backslash escapes or character references stays as it is, still reported.
+- An item that gets its anchor has its heading, relation values and mentions repaired in the same run, and a bare ID may name it, so one run leaves none of these problems.
+- It writes the changed documents in path order. Each document's repairs depend on no other document, so a rerun completes an interrupted fix. A document whose repairs would not read back refuses the whole fix with `unreadable-edit`.
+- The result is `format_version` (1), `repairs` and `repairs_total`. A repair is the problem's `code`, `path`, `line` before the fix and `message`; `repairs` holds the first in path and line order that fit in 8,192 bytes of JSON. The human form prints each as `<path>:<line>: fixed[<code>]: <message>`, then the counts. Exit status 0.

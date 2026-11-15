@@ -7,6 +7,7 @@
 //! case to the performance harness (`crates/mara/tests/performance/`).
 
 mod author;
+mod fix;
 mod init;
 mod read;
 mod relink;
@@ -30,6 +31,7 @@ use mara::write::WriteError;
 const OPERATIONS: &[Operation] = &[
     validate::PROJECT,
     init::PROJECT,
+    fix::PROJECT,
     validate::ITEM,
     validate::SCHEMA,
     read::SEARCH,

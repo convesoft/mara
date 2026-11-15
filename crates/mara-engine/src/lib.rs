@@ -5,6 +5,7 @@ pub mod authoring;
 pub mod config;
 pub mod diagnostic;
 pub mod document;
+pub mod fix;
 pub mod hash;
 pub mod json;
 pub mod paging;

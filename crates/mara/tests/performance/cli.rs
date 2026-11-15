@@ -51,6 +51,8 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
     let (second, untargeted) = (25, corpus.untargeted);
     vec![
         case(&["project", "validate"], Reads::Checked),
+        // The corpus is valid, so fix writes nothing.
+        case(&["project", "fix"], Reads::Documents),
         case(&["item", "validate", &corpus.first_id], Reads::Checked),
         case(&["schema", "validate"], Reads::Schema),
         case(&["search", "cache"], Reads::Documents),

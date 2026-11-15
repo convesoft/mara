@@ -186,6 +186,49 @@ pub fn hub_writes() -> [[&'static str; 4]; 2] {
     ]
 }
 
+/// `project fix` after the hub item is moved by hand rewrites every edge's link: a cold request
+/// and 1 parse per distinct content written, and nothing more (DES-PERFORMANCE-HARNESS). A second
+/// fix finds nothing to write.
+#[test]
+fn moved_hub_fix_counts() {
+    let hubs: Vec<(usize, Hub)> = PULL_REQUEST_SIZES
+        .iter()
+        .map(|&size| (size, Hub::generate(size)))
+        .collect();
+    for (_, hub) in &hubs {
+        hub.move_hub();
+    }
+    // Every file the fix writes last changed at least 2 s before.
+    restore::settle(SystemTime::now());
+    for (size, hub) in &hubs {
+        let documents = hub.edges.div_ceil(100) as u64 + 1;
+        let cold = WorkCounts {
+            file_reads: documents + 2,
+            hashes: documents + 2,
+            parses: documents,
+            snapshot_builds: 1,
+            ..WorkCounts::default()
+        };
+        let mut run = None;
+        let fix = ["project", "fix"];
+        let written = Written::learn(hub.root(), || run = Some(cli::run(hub.root(), &fix, 0)));
+        assert_eq!(written.contents.len() as u64, documents - 1, "at {size}×");
+        let expected = WorkCounts {
+            parses: documents + written.distinct(),
+            ..cold
+        };
+        let run = run.expect("the case ran");
+        assert_eq!(run.work, expected, "fix of the moved hub at {size}×");
+        let run = cli::run(hub.root(), &fix, 0);
+        assert_eq!(run.work, cold, "fix with nothing to write at {size}×");
+        let run = cli::run(hub.root(), &["project", "validate"], 0);
+        assert!(
+            run.output.stdout.starts_with(b"valid"),
+            "after the fix at {size}×"
+        );
+    }
+}
+
 /// Input tracking and the snapshot build below the CLI: a cold build, then builds in the same
 /// process that do work only for what changed, as a host that keeps state between requests
 /// does (REQ-WORK-FOLLOWS-CHANGE).

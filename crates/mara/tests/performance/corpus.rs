@@ -864,6 +864,14 @@ impl Hub {
     pub fn root(&self) -> &Path {
         self.dir.path()
     }
+
+    /// Moves the hub item's document to another directory by hand, which leaves every source's
+    /// link to it stale.
+    pub fn move_hub(&self) {
+        let docs = self.root().join("docs");
+        fs::create_dir_all(docs.join("moved")).unwrap();
+        fs::rename(docs.join("hub.mara.md"), docs.join("moved/hub.mara.md")).unwrap();
+    }
 }
 
 /// Edges on the longest chain of `Decomposes` and `Derives from`, and the most such edges into

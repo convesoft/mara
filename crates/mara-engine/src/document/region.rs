@@ -7,8 +7,8 @@ use pulldown_cmark::{Event, LinkType, Tag, TagEnd};
 
 use super::html::{HtmlBlock, HtmlLine};
 use super::{
-    Document, Item, LineIndex, Link, Node, Posting, Problem, Row, Unit, Word, Zone, is_mid,
-    label_name, lines, word_spans,
+    Anchorless, Document, Item, LineIndex, Link, Node, Posting, Problem, Row, Unit, Word, Zone,
+    is_mid, label_name, lines, word_spans,
 };
 
 /// Reads the events of one document in order.
@@ -847,6 +847,18 @@ impl<'t> Reader<'t> {
             if !missing.is_empty() {
                 let message = format!("the item {name} is not read: {}", missing.join("; "));
                 self.problem("incomplete-item", start, message);
+            }
+            // Only the anchor is missing, and the heading comes first, so the anchor goes
+            // right before it.
+            let only_anchor = missing.len() == 1 && blocks[0].anchors.is_empty();
+            if head.anchor.is_none() && head.heading == Some(0) && only_anchor {
+                let end = blocks.last().map_or(start, |block| block.span.end);
+                self.document.anchorless.push(Anchorless {
+                    span: start..end,
+                    heading: blocks[0].span.clone(),
+                    rows,
+                    line: self.lines.line(start),
+                });
             }
             return self.read_narrative(blocks, head.table);
         };

@@ -73,6 +73,24 @@ fn growth_per_doubling() {
         };
         check_writes(&hubs, &name, run, |hub| hub.root());
     }
+    // Fix after the hub item is moved by hand: every source's link to it is rewritten.
+    let moved: Vec<(usize, Hub)> = PULL_REQUEST_SIZES
+        .iter()
+        .map(|&size| {
+            let hub = Hub::generate(size);
+            hub.move_hub();
+            (size, hub)
+        })
+        .collect();
+    let run = |_: usize, hub: &Hub| {
+        cli::run(hub.root(), &["project", "fix"], 0);
+    };
+    check_writes(
+        &moved,
+        "mara project fix on a hub moved by hand",
+        run,
+        |hub| hub.root(),
+    );
     // Search with a vocabulary and a query that grow together: query words allowed one edit,
     // two, and none beyond 18 characters, and a mix. Candidates come from the vocabulary index,
     // never from a scan of every word per query word. At 16× each query stays within the 128 KiB

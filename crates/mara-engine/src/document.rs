@@ -23,7 +23,7 @@ use crate::work::WorkCounts;
 
 /// The version of everything [`parse`] derives from a document's bytes, search words included.
 /// A change to any of it takes a new version, which changes every [`DocumentKey`].
-pub const PARSER_VERSION: u32 = 10;
+pub const PARSER_VERSION: u32 = 11;
 
 /// The key of a parsed document: parser version and file hash (DES-INPUTS-AND-KEYS).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -61,6 +61,9 @@ pub struct Document {
     pub definitions: Vec<Range<usize>>,
     /// Every link, image and footnote reference, in source order, as resolved.
     pub references: Vec<Reference>,
+    /// Each region that starts with a heading followed by a metadata table with a `Type` row
+    /// and lacks only its MID anchor, in source order (DES-ITEM-STRUCTURE). Fix adds the anchor.
+    pub anchorless: Vec<Anchorless>,
     /// In line order.
     problems: Vec<Problem>,
 }
@@ -173,6 +176,20 @@ impl Item {
             .find(|row| row.name == name)
             .map(|row| row.value.as_str())
     }
+}
+
+/// A region that would be an item but for its MID anchor: a heading first, then a metadata
+/// table with a `Type` row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Anchorless {
+    /// Bytes from the heading to the end of the region's last block.
+    pub span: Range<usize>,
+    /// Bytes of the heading.
+    pub heading: Range<usize>,
+    /// The metadata rows, read as an item's are.
+    pub rows: Vec<Row>,
+    /// The heading's line.
+    pub line: usize,
 }
 
 /// A narrative unit: in a region that is no item, a heading and the blocks up to the next
