@@ -145,3 +145,23 @@
 - Rejected: the minimum over rounds. A short run escapes contention more often than a long one, so the minimum inflates growth: 7 to 10 of 10 busy runs failed, against 1 to 3 with the median.
 - Rejected: pinning the run to one CPU, or disabling transparent huge pages or address randomization for it. None narrowed the spread.
 - Not covered: CPU time excludes time a process waits on I/O or locks, so a blocking latency that grows faster than the corpus does not fail this test.
+- Rejected by the maintainer: raising the limit to 2.4 so that the test also passes on a machine whose memory bandwidth other processes saturate. Correct code would pass there by only 0.04–0.09, and the weakest planted fault would fail by 0.15 instead of 0.25; the maintainer chose to rerun such a failure without that load instead.
+
+---
+
+<a id="01M7F8TYKM1HAKA1YQ5NFNKBJC"></a>
+
+### Alternate the hub's other row keys between the lengths of `Type` and `ID`
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-HUB-ROW-KEYS |
+| Status | Accepted |
+| Justifies | [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) |
+
+- Chosen: the hub's other rows alternate between `Tags` and `No`. A comparison of two keys of different lengths ends at the length: with only `Tags` rows, a per-edge scan for the ID cost about 0.4 ns per row and a scan for the type, whose key has the length of `Tags`, about 1.0 ns. The number of rows and the counts stay, and on correct code the hub's CPU time and growth did not change: 166 and 163 ms at 16× quiet, and growth per doubling of 1.95–2.26 under load, against 2.00–2.27 before.
+- Measured with each scan planted in a copy, as growth from 4× to 16× before and after; quiet is load below 3 and 9 rounds, the rest the gate's 60 runs per size. The scan for the ID (`value("id")` per edge in `Checker::edge`): 2.46–2.57 and 2.86 quiet, 2.37 and 2.57 beside other projects' tests (load 9–29), 2.46 and 2.61–2.71 beside 32 spinning processes (load 19–48), 2.41 and 2.62–2.65 beside 24 spinning and 8 memory-writing processes (load 34–52). The scan for the type (in `target_type`): 2.98 and 2.81 quiet, 2.67 and 2.55 beside other projects' tests, 2.62 after beside the spinning processes, 2.70 and 2.56 beside the memory-writing ones. Under load the smaller margin of the two scans grew from 0.07–0.16 to 0.25–0.31.
+- Rejected: leaving the shape. The scan for the ID exceeded the limit by only 0.06–0.22 under load.
+- Rejected: four times as many `Tags` rows. The scan for the ID grew 2.92 at load 10, but the hub took 60% more CPU time per run (198 to 316 ms at 16×).
+- Rejected: a block of `Tags` rows, then a block of as many `No` rows. Both scans grew 3.15 quiet, but the hub took 11% more CPU time per run, and correct code failed the gate in 2 of 2 runs beside the memory-writing processes (2.35, 2.36).
+- Rejected: only `No` rows. The scan for the ID grew 3.09 quiet, but the scan for the type fell to 2.54.

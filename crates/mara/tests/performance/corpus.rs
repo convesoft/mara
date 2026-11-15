@@ -776,7 +776,9 @@ impl Stress {
 }
 
 /// A project in which every item but one links to that one, whose `Type` and `ID` rows follow
-/// as many other rows: late metadata and many incoming edges at once.
+/// as many other rows: late metadata and many incoming edges at once. The other rows' keys
+/// alternate between the lengths of `Type` and `ID`, so a scan for either compares every other
+/// key in full instead of stopping at its length (DES-PERFORMANCE-HARNESS).
 pub struct Hub {
     dir: TempDir,
     pub items: usize,
@@ -803,13 +805,15 @@ impl Hub {
         let schema = "format_version = 1\nstatuses = [\"draft\"]\n\n\
             [types.requirement]\nid_prefix = \"REQ-\"\ndescription = \"An obligation.\"\n\n\
             [types.requirement.fields.tags]\nkind = \"text\"\nrepeatable = true\n\n\
+            [types.requirement.fields.no]\nkind = \"text\"\nrepeatable = true\n\n\
             [relations.refines]\ninverse = \"refined_by\"\ndescription = \"Refines.\"\n\
             targets = { requirement = [\"requirement\"] }\nacyclic = true\n";
         write(root, ".mara/schema.toml", schema.as_bytes());
         let mut hub = format!("# Hub\n\n---\n\n<a id=\"{}\"></a>\n\n### Hub\n\n", mid(0));
         hub.push_str("| Tags | tag-0 |\n| --- | --- |\n");
         for tag in 1..sources {
-            let _ = writeln!(hub, "| Tags | tag-{tag} |");
+            let key = if tag % 2 == 0 { "Tags" } else { "No" };
+            let _ = writeln!(hub, "| {key} | tag-{tag} |");
         }
         hub.push_str("| Type | Requirement |\n| ID | REQ-HUB |\n| Status | Draft |\n\nThe hub.\n");
         write(root, "docs/hub.mara.md", hub.as_bytes());
