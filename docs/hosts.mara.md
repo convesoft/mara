@@ -119,6 +119,8 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 | `duplicate-id`, `wrong-id-prefix`, `missing-row` | A rename would cause that diagnostic, or the item has no `ID` row to rename ([DES-MOVE-AND-RENAME](authoring.mara.md#01M7FWNBFDHGXN2TH1BK08GKCK)) |
 | `not-a-legacy-project` | `project convert` of a project that is not a 0.3.0 project ([DES-CONVERSION-MAPPING](migration.mara.md#01M7CMW71TXDY6VCTJS7XNSQRM)) |
 | `daemon-lost` | The daemon ended before it answered a request sent to it ([DES-DAEMON-LIFECYCLE](daemon.mara.md#01M7BF6GR80WA207P4BBFWW671)); a write may be left interrupted ([REQ-INTERRUPTED-EDIT-LOSES-NOTHING](writes.mara.md#01M7BF6HJ3758Y06V61901ZSKK)) |
+| `unavailable-operation` | The host cannot run the operation, such as `project init` in a browser ([DES-BROWSER-WORKSPACE](#01M7JQJKGBJ7KQFM9PJV8RK8H7)); nothing is written |
+| `daemon-running` | `mara daemon start` asks for another browser listener than the running daemon of the build has ([DES-BROWSER-LISTENER](daemon.mara.md#01M7CQ57TJY788DMPBN4BX1SEM)); nothing changes |
 | `stale-cursor` | The cursor belongs to another result |
 | `record-too-large` | A record exceeds a page ([DES-PAGING](retrieval.mara.md#01M7BF6HCCWQH6P13ZR2YHAPS0)) |
 
@@ -142,6 +144,25 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 - Calls run on the runtime's blocking pool, several at once if the client sends them so. Each is a cold request; writes wait for the write lock ([REQ-WRITERS-SERIALIZED](writes.mara.md#01M7CXC2N8EZYVHGY7T2GPPB3X)). A call that the client cancels still runs to its end; only its response is dropped.
 - Its `instructions` are the agent guide ([DES-AGENT-GUIDE](agents.mara.md#01M7BGRHWQHQJJHC6XCXVDWDM8)).
 - With `--debug-stats`, the server prints one stats line when it exits: the work of all its calls.
+
+---
+
+<a id="01M7JQJKGBJ7KQFM9PJV8RK8H7"></a>
+
+### Browser workspace
+
+| Type | Design |
+| --- | --- |
+| ID | DES-BROWSER-WORKSPACE |
+| Status | Accepted |
+| Satisfies | [REQ-BROWSER-LOCAL-WORKSPACE](#01M7BF6H0G63VTGGYK0HSE5XDE) |
+| Satisfies | [REQ-UNAVAILABLE-NOT-PARTIAL](engine.mara.md#01M7BF6GXSJVVASJ4C8ZGHM909) |
+
+- A workspace starts from supplied files, each a path relative to the project root with its bytes. The caller may later write a file's bytes or remove a file; such a change is an edit, as a Mara write is.
+- It runs every document operation but `project init` and `project convert`, which fail with `unavailable-operation` and change nothing. A browser that reaches the daemon gets the same failure for them ([DES-BROWSER-LISTENER](daemon.mara.md#01M7CQ57TJY788DMPBN4BX1SEM)).
+- It loads no grammar: every pinned grammar is `unavailable-grammar`, with a message that the browser cannot load grammars, and its language's files are scanned at the basic level ([DES-GRAMMAR-ASSETS](code.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)).
+- A Soufflé module that cannot be loaded or compiled is a fault without a line for each evaluation ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)).
+- Export returns the change set and leaves the workspace as it is. The change set has one entry per path whose final contents differ from its supplied contents: the final bytes, or none for a removed file, and `base`, the BLAKE3 hash of the supplied bytes in the form of `revision` ([DES-READ-RESULTS](retrieval-requests.mara.md#01M7DMT8GAJCAFTW0Y2939JFF1)), or none for a file that was not supplied. A file written back to its supplied bytes, or added and removed again, has no entry.
 
 ---
 

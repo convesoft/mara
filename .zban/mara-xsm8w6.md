@@ -14,4 +14,4 @@ Context: DES-RULE-EXECUTION in docs/rules-evaluation.mara.md; DES-SOUFFLE-BUILD 
 - [ ] Soufflé in a worker of its own; a fresh instance per evaluation on an in-memory filesystem
 - [ ] Tests: the browser rows of VER-FACT-ROWS, VER-EXPLANATIONS, VER-PROGRAM-FAULTS, VER-EVALUATION-TIME-LIMIT and VER-PROGRAM-REACH-CASES pass (an evaluation that hits the time limit loses no unexported edit of the workspace)
 - [ ] Explanations: the console input is supplied through the `stdin` hook (DES-RULE-EXECUTION, EVD-SOUFFLE-TRIAL)
-- [ ] Test: native and WASM outputs are identical for the engineering template's programs
+- [ ] Tests: the row of VER-HOST-COMPARISON (docs/verification.mara.md) for every query, view, gate and report in a browser workspace passes, the Soufflé module row of VER-UNAVAILABLE-NOT-PARTIAL and the program part of the caller-write row of VER-BROWSER-WORKSPACE (docs/verification-browser.mara.md), and the browser workspace rows of VER-WORK-COUNTERS marked mara-xsm8w6

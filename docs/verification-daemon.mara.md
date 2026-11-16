@@ -15,7 +15,7 @@
 
 Rust integration tests run the real CLI and `mara mcp` in a runtime directory of their own: a new directory of the test, mode 0700, set as `XDG_RUNTIME_DIR` on Linux and as `TMPDIR` on macOS for every client and every copy of the binary ([DES-DAEMON-LIFECYCLE](daemon.mara.md#01M7BF6GR80WA207P4BBFWW671)). Every other test that runs `mara` does the same or runs in direct mode, so no test reaches a daemon it did not start. A daemon of the test is a process of a binary under test whose environment holds that directory (`/proc/<pid>/environ` on Linux, `sysctl` `KERN_PROCARGS2` on macOS); tests identify and stop only those. The project's files last changed at least 2 s before its first call.
 
-A call is served in-process when its stats line holds the counts of a cold request and no daemon of the test can have answered it: none runs or can start; or the only one runs a session of the project that answered a request sent at least 2 s after the last change, and would report nothing; or the first call that a daemon of the test answers afterwards reports the counts of a cold request too. A daemon reports the opening of a session with its first response for it ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)), so it had answered nothing before. A call is served by the daemon when it repeats a request sent at least 2 s after the last change and its stats line holds those of the same request again ([VER-WORK-COUNTERS](verification.mara.md#01M7BF6HGG6ET88HS641Y5676G)). A wait for a daemon polls `mara daemon status` for at most 10 s. The Node client's cases come with it in 0.4.0-alpha.6 (mara-vfkgbs).
+A call is served in-process when its stats line holds the counts of a cold request and no daemon of the test can have answered it: none runs or can start; or the only one runs a session of the project that answered a request sent at least 2 s after the last change, and would report nothing; or the first call that a daemon of the test answers afterwards reports the counts of a cold request too. A daemon reports the opening of a session with its first response for it ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)), so it had answered nothing before. A call is served by the daemon when it repeats a request sent at least 2 s after the last change and its stats line holds those of the same request again ([VER-WORK-COUNTERS](verification.mara.md#01M7BF6HGG6ET88HS641Y5676G)). A wait for a daemon polls `mara daemon status` for at most 10 s. From 0.4.0-alpha.6 the Node client of the setup of [VER-HOST-COMPARISON](verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9) is a client too, with the stats that [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) gives it.
 
 | Case | Expectation |
 | --- | --- |
@@ -30,6 +30,10 @@ A call is served in-process when its stats line holds the counts of a cold reque
 | Copies of the binary at two paths, and one copy replaced in its place by a new copy while its daemon runs | Each copy serves its first call in-process and starts its own daemon: `mara daemon status` of each names another process |
 | `mara mcp`, after the same request from the CLI settled a daemon of the test: one call | The server's stats line holds the counts of the same request again |
 | One `mara mcp` server, started with no daemon running, sends the same read as four calls: call 1; once `mara daemon status` reports the session, 2 s later, call 2; then `mara daemon stop`; then call 3; once the session is reported again, 2 s later, call 4 | The server's stats line at exit is the sum of its calls' counts: call 1 + call 2 + call 3 + call 4 = 4 × the counts of a cold request. Call 1 and call 3 are served in-process, a cold request each, and each starts a daemon. Call 2 and call 4 are the first responses of those daemons, which report the opening of the session, a cold request each; the client adds nothing. Had call 1 or call 3 been answered by a daemon, the call after it would report nothing, and the total would be at most 3 × the counts of a cold request |
+| From 0.4.0-alpha.6, a Node module of the test makes one read through the client of the package whose binary the CLI cases run, with no daemon running, and returns | Served in-process; the Node process exits within 5 s of the call settling; then `mara daemon status` reports a daemon with the project's session |
+| From 0.4.0-alpha.6, the reads of the second case through the Node client | As there; `mara daemon status` names the process that served them: the client and the CLI of one package share their daemon |
+| From 0.4.0-alpha.6, the Node client with `CI` set, with `MARA_NO_DAEMON=1` set and with its direct-mode option, each with no daemon running and with one | Served in-process; no daemon of the test starts |
+| From 0.4.0-alpha.6, the Node client of a package whose binary is a copy at another path | Its first call starts the daemon of that copy: `mara daemon status` of each copy names another process |
 | `mara daemon status`, `start` and `stop`, with no daemon running and with one | Exit status 0; `status` reports no daemon, or that daemon's process ID and sessions; after `start` exactly one daemon of the test runs; when `stop` returns, none runs |
 
 ---
@@ -105,3 +109,42 @@ Rust integration tests write through the real CLI to a daemon that the test star
 | `mara daemon stop`, and in a second run SIGTERM to the daemon, while an `item move` waits in step 3 of its first file; then the pauses released | The move's client reports success, and the files are those of the completed move; then the daemon exits |
 | SIGKILL to the daemon while an `item create` waits before step 2 | The client fails with `daemon-lost` and exit status 1 and does not run the create itself: every file is byte-identical |
 | SIGKILL to the daemon while an `item move` waits in step 3 of its second file | The client fails with `daemon-lost`; the files hold an interrupted move as [VER-INTERRUPTED-EDITS](verification-writes.mara.md#01M7F74J3SE8HJ3S6ZNG3G2DYJ) allows it, which the next `project validate`, served in-process, reports |
+| From 0.4.0-alpha.6, the two SIGKILL cases with the write sent through the daemon by the Node client | The call fails with `daemon-lost`, and the files are as in those cases: the client does not run the write again in-process |
+
+---
+
+<a id="01M7JQJKGBQKMRHH97R3RRJJ62"></a>
+
+### Refuse every unauthorized browser request
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-BROWSER-ACCESS |
+| Status | Accepted |
+| Methods | Test |
+| Methods | Inspection |
+| Verifies | [REQ-BROWSER-ACCESS-AUTHORIZED](daemon.mara.md#01M7BF6GR0N9J4C8Z5QQ4CSCB7) |
+
+Rust integration tests start each daemon from the test's temporary directory, outside every project, with its own runtime directory ([VER-DAEMON-START](#01M7JKW7JWB2RANYKNE6BHYM26)), and an HTTP client of the test sends HTTP/1.1 requests to `127.0.0.1` at the port that daemon printed. The listening daemon is started with `--http --allow-origin http://127.0.0.1:5173 --allow-origin http://127.0.0.1:5175 --allow-project <A> --allow-project <C>`; B is a third disposable project, and the documents of each project hold a word of their own. An accepted request carries the token, `Origin: http://127.0.0.1:5173` and project A, and is a read or a write; each case changes one part of it. A refusal is a 4xx status whose status and body are those of the same request naming a path where nothing exists, and hold no project's word; to a request whose one `Origin` header is an allowed origin it carries the CORS headers of an accepted response, and to any other request no `Access-Control-*` header. After a refusal, `mara daemon status` lists no session that the daemon did not hold before, and every file of A, B and C is byte-identical ([DES-BROWSER-LISTENER](daemon.mara.md#01M7CQ57TJY788DMPBN4BX1SEM)).
+
+| Case | Expectation |
+| --- | --- |
+| `mara daemon start --http` without `--allow-origin`, and without `--allow-project`; either option without `--http`; the origins `*`, `null`, `http://*.example.com`, `http://127.0.0.1:5173/`, `127.0.0.1:5173` and `file:///` | Rejected with `invalid-argument`, exit status 2; no daemon of the test runs |
+| A daemon started on demand by a CLI read; one started by `mara daemon start` | The daemon process has no listening TCP socket: none of its socket inodes in `/proc/<pid>/fd` is in the listening state in `/proc/net/tcp` or `/proc/net/tcp6` (on macOS, `lsof -a -p <pid> -iTCP -sTCP:LISTEN` lists none); `mara daemon status` prints no port or token |
+| The listening daemon | `start` prints a port and a token, which `status` prints again; each listening socket of the daemon is bound to `127.0.0.1` or `::1`; the accepted read and write return the result of CLI direct mode, with `Access-Control-Allow-Origin: http://127.0.0.1:5173` and `Vary: Origin` |
+| The accepted read from each allowed origin to each allowed project: four requests | Each returns the result of CLI direct mode for its project, with `Access-Control-Allow-Origin` naming its own origin |
+| An `OPTIONS` preflight without a token, asking for the method and headers of the accepted request, from the allowed origin and from `http://127.0.0.1:5174` | The first is allowed them for that origin; the second gets no `Access-Control-*` header; neither opens a session |
+| The token left out, empty, with one character changed, in the query string instead of `Authorization`; the token of the previous run after `mara daemon stop` and a new start | Refused |
+| `Origin` left out; given twice, once allowed; `null`, `https://127.0.0.1:5173`, `http://localhost:5173`, `http://127.0.0.1:5174`, `http://127.0.0.1:51730`, `http://127.0.0.1:5173.example.com` and `http://127.0.0.1:5173/` | Refused |
+| Project B; no project; `<A>/../<B>`; a symbolic link in A to B; a project nested in a directory of A; a regular file of A | Refused |
+| A symbolic link outside A to A | Served as A |
+| A write to A at the document path `../<B>/docs/x.mara.md` | Fails with `not-an-input`, as in CLI direct mode; B is byte-identical |
+| `project init` and `project convert` of A; requests naming `daemon stop` and `code add` | Fail with `unavailable-operation`; nothing is written in A or in the grammar cache, and the daemon still runs |
+| While the listening daemon runs: `mara daemon start` with the same listener options | Exit status 0, printing the same port and token |
+| While the listening daemon runs: `mara daemon start` with a third `--allow-origin`; with `--allow-project <B>` added; with `--allow-project <C>` left out | Each fails with `daemon-running`, exit status 1; then `status` prints the same port and token, a request from the third origin and one for B are refused, and the four accepted reads above still return their results |
+| While a daemon started on demand runs: `mara daemon start` with the listener options | `daemon-running`; that daemon still has no listening socket |
+| The listening daemon started with `MARA_TEST_IDLE_SECONDS=4`; an accepted read, then no request for 10 s, then the read again | After the 10 s it still runs and `status` lists no session; the second read returns the result of CLI direct mode |
+| `mara daemon stop` | Once it returns, a connection to the port is refused; the token is in no file under the runtime directory, the test's `HOME` or its `TMPDIR`; the next daemon started on demand has no listening socket |
+| In the browser setup of [VER-HOST-COMPARISON](verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9), two pages served by the test from two loopback ports, the daemon allowing only the first's origin: the second page, then the first, `fetch` a read of A with the token | The second's `fetch` rejects and `status` lists no session of A; the first gets the result of CLI direct mode |
+
+Inspection: review of mara-fkkcad finds the token drawn from the operating system's random generator with at least 128 bits, compared in constant time, and the token and the origin checked before the request's path is used. A test observes neither a token's entropy nor the timing of a comparison.

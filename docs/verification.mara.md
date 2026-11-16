@@ -66,6 +66,15 @@ Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANG
 | The project reached through a symbolic link to its root, after requests through its real path | As the same request again: one session per canonical root ([DES-DAEMON-SESSIONS](daemon.mara.md#01M7BF6GRG3NJZTA29TYVRVFT7)) |
 | One `mara mcp` call, after the same request from the CLI | The server's stats line: as the same request again |
 
+From 0.4.0-alpha.6, warm rows also run in a browser workspace on the 1× corpus, in the setup of [VER-HOST-COMPARISON](#01M7D3NAQHP8HX0X0GCZMXD1Q9), read through the workspace's debug stats option ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)). Contents the caller supplies or writes are hashed by the engine and are no file reads:
+
+| Situation | Expectation |
+| --- | --- |
+| The same read request again, nothing written (mara-jptfbq) | 0 file reads, 0 hashes, 0 parses, 0 snapshot builds, 0 check steps, 0 program runs |
+| One document written by the caller, then a read (mara-jptfbq) | 1 hash, of that document; 1 parse; 1 snapshot build |
+| `query view` after `project validate`, nothing written (mara-xsm8w6) | 0 program runs |
+| One program written by the caller, then `project validate` (mara-xsm8w6) | 1 program run, of that program; 0 parses, 0 snapshot builds |
+
 ---
 
 <a id="01M7BF6HGRNQ5SJVNP89G1CCBW"></a>
@@ -120,6 +129,15 @@ Rust integration tests run each operation on the same disposable project in CLI 
 | Browser, through the daemon and local WASM | 0.4.0-alpha.6 |
 
 The daemon case sends every document operation but `project init` and `project convert`, failing requests and writes included, from the CLI and from `mara mcp` to a daemon the test starts ([VER-DAEMON-START](verification-daemon.mara.md#01M7JKW7JWB2RANYKNE6BHYM26)), after an earlier request opened the session. It pairs generated MIDs as [VER-CLI-MCP-PARITY](verification-hosts.mara.md#01M7F74J5Z4KX9F3HN78T1WB85) does, and requires the same files after each write.
+
+The Node library and browser cases are modules run by `node --test`, Node's own runner, which a Rust integration test of the `mara` crate starts, so that `cargo test` runs them. The browser is Playwright's Chromium, driven by Playwright's library from those modules. A case needs only what its backend uses, and a missing piece fails only the cases that need it, with a message that names it: Node 24 for every case; for a browser workspace, Chromium, the page server and the engine's WASM module, and Soufflé's when the case runs a program; for an embedded Node case, the built addon; for a Node case through the daemon, the addon and a daemon; for Chromium through the daemon, Chromium, the page server and a daemon started with `--http`. The test creates what its cases use: a daemon with the runtime directory of [VER-DAEMON-START](verification-daemon.mara.md#01M7JKW7JWB2RANYKNE6BHYM26), started with `--http` for the Chromium cases and allowing only the test's projects and page origin; an HTTP server on a loopback port the operating system assigns, which serves the test's pages and the package's files; and a browser launched with a new profile in the test's temporary directory, never a persistent context. At the end it closes the browser and the server and stops any daemon it started; then no process whose environment or command line names the test's temporary directory runs. Every Node and browser case of a Verification item runs in this setup. Each case compares with CLI direct mode on the same files, pairing MIDs as above:
+
+| Case | Expectation |
+| --- | --- |
+| The daemon case's requests on the 1× corpus of [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA), `project init` in an empty directory and `project convert` of that harness's 0.3.0 input, through the Node client embedded and through the daemon | Each result, or failure's code, message and diagnostics, as in CLI direct mode; the same files after each write |
+| The same from Chromium through the daemon | The same, but `project init` and `project convert` fail with `unavailable-operation` ([VER-UNAVAILABLE-NOT-PARTIAL](verification-browser.mara.md#01M7JQJKGBJ6VC7X844R6HZZGS)) |
+| The same in a browser workspace supplied with every file of the project but `.git` | As in the row above; after each write, the supplied files with the exported change set applied by the test are the files of CLI direct mode |
+| A browser workspace supplied with the 1× corpus: every query and view of `engineering`, `query gate` with the corpus's gate inputs, and `query report` of its failing row | The rows of CLI direct mode: Soufflé's WASM and native builds give the same outputs |
 
 Architecture checks run from 0.4.0-alpha.1. They guard [DES-ENGINE-BOUNDARY](engine.mara.md#01M7BF6GY13YX9PD76M0TQG8YK) and do not establish the requirement without the parity cases:
 

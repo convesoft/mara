@@ -85,6 +85,7 @@ Counters:
 - A request that the daemon serves reports the daemon's counts for its project's session: the work done since the session's previous response, the opening of the session and background re-derivation after a watched change included. The client adds none, and starting a daemon is not counted.
 - `--debug-stats` makes the stats line the last line on stderr, after any diagnostic: also when the request fails or its arguments are rejected. Stdout stays the operation's.
 - The stats line is a JSON object of exactly `format_version` (1) and `file_reads`, `hashes`, `parses`, `snapshot_builds`, `code_scans`, `subprocess_spawns`, `check_steps` and `program_runs`. Key order carries no meaning.
+- The Node client's and the browser workspace's debug stats option reports, beside each call's result and never inside it, the object that the call's stats line would hold.
 
 Corpus generator:
 

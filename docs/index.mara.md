@@ -27,7 +27,7 @@
 | [Daemon](daemon.mara.md) | Lifecycle, sessions, watching, browser listener |
 | [Code links](code.mara.md) | Comment markers, grammars, operations that read code |
 | [Performance](performance.mara.md) | Work and time obligations, test harness, profiling |
-| [Verification](verification.mara.md) | Checks of performance, hosts and the engineering template |
+| [Verification](verification.mara.md) | Checks of performance, host parity and the engineering template |
 | [Document verification](verification-documents.mara.md) | Checks of format, identity, project selection, schema and validation |
 | [Retrieval verification](verification-retrieval.mara.md) | Checks of search, get, relation list, item list, paging and schema inspection |
 | [Authoring verification](verification-authoring.mara.md) | Checks of create, update, delete, relation edits, move and rename |
@@ -37,7 +37,8 @@
 | [Program safety verification](verification-programs.mara.md) | Checks of program faults, the time limit, the admitted language and reaching outside |
 | [Code link verification](verification-code.mara.md) | Checks of markers at both levels and of grammar downloads |
 | [Code link use verification](verification-code-use.mara.md) | Checks of marker rewrites, code links in programs and the work of reading code |
-| [Daemon verification](verification-daemon.mara.md) | Checks of daemon start, fresh answers, reads during validation and writes through the daemon |
+| [Daemon verification](verification-daemon.mara.md) | Checks of daemon start, fresh answers, reads during validation, writes through the daemon and browser access |
+| [Node library and browser verification](verification-browser.mara.md) | Checks of the Node library, the browser workspace and unavailable capabilities |
 | [Distribution](distribution.mara.md) | Packages, bundled Soufflé |
 | [Decisions](decisions.mara.md) | Format, authoring, project files, packaging, agent guidance |
 | [Runtime decisions](decisions-runtime.mara.md) | Caching, inputs, daemon, code links, performance tests |

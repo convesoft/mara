@@ -62,7 +62,7 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 
 - Each Mara build has its own lock and socket in the runtime directory (`mara/`, mode 0700, in `XDG_RUNTIME_DIR`, or `/run/user/<uid>` when it is unset, on Linux; in `TMPDIR` on macOS). A build is its version with the path, size and modification time of its executable ([ADR-DAEMON-PER-VERSION](decisions-runtime.mara.md#01M7CMW6Z9MMB1705N02S9CCYG)). The lock ensures one instance per build when several clients start it at once; the socket path stays under the 108-byte Unix limit.
 - When that base names no directory, or the socket path would pass the limit, every call runs in direct mode.
-- A client connects only to the daemon of its own build. Daemons of different builds run side by side.
+- A client connects only to the daemon of its own build. Daemons of different builds run side by side. A Node client's build is that of the `mara` binary of its native package, which it starts as its daemon.
 - Clients send every document operation to the daemon except `project init` and `project convert`, which run in the calling process, as `prime` does.
 - A client that finds no daemon of its build starts `mara daemon start`, with its project as `--project`, detached from its standard streams, and serves its request in-process. A daemon opens the session of the project that `--project` names or that holds its working directory, if any, as soon as it starts.
 - A client falls back to direct mode only before it dispatches a request. A dispatched request is never replayed on another backend: when the daemon ends before answering, the request fails with `daemon-lost` ([DES-OPERATIONS](hosts.mara.md#01M7BF6H124JRJAQSYVQ21Q2JS)).
@@ -123,6 +123,12 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 - The command prints the port and a token generated for that daemon run. `mara daemon status` prints them again.
 - Nothing is persisted, and a daemon started on demand never listens on HTTP.
 - A daemon that listens for browsers runs until `mara daemon stop`, because a browser cannot start one. Its idle sessions are still dropped.
+- `--http` needs both options, and neither is accepted without it. An allowed origin is written as a browser sends it: `http` or `https`, a host and an optional port, with no path, no trailing `/` and no `*`; `null` and anything else are rejected with `invalid-argument`.
+- The operating system assigns the port. The token holds at least 128 bits from the operating system's random generator.
+- A request carries the token as `Authorization: Bearer <token>` and names its project root. It is refused unless the token matches, compared in constant time, its one `Origin` header equals an allowed origin byte for byte, and the project's canonical root is that of an `--allow-project` path. Token and origin are checked before the path is used, and the project before anything in it is read. A refusal opens no session, and has the same status and body whatever the path names.
+- A response to an allowed origin carries `Access-Control-Allow-Origin` with that origin and `Vary: Origin`; a preflight from an allowed origin is answered without a token. A response to any other origin carries no `Access-Control-*` header.
+- The listener serves the document operations that native clients send to the daemon. `project init` and `project convert` fail with `unavailable-operation`; nothing else is served.
+- `mara daemon start --http …` while a daemon of the build runs prints that daemon's port and token and exits 0 when it listens with the same origins and projects, and otherwise fails with `daemon-running` and changes nothing.
 
 ---
 
