@@ -1,8 +1,13 @@
 ---
 title: Regroup docs into subject folders and drop the page size limit
-status: in-progress
+status: todo
 type: task
 priority: high
+blocked_by:
+  - mara-yhxq5x
+  - mara-17gykj
+  - mara-274e1m
+  - mara-gfb6n6
 created_at: 2026-11-16T17:58:13Z
 ---
 
@@ -18,3 +23,5 @@ The maintainer dropped the 200-line page limit and wants `docs/` laid out by the
 - [ ] Project validation with the worktree binary reports valid with complete evaluation, and `zban check` passes
 
 Done when the checks above pass and the change contains only moves, merges, link and index updates and the `AGENTS.md` edits.
+
+Order, decided by the maintainer on 2026-11-16: the four issues in progress (mara-yhxq5x, mara-17gykj, mara-274e1m, mara-gfb6n6) are integrated first and no other issue starts meanwhile; then this issue runs alone on the quiet tip, so that no branch has to rebase over the moves; then the other work resumes.
