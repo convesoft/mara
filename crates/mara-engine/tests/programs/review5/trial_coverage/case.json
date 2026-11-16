@@ -1,0 +1,29 @@
+{
+ "boundary": [
+  "covered",
+  "edge",
+  "field",
+  "item",
+  "source_complete",
+  "uncovered",
+  "verification_result"
+ ],
+ "counts_only": true,
+ "inputs": {
+  "edge": 4256,
+  "field": 1072,
+  "item": 3200,
+  "source_complete": 0,
+  "verification_result": 416
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "covered": 337,
+   "uncovered": 437
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

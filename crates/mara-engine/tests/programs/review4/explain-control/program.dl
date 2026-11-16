@@ -1,0 +1,3 @@
+.decl s(mid:symbol,text:symbol,path:symbol,line:number)
+.decl r(mid:symbol,text:symbol)
+r(m,t):-s(m,t,_,_).

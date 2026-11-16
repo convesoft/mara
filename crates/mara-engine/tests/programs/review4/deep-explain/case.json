@@ -1,0 +1,28 @@
+{
+ "boundary": [
+  "a7",
+  "base"
+ ],
+ "inputs": {
+  "base": [
+   [
+    "m",
+    "docs/a.md",
+    2
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "a7": [
+    [
+     "m"
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"premises\": \"a7(\\\"m\\\")\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"premises\": \"a1(\\\"m\\\")\",\n\t\t  \"rule-number\": \"(R1)\",\n\t\t  \"children\": [\n\t\t\t{ \"axiom\": \"base(\\\"m\\\", \\\"docs/a.md\\\", 2)\"}\t\t]\n\t\t}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"a1(m) :- \\n   base(m,+underscore_6,+underscore_7).\"},\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"a7(m) :- \\n   a1(m).\"}\n]\n}\n"
+ },
+ "parser": "admitted"
+}

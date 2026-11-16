@@ -1,0 +1,13 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 1,
+  "outputs": {},
+  "stderr": "Error: Constraint requires an operand of type `number` in file program.dl at line 5\nr(x):-a([x]),a(y),[x]<y.\n------------------^------\nError: Constraint requires an operand of type `number` in file program.dl at line 5\nr(x):-a([x]),a(y),[x]<y.\n----------------------^--\n2 errors generated, evaluation aborted\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:5:22"
+}

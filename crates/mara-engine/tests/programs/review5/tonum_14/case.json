@@ -1,0 +1,26 @@
+{
+ "boundary": [
+  "a",
+  "r"
+ ],
+ "inputs": {
+  "a": [
+   [
+    "-2147483648"
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     -2147483648
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

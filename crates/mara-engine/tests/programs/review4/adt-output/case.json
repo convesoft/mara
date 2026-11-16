@@ -1,0 +1,15 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": -6,
+  "outputs": {
+   "r": ""
+  },
+  "stderr": "unsupported type attribute: `+`\nsouffle-static: <souffle-source>/src/include/souffle/utility/MiscUtil.h:245: void souffle::fatal(const char*, const Args& ...) [with Args = {char}]: Assertion `false && \"fatal error; see std err\"' failed.\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:1:11"
+}

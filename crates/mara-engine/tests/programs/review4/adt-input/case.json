@@ -1,0 +1,19 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {
+  "r": [
+   [
+    "$A(1)"
+   ]
+  ]
+ },
+ "native": {
+  "exit": 1,
+  "outputs": {},
+  "stderr": "Error loading r data: Error converting: \"$A(1)\"\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:1:11"
+}

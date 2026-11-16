@@ -1,0 +1,4 @@
+.decl a(x:number)
+a(1).a(2).a(x)<=a(y):-x<y.
+.decl r(x:number)
+r(x):-a(x).

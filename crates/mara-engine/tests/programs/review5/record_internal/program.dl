@@ -1,0 +1,5 @@
+.type R=[x:symbol,y:number]
+.decl a(x:R)
+a(["a",1]).a(nil).
+.decl r(x:symbol,y:number)
+r(x,y):-a([x,y]).

@@ -1,0 +1,5 @@
+.type R=[x:number]
+.decl a(x:R)
+a([7]).
+.decl r(x:number)
+r(as(x,number)):-a(x).

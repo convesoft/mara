@@ -1,0 +1,22 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     1073741823
+    ],
+    [
+     2147483647
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

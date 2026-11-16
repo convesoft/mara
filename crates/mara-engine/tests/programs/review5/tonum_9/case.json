@@ -1,0 +1,26 @@
+{
+ "boundary": [
+  "a",
+  "r"
+ ],
+ "inputs": {
+  "a": [
+   [
+    " 0x10"
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     0
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

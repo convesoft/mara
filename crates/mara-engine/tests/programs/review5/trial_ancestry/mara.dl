@@ -1,0 +1,15 @@
+.once
+// Fact bridge: the input relations Mara exports from a snapshot.
+.type Mid <: symbol      // machine identity (ULID)
+.type Id <: symbol       // human-readable ID
+.type Type <: symbol     // flavour label, e.g. "requirement"
+.type Status <: symbol   // draft | accepted | retired
+.type Rel <: symbol      // relation name, e.g. "satisfies"
+.type Path <: symbol     // project-relative document path
+
+.decl item(mid: Mid, type: Type, id: Id, status: Status, path: Path, line: number)
+.decl field(mid: Mid, key: symbol, value: symbol)
+.decl edge(rel: Rel, src: Mid, dst: Mid, path: Path, line: number)
+// Externally supplied records, with an explicit completeness marker per source.
+.decl verification_result(ver: Mid, result: symbol, revision: symbol)
+.decl source_complete(source: symbol)

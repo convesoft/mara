@@ -1,0 +1,4 @@
+.decl a(x:symbol)
+.decl b(x:symbol)
+.decl r(x:symbol)
+r(x):-a(x),!b(x).

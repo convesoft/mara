@@ -1,0 +1,33 @@
+{
+ "boundary": [
+  "a",
+  "r"
+ ],
+ "inputs": {
+  "a": [
+   [
+    "A",
+    3
+   ],
+   [
+    "B",
+    5
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "explain_input": "format json\nexplain r(\"MID\",8)\nexit\n",
+  "outputs": {
+   "r": [
+    [
+     "MID",
+     8
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"premises\": \"r(\\\"MID\\\", 8)\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"axiom\": \"__agg_single(8)\"}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"__agg_single(@generator_0) :- \\n   @generator_0 = sum n : { a(+underscore_0,n) }.\"},\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(\\\"MID\\\",z) :- \\n   __agg_single(z).\"}\n]\n}\n"
+ },
+ "parser": "admitted"
+}

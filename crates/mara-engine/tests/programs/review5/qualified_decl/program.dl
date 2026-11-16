@@ -1,0 +1,2 @@
+.decl a.r(x:number)
+a.r(1).

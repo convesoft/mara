@@ -1,0 +1,3 @@
+.include "mara.dl"
+.decl ids(i: Id)
+ids(M) :- item(M, _, _, _, _, _).

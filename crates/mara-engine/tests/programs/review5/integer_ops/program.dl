@@ -1,0 +1,19 @@
+.decl a(x:number,y:number)
+.decl r(op:symbol,x:number,y:number,z:number)
+r("+",x,y,x + y):-a(x,y).
+r("-",x,y,x - y):-a(x,y).
+r("*",x,y,x * y):-a(x,y).
+r("/",x,y,x / y):-a(x,y).
+r("%",x,y,x % y):-a(x,y).
+r("band",x,y,x band y):-a(x,y).
+r("bor",x,y,x bor y):-a(x,y).
+r("bxor",x,y,x bxor y):-a(x,y).
+r("bshl",x,y,x bshl y):-a(x,y).
+r("bshr",x,y,x bshr y):-a(x,y).
+r("bshru",x,y,x bshru y):-a(x,y).
+r("land",x,y,x land y):-a(x,y).
+r("lor",x,y,x lor y):-a(x,y).
+r("lxor",x,y,x lxor y):-a(x,y).
+r("unary -",x,y,- x):-a(x,y).
+r("unary bnot",x,y,bnot x):-a(x,y).
+r("unary lnot",x,y,lnot x):-a(x,y).

@@ -1,0 +1,13 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": -6,
+  "outputs": {},
+  "stderr": "Unhandled argument type: Counter\nsouffle-static: <souffle-source>/src/include/souffle/utility/MiscUtil.h:245: void souffle::fatal(const char*, const Args& ...) [with Args = {}]: Assertion `false && \"fatal error; see std err\"' failed.\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:4:5"
+}

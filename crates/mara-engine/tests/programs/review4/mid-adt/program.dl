@@ -1,0 +1,4 @@
+.type Mid <: symbol
+.type T = A {x:number} | B {}
+.decl r(mid:Mid,x:T)
+r("m",$A(1)).

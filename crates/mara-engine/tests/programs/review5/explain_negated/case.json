@@ -1,0 +1,29 @@
+{
+ "boundary": [
+  "a",
+  "b",
+  "r"
+ ],
+ "inputs": {
+  "a": [
+   [
+    "MID"
+   ]
+  ],
+  "b": []
+ },
+ "native": {
+  "exit": 0,
+  "explain_input": "format json\nexplain r(\"MID\")\nexit\n",
+  "outputs": {
+   "r": [
+    [
+     "MID"
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"premises\": \"r(\\\"MID\\\")\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"axiom\": \"a(\\\"MID\\\")\"},\n\t\t{ \"axiom\": \"!b(\\\"MID\\\")\"}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(x) :- \\n   a(x),\\n   !b(x).\"}\n]\n}\n"
+ },
+ "parser": "admitted"
+}

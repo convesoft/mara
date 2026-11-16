@@ -1,0 +1,13 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 1,
+  "outputs": {},
+  "stderr": "Warning: Deprecated $ symbol was used. Use functor 'autoinc()' instead. in file program.dl at line 2\nr($).\n--^---\nError: Argument in fact is not constant\n1 errors generated, evaluation aborted\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:2:3"
+}

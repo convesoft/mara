@@ -1,0 +1,15 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 1,
+  "outputs": {
+   "r": ""
+  },
+  "stderr": "Segmentation violation signal in rule:\nr(as(x, symbol)) :- \n   a(x).\nin file program.dl [4:1-4:23]\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:4:3"
+}

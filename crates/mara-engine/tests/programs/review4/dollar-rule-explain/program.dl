@@ -1,0 +1,4 @@
+.decl seed(x:symbol)
+seed("one"). seed("two").
+.decl r(s:symbol,n:number)
+r(x,$):-seed(x).

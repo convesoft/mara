@@ -1,0 +1,4 @@
+.decl a(x:number) no_magic
+a(1).a(2).
+.decl r(x:number)
+r(x):-a(x).

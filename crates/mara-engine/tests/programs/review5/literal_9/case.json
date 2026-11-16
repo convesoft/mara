@@ -1,0 +1,13 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 1,
+  "outputs": {},
+  "stderr": "Error: IP out of range in file program.dl at line 3\nr(256.1.1.1).\n--^-----------\n1 errors generated, evaluation aborted\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:3:3"
+}

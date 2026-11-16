@@ -1,0 +1,4 @@
+.once
+.include "leaf.dl"
+.decl h(x:number)
+h(x):-leaf(x).

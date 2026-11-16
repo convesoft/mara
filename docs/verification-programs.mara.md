@@ -111,5 +111,5 @@ Tests of the engine crate's parser run on the review probe programs and the tria
 | `min` and `max` aggregates over symbols | Refused |
 | The variadic `min(...)` and `max(...)` over symbols; `count` over symbol tuples | Admitted |
 | A left-out word inside a comment or a string literal | Admitted |
-| Every probe program that the parser admits | `souffle` compiles it: a run against empty facts exits 0 with nothing on stderr |
+| Every probe program that the parser admits | `souffle` compiles it: a run against empty facts exits 0 with no compile diagnostic |
 | The rewritten trial programs | Admitted, and they compile |

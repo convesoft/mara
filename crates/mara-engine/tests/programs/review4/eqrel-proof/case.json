@@ -1,0 +1,64 @@
+{
+ "boundary": [
+  "r",
+  "s"
+ ],
+ "inputs": {
+  "s": [
+   [
+    "a",
+    "b"
+   ],
+   [
+    "b",
+    "c"
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     "a",
+     "a"
+    ],
+    [
+     "a",
+     "b"
+    ],
+    [
+     "a",
+     "c"
+    ],
+    [
+     "b",
+     "a"
+    ],
+    [
+     "b",
+     "b"
+    ],
+    [
+     "b",
+     "c"
+    ],
+    [
+     "c",
+     "a"
+    ],
+    [
+     "c",
+     "b"
+    ],
+    [
+     "c",
+     "c"
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"premises\": \"r(\\\"a\\\", \\\"c\\\")\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"premises\": \"s(\\\"a\\\", \\\"c\\\")\",\n\t\t  \"rule-number\": \"(R1)\",\n\t\t  \"children\": [\n\t\t\t{ \"axiom\": \"s(\\\"a\\\", \\\"b\\\")\"},\n\t\t\t{ \"axiom\": \"s(\\\"b\\\", \\\"c\\\")\"}\t\t]\n\t\t}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(a,b) :- \\n   s(a,b).\"},\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"s(x,z) :- \\n   s(x,y),\\n   s(y,z).\"},\n\t{ \"rule-number\": \"(R2)\", \"rule\": \"s(x,y) :- \\n   s(y,x).\"},\n\t{ \"rule-number\": \"(R3)\", \"rule\": \"s(x,x) :- \\n   s(x,+underscore_0).\"}\n]\n}\n"
+ },
+ "parser": "admitted"
+}

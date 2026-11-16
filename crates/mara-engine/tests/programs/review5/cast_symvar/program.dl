@@ -1,0 +1,4 @@
+.decl a(x:symbol)
+a("hello").
+.decl r(x:number)
+r(as(x,number)):-a(x).

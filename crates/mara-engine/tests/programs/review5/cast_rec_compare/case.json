@@ -1,0 +1,13 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 1,
+  "outputs": {},
+  "stderr": "Error: Ambiguous record in file program.dl at line 5\nr(x):-a([x]),a(y),as([x],number)<as(y,number).\n---------------------^-------------------------\n1 errors generated, evaluation aborted\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:5:19"
+}

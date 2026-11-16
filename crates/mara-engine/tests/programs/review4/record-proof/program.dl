@@ -1,0 +1,4 @@
+.type Rec=[s:symbol,n:number]
+.decl s(m:symbol,v:Rec,p:symbol,l:number)
+.decl r(m:symbol,n:number)
+r(m,n):-s(m,[_,n],_,_).

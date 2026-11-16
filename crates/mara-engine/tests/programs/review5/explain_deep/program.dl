@@ -1,0 +1,5 @@
+.decl a(x:number)
+a(0).
+a(x+1):-a(x),x<8.
+.decl r(x:number)
+r(x):-a(x).

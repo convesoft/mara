@@ -1,0 +1,5 @@
+.decl s(x:symbol)
+.decl r(s:symbol,n:number)
+r(x,ord(x)):-s(x).
+.decl other(x:symbol)
+other("unrelated").

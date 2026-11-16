@@ -1,0 +1,15 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": "[[\"\\xc3\"]]\n"
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

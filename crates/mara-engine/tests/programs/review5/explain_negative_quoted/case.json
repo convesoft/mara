@@ -1,0 +1,29 @@
+{
+ "boundary": [
+  "a",
+  "r"
+ ],
+ "inputs": {
+  "a": [
+   [
+    "neg",
+    -1
+   ]
+  ]
+ },
+ "native": {
+  "exit": 1,
+  "explain_input": "format json\nexplain r(\"neg\",\"-1\")\nexit\n",
+  "outputs": {
+   "r": [
+    [
+     "neg",
+     -1
+    ]
+   ]
+  },
+  "stderr": "stoi\n",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

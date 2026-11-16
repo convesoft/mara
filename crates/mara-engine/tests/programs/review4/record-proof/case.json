@@ -1,0 +1,33 @@
+{
+ "boundary": [
+  "r",
+  "s"
+ ],
+ "inputs": {
+  "s": [
+   [
+    "m",
+    [
+     "text",
+     2
+    ],
+    "docs/a.md",
+    7
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     "m",
+     2
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"premises\": \"r(\\\"m\\\", 2)\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"axiom\": \"s(\\\"m\\\", record #1, \\\"docs/a.md\\\", 7)\"}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(m,n) :- \\n   s(m,[_<unnamed_1>,n],+underscore_6,+underscore_7).\"}\n]\n}\n"
+ },
+ "parser": "program.dl:2:20"
+}

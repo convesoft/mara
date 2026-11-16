@@ -1,0 +1,20 @@
+{
+ "boundary": [
+  "a",
+  "r"
+ ],
+ "inputs": {
+  "a": [
+   [
+    "garbage"
+   ]
+  ]
+ },
+ "native": {
+  "exit": 1,
+  "outputs": {},
+  "stderr": "error: wrong string provided by `to_number(\"garbage\")` functor.\nFloating-point arithmetic exception signal in rule:\nr(to_number(x)) :- \n   a(x).\nin file program.dl [3:1-3:23]\n",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

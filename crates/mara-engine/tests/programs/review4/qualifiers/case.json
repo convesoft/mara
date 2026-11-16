@@ -1,0 +1,13 @@
+{
+ "boundary": [],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "side.csv": "sentinel\n"
+  },
+  "stderr": "Warning: Deprecated output qualifier was used in file program.dl at line 1\n.decl side(x:symbol) output printsize\n---------------------^----------------\nWarning: Deprecated printsize qualifier was used in file program.dl at line 1\n.decl side(x:symbol) output printsize\n----------------------------^---------\n",
+  "stdout": "side\t1\n"
+ },
+ "parser": "program.dl:1:22"
+}

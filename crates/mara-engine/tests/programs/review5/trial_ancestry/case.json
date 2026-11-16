@@ -1,0 +1,29 @@
+{
+ "boundary": [
+  "ancestor",
+  "edge",
+  "field",
+  "in_cycle",
+  "item",
+  "source_complete",
+  "verification_result"
+ ],
+ "counts_only": true,
+ "inputs": {
+  "edge": 4256,
+  "field": 1072,
+  "item": 3200,
+  "source_complete": 0,
+  "verification_result": 416
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "ancestor": 2550,
+   "in_cycle": 32
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

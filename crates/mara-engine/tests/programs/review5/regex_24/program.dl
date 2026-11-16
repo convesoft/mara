@@ -1,0 +1,3 @@
+.decl a(x:symbol)
+.decl r(x:symbol)
+r(x):-a(x),match("\\u00e9",x).

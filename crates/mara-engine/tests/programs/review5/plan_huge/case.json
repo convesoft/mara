@@ -1,0 +1,13 @@
+{
+ "boundary": [
+  "a"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": -6,
+  "outputs": {},
+  "stderr": "terminate called after throwing an instance of 'std::out_of_range'\n  what():  stoul\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:2:33"
+}

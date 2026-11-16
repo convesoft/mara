@@ -1,0 +1,20 @@
+{
+ "boundary": [
+  "failed",
+  "subjects"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 1,
+  "outputs": {
+   "subjects": [
+    [
+     "MID"
+    ]
+   ]
+  },
+  "stderr": "Floating-point arithmetic exception signal in rule:\n+disconnected0() :- \n   a(x,y),\n   (x%y) != 0.\nin file program.dl [6:1-6:30]\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:6:24"
+}

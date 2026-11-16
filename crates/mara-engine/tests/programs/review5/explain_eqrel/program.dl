@@ -1,0 +1,4 @@
+.decl e(x:symbol,y:symbol) eqrel
+e("a","b").e("b","c").
+.decl r(x:symbol)
+r(x):-e("a",x).

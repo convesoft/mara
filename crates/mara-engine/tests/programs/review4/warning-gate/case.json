@@ -1,0 +1,21 @@
+{
+ "boundary": [
+  "condition",
+  "subject"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "condition": [],
+   "subject": [
+    [
+     "m"
+    ]
+   ]
+  },
+  "stderr": "warning: wrong pattern provided \"[\"\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:4:26"
+}

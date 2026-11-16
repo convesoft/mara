@@ -1,0 +1,2 @@
+.decl r(s:symbol,n:number)
+r("x",ord("x")).

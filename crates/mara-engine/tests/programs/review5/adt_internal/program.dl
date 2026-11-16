@@ -1,0 +1,5 @@
+.type T=A{x:number}|B{x:symbol}
+.decl a(x:T)
+a($A(7)).a($B("hello")).
+.decl r(x:number)
+r(x):-a($A(x)).

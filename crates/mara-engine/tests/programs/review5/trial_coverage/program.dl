@@ -1,0 +1,7 @@
+.include "mara.dl"
+.decl covered(req: Mid)
+covered(R) :-
+    item(R, "requirement", _, "accepted", _, _),
+    edge("verifies", V, R, _, _), item(V, "verification", _, "accepted", _, _).
+.decl uncovered(req: Mid, id: Id, path: Path, line: number)
+uncovered(R, Id, P, L) :- item(R, "requirement", Id, "accepted", P, L), !covered(R).

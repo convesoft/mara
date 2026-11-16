@@ -1,0 +1,4 @@
+.decl a(x:number)
+a(1).
+.decl r(x:number)
+r(x):-a(x). .plan 0:(0)

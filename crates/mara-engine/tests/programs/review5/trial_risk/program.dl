@@ -1,0 +1,24 @@
+.include "mara.dl"
+// Gate parameter supplied by Mara as a one-row input relation.
+.decl threshold(value: number)
+
+.decl likelihood_value(label: symbol, value: number)
+likelihood_value("rare", 1). likelihood_value("unlikely", 2). likelihood_value("possible", 3).
+likelihood_value("likely", 4). likelihood_value("almost-certain", 5).
+.decl consequence_value(label: symbol, value: number)
+consequence_value("minimal", 1). consequence_value("minor", 2). consequence_value("moderate", 3).
+consequence_value("major", 4). consequence_value("severe", 5).
+
+.decl risk_score(risk: Mid, score: number)
+risk_score(R, L * C) :-
+    item(R, "risk", _, _, _, _),
+    field(R, "likelihood", LL), likelihood_value(LL, L),
+    field(R, "consequence", CL), consequence_value(CL, C).
+
+.decl risk_above(risk: Mid, score: number)
+risk_above(R, S) :- risk_score(R, S), threshold(T), S >= T.
+
+// Missing input is "unavailable", never an invented zero.
+.decl risk_unavailable(risk: Mid, reason: symbol)
+risk_unavailable(R, "no likelihood") :- item(R, "risk", _, _, _, _), !field(R, "likelihood", _).
+risk_unavailable(R, "no consequence") :- item(R, "risk", _, _, _, _), !field(R, "consequence", _).

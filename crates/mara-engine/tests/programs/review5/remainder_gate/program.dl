@@ -1,0 +1,6 @@
+.decl a(x:number,y:number)
+a(-2147483648,-1).
+.decl subjects(mid:symbol)
+subjects("MID").
+.decl failed(mid:symbol)
+failed("MID"):-a(x,y),x%y!=0.

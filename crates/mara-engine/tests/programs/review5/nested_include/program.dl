@@ -1,0 +1,4 @@
+.once
+.include "helper.dl"
+.decl r(x:number)
+r(x):-h(x).

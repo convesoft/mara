@@ -1,0 +1,45 @@
+{
+ "boundary": [
+  "a",
+  "r"
+ ],
+ "inputs": {
+  "a": [
+   [
+    -3
+   ],
+   [
+    2
+   ],
+   [
+    7
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     "min",
+     -3
+    ],
+    [
+     "max",
+     7
+    ],
+    [
+     "sum",
+     6
+    ],
+    [
+     "count",
+     3
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

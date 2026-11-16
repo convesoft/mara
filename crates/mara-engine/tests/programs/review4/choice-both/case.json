@@ -1,0 +1,38 @@
+{
+ "boundary": [
+  "other",
+  "r",
+  "s"
+ ],
+ "inputs": {
+  "s": [
+   [
+    "a",
+    "c"
+   ],
+   [
+    "a",
+    "b"
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "other": [
+    [
+     "b"
+    ]
+   ],
+   "r": [
+    [
+     "a",
+     "b"
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "program.dl:2:28"
+}

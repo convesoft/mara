@@ -1,0 +1,61 @@
+{
+ "boundary": [
+  "a",
+  "r"
+ ],
+ "inputs": {
+  "a": [
+   [
+    ""
+   ],
+   [
+    "a"
+   ],
+   [
+    "b"
+   ],
+   [
+    "aa"
+   ],
+   [
+    "ab"
+   ],
+   [
+    "aba"
+   ],
+   [
+    "zabcac"
+   ],
+   [
+    "word"
+   ],
+   [
+    "é"
+   ],
+   [
+    "1"
+   ],
+   [
+    "a\n"
+   ],
+   [
+    " "
+   ],
+   [
+    "q"
+   ],
+   [
+    "\u0001"
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": []
+  },
+  "stderr": "warning: wrong pattern provided \"a{2,1}\"\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:3:12"
+}

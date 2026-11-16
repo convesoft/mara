@@ -79,7 +79,25 @@ Before every run the host copies `mara.dl` and the declared program files into a
 - Left out because it reaches outside: every input and output directive and qualifier, which Mara generates; `.functor`, `.pragma`, `.lattice`, `@` functors, `#` directives, `__FILE__`, `__INCL__`.
 - Left out because its value depends on evaluation order: `autoinc()`, a bare `$`, `ord`, `choice-domain`, `recursive_iteration_cnt`, `.limitsize`.
 - Left out because the native and the browser build differ, or Soufflé gets it wrong: `float` and `unsigned` types and literals, `mean`, `to_float`, `to_unsigned`, `as` casts, `match`, `/`, `%`, `^`, `magic`, subsumption, ADTs.
-- A relation that crosses the boundary (a fact relation, a supplied input, a consumed output) has only `symbol` and `number` columns, or subtypes of them. The parser checks this on the resolved types.
+- A relation that crosses the boundary (a fact relation, a supplied input, a consumed output) has only `symbol` and `number` columns, or subtypes of them, and is not `inline`. The parser checks this on the resolved types.
+
+The parser reads text as Soufflé 2.5 does with `--no-preprocessor` and refuses text that the two could read differently:
+
+| Part | Admitted |
+| --- | --- |
+| Text | UTF-8; outside strings and comments only ASCII; no control character but tab, line feed and carriage return |
+| Comments | `//` up to the line feed, `/* */` without nesting; `#` only in comments and strings |
+| Doc comments | `///` and `/** */` only right before a declaration, a fact or a rule; no `//!` or `/*!` |
+| Strings | On one line; the escapes `\"`, `\\`, `\'`, `\n`, `\t`, `\r` |
+| Integers | Decimal, `0x` and `0b`, from −2^31 to 2^31−1; 2^31 only right after a unary `-` |
+| Names | No Soufflé keyword or built-in type name, no `?`, no leading `__` |
+| Directives | Each but `.once` followed by a space or a tab |
+| `.include` | Only between items outside components, its quoted path after spaces or tabs: relative, without `.` or `..` parts, resolved against the including file's directory to a declared program, else `mara.dl` to Mara's declarations. A file included twice starts with `.once`; `.once` comes first in a file. A declared program at the project path `mara.dl` is refused |
+| Aggregates | `count :`, or `sum`, `min` or `max` of one value; no `;` at any depth of the body; `min` and `max` only of values that the aggregate's own atoms or comparisons show to be numbers, also through groups without `;` and through record fields |
+| Comparisons | `<`, `<=`, `>` and `>=` not on records |
+| `.plan` | Only after a recursive rule with one head, no `;` and no parentheses around terms; versions below its number of recursive atoms, each order a permutation of its atoms |
+| Components | A relation or type name resolves in its instance, then the enclosing instances, then the program; a type parameter only in its own component's body; a type argument is one name, without `.` |
+| Size | The parser descends at most 100 levels, each term, value, operator, group, record, call, aggregate, negation and component definition taking one or more; component instances and inheritance together nest at most 100 deep; at most 100,000 declarations, clauses, instances and inherited bodies once components are expanded. A program past a limit is refused, naming it |
 - Time is bounded ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)).
 - Soufflé runs with library loading off and never in the project's directory ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)).
 

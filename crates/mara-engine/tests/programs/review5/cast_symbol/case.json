@@ -1,0 +1,13 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 1,
+  "outputs": {},
+  "stderr": "Error: Symbol constant (type mismatch) in file program.dl at line 2\nr(as(\"hello\", number)).\n-----^------------------\n1 errors generated, evaluation aborted\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:2:3"
+}

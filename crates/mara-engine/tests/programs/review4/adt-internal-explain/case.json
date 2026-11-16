@@ -1,0 +1,19 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": -6,
+  "outputs": {
+   "r": [
+    [
+     1
+    ]
+   ]
+  },
+  "stderr": "unhandled type attr code\nsouffle-static: <souffle-source>/src/include/souffle/utility/MiscUtil.h:245: void souffle::fatal(const char*, const Args& ...) [with Args = {}]: Assertion `false && \"fatal error; see std err\"' failed.\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:1:11"
+}

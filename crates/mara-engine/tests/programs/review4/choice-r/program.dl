@@ -1,0 +1,5 @@
+.decl s(x:symbol,y:symbol)
+.decl r(x:symbol,y:symbol) choice-domain x
+r(x,y):-s(x,y).
+.decl other(x:symbol)
+other("b").

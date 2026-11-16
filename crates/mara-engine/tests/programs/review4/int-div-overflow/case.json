@@ -1,0 +1,13 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 1,
+  "outputs": {},
+  "stderr": "Floating-point arithmetic exception signal in rule:\nr((-2147483648/-1)).\nin file program.dl [2:1-2:21]\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:2:15"
+}

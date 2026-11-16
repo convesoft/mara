@@ -1,0 +1,6 @@
+.decl a(x:number)
+a(1).
+.decl b(x:number)
+b(2).
+.decl r(x:number)
+r(count:{a(x);b(x)}).

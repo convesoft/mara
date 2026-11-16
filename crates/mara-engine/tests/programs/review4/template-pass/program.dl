@@ -1,0 +1,64 @@
+.type Mid <: symbol
+.type Id <: symbol
+.type Type <: symbol
+.type Status <: symbol
+.type Rel <: symbol
+.type Path <: symbol
+
+.decl item(mid: Mid, type: Type, id: Id, status: Status, path: Path, line: number)
+.decl title(mid: Mid, text: symbol)
+.decl revision(mid: Mid, hash: symbol)
+.decl field(mid: Mid, key: symbol, value: symbol)
+.decl folded(text: symbol, folded: symbol)
+.decl edge(rel: Rel, src: Mid, dst: Mid, path: Path, line: number)
+.decl source_complete(source: symbol)
+
+.decl req(r:Mid)
+req(r):-item(r,"requirement",_,_,_,_).
+.decl ancestor(r:Mid,a:Mid)
+ancestor(r,r):-req(r).
+ancestor(r,a):-ancestor(r,p),edge("decomposes",p,a,_,_),req(a).
+ancestor(r,a):-ancestor(r,p),edge("derives_from",p,a,_,_),req(a).
+.decl scope(r:Mid,n:Mid)
+scope(r,a):-ancestor(r,a).
+scope(r,n):-ancestor(r,a),edge("satisfies",a,n,_,_),item(n,"need",_,_,_,_).
+scope(r,g):-ancestor(r,a),edge("satisfies",a,n,_,_),item(n,"need",_,_,_,_),edge("contributes_to",n,g,_,_),item(g,"goal",_,_,_,_).
+.decl relevant(r:Mid,k:Mid,n:Mid)
+relevant(r,k,n):-scope(r,n),edge("threatens",k,n,_,_),item(k,"risk",_,_,_,_).
+.decl cell(l:symbol,c:symbol,level:symbol)
+cell("likely","major","HIGH").
+.decl level(k:Mid,v:symbol)
+level(k,v):-item(k,"risk",_,_,_,_),field(k,"likelihood",l),field(k,"consequence",c),cell(l,c,v).
+.decl accepted_risk(k:Mid)
+accepted_risk(k):-item(k,"risk",_,"accepted",_,_).
+.decl accepted_by(k:Mid,d:Mid)
+accepted_by(k,d):-edge("accepts",d,k,_,_),item(d,"decision",_,"accepted",_,_).
+.decl blocking(r:Mid,k:Mid)
+blocking(r,k):-relevant(r,k,_),accepted_risk(k),level(k,"HIGH"),!accepted_by(k,_).
+.decl risk_unavailable(r:Mid,k:Mid)
+risk_unavailable(r,k):-relevant(r,k,_),accepted_risk(k),!level(k,_).
+.decl term_value(t:Mid,v:symbol,kind:symbol)
+term_value(t,f,"title"):-item(t,"term",_,_,_,_),title(t,s),folded(s,f).
+term_value(t,f,"alias"):-item(t,"term",_,_,_,_),field(t,"aliases",s),folded(s,f).
+.decl collision(t:Mid,u:Mid,v:symbol,k:symbol,j:symbol)
+collision(t,u,v,k,j):-term_value(t,v,k),term_value(u,v,j),t!=u.
+.decl term_failure(t:Mid,u:Mid)
+term_failure(t,u):-collision(t,u,_,_,_),item(t,_,_,"accepted",_,_),item(u,_,_,"accepted",_,_).
+.decl candidate(c:symbol)
+.decl verification_result(v:Id,r:Id,c:symbol,vrev:symbol,rrev:symbol,result:symbol)
+.decl rank(s:symbol,n:number)
+rank("fail",4). rank("error",3). rank("inconclusive",2). rank("pass",1).
+.decl verifies(r:Mid,v:Mid,vs:Status)
+verifies(r,v,vs):-req(r),edge("verifies",v,r,_,_),item(v,"verification",_,vs,_,_).
+.decl counting(r:Mid,v:Mid,s:symbol,n:number)
+counting(r,v,s,n):-verifies(r,v,_),item(r,_,ri,_,_,_),item(v,_,vi,_,_,_),revision(r,rr),revision(v,vr),candidate(c),verification_result(vi,ri,c,vr,rr,s),rank(s,n).
+.decl worse(r:Mid,v:Mid,n:number)
+worse(r,v,n):-counting(r,v,_,m),rank(_,n),m>n.
+.decl status(r:Mid,v:Mid,vs:Status,s:symbol)
+status(r,v,vs,s):-verifies(r,v,vs),counting(r,v,s,n),!worse(r,v,n).
+status(r,v,vs,"pending"):-verifies(r,v,vs),!counting(r,v,_,_),source_complete("verification_result").
+status(r,v,vs,"unavailable"):-verifies(r,v,vs),!counting(r,v,_,_),!source_complete("verification_result").
+.decl verification_failure(r:Mid,v:Mid)
+verification_failure(r,v):-status(r,v,"accepted",s),s!="pass",s!="unavailable".
+.decl verification_unavailable(r:Mid,v:Mid)
+verification_unavailable(r,v):-status(r,v,"accepted","unavailable").

@@ -1,0 +1,7 @@
+.type A <: symbol
+.type B <: symbol
+.type C=A|B
+.decl a(x:A)
+a("a").
+.decl r(x:C)
+r(x):-a(x).

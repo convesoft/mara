@@ -1,0 +1,25 @@
+{
+ "boundary": [
+  "failed",
+  "subjects"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "failed": [
+    [
+     "MID"
+    ]
+   ],
+   "subjects": [
+    [
+     "MID"
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "program.dl:1:19"
+}

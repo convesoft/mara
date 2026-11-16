@@ -1,0 +1,3 @@
+.type A=number
+.decl r(x:A)
+r(7).

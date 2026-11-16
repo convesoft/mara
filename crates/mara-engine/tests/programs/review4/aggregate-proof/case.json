@@ -1,0 +1,36 @@
+{
+ "boundary": [
+  "r",
+  "s"
+ ],
+ "inputs": {
+  "s": [
+   [
+    "m",
+    1,
+    "docs/a.md",
+    7
+   ],
+   [
+    "m",
+    2,
+    "docs/a.md",
+    8
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     "m",
+     2
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"premises\": \"r(\\\"m\\\", 2)\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"axiom\": \"s(\\\"m\\\", 1, \\\"docs/a.md\\\", 7)\"},\n\t\t{ \"axiom\": \"2 = 2\"}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(m,@generator_0) :- \\n   s(m,+underscore_12,+underscore_13,+underscore_14),\\n   @generator_0 = count : { s(m,+underscore_3,+underscore_4,+underscore_5) }.\"}\n]\n}\n"
+ },
+ "parser": "admitted"
+}

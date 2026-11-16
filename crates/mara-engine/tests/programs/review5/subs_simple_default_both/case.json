@@ -1,0 +1,21 @@
+{
+ "boundary": [
+  "a",
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "a": [
+    [
+     2
+    ]
+   ],
+   "r": []
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "program.dl:3:5"
+}

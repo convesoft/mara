@@ -1,0 +1,31 @@
+{
+ "boundary": [
+  "r",
+  "s"
+ ],
+ "inputs": {
+  "s": [
+   [
+    "m",
+    "a\u0001b",
+    "docs/test.md",
+    7
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "explain_input": "format json\nexplain r(\"m\",\"a\\u0001b\")\nexit\n",
+  "outputs": {
+   "r": [
+    [
+     "m",
+     "a\u0001b"
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"axiom\": \"Tuple not found\"},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(m,t) :- \\n   s(m,t,+underscore_6,+underscore_7).\"}\n]\n}\n"
+ },
+ "parser": "admitted"
+}

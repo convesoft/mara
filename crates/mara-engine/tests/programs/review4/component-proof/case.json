@@ -1,0 +1,28 @@
+{
+ "boundary": [
+  "c.r",
+  "c.s"
+ ],
+ "inputs": {
+  "c.s": [
+   [
+    "m",
+    "docs/a.md",
+    7
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "c.r": [
+    [
+     "m"
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"premises\": \"c.r(\\\"m\\\")\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"axiom\": \"c.s(\\\"m\\\", \\\"docs/a.md\\\", 7)\"}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"c.r(m) :- \\n   c.s(m,+underscore_6,+underscore_7).\"}\n]\n}\n"
+ },
+ "parser": "admitted"
+}

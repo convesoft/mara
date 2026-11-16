@@ -1,0 +1,13 @@
+{
+ "boundary": [
+  "a.r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 1,
+  "outputs": {},
+  "stderr": "Error: syntax error, unexpected ., expecting ( or \",\" in file program.dl at line 1\n.decl a.r(x:number)\n-------^------------\n1 errors generated, evaluation aborted\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:1:8"
+}

@@ -1,0 +1,2 @@
+.decl r(x:symbol)
+r(to_string(4294967295)).

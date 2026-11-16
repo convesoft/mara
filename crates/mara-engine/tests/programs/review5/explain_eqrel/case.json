@@ -1,0 +1,26 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "explain_input": "format json\nexplain r(\"c\")\nexit\n",
+  "outputs": {
+   "r": [
+    [
+     "a"
+    ],
+    [
+     "b"
+    ],
+    [
+     "c"
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"premises\": \"r(\\\"c\\\")\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"premises\": \"e(\\\"a\\\", \\\"c\\\")\",\n\t\t  \"rule-number\": \"(R3)\",\n\t\t  \"children\": [\n\t\t\t{ \"axiom\": \"e(\\\"a\\\", \\\"b\\\")\"},\n\t\t\t{ \"axiom\": \"e(\\\"b\\\", \\\"c\\\")\"}\t\t]\n\t\t}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R3)\", \"rule\": \"e(x,z) :- \\n   e(x,y),\\n   e(y,z).\"},\n\t{ \"rule-number\": \"(R4)\", \"rule\": \"e(x,y) :- \\n   e(y,x).\"},\n\t{ \"rule-number\": \"(R5)\", \"rule\": \"e(x,x) :- \\n   e(x,+underscore_0).\"},\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(x) :- \\n   e(\\\"a\\\",x).\"}\n]\n}\n"
+ },
+ "parser": "admitted"
+}

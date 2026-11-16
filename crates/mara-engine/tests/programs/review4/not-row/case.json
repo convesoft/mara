@@ -1,0 +1,21 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {
+  "r": [
+   [
+    "valid",
+    7
+   ],
+   false
+  ]
+ },
+ "native": {
+  "exit": -6,
+  "outputs": {},
+  "stderr": "souffle-static: <souffle-source>/src/include/souffle/io/ReadStreamJSON.h:119: souffle::Own<int []> souffle::ReadStreamJSON::readNextTupleList(): Assertion `jsonObj.is_array() && \"the input is not json array\"' failed.\n",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

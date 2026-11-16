@@ -1,0 +1,6 @@
+.comp C {
+.decl s(m:symbol,p:symbol,l:number)
+.decl r(m:symbol)
+r(m):-s(m,_,_).
+}
+.init c=C

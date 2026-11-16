@@ -1,0 +1,3 @@
+.include "mara.dl"
+.decl score(r: Mid, s: number)
+score(R, L) :- field(R, "likelihood", L).

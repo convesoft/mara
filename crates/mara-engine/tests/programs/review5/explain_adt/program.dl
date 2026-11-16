@@ -1,0 +1,5 @@
+.type T=A{x:number}
+.decl a(x:T)
+a($A(7)).
+.decl r(x:number)
+r(x):-a($A(x)).

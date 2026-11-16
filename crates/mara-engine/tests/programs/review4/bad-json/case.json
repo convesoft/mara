@@ -1,0 +1,15 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {
+  "r": "[[\"valid\",7],]"
+ },
+ "native": {
+  "exit": 1,
+  "outputs": {},
+  "stderr": "Error loading r data: cannot deserialize json because expected value, got ']' (93):\n[[\"valid\",7],]\n",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

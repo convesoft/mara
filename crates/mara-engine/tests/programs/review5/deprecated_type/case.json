@@ -1,0 +1,19 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     "x"
+    ]
+   ]
+  },
+  "stderr": "Warning: Deprecated type declaration used in file program.dl at line 1\n.type X\n^-------\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:2:1"
+}

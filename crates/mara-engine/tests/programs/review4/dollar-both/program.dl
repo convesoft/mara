@@ -1,0 +1,5 @@
+.decl s(x:symbol)
+.decl r(x:symbol,n:number)
+r(x,$):-s(x).
+.decl other(x:symbol)
+other("b").

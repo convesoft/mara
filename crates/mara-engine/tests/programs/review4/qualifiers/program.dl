@@ -1,0 +1,2 @@
+.decl side(x:symbol) output printsize
+side("sentinel").

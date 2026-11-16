@@ -1,0 +1,4 @@
+.once
+.include "program.dl"
+.decl leaf(x:number)
+leaf(__LINE__).

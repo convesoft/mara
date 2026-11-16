@@ -1,0 +1,2 @@
+.decl r(x:unsigned)
+r(4294967295u).

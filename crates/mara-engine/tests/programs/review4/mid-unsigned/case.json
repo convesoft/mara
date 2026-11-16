@@ -1,0 +1,27 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {
+  "r": [
+   [
+    "m",
+    4294967295
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     "m",
+     -2147483648
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "program.dl:2:19"
+}

@@ -1,0 +1,5 @@
+.type Mid <: symbol
+.decl subject(mid:Mid)
+subject("m").
+.decl condition(mid:Mid)
+condition(m):-subject(m),match("[",m).

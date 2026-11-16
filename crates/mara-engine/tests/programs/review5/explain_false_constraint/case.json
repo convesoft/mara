@@ -1,0 +1,27 @@
+{
+ "boundary": [
+  "a",
+  "r"
+ ],
+ "inputs": {
+  "a": [
+   [
+    "a"
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "explain_input": "format json\nexplain r(\"a\")\nexit\n",
+  "outputs": {
+   "r": [
+    [
+     "a"
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"premises\": \"r(\\\"a\\\")\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"axiom\": \"a(\\\"a\\\")\"},\n\t\t{ \"axiom\": \"5 < 4\"}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(x) :- \\n   a(x),\\n   x < \\\"z\\\".\"}\n]\n}\n"
+ },
+ "parser": "admitted"
+}

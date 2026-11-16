@@ -1,0 +1,3 @@
+.include "mara.dl"
+.decl uncovered(r: Mid)
+uncovered(R) :- requirment(R).

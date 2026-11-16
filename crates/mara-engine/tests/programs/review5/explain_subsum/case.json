@@ -1,0 +1,14 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": -6,
+  "explain_input": "format json\nexplain r(2)\nexit\n",
+  "outputs": {},
+  "stderr": "souffle-static: <souffle-source>/src/ram/analysis/Relation.cpp:30: const souffle::ram::Relation& souffle::ram::analysis::RelationAnalysis::lookup(const std::string&) const: Assertion `it != relationMap.end() && \"relation not found\"' failed.\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:2:15"
+}

@@ -1,0 +1,41 @@
+// Gate: implementation_ready, evaluated for every requirement root.
+.include "mara.dl"
+.include "risk.dl"   // composition: reuses risk_score / risk_above / risk_unavailable
+
+.decl root(r: Mid)
+root(R) :- item(R, "requirement", _, _, _, _).
+
+// Scope: the root and all its ancestors (decomposes points child -> parent; cycles are fine).
+.decl up(r: Mid, a: Mid)
+up(R, R) :- root(R).
+up(R, A) :- up(R, X), edge("decomposes", X, A, _, _).
+
+.decl failed(r: Mid, condition: symbol)
+
+failed(R, "accepted") :- root(R), item(R, _, _, S, _, _), S != "accepted".
+
+.decl has_accepted_basis(r: Mid)
+has_accepted_basis(R) :- root(R), edge("satisfies", R, N, _, _), item(N, "need", _, "accepted", _, _).
+has_accepted_basis(R) :- root(R), edge("derives_from", R, Q, _, _), item(Q, "requirement", _, "accepted", _, _).
+.decl has_accepted_verification(r: Mid)
+has_accepted_verification(R) :- root(R), edge("verifies", V, R, _, _), item(V, "verification", _, "accepted", _, _).
+failed(R, "requirement-knowledge") :- root(R), !has_accepted_basis(R).
+failed(R, "requirement-knowledge") :- root(R), !has_accepted_verification(R).
+
+failed(R, "requirement-endpoints") :- root(R), edge("satisfies", R, T, _, _), !item(T, "need", _, _, _, _).
+failed(R, "requirement-lifecycle") :- root(R), edge(_, R, T, _, _), item(T, _, _, "retired", _, _).
+
+.decl risk_accepted(k: Mid)
+risk_accepted(K) :- edge("accepts", D, K, _, _), item(D, "decision", _, "accepted", _, _).
+.decl relevant_risk(r: Mid, k: Mid)
+relevant_risk(R, K) :- up(R, A), edge("threatens", K, A, _, _), item(K, "risk", _, "accepted", _, _), !risk_accepted(K).
+failed(R, "no-blocking-risk") :- relevant_risk(R, K), risk_above(K, _).
+
+// A relevant risk without likelihood/consequence makes the outcome unavailable, not passed.
+.decl unavailable(r: Mid, risk: Mid)
+unavailable(R, K) :- relevant_risk(R, K), risk_unavailable(K, _).
+
+.decl outcome(r: Mid, id: Id, result: symbol)
+outcome(R, I, "failed") :- root(R), item(R, _, I, _, _, _), failed(R, _).
+outcome(R, I, "unavailable") :- root(R), item(R, _, I, _, _, _), !failed(R, _), unavailable(R, _).
+outcome(R, I, "passed") :- root(R), item(R, _, I, _, _, _), !failed(R, _), !unavailable(R, _).

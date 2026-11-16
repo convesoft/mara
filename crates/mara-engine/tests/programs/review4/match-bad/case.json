@@ -1,0 +1,15 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": []
+  },
+  "stderr": "warning: wrong pattern provided \"[\"\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:2:12"
+}

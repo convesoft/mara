@@ -1,0 +1,24 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     "one",
+     0
+    ],
+    [
+     "two",
+     1
+    ]
+   ]
+  },
+  "stderr": "Warning: Deprecated $ symbol was used. Use functor 'autoinc()' instead. in file program.dl at line 4\nr(x,$):-seed(x).\n----^------------\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:4:5"
+}

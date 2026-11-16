@@ -1,0 +1,20 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "explain_input": "format json\nexplain r(7)\nexit\n",
+  "outputs": {
+   "r": [
+    [
+     7
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"premises\": \"r(7)\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"axiom\": \"a(record #1)\"}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(x) :- \\n   a([x]).\"}\n]\n}\n"
+ },
+ "parser": "admitted"
+}

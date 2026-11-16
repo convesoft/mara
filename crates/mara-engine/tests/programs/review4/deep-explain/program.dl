@@ -1,0 +1,15 @@
+.decl base(m:symbol,p:symbol,l:number)
+.decl a1(m:symbol)
+a1(m):-base(m,_,_).
+.decl a2(m:symbol)
+a2(m):-a1(m).
+.decl a3(m:symbol)
+a3(m):-a2(m).
+.decl a4(m:symbol)
+a4(m):-a3(m).
+.decl a5(m:symbol)
+a5(m):-a4(m).
+.decl a6(m:symbol)
+a6(m):-a5(m).
+.decl a7(m:symbol)
+a7(m):-a6(m).

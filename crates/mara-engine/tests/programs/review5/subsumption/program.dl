@@ -1,0 +1,3 @@
+.decl r(x:number)
+r(1). r(2).
+r(x) <= r(y) :- x < y.

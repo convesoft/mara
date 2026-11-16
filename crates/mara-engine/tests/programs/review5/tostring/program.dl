@@ -1,0 +1,3 @@
+.decl a(x:number)
+.decl r(x:symbol)
+r(to_string(x)):-a(x).

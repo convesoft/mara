@@ -1,0 +1,33 @@
+{
+ "boundary": [
+  "edge",
+  "field",
+  "item",
+  "risk_above",
+  "risk_score",
+  "risk_unavailable",
+  "source_complete",
+  "threshold",
+  "verification_result"
+ ],
+ "counts_only": true,
+ "inputs": {
+  "edge": 4256,
+  "field": 1072,
+  "item": 3200,
+  "source_complete": 0,
+  "threshold": 1,
+  "verification_result": 416
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "risk_above": 56,
+   "risk_score": 192,
+   "risk_unavailable": 48
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

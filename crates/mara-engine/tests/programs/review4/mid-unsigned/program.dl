@@ -1,0 +1,2 @@
+.type Mid <: symbol
+.decl r(mid:Mid,x:unsigned)

@@ -1,0 +1,2 @@
+.comp C<T> { .decl r(x:T) r(7). }
+.init c=C<number>

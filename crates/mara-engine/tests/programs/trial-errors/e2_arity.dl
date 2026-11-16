@@ -1,0 +1,3 @@
+.include "mara.dl"
+.decl v(r: Mid)
+v(R) :- edge("verifies", _, R).

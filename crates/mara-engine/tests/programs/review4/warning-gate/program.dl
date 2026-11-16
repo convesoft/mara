@@ -1,0 +1,4 @@
+.decl subject(mid:symbol)
+subject("m").
+.decl condition(mid:symbol)
+condition(m):-subject(m),match("[",m).

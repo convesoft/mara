@@ -1,0 +1,27 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {
+  "r": [
+   [
+    1.5
+   ],
+   [
+    0.5
+   ],
+   [
+    -2.75
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": "[[-nan],\n[0],\n[1.4013e-45]]\n"
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "program.dl:1:11"
+}

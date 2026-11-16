@@ -11,6 +11,7 @@ pub mod hash;
 pub mod json;
 pub mod paging;
 pub mod pattern;
+pub mod program;
 pub mod read;
 pub mod relink;
 pub mod schema;

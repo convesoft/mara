@@ -1,0 +1,2 @@
+.decl r(n:number)
+r(to_number(2147483648.0)).

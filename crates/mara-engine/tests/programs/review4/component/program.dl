@@ -1,0 +1,8 @@
+.comp C {
+.decl src(x:symbol)
+.decl r(x:symbol)
+r(x):-src(x).
+}
+.init c=C
+.decl c_r(x:symbol)
+c_r("top").

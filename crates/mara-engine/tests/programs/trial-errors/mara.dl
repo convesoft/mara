@@ -1,0 +1,15 @@
+.once
+.type Mid <: symbol
+.type Id <: symbol
+.type Type <: symbol
+.type Status <: symbol
+.type Rel <: symbol
+.type Path <: symbol
+
+.decl item(mid: Mid, type: Type, id: Id, status: Status, path: Path, line: number)
+.decl title(mid: Mid, text: symbol)
+.decl revision(mid: Mid, hash: symbol)
+.decl field(mid: Mid, key: symbol, value: symbol)
+.decl folded(text: symbol, folded: symbol)
+.decl edge(rel: Rel, src: Mid, dst: Mid, path: Path, line: number)
+.decl source_complete(source: symbol)

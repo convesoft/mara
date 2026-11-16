@@ -1,0 +1,4 @@
+.include "mara.dl"
+.decl threshold(v: number)
+.decl d(x: number)
+d(10 / Z) :- threshold(T), Z = T - 12.

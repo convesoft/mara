@@ -28,3 +28,7 @@ Context: docs/rules.mara.md (REQ-PROJECT-AUTHORED-LOGIC, REQ-EXTERNAL-RECORDS-AS
 Decided by the orchestrator on 2026-11-16 (from mara-t2qrcb, under the maintainer's rule of that day; listed in mara-46j65e): an evaluation gets limits on output size and memory besides time. A finite program wrote 8 MB in 15 ms in a review probe. Rests on REQ-PROGRAMS-ONLY-COMPUTE, RISK-SOUFFLE-REACHES-OUTSIDE and REQ-EVALUATION-TIME-LIMIT. The sandbox half of that question is mara-ptq6xc.
 
 - [ ] Limits on the output size and the memory of an evaluation: exceeding one ends the evaluation and is reported as a fault, never a passing outcome (REQ-PROGRAM-FAULTS-REPORTED). The worker chooses the numbers and the mechanism, records them in DES-RULE-EXECUTION, and removes the limits part of the open question on docs/rules-facts.mara.md
+
+Folded in from mara-stpjjc and mara-x0qc0q (found by mara-wrbjte):
+- [ ] A standing test compiles every probe fixture whose `parser` is `admitted` and every program in `crates/mara-engine/tests/programs/trial/` with the pinned `souffle`: a run against empty facts, with a wrapper that reads and writes the fixture's boundary relations as JSON, exits 0 with no compile diagnostic (VER-ADMITTED-LANGUAGE)
+- [ ] Soufflé names an included file in a diagnostic only by its base name (`in file b.dl` for `sub/b.dl`, observed 2026-11-16): map each diagnostic to its project path also when two included files share a base name, record how in DES-RULE-EXECUTION, and test it with VER-PROGRAM-FAULTS's included-program case

@@ -1,0 +1,5 @@
+.type T=[x:number]
+.decl a(x:T)
+a([7]).
+.decl r(x:number)
+r(x):-a([x]).

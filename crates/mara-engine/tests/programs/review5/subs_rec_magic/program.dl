@@ -1,0 +1,5 @@
+.decl a(x:number) magic
+a(1).a(2).a(x+1):-a(x),x<4.
+a(x)<=a(y):-x<y.
+.decl r(x:number)
+r(x):-a(x).

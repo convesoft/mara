@@ -1,0 +1,53 @@
+{
+ "boundary": [
+  "a",
+  "r"
+ ],
+ "inputs": {
+  "a": [
+   [
+    "a,b (c)",
+    7
+   ],
+   [
+    "a b",
+    2147483647
+   ],
+   [
+    "neg",
+    -1
+   ],
+   [
+    "",
+    0
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "explain_input": "format json\nexplain r(\"a,b (c)\",7)\nexplain r(\"a b\",2147483647)\nexplain r(\"neg\",-1)\nexplain r(\"\",0)\nexit\n",
+  "outputs": {
+   "r": [
+    [
+     "a,b (c)",
+     7
+    ],
+    [
+     "a b",
+     2147483647
+    ],
+    [
+     "neg",
+     -1
+    ],
+    [
+     "",
+     0
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"premises\": \"r(\\\"a,b (c)\\\", 7)\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"axiom\": \"a(\\\"a,b (c)\\\", 7)\"}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(x,n) :- \\n   a(x,n).\"}\n]\n}\n{ \"proof\":\n\t{ \"premises\": \"r(\\\"a b\\\", 2147483647)\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"axiom\": \"a(\\\"a b\\\", 2147483647)\"}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(x,n) :- \\n   a(x,n).\"}\n]\n}\n{ \"proof\":\n\t{ \"axiom\": \"Relation not found\"},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(x,n) :- \\n   a(x,n).\"}\n]\n}\n{ \"proof\":\n\t{ \"premises\": \"r(\\\"\\\", 0)\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"axiom\": \"a(\\\"\\\", 0)\"}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(x,n) :- \\n   a(x,n).\"}\n]\n}\n"
+ },
+ "parser": "admitted"
+}

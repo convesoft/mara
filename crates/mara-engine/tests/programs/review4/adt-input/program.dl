@@ -1,0 +1,2 @@
+.type T = A {x:number} | B {}
+.decl r(x:T)

@@ -1,0 +1,8 @@
+.include "mara.dl"
+// "missing" only when the supplied source is declared complete; otherwise "unavailable".
+.decl has_result(ver: Mid)
+has_result(V) :- verification_result(V, _, _).
+.decl result_status(ver: Mid, status: symbol)
+result_status(V, R) :- verification_result(V, R, _).
+result_status(V, "missing") :- item(V, "verification", _, "accepted", _, _), !has_result(V), source_complete("verification_result").
+result_status(V, "unavailable") :- item(V, "verification", _, "accepted", _, _), !has_result(V), !source_complete("verification_result").

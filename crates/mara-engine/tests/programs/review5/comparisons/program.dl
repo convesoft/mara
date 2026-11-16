@@ -1,0 +1,11 @@
+.decl a(x:number,y:number)
+.decl r(op:symbol,x:number,y:number)
+r("<",x,y):-a(x,y),x<y.
+r("<=",x,y):-a(x,y),x<=y.
+r(">",x,y):-a(x,y),x>y.
+r(">=",x,y):-a(x,y),x>=y.
+r("=",x,y):-a(x,y),x=y.
+r("!=",x,y):-a(x,y),x!=y.
+r("true",x,y):-a(x,y),true.
+r("false",x,y):-a(x,y),false.
+r("or",x,y):-a(x,y),(x=0;y=0).

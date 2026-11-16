@@ -1,0 +1,19 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     ""
+    ]
+   ]
+  },
+  "stderr": "warning: wrong index position provided by substr(\"abc\",4,1) functor.\n",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

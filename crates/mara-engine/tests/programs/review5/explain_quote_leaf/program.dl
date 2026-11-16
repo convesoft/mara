@@ -1,0 +1,3 @@
+.decl a(x:symbol,y:symbol)
+.decl r(x:symbol)
+r(x):-a(x,_).

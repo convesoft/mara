@@ -1,0 +1,7 @@
+.include "mara.dl"
+// Decomposes points child -> parent; ancestry is its transitive closure.
+.decl ancestor(child: Mid, ancestor: Mid)
+ancestor(C, P) :- edge("decomposes", C, P, _, _).
+ancestor(C, A) :- ancestor(C, P), edge("decomposes", P, A, _, _).
+.decl in_cycle(item: Mid)
+in_cycle(X) :- ancestor(X, X).

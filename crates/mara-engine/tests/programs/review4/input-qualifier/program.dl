@@ -1,0 +1,3 @@
+.decl side(x:symbol) input
+.decl r(x:symbol)
+r(x):-side(x).

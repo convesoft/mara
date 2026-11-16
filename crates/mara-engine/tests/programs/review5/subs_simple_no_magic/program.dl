@@ -1,0 +1,5 @@
+.decl a(x:number) no_magic
+a(1). a(2).
+a(x)<=a(y):-x<y.
+.decl r(mid:symbol)
+r("MID"):-a(1).

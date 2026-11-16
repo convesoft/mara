@@ -1,0 +1,32 @@
+{
+ "boundary": [
+  "c.r",
+  "c.src",
+  "c_r"
+ ],
+ "inputs": {
+  "c.src": [
+   [
+    "instance"
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "c.r": [
+    [
+     "instance"
+    ]
+   ],
+   "c_r": [
+    [
+     "top"
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": ""
+ },
+ "parser": "admitted"
+}

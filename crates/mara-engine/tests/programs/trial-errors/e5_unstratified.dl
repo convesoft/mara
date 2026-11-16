@@ -1,0 +1,5 @@
+.include "mara.dl"
+.decl p(x: Mid)
+.decl q(x: Mid)
+p(X) :- item(X, _, _, _, _, _), !q(X).
+q(X) :- item(X, _, _, _, _, _), !p(X).

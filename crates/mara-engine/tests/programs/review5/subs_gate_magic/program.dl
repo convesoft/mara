@@ -1,0 +1,8 @@
+.decl a(x:number) magic
+a(1).a(2).a(x)<=a(y):-x<y.
+.decl ok(mid:symbol)
+ok("MID"):-a(1).
+.decl subjects(mid:symbol)
+subjects("MID").
+.decl failed(mid:symbol)
+failed(m):-subjects(m),!ok(m).

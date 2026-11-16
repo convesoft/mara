@@ -1,0 +1,34 @@
+{
+ "boundary": [
+  "r",
+  "s"
+ ],
+ "inputs": {
+  "s": [
+   [
+    "c"
+   ],
+   [
+    "b"
+   ]
+  ]
+ },
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     "c",
+     0
+    ],
+    [
+     "b",
+     1
+    ]
+   ]
+  },
+  "stderr": "Warning: Deprecated $ symbol was used. Use functor 'autoinc()' instead. in file program.dl at line 3\nr(x,$):-s(x).\n----^---------\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:3:5"
+}

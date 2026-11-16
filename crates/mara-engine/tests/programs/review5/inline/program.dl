@@ -1,0 +1,2 @@
+.decl r(x:number) inline
+r(7).

@@ -1,0 +1,2 @@
+.decl r(x:symbol)
+r(as(0, symbol)).

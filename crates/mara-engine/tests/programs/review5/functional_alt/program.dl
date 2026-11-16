@@ -1,0 +1,2 @@
+.decl r(x:number,y:number) (x)
+r(1,2).

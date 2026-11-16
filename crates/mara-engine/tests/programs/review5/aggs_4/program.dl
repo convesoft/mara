@@ -1,0 +1,6 @@
+.decl a(x:number)
+.decl r(k:symbol,x:number)
+r("min",min x:a(x)).
+r("max",max x:a(x)).
+r("sum",sum x:a(x)).
+r("count",count:a(_)).

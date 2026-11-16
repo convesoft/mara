@@ -1,0 +1,2 @@
+.decl r(s:symbol)
+r(substr("é",0,1)).

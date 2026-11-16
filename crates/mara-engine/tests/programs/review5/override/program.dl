@@ -1,0 +1,3 @@
+.comp A { .decl r(x:number) overridable r(1). }
+.comp B:A { .override r r(2). }
+.init c=B

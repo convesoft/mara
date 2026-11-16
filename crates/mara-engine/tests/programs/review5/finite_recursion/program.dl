@@ -1,0 +1,4 @@
+.decl a(x:number)
+a(0).a(x+1):-a(x),x<5000.
+.decl r(x:number)
+r(n):-n=count:a(_).

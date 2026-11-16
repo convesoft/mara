@@ -1,0 +1,44 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "explain_input": "format json\nexplain r(8)\nsubproof a(0)\nsubproof a(1)\nsubproof a(2)\nexit\n",
+  "outputs": {
+   "r": [
+    [
+     0
+    ],
+    [
+     1
+    ],
+    [
+     2
+    ],
+    [
+     3
+    ],
+    [
+     4
+    ],
+    [
+     5
+    ],
+    [
+     6
+    ],
+    [
+     7
+    ],
+    [
+     8
+    ]
+   ]
+  },
+  "stderr": "",
+  "stdout": "{ \"proof\":\n\t{ \"premises\": \"r(8)\",\n\t  \"rule-number\": \"(R1)\",\n\t  \"children\": [\n\t\t{ \"premises\": \"a(8)\",\n\t\t  \"rule-number\": \"(R2)\",\n\t\t  \"children\": [\n\t\t\t{ \"premises\": \"a(7)\",\n\t\t\t  \"rule-number\": \"(R2)\",\n\t\t\t  \"children\": [\n\t\t\t\t{ \"axiom\": \"subproof a(0)\"},\n\t\t\t\t{ \"axiom\": \"6 < 8\"}\t\t\t]\n\t\t\t},\n\t\t\t{ \"axiom\": \"7 < 8\"}\t\t]\n\t\t}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R2)\", \"rule\": \"a((x+1)) :- \\n   a(x),\\n   x < 8.\"},\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(x) :- \\n   a(x).\"}\n]\n}\n{ \"proof\":\n\t{ \"premises\": \"a(6)\",\n\t  \"rule-number\": \"(R2)\",\n\t  \"children\": [\n\t\t{ \"premises\": \"a(5)\",\n\t\t  \"rule-number\": \"(R2)\",\n\t\t  \"children\": [\n\t\t\t{ \"premises\": \"a(4)\",\n\t\t\t  \"rule-number\": \"(R2)\",\n\t\t\t  \"children\": [\n\t\t\t\t{ \"axiom\": \"subproof a(1)\"},\n\t\t\t\t{ \"axiom\": \"3 < 8\"}\t\t\t]\n\t\t\t},\n\t\t\t{ \"axiom\": \"4 < 8\"}\t\t]\n\t\t},\n\t\t{ \"axiom\": \"5 < 8\"}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R2)\", \"rule\": \"a((x+1)) :- \\n   a(x),\\n   x < 8.\"},\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(x) :- \\n   a(x).\"}\n]\n}\n{ \"proof\":\n\t{ \"premises\": \"a(3)\",\n\t  \"rule-number\": \"(R2)\",\n\t  \"children\": [\n\t\t{ \"premises\": \"a(2)\",\n\t\t  \"rule-number\": \"(R2)\",\n\t\t  \"children\": [\n\t\t\t{ \"premises\": \"a(1)\",\n\t\t\t  \"rule-number\": \"(R2)\",\n\t\t\t  \"children\": [\n\t\t\t\t{ \"axiom\": \"a(0)\"},\n\t\t\t\t{ \"axiom\": \"0 < 8\"}\t\t\t]\n\t\t\t},\n\t\t\t{ \"axiom\": \"1 < 8\"}\t\t]\n\t\t},\n\t\t{ \"axiom\": \"2 < 8\"}\t]\n\t},\"rules\": [\n\t{ \"rule-number\": \"(R2)\", \"rule\": \"a((x+1)) :- \\n   a(x),\\n   x < 8.\"},\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(x) :- \\n   a(x).\"}\n]\n}\n{ \"proof\":\n\t{ \"axiom\": \"Subproof not found\"},\"rules\": [\n\t{ \"rule-number\": \"(R2)\", \"rule\": \"a((x+1)) :- \\n   a(x),\\n   x < 8.\"},\n\t{ \"rule-number\": \"(R1)\", \"rule\": \"r(x) :- \\n   a(x).\"}\n]\n}\n"
+ },
+ "parser": "admitted"
+}

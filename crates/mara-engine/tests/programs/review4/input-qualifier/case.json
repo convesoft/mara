@@ -1,0 +1,19 @@
+{
+ "boundary": [
+  "r"
+ ],
+ "inputs": {},
+ "native": {
+  "exit": 0,
+  "outputs": {
+   "r": [
+    [
+     "sentinel"
+    ]
+   ]
+  },
+  "stderr": "Warning: Deprecated input qualifier was used in file program.dl at line 1\n.decl side(x:symbol) input\n---------------------^-----\n",
+  "stdout": ""
+ },
+ "parser": "program.dl:1:22"
+}

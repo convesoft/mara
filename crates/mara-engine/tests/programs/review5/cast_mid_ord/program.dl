@@ -1,0 +1,3 @@
+.decl a(mid:symbol)
+.decl r(mid:symbol,n:number)
+r(mid,as(mid,number)):-a(mid).
