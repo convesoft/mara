@@ -23,7 +23,7 @@ use crate::work::WorkCounts;
 
 /// The version of everything [`parse`] derives from a document's bytes, search words included.
 /// A change to any of it takes a new version, which changes every [`DocumentKey`].
-pub const PARSER_VERSION: u32 = 11;
+pub const PARSER_VERSION: u32 = 12;
 
 /// The key of a parsed document: parser version and file hash (DES-INPUTS-AND-KEYS).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -64,6 +64,10 @@ pub struct Document {
     /// Each region that starts with a heading followed by a metadata table with a `Type` row
     /// and lacks only its MID anchor, in source order (DES-ITEM-STRUCTURE). Fix adds the anchor.
     pub anchorless: Vec<Anchorless>,
+    /// Where reading started a region without a `---` before it, at a heading followed by an
+    /// item's table or at the paragraph of inline HTML right before that heading, in source
+    /// order (DES-REGIONS). Fix inserts the `---` there.
+    pub unseparated: Vec<usize>,
     /// In line order.
     problems: Vec<Problem>,
 }

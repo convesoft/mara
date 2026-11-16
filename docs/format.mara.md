@@ -82,8 +82,10 @@ A Mara document is GitHub-flavoured Markdown that GitHub renders as documentatio
 - An HTML block that starts with `<script`, `<pre`, `<style` or `<textarea` and holds its own end tag in another case than lowercase, such as `</SCRIPT>`, is an error at that end tag (`html-end-tag-case`). `pulldown-cmark` ends such a block only at the lowercase end tag and reads what follows as HTML, while CommonMark and GitHub match the end tag in any case. No anchor line in the rest of that block is reported.
 - Every thematic break (`---`, `***`, `___`) outside code is a region boundary. Start and end of file are implicit boundaries. A thematic break inside a list or block quote ends its region after the top-level block that holds it.
 - A region whose first block is a MID anchor is an item. Any other region is ordinary Markdown.
-- An item ends only at a thematic break or end of file. Headings never end an item, items contain no thematic breaks, and items do not nest.
+- An item ends only at a thematic break, end of file or a missing separator (below). Other headings never end an item, items contain no thematic breaks, and items do not nest.
 - A MID anchor that is not the first block of its region is an error (`missing-separator`, or `merged-anchor` when it is not a paragraph of its own). Reading starts a new region at such an anchor paragraph, and its item loads.
+- So is a heading, not in its region's heading place ([DES-ITEM-STRUCTURE](#01M7BF6GZDTNNW0Z0MX7FEG6ZF)), directly followed by a table whose first row is a `Type` row and that has an `ID` or a `Status` row, whatever their values: an item written without its `---` (`missing-separator`). Reading starts a new region at the heading, or at a paragraph of inline HTML right before it, where the error is reported. A heading after a block that holds a MID anchor is not reported, nor a table with neither row, one after other text, or one in a list, quote or code.
+- A heading followed by an item's table is an item wherever it stands. An example of an item goes in a fenced code block, or gets a paragraph between its heading and its table.
 - A setext heading (text directly above `---` or `===`) is an error (`setext-heading`), reported at its underline. Writers put a blank line on both sides of every `---`.
 
 ---
@@ -108,10 +110,10 @@ An item region holds, in order:
 - Every item has `Type`, `ID` and `Status` rows.
 - Anchor, heading and `Type` row make a region an item. Markdown without them is never an item.
 - An incomplete item is reported and kept in diagnostics (`incomplete-item`). It is either a region that starts with an anchor but lacks the heading or the `Type` row, or a region that starts with a heading followed by a table with a `Type` row but has no anchor. A paragraph of only inline HTML that is not a MID anchor, such as an anchor with a lowercase MID, before that heading counts as no anchor.
-- A `Type` row is a row whose first two cells are `Type` and a value, read as [DES-METADATA-TABLE](#01M7BF6GZNS6VM3T94VS9A5HTD) reads rows, wherever a region is classified. Without a heading, the table after the block in the heading's place is the metadata table.
+- A `Type` row is a row whose first two cells are `Type` and a value, read as [DES-METADATA-TABLE](#01M7BF6GZNS6VM3T94VS9A5HTD) reads rows, wherever a region is classified. Without a heading, the table after the block in the heading's place is the metadata table. The heading's place is the first block, or the block after a first anchor, paragraph of inline HTML or paragraph with one merged MID anchor.
 - Each problem of a region that is or is meant as an item is reported once: the anchor's form, malformed rows and an empty body also for an incomplete item.
 - A region whose first paragraph holds exactly one MID anchor merged with other content is meant as an item. It loads when it has a heading and a `Type` row, and starts at that anchor; text before the anchor is narrative. A MID anchor merged anywhere else makes no item and is reported only as `merged-anchor`.
-- Fix adds the missing anchor ([REQ-ONE-FIX-OPERATION](authoring.mara.md#01M7BF6GNPRRHNP2TRX7MKZRRH)) only when nothing stands in the anchor's place; a paragraph of inline HTML there stays reported. An anchor without a heading or a `Type` row stays reported until the author completes the item.
+- Fix adds the missing anchor ([REQ-ONE-FIX-OPERATION](authoring.mara.md#01M7BF6GNPRRHNP2TRX7MKZRRH)) only when nothing stands in the anchor's place; a paragraph of inline HTML there stays reported. For a heading that lacks its `---` ([DES-REGIONS](#01M7BF6GZ5V5HWV00MDZN68Z06)), it adds the `---` and the anchor, or only the `---` before inline HTML there. An anchor without a heading or a `Type` row stays reported until the author completes the item.
 
 ---
 

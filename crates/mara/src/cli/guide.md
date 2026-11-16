@@ -45,7 +45,7 @@ An item, or many at once, may be written by hand without an anchor and with rela
 Users sign in with a passkey.
 ```
 
-- Put a `---` line with a blank line on each side before every item, the first one after a title or other text included; leave it out only for an item that starts the document, which never starts with `---`. Without it, the item is read as text of what comes before, and nothing reports it.
+- Put a `---` line with a blank line on each side before every item, the first one after a title or other text included; leave it out only for an item that starts the document, which never starts with `---`. A forgotten one is reported, and `{{project fix}}` adds it.
 - Then run `{{project fix}}` once. It gives each such item an anchor with a new MID, turns bare IDs in relation rows into links, and repairs link paths and texts that moving or renaming items by hand left stale.
 - Never make up a MID, change one, or copy an anchor to another item.
 - To mention an item in text, write `[<ID>](#<MID>)` with the MID from `{{get}}`; `{{project fix}}` writes the path.

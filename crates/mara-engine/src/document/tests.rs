@@ -257,6 +257,102 @@ fn reports_misplaced_anchors_and_still_reads_their_items() {
 }
 
 #[test]
+fn reports_an_item_heading_that_is_not_the_first_block_of_its_region() {
+    // An item without its anchor and its separator: the heading and the table that follows it.
+    let lacking = |name: &str| item(A, name).split_once("\n\n").unwrap().1.to_owned();
+    // After another item: the item before ends at the heading, with its mentions.
+    let first = item(A, "A").replace("Body of A.", &format!("Body of A, see [A](#{A})."));
+    let text = format!("{first}{}", lacking("B"));
+    let document = parse_text(&text);
+    assert_eq!(
+        problems(&document),
+        [(11, "missing-separator"), (11, "incomplete-item")]
+    );
+    assert_eq!(ids(&document), ["REQ-A"]);
+    let heading = text.find("### B").unwrap();
+    assert_eq!(document.items[0].span.end, heading - 1);
+    assert_eq!(document.items[0].mentions.len(), 1);
+    let [anchorless] = &document.anchorless[..] else {
+        panic!(
+            "one region lacks only its anchor: {:?}",
+            document.anchorless
+        );
+    };
+    assert_eq!((anchorless.line, anchorless.span.start), (11, heading));
+    assert_item_contract(&text, &document);
+
+    // After a title and an introduction, or after another heading.
+    for (text, line) in [
+        (
+            format!("# Auth\n\nHow users sign in.\n\n{}", lacking("B")),
+            5,
+        ),
+        (format!("# Auth\n\n{}", lacking("B")), 3),
+    ] {
+        let document = parse_text(&text);
+        assert_eq!(
+            problems(&document),
+            [(line, "missing-separator"), (line, "incomplete-item")],
+            "{text}"
+        );
+        assert_eq!(document.anchorless.len(), 1, "{text}");
+        let headings: Vec<_> = document
+            .units
+            .iter()
+            .map(|u| u.heading.as_deref())
+            .collect();
+        assert_eq!(headings, [Some("Auth"), Some("B")], "{text}");
+        assert_eq!(document.units[0].span.end, text.find("\n\n### B").unwrap());
+    }
+
+    // A table whose first row is a `Type` row and that has an `ID` or a `Status` row is an
+    // item's, whatever their values: an ID with a typo, no `ID` row, or a table of field types
+    // that happens to have such a row. HTML right before the heading goes with it.
+    let fields = "### Fields\n\n| Type | Meaning |\n| --- | --- |\n";
+    for (body, line) in [
+        (lacking("B").replace("REQ-B", "REQ-b"), 12),
+        (lacking("B").replace("| ID | REQ-B |\n", ""), 12),
+        (format!("{fields}| ID | The identifier |\n\nText.\n"), 12),
+        (format!("{fields}| Status | The state |\n\nText.\n"), 12),
+        (format!("<a id=\"passkeys\"></a>\n\n{}", lacking("B")), 12),
+    ] {
+        let text = format!("{}\n{body}", item(A, "A"));
+        let document = parse_text(&text);
+        let found = problems(&document);
+        assert_eq!(found[0], (line, "missing-separator"), "{text}");
+        assert_eq!(found[1..], [(line, "incomplete-item")], "{text}");
+        let start = text.find("Body of A.").unwrap() + "Body of A.".len();
+        assert_eq!(document.items[0].span.end, start, "{text}");
+        assert_eq!(document.unseparated, [start + 2], "{text}");
+    }
+
+    // A table with `Type` rows that makes no item stays body text.
+    let table = "| Type | Requirement |\n| --- | --- |\n| ID | REQ-X |\n";
+    for body in [
+        format!("{fields}| Requirement | What must hold |\n"),
+        "### Kinds\n\n| Type | Requirement |\n| --- | --- |\n".to_owned(),
+        "### Fields\n\n| Key | Value |\n| --- | --- |\n| Type | Requirement |\n| ID | REQ-X |\n"
+            .to_owned(),
+        format!("### Example\n\nText.\n\n{table}"),
+        format!("Text.\n\n{table}"),
+        format!("- ### In a list\n\n  {}", table.replace('\n', "\n  ")),
+        format!("> ### In a quote\n>\n> {}", table.replace('\n', "\n> ")),
+        format!("```markdown\n### In code\n\n{table}```\n"),
+        // A MID anchor merged into the block before the heading is reported as merged.
+        format!("Text <a id=\"{B}\"></a>.\n\n### B\n\n{table}"),
+    ] {
+        let text = format!("{}\n{body}", item(A, "A"));
+        let document = parse_text(&text);
+        let expected: &[(usize, &str)] = match body.contains(B) {
+            true => &[(12, "merged-anchor")],
+            false => &[],
+        };
+        assert_eq!(problems(&document), expected, "{text}");
+        assert_eq!(document.items[0].span.end, text.trim_end().len(), "{text}");
+    }
+}
+
+#[test]
 fn reports_setext_headings() {
     let text = format!("Narrative\n===\n\n---\n\n{}Last line\n---\n", item(A, "A"))
         .replace("### A", "Title A\n=======");
@@ -682,10 +778,14 @@ fn assert_item_contract(text: &str, document: &Document) {
 #[test]
 fn recovers_only_from_an_exact_anchor_at_its_place() {
     let anchor = format!("<a id=\"{MID}\"></a>");
-    // An opening tag alone is no anchor: no item, and nothing to report.
+    // An opening tag alone is no anchor: no item, and the heading after the paragraph that
+    // holds it starts an item that lacks its separator and its anchor.
     let text = format!("Text <a id=\"{MID}\">{TAIL}");
     let document = parse_text(&text);
-    assert_eq!(problems(&document), []);
+    assert_eq!(
+        problems(&document),
+        [(3, "missing-separator"), (3, "incomplete-item")]
+    );
     assert!(document.items.is_empty());
 
     // A merged first anchor makes the region an item, with every other problem reported.

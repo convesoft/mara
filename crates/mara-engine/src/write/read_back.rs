@@ -573,26 +573,34 @@ impl<'r> Reading<'r> {
                 *problems.entry(problem.code).or_default() += 1;
             }
         }
+        let mut added = Vec::new();
         for problem in self.new.document.diagnostics("") {
             if within(problem.line, &inserted) {
                 continue;
             }
             match problems.get_mut(problem.code) {
                 Some(count) if *count > 0 => *count -= 1,
-                _ => {
-                    let message = format!(
-                        "the edit would add a problem, `{}`: {}",
-                        problem.code, problem.message
-                    );
-                    let line = self
-                        .splices
-                        .first()
-                        .map_or(1, |splice| self.line(splice.range.start));
-                    return misread(line, message);
-                }
+                _ => added.push(problem),
             }
         }
-        Ok(())
+        // A missing separator is the cause of the other problems it brings, such as an empty
+        // body of the item before it, so it is the one named.
+        let named = match added.iter().position(|p| p.code == "missing-separator") {
+            Some(index) => added.into_iter().nth(index),
+            None => added.into_iter().next(),
+        };
+        let Some(problem) = named else {
+            return Ok(());
+        };
+        let message = format!(
+            "the edit would add a problem, `{}`: {}",
+            problem.code, problem.message
+        );
+        let line = self
+            .splices
+            .first()
+            .map_or(1, |splice| self.line(splice.range.start));
+        misread(line, message)
     }
 
     /// Why a reference reads differently: the definition that decides it, when the edit removes,

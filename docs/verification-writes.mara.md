@@ -125,6 +125,9 @@ Rust integration tests run `project fix` with the real CLI on disposable project
 | A bare-ID relation value that names one item | The canonical link to that item |
 | A stale link path in a relation and in a mention, and stale relation link text | The current path and ID; mention text unchanged |
 | A `missing-separator`, an anchor that lacks only its blank line, and a setext heading in an item's heading place | A `---` with a blank line on each side before the anchor; a blank line after the anchor; an ATX heading of the same level |
+| Items written without `---` and anchor, one after a title and an introduction and one right after another item, with a bare-ID relation value; tables with `Type` rows that make no item in the body before them | One fix adds the `---` and an anchor before each heading and the link; the item before keeps its body up to the `---`, mentions included; the other tables stay body text, unreported |
+| After another item without `---`: an item whose ID is malformed, one without an `ID` row, and one after a custom HTML anchor | Reported before the fix, and an update of the item before keeps them; one fix adds the `---`, and an anchor except after the HTML; the ID and HTML problems stay reported, and a second fix finds nothing |
+| A body or new item that holds a heading followed by an item's table | Refused, naming `missing-separator` |
 | After each of these | No diagnostic of the repaired kind is left |
 | An anchor without a heading or `Type` row, an item without an `ID` row, a bare ID that names no item, and a broken link | Unchanged and still reported: no heading, type or ID is supplied |
 | Two copies of one item | Both are kept |

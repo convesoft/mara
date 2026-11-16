@@ -67,7 +67,12 @@ fn marks_the_regions_that_lack_only_their_anchor() {
     let cases = [
         (format!("### A\n\n{table}\nBody.\n"), true),
         (format!("# Page\n\n---\n\n### A\n{table}"), true),
-        (format!("Text first.\n\n### A\n\n{table}\nBody.\n"), false),
+        // After other text, the heading starts a region of its own (DES-REGIONS).
+        (format!("Text first.\n\n### A\n\n{table}\nBody.\n"), true),
+        (
+            "Text first.\n\n### A\n\n| Type | Requirement |\n| --- | --- |\n".to_owned(),
+            false,
+        ),
         (
             format!("<a id=\"{}\"></a>\n\n### A\n\n{table}", mid.to_lowercase()),
             false,

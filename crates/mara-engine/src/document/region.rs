@@ -535,7 +535,8 @@ impl<'t> Reader<'t> {
                 html_only: true,
             },
             Tag::Heading { .. } => OpenKind::Heading(String::new()),
-            Tag::Table(_) if self.region.len() <= 2 => OpenKind::Table {
+            // A table after a heading may make an item that lacks its separator.
+            Tag::Table(_) if self.region.len() <= 2 || self.after_heading() => OpenKind::Table {
                 rows: Vec::new(),
                 row: None,
                 cell: None,
@@ -695,6 +696,14 @@ impl<'t> Reader<'t> {
             );
             self.problem("merged-anchor", *offset, message);
         }
+        if let Kind::Table(rows) = &block.kind
+            && is_item_table(rows)
+            && self.after_heading()
+            && Head::of(&self.region).heading != Some(self.region.len() - 1)
+            && self.region[self.region.len() - 2].anchors.is_empty()
+        {
+            self.split_before_heading();
+        }
         if let Kind::Anchor(mid) = &block.kind
             && !self.region.is_empty()
         {
@@ -710,6 +719,52 @@ impl<'t> Reader<'t> {
             self.end_region(Some(block.span.start));
         }
         self.region.push(block);
+    }
+
+    /// Starts a new region at the region's last block, a heading followed by an item's table
+    /// that lacks the `---` before it, or at the paragraph of inline HTML right before that
+    /// heading, which stands in the anchor's place (DES-REGIONS). Reports `missing-separator`
+    /// where the `---` belongs.
+    fn split_before_heading(&mut self) {
+        let heading = self.region.pop().expect("a heading precedes the table");
+        let html = match self.region.last() {
+            Some(Block {
+                kind: Kind::Html, ..
+            }) if self.region.len() >= 2 => self.region.pop(),
+            _ => None,
+        };
+        let title = match &heading.kind {
+            Kind::Heading(title) => title.as_str(),
+            _ => "",
+        };
+        let (start, place) = match &html {
+            Some(html) => (html.span.start, "before the HTML above the heading"),
+            None => (heading.span.start, "before the heading"),
+        };
+        let message = format!(
+            "the heading `{title}` and the table after it, with `Type` and `ID` or `Status` rows, \
+             make an item, but it is not the first block of its region, so it reads as text of \
+             what comes before. If it is an item, put a `---` line, with a blank line on each \
+             side, {place}. If it is an example, put it in a fenced code block, or put a \
+             paragraph between the heading and the table"
+        );
+        self.problem("missing-separator", start, message);
+        // Read on as if the separator were there, so that what comes before ends at it.
+        self.end_region(Some(start));
+        self.document.unseparated.push(start);
+        self.region.extend(html);
+        self.region.push(heading);
+    }
+
+    /// Whether the last finished block of the region is a heading.
+    fn after_heading(&self) -> bool {
+        matches!(
+            self.region.last(),
+            Some(Block {
+                kind: Kind::Heading(_),
+                ..
+            })
+        )
     }
 
     /// Reads the finished region. `next` is where the next region starts; `None` at the end
@@ -1174,6 +1229,18 @@ struct ItemWords<'i> {
     /// The text after a merged anchor in its paragraph.
     lead: Option<Words<'i>>,
     body: &'i [Block],
+}
+
+/// Whether a table after a heading that is not the first block of its region makes an item
+/// that lacks its separator: its first row is a `Type` row, and it has an `ID` or a `Status`
+/// row, whatever their values (DES-REGIONS). A table of field types with a `Type` column and
+/// neither row is no item's.
+fn is_item_table(rows: &[TableRow]) -> bool {
+    let key = |row: &TableRow| row.cells.first().map(|key| label_name(&key.text));
+    rows.first().is_some_and(TableRow::is_type_row)
+        && rows[1..]
+            .iter()
+            .any(|row| matches!(key(row).as_deref(), Some("id" | "status")))
 }
 
 /// `span` without the spaces, tabs and line endings around its text.

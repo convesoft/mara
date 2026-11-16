@@ -48,7 +48,7 @@ Update:
 Create and update:
 
 - A value outside a field's allowed set, several values of a single-valued key, and a value given twice are refused, as validation would report them ([DES-SCHEMA-CHECKS](validation.mara.md#01M7BF6HG7AQZ9FM38CMT4BTHR)). Links in a title or body are not checked; validation reports them.
-- A title or body after which the item would not read back as one item, or would read a parse problem it lacked, is refused with `unreadable-edit`: a thematic break or an anchor in a body, or a setext underline.
+- A title or body after which the item would not read back as one item, or would read a parse problem it lacked, is refused with `unreadable-edit`: a thematic break, an anchor, or a heading followed by an item's table in a body, or a setext underline. A missing separator is named before the problems it brings.
 - A body that ends inside an open fenced code block is written when nothing follows the item; any later item after it is then refused until the fence is closed.
 
 Delete:
@@ -87,7 +87,7 @@ Failure codes, besides those of [DES-OPERATIONS](hosts.mara.md#01M7BF6H124JRJAQS
 | Problem | Repair |
 | --- | --- |
 | `incomplete-item` of a region that starts with a heading followed by a table with a `Type` row | An anchor with a new MID that no item has, and a blank line, before the heading, in a splice that holds the whole region |
-| `missing-separator` | A `---` line before the anchor, with a blank line on each side |
+| `missing-separator` | A `---` line before the anchor, with a blank line on each side; before a heading, in the splice of that region's anchor; before inline HTML in the heading's place, alone |
 | `merged-anchor` of an anchor that lacks only the blank line after it | That blank line |
 | `setext-heading` of one line of text in an item's heading place | An ATX heading of the same level and text |
 | `bare-id-value` that names one item | The relation link to it ([DES-ITEM-WRITER](authoring.mara.md#01M7BF6GP2Z6R1VCQMQ6ZZB218)) |

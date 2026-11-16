@@ -238,6 +238,24 @@ impl<'s> Planner<'s> {
             self.anchor(&mut page, region, mid, &flagged);
             self.relations(&mut page, &kind(&region.rows), &region.rows);
         }
+        // The `---` before a region that gets no anchor: one that starts with inline HTML.
+        let anchored: HashSet<usize> = page
+            .parsed
+            .anchorless
+            .iter()
+            .map(|r| r.span.start)
+            .collect();
+        for &start in &page.parsed.unseparated {
+            if !anchored.contains(&start) {
+                let line_start = contents[..start].rfind(['\n', '\r']).map_or(0, |at| at + 1);
+                let line = 1 + line_count(&contents[..line_start]);
+                let text = separator(contents, line_start, page.eol);
+                let message = "added a `---` line before the HTML above the heading".to_owned();
+                let repair = page.repair("missing-separator", line, message);
+                page.edits
+                    .push(Edit::replace(line_start..line_start, text, repair));
+            }
+        }
         for item in document.items.clone() {
             self.formatting(&mut page, snapshot.item(item), &flagged);
             self.relations(&mut page, &self.kinds[item], &snapshot.item(item).rows);
@@ -262,7 +280,8 @@ impl<'s> Planner<'s> {
 
     /// The anchor of `mid`, and a blank line, before the heading of `region`, which lacks only
     /// its anchor, in a splice that holds the whole region, which becomes an item
-    /// (DES-ITEM-WRITER). Also an ATX heading for a setext heading of one line.
+    /// (DES-ITEM-WRITER). Also the `---` line before them when the parser read the heading as
+    /// lacking it, and an ATX heading for a setext heading of one line.
     fn anchor(
         &self,
         page: &mut Page<'_>,
@@ -270,16 +289,31 @@ impl<'s> Planner<'s> {
         mid: &str,
         flagged: &dyn Fn(&str, usize) -> bool,
     ) {
-        let eol = page.eol;
+        let (contents, eol) = (page.contents, page.eol);
+        let start = region.span.start;
+        let line_start = contents[..start].rfind(['\n', '\r']).map_or(0, |at| at + 1);
+        let mut replacements = Vec::new();
+        let mut repairs = Vec::new();
+        let mut text = format!("{}{eol}{eol}", anchor(mid));
+        if page.parsed.unseparated.binary_search(&start).is_ok() {
+            let separator = separator(contents, line_start, eol);
+            // Insertions at one place are one replacement, so that other edits merge with it.
+            match line_start == start {
+                true => text.insert_str(0, &separator),
+                false => replacements.push((line_start..line_start, separator)),
+            }
+            let message = "added a `---` line before the heading".to_owned();
+            repairs.push(page.repair("missing-separator", region.line, message));
+        }
+        replacements.push((start..start, text));
         let message =
             format!("added an anchor with the new MID {mid} before the heading, so the item loads");
-        let repair = page.repair("incomplete-item", region.line, message);
-        let start = region.span.start;
+        repairs.push(page.repair("incomplete-item", region.line, message));
         page.edits.push(Edit {
-            range: region.span.clone(),
-            replacements: vec![(start..start, format!("{}{eol}{eol}", anchor(mid)))],
+            range: line_start..region.span.end,
+            replacements,
             expect: Expect::Bytes,
-            repairs: vec![repair],
+            repairs,
         });
         let base = (region.heading.start, region.line);
         self.setext(page, mid, region.heading.clone(), base, flagged);
@@ -294,10 +328,7 @@ impl<'s> Planner<'s> {
         let start = item.span.start;
         let line_start = contents[..start].rfind(['\n', '\r']).map_or(0, |at| at + 1);
         if flagged("missing-separator", item.line) {
-            let text = match previous_line_blank(contents, line_start) {
-                true => format!("---{eol}{eol}"),
-                false => format!("{eol}---{eol}{eol}"),
-            };
+            let text = separator(contents, line_start, eol);
             let message = format!("added a `---` line before the anchor of MID {}", item.mid);
             let repair = page.repair("missing-separator", item.line, message);
             page.edits
@@ -682,6 +713,14 @@ fn line_end(contents: &str, at: usize) -> Option<usize> {
     let rest = &contents[at..];
     let line = lines(rest).next()?;
     line.ends_with(['\n', '\r']).then_some(at + line.len())
+}
+
+/// A `---` line to insert at the line start `at`, with a blank line on each side.
+fn separator(contents: &str, at: usize, eol: &str) -> String {
+    match previous_line_blank(contents, at) {
+        true => format!("---{eol}{eol}"),
+        false => format!("{eol}---{eol}{eol}"),
+    }
 }
 
 /// Whether the line before the one that starts at `start` holds only spaces and tabs.

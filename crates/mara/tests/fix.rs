@@ -321,6 +321,250 @@ fn repairs_items_that_get_their_anchor_in_one_run() {
     );
 }
 
+/// Items written by hand without the `---` before them: the first after a title and an
+/// introduction, another right after an item. Tables with a `Type` row that make no item stay
+/// body text. One fix leaves a valid project.
+#[test]
+fn repairs_items_written_without_their_separator() {
+    let table = |id: &str| {
+        format!("| Type | Requirement |\n| --- | --- |\n| ID | {id} |\n| Status | Draft |\n")
+    };
+    let not_items = "### Fields\n\n| Type | Meaning |\n| --- | --- |\n| Requirement | What must hold |\n\n\
+                     ### Kinds\n\n| Type | Requirement |\n| --- | --- |\n\n\
+                     Text.\n\n| Type | Requirement |\n| --- | --- |\n| ID | REQ-TEXT |\n\n\
+                     - ### In a list\n\n  | Type | Requirement |\n  | --- | --- |\n  | ID | REQ-LIST |\n\n\
+                     > ### In a quote\n>\n> | Type | Requirement |\n> | --- | --- |\n> | ID | REQ-QUOTE |\n\n\
+                     ```markdown\n### In code\n\n| Type | Requirement |\n| --- | --- |\n| ID | REQ-CODE |\n```\n";
+    let before = format!(
+        "# Authentication\n\nHow users sign in.\n\n### REQ-FIRST\n\n{}\nUsers sign in with \
+         passkeys.\n\n{not_items}\n---\n\n{}### REQ-NEXT\n\n{}| Refines | REQ-FIRST |\n\nBody of \
+         REQ-NEXT.\n",
+        table("REQ-FIRST"),
+        item(A, "REQ-A", "", &format!("Body of A, see [REQ-A](#{A}).")),
+        table("REQ-NEXT"),
+    );
+    let path = "docs/a.mara.md";
+    let project = Project::with(&[(path, before.clone())]);
+    let first = 5;
+    let next = 1 + before.lines().position(|l| l == "### REQ-NEXT").unwrap() as u64;
+    let expected = [
+        at("missing-separator", path, first),
+        at("incomplete-item", path, first),
+        at("missing-separator", path, next),
+        at("incomplete-item", path, next),
+    ];
+    assert_eq!(project.diagnostics(), expected);
+    // Until the fix, the item before ends where the separator belongs, with its mention.
+    let get = project.run(&["get", "REQ-A"]).json();
+    assert_eq!(get["content"], format!("Body of A, see [REQ-A](#{A})."));
+
+    let mut repairs = expected.to_vec();
+    repairs.push(at("bare-id-value", path, next + 6));
+    assert_eq!(project.fix().repairs(), repairs);
+    let after = project.read(path);
+    let mid = |id: &str| {
+        let heading = after.find(&format!("### {id}\n")).unwrap();
+        let start = after[..heading].rfind("<a id=\"").unwrap() + 7;
+        after[start..start + 26].to_owned()
+    };
+    let (first_mid, next_mid) = (mid("REQ-FIRST"), mid("REQ-NEXT"));
+    let fixed = before
+        .replace(
+            "sign in.\n\n### REQ-FIRST",
+            &format!("sign in.\n\n---\n\n<a id=\"{first_mid}\"></a>\n\n### REQ-FIRST"),
+        )
+        .replace(
+            ").\n### REQ-NEXT",
+            &format!(").\n\n---\n\n<a id=\"{next_mid}\"></a>\n\n### REQ-NEXT"),
+        )
+        .replace(
+            "| Refines | REQ-FIRST |",
+            &format!("| Refines | [REQ-FIRST](#{first_mid}) |"),
+        );
+    assert_eq!(after, fixed);
+    assert_eq!(project.diagnostics(), []);
+    let list = project.run(&["item", "list"]).json();
+    let ids: Vec<&str> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["REQ-FIRST", "REQ-A", "REQ-NEXT"]);
+    let first_body = project.run(&["get", "REQ-FIRST"]).json();
+    assert_eq!(
+        first_body["content"],
+        format!("Users sign in with passkeys.\n\n{}", not_items.trim_end())
+    );
+    let get = project.run(&["get", "REQ-A"]).json();
+    assert_eq!(get["content"], format!("Body of A, see [REQ-A](#{A})."));
+    let relations = project.run(&["relation", "list", "REQ-A"]).json();
+    let connections = relations["connections"].as_array().unwrap();
+    let outgoing = connections
+        .iter()
+        .find(|c| c["direction"] == "outgoing")
+        .expect("REQ-A keeps its mention");
+    assert_eq!(outgoing["kind"], "mention", "{relations}");
+    assert_eq!(outgoing["neighbour"]["id"], "REQ-A", "{relations}");
+    assert_eq!(project.fix().repairs(), [], "nothing is left");
+}
+
+/// A complete item `REQ-OLD` at the start of a page, ending with its body line.
+fn old_item() -> String {
+    item(A, "REQ-OLD", "", "Old body.")
+}
+
+/// On a page of [`old_item`] followed by `section` without a `---`: `project validate` reports
+/// `before_fix`, and `item update REQ-OLD --body Replacement.` keeps the section.
+fn update_then_fix(project: &Project, section: &str, before_fix: &[(String, String, u64)]) {
+    let path = "docs/a.mara.md";
+    assert_eq!(project.diagnostics(), before_fix);
+    let run = project.run(&["item", "update", "REQ-OLD", "--body", "Replacement."]);
+    assert_eq!(run.code(), Some(0), "{run:?}");
+    let updated = project.read(path);
+    assert!(
+        updated.ends_with(&format!("Replacement.\n{section}")),
+        "{updated}"
+    );
+    assert_eq!(project.diagnostics(), before_fix);
+}
+
+/// Review finding 1: an item whose ID has a typo, or that has no `ID` row, after another item.
+#[test]
+fn separates_an_item_with_a_malformed_or_missing_id() {
+    let path = "docs/a.mara.md";
+    let rows = "| Type | Requirement |\n| --- | --- |\n";
+    for (id_row, left) in [
+        ("| ID | REQ-passkeys |\n", "invalid-id"),
+        ("", "missing-row"),
+    ] {
+        let section = format!(
+            "## Passkeys\n\n{rows}{id_row}| Status | Draft |\n\nUsers sign in with passkeys.\n"
+        );
+        let before = format!("# Auth\n\n---\n\n{}{section}", old_item());
+        let project = Project::with(&[(path, before.clone())]);
+        let line = 15;
+        let expected = [
+            at("missing-separator", path, line),
+            at("incomplete-item", path, line),
+        ];
+        update_then_fix(&project, &section, &expected);
+        let updated = project.read(path);
+        assert_eq!(project.fix().repairs(), expected);
+        let after = project.read(path);
+        let mid = new_mid(&updated, &after);
+        assert_eq!(
+            after,
+            updated.replace(
+                "Replacement.\n## Passkeys",
+                &format!("Replacement.\n\n---\n\n<a id=\"{mid}\"></a>\n\n## Passkeys")
+            )
+        );
+        // The item's own problem is left to the author: fix supplies or corrects no ID.
+        let codes: Vec<String> = project.diagnostics().into_iter().map(|d| d.0).collect();
+        assert_eq!(codes, [left], "{after}");
+        assert_eq!(
+            project.fix().repairs(),
+            [],
+            "nothing is left for a second run"
+        );
+    }
+}
+
+/// Review finding 2: HTML of the author's own, such as a custom anchor, right before the heading.
+/// Fix adds the `---` before it and no anchor, and a second fix finds nothing.
+#[test]
+fn separates_an_item_after_custom_html_and_adds_no_anchor() {
+    let path = "docs/a.mara.md";
+    let section = "<a id=\"passkeys\"></a>\n\n## Passkeys\n\n| Type | Requirement |\n| --- | --- |\n\
+                   | ID | REQ-PASSKEYS |\n| Status | Draft |\n\nUsers sign in with passkeys.\n";
+    let before = format!("# Auth\n\n---\n\n{}\n{section}", old_item());
+    let project = Project::with(&[(path, before.clone())]);
+    let expected = [
+        at("missing-separator", path, 16),
+        at("incomplete-item", path, 16),
+    ];
+    update_then_fix(&project, &format!("\n{section}"), &expected);
+    let updated = project.read(path);
+    assert_eq!(project.fix().repairs(), [at("missing-separator", path, 16)]);
+    let after = project.read(path);
+    assert_eq!(
+        after,
+        updated.replace("\n<a id=\"passkeys\">", "\n---\n\n<a id=\"passkeys\">")
+    );
+    assert_eq!(project.diagnostics(), [at("incomplete-item", path, 18)]);
+    assert_eq!(
+        project.fix().repairs(),
+        [],
+        "nothing is left for a second run"
+    );
+}
+
+/// A table of field types whose first row is `Type` and that has an `ID` or a `Status` row has
+/// an item's shape and is reported; one with neither row, or only a `Type` row, is not.
+#[test]
+fn a_field_table_with_an_id_or_status_row_has_an_item_shape() {
+    let path = "docs/a.mara.md";
+    let fields = "### Fields\n\n| Type | Meaning |\n| --- | --- |\n";
+    for (rows, reported) in [
+        ("| ID | The identifier |\n", true),
+        ("| Status | The state |\n", true),
+        ("| Requirement | What must hold |\n", false),
+        ("", false),
+    ] {
+        let before = format!("# Auth\n\n---\n\n{}\n{fields}{rows}\nText.\n", old_item());
+        let project = Project::with(&[(path, before)]);
+        let expected = match reported {
+            true => vec![
+                at("missing-separator", path, 16),
+                at("incomplete-item", path, 16),
+            ],
+            false => Vec::new(),
+        };
+        assert_eq!(project.diagnostics(), expected, "{rows}");
+    }
+}
+
+/// Review finding 4: a refused body names the heading and item table it holds, not a problem
+/// that follows from it.
+#[test]
+fn a_refused_body_names_the_item_it_holds() {
+    let path = "docs/a.mara.md";
+    let before = format!("# Auth\n\n---\n\n{}", old_item());
+    let project = Project::with(&[(path, before.clone())]);
+    let body = "## Section\n\n| Type | Requirement |\n| --- | --- |\n| ID | REQ-SECTION |\n\
+                | Status | Draft |\n\nText.";
+    for args in [
+        &["item", "update", "REQ-OLD", "--body", body][..],
+        &[
+            "item",
+            "update",
+            "REQ-OLD",
+            "--body",
+            &format!("Intro.\n\n{body}"),
+        ],
+        &[
+            "item",
+            "create",
+            "requirement",
+            path,
+            "--title",
+            "New",
+            "--field",
+            "status=draft",
+            "--body",
+            body,
+        ],
+    ] {
+        let run = project.run(args);
+        assert_eq!(run.error(), "unreadable-edit", "{run:?}");
+        let message = run.json()["error"]["message"].as_str().unwrap().to_owned();
+        assert!(message.contains("`missing-separator`"), "{message}");
+        assert!(message.contains("fenced code block"), "{message}");
+        assert_eq!(project.read(path), before);
+    }
+}
+
 #[test]
 fn writes_the_link_for_a_bare_id_of_one_item() {
     let source = page(
