@@ -1,6 +1,6 @@
 ---
 title: A hand-written item without a separator before it is read as the previous item's body, with no diagnostic
-status: todo
+status: in-progress
 type: bug
 discovered_from: mara-18193r
 created_at: 2026-11-16T10:50:38Z
