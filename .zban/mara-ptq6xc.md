@@ -19,3 +19,5 @@ Provisional decision, by the orchestrator on 2026-11-16 under the maintainer's r
 - [ ] The implementation, and tests that a program which reaches outside, by a planted way past the scan, is stopped by the sandbox and reported as a fault (REQ-PROGRAM-FAULTS-REPORTED)
 - [ ] The sandbox part of the open question removed from docs/rules-facts.mara.md; RISK-SOUFFLE-REACHES-OUTSIDE names the sandbox as a mitigation
 - [ ] macOS (Seatbelt) is not part of this issue: it goes with mara-ag4ees
+
+Confirmed by the maintainer on 2026-11-16, so the decision above is no longer provisional. Chosen option, word for word: "Sandbox on Linux (Recommended) — Keep my decision: a Landlock sandbox around the child process on Linux, built before 0.4.0; macOS follows with the macOS work. Costs one issue of release work, and closes the risk instead of accepting it." Not chosen: accepting the risk; a sandbox after 0.4.0. The question and answer are recorded in mara-46j65e.
