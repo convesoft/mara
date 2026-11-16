@@ -80,7 +80,8 @@ Rust integration tests run `item move`, `item rename`, `project fix` and `projec
 | A move stopped while the item is in both files, then rerun; the item's own links are relative | The move completes and the project gains no diagnostic |
 | A rename stopped before its `ID` row, then rerun | The rename completes |
 | A rename stopped after its `ID` row | Every mention whose text was the old ID carries the new ID; the only leftover is stale relation link text, which `project validate` reports and `project fix` rewrites ([VER-FIX-CASES](#01M7F74HZVJPEQRJWABH3NTDW5)) |
-| A rename stopped after rewriting code markers, from 0.4.0-alpha.5 (mara-yhxq5x) | The markers' ID is reported as unresolved; a rerun completes the rename |
+| From 0.4.0-alpha.5 (mara-yhxq5x), a rename whose markers are in two code files, stopped at the second code file, then rerun | Before the rerun, the first file's markers name the new ID and are each `unresolved-marker`, and the second file's name the old ID; after it, every marker names the new ID and the project has no diagnostic |
+| The same rename stopped after its `ID` row | Every marker names the new ID and resolves |
 
 ---
 

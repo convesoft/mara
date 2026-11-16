@@ -71,7 +71,7 @@ Rust integration tests run `item delete` with the real CLI on a disposable proje
 | --- | --- |
 | An item with outgoing relations and a mention of itself, which nothing else targets | Removed; `get` of its ID and of its MID fails with `unknown-item`; no other item or narrative changes and the project gains no diagnostic |
 | An item targeted by a relation in another item (one through a stale path), a mention in another item's body and a mention in narrative | Refused, listing each of these locations with path and line; files byte-identical |
-| An item whose ID a code marker names, from 0.4.0-alpha.5 (mara-yhxq5x) | Refused, listing the marker's location |
+| An item whose ID a code marker names, from 0.4.0-alpha.5 (mara-yhxq5x); the same item after that marker is removed | Refused, listing the marker's path and line; files byte-identical. Removed |
 
 ---
 
@@ -136,4 +136,4 @@ Rust integration tests run `item rename` with the real CLI on a disposable proje
 | The rename | The anchor keeps the MID; the `ID` row, the text of every inbound relation link and of every mention whose text was the old ID carry the new ID; other mention text and the plain text are unchanged; the project gains no diagnostic |
 | `get`, `item validate` and `relation add` given the old ID afterwards | Fail with `unknown-item` |
 | The rename stopped before its `ID` row, and after it, in the order of [DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) | As [VER-INTERRUPTED-EDITS](verification-writes.mara.md#01M7F74J3SE8HJ3S6ZNG3G2DYJ) requires |
-| A code marker that names the old ID, from 0.4.0-alpha.5 (mara-yhxq5x) | Names the new ID |
+| Code markers that name the old ID, from 0.4.0-alpha.5 (mara-yhxq5x) | As [VER-CODE-EDITS](verification-code-use.mara.md#01M7JKT47QXAAP2VG6S3P1Y7XB) requires |

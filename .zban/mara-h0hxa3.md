@@ -12,4 +12,4 @@ Context: docs/code.mara.md (REQ-ONLY-CODE-ADD-DOWNLOADS, DES-GRAMMAR-ASSETS).
 
 - [ ] Built-in catalog and fetch from a given repository
 - [ ] Checksum verification, per-user cache, pin in the project configuration
-- [ ] Test: no other operation connects to another machine (the daemon's loopback listener is not such a connection)
+- [ ] VER-CODE-ADD passes, and its row of VER-CODE-WORK-COUNTERS: no other operation connects to another machine (the daemon's loopback listener is not such a connection)

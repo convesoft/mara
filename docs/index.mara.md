@@ -34,6 +34,8 @@
 | [Setup and host verification](verification-hosts.mara.md) | Checks of init, conversion, CLI and MCP parity and the agent guide |
 | [Rules verification](verification-rules.mara.md) | Checks of program consumers, facts, request inputs and explanations |
 | [Program safety verification](verification-programs.mara.md) | Checks of program faults, the time limit, the admitted language and reaching outside |
+| [Code link verification](verification-code.mara.md) | Checks of markers at both levels and of grammar downloads |
+| [Code link use verification](verification-code-use.mara.md) | Checks of marker rewrites, code links in programs and the work of reading code |
 | [Distribution](distribution.mara.md) | Packages, bundled Soufflé |
 | [Decisions](decisions.mara.md) | Format, authoring, project files, packaging, agent guidance |
 | [Runtime decisions](decisions-runtime.mara.md) | Caching, inputs, daemon, code links, performance tests |

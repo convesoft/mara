@@ -83,6 +83,7 @@ Implemented in Rust, always on, linear in items plus edges.
 | Identity | MID form and uniqueness, ID prefix and uniqueness ([DES-MID-ANCHOR](identity.mara.md#01M7BF6H1MB5RR3RS43B3CJHAR), [DES-ITEM-IDS](identity.mara.md#01M7BF6H1ZBTKWTF9ZXEJ8EBGS)) |
 | Links | Relation and mention targets exist; paths and relation link text are current ([DES-RELATION-LINKS](identity.mara.md#01M7BF6H29JGHG65SV91K6D11V)) |
 | Relations | Target type allowed for the source type, same-type relations, acyclic relations ([DES-SCHEMA-MODEL](project.mara.md#01M7BF6HA0KG3R3AATWM1P2X1G)) |
+| Code markers | Form, target and relation of each marker; grammars ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1), [DES-GRAMMAR-ASSETS](code.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)) |
 
 Parsing reports the Document structure failures and the malformed metadata rows of each document on its own, with the codes of the pages linked above. The other checks have these codes:
 
@@ -103,7 +104,10 @@ Parsing reports the Document structure failures and the malformed metadata rows 
 | `broken-link` | No item has the link's MID | The link |
 | `stale-link-path` | The link's path, resolved from the linking file, does not name the file that holds the MID | The link |
 | `stale-link-text` | A relation link's text is not the target's ID | The link |
-| `disallowed-target` | The relation does not lead from the source's type to the target's | The link |
+| `disallowed-target` | The relation does not lead from the source's type, or from `code`, to the target's | The link or marker |
+| `invalid-marker` | A line that starts as a marker but is not one | The line |
+| `unresolved-marker` | No item has the marker's ID | The marker |
+| `unavailable-grammar` | A pinned grammar is not cached, does not match its pin or cannot be loaded | The configuration line that pins it |
 | `relation-cycle` | Links of an acyclic relation form a cycle | Its first link |
 
 - Earlier and first are in path and line order. A problem that several items share, a repeated MID or ID or a cycle, is reported once to the project and to the validation of each item it concerns, there at that item's own anchor, row or link.

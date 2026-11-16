@@ -12,3 +12,5 @@ Context: DES-CODE-MARKERS in docs/code.mara.md.
 
 - [ ] Tree-sitter WASM grammars with `tags.scm`; endpoint is file and owning declaration
 - [ ] ABI check on load; fallback to the basic level with a diagnostic
+
+- [ ] VER-GRAMMAR-MARKERS passes, and the grammar-level cases of VER-CODE-FACTS

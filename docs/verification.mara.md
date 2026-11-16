@@ -147,6 +147,10 @@ Rust integration tests run the real CLI on disposable projects initialized from 
 | A failing row of each template invariant and gate | Has an explanation |
 | `C supersedes B supersedes A` after B retires | Valid |
 | Requirement implemented only through a design, from 0.4.0-alpha.5 (mara-yhxq5x) | Counts when the design is accepted, not when it is draft |
+| From 0.4.0-alpha.5, a requirement that an `implements` marker names, with an accepted Verification whose result passes and a named Validation of its Need that passes | `implemented` has the marker's row; `verified` and `release-ready` pass |
+| From 0.4.0-alpha.5, markers naming a Design and a Verification | `implemented` has a row for each |
+| From 0.4.0-alpha.5, a requirement that no marker names, every code file read; the same in a project that declares no code language | `verified` and `release-ready` fail ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)) |
+| From 0.4.0-alpha.5, a requirement that no marker names while a code file cannot be read | `verified` and `release-ready` unavailable |
 | A view and a gate over the same items | Report the same facts |
 | One project per rule of [DES-TEMPLATE-ACCEPTANCE](template.mara.md#01M7CT60M2EQ33WTZFNG600D4H) and of [DES-TEMPLATE-RELATION-LIFECYCLE](template.mara.md#01M7CT60M96Q91T5KXNQ1G58PP), with an accepted item that breaks it | A validation error of that rule's invariant at the item; valid when the item is a draft |
 | A risk in each of the 25 cells of [DES-TEMPLATE-RISK-LEVEL](template.mara.md#01M7CT60MFPF2Y871JJDZP5K0T) | `risk-level` gives that cell's level |
