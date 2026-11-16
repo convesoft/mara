@@ -23,3 +23,5 @@ One line per decision made on the maintainer's behalf under the rule of 2026-11-
 - 2026-11-16, mara-bx63yb: tests reach the end of the idle period through one debug-only variable, `MARA_TEST_IDLE_SECONDS`; a release build ignores it and does not contain it (ADR-TEST-IDLE-PERIOD). Rests on ADR-DEBUG-PAUSE-POINT, where the maintainer approved test-only code that exists in debug builds only. Rejected: a user-visible `--idle` option; inspection only. Undo: remove the variable and verify the idle drop by inspection.
 - 2026-11-16, mara-bx63yb: the daemon gets scaling cases of its own (a settled warm request, a request after one document edit), with the daemon's CPU time measured. Rests on REQ-NEAR-LINEAR-SCALING. Undo: drop them and rely on the CLI-direct cases.
 - 2026-11-16: mara-bx63yb was started before the alpha.3 epic closed, since it writes documents only. Undo: not needed.
+
+- 2026-11-16: mara-17gykj (daemon process, IPC and lifecycle) was started before the alpha.3 epic closed, on a free worker slot: it needs nothing from the rule evaluation. The slices still close and are tagged in order. Undo: not needed.

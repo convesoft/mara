@@ -3,6 +3,8 @@ title: Run the code-link case of VER-ONE-HOP
 status: todo
 type: task
 parent: mara-779tms
+blocked_by:
+  - mara-yhxq5x
 related:
   - mara-bmc9gc
 discovered_from: mara-km8qqj

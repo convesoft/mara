@@ -1,6 +1,6 @@
 ---
 title: Daemon process, IPC and lifecycle
-status: todo
+status: in-progress
 type: feature
 parent: mara-0mxw21
 created_at: 2026-11-13T22:10:06Z
