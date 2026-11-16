@@ -1,6 +1,6 @@
 ---
 title: Parser for the admitted program language
-status: todo
+status: in-progress
 type: feature
 parent: mara-17tdb3
 created_at: 2026-11-14T12:48:21Z
