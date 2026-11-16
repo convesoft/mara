@@ -74,6 +74,13 @@ impl Patterns {
             .any(|&(pattern, index)| index == self.patterns[pattern].len())
     }
 
+    /// Whether one of the patterns at the indices `patterns` matches the path that led to `at`.
+    pub fn is_match_among(&self, at: &Positions, patterns: std::ops::Range<usize>) -> bool {
+        at.0.iter().any(|&(pattern, index)| {
+            patterns.contains(&pattern) && index == self.patterns[pattern].len()
+        })
+    }
+
     /// Whether a pattern can match a path below the one that led to `at`.
     pub fn can_continue(&self, at: &Positions) -> bool {
         at.0.iter()

@@ -19,7 +19,8 @@
 | [Engineering template: readiness](template-readiness.mara.md) | Queries, result inputs, gates, views |
 | [Rules](rules.mara.md) | Soufflé programs, consumers, gate outcome, request inputs |
 | [Rule facts and programs](rules-facts.mara.md) | Fact bridge, admitted profile |
-| [Rule evaluation](rules-evaluation.mara.md) | Running Soufflé, time limit, explanations, trial results |
+| [Rule evaluation](rules-evaluation.mara.md) | Running Soufflé, limits, faults, explanations |
+| [Soufflé evidence](rules-evidence.mara.md) | Trial results, ways programs reached outside |
 | [Engine](engine.mara.md) | Engine boundary, inputs, cache keys, snapshot |
 | [Hosts](hosts.mara.md) | Execution modes, operations, CLI and MCP, Node, browser |
 | [Agent guidance](agents.mara.md) | `mara prime`, MCP server instructions |

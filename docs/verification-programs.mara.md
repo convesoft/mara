@@ -17,7 +17,7 @@ In the setup of [VER-PROGRAM-CONSUMERS](verification-rules.mara.md#01M7HZYK9DYQD
 
 | Case | Expectation |
 | --- | --- |
-| An undefined relation, a wrong arity, a `Mid` used as an `Id`, a symbol used as a number, and negation that cannot be stratified ([EVD-SOUFFLE-TRIAL](rules-evaluation.mara.md#01M7BF6HDDJJ0Y0WWT6RK17CDN)), in the declared program and in a declared program it includes | Reported at the file and line that hold the error; the message ends with that source line and a caret under the column |
+| An undefined relation, a wrong arity, a `Mid` used as an `Id`, a symbol used as a number, and negation that cannot be stratified ([EVD-SOUFFLE-TRIAL](rules-evidence.mara.md#01M7BF6HDDJJ0Y0WWT6RK17CDN)), in the declared program and in a declared program it includes | Reported at the file and line that hold the error; the message ends with that source line and a caret under the column |
 | A program the parser refuses ([VER-ADMITTED-LANGUAGE](#01M7HZYKDB9NDNWP4KJFGK5A9D)) | Reported the same way, at the place the parser stopped; 0 subprocess spawns |
 | `to_number` of a field value `abc` | A runtime fault at the line of the rule |
 | `substr` of a title with a start past its end | A runtime fault, although `souffle` exits with 0 |
@@ -46,7 +46,7 @@ Draft with its requirement, whose number is provisional. In the setup of [VER-PR
 | --- | --- |
 | The long program, with a limit of 1 s set in the configuration | The request ends after at least 1 s and within 10 s; no `souffle` process with its working directory under the test's temporary directory remains, and `TMPDIR` holds what it held before |
 | The long program, without a configured limit | The request ends after at least 10 s and within 20 s |
-| `nat(0). nat(x + 1) :- nat(x).` and `s("a"). s(cat(x, "a")) :- s(x).` ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)), with the 1 s limit | Stopped by the time limit or the memory limit, whichever comes first |
+| `nat(0). nat(x + 1) :- nat(x).` and `s("a"). s(cat(x, "a")) :- s(x).` ([EVD-SOUFFLE-PROGRAM-REACH](rules-evidence.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)), with the 1 s limit | Stopped by the time limit or the memory limit, whichever comes first |
 | `query report` of a row of an invariant over the long program, with the 1 s limit | Cannot explain, naming the time limit |
 | From 0.4.0-alpha.6 (mara-xsm8w6), the first case in the browser | The Soufflé worker is terminated; the workspace keeps every unexported edit |
 
@@ -63,7 +63,7 @@ Draft with its requirement, whose number is provisional. In the setup of [VER-PR
 | Methods | Test |
 | Verifies | [REQ-PROGRAMS-ONLY-COMPUTE](rules.mara.md#01M7CMW6ZTAJHSF5BR9SF9KR86) |
 
-Each row of [EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG) is a case. In the setup of [VER-PROGRAM-CONSUMERS](verification-rules.mara.md#01M7HZYK9DYQDY8XFKWZES1ZB6), each case declares one program, consumed by an invariant and a query, and runs `project validate` and `query execute`. The test's temporary directory also holds a file `secret` with a marker line, and a `libfunctors.so` that the test builds with `cc`, whose constructor creates a marker file. After every case no marker file exists, neither marker is on stdout or stderr, and every file under the test's temporary directory, `TMPDIR` included, has the name, bytes and mtime it had before. Refused means reported as [VER-PROGRAM-FAULTS](#01M7HZYKB4R632Q63YWS8CY1FJ) requires, with 0 subprocess spawns.
+Each row of [EVD-SOUFFLE-PROGRAM-REACH](rules-evidence.mara.md#01M7CMW70TAFCJKPAX3VY94QMG) is a case. In the setup of [VER-PROGRAM-CONSUMERS](verification-rules.mara.md#01M7HZYK9DYQDY8XFKWZES1ZB6), each case declares one program, consumed by an invariant and a query, and runs `project validate` and `query execute`. The test's temporary directory also holds a file `secret` with a marker line, and a `libfunctors.so` that the test builds with `cc`, whose constructor creates a marker file. After every case no marker file exists, neither marker is on stdout or stderr, and every file under the test's temporary directory, `TMPDIR` included, has the name, bytes and mtime it had before. Refused means reported as [VER-PROGRAM-FAULTS](#01M7HZYKB4R632Q63YWS8CY1FJ) requires, with 0 subprocess spawns.
 
 | Program | Expectation |
 | --- | --- |
@@ -100,7 +100,7 @@ Each row of [EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJK
 | Methods | Test |
 | Verifies | [REQ-PROGRAMS-ONLY-COMPUTE](rules.mara.md#01M7CMW6ZTAJHSF5BR9SF9KR86) |
 
-Tests of the engine crate's parser run on the review probe programs and the trial programs of [EVD-SOUFFLE-TRIAL](rules-evaluation.mara.md#01M7BF6HDDJJ0Y0WWT6RK17CDN) rewritten in the admitted language, both copied into the repository as fixtures (mara-wrbjte). A refusal names the line and column where the parser stopped.
+Tests of the engine crate's parser run on the review probe programs and the trial programs of [EVD-SOUFFLE-TRIAL](rules-evidence.mara.md#01M7BF6HDDJJ0Y0WWT6RK17CDN) rewritten in the admitted language, both copied into the repository as fixtures (mara-wrbjte). A refusal names the line and column where the parser stopped.
 
 | Case | Expectation |
 | --- | --- |

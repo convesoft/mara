@@ -24,8 +24,8 @@ const TEST_FILES: usize = 3;
 /// Timestamp part of the first MID, in milliseconds.
 const MID_TIME: u64 = 1_794_000_000_000;
 
-/// The configuration example of DES-PROJECT-CONFIGURATION. It declares no code language and no
-/// program, so code files are not inputs yet.
+/// The configuration example of DES-PROJECT-CONFIGURATION. It declares no code language, so
+/// code files are not inputs yet, and no program.
 const CONFIG: &str = r#"format_version = 1
 schema = ".mara/schema.toml"
 
@@ -33,6 +33,57 @@ schema = ".mara/schema.toml"
 format_version = 1
 include = ["docs/**/*.mara.md"]
 "#;
+/// The corpus's configuration: [`CONFIG`], and [`PROGRAM`] with one invariant, query, view and
+/// gate, which stand in for the `engineering` programs until mara-tx0fcf ships them.
+const CORPUS_CONFIG: &str = r#"
+[rules]
+programs = [".mara/rules/*.dl"]
+
+[invariants.requirement-verified]
+program = ".mara/rules/harness.dl"
+relation = "unverified"
+severity = "error"
+message = "Accepted requirement has no accepted verification"
+
+[queries.verified-requirements]
+program = ".mara/rules/harness.dl"
+relation = "verified"
+description = "Requirements with an accepted verification"
+
+[views.unverified]
+program = ".mara/rules/harness.dl"
+relation = "unverified"
+description = "Accepted requirements without an accepted verification"
+
+[gates.verified]
+program = ".mara/rules/harness.dl"
+description = "Named requirements pass every accepted verification"
+subjects = ["requirement"]
+conditions = ["not_passed"]
+unavailable = ["result_unavailable"]
+inputs = ["candidate", "verification_result"]
+"#;
+/// The program of [`CORPUS_CONFIG`]: joins of items and edges, and negation.
+const PROGRAM: &str = r#".include "mara.dl"
+.decl accepted(m: Mid, type: Type)
+accepted(m, t) :- item(m, t, _, "accepted", _, _).
+.decl verified(r: Mid)
+verified(r) :- edge("verifies", v, r, _, _), accepted(v, "verification").
+.decl unverified(r: Mid)
+unverified(r) :- accepted(r, "requirement"), !verified(r).
+.decl requirement(r: Mid)
+requirement(r) :- item(r, "requirement", _, _, _, _).
+.decl candidate(c: symbol)
+.decl verification_result(v: Mid, c: symbol, result: symbol)
+.decl not_passed(r: Mid, v: Mid)
+not_passed(r, v) :-
+    edge("verifies", v, r, _, _), accepted(v, "verification"), candidate(c),
+    !verification_result(v, c, "pass").
+.decl result_unavailable(r: Mid)
+result_unavailable(r) :- not_passed(r, _), !source_complete("verification_result").
+"#;
+/// The program files the corpus declares.
+pub const PROGRAMS: u64 = 1;
 /// The engineering vocabulary (DES-ENGINEERING-VOCABULARY): the `engineering` template's schema.
 const SCHEMA: &str = include_str!("../../templates/engineering/schema.toml");
 const GITIGNORE: &str = "/target/\n/docs/generated/\n";
@@ -596,7 +647,12 @@ fn ids<'a>(items: &'a [Item], base: usize, locals: &[usize]) -> Vec<&'a str> {
 /// Configuration, schema, `.gitignore`, and files that are not inputs: a README, a document
 /// outside the include patterns, a document that `.gitignore` excludes, and build output.
 fn write_project_files(root: &Path, size: usize, seed: u64, rng: &mut Rng, items: usize) {
-    write(root, ".mara/config.toml", CONFIG.as_bytes());
+    write(
+        root,
+        ".mara/config.toml",
+        format!("{CONFIG}{CORPUS_CONFIG}").as_bytes(),
+    );
+    write(root, ".mara/rules/harness.dl", PROGRAM.as_bytes());
     write(root, ".mara/schema.toml", SCHEMA.as_bytes());
     write(root, ".gitignore", GITIGNORE.as_bytes());
     let readme = format!("# Generated corpus\n\nSize {size}×, seed {seed}.\n");

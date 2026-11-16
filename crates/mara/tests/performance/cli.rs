@@ -26,10 +26,10 @@ pub struct Case {
 pub enum Reads {
     /// The configuration and the schema.
     Schema,
-    /// The configuration, the schema, the `.gitignore` files and every document, which it
-    /// parses into a snapshot and checks.
+    /// The configuration, the schema, the `.gitignore` files, every document and every program,
+    /// which it parses into a snapshot and checks, and evaluates every program once.
     Checked,
-    /// The same inputs into a snapshot, without checks.
+    /// The same inputs into a snapshot, without checks or program runs.
     Documents,
     /// The same inputs, then a write: the files it writes are restored after each run
     /// (`restore`).

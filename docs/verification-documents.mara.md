@@ -115,7 +115,7 @@ Rust integration tests run the real CLI on a disposable project seeded, several 
 | --- | --- |
 | `project validate` | Each seeded problem exactly once, with its code, severity, path and line, and nothing else |
 | `schema validate` | The schema's problem, and no document's |
-| `item validate` of an item whose ID another file repeats and whose relation link has a stale path | Both problems, and none of another item |
+| `item validate` of an item whose ID another file repeats and whose relation link has a stale path | Both problems and the configuration's, and none of another item |
 | `project validate` with a page of one diagnostic, or filtered to a path without errors | Invalid, with the project's total error count and a non-zero exit status |
 | The same project with every problem removed | Valid, no diagnostic and exit status 0 |
 

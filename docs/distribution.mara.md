@@ -57,6 +57,7 @@
 - [scripts/build-souffle.sh](../scripts/build-souffle.sh) is the native build for the local platform. It pins the release by tag and the SHA-256 of the downloaded archive, checked before anything is built, and fails when the binary needs a shared C++ runtime or OpenMP or fails a smoke run of `souffle --no-preprocessor -l ""` on JSON facts with no compiler on `PATH`.
 - The binary is `target/souffle-<version>/souffle` under the workspace root, with Soufflé's `LICENSE` beside it; the version is 2.5. A rerun only checks an existing binary. The source and build tree live in `target/souffle-<version>/work/` and are removed after a successful build.
 - A test or packaging step reads the binary from that path. A test that needs it and does not find it fails with a message that names `scripts/build-souffle.sh`.
+- `mara` runs the `souffle` in its own directory, else `../souffle-2.5/souffle` from there, which is that path for a binary Cargo built in the same `target/`; never one on `PATH`. Without either, each evaluation is a fault that names both paths and `scripts/build-souffle.sh`.
 
 ---
 

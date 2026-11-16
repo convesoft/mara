@@ -87,3 +87,22 @@ impl fmt::Display for Diagnostic {
         )
     }
 }
+
+/// `code` as a code that lives as long as the process: the name of an invariant, which a
+/// configuration sets (DES-DIAGNOSTICS). Each distinct name is kept once, so a host that reads
+/// configurations again keeps no more than the names it has seen.
+pub fn intern(code: &str) -> &'static str {
+    use std::collections::BTreeSet;
+    use std::sync::{Mutex, OnceLock};
+    static CODES: OnceLock<Mutex<BTreeSet<&'static str>>> = OnceLock::new();
+    let mut codes = CODES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(&interned) = codes.get(code) {
+        return interned;
+    }
+    let interned: &'static str = Box::leak(code.to_owned().into_boxed_str());
+    codes.insert(interned);
+    interned
+}

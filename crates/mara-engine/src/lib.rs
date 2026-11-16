@@ -5,6 +5,7 @@ pub mod authoring;
 pub mod config;
 pub mod diagnostic;
 pub mod document;
+pub mod evaluation;
 pub mod facts;
 pub mod fix;
 pub mod hash;

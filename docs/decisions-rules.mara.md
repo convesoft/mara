@@ -63,7 +63,7 @@
 | Justifies | [DES-PROGRAM-PROFILE](rules-facts.mara.md#01M7CMW7051QVPFDWQBMB1A6K6) |
 | Justifies | [REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0) |
 
-- Chosen: Mara parses every program against the grammar of a small admitted language, with types resolved, and runs stock Soufflé 2.5 only on programs that pass, on parsed copies in a private directory with library loading off; a time limit bounds each evaluation ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)).
+- Chosen: Mara parses every program against the grammar of a small admitted language, with types resolved, and runs stock Soufflé 2.5 only on programs that pass, on parsed copies in a private directory with library loading off; a time limit bounds each evaluation ([EVD-SOUFFLE-PROGRAM-REACH](rules-evidence.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)).
 - Rejected: lists of refused or admitted words. Five reviews each found ways past one, and a word list cannot express literal types, casts or column types.
 - Rejected: an evaluator inside the engine for the same language. It has no trial behind it and would reverse the choice of Soufflé; it stays the alternative if this boundary keeps failing.
 - Rejected: patching Soufflé or tracking its master. The behaviours left out are by design upstream or differ between the two builds, and a fork must be verified again on every update.
@@ -180,6 +180,6 @@
 | Justifies | [DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH) |
 | Justifies | [DES-FACT-BRIDGE](rules-facts.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J) |
 
-- Chosen: programs hold no input or output directive. Mara generates them for the relations a run needs and uses Soufflé's JSON files; a run at 16× takes 18 ms instead of 14 ms ([EVD-SOUFFLE-TRIAL](rules-evaluation.mara.md#01M7BF6HDDJJ0Y0WWT6RK17CDN)).
-- Rejected: Soufflé's default tab-separated files. A tab or a newline in a value reads as a column or row break ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)).
+- Chosen: programs hold no input or output directive. Mara generates them for the relations a run needs and uses Soufflé's JSON files; a run at 16× takes 18 ms instead of 14 ms ([EVD-SOUFFLE-TRIAL](rules-evidence.mara.md#01M7BF6HDDJJ0Y0WWT6RK17CDN)).
+- Rejected: Soufflé's default tab-separated files. A tab or a newline in a value reads as a column or row break ([EVD-SOUFFLE-PROGRAM-REACH](rules-evidence.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)).
 - Rejected: escaping values in tab-separated files. A program can still build such a value, and rules would see the escaped text.

@@ -75,7 +75,7 @@ Before every run the host copies `mara.dl` and the declared program files into a
 | Text | `cat`, `strlen`, `substr`, `contains`, `to_string`, `to_number` |
 | Aggregates | `count`, `sum`, `min`, `max` |
 
-- A refusal is reported like a compile error, at the place the parser stopped ([REQ-PROGRAM-FAULTS-REPORTED](rules-evaluation.mara.md#01M7BF6HCZ88PSSQTFKXE8KJ81)). [EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG) shows what each construct below did in Soufflé.
+- A refusal is reported like a compile error, at the place the parser stopped ([REQ-PROGRAM-FAULTS-REPORTED](rules-evaluation.mara.md#01M7BF6HCZ88PSSQTFKXE8KJ81)). [EVD-SOUFFLE-PROGRAM-REACH](rules-evidence.mara.md#01M7CMW70TAFCJKPAX3VY94QMG) shows what each construct below did in Soufflé.
 - Left out because it reaches outside: every input and output directive and qualifier, which Mara generates; `.functor`, `.pragma`, `.lattice`, `@` functors, `#` directives, `__FILE__`, `__INCL__`.
 - Left out because its value depends on evaluation order: `autoinc()`, a bare `$`, `ord`, `choice-domain`, `recursive_iteration_cnt`, `.limitsize`.
 - Left out because the native and the browser build differ, or Soufflé gets it wrong: `float` and `unsigned` types and literals, `mean`, `to_float`, `to_unsigned`, `as` casts, `match`, `/`, `%`, `^`, `magic`, subsumption, ADTs.
@@ -119,10 +119,10 @@ The parser reads text as Soufflé 2.5 does with `--no-preprocessor` and refuses 
 | Consequence | Severe |
 | Threatens | [REQ-PROGRAMS-ONLY-COMPUTE](rules.mara.md#01M7CMW6ZTAJHSF5BR9SF9KR86) |
 
-A construct that the parser admits, or a memory fault in Soufflé, lets a program from an untrusted checkout read or write files or run code as the user who validates it. Five reviews each found ways past earlier, weaker checks ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)).
+A construct that the parser admits, or a memory fault in Soufflé, lets a program from an untrusted checkout read or write files or run code as the user who validates it. Five reviews each found ways past earlier, weaker checks ([EVD-SOUFFLE-PROGRAM-REACH](rules-evidence.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)).
 
 ---
 
 ## Open questions
 
-- Whether the `souffle` child process also runs in an operating-system sandbox, or an accepted Decision accepts [RISK-SOUFFLE-REACHES-OUTSIDE](#01M7CYC90BZBBXGC0CZ66W8ZEV), and whether an evaluation gets limits on output size and memory besides time. The maintainer decides before the release.
+- Whether the `souffle` child process also runs in an operating-system sandbox, or an accepted Decision accepts [RISK-SOUFFLE-REACHES-OUTSIDE](#01M7CYC90BZBBXGC0CZ66W8ZEV). The maintainer decides before the release.

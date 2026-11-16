@@ -13,7 +13,7 @@
 | Methods | Test |
 | Verifies | [REQ-PROJECT-AUTHORED-LOGIC](rules.mara.md#01M7BF6HDMR4G13G7VFDA770ZN) |
 
-Rust integration tests run the real CLI on disposable projects of the `empty` template with a small hand-written schema, programs under `.mara/rules/` and their entries in the configuration ([DES-RULE-CONSUMERS](rules.mara.md#01M7BF6HE529B61Q2ZNXFQ1JXE)). The binary runs with an environment that holds only `HOME` and `TMPDIR`, both inside the test's temporary directory, and what mara-vt2ktq uses to locate the pinned `souffle`: no compiler is reachable. The other rules Verification items use this setup. Every consumed relation in them starts with the MID of the item its row is about, as DES-RULE-CONSUMERS requires; a row described without one is joined to an item of the project.
+Rust integration tests run the real CLI on disposable projects of the `empty` template with a small hand-written schema, programs under `.mara/rules/` and their entries in the configuration ([DES-RULE-CONSUMERS](rules.mara.md#01M7BF6HE529B61Q2ZNXFQ1JXE)). The binary runs with an environment that holds only `HOME` and `TMPDIR`, both inside the test's temporary directory, and finds the pinned `souffle` from its own path ([DES-SOUFFLE-BUILD](distribution.mara.md#01M7BF6GX9WNFK70C6H1RBQJ5R)): no compiler is reachable. The other rules Verification items use this setup. Every consumed relation in them starts with the MID of the item its row is about, as DES-RULE-CONSUMERS requires; a row described without one is joined to an item of the project.
 
 | Case | Expectation |
 | --- | --- |
@@ -107,5 +107,5 @@ In the setup of [VER-PROGRAM-CONSUMERS](#01M7HZYK9DYQDY8XFKWZES1ZB6), `query rep
 | Rows whose value holds a newline from a supplied input, a quote or a backslash, or is a negative number | Test | Cannot explain; never a proof of another row |
 | A row whose proof passes an aggregate | Test | Cannot explain |
 | Each case | Test | `project validate` and the gate return the same result as without the report |
-| The check that a returned proof is for the requested row, and the handling of a reply that is not JSON and of an aborted provenance run | Inspection | Review of mara-bx82k0 finds each; no admitted program is known to reach them ([EVD-SOUFFLE-PROGRAM-REACH](rules-evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)) |
+| The check that a returned proof is for the requested row, and the handling of a reply that is not JSON and of an aborted provenance run | Inspection | Review of mara-bx82k0 finds each; no admitted program is known to reach them ([EVD-SOUFFLE-PROGRAM-REACH](rules-evidence.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)) |
 | From 0.4.0-alpha.6 (mara-xsm8w6), the test cases in the browser | Test | The same proofs |

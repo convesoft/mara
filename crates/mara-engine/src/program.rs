@@ -40,8 +40,22 @@ pub struct Program {
     /// Every relation it declares, by name, with components' relations under their qualified
     /// names (`c.r`).
     pub relations: BTreeMap<String, Relation>,
+    /// Every `.include` that names one of its files, in the order they were read.
+    pub includes: Vec<Include>,
     /// The text of each file and the offsets where its lines start.
     texts: Vec<(String, Vec<usize>)>,
+}
+
+/// One `.include` directive of a program.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Include {
+    /// The file that holds it, an index into `Program::files`.
+    pub file: usize,
+    /// The byte offset of its quoted path, which holds only the characters the parser admits
+    /// in a path, so its text is the path in quotes.
+    pub at: usize,
+    /// The file it includes, an index into `Program::files`.
+    pub target: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,27 +110,32 @@ pub struct Refusal {
     pub location: Location,
 }
 
+impl Location {
+    /// The source line, then a caret under the column on the next line: how a compile error's
+    /// message ends (DES-RULE-EXECUTION in `docs/rules-evaluation.mara.md`).
+    pub fn excerpt(&self) -> String {
+        let caret: String = self
+            .source_line
+            .chars()
+            .take(self.column - 1)
+            .map(|c| if c == '\t' { '\t' } else { ' ' })
+            .chain(['^'])
+            .collect();
+        format!("{}\n{caret}", self.source_line)
+    }
+}
+
 impl Refusal {
     /// The error diagnostic of a refusal: a compile error's form, its message ending with the
     /// source line and a caret under the column (DES-RULE-EXECUTION in
     /// `docs/rules-evaluation.mara.md`).
     pub fn diagnostic(&self) -> Diagnostic {
         let location = &self.location;
-        let caret: String = location
-            .source_line
-            .chars()
-            .take(location.column - 1)
-            .map(|c| if c == '\t' { '\t' } else { ' ' })
-            .chain(['^'])
-            .collect();
         Diagnostic::error(
             "program-refused",
             location.path.clone(),
             location.line,
-            format!(
-                "program refused: {}\n{}\n{caret}",
-                self.message, location.source_line
-            ),
+            format!("program refused: {}\n{}", self.message, location.excerpt()),
         )
     }
 }
@@ -131,6 +150,22 @@ pub enum BoundaryError {
 }
 
 impl Program {
+    /// The text of the file at `file`, an index into `files`.
+    pub fn text(&self, file: usize) -> &str {
+        &self.texts[file].0
+    }
+
+    /// The location of byte `offset` of the file at index `file`.
+    pub fn locate(&self, file: usize, offset: usize) -> Location {
+        let (text, lines) = &self.texts[file];
+        locate(&self.files[file], text, lines, offset)
+    }
+
+    /// The start of line `line`, 1-based, of the file at index `file`; `None` past its end.
+    pub fn line_start(&self, file: usize, line: usize) -> Option<usize> {
+        self.texts[file].1.get(line.checked_sub(1)?).copied()
+    }
+
     /// The location of `place`.
     pub fn location(&self, place: Place) -> Location {
         let (text, lines) = &self.texts[place.file];

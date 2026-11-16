@@ -11,8 +11,8 @@ use super::syntax::{
     self, Aggregator, Clause, Component, Expr, Functor, Item, QualifiedName, Term,
 };
 use super::{
-    Column, ColumnKind, DECLARATIONS, Files, Place, Program, Refusal, Relation, line_starts,
-    locate, parser,
+    Column, ColumnKind, DECLARATIONS, Files, Include, Place, Program, Refusal, Relation,
+    line_starts, locate, parser,
 };
 
 /// How many declarations, clauses, instances and inherited bodies a program may expand to.
@@ -57,8 +57,9 @@ fn parse_source<'a>(path: &str, bytes: &'a [u8]) -> Result<Source<'a>, Refusal> 
     })
 }
 
-/// The declared program at `root` and every file it includes, each once.
-fn load<'a>(root: &str, files: &Files<'a>) -> Result<Vec<Source<'a>>, Refusal> {
+/// The declared program at `root` and every file it includes, each once, with every
+/// `.include` that loads them.
+fn load<'a>(root: &str, files: &Files<'a>) -> Result<(Vec<Source<'a>>, Vec<Include>), Refusal> {
     let refuse_root = |message: &str| Refusal {
         message: message.to_owned(),
         location: locate(root, "", &[0], 0),
@@ -72,6 +73,7 @@ fn load<'a>(root: &str, files: &Files<'a>) -> Result<Vec<Source<'a>>, Refusal> {
         return Err(refuse_root("no program pattern declares this file"));
     };
     let mut sources = vec![parse_source(root, bytes)?];
+    let mut sites = Vec::new();
     let mut loaded = HashMap::from([(root.to_owned(), 0)]);
     let mut next = 0;
     while next < sources.len() {
@@ -104,6 +106,11 @@ fn load<'a>(root: &str, files: &Files<'a>) -> Result<Vec<Source<'a>>, Refusal> {
         }
         for (target, at) in includes {
             if let Some(&index) = loaded.get(&target) {
+                sites.push(Include {
+                    file: next,
+                    at: at as usize,
+                    target: index,
+                });
                 if !sources[index].file.once {
                     return Err(refusal(
                         &sources[next],
@@ -121,11 +128,16 @@ fn load<'a>(root: &str, files: &Files<'a>) -> Result<Vec<Source<'a>>, Refusal> {
                 &files.programs[&target]
             };
             loaded.insert(target.clone(), sources.len());
+            sites.push(Include {
+                file: next,
+                at: at as usize,
+                target: sources.len(),
+            });
             sources.push(parse_source(&target, bytes)?);
         }
         next += 1;
     }
-    Ok(sources)
+    Ok((sources, sites))
 }
 
 /// Items of one source with the frame that reads them, before they are given a namespace.
@@ -197,7 +209,7 @@ struct Resolver<'a> {
 }
 
 pub(super) fn resolve(root: &str, files: &Files) -> Result<Program, Refusal> {
-    let sources = load(root, files)?;
+    let (sources, includes) = load(root, files)?;
     let mut resolver = Resolver {
         sources: &sources,
         namespaces: vec![Namespace::default()],
@@ -228,6 +240,7 @@ pub(super) fn resolve(root: &str, files: &Files) -> Result<Program, Refusal> {
     Ok(Program {
         files: sources.iter().map(|source| source.path.clone()).collect(),
         relations,
+        includes,
         texts: sources
             .iter()
             .map(|source| (source.text.to_owned(), source.lines.clone()))

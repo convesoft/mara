@@ -11,7 +11,7 @@ use mara::inputs::{Generation, Inputs};
 use mara_engine::work::WorkCounts;
 
 use crate::cli::Reads;
-use crate::corpus::{Corpus, Hub};
+use crate::corpus::{Corpus, Hub, PROGRAMS};
 use crate::restore::{self, Written};
 use crate::{NIGHTLY_SIZE, PULL_REQUEST_SIZES, SEED, cli, mcp};
 
@@ -98,9 +98,11 @@ fn check_cold(
         }
         _ => run(),
     };
-    // The configuration and the schema; for a check, also the root `.gitignore` and every
-    // document. `.git`, ignored and undeclared files are never read. No code is read and no
-    // program runs.
+    // The configuration and the schema; for a request that reads documents, also the root
+    // `.gitignore`, every document and the program file. `.git`, ignored and undeclared files
+    // are never read. No code is read. Validation runs each declared program once, as one
+    // subprocess, and nothing else runs one.
+    let read = documents + 3 + PROGRAMS;
     let expected = match reads {
         Reads::Schema => WorkCounts {
             file_reads: 2,
@@ -108,16 +110,18 @@ fn check_cold(
             ..WorkCounts::default()
         },
         Reads::Checked => WorkCounts {
-            file_reads: documents + 3,
-            hashes: documents + 3,
+            file_reads: read,
+            hashes: read,
             parses: documents - 1,
             snapshot_builds: 1,
             check_steps: run.work.check_steps,
+            subprocess_spawns: PROGRAMS,
+            program_runs: PROGRAMS,
             ..WorkCounts::default()
         },
         Reads::Documents => WorkCounts {
-            file_reads: documents + 3,
-            hashes: documents + 3,
+            file_reads: read,
+            hashes: read,
             parses: documents - 1,
             snapshot_builds: 1,
             ..WorkCounts::default()
@@ -125,8 +129,8 @@ fn check_cold(
         // A cold request, then 1 parse per distinct content written, before the renames, and
         // nothing after them (DES-WRITE-PROCEDURE, ADR-READ-BACK-EVERY-EDIT).
         Reads::Writes => WorkCounts {
-            file_reads: documents + 3,
-            hashes: documents + 3,
+            file_reads: read,
+            hashes: read,
             parses: documents - 1 + written.as_ref().map_or(0, Written::distinct),
             snapshot_builds: 1,
             ..WorkCounts::default()
@@ -279,11 +283,11 @@ fn snapshot_counts_at(size: usize) {
         (inputs.snapshot(last, &mut work), work)
     };
 
-    // Cold: the configuration, the schema, the root `.gitignore` and each declared document are
-    // read and hashed once; `.git`, ignored and undeclared files never.
+    // Cold: the configuration, the schema, the root `.gitignore`, each declared document and the
+    // program file are read and hashed once; `.git`, ignored and undeclared files never.
     let documents = corpus.documents as u64;
     let (cold, work) = request(&mut inputs);
-    let read = documents + 3;
+    let read = documents + 3 + PROGRAMS;
     let expected = WorkCounts {
         file_reads: read,
         hashes: read,

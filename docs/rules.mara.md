@@ -70,9 +70,13 @@ One program's output relations serve several consumers; presentation never defin
 | Gate | Program; subject, condition and unavailable relations | Judges the items a request names ([DES-GATE-OUTCOME](#01M7CT60KEEZRJCPJ0CPT7YT5B)); never changes documentation validity |
 
 - Every entry has a name and a description, and lists the inputs a request must supply ([DES-REQUEST-INPUTS](#01M7CT60KMGA2M9WMQ8RRJREPG)). `query list` shows them all.
+- `[rules] programs` lists the patterns that declare program files ([DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27)); the line of the first pattern that matches a file declares it. `time_limit_seconds`, optional, from 1 to 3600, sets the time limit ([REQ-EVALUATION-TIME-LIMIT](rules-evaluation.mara.md#01M7CMW70G711Z67QEWW5Z0MK0)). An entry table without `[rules]` is `missing-key`.
+- A name starts with a lowercase ASCII letter and holds lowercase ASCII letters, digits, `-` and `_`; it is unique across the four tables (`duplicate-name`). An entry whose name is invalid or taken is still checked, then left out. An entry's `program` is a file that a pattern declares.
+- `inputs` is optional and empty by default. An invariant has none, since validation supplies none, and its `description` defaults to its `message`. `severity` is `error` or `warning`. A gate's `subjects` and `conditions` name at least one relation; `unavailable` is optional.
+- Against its admitted program, an entry naming a relation or input that the program does not declare is `undeclared-relation`; a consumed relation whose first column is no symbol, or an input whose facts Mara supplies, is `invalid-relation`; both at the configuration line that names it. Such an entry does not run. Since they are found only against the admitted program, they are reported by validation and fail the operations that evaluate the entry, as a compile error does, and do not refuse the project to operations that evaluate nothing ([DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27)).
 - A request addresses a consumer only by its name. A relation without an entry is not reachable.
 - The first column of a consumed relation is the MID of the item its row is about. It gives a failure its path and line, and a query or view request that names items gets only their rows.
-- A row of an invariant relation is one failure.
+- A row of an invariant relation is one failure. A row whose first column is no item's MID is reported at the configuration line that names the relation.
 - `query report` explains one row of an invariant or gate outcome ([REQ-EXPLAIN-OUTCOMES](rules-evaluation.mara.md#01M7BF6HCQX66B3MYRH5BZM6BE)).
 - An empty result has no pass or fail meaning of its own; the consumer defines it.
 - A gate reports conditions, not permission to release, deploy or act.

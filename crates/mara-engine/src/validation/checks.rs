@@ -673,7 +673,7 @@ fn names(names: &[String]) -> String {
 }
 
 /// At most [`QUOTED`] characters of `text`, with `…` when it is longer.
-fn quote(text: &str) -> String {
+pub(crate) fn quote(text: &str) -> String {
     match text.char_indices().nth(QUOTED) {
         Some((end, _)) => format!("{}…", &text[..end]),
         None => text.to_owned(),

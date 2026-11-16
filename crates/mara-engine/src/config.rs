@@ -1,8 +1,12 @@
 //! The project configuration and project roots (DES-PROJECT-CONFIGURATION in
 //! `docs/project.mara.md`).
 
+mod rules;
+
 use crate::diagnostic::Diagnostic;
 use crate::toml_file::{Table, TomlFile, Value};
+
+pub use rules::{Consumer, DEFAULT_TIME_LIMIT_SECONDS, Entry, EntryKind, Named, Rules};
 
 /// The configuration, relative to the project root.
 pub const CONFIG_PATH: &str = ".mara/config.toml";
@@ -39,6 +43,9 @@ pub struct Config {
     pub schema: Option<PathSetting>,
     /// Document include patterns.
     pub include: Option<Vec<PathSetting>>,
+    /// The programs and their consumers (DES-RULE-CONSUMERS in `docs/rules.mara.md`); `None`
+    /// without `[rules]`.
+    pub rules: Option<Rules>,
 }
 
 /// A path or pattern relative to the project root, with the configuration line that sets it,
@@ -65,7 +72,8 @@ fn read(file: &mut TomlFile, root: &Table, config: &mut Config) {
     if !file.format_version(root, 0..0, PLACE) {
         return;
     }
-    file.unknown_keys(root, &["format_version", "schema", "documents"], PLACE);
+    file.unknown_keys(root, rules::ROOT_KEYS, PLACE);
+    config.rules = rules::read(file, root);
     if let Some(value) = file.required(root, "schema", 0..0, PLACE) {
         config.schema = path(file, "schema", value);
     }
@@ -117,7 +125,7 @@ mod tests {
 
     #[test]
     fn reports_unknown_settings_and_reads_the_rest() {
-        let text = "format_version = 1\nschema = \".mara/schema.toml\"\nname = \"x\"\n\n[documents]\nformat_version = 1\ninclude = [\"docs/*.mara.md\"]\nexclude = []\n\n[rules]\nprograms = []\n";
+        let text = "format_version = 1\nschema = \".mara/schema.toml\"\nname = \"x\"\n\n[documents]\nformat_version = 1\ninclude = [\"docs/*.mara.md\"]\nexclude = []\n\n[daemon]\nport = 1\n";
         let (config, diagnostics) = parse_config(text.as_bytes());
         assert_eq!(
             codes(&diagnostics),
@@ -126,7 +134,7 @@ mod tests {
         assert_eq!(diagnostics[0].path, CONFIG_PATH);
         assert_eq!(
             diagnostics[0].to_string(),
-            ".mara/config.toml:3: error[unknown-key]: unknown key `name` in the configuration; the keys are `format_version`, `schema`, `documents`"
+            ".mara/config.toml:3: error[unknown-key]: unknown key `name` in the configuration; the keys are `format_version`, `schema`, `documents`, `rules`, `queries`, `views`, `invariants`, `gates`"
         );
         assert_eq!(patterns(&config), ["docs/*.mara.md"]);
         assert_eq!(config.schema.unwrap().path, ".mara/schema.toml");

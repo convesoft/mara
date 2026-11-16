@@ -6,7 +6,7 @@ mod checks;
 mod tests;
 
 pub use checks::is_id;
-pub(crate) use checks::resolve;
+pub(crate) use checks::{quote, resolve};
 
 use crate::diagnostic::{Diagnostic, Severity};
 use crate::hash::{Hash, KeyHasher};

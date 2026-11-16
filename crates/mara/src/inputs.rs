@@ -8,7 +8,7 @@
 
 mod admit;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -49,6 +49,7 @@ struct State {
     /// By the path of the directory that holds the file.
     gitignores: HashMap<String, Tracked<Compiled>>,
     documents: HashMap<String, Tracked<Arc<ParsedFile>>>,
+    programs: HashMap<String, Tracked<Arc<Vec<u8>>>>,
 }
 
 /// A `.gitignore` file compiled by the `ignore` crate, or the line (1 for the whole file) and the
@@ -63,6 +64,9 @@ pub struct Generation {
     /// path order. The configuration's and the schema's problems are the project's.
     pub diagnostics: Vec<Diagnostic>,
     pub snapshot: Arc<Snapshot>,
+    /// The contents of every file that a pattern of `[rules] programs` declares, by path
+    /// (DES-PROGRAM-PROFILE).
+    pub programs: BTreeMap<String, Vec<u8>>,
 }
 
 impl Inputs {
@@ -120,6 +124,7 @@ impl Inputs {
         let Walk {
             next,
             documents,
+            programs,
             mut diagnostics,
             ..
         } = walk;
@@ -141,6 +146,7 @@ impl Inputs {
             project,
             diagnostics,
             snapshot,
+            programs,
         }
     }
 }
@@ -148,7 +154,10 @@ impl Inputs {
 /// One pass of the inventory over the project tree.
 struct Walk<'w> {
     root: &'w Path,
+    /// The document include patterns, then the program patterns.
     patterns: Patterns,
+    /// How many of `patterns` are document include patterns.
+    document_patterns: usize,
     now: SystemTime,
     work: &'w mut WorkCounts,
     reads: &'w mut Reads,
@@ -159,6 +168,7 @@ struct Walk<'w> {
     /// copied document is not parsed again.
     parsed: HashMap<DocumentKey, Arc<ParsedFile>>,
     documents: Vec<DocumentInput>,
+    programs: BTreeMap<String, Vec<u8>>,
     diagnostics: Vec<Diagnostic>,
 }
 
@@ -179,7 +189,10 @@ impl<'w> Walk<'w> {
         work: &'w mut WorkCounts,
         reads: &'w mut Reads,
     ) -> Walk<'w> {
-        let patterns = config.include.iter().flatten();
+        let documents = config.include.iter().flatten();
+        let programs = config.rules.iter().flat_map(|rules| &rules.programs);
+        let document_patterns = documents.clone().count();
+        let patterns = documents.chain(programs);
         let parsed = previous
             .documents
             .values()
@@ -188,6 +201,7 @@ impl<'w> Walk<'w> {
         Walk {
             root,
             patterns: Patterns::new(patterns.map(|pattern| pattern.path.as_str())),
+            document_patterns,
             now,
             work,
             reads,
@@ -195,6 +209,7 @@ impl<'w> Walk<'w> {
             next: State::default(),
             parsed,
             documents: Vec::new(),
+            programs: BTreeMap::new(),
             diagnostics: Vec::new(),
         }
     }
@@ -309,20 +324,32 @@ impl<'w> Walk<'w> {
                 }
                 continue;
             }
-            let document = entry.name.ends_with(".mara.md") && self.patterns.is_match(&next);
-            if !document || ignored(&ignores, &child, false) {
+            let documents = 0..self.document_patterns;
+            let document = entry.name.ends_with(".mara.md")
+                && self.patterns.is_match_among(&next, documents.clone());
+            let programs = self.document_patterns..usize::MAX;
+            let program = self.patterns.is_match_among(&next, programs);
+            if !(document || program) || ignored(&ignores, &child, false) {
                 continue;
             }
             if !entry.utf8 {
                 self.unnamed(child);
                 continue;
             }
+            let role = if document { "document" } else { "program" };
             match entry.kind {
-                Kind::File => self.document(child),
+                Kind::File => {
+                    if program {
+                        self.program(child.clone());
+                    }
+                    if document {
+                        self.document(child);
+                    }
+                }
                 Kind::SymbolicLink => {
                     let message = format!(
                         "{child} is a symbolic link, and Mara follows none among a project's \
-                         inputs: put the document itself there"
+                         inputs: put the {role} itself there"
                     );
                     self.problem(SYMBOLIC_LINK, child, message);
                 }
@@ -403,6 +430,30 @@ impl<'w> Walk<'w> {
             file: Arc::clone(&tracked.value),
         });
         self.next.documents.insert(path, tracked);
+    }
+
+    /// Adds the program file at `path`, read when its stat changed.
+    fn program(&mut self, path: String) {
+        let absolute = self.root.join(&path);
+        let previous = self.previous.programs.remove(&path);
+        let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
+            let (now, work, reads) = (self.now, &mut *self.work, &mut *self.reads);
+            tracked::check(&absolute, &metadata, previous, now, work, reads, false)
+        });
+        let tracked = match checked {
+            Ok(Check::Kept(tracked)) => tracked,
+            Ok(Check::Read(mut read)) => {
+                let contents = Arc::new(std::mem::take(&mut read.contents));
+                read.with(contents)
+            }
+            Err(error) => {
+                let message = format!("cannot read {path}: {error}");
+                return self.problem("io-error", path, message);
+            }
+        };
+        let contents = tracked.value.to_vec();
+        self.programs.insert(path.clone(), contents);
+        self.next.programs.insert(path, tracked);
     }
 
     /// Reports an entry that may hold or be an input but whose name is not UTF-8.

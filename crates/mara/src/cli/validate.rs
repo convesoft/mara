@@ -8,9 +8,11 @@ use std::fmt::Write as _;
 
 use mara::inputs::Inputs;
 use mara::project::{self, Project};
+use mara::rules::{self, Scope};
 use mara_engine::config::CONFIG_PATH;
 use mara_engine::diagnostic::Diagnostic;
 use mara_engine::document::is_mid;
+use mara_engine::hash::Hash;
 use mara_engine::paging::PAGE_BYTES;
 use mara_engine::validation::{self, PageError, Report, result_key};
 
@@ -21,8 +23,9 @@ use super::{
 
 pub const PROJECT: Operation = Operation {
     words: &["project", "validate"],
-    summary: "Reports every problem of the project: configuration, schema, documents and built-in \
-              checks. Also runs on a project whose configuration or schema has errors.",
+    summary: "Reports every problem of the project: configuration, schema, documents, built-in \
+              checks and invariants, and compiles every program. Also runs on a project whose \
+              configuration or schema has errors.",
     arguments: &[],
     options: &[PATH, LIMIT, CURSOR],
     run: Run::Document(project_validate),
@@ -30,7 +33,8 @@ pub const PROJECT: Operation = Operation {
 
 pub const ITEM: Operation = Operation {
     words: &["item", "validate"],
-    summary: "Reports the problems of one item.",
+    summary: "Reports the problems of one item, and those of the configuration and of the programs \
+              its invariants use.",
     arguments: &[Argument {
         name: "id-or-mid",
         help: "The item's ID or MID.",
@@ -61,11 +65,29 @@ pub(super) const PATH: Opt = Opt {
     check: |path| project_path(path).map(drop),
 };
 
-/// Every problem of the project: configuration, schema, inventory and built-in checks.
+/// The keys of what a validation read: the snapshot, every declared program file, and each
+/// evaluation.
+fn input_keys(generation: &mara::inputs::Generation, evaluations: &[Hash]) -> Vec<Option<Hash>> {
+    let mut programs = Vec::new();
+    for (path, contents) in &generation.programs {
+        programs.extend_from_slice(Hash::of_bytes(path.as_bytes()).as_bytes());
+        programs.extend_from_slice(Hash::of_bytes(contents).as_bytes());
+    }
+    let mut keys = vec![
+        Some(generation.snapshot.key().0),
+        Some(Hash::of_bytes(&programs)),
+    ];
+    keys.extend(evaluations.iter().copied().map(Some));
+    keys
+}
+
+/// Every problem of the project: configuration, schema, inventory, built-in checks, programs
+/// and invariants.
 fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let root = context.root()?;
     let generation = Inputs::new(root).snapshot(context.now, context.work);
     let findings = validation::check(&generation.snapshot, context.work);
+    let invariants = rules::invariants(&generation, Scope::Project, context.work);
     // One key for every spelling of the same paths (DES-DIAGNOSTICS).
     let mut paths: Vec<String> = args
         .values(PATH.name)
@@ -76,11 +98,22 @@ fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Fail
     let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
     let mut diagnostics = generation.project.diagnostics.clone();
     diagnostics.extend(generation.diagnostics.iter().cloned());
+    diagnostics.extend(invariants.diagnostics);
     let mut request = vec!["project validate"];
     request.extend(&paths);
-    let key = result_key(&request, &[Some(generation.snapshot.key().0)], &diagnostics);
+    let key = result_key(
+        &request,
+        &input_keys(&generation, &invariants.keys),
+        &diagnostics,
+    );
     let primary = findings.into_iter().filter(|finding| finding.primary);
     diagnostics.extend(primary.map(|finding| finding.diagnostic));
+    diagnostics.extend(
+        invariants
+            .findings
+            .into_iter()
+            .map(|finding| finding.diagnostic),
+    );
     respond(Report::new(diagnostics, key), &paths, args)
 }
 
@@ -117,15 +150,33 @@ fn item_validate(context: &mut Context, args: &Args) -> Result<Response, Failure
         }
     };
     let findings = validation::check(snapshot, context.work);
-    let diagnostics = findings
+    let mut diagnostics: Vec<Diagnostic> = findings
         .into_iter()
         .filter(|finding| finding.item == Some(item))
         .map(|finding| finding.diagnostic)
         .collect();
+    // A configuration problem may drop an entry that would judge the item, and a program that
+    // cannot be evaluated leaves the item's invariants unknown, so their problems are the
+    // item's too.
+    let invariants = rules::invariants(&generation, Scope::Item, context.work);
+    let mut shared: Vec<Diagnostic> = generation
+        .project
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.path == CONFIG_PATH)
+        .cloned()
+        .collect();
+    shared.extend(invariants.diagnostics);
     let key = result_key(
         &["item validate", reference],
-        &[Some(snapshot.key().0)],
-        &[],
+        &input_keys(&generation, &invariants.keys),
+        &shared,
+    );
+    diagnostics.extend(shared);
+    let rows = invariants.findings.into_iter();
+    diagnostics.extend(
+        rows.filter(|finding| finding.item == Some(item))
+            .map(|finding| finding.diagnostic),
     );
     respond(Report::new(diagnostics, key), &[], args)
 }

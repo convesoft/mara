@@ -516,7 +516,14 @@ fn schema_validate_reports_the_schema_problem_and_no_document() {
 fn item_validate_reports_the_problems_of_one_item_only() {
     let dir = project(false);
     let text = dir.read("docs/links/a.mara.md");
+    // The configuration's problem is every item's: it could drop an entry that judges it.
+    let config = at(
+        "unknown-key",
+        ".mara/config.toml",
+        line_of(&dir.read(".mara/config.toml"), "colour = \"blue\""),
+    );
     let expected = [
+        config.clone(),
         at(
             "duplicate-id",
             "docs/links/a.mara.md",
@@ -531,17 +538,20 @@ fn item_validate_reports_the_problems_of_one_item_only() {
     let run = json(&dir.root(), &["item", "validate", L1]);
     assert_eq!(run.status, 1, "{run:?}");
     assert_eq!(run.diagnostics(), expected);
-    assert_eq!(run.json()["errors"], 2);
+    assert_eq!(run.json()["errors"], 3);
     // The other holder of the ID has the repetition in its own validation, at its own row.
     let run = json(&dir.root(), &["item", "validate", DA]);
     let text = dir.read("docs/dup.mara.md");
     assert_eq!(
         run.diagnostics(),
-        [at(
-            "duplicate-id",
-            "docs/dup.mara.md",
-            line_of(&text, "| ID | REQ-L1 |")
-        )]
+        [
+            config,
+            at(
+                "duplicate-id",
+                "docs/dup.mara.md",
+                line_of(&text, "| ID | REQ-L1 |")
+            )
+        ]
     );
     // An ID that two items have names neither; a MID does.
     let run = json(&dir.root(), &["item", "validate", "REQ-L1"]);
@@ -553,7 +563,7 @@ fn item_validate_reports_the_problems_of_one_item_only() {
         "{error}"
     );
     let run = json(&dir.root(), &["item", "validate", "REQ-K1"]);
-    assert_eq!((run.status, run.json()["valid"].clone()), (0, true.into()));
+    assert_eq!((run.status, run.json()["errors"].clone()), (1, 1.into()));
     let run = json(&dir.root(), &["item", "validate", "REQ-NONE"]);
     assert_eq!(
         (run.status, run.json()["error"]["code"].clone()),

@@ -274,7 +274,7 @@ fn reports_problems_of_both_files_by_path_and_line() {
     assert_eq!(
         printed,
         [
-            ".mara/config.toml:3: error[unknown-key]: unknown key `name` in the configuration; the keys are `format_version`, `schema`, `documents`",
+            ".mara/config.toml:3: error[unknown-key]: unknown key `name` in the configuration; the keys are `format_version`, `schema`, `documents`, `rules`, `queries`, `views`, `invariants`, `gates`",
             "vocabulary/schema.toml:4: error[reserved-name]: type name `code` is reserved",
         ]
     );
