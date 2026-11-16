@@ -105,6 +105,7 @@ Tests:
 
 - The counter and scaling tests are the `performance` integration test of the `mara` crate, with the generator. They run the real binary with an empty environment.
 - A case is the arguments and the exit status of one invocation. The harness asserts the status before it accepts the counts or the timing. Each operation adds its case to both tests.
+- A case of `mara mcp` is one session of the real server: the `initialize` handshake, `tools/list` and one tool call, whose stats line is that call's. A session without a call does no work.
 - `project convert` has no scaling case. Its counter case runs the real CLI on a small fixed 0.3.0 input, a hand-written fixture of the test and not generator output ([ADR-NO-CONVERTER-SCALING](decisions-runtime.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)).
 - Two cases without an operation pin today's behaviour and stay: `mara --debug-stats` exits 0, and `mara --debug-stats --no-such-option` exits 2 after a diagnostic. Neither does work, and the first does not grow. Changing either behaviour changes its case.
 - Engine code that runs inside operations, such as the document parser, adds no case: it counts its own work, and the cases of the operations that run it assert and time that work.

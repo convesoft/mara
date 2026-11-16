@@ -15,28 +15,36 @@ use mara_engine::paging::PAGE_BYTES;
 use mara_engine::validation::{self, PageError, Report, result_key};
 
 use super::{
-    Args, CURSOR, Context, FAILURE, Failure, LIMIT, Operation, Opt, Response, SUCCESS, project_path,
+    Args, Argument, CURSOR, Context, FAILURE, Failure, LIMIT, Operation, Opt, Response, Run,
+    SUCCESS, project_path,
 };
 
 pub const PROJECT: Operation = Operation {
     words: &["project", "validate"],
+    summary: "Reports every problem of the project: configuration, schema, documents and built-in \
+              checks. Also runs on a project whose configuration or schema has errors.",
     arguments: &[],
     options: &[PATH, LIMIT, CURSOR],
-    run: project_validate,
+    run: Run::Document(project_validate),
 };
 
 pub const ITEM: Operation = Operation {
     words: &["item", "validate"],
-    arguments: &["id-or-mid"],
+    summary: "Reports the problems of one item.",
+    arguments: &[Argument {
+        name: "id-or-mid",
+        help: "The item's ID or MID.",
+    }],
     options: &[LIMIT, CURSOR],
-    run: item_validate,
+    run: Run::Document(item_validate),
 };
 
 pub const SCHEMA: Operation = Operation {
     words: &["schema", "validate"],
+    summary: "Reports the problems of the configuration and the schema.",
     arguments: &[],
     options: &[LIMIT, CURSOR],
-    run: schema_validate,
+    run: Run::Document(schema_validate),
 };
 
 /// `--path <path>`: report only diagnostics in this file or directory, relative to the project
@@ -44,7 +52,11 @@ pub const SCHEMA: Operation = Operation {
 pub(super) const PATH: Opt = Opt {
     name: "path",
     value: "path",
+    help: "Only what is in this document, or in the documents below this directory, relative to \
+           the project root.",
     repeatable: true,
+    required: false,
+    integer: false,
     check: |path| project_path(path).map(drop),
 };
 

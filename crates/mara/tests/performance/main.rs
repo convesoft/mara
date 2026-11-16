@@ -7,6 +7,7 @@ mod convert;
 mod corpus;
 mod cpu_time;
 mod init;
+mod mcp;
 mod pause_points;
 mod restore;
 mod scaling;

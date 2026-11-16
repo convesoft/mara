@@ -95,7 +95,7 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 | `mcp` | Serves the document operations (every group above except `code` and `daemon`) over stdio |
 | `prime` | Prints the agent guide ([DES-AGENT-GUIDE](agents.mara.md#01M7BGRHWQHQJJHC6XCXVDWDM8)) |
 
-- An MCP server takes the project on each call, or is bound to one project when started with `--project`.
+- An MCP server takes the project on each call, or is bound to one project when started with `--project` ([DES-MCP-SERVER](#01M7J0N6KRQ3NNE4Z6SPZ1VYRK)).
 - The CLI's global options stand anywhere: `--project <dir>`, `--format human|json` (default `human`) and `--debug-stats` ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)). An operation's options follow its words, as `--<name> <value>` or `--<name>=<value>`. Bare `mara` prints the usage and exits 0.
 - Exit status: 0 for a valid result or a successful operation, 1 for an invalid result or a failed request, 2 for rejected arguments.
 - `--format json` prints one JSON object on stdout: the result, or `{"format_version": 1, "error": {"code", "message", "diagnostics"}}` when the request fails, `diagnostics` holding the problems in project files that caused it. Each result also carries `format_version` 1.
@@ -120,3 +120,42 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 | `not-a-legacy-project` | `project convert` of a project that is not a 0.3.0 project ([DES-CONVERSION-MAPPING](migration.mara.md#01M7CMW71TXDY6VCTJS7XNSQRM)) |
 | `stale-cursor` | The cursor belongs to another result |
 | `record-too-large` | A record exceeds a page ([DES-PAGING](retrieval.mara.md#01M7BF6HCCWQH6P13ZR2YHAPS0)) |
+
+---
+
+<a id="01M7J0N6KRQ3NNE4Z6SPZ1VYRK"></a>
+
+### MCP server
+
+| Type | Design |
+| --- | --- |
+| ID | DES-MCP-SERVER |
+| Status | Accepted |
+| Satisfies | [REQ-CLI-MCP-PARITY](#01M7BF6H00N50GBQGCYF4RSR1Z) |
+
+- `mara mcp` speaks MCP over stdio through `rmcp` ([ADR-RMCP-SERVER](#01M7J0N6M9GKB113E35X5QPTZY)): the 2026-07-28 revision, whose requests carry their version, and the `initialize` handshake of 2024-11-05 to 2025-11-25.
+- `tools/list` returns one tool per document operation of [DES-OPERATIONS](#01M7BF6H124JRJAQSYVQ21Q2JS) on one page. Its description is the operation's summary.
+- A positional argument is a required string parameter. An option is a string parameter, an integer for a whole number (`limit`, `line`), an array of them when it repeats; `title` and `body` of `item create` are required. A parameter set to `null` counts as left out.
+- A server started without `--project` adds a `project` parameter to every tool: the project root, absolute or relative to the server's working directory. Without it, the project is found from the server's working directory upward, as the CLI finds it from its own. A server started with `--project` lists no `project` parameter, and a call that gives one is rejected.
+- A call's result is one text content block holding the JSON object that `--format json` prints, with `isError` true for a failure; there is no structured content. An undeclared, missing or mistyped parameter is rejected with `invalid-argument` before the operation runs, in a message that names the parameter. An unknown tool is a JSON-RPC error.
+- Calls run on the runtime's blocking pool, several at once if the client sends them so. Each is a cold request; writes wait for the write lock ([REQ-WRITERS-SERIALIZED](writes.mara.md#01M7CXC2N8EZYVHGY7T2GPPB3X)). A call that the client cancels still runs to its end; only its response is dropped.
+- With `--debug-stats`, the server prints one stats line when it exits: the work of all its calls.
+
+---
+
+## Decisions
+
+---
+
+<a id="01M7J0N6M9GKB113E35X5QPTZY"></a>
+
+### Serve MCP through `rmcp`
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-RMCP-SERVER |
+| Status | Accepted |
+| Justifies | [DES-MCP-SERVER](#01M7J0N6KRQ3NNE4Z6SPZ1VYRK) |
+
+- Chosen by the maintainer on 2026-11-15: the `rmcp` SDK, as in 0.3.0, so that Mara does not maintain the protocol's edges itself. Its async runtime starts only in `mara mcp`, single-threaded.
+- Rejected: a hand-written JSON-RPC server on `serde_json`. Every lifecycle, version and error rule of each protocol revision would be Mara's to keep.

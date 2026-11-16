@@ -11,48 +11,104 @@ use mara_engine::work::WorkCounts;
 use mara_engine::write::{cell, heading, label};
 
 use super::read::open;
-use super::{Args, Context, Failure, Operation, Opt, Response, SUCCESS, project_path};
+use super::{
+    Args, Argument, Context, Failure, Operation, Opt, Response, Run, SUCCESS, project_path,
+};
 
 pub const ITEM_CREATE: Operation = Operation {
     words: &["item", "create"],
-    arguments: &["type", "path"],
-    options: &[TITLE, ID, FIELD, BODY, LINE],
-    run: item_create,
+    summary: "Creates an item with a new MID in a document, which is created when it would be an \
+              input of the project.",
+    arguments: &[
+        Argument {
+            name: "type",
+            help: "The item's type, as the schema declares it.",
+        },
+        Argument {
+            name: "path",
+            help: "The document, relative to the project root.",
+        },
+    ],
+    options: &[
+        Opt {
+            required: true,
+            ..TITLE
+        },
+        ID,
+        FIELD,
+        Opt {
+            required: true,
+            ..BODY
+        },
+        LINE,
+    ],
+    run: Run::Document(item_create),
 };
 
 pub const ITEM_UPDATE: Operation = Operation {
     words: &["item", "update"],
-    arguments: &["item"],
+    summary: "Changes an item's title, fields or body.",
+    arguments: &[ITEM],
     options: &[TITLE, FIELD, CLEAR_FIELD, BODY],
-    run: item_update,
+    run: Run::Document(item_update),
 };
 
 pub const ITEM_DELETE: Operation = Operation {
     words: &["item", "delete"],
-    arguments: &["item"],
+    summary: "Deletes an item that no other item or narrative targets.",
+    arguments: &[ITEM],
     options: &[],
-    run: item_delete,
+    run: Run::Document(item_delete),
 };
 
 pub const RELATION_ADD: Operation = Operation {
     words: &["relation", "add"],
-    arguments: &["source", "relation", "target"],
+    summary: "Adds a relation row to the source item that links to the target item.",
+    arguments: &[SOURCE, RELATION, TARGET],
     options: &[],
-    run: relation_add,
+    run: Run::Document(relation_add),
 };
 
 pub const RELATION_REMOVE: Operation = Operation {
     words: &["relation", "remove"],
-    arguments: &["source", "relation", "target"],
+    summary: "Removes every row of the relation on the source item that links to the target item.",
+    arguments: &[SOURCE, RELATION, TARGET],
     options: &[],
-    run: relation_remove,
+    run: Run::Document(relation_remove),
+};
+
+/// `<item>`: the item an update or delete edits.
+const ITEM: Argument = Argument {
+    name: "item",
+    help: "The item: its ID, its MID or `<path>:<line>`.",
+};
+
+/// `<source>`: the item whose table holds the relation row.
+const SOURCE: Argument = Argument {
+    name: "source",
+    help: "The item whose table holds the row: its ID, its MID or `<path>:<line>`.",
+};
+
+/// `<relation>`: the relation's forward name.
+const RELATION: Argument = Argument {
+    name: "relation",
+    help: "The relation's forward name, as the schema declares it.",
+};
+
+/// `<target>`: the item the row links to.
+const TARGET: Argument = Argument {
+    name: "target",
+    help: "The item the row links to: its ID, its MID or `<path>:<line>`.",
 };
 
 /// `--title <title>`: one line of Markdown, the item's heading text.
 const TITLE: Opt = Opt {
     name: "title",
     value: "title",
+    help: "The item's heading text: one line of Markdown.",
     repeatable: false,
+    required: false,
+    integer: false,
     check: |value| {
         heading(1, value)
             .map(drop)
@@ -64,7 +120,10 @@ const TITLE: Opt = Opt {
 const ID: Opt = Opt {
     name: "id",
     value: "id",
+    help: "The new item's ID, instead of the one proposed from its title.",
     repeatable: false,
+    required: false,
+    integer: false,
     check: |_| Ok(()),
 };
 
@@ -73,7 +132,11 @@ const ID: Opt = Opt {
 const FIELD: Opt = Opt {
     name: "field",
     value: "key=value",
+    help: "`<key>=<value>`: a value of a field or of `Status`. The values of one key replace all \
+           its rows.",
     repeatable: true,
+    required: false,
+    integer: false,
     check: field,
 };
 
@@ -81,7 +144,10 @@ const FIELD: Opt = Opt {
 const CLEAR_FIELD: Opt = Opt {
     name: "clear-field",
     value: "name",
+    help: "An optional field whose rows are all removed.",
     repeatable: true,
+    required: false,
+    integer: false,
     check: |name| match label_name(name.trim()).as_str() {
         "" => Err("a field to clear is named by its key".to_owned()),
         "type" | "id" | "status" => Err(format!(
@@ -96,7 +162,10 @@ const CLEAR_FIELD: Opt = Opt {
 const BODY: Opt = Opt {
     name: "body",
     value: "text",
+    help: "The item's body: Markdown of any number of lines.",
     repeatable: false,
+    required: false,
+    integer: false,
     check: |_| Ok(()),
 };
 
@@ -104,7 +173,10 @@ const BODY: Opt = Opt {
 const LINE: Opt = Opt {
     name: "line",
     value: "n",
+    help: "The line, from 1, at which the item goes; without it, the item ends the document.",
     repeatable: false,
+    required: false,
+    integer: true,
     check: |value| match value.parse::<usize>() {
         Ok(line) if line >= 1 => Ok(()),
         _ => Err(format!("a line is a number from 1, not `{value}`")),

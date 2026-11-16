@@ -8,20 +8,27 @@ use mara::project;
 use mara_engine::config::{CONFIG_PATH, Root};
 use mara_engine::json::{self, Object};
 
-use super::{Args, Context, FORMAT_VERSION, Failure, Operation, Opt, REJECTED, Response, SUCCESS};
+use super::{
+    Args, Context, FORMAT_VERSION, Failure, Operation, Opt, REJECTED, Response, Run, SUCCESS,
+};
 
 pub const PROJECT_CONVERT: Operation = Operation {
     words: &["project", "convert"],
+    summary: "Converts a 0.3.0 project, whose items are `:::mara` blocks, to this format, and \
+              reports what it leaves out.",
     arguments: &[],
     options: &[STATUS],
-    run: project_convert,
+    run: Run::Document(project_convert),
 };
 
 /// `--status <status>`: the status of each item that has none.
 const STATUS: Opt = Opt {
     name: "status",
     value: "status",
+    help: "The status of each item that has none.",
     repeatable: false,
+    required: false,
+    integer: false,
     check: |value| match convert::is_name(&convert::name_of(value)) {
         true => Ok(()),
         false => Err(format!(

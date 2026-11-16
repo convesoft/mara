@@ -180,7 +180,7 @@ fn shown(args: &[impl AsRef<std::ffi::OsStr>]) -> Vec<String> {
 }
 
 /// Parses a stats line: a JSON object of exactly `format_version` 1 and the [`COUNTERS`].
-fn parse(line: &str) -> Result<WorkCounts, String> {
+pub fn parse(line: &str) -> Result<WorkCounts, String> {
     let value: Value = serde_json::from_str(line).map_err(|error| format!("not JSON: {error}"))?;
     let object = value.as_object().ok_or("not a JSON object")?;
     if object.get("format_version") != Some(&Value::from(1)) {

@@ -15,20 +15,25 @@ use mara_engine::diagnostic::Diagnostic;
 use mara_engine::json::{self, Object};
 use mara_engine::validation;
 
-use super::{Args, Context, FORMAT_VERSION, Failure, Operation, Opt, Response, SUCCESS};
+use super::{Args, Context, FORMAT_VERSION, Failure, Operation, Opt, Response, Run, SUCCESS};
 
 pub const PROJECT: Operation = Operation {
     words: &["project", "init"],
+    summary: "Makes the directory a project: writes `.mara/config.toml` and `.mara/schema.toml` \
+              of a template, and overwrites no file.",
     arguments: &[],
     options: &[TEMPLATE],
-    run: project_init,
+    run: Run::Document(project_init),
 };
 
 /// `--template engineering|empty`: the template to write, `engineering` when left out.
 const TEMPLATE: Opt = Opt {
     name: "template",
     value: "engineering|empty",
+    help: "`engineering`, the default, or `empty`, which declares no type and no relation.",
     repeatable: false,
+    required: false,
+    integer: false,
     check: |value| match template(value) {
         Some(_) => Ok(()),
         None => Err(format!(

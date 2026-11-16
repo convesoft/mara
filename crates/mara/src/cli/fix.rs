@@ -11,13 +11,15 @@ use mara::write::{self, FileWrite, WriteLock};
 use mara_engine::fix::{self, Repair};
 use mara_engine::write::ReadBack;
 
-use super::{Context, Failure, Operation, Response, SUCCESS};
+use super::{Context, Failure, Operation, Response, Run, SUCCESS};
 
 pub const PROJECT: Operation = Operation {
     words: &["project", "fix"],
+    summary: "Repairs what hand edits leave: items without an anchor, missing separators and blank \
+              lines, setext headings, bare-ID relation values, and stale link paths and text.",
     arguments: &[],
     options: &[],
-    run: project_fix,
+    run: Run::Document(project_fix),
 };
 
 /// Repairs every problem that fix may repair, in one edit of the documents that have any

@@ -17,29 +17,54 @@ use mara_engine::work::WorkCounts;
 use mara_engine::write::{ReadBack, UNREADABLE_EDIT};
 
 use super::{
-    Args, Context, FAILURE, FORMAT_VERSION, Failure, Operation, Opt, REJECTED, Response, SUCCESS,
-    project_path,
+    Args, Argument, Context, FAILURE, FORMAT_VERSION, Failure, Operation, Opt, REJECTED, Response,
+    Run, SUCCESS, project_path,
 };
 
 pub const ITEM_MOVE: Operation = Operation {
     words: &["item", "move"],
-    arguments: &["id-or-mid", "path"],
+    summary: "Moves an item to another document, or to another line of its own, and rewrites every \
+              link to it.",
+    arguments: &[
+        ID_OR_MID,
+        Argument {
+            name: "path",
+            help: "The destination document, relative to the project root.",
+        },
+    ],
     options: &[LINE],
-    run: item_move,
+    run: Run::Document(item_move),
 };
 
 pub const ITEM_RENAME: Operation = Operation {
     words: &["item", "rename"],
-    arguments: &["id-or-mid", "new-id"],
+    summary: "Changes an item's ID, and every relation link and mention that shows it.",
+    arguments: &[
+        ID_OR_MID,
+        Argument {
+            name: "new-id",
+            help: "The new ID, with the type's prefix.",
+        },
+    ],
     options: &[],
-    run: item_rename,
+    run: Run::Document(item_rename),
+};
+
+/// `<id-or-mid>`: the item moved or renamed.
+const ID_OR_MID: Argument = Argument {
+    name: "id-or-mid",
+    help: "The item's ID or MID.",
 };
 
 /// `--line <n>`: the line of the destination before which the item goes.
 const LINE: Opt = Opt {
     name: "line",
     value: "n",
+    help: "The line of the destination, from 1, before which the item goes; without it, the item \
+           ends the document.",
     repeatable: false,
+    required: false,
+    integer: true,
     check: |value| match value.parse::<usize>() {
         Ok(line) if line > 0 => Ok(()),
         _ => Err(format!("a line is a whole number from 1, not `{value}`")),

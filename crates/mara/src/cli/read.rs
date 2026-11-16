@@ -21,56 +21,81 @@ use mara_engine::write::label;
 
 use super::validate::PATH;
 use super::{
-    Args, CURSOR, Context, Failure, LIMIT, Operation, Opt, Response, SUCCESS, project_path,
+    Args, Argument, CURSOR, Context, Failure, LIMIT, Operation, Opt, Response, Run, SUCCESS,
+    project_path,
 };
 
 pub const SEARCH: Operation = Operation {
     words: &["search"],
-    arguments: &["query"],
+    summary: "Finds items and narrative by their words, ranked, among the nodes that match every \
+              filter.",
+    arguments: &[Argument {
+        name: "query",
+        help: "Words to find; a query without words matches every node.",
+    }],
     options: &[TYPE, FIELD, RELATION, PATH, ID, LIMIT, CURSOR],
-    run: search,
+    run: Run::Document(search),
 };
 
 pub const GET: Operation = Operation {
     words: &["get"],
-    arguments: &["node"],
+    summary: "Reads a node: an item's rows and body, a narrative unit or a whole document.",
+    arguments: &[NODE],
     options: &[CURSOR],
-    run: get,
+    run: Run::Document(get),
 };
 
 pub const RELATION_LIST: Operation = Operation {
     words: &["relation", "list"],
-    arguments: &["node"],
+    summary: "Lists the relations and mentions of a node, outgoing then incoming.",
+    arguments: &[NODE],
     options: &[RELATION, LIMIT, CURSOR],
-    run: relation_list,
+    run: Run::Document(relation_list),
 };
 
 pub const ITEM_LIST: Operation = Operation {
     words: &["item", "list"],
+    summary: "Lists the items that match every filter.",
     arguments: &[],
     options: &[TYPE, FIELD, RELATION, PATH, ID, LIMIT, CURSOR],
-    run: item_list,
+    run: Run::Document(item_list),
 };
 
 pub const SCHEMA_LIST: Operation = Operation {
     words: &["schema", "list"],
+    summary: "Lists the types and relations that the schema declares.",
     arguments: &[],
     options: &[LIMIT, CURSOR],
-    run: schema_list,
+    run: Run::Document(schema_list),
 };
 
 pub const SCHEMA_GET: Operation = Operation {
     words: &["schema", "get"],
-    arguments: &["name"],
+    summary: "Reads the declaration of a type or relation: its fields, values, targets and \
+              constraints.",
+    arguments: &[Argument {
+        name: "name",
+        help: "A type's name, or a relation's forward or inverse name.",
+    }],
     options: &[LIMIT, CURSOR],
-    run: schema_get,
+    run: Run::Document(schema_get),
+};
+
+/// `<node>`: what `get` and `relation list` read.
+const NODE: Argument = Argument {
+    name: "node",
+    help: "An item's ID or MID, `<path>:<line>` of an item or narrative unit, or a document's \
+           `<path>`.",
 };
 
 /// `--type <name>`: items of this type. Repeatable (DES-SEARCH-REQUESTS).
 const TYPE: Opt = Opt {
     name: "type",
     value: "name",
+    help: "Only items of this type.",
     repeatable: true,
+    required: false,
+    integer: false,
     check: |_| Ok(()),
 };
 
@@ -78,7 +103,10 @@ const TYPE: Opt = Opt {
 const FIELD: Opt = Opt {
     name: "field",
     value: "key=value",
+    help: "`<key>=<value>`: only items with this row.",
     repeatable: true,
+    required: false,
+    integer: false,
     check: |value| match value.split_once('=') {
         Some((key, _)) if !key.is_empty() => Ok(()),
         _ => Err(format!("a field filter is `<key>=<value>`, not `{value}`")),
@@ -90,7 +118,11 @@ const FIELD: Opt = Opt {
 const RELATION: Opt = Opt {
     name: "relation",
     value: "name",
+    help: "Only edges of this relation: by its forward name those that leave, by its inverse \
+           name those that arrive.",
     repeatable: true,
+    required: false,
+    integer: false,
     check: |_| Ok(()),
 };
 
@@ -98,7 +130,10 @@ const RELATION: Opt = Opt {
 const ID: Opt = Opt {
     name: "id",
     value: "id-or-mid",
+    help: "Only the items with this ID or MID.",
     repeatable: true,
+    required: false,
+    integer: false,
     check: |_| Ok(()),
 };
 

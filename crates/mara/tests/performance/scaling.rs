@@ -1,6 +1,7 @@
 //! VER-SCALING: growth per doubling of each operation's CPU time on a release build.
 //!
-//! Each operation adds its case to `cli::cases`, which `growth_per_doubling` times.
+//! Each operation adds its case to `cli::cases`, which `growth_per_doubling` times, as it times
+//! the calls of `mcp::cases` through `mara mcp`.
 
 use std::f64::consts::FRAC_PI_2;
 use std::time::{Duration, SystemTime};
@@ -11,7 +12,7 @@ use mara_engine::work::WorkCounts;
 use crate::corpus::{Corpus, Hub, Shape, Stress};
 use crate::restore::Written;
 use crate::work_counters::hub_writes;
-use crate::{PULL_REQUEST_SIZES, SEED, cli, cpu_time};
+use crate::{PULL_REQUEST_SIZES, SEED, cli, cpu_time, mcp};
 
 /// Most growth of time per doubling of corpus size (REQ-NEAR-LINEAR-SCALING).
 const LIMIT: f64 = 2.3;
@@ -53,6 +54,26 @@ fn growth_per_doubling() {
             cli::run(corpus.root(), &case.args, case.status);
         };
         if cases[0][index].reads == cli::Reads::Writes {
+            check_writes(&corpora, &name, run, |corpus| corpus.root());
+        } else {
+            check_growth(&corpora, &name, run);
+        }
+    }
+    // `mara mcp`: a session's start-up, and each call through the server.
+    check_growth(&corpora, "mara mcp", |_, corpus| {
+        mcp::run(corpus.root(), &[]);
+    });
+    let calls: Vec<Vec<mcp::Case>> = corpora
+        .iter()
+        .map(|(_, corpus)| mcp::cases(corpus))
+        .collect();
+    for index in 0..calls[0].len() {
+        let name = format!("mara mcp {}", calls[0][index].tool);
+        let run = |at: usize, corpus: &Corpus| {
+            let case = &calls[at][index];
+            mcp::run(corpus.root(), &[(case.tool, &case.arguments)]);
+        };
+        if calls[0][index].reads == cli::Reads::Writes {
             check_writes(&corpora, &name, run, |corpus| corpus.root());
         } else {
             check_growth(&corpora, &name, run);

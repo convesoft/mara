@@ -1,8 +1,8 @@
 //! VER-WORK-COUNTERS: exact work counts of cold requests through the real CLI, and of input
 //! tracking and the snapshot build below it.
 //!
-//! Each operation adds its case to `cli::cases`, which `cold_counts_at` runs. The warm rows run
-//! against the daemon (0.4.0-alpha.4).
+//! Each operation adds its case to `cli::cases`, which `cold_counts_at` runs, as do the calls of
+//! `mcp::cases` through `mara mcp`. The warm rows run against the daemon (0.4.0-alpha.4).
 
 use std::fs;
 use std::time::{Duration, SystemTime};
@@ -13,7 +13,7 @@ use mara_engine::work::WorkCounts;
 use crate::cli::Reads;
 use crate::corpus::{Corpus, Hub};
 use crate::restore::{self, Written};
-use crate::{NIGHTLY_SIZE, PULL_REQUEST_SIZES, SEED, cli};
+use crate::{NIGHTLY_SIZE, PULL_REQUEST_SIZES, SEED, cli, mcp};
 
 #[test]
 fn cold_counts() {
@@ -62,70 +62,91 @@ fn cold_counts_at(size: usize) {
     let documents = corpus.documents as u64 + 2;
     let mut last_write = SystemTime::now();
     for case in cli::cases(&corpus) {
-        let mut written = None;
-        let run = match case.reads {
-            // Every file it writes last changed at least 2 s before.
-            Reads::Writes => {
-                restore::settle(last_write);
-                let mut run = None;
-                written = Some(Written::learn(corpus.root(), || {
-                    run = Some(cli::run(corpus.root(), &case.args, case.status));
-                }));
-                run.expect("the case ran")
-            }
-            _ => cli::run(corpus.root(), &case.args, case.status),
-        };
         let name = format!("mara {} at {size}×", case.args.join(" "));
-        // The configuration and the schema; for a check, also the root `.gitignore` and every
-        // document. `.git`, ignored and undeclared files are never read. No code is read and
-        // no program runs.
-        let expected = match case.reads {
-            Reads::Schema => WorkCounts {
-                file_reads: 2,
-                hashes: 2,
-                ..WorkCounts::default()
-            },
-            Reads::Checked => WorkCounts {
-                file_reads: documents + 3,
-                hashes: documents + 3,
-                parses: documents - 1,
-                snapshot_builds: 1,
-                check_steps: run.work.check_steps,
-                ..WorkCounts::default()
-            },
-            Reads::Documents => WorkCounts {
-                file_reads: documents + 3,
-                hashes: documents + 3,
-                parses: documents - 1,
-                snapshot_builds: 1,
-                ..WorkCounts::default()
-            },
-            // A cold request, then 1 parse per distinct content written, before the renames,
-            // and nothing after them (DES-WRITE-PROCEDURE, ADR-READ-BACK-EVERY-EDIT).
-            Reads::Writes => WorkCounts {
-                file_reads: documents + 3,
-                hashes: documents + 3,
-                parses: documents - 1 + written.as_ref().map_or(0, Written::distinct),
-                snapshot_builds: 1,
-                ..WorkCounts::default()
-            },
-        };
-        assert_eq!(run.work, expected, "{name}");
-        if let Some(written) = written {
-            assert!(!written.contents.is_empty(), "{name} wrote nothing");
-            written.restore();
-            last_write = SystemTime::now();
+        let run = || cli::run(corpus.root(), &case.args, case.status);
+        check_cold(&corpus, &name, case.reads, documents, &mut last_write, run);
+    }
+    // `mara mcp`: a session without a call does no work, and a call's counts are those of the
+    // same request through the CLI.
+    let run = mcp::run(corpus.root(), &[]);
+    assert_eq!(run.work, WorkCounts::default(), "mara mcp at {size}×");
+    for case in mcp::cases(&corpus) {
+        let name = format!("mara mcp {} {} at {size}×", case.tool, case.arguments);
+        let run = || mcp::run(corpus.root(), &[(case.tool, &case.arguments)]);
+        check_cold(&corpus, &name, case.reads, documents, &mut last_write, run);
+    }
+}
+
+/// Runs a case once and requires the counts of a cold request that reads `reads`, with
+/// `documents` documents in the corpus. A case that writes starts when every file it writes last
+/// changed at least 2 s before, and its files are restored after it.
+fn check_cold(
+    corpus: &Corpus,
+    name: &str,
+    reads: Reads,
+    documents: u64,
+    last_write: &mut SystemTime,
+    run: impl FnOnce() -> cli::Run,
+) {
+    let mut written = None;
+    let run = match reads {
+        Reads::Writes => {
+            restore::settle(*last_write);
+            let mut ran = None;
+            written = Some(Written::learn(corpus.root(), || ran = Some(run())));
+            ran.expect("the case ran")
         }
-        // Built-in checks visit each item twice and each edge once, and the items and edges of
-        // acyclic relations once more (REQ-NEAR-LINEAR-SCALING).
-        if case.reads == Reads::Checked {
-            let steps = run.work.check_steps;
-            let (items, edges) = (corpus.items as u64, corpus.edges as u64);
-            assert!(
-                (2 * items + edges..=3 * items + 2 * edges).contains(&steps),
-                "{name}: {steps} check steps for {items} items and {edges} edges"
-            );
-        }
+        _ => run(),
+    };
+    // The configuration and the schema; for a check, also the root `.gitignore` and every
+    // document. `.git`, ignored and undeclared files are never read. No code is read and no
+    // program runs.
+    let expected = match reads {
+        Reads::Schema => WorkCounts {
+            file_reads: 2,
+            hashes: 2,
+            ..WorkCounts::default()
+        },
+        Reads::Checked => WorkCounts {
+            file_reads: documents + 3,
+            hashes: documents + 3,
+            parses: documents - 1,
+            snapshot_builds: 1,
+            check_steps: run.work.check_steps,
+            ..WorkCounts::default()
+        },
+        Reads::Documents => WorkCounts {
+            file_reads: documents + 3,
+            hashes: documents + 3,
+            parses: documents - 1,
+            snapshot_builds: 1,
+            ..WorkCounts::default()
+        },
+        // A cold request, then 1 parse per distinct content written, before the renames, and
+        // nothing after them (DES-WRITE-PROCEDURE, ADR-READ-BACK-EVERY-EDIT).
+        Reads::Writes => WorkCounts {
+            file_reads: documents + 3,
+            hashes: documents + 3,
+            parses: documents - 1 + written.as_ref().map_or(0, Written::distinct),
+            snapshot_builds: 1,
+            ..WorkCounts::default()
+        },
+    };
+    assert_eq!(run.work, expected, "{name}");
+    if let Some(written) = written {
+        assert!(!written.contents.is_empty(), "{name} wrote nothing");
+        written.restore();
+        *last_write = SystemTime::now();
+    }
+    // Built-in checks visit each item twice and each edge once, and the items and edges of
+    // acyclic relations once more (REQ-NEAR-LINEAR-SCALING).
+    if reads == Reads::Checked {
+        let steps = run.work.check_steps;
+        let (items, edges) = (corpus.items as u64, corpus.edges as u64);
+        assert!(
+            (2 * items + edges..=3 * items + 2 * edges).contains(&steps),
+            "{name}: {steps} check steps for {items} items and {edges} edges"
+        );
     }
 }
 

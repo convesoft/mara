@@ -3,13 +3,15 @@
 //!
 //! An operation is an [`Operation`] in [`OPERATIONS`]: its words, positional arguments and
 //! options, and a function from a [`Context`] and its [`Args`] to a [`Response`] or a
-//! [`Failure`]. Arguments are checked before the function runs. Each operation also adds its
+//! [`Failure`]. Arguments are checked before the function runs. `mara mcp` serves each document
+//! operation as an MCP tool that runs the same function ([`mcp`]). Each operation also adds its
 //! case to the performance harness (`crates/mara/tests/performance/`).
 
 mod author;
 mod convert;
 mod fix;
 mod init;
+mod mcp;
 mod read;
 mod relink;
 mod validate;
@@ -49,6 +51,7 @@ const OPERATIONS: &[Operation] = &[
     author::ITEM_DELETE,
     author::RELATION_ADD,
     author::RELATION_REMOVE,
+    mcp::MCP,
 ];
 
 /// The exit status of a valid result, or of a successful operation.
@@ -61,14 +64,32 @@ pub const REJECTED: u8 = 2;
 /// Version of the JSON form of results and failures.
 pub const FORMAT_VERSION: u64 = 1;
 
-/// A CLI operation, and an MCP tool of the same inputs and results.
+/// A CLI operation. A document operation is also an MCP tool of the same inputs and results.
 pub struct Operation {
     /// The words that name it, such as `["project", "validate"]`.
     pub words: &'static [&'static str],
-    /// Its positional arguments, by name. Each is required.
-    pub arguments: &'static [&'static str],
+    /// What it does, in one sentence: its MCP tool's description.
+    pub summary: &'static str,
+    /// Its positional arguments. Each is required.
+    pub arguments: &'static [Argument],
     pub options: &'static [Opt],
-    pub run: fn(&mut Context, &Args) -> Result<Response, Failure>,
+    pub run: Run,
+}
+
+/// What an operation runs.
+pub enum Run {
+    /// Answers one request with a result or a failure: a document operation, which `mara mcp`
+    /// also serves as a tool.
+    Document(fn(&mut Context, &Args) -> Result<Response, Failure>),
+    /// Serves requests until its input ends, and returns the exit status.
+    Serve(fn(&mut Context) -> u8),
+}
+
+/// A positional argument.
+pub struct Argument {
+    pub name: &'static str,
+    /// What it names: its MCP parameter's description.
+    pub help: &'static str,
 }
 
 /// An option with a value: `--<name> <value>` or `--<name>=<value>`.
@@ -76,7 +97,14 @@ pub struct Opt {
     pub name: &'static str,
     /// What the value is, as the usage names it.
     pub value: &'static str,
+    /// What it does: its MCP parameter's description.
+    pub help: &'static str,
     pub repeatable: bool,
+    /// Whether the operation needs it. The operation itself refuses a request without it; MCP
+    /// lists it as a required parameter.
+    pub required: bool,
+    /// Whether its value is a whole number, which MCP takes as a JSON integer.
+    pub integer: bool,
     /// Checks a value before anything runs, with the reason it is rejected.
     pub check: fn(&str) -> Result<(), String>,
 }
@@ -85,7 +113,11 @@ pub struct Opt {
 const PROJECT: Opt = Opt {
     name: "project",
     value: "dir",
+    help: "The project root, absolute or relative to the working directory. Without it, the \
+           project is found from the working directory upward.",
     repeatable: false,
+    required: false,
+    integer: false,
     check: |_| Ok(()),
 };
 
@@ -93,7 +125,10 @@ const PROJECT: Opt = Opt {
 const FORMAT: Opt = Opt {
     name: "format",
     value: "human|json",
+    help: "How results and failures are printed.",
     repeatable: false,
+    required: false,
+    integer: false,
     check: |value| match value {
         "human" | "json" => Ok(()),
         _ => Err(format!("the format is `human` or `json`, not `{value}`")),
@@ -107,7 +142,10 @@ const DEBUG_STATS: &str = "debug-stats";
 pub const LIMIT: Opt = Opt {
     name: "limit",
     value: "n",
+    help: "Records per page, 1 to 100.",
     repeatable: false,
+    required: false,
+    integer: true,
     check: |value| paging::parse_limit(value).map(drop),
 };
 
@@ -115,7 +153,10 @@ pub const LIMIT: Opt = Opt {
 pub const CURSOR: Opt = Opt {
     name: "cursor",
     value: "cursor",
+    help: "Where the page starts: the `next_cursor` of the previous page.",
     repeatable: false,
+    required: false,
+    integer: false,
     check: |value| match Cursor::parse(value) {
         Some(_) => Ok(()),
         None => Err(format!(
@@ -312,21 +353,26 @@ impl From<SelectError> for Failure {
 /// status.
 pub fn run(arguments: &[OsString], work: &mut WorkCounts) -> u8 {
     let json = requested_json(arguments);
-    let outcome = parse(arguments).and_then(|(operation, args)| {
-        let Some(operation) = operation else {
+    let outcome = match parse(arguments) {
+        Ok((None, _)) => {
             print(&mut std::io::stdout(), &usage());
-            return Ok(None);
-        };
-        let mut context = Context {
-            work,
-            now: SystemTime::now(),
-            project: args.value(PROJECT.name).map(PathBuf::from),
-        };
-        (operation.run)(&mut context, &args).map(Some)
-    });
+            return SUCCESS;
+        }
+        Ok((Some(operation), args)) => {
+            let mut context = Context {
+                work,
+                now: SystemTime::now(),
+                project: args.value(PROJECT.name).map(PathBuf::from),
+            };
+            match operation.run {
+                Run::Document(run) => run(&mut context, &args),
+                Run::Serve(serve) => return serve(&mut context),
+            }
+        }
+        Err(failure) => Err(failure),
+    };
     match outcome {
-        Ok(None) => SUCCESS,
-        Ok(Some(response)) => {
+        Ok(response) => {
             let text = if json {
                 response.json + "\n"
             } else {
@@ -484,7 +530,10 @@ fn describe_arguments(operation: &Operation) -> String {
     match operation.arguments {
         [] => "no argument".to_owned(),
         arguments => {
-            let names: Vec<String> = arguments.iter().map(|name| format!("<{name}>")).collect();
+            let names: Vec<String> = arguments
+                .iter()
+                .map(|argument| format!("<{}>", argument.name))
+                .collect();
             names.join(" ")
         }
     }
@@ -504,7 +553,7 @@ fn usage() -> String {
     for operation in OPERATIONS {
         let mut line = format!("  mara {}", operation.words.join(" "));
         for argument in operation.arguments {
-            write!(line, " <{argument}>").expect("writing to a String cannot fail");
+            write!(line, " <{}>", argument.name).expect("writing to a String cannot fail");
         }
         for opt in operation.options {
             line.push_str(&option(opt));
