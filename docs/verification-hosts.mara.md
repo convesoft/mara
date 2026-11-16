@@ -22,7 +22,7 @@ Rust integration tests run `project init` with the real CLI in disposable direct
 | Items of that project with each of the statuses `Draft`, `Accepted` and `Retired`, and with another status | Valid; invalid |
 | `empty` named | A configuration and a schema that declares no type and no relation; `project validate` reports no diagnostic |
 | A directory in which one of the files to write exists | Refused, naming that file; no file or directory is created |
-| The programs of `engineering`, from 0.4.0-alpha.3 (mara-tx0fcf) | Written under `.mara/rules/` and listed |
+| The programs of `engineering`, from 0.4.0-alpha.3 (mara-tx0fcf) | Written under `.mara/rules/` and listed; `project validate` compiles them without a diagnostic; `query list` lists the template's invariants, queries, gates and three views ([DES-TEMPLATE-VIEWS](template-readiness.mara.md#01M7CT60NHPG3GY0V1F0MZ5QF0)) |
 
 ---
 

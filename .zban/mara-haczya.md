@@ -15,3 +15,5 @@ Context: AGENTS.md (Mara documents): a requirement is Accepted together with its
 - [ ] List the requirements the slice delivers: those its issues name and those satisfied by the designs they name
 - [ ] One Verification item for each, or one shared by requirements that a single check covers
 - [ ] The test items in those issues point at the Verification items instead of restating them
+
+REQ-RUN-WITHOUT-TOOLCHAIN (docs/distribution.mara.md) belongs to this slice, not to alpha.3 (decided in mara-wamxz3): its Verification must include rule evaluation with the packaged Soufflé (DES-SOUFFLE-BUILD), run through `npx @convesoft/mara@<version>`.

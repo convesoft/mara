@@ -32,6 +32,15 @@ Cold rows of the operations that 0.4.0-alpha.2 adds hold in every host and run t
 | `prime`, `project init` | 0 file reads, 0 hashes, 0 parses, 0 snapshot builds |
 | `project convert`, on the small fixed 0.3.0 input of [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) | No read or hash of `.git` or of a file that the 0.3.0 configuration does not declare, except the project's `.gitignore` files, and a report file or `.mara/schema.toml` that an earlier run left ([DES-CONVERSION-MAPPING](migration.mara.md#01M7CMW71TXDY6VCTJS7XNSQRM)) |
 
+Cold rows of the operations that 0.4.0-alpha.3 adds hold in every host and run through the real CLI from 0.4.0-alpha.3. A program run is one evaluation by Soufflé ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)); in CLI direct mode each is one subprocess spawn, and no other process is spawned:
+
+| Situation | Expectation |
+| --- | --- |
+| `project validate` of a project that declares programs | 1 program run per declared program, whether an invariant uses it or not |
+| `query execute`, `query view`, `query gate` | 1 program run |
+| `query report` | 1 program run, in provenance mode |
+| `query list`; a request refused for a program the parser refuses or for a missing or wrong input | 0 program runs |
+
 Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANGE](performance.mara.md#01M7BF6H3A6YQ43351V9YSV3SQ)) and run against the daemon from 0.4.0-alpha.4:
 
 | Situation | Expectation |
@@ -125,7 +134,9 @@ Rust integration tests run the real CLI on disposable projects initialized from 
 | --- | --- |
 | Accepted requirement with only a draft basis, or only a draft verification | Validation error; the same items as drafts are valid |
 | Requirement with two accepted verifications, one passing and the other failing or absent from a complete input | `verified` fails |
-| Result for another candidate, or for an older revision of the verification or of the requirement | Does not count |
+| Result for another candidate, or for an older revision of the verification or of the requirement | Does not count: `verification-status` is `pending` with a complete input and `unavailable` with an incomplete one; `verified` does not pass |
+| Validation result for another context, or for an older revision of the validation or of its need or goal | Does not count: `validation-status` is `pending` with a complete input and `unavailable` with an incomplete one; `release-ready` does not pass |
+| For one verification and requirement, and for one validation and need, counting results `pass` and `fail`, `pass` and `error`, and `pass` and `inconclusive` | `verification-status` and `validation-status` give the worse result; `verified` and `release-ready` fail |
 | Risk on a parent requirement, on its need or on that need's goal | Relevant to the child requirement; a sibling requirement is not judged |
 | HIGH risk with a mitigation | Blocks until it is reassessed or an accepted decision accepts it |
 | Named validation whose result is absent from a complete input, or is not a pass | `release-ready` fails; a validation that is not named does not block |
@@ -135,5 +146,9 @@ Rust integration tests run the real CLI on disposable projects initialized from 
 | Accepted requirement without an accepted verification | `verified` fails |
 | A failing row of each template invariant and gate | Has an explanation |
 | `C supersedes B supersedes A` after B retires | Valid |
-| Requirement implemented only through a design | Counts when the design is accepted, not when it is draft |
+| Requirement implemented only through a design, from 0.4.0-alpha.5 (mara-yhxq5x) | Counts when the design is accepted, not when it is draft |
 | A view and a gate over the same items | Report the same facts |
+| One project per rule of [DES-TEMPLATE-ACCEPTANCE](template.mara.md#01M7CT60M2EQ33WTZFNG600D4H) and of [DES-TEMPLATE-RELATION-LIFECYCLE](template.mara.md#01M7CT60M96Q91T5KXNQ1G58PP), with an accepted item that breaks it | A validation error of that rule's invariant at the item; valid when the item is a draft |
+| A risk in each of the 25 cells of [DES-TEMPLATE-RISK-LEVEL](template.mara.md#01M7CT60MFPF2Y871JJDZP5K0T) | `risk-level` gives that cell's level |
+| `requirement-basis` of a requirement with a draft and an accepted basis | Both rows, with their statuses |
+| Each view of [DES-TEMPLATE-VIEWS](template-readiness.mara.md#01M7CT60NHPG3GY0V1F0MZ5QF0) for a requirement without an accepted verification, one whose result is absent from an incomplete input, and one with a failing result | A row for each; the cells for missing, unavailable and failed differ |

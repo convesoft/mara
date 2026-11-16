@@ -32,6 +32,8 @@
 | [Authoring verification](verification-authoring.mara.md) | Checks of create, update, delete, relation edits, move and rename |
 | [Write verification](verification-writes.mara.md) | Checks of preserved bytes, refused, interrupted and concurrent writes, and fix |
 | [Setup and host verification](verification-hosts.mara.md) | Checks of init, conversion, CLI and MCP parity and the agent guide |
+| [Rules verification](verification-rules.mara.md) | Checks of program consumers, facts, request inputs and explanations |
+| [Program safety verification](verification-programs.mara.md) | Checks of program faults, the time limit, the admitted language and reaching outside |
 | [Distribution](distribution.mara.md) | Packages, bundled Soufflé |
 | [Decisions](decisions.mara.md) | Format, authoring, project files, packaging, agent guidance |
 | [Runtime decisions](decisions-runtime.mara.md) | Caching, inputs, daemon, code links, performance tests |

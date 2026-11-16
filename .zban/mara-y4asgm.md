@@ -13,4 +13,4 @@ Context: DES-FACT-BRIDGE in docs/rules-facts.mara.md; DES-REQUEST-INPUTS in docs
 - [ ] Inputs supplied by a request, inline or from a JSON file of rows; a missing input refuses the request
 - [ ] Every supplied row checked before the run: column count, string for a symbol, signed 32-bit integer for a number; a wrong row refuses the request with its row and column (DES-REQUEST-INPUTS)
 - [ ] `source_complete` from `--complete`
-- [ ] Test: values with tabs, newlines, quotes and backslashes reach a program and come back unchanged, natively and in WASM
+- [ ] Tests: the cases of VER-FACT-ROWS and VER-REQUEST-INPUTS (docs/verification-rules.mara.md) pass, natively; their browser rows wait for mara-xsm8w6

@@ -21,12 +21,9 @@ Context: docs/rules.mara.md (REQ-PROJECT-AUTHORED-LOGIC, REQ-EXTERNAL-RECORDS-AS
 - [ ] Time limit (REQ-EVALUATION-TIME-LIMIT)
 - [ ] Compile errors, refused programs, timeouts, runtime faults and anything Soufflé prints on stderr while evaluating are reported; never a passing outcome
 - [ ] Explanations from provenance mode with document locations: `subproof` references expanded, the returned proof checked against the requested row, and "cannot explain" for unwritable values, invalid replies, aborts and timeouts (REQ-EXPLAIN-OUTCOMES)
-- [ ] Tests, reaching outside: a `libfunctors.so` beside a harmless program or on the library path is not loaded; `#line` at the start of a line, after other text and after a block comment is refused; `__FILE__` is refused; no diagnostic shows another file
-- [ ] Tests, input and output: the `output`, `printsize` and `input` qualifiers and the I/O directives are refused; nothing but the generated files is written
-- [ ] Tests, determinism: two consumers of one program get the same rows; the admitted functions and operators give the same results natively and in WASM on the boundary cases of the review probes
-- [ ] Tests, faults: an out-of-range `substr` and `to_number` of text that is not a number make the outcome unavailable, natively and in WASM; `to_number("7junk")` is 7 and a negative `substr` length means the rest of the text, on both
-- [ ] Tests, explanations: a row whose value holds a newline, a quote or a negative number, and a proof that ends in an aggregate, are reported as not explainable; constraint leaves are left out
-- [ ] VER-WORK-COUNTERS rows for `souffle` runs pass
+- [ ] Tests: the cases of VER-PROGRAM-CONSUMERS and VER-EXPLANATIONS (docs/verification-rules.mara.md) and of VER-PROGRAM-FAULTS, VER-EVALUATION-TIME-LIMIT and VER-PROGRAM-REACH-CASES (docs/verification-programs.mara.md) pass, natively; their browser rows wait for mara-xsm8w6
+- [ ] The `query` rows of VER-CLI-MCP-PARITY pass
+- [ ] The alpha.3 cold rows of VER-WORK-COUNTERS pass, and VER-SCALING covers the `query` operations (DES-PERFORMANCE-HARNESS)
 
 Decided by the orchestrator on 2026-11-16 (from mara-t2qrcb, under the maintainer's rule of that day; listed in mara-46j65e): an evaluation gets limits on output size and memory besides time. A finite program wrote 8 MB in 15 ms in a review probe. Rests on REQ-PROGRAMS-ONLY-COMPUTE, RISK-SOUFFLE-REACHES-OUTSIDE and REQ-EVALUATION-TIME-LIMIT. The sandbox half of that question is mara-ptq6xc.
 

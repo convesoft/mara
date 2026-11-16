@@ -15,6 +15,5 @@ The parser lives in the engine crate: it does no I/O and builds for `wasm32`.
 - [ ] Grammar of the admitted language: types, relations and their qualifiers, structure directives, rules, text functions, aggregates, comments and literals as Soufflé reads them
 - [ ] Type resolution: only `symbol`, `number`, subtypes, unions and records; boundary relations hold only symbols and numbers
 - [ ] A program outside the language is refused like a compile error, with file and line
-- [ ] Tests: every left-out construct of DES-PROGRAM-PROFILE is refused, in each spelling the reviews found (`#line` at the start of a line, after other text and after a block comment; the `output` qualifier; float and unsigned literals; `as`; `magic`; subsumption; `match`; `/`; `%`; `^`), and so is an integer literal outside 32 bits, on which the WASM build aborts
-- [ ] Tests, typing: `min` and `max` aggregates over symbols are refused, as Soufflé refuses them; the variadic `min(...)` and `max(...)` functions and `count` over symbol tuples are admitted
-- [ ] Tests: every program the parser admits from the probe set compiles in Soufflé, and the trial programs rewritten in the language are admitted
+- [ ] The probe programs and the trial programs rewritten in the language copied into the repository as test fixtures, with the rows the probes recorded natively
+- [ ] Tests: the cases of VER-ADMITTED-LANGUAGE (docs/verification-programs.mara.md) pass

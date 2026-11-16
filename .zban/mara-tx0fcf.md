@@ -15,7 +15,7 @@ Context: docs/template.mara.md (REQ-TEMPLATE-ACCEPTANCE-RULES, DES-TEMPLATE-ACCE
 Design input, on the maintainer's machine: `~/Work/local/workspace/projects/mara-rewrite-design/engineering-template-inputs/README.md` and the Space export beside it. The previous encoding is in `git show d7f0e73:templates/` and `git show d7f0e73:docs/engineering-template.mara.md`; its helper queries, view shims and separate `required_validation` gate were limits of the old engine and are not ported.
 
 - [x] Decide with the maintainer which invariants, queries, gates and views ship; record them as items
-- [ ] Programs for the acceptance and lifecycle invariants, the queries, the three gates, the three views and the risk matrix, written in the admitted language (DES-PROGRAM-PROFILE) and installed by `project init`
+- [ ] Programs for the acceptance and lifecycle invariants, the queries, the three gates, the three views and the risk matrix, written in the admitted language (DES-PROGRAM-PROFILE) and installed by `project init`; the programs row of VER-PROJECT-INIT passes
 - [ ] The cases of VER-TEMPLATE-CASES that need no code links pass. Without code links, `verified` and `release-ready` are tested for what they can show: a known failure fails and everything else is unavailable; mara-yhxq5x makes the remaining cases pass
 - [ ] This repository adopts the invariants, with `requirement-verified` as a warning until the last slice
 
