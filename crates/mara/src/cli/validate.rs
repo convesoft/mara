@@ -41,7 +41,8 @@ pub const ITEM: Operation = Operation {
 
 pub const SCHEMA: Operation = Operation {
     words: &["schema", "validate"],
-    summary: "Reports the problems of the configuration and the schema.",
+    summary: "Reports the problems of the schema file, and of the configuration's line that \
+              names it.",
     arguments: &[],
     options: &[LIMIT, CURSOR],
     run: Run::Document(schema_validate),

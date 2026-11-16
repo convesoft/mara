@@ -160,3 +160,51 @@ fn refuses_an_edit_whose_file_changed_at_either_pause() {
         }
     }
 }
+
+/// What the agent guide (`mara prime`) says after a `changed-file` stop that replaced files: run
+/// `project fix` and `project validate`, then go on with the item's current ID or its MID. A
+/// rename across two documents stops after the first, whose replaced file the message names.
+#[test]
+fn after_a_changed_file_stop_that_replaced_files_fix_validate_and_the_mid_recover() {
+    let project = Project::new();
+    let need = mid(3);
+    project.write(
+        "docs/needs.mara.md",
+        &crate::document("Needs", &[item(&need, "Need", "NEED-N", "N", &[], "N.")]),
+    );
+    let satisfies = crate::link("NEED-N", "needs.mara.md", &need);
+    let requirement = item(
+        &mid(1),
+        "Requirement",
+        "REQ-A",
+        "A",
+        &[("Satisfies", &satisfies)],
+        "A.",
+    );
+    project.write(
+        "docs/reqs.mara.md",
+        &crate::document("Reqs", &[requirement]),
+    );
+    let args = ["item", "rename", "NEED-N", "NEED-AUTH"];
+    let mut files = Vec::new();
+    let run = run_paused(&project, &args, |contents, count| {
+        if count > 0 {
+            files.push(contents.to_owned());
+        }
+        if count == 2 {
+            change(&project.root(), contents, false);
+        }
+    });
+    assert_eq!(files.len(), 2, "{files:?}");
+    let run = run.refused("changed-file");
+    let message = run.message();
+    assert!(
+        message.contains(&format!("stopped after replacing {}", files[0])),
+        "{message}"
+    );
+    project.run(&["project", "fix"]).ok();
+    project.valid();
+    let item = project.run(&["get", &need]).ok().json();
+    let id = item["node"]["id"].as_str().expect("an ID").to_owned();
+    project.run(&["get", &id]).ok();
+}

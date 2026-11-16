@@ -139,6 +139,7 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 - A server started without `--project` adds a `project` parameter to every tool: the project root, absolute or relative to the server's working directory. Without it, the project is found from the server's working directory upward, as the CLI finds it from its own. A server started with `--project` lists no `project` parameter, and a call that gives one is rejected.
 - A call's result is one text content block holding the JSON object that `--format json` prints, with `isError` true for a failure; there is no structured content. An undeclared, missing or mistyped parameter is rejected with `invalid-argument` before the operation runs, in a message that names the parameter. An unknown tool is a JSON-RPC error.
 - Calls run on the runtime's blocking pool, several at once if the client sends them so. Each is a cold request; writes wait for the write lock ([REQ-WRITERS-SERIALIZED](writes.mara.md#01M7CXC2N8EZYVHGY7T2GPPB3X)). A call that the client cancels still runs to its end; only its response is dropped.
+- Its `instructions` are the agent guide ([DES-AGENT-GUIDE](agents.mara.md#01M7BGRHWQHQJJHC6XCXVDWDM8)).
 - With `--debug-stats`, the server prints one stats line when it exits: the work of all its calls.
 
 ---

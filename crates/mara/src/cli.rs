@@ -10,6 +10,7 @@
 mod author;
 mod convert;
 mod fix;
+mod guide;
 mod init;
 mod mcp;
 mod read;
@@ -52,6 +53,7 @@ const OPERATIONS: &[Operation] = &[
     author::RELATION_ADD,
     author::RELATION_REMOVE,
     mcp::MCP,
+    guide::PRIME,
 ];
 
 /// The exit status of a valid result, or of a successful operation.
@@ -81,6 +83,8 @@ pub enum Run {
     /// Answers one request with a result or a failure: a document operation, which `mara mcp`
     /// also serves as a tool.
     Document(fn(&mut Context, &Args) -> Result<Response, Failure>),
+    /// Answers one request as a document operation does, but is no MCP tool: `prime`.
+    Command(fn(&mut Context, &Args) -> Result<Response, Failure>),
     /// Serves requests until its input ends, and returns the exit status.
     Serve(fn(&mut Context) -> u8),
 }
@@ -365,7 +369,7 @@ pub fn run(arguments: &[OsString], work: &mut WorkCounts) -> u8 {
                 project: args.value(PROJECT.name).map(PathBuf::from),
             };
             match operation.run {
-                Run::Document(run) => run(&mut context, &args),
+                Run::Document(run) | Run::Command(run) => run(&mut context, &args),
                 Run::Serve(serve) => return serve(&mut context),
             }
         }

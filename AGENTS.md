@@ -27,22 +27,9 @@ For every document in this repository, this file included:
 - `Accepted` means decided, not built. `Draft` marks a proposal or a provisional number.
 - Add only relations that carry meaning. Never add an item or a link just to complete a chain.
 - Update the affected items in the same change as the code.
+- Read and change `docs/` with the binary built in your worktree, as `cargo run --quiet --bin mara -- <operation>`. When your context lacks its guide, headed `# Mara workflow`, run `cargo run --quiet --bin mara -- prime` first.
 - A requirement is Accepted together with its Verification item. The rewrite is the exception: until 0.4.0 ships, a slice's Verification items are written before its work starts, by the issue that blocks the slice's epic.
 - Ask before deciding anything that changes user-visible behaviour, a persisted format, data safety or scope. Small reversible choices need no question. Until 0.4.0 is published, [Deciding during the rewrite](#deciding-during-the-rewrite) replaces this rule.
-
-### Writing items by hand
-
-Until Mara can write the new format:
-
-- Generate each MID with:
-
-  ```sh
-  python3 -c "import os,time;n=(int(time.time()*1000)<<80)|int.from_bytes(os.urandom(10),'big');a='0123456789ABCDEFGHJKMNPQRSTVWXYZ';print(''.join(a[(n>>(5*i))&31] for i in range(25,-1,-1)))"
-  ```
-
-- Never copy or reuse a MID.
-- Put a `---` before every item and a blank line on both sides of every `---`.
-- When you move an item or rename an ID, update the path and text of every link to it.
 
 ## Work tracking
 

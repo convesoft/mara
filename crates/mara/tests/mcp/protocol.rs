@@ -4,6 +4,9 @@ use serde_json::json;
 
 use crate::{Dir, Server, usage};
 
+/// The CLI operations that are no tools: the server itself and the agent guide.
+const NOT_TOOLS: [&str; 2] = ["mcp", "prime"];
+
 /// The document operations of DES-OPERATIONS, as tools.
 const TOOLS: [&str; 19] = [
     "project_init",
@@ -135,11 +138,14 @@ fn every_document_operation_is_a_tool_with_its_arguments_and_options() {
     let usages = usage();
     let served: Vec<String> = usages
         .iter()
-        .filter(|usage| usage.words != ["mcp"])
+        .filter(|usage| !NOT_TOOLS.contains(&usage.words.join(" ").as_str()))
         .map(|usage| usage.words.join("_"))
         .collect();
     assert_eq!(served.len(), TOOLS.len(), "{served:?}");
-    for usage in usages.iter().filter(|usage| usage.words != ["mcp"]) {
+    for usage in usages
+        .iter()
+        .filter(|usage| !NOT_TOOLS.contains(&usage.words.join(" ").as_str()))
+    {
         let name = usage.words.join("_");
         let tool = tools
             .iter()

@@ -9,6 +9,7 @@ mod cpu_time;
 mod init;
 mod mcp;
 mod pause_points;
+mod prime;
 mod restore;
 mod scaling;
 mod work_counters;

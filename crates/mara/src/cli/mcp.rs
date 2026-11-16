@@ -19,6 +19,7 @@ use rmcp::service::{RequestContext, ServerInitializeError};
 use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{Value, json};
 
+use super::guide::{self, Surface};
 use super::{
     Args, Context, FAILURE, Failure, OPERATIONS, Operation, Opt, PROJECT, REJECTED, Response, Run,
     SUCCESS,
@@ -37,10 +38,15 @@ const PROJECT_HELP: &str = "The project root, absolute or relative to the server
                             directory. Without it, the project is found from the server's \
                             working directory upward.";
 
-/// The server's `instructions`: the agent guide rendered for MCP, for the project found where
-/// the server starts (DES-AGENT-GUIDE). Until the guide exists, the server sends none.
-fn instructions(_bound: Option<&Path>) -> Option<String> {
-    None
+/// The server's `instructions`: the agent guide rendered for MCP, for the project of
+/// `--project` or the one found from where the server starts (DES-AGENT-GUIDE). A selection
+/// error other than finding no project sends none; each tool call reports it.
+fn instructions(bound: Option<&Path>) -> Option<String> {
+    let start = std::env::current_dir().ok()?;
+    let surface = Surface::Mcp {
+        bound: bound.is_some(),
+    };
+    guide::render(surface, &start, bound).ok()
 }
 
 /// A document operation's function.
