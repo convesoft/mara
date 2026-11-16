@@ -1,5 +1,5 @@
 //! `mara daemon status | start | stop` and the client's side of the daemon's requests
-//! (DES-DAEMON-LIFECYCLE in `docs/daemon.mara.md`).
+//! (DES-DAEMON-LIFECYCLE in `docs/daemon/index.mara.md`).
 //!
 //! A client finds the daemon of its own build ([`Runtime::find`]), connects to its socket and
 //! sends one request per frame: a JSON object with `version`, the client's `build` key and

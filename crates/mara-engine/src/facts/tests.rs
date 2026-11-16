@@ -271,7 +271,7 @@ fn marks_each_complete_input_once() {
 
 #[test]
 fn mara_dl_is_the_version_that_des_fact_bridge_shows() {
-    let page = include_str!("../../../../docs/rules-facts.mara.md");
+    let page = include_str!("../../../../docs/rules/index.mara.md");
     assert!(page.contains(&format!("```souffle\n{MARA_DL}```")));
     assert!(MARA_DL.starts_with(".once\n"));
     assert!(MARA_DL.contains(&format!("format version {MARA_DL_VERSION} ")));

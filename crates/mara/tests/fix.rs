@@ -1,6 +1,6 @@
 //! `project fix` through the real `mara` binary, on disposable projects in the temporary
 //! directory: VER-FIX-CASES and, for `project fix`, VER-PRESERVED-BYTES, VER-REFUSED-EDITS,
-//! VER-INTERRUPTED-EDITS and VER-CONCURRENT-WRITERS (`docs/verification-writes.mara.md`).
+//! VER-INTERRUPTED-EDITS and VER-CONCURRENT-WRITERS (`docs/authoring/verification.mara.md`).
 
 #![cfg(unix)]
 

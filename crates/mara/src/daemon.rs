@@ -1,6 +1,6 @@
 //! Where the daemon of a build lives, and the frames its clients exchange with it
-//! (DES-DAEMON-LIFECYCLE and ADR-DAEMON-PER-VERSION in `docs/daemon.mara.md` and
-//! `docs/decisions-runtime.mara.md`).
+//! (DES-DAEMON-LIFECYCLE and ADR-DAEMON-PER-VERSION in
+//! `docs/daemon/index.mara.md`).
 //!
 //! A [`Build`] names the running executable. [`Runtime::find`] places its lock and socket in the
 //! runtime directory, or says why every call runs in direct mode. The process itself, its

@@ -12,7 +12,7 @@
 | --- | --- |
 | ID | DES-ENGINEERING-VOCABULARY |
 | Status | Accepted |
-| Satisfies | [REQ-PROJECT-INIT](project.mara.md#01M7BF6H8Z02SNKXD2XPGVD87M) |
+| Satisfies | [REQ-PROJECT-INIT](../project.mara.md#01M7BF6H8Z02SNKXD2XPGVD87M) |
 
 Every type has `Status`: `Draft`, `Accepted` or `Retired`.
 
@@ -46,6 +46,6 @@ Every type has `Status`: `Draft`, `Accepted` or `Retired`.
 | Exercises | Exercised by | Validation → Scenario | | The source runs through the target |
 | Supports | Supported by | Evidence → Goal, Need, Requirement, Design, Decision, Risk | | The source is evidence for the target |
 
-`Implements` (code → Requirement, Design, Verification; shown on the target as `Implemented by`) comes only from code markers ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)), never from a metadata table. Its schema description is "The code realizes the target."; every other description is the `Use for` or `Means` text above, ending with a full stop.
+`Implements` (code → Requirement, Design, Verification; shown on the target as `Implemented by`) comes only from code markers ([DES-CODE-MARKERS](../code/index.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)), never from a metadata table. Its schema description is "The code realizes the target."; every other description is the `Use for` or `Means` text above, ending with a full stop.
 
-The template's rules, queries, gates and views are on [knowledge rules](template.mara.md) and [readiness](template-readiness.mara.md).
+The template's rules, queries, gates and views are on [knowledge rules](index.mara.md) and [readiness](readiness.mara.md).

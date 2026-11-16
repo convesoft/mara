@@ -1,6 +1,6 @@
 //! The validation operations through the real `mara` binary, on disposable projects under the
 //! temporary directory (`docs/validation.mara.md`; Verification items in
-//! `docs/verification-documents.mara.md`).
+//! `docs/verification.mara.md`).
 
 mod nested;
 mod rendering;

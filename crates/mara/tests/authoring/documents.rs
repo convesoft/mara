@@ -1,4 +1,4 @@
-//! The alpha.2 rows of docs/verification-documents.mara.md for the single-file operations: the
+//! The alpha.2 rows of docs/verification.mara.md for the single-file operations: the
 //! writer row of VER-GITHUB-RENDERING, the `item update` row of VER-MID-RESOLUTION and the write
 //! row of VER-NESTED-PROJECTS.
 

@@ -1,5 +1,5 @@
 //! The pause points of the write procedure in a debug build (DES-WRITE-PROCEDURE and
-//! ADR-DEBUG-PAUSE-POINT in `docs/writes.mara.md`), below the CLI: the checks of step 2 and of
+//! ADR-DEBUG-PAUSE-POINT in `docs/authoring/writes.mara.md`), below the CLI: the checks of step 2 and of
 //! step 3 against a file changed while the writer waits, and a rename that fails. The CLI cases
 //! of VER-REFUSED-EDITS and VER-INTERRUPTED-EDITS run with each write operation.
 //!

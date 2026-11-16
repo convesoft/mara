@@ -11,16 +11,16 @@
 | ID | VER-SEARCH-CASES |
 | Status | Accepted |
 | Methods | Test |
-| Verifies | [REQ-SEARCH-ITEMS-AND-NARRATIVE](retrieval.mara.md#01M7BF6HA7YSRRQ2BWS54AEGSG) |
-| Verifies | [REQ-SEARCH-RANKING](retrieval.mara.md#01M7BF6HAHQJNEGTAV5A2AY9RX) |
-| Verifies | [REQ-TYPO-TOLERANT-SEARCH](retrieval.mara.md#01M7BF6HAS8Y6FSG3BXXPTZNGP) |
+| Verifies | [REQ-SEARCH-ITEMS-AND-NARRATIVE](index.mara.md#01M7BF6HA7YSRRQ2BWS54AEGSG) |
+| Verifies | [REQ-SEARCH-RANKING](index.mara.md#01M7BF6HAHQJNEGTAV5A2AY9RX) |
+| Verifies | [REQ-TYPO-TOLERANT-SEARCH](index.mara.md#01M7BF6HAS8Y6FSG3BXXPTZNGP) |
 
 Rust integration tests run `search` with the real CLI on a disposable project whose items and narrative hold planted words.
 
 | Case | Expectation |
 | --- | --- |
 | Two query words, both in one item's body and one in another's | Only the first item, with its location and one excerpt |
-| A word only in a narrative unit | That unit as `<path>:<line>` ([DES-NARRATIVE-UNITS](retrieval.mara.md#01M7CMW710P9V73WXFQ15PBYBS)) |
+| A word only in a narrative unit | That unit as `<path>:<line>` ([DES-NARRATIVE-UNITS](index.mara.md#01M7CMW710P9V73WXFQ15PBYBS)) |
 | A word only in the body of an item that another item links to | Not the linking item |
 | A filter by type, field value, relation, path or ID | Exactly the results that match it; a filter value one edit away from a real one matches nothing |
 | Exact and one-edit matches in titles, headings, bodies and fields, and exact matches in IDs, across several files | Exact matches first; within each group, ID, title and heading matches before body and field matches; ties in path and source order |
@@ -39,7 +39,7 @@ Rust integration tests run `search` with the real CLI on a disposable project wh
 | ID | VER-NODE-READS |
 | Status | Accepted |
 | Methods | Test |
-| Verifies | [REQ-READ-NODE](retrieval.mara.md#01M7BF6HB1DC9AFHM890ERAJCK) |
+| Verifies | [REQ-READ-NODE](index.mara.md#01M7BF6HB1DC9AFHM890ERAJCK) |
 
 Rust integration tests run `get` with the real CLI on a disposable project.
 
@@ -61,7 +61,7 @@ Rust integration tests run `get` with the real CLI on a disposable project.
 | ID | VER-ONE-HOP |
 | Status | Accepted |
 | Methods | Test |
-| Verifies | [REQ-DIRECT-NEIGHBOURS](retrieval.mara.md#01M7BF6HBCR1H0P6S8KWBV3DAS) |
+| Verifies | [REQ-DIRECT-NEIGHBOURS](index.mara.md#01M7BF6HBCR1H0P6S8KWBV3DAS) |
 
 Rust integration tests run `relation list` with the real CLI on a disposable project. Item A has outgoing relations, an incoming relation from item B, mentions to and from it and a code link; B has relations of its own.
 
@@ -82,7 +82,7 @@ Rust integration tests run `relation list` with the real CLI on a disposable pro
 | ID | VER-ITEM-LIST |
 | Status | Accepted |
 | Methods | Test |
-| Verifies | [REQ-LIST-ITEMS](retrieval.mara.md#01M7BF6HBTZ6YD1XBDXRD4ZCC4) |
+| Verifies | [REQ-LIST-ITEMS](index.mara.md#01M7BF6HBTZ6YD1XBDXRD4ZCC4) |
 
 Rust integration tests run `item list` with the real CLI on a disposable project with items in several documents.
 
@@ -103,7 +103,7 @@ Rust integration tests run `item list` with the real CLI on a disposable project
 | ID | VER-CURSOR-WALK |
 | Status | Accepted |
 | Methods | Test |
-| Verifies | [REQ-BOUNDED-PAGES](retrieval.mara.md#01M7BF6HC3AE196XHCMXGKJXFS) |
+| Verifies | [REQ-BOUNDED-PAGES](index.mara.md#01M7BF6HC3AE196XHCMXGKJXFS) |
 
 Rust integration tests run each read operation with the real CLI on a disposable project with more results than one page holds.
 
@@ -126,7 +126,7 @@ Rust integration tests run each read operation with the real CLI on a disposable
 | ID | VER-PAGE-LIMITS |
 | Status | Draft |
 | Methods | Test |
-| Verifies | [REQ-PAGE-LIMITS](retrieval.mara.md#01M7CMW719S9H8FQKRFWWQ6NQK) |
+| Verifies | [REQ-PAGE-LIMITS](index.mara.md#01M7CMW719S9H8FQKRFWWQ6NQK) |
 
 Rust integration tests run `search`, `relation list`, `item list` and `schema list` with the real CLI on a disposable project with more than 100 results.
 
@@ -148,7 +148,7 @@ Rust integration tests run `search`, `relation list`, `item list` and `schema li
 | ID | VER-SCHEMA-INSPECTION |
 | Status | Accepted |
 | Methods | Test |
-| Verifies | [REQ-SCHEMA-INSPECTION](project.mara.md#01M7BF6H9F8E7RB3XBSE0EKAR3) |
+| Verifies | [REQ-SCHEMA-INSPECTION](../project.mara.md#01M7BF6H9F8E7RB3XBSE0EKAR3) |
 
 Rust integration tests run `schema list` and `schema get` with the real CLI on a disposable project whose schema declares fields of both kinds and relations with every constraint.
 

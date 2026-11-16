@@ -1,5 +1,5 @@
 //! Pages and cursors: REQ-BOUNDED-PAGES, REQ-PAGE-LIMITS and DES-PAGING in
-//! `docs/retrieval.mara.md`.
+//! `docs/retrieval/index.mara.md`.
 
 use std::fmt;
 

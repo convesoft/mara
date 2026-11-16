@@ -14,14 +14,14 @@ For every document in this repository, this file included:
 - State each fact once; link to it everywhere else.
 - No introductions, summaries, "this document describes…", or restated headings.
 - Requirement: one testable obligation in 1–3 sentences. Design: bullets and tables. Rationale only in Decision items: the choice and rejected alternatives, one line each.
-- Size limits: README ≤ 60 lines, AGENTS.md ≤ 120 lines, any docs page ≤ 200 lines (split it otherwise).
+- Size limits: README ≤ 60 lines, AGENTS.md ≤ 120 lines.
 
 ## Mara documents
 
-- Engineering knowledge lives in `docs/*.mara.md`, listed in [docs/index.mara.md](docs/index.mara.md). README, this file and zban issues link to it and never restate it.
-- Syntax: [item format](docs/format.mara.md) and [identity and links](docs/identity.mara.md). Types and relations: [engineering vocabulary](docs/vocabulary.mara.md).
+- Engineering knowledge lives in `docs/**/*.mara.md`, listed in [docs/index.mara.md](docs/index.mara.md). README, this file and zban issues link to it and never restate it.
+- Syntax: [item format](docs/format.mara.md) and [identity and links](docs/identity.mara.md). Types and relations: [engineering vocabulary](docs/template/vocabulary.mara.md).
 - [.mara/config.toml](.mara/config.toml) makes `docs/` a Mara project. Its schema, [.mara/schema.toml](.mara/schema.toml), is the engineering vocabulary and changes only with that page. The [local checks](#local-checks) validate the project with the worktree's binary.
-- Layout follows the `mara-docs-layout` skill; the 200-line limit above replaces its 500-line signal.
+- Layout follows the `mara-docs-layout` skill.
 - Make an item only for knowledge that needs its own identity, relations or verification. Everything else is narrative.
 - An undecided matter is a plain bullet under `## Open questions` on its topic page, never an item. Settling it adds or changes an item and removes the bullet.
 - `Accepted` means decided, not built. `Draft` marks a proposal or a provisional number.

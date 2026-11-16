@@ -22,17 +22,17 @@ Cold rows hold in every host and run through the real CLI from 0.4.0-alpha.1:
 | --- | --- |
 | Cold request, two documents with the same contents included | For each input it reads, 1 file read and 1 hash; 1 parse per distinct document content ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)); 1 snapshot build |
 | `.git` and undeclared files | 0 file reads, 0 hashes |
-| An operation that reads no code ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)) and runs no program | 0 subprocesses, 0 code scans |
+| An operation that reads no code ([DES-CODE-READERS](code/index.mara.md#01M7CQ57TTB40GWX8YHKB259DK)) and runs no program | 0 subprocesses, 0 code scans |
 
-Cold rows of the operations that 0.4.0-alpha.2 adds hold in every host and run through the real CLI from 0.4.0-alpha.2. The checks of [DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) read and hash a file again only when [DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY) would:
+Cold rows of the operations that 0.4.0-alpha.2 adds hold in every host and run through the real CLI from 0.4.0-alpha.2. The checks of [DES-WRITE-PROCEDURE](authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) read and hash a file again only when [DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY) would:
 
 | Situation | Expectation |
 | --- | --- |
-| A write by a direct CLI call, every file it writes last changed at least 2 s before the write starts | The counts of a cold request plus 1 parse per distinct content written, before the renames ([ADR-READ-BACK-EVERY-EDIT](authoring.mara.md#01M7FH6HEWNYQ66F5KE912BQSM)), and nothing more: no read, hash or snapshot build before or after the renames, and no parse after them ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) steps 3 and 4) |
+| A write by a direct CLI call, every file it writes last changed at least 2 s before the write starts | The counts of a cold request plus 1 parse per distinct content written, before the renames ([ADR-READ-BACK-EVERY-EDIT](authoring/index.mara.md#01M7FH6HEWNYQ66F5KE912BQSM)), and nothing more: no read, hash or snapshot build before or after the renames, and no parse after them ([DES-WRITE-PROCEDURE](authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) steps 3 and 4) |
 | `prime`, `project init` | 0 file reads, 0 hashes, 0 parses, 0 snapshot builds |
 | `project convert`, on the small fixed 0.3.0 input of [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) | No read or hash of `.git` or of a file that the 0.3.0 configuration does not declare, except the project's `.gitignore` files, and a report file or `.mara/schema.toml` that an earlier run left ([DES-CONVERSION-MAPPING](migration.mara.md#01M7CMW71TXDY6VCTJS7XNSQRM)) |
 
-Cold rows of the operations that 0.4.0-alpha.3 adds hold in every host and run through the real CLI from 0.4.0-alpha.3. A program run is one evaluation by Soufflé ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)); in CLI direct mode each is one subprocess spawn, and no other process is spawned:
+Cold rows of the operations that 0.4.0-alpha.3 adds hold in every host and run through the real CLI from 0.4.0-alpha.3. A program run is one evaluation by Soufflé ([DES-RULE-EXECUTION](rules/evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)); in CLI direct mode each is one subprocess spawn, and no other process is spawned:
 
 | Situation | Expectation |
 | --- | --- |
@@ -41,19 +41,19 @@ Cold rows of the operations that 0.4.0-alpha.3 adds hold in every host and run t
 | `query report` | 1 program run, in provenance mode |
 | `query list`; a request refused for a program the parser refuses or for a missing or wrong input | 0 program runs |
 
-Cold rows of the operations that 0.4.0-alpha.4 adds run through the real CLI from 0.4.0-alpha.4, with a runtime directory of the test ([VER-DAEMON-START](verification-daemon.mara.md#01M7JKW7JWB2RANYKNE6BHYM26)):
+Cold rows of the operations that 0.4.0-alpha.4 adds run through the real CLI from 0.4.0-alpha.4, with a runtime directory of the test ([VER-DAEMON-START](daemon/verification.mara.md#01M7JKW7JWB2RANYKNE6BHYM26)):
 
 | Situation | Expectation |
 | --- | --- |
 | `daemon status`, `daemon start`, `daemon stop`, each with and without a daemon running | 0 of every count |
 
-Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANGE](performance.mara.md#01M7BF6H3A6YQ43351V9YSV3SQ)) and run from 0.4.0-alpha.4, at 1×, through the real CLI against a daemon the test starts with its own runtime directory ([VER-DAEMON-START](verification-daemon.mara.md#01M7JKW7JWB2RANYKNE6BHYM26)). Each row is its own test and starts settled: the last change came at least 2 s before the last request, so every input was last hashed by a check at least 2 s after its mtime and ctime ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)). A row's counts are those of its write, or else of the request sent after its situation, background re-derivation included ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)). The rows for one document edited and for the request after a write also run with that request sent 2 s later, after the watcher re-derived, and give the same counts:
+Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANGE](performance.mara.md#01M7BF6H3A6YQ43351V9YSV3SQ)) and run from 0.4.0-alpha.4, at 1×, through the real CLI against a daemon the test starts with its own runtime directory ([VER-DAEMON-START](daemon/verification.mara.md#01M7JKW7JWB2RANYKNE6BHYM26)). Each row is its own test and starts settled: the last change came at least 2 s before the last request, so every input was last hashed by a check at least 2 s after its mtime and ctime ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)). A row's counts are those of its write, or else of the request sent after its situation, background re-derivation included ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)). The rows for one document edited and for the request after a write also run with that request sent 2 s later, after the watcher re-derived, and give the same counts:
 
 | Situation | Expectation |
 | --- | --- |
 | The same read request again, inputs unchanged | 0 file reads, 0 hashes, 0 parses, 0 snapshot builds, 0 code scans, 0 subprocess spawns, 0 check steps, 0 program runs |
 | Another request, inputs unchanged | 0 file reads, 0 hashes, 0 parses, 0 snapshot builds |
-| A request whose evaluations an earlier request ran with the same keys ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)), such as `query view` after `project validate` | 0 program runs |
+| A request whose evaluations an earlier request ran with the same keys ([DES-RULE-EXECUTION](rules/evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)), such as `query view` after `project validate` | 0 program runs |
 | An input last hashed by a check less than 2 s after its mtime or ctime, unchanged | That input read and hashed again, and no other; 0 parses, 0 snapshot builds |
 | An input touched, its contents unchanged | That input read and hashed again, and no other; 0 parses, 0 snapshot builds, 0 program runs |
 | One document edited in place, or saved by renaming a new file over it | That document read and hashed, and no other input; 1 parse, 1 snapshot build, 0 code scans |
@@ -69,7 +69,7 @@ Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANG
 | `query gate` with other supplied inputs, nothing else changed | 1 program run |
 | A file that is no input changed, in a directory that holds inputs or in ignored build output; a `.git` change; a failed request; 5 s without a request | No invalidation: the next request counts as on unchanged inputs |
 | A second project's session opened and its inputs edited | The first project's next request counts as on unchanged inputs |
-| The project reached through a symbolic link to its root, after requests through its real path | As the same request again: one session per canonical root ([DES-DAEMON-SESSIONS](daemon.mara.md#01M7BF6GRG3NJZTA29TYVRVFT7)) |
+| The project reached through a symbolic link to its root, after requests through its real path | As the same request again: one session per canonical root ([DES-DAEMON-SESSIONS](daemon/index.mara.md#01M7BF6GRG3NJZTA29TYVRVFT7)) |
 | One `mara mcp` call, after the same request from the CLI | The server's stats line: as the same request again |
 
 From 0.4.0-alpha.6, warm rows also run in a browser workspace on the 1× corpus, in the setup of [VER-HOST-COMPARISON](#01M7D3NAQHP8HX0X0GCZMXD1Q9), read through the workspace's debug stats option ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)). Contents the caller supplies or writes are hashed by the engine and are no file reads:
@@ -94,7 +94,7 @@ From 0.4.0-alpha.6, warm rows also run in a browser workspace on the 1× corpus,
 | Methods | Test |
 | Verifies | [REQ-NEAR-LINEAR-SCALING](performance.mara.md#01M7BF6H3K1M4HMG6CW2B85VQK) |
 
-On every pull request, Rust integration tests time each operation except `project convert` ([ADR-NO-CONVERTER-SCALING](decisions-runtime.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)) on a release build at each pull-request corpus size (median of runs). They fail when growth per doubling exceeds the limit. From 0.4.0-alpha.4 they also time a daemon the test starts, by the same rule: settled warm requests and requests after one document edit, with the daemon's CPU time measured as [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) says.
+On every pull request, Rust integration tests time each operation except `project convert` ([ADR-NO-CONVERTER-SCALING](decisions.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)) on a release build at each pull-request corpus size (median of runs). They fail when growth per doubling exceeds the limit. From 0.4.0-alpha.4 they also time a daemon the test starts, by the same rule: settled warm requests and requests after one document edit, with the daemon's CPU time measured as [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) says.
 
 ---
 
@@ -134,14 +134,14 @@ Rust integration tests run each operation on the same disposable project in CLI 
 | Node library, embedded and through the daemon | 0.4.0-alpha.6 |
 | Browser, through the daemon and local WASM | 0.4.0-alpha.6 |
 
-The daemon case sends every document operation but `project init` and `project convert`, failing requests and writes included, from the CLI and from `mara mcp` to a daemon the test starts ([VER-DAEMON-START](verification-daemon.mara.md#01M7JKW7JWB2RANYKNE6BHYM26)), after an earlier request opened the session. It pairs generated MIDs as [VER-CLI-MCP-PARITY](verification-hosts.mara.md#01M7F74J5Z4KX9F3HN78T1WB85) does, and requires the same files after each write.
+The daemon case sends every document operation but `project init` and `project convert`, failing requests and writes included, from the CLI and from `mara mcp` to a daemon the test starts ([VER-DAEMON-START](daemon/verification.mara.md#01M7JKW7JWB2RANYKNE6BHYM26)), after an earlier request opened the session. It pairs generated MIDs as [VER-CLI-MCP-PARITY](hosts/verification.mara.md#01M7F74J5Z4KX9F3HN78T1WB85) does, and requires the same files after each write.
 
-The Node library and browser cases are modules run by `node --test`, Node's own runner, which a Rust integration test of the `mara` crate starts, so that `cargo test` runs them. The browser is Playwright's Chromium, driven by Playwright's library from those modules. A case needs only what its backend uses, and a missing piece fails only the cases that need it, with a message that names it: Node 24 for every case; for a browser workspace, Chromium, the page server and the engine's WASM module, and Soufflé's when the case runs a program; for an embedded Node case, the built addon; for a Node case through the daemon, the addon and a daemon; for Chromium through the daemon, Chromium, the page server and a daemon started with `--http`. The test creates what its cases use: a daemon with the runtime directory of [VER-DAEMON-START](verification-daemon.mara.md#01M7JKW7JWB2RANYKNE6BHYM26), started with `--http` for the Chromium cases and allowing only the test's projects and page origin; an HTTP server on a loopback port the operating system assigns, which serves the test's pages and the package's files; and a browser launched with a new profile in the test's temporary directory, never a persistent context. At the end it closes the browser and the server and stops any daemon it started; then no process whose environment or command line names the test's temporary directory runs. Every Node and browser case of a Verification item runs in this setup. Each case compares with CLI direct mode on the same files, pairing MIDs as above:
+The Node library and browser cases are modules run by `node --test`, Node's own runner, which a Rust integration test of the `mara` crate starts, so that `cargo test` runs them. The browser is Playwright's Chromium, driven by Playwright's library from those modules. A case needs only what its backend uses, and a missing piece fails only the cases that need it, with a message that names it: Node 24 for every case; for a browser workspace, Chromium, the page server and the engine's WASM module, and Soufflé's when the case runs a program; for an embedded Node case, the built addon; for a Node case through the daemon, the addon and a daemon; for Chromium through the daemon, Chromium, the page server and a daemon started with `--http`. The test creates what its cases use: a daemon with the runtime directory of [VER-DAEMON-START](daemon/verification.mara.md#01M7JKW7JWB2RANYKNE6BHYM26), started with `--http` for the Chromium cases and allowing only the test's projects and page origin; an HTTP server on a loopback port the operating system assigns, which serves the test's pages and the package's files; and a browser launched with a new profile in the test's temporary directory, never a persistent context. At the end it closes the browser and the server and stops any daemon it started; then no process whose environment or command line names the test's temporary directory runs. Every Node and browser case of a Verification item runs in this setup. Each case compares with CLI direct mode on the same files, pairing MIDs as above:
 
 | Case | Expectation |
 | --- | --- |
 | The daemon case's requests on the 1× corpus of [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA), `project init` in an empty directory and `project convert` of that harness's 0.3.0 input, through the Node client embedded and through the daemon | Each result, or failure's code, message and diagnostics, as in CLI direct mode; the same files after each write |
-| The same from Chromium through the daemon | The same, but `project init` and `project convert` fail with `unavailable-operation` ([VER-UNAVAILABLE-NOT-PARTIAL](verification-browser.mara.md#01M7JQJKGBJ6VC7X844R6HZZGS)) |
+| The same from Chromium through the daemon | The same, but `project init` and `project convert` fail with `unavailable-operation` ([VER-UNAVAILABLE-NOT-PARTIAL](#01M7JQJKGBJ6VC7X844R6HZZGS)) |
 | The same in a browser workspace supplied with every file of the project but `.git` | As in the row above; after each write, the supplied files with the exported change set applied by the test are the files of CLI direct mode |
 | A browser workspace supplied with the 1× corpus: every query and view of `engineering`, `query gate` with the corpus's gate inputs, and `query report` of its failing row | The rows of CLI direct mode: Soufflé's WASM and native builds give the same outputs |
 
@@ -152,43 +152,255 @@ Architecture checks run from 0.4.0-alpha.1. They guard [DES-ENGINE-BOUNDARY](eng
 
 ---
 
-<a id="01M7CT60NQK9TAH7JD15HCR2XE"></a>
+<a id="01M7D3NAQQ599DWC895A7TG3TC"></a>
 
-### Exercise the engineering template's acceptance cases
+### Check documents against their GitHub rendering
 
 | Type | Verification |
 | --- | --- |
-| ID | VER-TEMPLATE-CASES |
+| ID | VER-GITHUB-RENDERING |
 | Status | Accepted |
 | Methods | Test |
-| Verifies | [REQ-TEMPLATE-ACCEPTANCE-RULES](template.mara.md#01M7CT60KVJ75RV9GPP3SEF0WX) |
-| Verifies | [REQ-TEMPLATE-GATES-PROVE-READINESS](template-readiness.mara.md#01M7CT60MNF0XPXR9NB6X74F3B) |
+| Methods | Analysis |
+| Methods | Inspection |
+| Verifies | [REQ-SOURCE-IS-PUBLISHED-FORM](format.mara.md#01M7BF6GYWE2DT7WSXQH2QPNPA) |
 
-Rust integration tests run the real CLI on disposable projects initialized from `engineering`.
+Rust integration tests run the real CLI on disposable projects.
+
+| Case | Method | Expectation |
+| --- | --- | --- |
+| A document with `***` and `___` breaks and a `---` line inside a fenced code block | Test | Regions break at the `***` and `___` lines only |
+| A document that starts with YAML front matter | Test | No diagnostic |
+| Same-file, cross-directory and table-cell relation links and mentions in a project that validates without diagnostics | Test | Each link's path, resolved from the linking file, names the file that holds the anchor of its MID |
+| GitHub's handling of those links | Analysis | They have the forms that [EVD-GITHUB-FRAGMENT-MATCHING](identity.mara.md#01M7BF6H2MHAVK1Z5HCXR1V289) found GitHub to navigate to their target |
+| Items and links written by `item create`, `relation add` and `item move`, in a new document too, from 0.4.0-alpha.2 | Test | As for the hand-written links; no written file starts with `---` |
+| The CLI's operations | Inspection | None writes documents in another format |
+
+---
+
+<a id="01M7D3NAQYGXQ5YG1YMRV12SKS"></a>
+
+### Resolve hand-edited items by MID
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-MID-RESOLUTION |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-STABLE-IDENTITY](identity.mara.md#01M7BF6H1AN6G9GP3DV62342WJ) |
+
+Rust integration tests run the real CLI on a disposable project in which another file links to an item by a relation and by a mention. The tests then change the item's title and ID and move it to another file by hand, leaving the links as they were.
 
 | Case | Expectation |
 | --- | --- |
-| Accepted requirement with only a draft basis, or only a draft verification | Validation error; the same items as drafts are valid |
-| Requirement with two accepted verifications, one passing and the other failing or absent from a complete input | `verified` fails |
-| Result for another candidate, or for an older revision of the verification or of the requirement | Does not count: `verification-status` is `pending` with a complete input and `unavailable` with an incomplete one; `verified` does not pass |
-| Validation result for another context, or for an older revision of the validation or of its need or goal | Does not count: `validation-status` is `pending` with a complete input and `unavailable` with an incomplete one; `release-ready` does not pass |
-| For one verification and requirement, and for one validation and need, counting results `pass` and `fail`, `pass` and `error`, and `pass` and `inconclusive` | `verification-status` and `validation-status` give the worse result; `verified` and `release-ready` fail |
-| Risk on a parent requirement, on its need or on that need's goal | Relevant to the child requirement; a sibling requirement is not judged |
-| HIGH risk with a mitigation | Blocks until it is reassessed or an accepted decision accepts it |
-| Named validation whose result is absent from a complete input, or is not a pass | `release-ready` fails; a validation that is not named does not block |
-| Validation of two needs with a pass for one and, for the other, a failing result or none in a complete input | `release-ready` fails |
-| A failure and an unavailable fact on the same item | Failed |
-| Item whose only missing fact is a risk level, an implementation link while code is unread, or a result absent from an incomplete input | Unavailable, never passed |
-| Accepted requirement without an accepted verification | `verified` fails |
-| A failing row of each template invariant and gate | Has an explanation |
-| `C supersedes B supersedes A` after B retires | Valid |
-| Requirement implemented only through a design, from 0.4.0-alpha.5 (mara-yhxq5x) | Counts when the design is accepted, not when it is draft |
-| From 0.4.0-alpha.5, a requirement that an `implements` marker names, with an accepted Verification whose result passes and a named Validation of its Need that passes | `implemented` has the marker's row; `verified` and `release-ready` pass |
-| From 0.4.0-alpha.5, markers naming a Design and a Verification | `implemented` has a row for each |
-| From 0.4.0-alpha.5, a requirement that no marker names, every code file read; the same in a project that declares no code language | `verified` and `release-ready` fail ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)) |
-| From 0.4.0-alpha.5, a requirement that no marker names while a code file cannot be read | `verified` and `release-ready` unavailable |
-| A view and a gate over the same items | Report the same facts |
-| One project per rule of [DES-TEMPLATE-ACCEPTANCE](template.mara.md#01M7CT60M2EQ33WTZFNG600D4H) and of [DES-TEMPLATE-RELATION-LIFECYCLE](template.mara.md#01M7CT60M96Q91T5KXNQ1G58PP), with an accepted item that breaks it | A validation error of that rule's invariant at the item; valid when the item is a draft |
-| A risk in each of the 25 cells of [DES-TEMPLATE-RISK-LEVEL](template.mara.md#01M7CT60MFPF2Y871JJDZP5K0T) | `risk-level` gives that cell's level |
-| `requirement-basis` of a requirement with a draft and an accepted basis | Both rows, with their statuses |
-| Each view of [DES-TEMPLATE-VIEWS](template-readiness.mara.md#01M7CT60NHPG3GY0V1F0MZ5QF0) for a requirement without an accepted verification, one whose result is absent from an incomplete input, and one with a failing result | A row for each; the cells for missing, unavailable and failed differ |
+| `get` of the MID | The item, with its new title, ID and location |
+| `relation list` of the item | The incoming relation and the mention, at their unchanged source locations |
+| The same three changes made with `item update`, `item rename` and `item move`, from 0.4.0-alpha.2 | The same results, and the anchor keeps the MID |
+
+---
+
+<a id="01M7D3NAR43MYRDF7YKMBDSJ10"></a>
+
+### Select the project among nested projects
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-NESTED-PROJECTS |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-ONE-PROJECT-PER-OPERATION](project.mara.md#01M7BF6H8ND7YSXFMWCM0KXAAY) |
+
+Rust integration tests run each CLI operation on a disposable project that holds a second project in a subdirectory. The include patterns of both match every `*.mara.md` file below their roots, so the outer project's patterns also match the inner project's documents. An operation uses only a project when no result holds an item, narrative unit or diagnostic from another project's files, and the file-read counter ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)) counts only that project's inputs.
+
+| Case | Expectation |
+| --- | --- |
+| Run from a directory inside the inner project | Uses only the inner project: none of the outer project's files is read |
+| Run from the outer project, outside the inner one | Uses only the outer project: none of the inner project's files is read |
+| `--project` naming one project, run from inside the other | Uses only the named project |
+| Run from the outer project after the inner project's `.mara/config.toml` is replaced by `.mara/project.toml` | None of the inner project's documents is read |
+| Run from the outer project when a subdirectory holds a `config.toml` outside any `.mara/` directory | The subdirectory's documents are inputs of the outer project |
+| Run outside every project | Fails with a diagnostic and parses no document |
+| A directory with `.mara/project.toml` and no `.mara/config.toml` | Refused with a diagnostic that names the conversion |
+| A write run from the outer project that names a document path below the inner project's root, from 0.4.0-alpha.2 | Refused; no file of either project changes |
+
+---
+
+<a id="01M7D3NARATT16K40DZCCFCX3H"></a>
+
+### Validate against the project's own schema
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-CUSTOM-SCHEMA |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-SCHEMA-DEFINES-VOCABULARY](project.mara.md#01M7BF6H97RDY6XY07F5SC4777) |
+
+Rust integration tests run the real CLI on a disposable project whose schema declares types, fields, values, statuses and relations of its own, and none of the `engineering` template's.
+
+| Case | Expectation |
+| --- | --- |
+| Items that use only the declared vocabulary | Valid |
+| An item of type `Requirement`; a row keyed by an `engineering` field or relation; a field value or `Status` outside the declared lists | An error each |
+| An item of a type without fields, with only `Type`, `ID` and `Status` rows | Valid |
+| A schema edit that adds the rejected field value to its list | The same document becomes valid |
+
+---
+
+<a id="01M7D3NARGT43PEVX6SWPN60CZ"></a>
+
+### Report every seeded problem
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-SEEDED-PROBLEMS |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-REPORT-EVERY-PROBLEM](validation.mara.md#01M7BF6HEVWZ2490K493GDP8KC) |
+| Verifies | [REQ-VALIDITY-COVERS-WHOLE-PROJECT](validation.mara.md#01M7BF6HF8R0Q5BK349ESZ2PS7) |
+
+Rust integration tests run the real CLI on a disposable project seeded, several to a file, with one instance of each failure the built-in checks define ([DES-SCHEMA-CHECKS](validation.mara.md#01M7BF6HG7AQZ9FM38CMT4BTHR)), an unknown configuration setting and an invalid schema declaration.
+
+| Case | Expectation |
+| --- | --- |
+| `project validate` | Each seeded problem exactly once, with its code, severity, path and line, and nothing else |
+| `schema validate` | The schema's problem, and no document's |
+| `item validate` of an item whose ID another file repeats and whose relation link has a stale path | Both problems and the configuration's, and none of another item |
+| `project validate` with a page of one diagnostic, or filtered to a path without errors | Invalid, with the project's total error count and a non-zero exit status |
+| The same project with every problem removed | Valid, no diagnostic and exit status 0 |
+
+---
+
+<a id="01M7D3NARPYEP9XHY86H015Y4Z"></a>
+
+### Read an item with invalid rows
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-INVALID-ROWS |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-INVALID-ROWS-REPORTED](validation.mara.md#01M7BF6HFZVTK5PC7W60FPND94) |
+
+Rust integration tests run the real CLI on a disposable project with an item that has an undeclared key, a value outside its field's allowed set and a row that repeats another.
+
+| Case | Expectation |
+| --- | --- |
+| `project validate` | One diagnostic for each of the three rows |
+| `get` of the item | The item with all its rows in source order, the invalid ones included |
+
+---
+
+<a id="01M7D3NARW1657P2G2P9BWXSWR"></a>
+
+### Run every read on a broken project
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-UNCHANGED-SOURCES |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-READS-NEVER-WRITE](validation.mara.md#01M7BF6HFM0MQ2NH7RA7S00B8K) |
+
+Rust integration tests run every validation and read operation of the CLI, failing requests included, on a disposable project with a missing anchor, a bare-ID relation value, stale link paths and text, invalid rows and CRLF line endings. After each run, no file in the project tree has been created, deleted or modified: names, bytes and mtimes are unchanged.
+
+---
+
+<a id="01M7F74J51BE6J8BQSH842BXWV"></a>
+
+### Initialize a project from each template
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-PROJECT-INIT |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-PROJECT-INIT](project.mara.md#01M7BF6H8Z02SNKXD2XPGVD87M) |
+
+Rust integration tests run `project init` with the real CLI in disposable directories.
+
+| Case | Expectation |
+| --- | --- |
+| No template named, in the working directory and in a named one | `.mara/config.toml` and `.mara/schema.toml` are written there; the output lists exactly the files created; `project validate` reports no diagnostic |
+| `schema list` and `schema get` of that project | Every type and relation of [DES-ENGINEERING-VOCABULARY](template/vocabulary.mara.md#01M7BF6HH8CA2B9TQJ9DT32WDG), with its ID prefix, description, fields, allowed values, target types and constraints, and nothing else |
+| Items of that project with each of the statuses `Draft`, `Accepted` and `Retired`, and with another status | Valid; invalid |
+| `empty` named | A configuration and a schema that declares no type and no relation; `project validate` reports no diagnostic |
+| A directory in which one of the files to write exists | Refused, naming that file; no file or directory is created |
+| The programs of `engineering`, from 0.4.0-alpha.3 (mara-tx0fcf) | Written under `.mara/rules/` and listed; `project validate` compiles them without a diagnostic; `query list` lists the template's invariants, queries, gates and three views ([DES-TEMPLATE-VIEWS](template/readiness.mara.md#01M7CT60NHPG3GY0V1F0MZ5QF0)) |
+
+---
+
+<a id="01M7F74J5E4771N36RX8H50X3P"></a>
+
+### Convert the 0.3.0 corpus and one fixture per mapping row
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-CONVERSION |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-CONVERT-DIRECTIVE-CORPUS](migration.mara.md#01M7BF6H30RYJTH5Z2YERBJ690) |
+
+Rust integration tests run `project convert` with the real CLI on disposable copies of this repository's 0.3.0 project (`docs/` and `.mara/` at tag `v0.3.0`) and of fixtures.
+
+| Case | Expectation |
+| --- | --- |
+| The 0.3.0 project | Every MID, ID and field value of its items is in the converted project; every relation that is not symmetric and leads from an item to an item, in a metadata row or inline, under the forward or the inverse name, is one row on its source item; `project validate` reports only the items reported for the author to complete; everything left out is reported; `.mara/conversion-report.json` holds the entries the result returns |
+| A fixture for each row of [DES-CONVERSION-MAPPING](migration.mara.md#01M7CMW71TXDY6VCTJS7XNSQRM), among them relations written from the target, thematic breaks and setext headings in bodies, `integer`, `number` and `boolean` fields, and empty bodies | Converted as the row says, and reported where it says so |
+| Include patterns `docs/{a,b}.mara.md` and `docs/[ab].mara.md` | Kept as written, and reported |
+| An item without a status, with a status named for the run | That status |
+| Two values of one field, or two statuses, that become the same label | Nothing written; each pair reported |
+| The 0.3.0 project's conversion stopped while it writes the report file and after each document, one of them a document whose conversion leaves something out, then rerun | As [VER-INTERRUPTED-EDITS](authoring/verification.mara.md#01M7F74J3SE8HJ3S6ZNG3G2DYJ) requires |
+| After a stop, a `[[ID]]` mention added by hand to a converted document from which a symmetric relation row was dropped, then a rerun | The returned report and the report file still hold that omission, once |
+| After a stop, a rerun with one unconverted document unchanged and another edited so that one of its omissions moves to another line | Each unchanged entry once; for the moved omission, the recorded entry and the rerun's entry at its new line |
+| A report file left by an earlier run that is a symbolic link, is not JSON of that object, or has `format_version` 2 | Refused, naming the file; nothing written |
+| Every other operation on a 0.3.0 project | Refused, as [VER-NESTED-PROJECTS](verification.mara.md#01M7D3NAR43MYRDF7YKMBDSJ10) requires |
+| A `:::mara` block in a converted project's document | Read as narrative: it makes no item |
+
+---
+
+<a id="01M7F74J6E2V10YX6RYENGHC1P"></a>
+
+### Compare both renderings of the agent guide
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-AGENT-GUIDE |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-AGENT-GUIDE](agents.mara.md#01M7BGRHWB2MGXEY5G41YP8E0G) |
+
+Rust integration tests run `mara prime` and read the instructions of the real stdio MCP server, each started inside and outside disposable projects.
+
+| Case | Expectation |
+| --- | --- |
+| Inside a project, found from the working directory or named by `--project` | Both open with the same fixed heading and have the sections find and read, author, repair after hand edits, and validate; operations appear as commands in `prime` and as tools in the MCP instructions |
+| Outside every project | Both say how to initialize a project and name no other operation or tool |
+| A 0.3.0 project | Both say how to convert it and name no other operation or tool |
+| Each operation, option, tool and parameter that either rendering names | The CLI declares it or the MCP server lists it, compared as [DES-AGENT-GUIDE](agents.mara.md#01M7BGRHWQHQJJHC6XCXVDWDM8) describes |
+| Each operation that works in a project | The full guide names it, as a command in `prime` and as a tool in the MCP instructions |
+| Two projects whose schemas differ | The same guide |
+| A project whose configuration has an error | The full guide |
+| A server started with and one started without `--project` | The same instructions but for the sentence on the project; each names only parameters its tools list |
+| The MCP instructions | At most 3,800 characters |
+
+---
+
+<a id="01M7JQJKGBJ6VC7X844R6HZZGS"></a>
+
+### Report what a host cannot do as unavailable
+
+| Type | Verification |
+| --- | --- |
+| ID | VER-UNAVAILABLE-NOT-PARTIAL |
+| Status | Accepted |
+| Methods | Test |
+| Verifies | [REQ-UNAVAILABLE-NOT-PARTIAL](engine.mara.md#01M7BF6GXSJVVASJ4C8ZGHM909) |
+
+In the setup of [VER-BROWSER-WORKSPACE](hosts/verification.mara.md#01M7JQJKGBSCMPWE7CGNPP7PNB). On the native hosts, code that cannot be read is checked by [VER-CODE-FACTS](code/verification.mara.md#01M7JKT47QVCRS95RJC08VA021) and [VER-TEMPLATE-CASES](template/index.mara.md#01M7CT60NQK9TAH7JD15HCR2XE), and a grammar that cannot be loaded by [VER-GRAMMAR-MARKERS](code/verification.mara.md#01M7JKT47QR2NYFK59JRV8EV7G).
+
+| Case | Expectation |
+| --- | --- |
+| `project init` of each template, and `project convert` of the 0.3.0 input of [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA), in a workspace and through the daemon from Chromium | Fail with `unavailable-operation` naming the operation; the next export is empty, and the daemon's project is byte-identical |
+| The fixtures of [VER-GRAMMAR-MARKERS](code/verification.mara.md#01M7JKT47QR2NYFK59JRV8EV7G), with both grammars pinned, in a workspace: each operation that reads code | The result of CLI direct mode on the same files with both grammars removed from the cache, but for each `unavailable-grammar` message, which says the browser cannot load grammars; `project validate` is invalid |
+| The setup of [VER-PROGRAM-FAULTS](rules/verification.mara.md#01M7HZYKB4R632Q63YWS8CY1FJ) with a program that passes, in a workspace whose Soufflé module the test's server answers with status 404, and in a second run with a truncated module | A fault without a line at the configuration line of each declared program; `project validate` is invalid, `query execute` and `query view` fail, and the gate and both items are unavailable |

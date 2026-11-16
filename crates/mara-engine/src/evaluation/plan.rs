@@ -1,5 +1,5 @@
 //! Which programs run, and which consumers read them (DES-RULE-CONSUMERS in
-//! `docs/rules.mara.md`).
+//! `docs/rules/index.mara.md`).
 
 use std::collections::{BTreeMap, BTreeSet};
 

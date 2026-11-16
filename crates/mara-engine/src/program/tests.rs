@@ -1,4 +1,4 @@
-//! The cases of VER-ADMITTED-LANGUAGE in `docs/verification-programs.mara.md` that are not
+//! The cases of VER-ADMITTED-LANGUAGE in `docs/rules/verification.mara.md` that are not
 //! review probes on disk, and the parser's share of VER-PROGRAM-REACH-CASES: what it refuses.
 
 use std::collections::BTreeMap;

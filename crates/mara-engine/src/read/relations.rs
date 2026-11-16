@@ -1,5 +1,5 @@
 //! `relation list`: the connections one hop from a node (REQ-DIRECT-NEIGHBOURS in
-//! `docs/retrieval.mara.md`).
+//! `docs/retrieval/index.mara.md`).
 
 use std::collections::HashMap;
 

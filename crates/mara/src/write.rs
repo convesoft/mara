@@ -1,4 +1,4 @@
-//! Putting an edit on disk (DES-WRITE-PROCEDURE in `docs/writes.mara.md`): the project's write
+//! Putting an edit on disk (DES-WRITE-PROCEDURE in `docs/authoring/writes.mara.md`): the project's write
 //! lock, the checks that refuse an edit whose files changed after it was computed, and each file
 //! replaced through a temporary file, in the order the edit gives. Nothing is read, hashed,
 //! parsed or built after the renames (ADR-NO-REDERIVATION-IN-CLI).

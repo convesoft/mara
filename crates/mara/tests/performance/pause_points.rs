@@ -1,5 +1,5 @@
 //! The case of DES-WRITE-PROCEDURE that finds no trace of the pause points in a release build
-//! (ADR-DEBUG-PAUSE-POINT in `docs/writes.mara.md`): a write with the variable set completes
+//! (ADR-DEBUG-PAUSE-POINT in `docs/authoring/writes.mara.md`): a write with the variable set completes
 //! without pausing, and the binary does not hold the variable's name.
 
 use std::process::{Command, Stdio};

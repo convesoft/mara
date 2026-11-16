@@ -75,9 +75,9 @@ Schema inspection lists the types and relations and returns each one's descripti
 | Satisfies | [REQ-ONE-PROJECT-PER-OPERATION](#01M7BF6H8ND7YSXFMWCM0KXAAY) |
 
 - The configuration is `.mara/config.toml`. The directory that contains `.mara/` is the project root.
-- It declares every input by a path or pattern relative to the project root: document include patterns, the schema, Soufflé programs, and code languages with their include patterns, comment prefixes and grammar pin (version and checksum), in the optional `[code]` that [DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1) defines.
+- It declares every input by a path or pattern relative to the project root: document include patterns, the schema, Soufflé programs, and code languages with their include patterns, comment prefixes and grammar pin (version and checksum), in the optional `[code]` that [DES-CODE-MARKERS](code/index.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1) defines.
 - A directory below the project root whose `.mara/` holds `config.toml` or `project.toml` is the root of another project. Nothing below it is an input, even where a pattern matches. A `config.toml` outside a `.mara/` directory makes no project.
-- `project init` writes a template's configuration, schema and programs ([DES-PROJECT-INIT](init.mara.md#01M7FVWHVXW71CWC0HJ52NTEQJ)).
+- `project init` writes a template's configuration, schema and programs ([DES-PROJECT-INIT](#01M7FVWHVXW71CWC0HJ52NTEQJ)).
 - The configuration and the schema are TOML. Each carries its own `format_version`, starting at 1. The configuration also holds the version of the document syntax, `[documents] format_version`.
 - An unknown setting is an error.
 - `.mara/project.toml` without `.mara/config.toml` marks a 0.3.0 project. Every operation except the conversion ([REQ-CONVERT-DIRECTIVE-CORPUS](migration.mara.md#01M7BF6H30RYJTH5Z2YERBJ690)) refuses it and names the conversion.
@@ -97,7 +97,7 @@ Schema inspection lists the types and relations and returns each one's descripti
 | `legacy-project` | The selected directory is the root of a 0.3.0 project | Selection |
 | `io-error` | A file or directory cannot be read; in the inventory, also an input or `.gitignore` that is not a regular file, or a name that is not UTF-8; in a write, a file that cannot be written | Selection, loading, inventory, writes |
 | `outside-project` | The schema path enters another project's root | Loading |
-| `symbolic-link` | `.mara`, the configuration or a component of the schema path is a symbolic link; in the inventory, a matched document, a `.gitignore` or a subdirectory's `.mara`; in a write, a file it writes or a directory above it ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) | Selection, loading, inventory, writes |
+| `symbolic-link` | `.mara`, the configuration or a component of the schema path is a symbolic link; in the inventory, a matched document, a `.gitignore` or a subdirectory's `.mara`; in a write, a file it writes or a directory above it ([DES-WRITE-PROCEDURE](authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) | Selection, loading, inventory, writes |
 | `unsupported-gitignore` | A `.gitignore` the `ignore` crate cannot take: a line that is not UTF-8, or patterns it cannot compile | Inventory |
 | `toml-syntax` | The configuration or schema is not UTF-8 TOML | Loading |
 | `unsupported-format-version` | A `format_version` other than 1 | Loading |
@@ -137,7 +137,7 @@ include = ["docs/**/*.mara.md"]
 | Field | Name, value kind (`text` or `enum`), allowed values, required, repeatable |
 | Relation | Forward name, inverse name, description, allowed target types per source type, same-type constraint, acyclic constraint |
 
-- The source `code` in a relation's targets stands for code markers ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)). No type may be named `code`.
+- The source `code` in a relation's targets stands for code markers ([DES-CODE-MARKERS](code/index.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)). No type may be named `code`.
 - "Type" replaces the term "flavour" used before v0.4.0.
 - `types`, `relations`, `fields` and the flags `required`, `repeatable`, `same_type` and `acyclic` are optional; a flag defaults to `false`. Every other key of the example is required, and a host test loads the example from this page. A description is not empty.
 - Every name, statuses and values included, is lowercase ASCII letters and digits in parts joined by single `_` or `-`. An ID prefix is uppercase letters and digits in parts that each end with `-` ([DES-ITEM-IDS](identity.mara.md#01M7BF6H1ZBTKWTF9ZXEJ8EBGS)).
@@ -192,3 +192,30 @@ targets = { need = ["need"], requirement = ["requirement"] }
 same_type = true
 acyclic = true
 ```
+
+---
+
+<a id="01M7FVWHVXW71CWC0HJ52NTEQJ"></a>
+
+### Write a template into a directory
+
+| Type | Design |
+| --- | --- |
+| ID | DES-PROJECT-INIT |
+| Status | Accepted |
+| Satisfies | [REQ-PROJECT-INIT](project.mara.md#01M7BF6H8Z02SNKXD2XPGVD87M) |
+
+- `project init [--template engineering|empty]` initializes the working directory, or the directory that `--project` names. That directory and each missing directory above it are created, and symbolic links in its path are resolved, as selection resolves a root.
+- The templates are embedded in the binary. Each writes its files in this order:
+
+| Template | Files |
+| --- | --- |
+| `engineering` | `.mara/schema.toml`, the vocabulary of [DES-ENGINEERING-VOCABULARY](template/vocabulary.mara.md#01M7BF6HH8CA2B9TQJ9DT32WDG) as the same text as this repository's `.mara/schema.toml`; programs under `.mara/rules/` from 0.4.0-alpha.3 (mara-tx0fcf); `.mara/config.toml` |
+| `empty` | `.mara/schema.toml`, with the statuses `draft`, `accepted` and `retired` and no type or relation; `.mara/config.toml` |
+
+- The configuration is the example of [DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27). It comes last: until it exists, no operation selects the directory as a project.
+- Before it creates anything, `project init` refuses a 0.3.0 project with `legacy-project`, a `.mara` that is a symbolic link with `symbolic-link`, and a file it would write that exists, whatever it is, or a `.mara` that is no directory, with `existing-file` ([DES-OPERATIONS](hosts/index.mara.md#01M7BF6H124JRJAQSYVQ21Q2JS)). The message and a diagnostic at line 1 name each such file.
+- The write procedure writes the files as files the edit creates ([DES-WRITE-PROCEDURE](authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)). A new project has no `.mara` to lock: `project init` creates `.mara` just before step 1, then takes the lock on it.
+- A failure before the first rename removes each directory that `project init` created and that is empty again, the last created first. A directory that holds another program's file stays.
+- A stop after the first rename leaves no configuration, so no project. A rerun refuses the files already written until they are removed.
+- The result is `created`: each file written, relative to the project root, in the order written. The human form prints `created <path>` for each.

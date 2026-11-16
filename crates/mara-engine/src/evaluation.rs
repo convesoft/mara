@@ -1,5 +1,5 @@
 //! What one evaluation of a program by Soufflé needs and what it means, without running it
-//! (DES-RULE-EXECUTION in `docs/rules-evaluation.mara.md`): the files of the private directory,
+//! (DES-RULE-EXECUTION in `docs/rules/evaluation.mara.md`): the files of the private directory,
 //! the generated wrapper, the evaluation key, the limits, and the reading of Soufflé's exit,
 //! diagnostics and output files into rows or a fault. The host writes the files, runs Soufflé
 //! and hands back what it printed and wrote.

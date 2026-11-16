@@ -6,40 +6,21 @@
 | [Item format](format.mara.md) | Regions, item structure, metadata table |
 | [Identity and links](identity.mara.md) | MID, ID, relation links, mentions |
 | [Project and schema](project.mara.md) | Project selection, init, configuration and schema files |
-| [Project initialization](init.mara.md) | `project init`: templates, file order, refusals |
-| [Engineering vocabulary](vocabulary.mara.md) | Types and relations of the `engineering` template |
-| [Authoring](authoring.mara.md) | Create, update, move, rename, delete, relations, fix |
-| [Write requests and results](authoring-requests.mara.md) | Arguments, results and refusals of create, update, delete and relation edits; fix's repairs |
-| [Write safety](writes.mara.md) | What a write preserves, write order |
 | [Migration](migration.mara.md) | Conversion from 0.3.0, dropped capabilities |
-| [Retrieval](retrieval.mara.md) | Search, get, relation list, item list, narrative units, paging |
-| [Read requests and results](retrieval-requests.mara.md) | Search filters, ranking within a group, excerpts, result formats |
 | [Validation](validation.mara.md) | Built-in checks, diagnostics |
-| [Engineering template: knowledge rules](template.mara.md) | Acceptance rules, relation lifecycle, risk level |
-| [Engineering template: readiness](template-readiness.mara.md) | Queries, result inputs, gates, views |
-| [Rules](rules.mara.md) | Soufflé programs, consumers, gate outcome, request inputs |
-| [Rule facts and programs](rules-facts.mara.md) | Fact bridge, admitted profile |
-| [Rule evaluation](rules-evaluation.mara.md) | Running Soufflé, limits, faults, explanations |
-| [Soufflé evidence](rules-evidence.mara.md) | Trial results, ways programs reached outside |
 | [Engine](engine.mara.md) | Engine boundary, inputs, cache keys, snapshot |
-| [Hosts](hosts.mara.md) | Execution modes, operations, CLI and MCP, Node, browser |
 | [Agent guidance](agents.mara.md) | `mara prime`, MCP server instructions |
-| [Daemon](daemon.mara.md) | Lifecycle, sessions, watching, browser listener |
-| [Code links](code.mara.md) | Comment markers, grammars, operations that read code |
 | [Performance](performance.mara.md) | Work and time obligations, test harness, profiling |
-| [Verification](verification.mara.md) | Checks of performance, host parity and the engineering template |
-| [Document verification](verification-documents.mara.md) | Checks of format, identity, project selection, schema and validation |
-| [Retrieval verification](verification-retrieval.mara.md) | Checks of search, get, relation list, item list, paging and schema inspection |
-| [Authoring verification](verification-authoring.mara.md) | Checks of create, update, delete, relation edits, move and rename |
-| [Write verification](verification-writes.mara.md) | Checks of preserved bytes, refused, interrupted and concurrent writes, and fix |
-| [Setup and host verification](verification-hosts.mara.md) | Checks of init, conversion, CLI and MCP parity and the agent guide |
-| [Rules verification](verification-rules.mara.md) | Checks of program consumers, facts, request inputs and explanations |
-| [Program safety verification](verification-programs.mara.md) | Checks of program faults, the time limit, the admitted language and reaching outside |
-| [Code link verification](verification-code.mara.md) | Checks of markers at both levels and of grammar downloads |
-| [Code link use verification](verification-code-use.mara.md) | Checks of marker rewrites, code links in programs and the work of reading code |
-| [Daemon verification](verification-daemon.mara.md) | Checks of daemon start, fresh answers, reads during validation, writes through the daemon and browser access |
-| [Node library and browser verification](verification-browser.mara.md) | Checks of the Node library, the browser workspace and unavailable capabilities |
 | [Distribution](distribution.mara.md) | Packages, bundled Soufflé |
-| [Decisions](decisions.mara.md) | Format, authoring, project files, packaging, agent guidance |
-| [Runtime decisions](decisions-runtime.mara.md) | Caching, inputs, daemon, code links, performance tests |
-| [Rules decisions](decisions-rules.mara.md) | Soufflé, program profile, consumers, fact bridge, gates, engineering template |
+| [Decisions](decisions.mara.md) | Decisions on format, project files, engine inputs, packaging, agent guidance and performance tests |
+| [Verification](verification.mara.md) | Checks of format, identity, project, validation, init, conversion, agent guide, hosts compared, performance |
+
+| Subject | Holds |
+| --- | --- |
+| [Authoring](authoring/index.mara.md) | Create, update, move, rename, delete, relations, fix; write safety |
+| [Retrieval](retrieval/index.mara.md) | Search, get, relation list, item list, narrative units, paging, read results |
+| [Rules](rules/index.mara.md) | Soufflé programs, consumers, gates, request inputs, fact bridge, evaluation |
+| [Engineering template](template/index.mara.md) | Knowledge rules, readiness, vocabulary |
+| [Hosts](hosts/index.mara.md) | Execution modes, operations, CLI and MCP, Node, browser |
+| [Daemon](daemon/index.mara.md) | Lifecycle, sessions, watching, browser listener |
+| [Code links](code/index.mara.md) | Comment markers, grammars, operations that read code |

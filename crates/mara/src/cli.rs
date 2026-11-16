@@ -1,5 +1,5 @@
 //! The command line: arguments, operations, output and exit status (REQ-CLI-MCP-PARITY and
-//! DES-OPERATIONS in `docs/hosts.mara.md`).
+//! DES-OPERATIONS in `docs/hosts/index.mara.md`).
 //!
 //! An operation is an [`Operation`] in [`OPERATIONS`]: its words, positional arguments and
 //! options, and a function from a [`Context`] and its [`Args`] to a [`Response`] or a

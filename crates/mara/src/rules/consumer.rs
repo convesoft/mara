@@ -1,6 +1,6 @@
 //! One entry evaluated for a request: a query, a view or a gate, with the inputs the request
-//! supplies (DES-RULE-CONSUMERS and DES-REQUEST-INPUTS in `docs/rules.mara.md`,
-//! DES-RULE-EXECUTION in `docs/rules-evaluation.mara.md`).
+//! supplies (DES-RULE-CONSUMERS and DES-REQUEST-INPUTS in `docs/rules/index.mara.md`,
+//! DES-RULE-EXECUTION in `docs/rules/evaluation.mara.md`).
 
 use std::collections::BTreeMap;
 

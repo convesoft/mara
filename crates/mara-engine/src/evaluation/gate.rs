@@ -1,5 +1,5 @@
 //! The outcome of a gate for the items a request names (DES-GATE-OUTCOME in
-//! `docs/rules.mara.md`).
+//! `docs/rules/index.mara.md`).
 
 use crate::config::{Consumer, Entry};
 use crate::facts::Value;

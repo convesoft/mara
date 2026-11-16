@@ -1,7 +1,7 @@
 //! Running programs: the files a program run reads, the fact relations of a snapshot and the
-//! supplied inputs, one JSON file per relation (DES-FACT-BRIDGE in `docs/rules-facts.mara.md`),
-//! the inputs a command line supplies (DES-REQUEST-INPUTS in `docs/rules.mara.md`), and the
-//! evaluation by the pinned Soufflé (DES-RULE-EXECUTION in `docs/rules-evaluation.mara.md`).
+//! supplied inputs, one JSON file per relation (DES-FACT-BRIDGE in `docs/rules/index.mara.md`),
+//! the inputs a command line supplies (DES-REQUEST-INPUTS in `docs/rules/index.mara.md`), and the
+//! evaluation by the pinned Soufflé (DES-RULE-EXECUTION in `docs/rules/evaluation.mara.md`).
 
 mod consumer;
 mod invariants;

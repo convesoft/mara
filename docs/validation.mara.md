@@ -83,7 +83,7 @@ Implemented in Rust, always on, linear in items plus edges.
 | Identity | MID form and uniqueness, ID prefix and uniqueness ([DES-MID-ANCHOR](identity.mara.md#01M7BF6H1MB5RR3RS43B3CJHAR), [DES-ITEM-IDS](identity.mara.md#01M7BF6H1ZBTKWTF9ZXEJ8EBGS)) |
 | Links | Relation and mention targets exist; paths and relation link text are current ([DES-RELATION-LINKS](identity.mara.md#01M7BF6H29JGHG65SV91K6D11V)) |
 | Relations | Target type allowed for the source type, same-type relations, acyclic relations ([DES-SCHEMA-MODEL](project.mara.md#01M7BF6HA0KG3R3AATWM1P2X1G)) |
-| Code markers | Form, target and relation of each marker; grammars ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1), [DES-GRAMMAR-ASSETS](code.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)) |
+| Code markers | Form, target and relation of each marker; grammars ([DES-CODE-MARKERS](code/index.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1), [DES-GRAMMAR-ASSETS](code/index.mara.md#01M7BF6GQC7MW6ZSA9NMEQRQHM)) |
 
 Parsing reports the Document structure failures and the malformed metadata rows of each document on its own, with the codes of the pages linked above. The other checks have these codes:
 
@@ -117,7 +117,7 @@ Parsing reports the Document structure failures and the malformed metadata rows 
 - A link path is percent-decoded and resolved like a relative URL. An absolute path, or one that leaves the project root, is stale. A link to a MID that several items have is not checked further.
 - A message quotes at most 100 characters of a value, and lists at most 10 names followed by `and <N> more` for the rest.
 
-Conditional obligations, such as "an accepted Verification verifies an accepted Requirement", are project logic ([DES-RULE-CONSUMERS](rules.mara.md#01M7BF6HE529B61Q2ZNXFQ1JXE)).
+Conditional obligations, such as "an accepted Verification verifies an accepted Requirement", are project logic ([DES-RULE-CONSUMERS](rules/index.mara.md#01M7BF6HE529B61Q2ZNXFQ1JXE)).
 
 ---
 
@@ -137,8 +137,8 @@ Conditional obligations, such as "an accepted Verification verifies an accepted 
 - Every built-in check failure is an error. A warning comes only from an invariant that declares that severity.
 - A result carries the project's validity and its error and warning counts, then one page of diagnostics in path and line order.
 - The CLI prints each diagnostic as `<path>:<line>: <severity>[<code>]: <message>`.
-- Validity and counts cover the target. `project validate` targets the whole project. `item validate <ID or MID>` targets the diagnostics of that item, of the configuration and of the programs its invariants use ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)), and fails with `unknown-item` or `ambiguous-item` when no item or several have the handle. `schema validate` targets the diagnostics of the schema file and those of the configuration at the line that names the schema, or every configuration diagnostic when it names no schema, and reads no document.
-- `--limit` and `--cursor` page every target ([REQ-PAGE-LIMITS](retrieval.mara.md#01M7CMW719S9H8FQKRFWWQ6NQK), [DES-PAGING](retrieval.mara.md#01M7BF6HCCWQH6P13ZR2YHAPS0)). `project validate --path <path>`, repeatable and relative to the project root, keeps the diagnostics in that file or below that directory. As in 0.3.0, empty and `.` parts and a trailing `/` are dropped, and an absolute path, a `..` part or the root itself is rejected. The normalized paths, sorted and without repeats, enter the result key.
+- Validity and counts cover the target. `project validate` targets the whole project. `item validate <ID or MID>` targets the diagnostics of that item, of the configuration and of the programs its invariants use ([DES-RULE-EXECUTION](rules/evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)), and fails with `unknown-item` or `ambiguous-item` when no item or several have the handle. `schema validate` targets the diagnostics of the schema file and those of the configuration at the line that names the schema, or every configuration diagnostic when it names no schema, and reads no document.
+- `--limit` and `--cursor` page every target ([REQ-PAGE-LIMITS](retrieval/index.mara.md#01M7CMW719S9H8FQKRFWWQ6NQK), [DES-PAGING](retrieval/index.mara.md#01M7BF6HCCWQH6P13ZR2YHAPS0)). `project validate --path <path>`, repeatable and relative to the project root, keeps the diagnostics in that file or below that directory. As in 0.3.0, empty and `.` parts and a trailing `/` are dropped, and an absolute path, a `..` part or the root itself is rejected. The normalized paths, sorted and without repeats, enter the result key.
 - A result's key also covers the code, path and line of each diagnostic that no input key covers, such as an input that cannot be read.
 - The JSON result is `format_version` (1), `valid`, `errors`, `warnings`, `diagnostics` and `next_cursor`, `null` on the last page. A diagnostic is `code`, `severity`, `message`, `path`, `line`, `id` and `mid`; `id` and `mid` are `null` outside an item.
 - The human form prints the page's diagnostics, then `valid` or `invalid` with the counts, then the next cursor.

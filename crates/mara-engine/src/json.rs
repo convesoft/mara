@@ -1,6 +1,6 @@
 //! The JSON form of results, which every host prints alike (REQ-CLI-MCP-PARITY in
-//! `docs/hosts.mara.md`). Records are written once, so a page's size is the sum of its records'
-//! sizes (DES-PAGING in `docs/retrieval.mara.md`).
+//! `docs/hosts/index.mara.md`). Records are written once, so a page's size is the sum of its records'
+//! sizes (DES-PAGING in `docs/retrieval/index.mara.md`).
 
 use std::fmt::Write as _;
 

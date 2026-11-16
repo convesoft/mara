@@ -44,7 +44,7 @@ pub struct Config {
     pub schema: Option<PathSetting>,
     /// Document include patterns.
     pub include: Option<Vec<PathSetting>>,
-    /// The programs and their consumers (DES-RULE-CONSUMERS in `docs/rules.mara.md`); `None`
+    /// The programs and their consumers (DES-RULE-CONSUMERS in `docs/rules/index.mara.md`); `None`
     /// without `[rules]`.
     pub rules: Option<Rules>,
     /// The code languages that `[code]` declares, in the configuration's order, each valid

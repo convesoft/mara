@@ -1,7 +1,7 @@
 //! The real stdio MCP server, `mara mcp`, spoken to over its stdin and stdout on disposable
-//! projects: VER-CLI-MCP-PARITY, the MCP side of VER-AGENT-GUIDE in
-//! `docs/verification-hosts.mara.md`, and the MCP case of
-//! VER-CONCURRENT-WRITERS in `docs/verification-writes.mara.md`.
+//! projects: VER-CLI-MCP-PARITY in `docs/hosts/verification.mara.md`, the MCP side of
+//! VER-AGENT-GUIDE in `docs/verification.mara.md`, and the MCP case of
+//! VER-CONCURRENT-WRITERS in `docs/authoring/verification.mara.md`.
 
 #![cfg(unix)]
 

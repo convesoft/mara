@@ -1,5 +1,5 @@
-//! The repairs of `project fix` (REQ-ONE-FIX-OPERATION in `docs/authoring.mara.md`,
-//! DES-FIX-REPAIRS in `docs/authoring-requests.mara.md`): from a snapshot, the splices that repair each document and the
+//! The repairs of `project fix` (REQ-ONE-FIX-OPERATION in `docs/authoring/index.mara.md`,
+//! DES-FIX-REPAIRS in `docs/authoring/index.mara.md`): from a snapshot, the splices that repair each document and the
 //! problems they repair. The host supplies new MIDs, reads the splices back and writes them, so
 //! this module does no I/O (DES-ENGINE-BOUNDARY).
 

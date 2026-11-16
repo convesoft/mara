@@ -1,5 +1,5 @@
 //! `search`, `get`, `relation list`, `item list`, `schema list` and `schema get`
-//! (`docs/retrieval.mara.md`, `docs/retrieval-requests.mara.md` and REQ-SCHEMA-INSPECTION in
+//! (`docs/retrieval/index.mara.md`, `docs/retrieval/index.mara.md` and REQ-SCHEMA-INSPECTION in
 //! `docs/project.mara.md`).
 //!
 //! Each refuses a project whose configuration or schema has an error, with those diagnostics

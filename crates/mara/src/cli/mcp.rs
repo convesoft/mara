@@ -1,5 +1,5 @@
 //! `mara mcp`: the document operations as MCP tools over stdio (REQ-CLI-MCP-PARITY,
-//! DES-OPERATIONS and DES-MCP-SERVER in `docs/hosts.mara.md`).
+//! DES-OPERATIONS and DES-MCP-SERVER in `docs/hosts/index.mara.md`).
 //!
 //! `rmcp` speaks the protocol (ADR-RMCP-SERVER). A tool call builds its operation's [`Args`]
 //! from the call's arguments and runs the operation's function, as the CLI does; the tool's text

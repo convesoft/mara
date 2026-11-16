@@ -1,5 +1,5 @@
 //! Code markers at the basic level (DES-CODE-MARKERS and DES-CODE-READERS in
-//! `docs/code.mara.md`): the scan of one code file, keyed by its contents and its language's
+//! `docs/code/index.mara.md`): the scan of one code file, keyed by its contents and its language's
 //! comment prefixes, the code layer of every scanned file, and the code links that its markers
 //! make with a snapshot's items.
 

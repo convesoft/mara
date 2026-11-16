@@ -1,4 +1,4 @@
-//! VER-ADMITTED-LANGUAGE in `docs/verification-programs.mara.md`, on the fixtures in
+//! VER-ADMITTED-LANGUAGE in `docs/rules/verification.mara.md`, on the fixtures in
 //! `tests/programs/`: the review probes (`review4/`, `review5/`), the trial programs rewritten in
 //! the admitted language (`trial/`) and the trial's compile errors (`trial-errors/`).
 //!

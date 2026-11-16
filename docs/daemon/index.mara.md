@@ -1,5 +1,9 @@
 # Daemon
 
+| Page | Holds |
+| --- | --- |
+| [Daemon verification](verification.mara.md) | Checks of daemon start, fresh answers, reads during validation, writes through the daemon and browser access |
+
 ## Requirements
 
 ---
@@ -12,7 +16,7 @@
 | --- | --- |
 | ID | REQ-FIRST-CALL-IN-PROCESS |
 | Status | Accepted |
-| Satisfies | [NEED-INTERACTIVE-SPEED](product.mara.md#01M7BF6H83C0SM1C8RHDHMBXZ2) |
+| Satisfies | [NEED-INTERACTIVE-SPEED](../product.mara.md#01M7BF6H83C0SM1C8RHDHMBXZ2) |
 
 A CLI, MCP or Node client that finds no daemon starts one in the background and runs its current request in-process. Later calls use the daemon.
 
@@ -26,7 +30,7 @@ A CLI, MCP or Node client that finds no daemon starts one in the background and 
 | --- | --- |
 | ID | REQ-NEVER-STALE |
 | Status | Accepted |
-| Satisfies | [NEED-ONE-BEHAVIOUR-EVERYWHERE](product.mara.md#01M7BF6H7Q0YP8SPVYWYJFB1MF) |
+| Satisfies | [NEED-ONE-BEHAVIOUR-EVERYWHERE](../product.mara.md#01M7BF6H7Q0YP8SPVYWYJFB1MF) |
 
 Every request checks the declared inputs on disk. When one has changed, the response waits for the rebuild.
 
@@ -40,7 +44,7 @@ Every request checks the declared inputs on disk. When one has changed, the resp
 | --- | --- |
 | ID | REQ-BROWSER-ACCESS-AUTHORIZED |
 | Status | Accepted |
-| Satisfies | [NEED-ONE-BEHAVIOUR-EVERYWHERE](product.mara.md#01M7BF6H7Q0YP8SPVYWYJFB1MF) |
+| Satisfies | [NEED-ONE-BEHAVIOUR-EVERYWHERE](../product.mara.md#01M7BF6H7Q0YP8SPVYWYJFB1MF) |
 
 The daemon serves browsers over loopback HTTP only, and only requests that carry the session token, come from an allowed origin and target an allowed project.
 
@@ -60,7 +64,7 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 | Status | Accepted |
 | Satisfies | [REQ-FIRST-CALL-IN-PROCESS](#01M7BF6GQK5GM340Z7CP4C83B8) |
 
-- Each Mara build has its own lock and socket in the runtime directory (`mara/`, mode 0700, in `XDG_RUNTIME_DIR`, or `/run/user/<uid>` when it is unset, on Linux; in `TMPDIR` on macOS). A build is its version with the path, size and modification time of its executable ([ADR-DAEMON-PER-VERSION](decisions-runtime.mara.md#01M7CMW6Z9MMB1705N02S9CCYG)). The lock ensures one instance per build when several clients start it at once; the socket path, with its terminating NUL, fits `sun_path`: 108 bytes on Linux, 104 on macOS.
+- Each Mara build has its own lock and socket in the runtime directory (`mara/`, mode 0700, in `XDG_RUNTIME_DIR`, or `/run/user/<uid>` when it is unset, on Linux; in `TMPDIR` on macOS). A build is its version with the path, size and modification time of its executable ([ADR-DAEMON-PER-VERSION](#01M7CMW6Z9MMB1705N02S9CCYG)). The lock ensures one instance per build when several clients start it at once; the socket path, with its terminating NUL, fits `sun_path`: 108 bytes on Linux, 104 on macOS.
 - When that base names no directory, or the socket path would pass the limit, every call runs in direct mode.
 - The base must be absolute, a directory and no symbolic link, owned by the user with mode exactly 0700, special bits included, or every call runs in direct mode too. `mara/` must be the same, or the `daemon` operations fail with `io-error` naming it; nothing in it is changed or followed.
 - The lock is `<key>.lock` and the socket `<key>.sock`, `<key>` being the first 16 hexadecimal digits of the BLAKE3 hash of the build. The lock is a regular file of mode exactly 0600, whatever the umask: it is created under another name with that mode and linked into place, so it never appears with another. It is opened without following a link, and one of another mode or owner is refused, never repaired. The daemon holds it with `flock` until it exits and writes its process ID into it. The socket is bound with mode 0600, whatever the umask, and a client refuses one of another mode or owner. Only the holder of the lock removes a stale socket, and only a socket; a start that fails after binding its socket removes it.
@@ -68,7 +72,7 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 - A client connects only to the daemon of its own build. Daemons of different builds run side by side. A Node client's build is that of the `mara` binary of its native package, which it starts as its daemon.
 - Clients send every document operation to the daemon except `project init` and `project convert`, which run in the calling process, as `prime` does.
 - A client that finds no daemon of its build starts `mara daemon start`, with its project as `--project`, detached from its standard streams, and serves its request in-process. A daemon opens the session of the project that `--project` names or that holds its working directory, if any, as soon as it starts.
-- A client falls back to direct mode only before it dispatches a request. A dispatched request is never replayed on another backend: when the daemon ends before answering, the request fails with `daemon-lost` ([DES-OPERATIONS](hosts.mara.md#01M7BF6H124JRJAQSYVQ21Q2JS)).
+- A client falls back to direct mode only before it dispatches a request. A dispatched request is never replayed on another backend: when the daemon ends before answering, the request fails with `daemon-lost` ([DES-OPERATIONS](../hosts/index.mara.md#01M7BF6H124JRJAQSYVQ21Q2JS)).
 - The daemon exits when its last session is dropped ([DES-IDLE-SESSIONS](#01M7CQ57TBWFN78CCMEAY6XFTF)), or after the idle period when it opened none, unless it listens for browsers ([DES-BROWSER-LISTENER](#01M7CQ57TJY788DMPBN4BX1SEM)). Without a session, the idle period is that of [DES-IDLE-SESSIONS](#01M7CQ57TBWFN78CCMEAY6XFTF), counted from its start or its last request; `status` and `stop` requests count as none, so a client watching the daemon does not keep it alive.
 - A client runs in direct mode, neither connecting to a daemon nor starting one, when `CI` is set, `MARA_NO_DAEMON=1` is set or the direct-mode flag is given.
 - `mara daemon status | start | stop` give explicit control. `status` prints whether the daemon of the client's build runs, its process ID and the root of each open session. `start` and `stop` exit 0 also when there is nothing to do; `stop` returns once the daemon has exited. `CI` and `MARA_NO_DAEMON` do not affect them. Without a runtime directory, `start` fails with `io-error`, and `status` and `stop` report that no daemon runs.
@@ -87,12 +91,12 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 | ID | DES-DAEMON-SESSIONS |
 | Status | Accepted |
 | Satisfies | [REQ-NEVER-STALE](#01M7BF6GQSA67MYWBHWA6VYA3E) |
-| Satisfies | [REQ-READS-DURING-VALIDATION](performance.mara.md#01M7BF6H3T3589901T1AE0ADHM) |
+| Satisfies | [REQ-READS-DURING-VALIDATION](../performance.mara.md#01M7BF6H3T3589901T1AE0ADHM) |
 
 - One session per canonical project root. Git worktrees are separate projects.
-- Watch mode is on by default. The daemon watches only directories that contain inputs ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)); inotify watch limits are per user.
+- Watch mode is on by default. The daemon watches only directories that contain inputs ([DES-INPUTS-AND-KEYS](../engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)); inotify watch limits are per user.
 - It debounces bursts such as a branch checkout and re-derives in the background. A watcher overflow or error triggers a full rescan.
-- Readers take the current snapshot without locks. Writers queue per project and take the project's write lock ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)); there is no global lock.
+- Readers take the current snapshot without locks. Writers queue per project and take the project's write lock ([DES-WRITE-PROCEDURE](../authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)); there is no global lock.
 - Long work runs on worker threads with cancellation. Protocol handlers never block each other.
 - Caches live in memory.
 
@@ -110,7 +114,7 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 
 - A session is dropped, with its snapshot and watches, after 30 minutes without a request. The number is provisional.
 - A connected native client does not keep a session or the daemon alive. Its next call starts a daemon again ([REQ-FIRST-CALL-IN-PROCESS](#01M7BF6GQK5GM340Z7CP4C83B8)).
-- A debug build takes the period in seconds from `MARA_TEST_IDLE_SECONDS` when it is set ([ADR-TEST-IDLE-PERIOD](#01M7JN4DSHNXYNDSQB08G5PPBF)). A release build ignores the variable and does not contain it ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)).
+- A debug build takes the period in seconds from `MARA_TEST_IDLE_SECONDS` when it is set ([ADR-TEST-IDLE-PERIOD](#01M7JN4DSHNXYNDSQB08G5PPBF)). A release build ignores the variable and does not contain it ([DES-PERFORMANCE-HARNESS](../performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)).
 
 ---
 
@@ -151,6 +155,70 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 | Status | Accepted |
 | Justifies | [DES-IDLE-SESSIONS](#01M7CQ57TBWFN78CCMEAY6XFTF) |
 
-- Chosen by the orchestrator on the maintainer's behalf on 2026-11-16: a debug build reads the idle period from `MARA_TEST_IDLE_SECONDS`, one variable for one period and no general test facility; a release build ignores it and does not contain it. The idle drop has to run in a test, and [ADR-DEBUG-PAUSE-POINT](writes.mara.md#01M7FCGJEWJ4EG946TYEVJAMW1) approved test-only code that exists in debug builds only.
+- Chosen by the orchestrator on the maintainer's behalf on 2026-11-16: a debug build reads the idle period from `MARA_TEST_IDLE_SECONDS`, one variable for one period and no general test facility; a release build ignores it and does not contain it. The idle drop has to run in a test, and [ADR-DEBUG-PAUSE-POINT](../authoring/writes.mara.md#01M7FCGJEWJ4EG946TYEVJAMW1) approved test-only code that exists in debug builds only.
 - Rejected: a `--idle` option of `daemon start`. Users would see a capability made for a test.
 - Rejected: inspection only. No test would exercise the idle drop.
+
+---
+
+<a id="01M7BF6GS1109M3YV9WHTT4XTK"></a>
+
+### Keep caches in memory
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-MEMORY-ONLY-CACHES |
+| Status | Accepted |
+| Justifies | [DES-DAEMON-SESSIONS](#01M7BF6GRG3NJZTA29TYVRVFT7) |
+
+- Chosen: no on-disk store. Documents and code markers rebuild in milliseconds to seconds, so a restart is cheap.
+- Rejected until a measured cost requires it: an on-disk store.
+
+---
+
+<a id="01M7BF6GS99YFG0VNDCJ1QQRCB"></a>
+
+### Start the daemon on demand and watch by default
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-ON-DEMAND-DAEMON |
+| Status | Accepted |
+| Justifies | [DES-DAEMON-LIFECYCLE](#01M7BF6GR80WA207P4BBFWW671) |
+| Justifies | [DES-DAEMON-SESSIONS](#01M7BF6GRG3NJZTA29TYVRVFT7) |
+
+- Chosen: clients start the daemon in the background; it watches declared inputs, so the next request is already warm, and exits when idle.
+- Rejected: explicit start only, as in 0.4.0-alpha.1. The CLI never started a daemon, so most calls ran cold.
+
+---
+
+<a id="01M7CMW6Z9MMB1705N02S9CCYG"></a>
+
+### Run one daemon per Mara version
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-DAEMON-PER-VERSION |
+| Status | Accepted |
+| Justifies | [DES-DAEMON-LIFECYCLE](#01M7BF6GR80WA207P4BBFWW671) |
+
+- Chosen: each version has its own lock and socket. Daemons of different versions coexist and exit when idle.
+- Rejected: one daemon per OS user that exits when a client of another version arrives. Projects pinned to different versions would stop each other's daemon on every call and never run warm.
+- Chosen by the orchestrator on the maintainer's behalf on 2026-11-16: a daemon belongs to a build, its version with the path, size and modification time of its executable, so it never answers for another build's code ([REQ-SAME-RESULT-ON-EVERY-HOST](../engine.mara.md#01M7BF6GXHZNABX9R7NKPNGJNM), [REQ-NEVER-STALE](#01M7BF6GQSA67MYWBHWA6VYA3E)).
+- Rejected: the version alone. Several worktrees of one version run different code every day.
+- Rejected: a hash of the executable's contents. Every call would read the whole binary.
+
+---
+
+<a id="01M7CQ57T4TYP96W06VB9P2W96"></a>
+
+### Enable browser access only by flags on `daemon start`
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-HTTP-BY-FLAG |
+| Status | Accepted |
+| Justifies | [DES-BROWSER-LISTENER](#01M7CQ57TJY788DMPBN4BX1SEM) |
+
+- Chosen: the user turns the listener on and names origins and projects when starting the daemon. Nothing is persisted.
+- Rejected: allowed origins in the project configuration. A cloned repository could grant a web origin access to itself.

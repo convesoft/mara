@@ -1,6 +1,6 @@
 //! The single-file authoring operations over a snapshot: `item create`, `item update`,
-//! `item delete`, `relation add` and `relation remove` (`docs/authoring.mara.md`,
-//! DES-AUTHORING-REQUESTS in `docs/authoring-requests.mara.md`).
+//! `item delete`, `relation add` and `relation remove` (`docs/authoring/index.mara.md`,
+//! DES-AUTHORING-REQUESTS in `docs/authoring/index.mara.md`).
 //!
 //! Each computes its edit with the item writer ([`crate::write`]), reads every document it
 //! writes back through one [`ReadBack`] (ADR-READ-BACK-EVERY-EDIT), and returns the new contents

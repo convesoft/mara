@@ -1,4 +1,4 @@
-//! The grammar of the admitted language (DES-PROGRAM-PROFILE in `docs/rules-facts.mara.md`).
+//! The grammar of the admitted language (DES-PROGRAM-PROFILE in `docs/rules/index.mara.md`).
 //!
 //! A recursive descent over the tokens of one file. Whatever the grammar does not name is
 //! refused at the token where it stopped; no construct is admitted by default.

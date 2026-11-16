@@ -1,7 +1,7 @@
 #![cfg(unix)]
 
 //! `mara prime` through the real binary in disposable directories: the CLI side of
-//! VER-AGENT-GUIDE in `docs/verification-hosts.mara.md`.
+//! VER-AGENT-GUIDE in `docs/verification.mara.md`.
 
 use std::collections::BTreeSet;
 use std::fs;

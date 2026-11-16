@@ -1,5 +1,5 @@
 //! Read operations, each answered in bounded pages: search, `get`, `relation list` and
-//! `item list` over a snapshot (`docs/retrieval.mara.md`), `schema list` and `schema get` over
+//! `item list` over a snapshot (`docs/retrieval/index.mara.md`), `schema list` and `schema get` over
 //! a schema (REQ-SCHEMA-INSPECTION in `docs/project.mara.md`).
 //!
 //! An operation computes its whole result, then writes the page that its cursor names

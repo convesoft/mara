@@ -1,5 +1,5 @@
-//! `project fix`: REQ-ONE-FIX-OPERATION in `docs/authoring.mara.md` and DES-FIX-REPAIRS in
-//! `docs/authoring-requests.mara.md`.
+//! `project fix`: REQ-ONE-FIX-OPERATION in `docs/authoring/index.mara.md` and DES-FIX-REPAIRS in
+//! `docs/authoring/index.mara.md`.
 //!
 //! It refuses a project whose configuration or schema has an error, as every operation but
 //! validation does (DES-PROJECT-CONFIGURATION); the problems of documents are what it repairs.

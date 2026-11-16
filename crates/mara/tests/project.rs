@@ -529,7 +529,7 @@ fn the_documented_examples_load_as_a_project() {
 /// without diagnostics.
 #[test]
 fn the_documented_code_example_loads() {
-    const CODE: &str = include_str!("../../../docs/code.mara.md");
+    const CODE: &str = include_str!("../../../docs/code/index.mara.md");
     let dir = TempDir::new();
     let example = format!(
         "{}\n{}",

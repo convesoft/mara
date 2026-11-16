@@ -1,6 +1,6 @@
 //! Code markers at the basic level through the real `mara` binary and `mara mcp`, on disposable
 //! projects initialized from `engineering`: VER-CODE-MARKERS in
-//! `docs/verification-code.mara.md`, VER-CODE-EDITS in `docs/verification-code-use.mara.md`,
+//! `docs/code/verification.mara.md`, VER-CODE-EDITS in `docs/code/verification.mara.md`,
 //! and the code rows of VER-DELETE-ITEM and VER-INTERRUPTED-EDITS.
 
 #![cfg(unix)]

@@ -1,6 +1,6 @@
 //! `query list`, `query execute`, `query view` and `query gate`: a project's named consumers of
 //! its programs (DES-RULE-CONSUMERS, DES-GATE-OUTCOME, DES-REQUEST-INPUTS and
-//! DES-QUERY-RESULTS in `docs/rules.mara.md`).
+//! DES-QUERY-RESULTS in `docs/rules/index.mara.md`).
 //!
 //! Each refuses a project whose configuration or schema has an error, as every read does. A
 //! request is refused before any program runs when it names no entry of its kind, an unknown or

@@ -1,7 +1,7 @@
 //! `item move` and `item rename` through the real `mara` binary, on disposable projects in the
-//! temporary directory: docs/verification-authoring.mara.md (VER-MOVE-ITEM, VER-RENAME-ID), the
-//! cases of docs/verification-writes.mara.md for these operations, and their alpha.2 rows of
-//! docs/verification-documents.mara.md.
+//! temporary directory: docs/authoring/verification.mara.md (VER-MOVE-ITEM, VER-RENAME-ID), the
+//! cases of docs/authoring/verification.mara.md for these operations, and their alpha.2 rows of
+//! docs/verification.mara.md.
 
 mod interrupted;
 mod moving;

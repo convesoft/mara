@@ -1,6 +1,6 @@
 //! What a program reads: `mara.dl`, the fact relations of a document snapshot
-//! (DES-FACT-BRIDGE in `docs/rules-facts.mara.md`) and the inputs a request supplies
-//! (DES-REQUEST-INPUTS in `docs/rules.mara.md`). The host writes each relation's JSON form to
+//! (DES-FACT-BRIDGE in `docs/rules/index.mara.md`) and the inputs a request supplies
+//! (DES-REQUEST-INPUTS in `docs/rules/index.mara.md`). The host writes each relation's JSON form to
 //! the file [`file_name`] names and generates the directives that read it (DES-RULE-EXECUTION).
 
 mod inputs;

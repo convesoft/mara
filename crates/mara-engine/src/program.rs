@@ -1,5 +1,5 @@
 //! Mara's parser for the admitted program language (DES-PROGRAM-PROFILE in
-//! `docs/rules-facts.mara.md`).
+//! `docs/rules/index.mara.md`).
 //!
 //! A program is admitted only if this module understands all of it: its files, read as Soufflé
 //! reads them, follow the grammar of the admitted language, its types resolve to `symbol`,
@@ -112,7 +112,7 @@ pub struct Refusal {
 
 impl Location {
     /// The source line, then a caret under the column on the next line: how a compile error's
-    /// message ends (DES-RULE-EXECUTION in `docs/rules-evaluation.mara.md`).
+    /// message ends (DES-RULE-EXECUTION in `docs/rules/evaluation.mara.md`).
     pub fn excerpt(&self) -> String {
         let caret: String = self
             .source_line
@@ -128,7 +128,7 @@ impl Location {
 impl Refusal {
     /// The error diagnostic of a refusal: a compile error's form, its message ending with the
     /// source line and a caret under the column (DES-RULE-EXECUTION in
-    /// `docs/rules-evaluation.mara.md`).
+    /// `docs/rules/evaluation.mara.md`).
     pub fn diagnostic(&self) -> Diagnostic {
         let location = &self.location;
         Diagnostic::error(

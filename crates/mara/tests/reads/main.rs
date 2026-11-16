@@ -1,6 +1,6 @@
 //! The read operations through the real `mara` binary, on disposable projects in the temporary
-//! directory, each with its own configuration (docs/verification-retrieval.mara.md and the read
-//! cases of docs/verification-documents.mara.md).
+//! directory, each with its own configuration (docs/retrieval/verification.mara.md and the read
+//! cases of docs/verification.mara.md).
 
 mod items;
 mod nodes;

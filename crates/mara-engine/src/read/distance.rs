@@ -1,4 +1,4 @@
-//! Typo tolerance (REQ-TYPO-TOLERANT-SEARCH in `docs/retrieval.mara.md`).
+//! Typo tolerance (REQ-TYPO-TOLERANT-SEARCH in `docs/retrieval/index.mara.md`).
 
 /// Whether `a` and `b` are at most `max` edits apart. An edit inserts, deletes or substitutes
 /// one character, or swaps two adjacent characters: the optimal string alignment distance, the

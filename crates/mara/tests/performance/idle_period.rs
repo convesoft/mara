@@ -1,4 +1,4 @@
-//! The case of ADR-TEST-IDLE-PERIOD (`docs/daemon.mara.md`) that finds no trace of the test
+//! The case of ADR-TEST-IDLE-PERIOD (`docs/daemon/index.mara.md`) that finds no trace of the test
 //! idle period in a release build: a daemon started with the variable set outlives it, and the
 //! binary does not hold the variable's name.
 

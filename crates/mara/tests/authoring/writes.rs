@@ -1,4 +1,4 @@
-//! The cases of docs/verification-writes.mara.md for the single-file operations:
+//! The cases of docs/authoring/verification.mara.md for the single-file operations:
 //! VER-PRESERVED-BYTES, the refusals of VER-REFUSED-EDITS that need no pause point, and the CLI
 //! cases of VER-CONCURRENT-WRITERS.
 

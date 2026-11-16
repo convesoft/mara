@@ -4,7 +4,7 @@
 //! the snapshot rebuilt only when its key changed.
 //!
 //! Code files are inputs too, read only by a request that reads code (DES-CODE-READERS in
-//! `docs/code.mara.md`): each is read and hashed only when its stat changed, and scanned for
+//! `docs/code/index.mara.md`): each is read and hashed only when its stat changed, and scanned for
 //! markers only when its contents or its language's comment prefixes changed.
 //!
 //! The CLI starts each request with a new [`Inputs`], so it reads everything once. A host that

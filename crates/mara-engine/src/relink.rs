@@ -1,6 +1,6 @@
 //! Moving an item and renaming its ID, with the links that follow (REQ-MOVE-ITEM, REQ-RENAME-ID
-//! and DES-MOVE-AND-RENAME in `docs/authoring.mara.md`). Each computes the splices of every
-//! document it writes, in the order of DES-WRITE-PROCEDURE in `docs/writes.mara.md`. The host
+//! and DES-MOVE-AND-RENAME in `docs/authoring/index.mara.md`). Each computes the splices of every
+//! document it writes, in the order of DES-WRITE-PROCEDURE in `docs/authoring/writes.mara.md`. The host
 //! reads them back ([`crate::write::ReadBack`]) and writes them.
 
 mod links;

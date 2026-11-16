@@ -2,7 +2,7 @@
 //!
 //! Every byte is accounted for: what Soufflé could read differently is refused here, before any
 //! grammar sees it. Strings, numbers, comments and directives follow the behaviour the reviews
-//! observed (EVD-SOUFFLE-PROGRAM-REACH in `docs/rules-evaluation.mara.md`).
+//! observed (EVD-SOUFFLE-PROGRAM-REACH in `docs/rules/evaluation.mara.md`).
 
 use super::Fault;
 

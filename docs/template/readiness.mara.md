@@ -30,7 +30,7 @@ A gate of the `engineering` template passes only when every named item is proven
 | ID | DES-TEMPLATE-QUERIES |
 | Status | Accepted |
 | Satisfies | [REQ-TEMPLATE-GATES-PROVE-READINESS](#01M7CT60MNF0XPXR9NB6X74F3B) |
-| Satisfies | [REQ-TEMPLATE-ACCEPTANCE-RULES](template.mara.md#01M7CT60KVJ75RV9GPP3SEF0WX) |
+| Satisfies | [REQ-TEMPLATE-ACCEPTANCE-RULES](index.mara.md#01M7CT60KVJ75RV9GPP3SEF0WX) |
 
 | Query | Rows, for the item in the first column |
 | --- | --- |
@@ -40,7 +40,7 @@ A gate of the `engineering` template passes only when every named item is proven
 | `relation-lifecycle` | Source item: relation, target, both statuses and the class |
 | `implemented` | Requirement, Design or Verification: each code link that implements it, directly or, for a Requirement, through an accepted Design that satisfies it |
 | `risk-level` | Risk: likelihood, consequence and level |
-| `risk-scope` | Requirement: every node through which a risk can be relevant to it ([DES-TEMPLATE-RISK-LEVEL](template.mara.md#01M7CT60MFPF2Y871JJDZP5K0T)) |
+| `risk-scope` | Requirement: every node through which a risk can be relevant to it ([DES-TEMPLATE-RISK-LEVEL](index.mara.md#01M7CT60MFPF2Y871JJDZP5K0T)) |
 | `relevant-risks` | Requirement: each relevant risk with its status and the node it threatens |
 | `verification-status` | Requirement: each Verification with its status and its result for the candidate |
 | `validation-status` | Need or Goal: each Validation with its status and its result in its context, and one summary row |
@@ -50,7 +50,7 @@ A gate of the `engineering` template passes only when every named item is proven
 - Invariants, gates and views are written over these relations, so they cannot disagree.
 - A lookup along one relation gets no query; `relation list` answers it.
 - Invariants live in a program without the per-requirement closures (`risk-scope`, `relevant-risks`), so validation never computes them.
-- The template's programs use only constructs that Soufflé can explain ([REQ-EXPLAIN-OUTCOMES](rules-evaluation.mara.md#01M7BF6HCQX66B3MYRH5BZM6BE)).
+- The template's programs use only constructs that Soufflé can explain ([REQ-EXPLAIN-OUTCOMES](../rules/evaluation.mara.md#01M7BF6HCQX66B3MYRH5BZM6BE)).
 
 ---
 
@@ -72,9 +72,9 @@ A gate of the `engineering` template passes only when every named item is proven
 | `validation_result` | Validation ID, Need or Goal ID, context, revision of each, result |
 
 - A result is `pass`, `fail`, `inconclusive` or `error`. A context is opaque text, such as a deployment or an observation window.
-- A result counts only when its candidate or context is the requested one and both revisions are the items' current revisions ([DES-FACT-BRIDGE](rules-facts.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)).
+- A result counts only when its candidate or context is the requested one and both revisions are the items' current revisions ([DES-FACT-BRIDGE](../rules/index.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)).
 - When several results count, the worst wins: `fail`, `error`, `inconclusive`, `pass`.
-- Without a counting result the status is `pending` when the input is complete and `unavailable` when it is not ([DES-REQUEST-INPUTS](rules.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)).
+- Without a counting result the status is `pending` when the input is complete and `unavailable` when it is not ([DES-REQUEST-INPUTS](../rules/index.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)).
 - The summary row of `validation-status` is the worst status of the target's accepted Validations, with `pending` and `unavailable` ranked between `inconclusive` and `pass`. A target without an accepted Validation is not validated.
 
 ---
@@ -91,11 +91,11 @@ A gate of the `engineering` template passes only when every named item is proven
 
 | Gate | Subjects | An item fails when | An item is unavailable when |
 | --- | --- | --- | --- |
-| `implementation-ready` | Requirements | It is not accepted, it breaks an acceptance or lifecycle rule, or a blocking risk is relevant to it ([DES-TEMPLATE-RISK-LEVEL](template.mara.md#01M7CT60MFPF2Y871JJDZP5K0T)) | A relevant accepted risk has no level |
+| `implementation-ready` | Requirements | It is not accepted, it breaks an acceptance or lifecycle rule, or a blocking risk is relevant to it ([DES-TEMPLATE-RISK-LEVEL](index.mara.md#01M7CT60MFPF2Y871JJDZP5K0T)) | A relevant accepted risk has no level |
 | `verified` | Requirements | It is not accepted; it has no accepted Verification; all code was read and `implemented` has no row for it; or an accepted Verification has, for this requirement, a counting result other than `pass`, or none although the input is complete | `implemented` has no row for it and code was not read completely; or an accepted Verification has no counting result for it and the input is not complete |
 | `release-ready` | Requirements and Validations | A Requirement fails either gate above. A Validation is not accepted, validates no accepted Need or Goal, has no context, or has, for a Need or Goal it validates, a counting result other than `pass`, or none although the input is complete | A Requirement is unavailable in either gate above. A Validation has no counting result for a Need or Goal it validates and the input is not complete |
 
-- A failure stands beside an unavailable fact: the item is failed ([DES-GATE-OUTCOME](rules.mara.md#01M7CT60KEEZRJCPJ0CPT7YT5B)).
+- A failure stands beside an unavailable fact: the item is failed ([DES-GATE-OUTCOME](../rules/index.mara.md#01M7CT60KEEZRJCPJ0CPT7YT5B)).
 - A Validation must pass for every Need or Goal it validates.
 - Every accepted Verification of a requirement must pass; one pass does not cover another.
 - No gate requires a Design, and none adds decomposed, parent or sibling requirements to the named items.
@@ -111,7 +111,7 @@ A gate of the `engineering` template passes only when every named item is proven
 | --- | --- |
 | ID | DES-TEMPLATE-VIEWS |
 | Status | Accepted |
-| Satisfies | [REQ-PROJECT-INIT](project.mara.md#01M7BF6H8Z02SNKXD2XPGVD87M) |
+| Satisfies | [REQ-PROJECT-INIT](../project.mara.md#01M7BF6H8Z02SNKXD2XPGVD87M) |
 
 | View | One row per | Columns |
 | --- | --- | --- |
@@ -121,3 +121,22 @@ A gate of the `engineering` template passes only when every named item is proven
 
 - A row stays when a fact is absent, and its cell says so. Missing, unavailable and failed stay distinct.
 - A view defines no meaning of its own: it renders relations that the queries and gates define.
+
+---
+
+## Decisions
+
+---
+
+<a id="01M7CXC2NESPHY4HB3QXEDTAJ2"></a>
+
+### Bind a result to the revision of what it checks
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-RESULTS-BOUND-TO-BOTH-REVISIONS |
+| Status | Accepted |
+| Justifies | [DES-TEMPLATE-INPUTS](../template/readiness.mara.md#01M7CT60N3AT6378YRQ62A5NM3) |
+
+- Chosen: a result carries the revision of its Verification or Validation and of the Requirement, Need or Goal it was produced for, and counts only while both are current.
+- Rejected: the revision of the Verification or Validation alone. A requirement that changes while its verification stays the same would keep its old passes.

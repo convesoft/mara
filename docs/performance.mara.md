@@ -28,7 +28,7 @@ A request performs derivation work only for inputs it reads; undeclared files an
 | Status | Accepted |
 | Satisfies | [NEED-INTERACTIVE-SPEED](product.mara.md#01M7BF6H83C0SM1C8RHDHMBXZ2) |
 
-On the generated corpus ([DES-PERFORMANCE-HARNESS](#01M7BF6H4HKH0B0TXQZM3VXASA)), each operation's time except that of `project convert` grows at most 2.3× per doubling from 1× to 16× ([ADR-NO-CONVERTER-SCALING](decisions-runtime.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)). Built-in checks do work linear in items plus edges, and validation runs each program once.
+On the generated corpus ([DES-PERFORMANCE-HARNESS](#01M7BF6H4HKH0B0TXQZM3VXASA)), each operation's time except that of `project convert` grows at most 2.3× per doubling from 1× to 16× ([ADR-NO-CONVERTER-SCALING](decisions.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)). Built-in checks do work linear in items plus edges, and validation runs each program once.
 
 ---
 
@@ -99,7 +99,7 @@ Corpus generator:
 - Chains are at most 2 edges deep, with at most 2 chain edges into one item.
 - Accepted items obey the engineering template's acceptance and lifecycle rules, and no built-in check fails.
 - The configuration is the example of [DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27). The schema is the engineering vocabulary, written with only the keys that [DES-SCHEMA-MODEL](project.mara.md#01M7BF6HA0KG3R3AATWM1P2X1G) shows, so each Verification and Validation has one method and each Term one alias.
-- It also declares Rust at the basic level in `src/**/*.rs` and `tests/**/*.rs` with the prefix `//` ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)), so the corpus's markers are code links; none names the Verification that the delete case removes. From 0.4.0-alpha.3 it declares the `engineering` programs and entries; a program of the test with one invariant, query, view and gate stands in until mara-tx0fcf ships them.
+- It also declares Rust at the basic level in `src/**/*.rs` and `tests/**/*.rs` with the prefix `//` ([DES-CODE-MARKERS](code/index.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)), so the corpus's markers are code links; none names the Verification that the delete case removes. From 0.4.0-alpha.3 it declares the `engineering` programs and entries; a program of the test with one invariant, query, view and gate stands in until mara-tx0fcf ships them.
 - `query gate` and `query report` name one requirement of the last cluster. The gate request supplies a candidate and a complete `verification_result` file with one `pass` row per `Verifies` edge, `results.json` in the corpus root; `query report` explains one failing row of that gate.
 - Each corpus also holds a `.git` directory, a `.gitignore`, ignored build output, an ignored document, a document outside the include patterns and a README.
 
@@ -108,8 +108,8 @@ Tests:
 - The counter and scaling tests are the `performance` integration test of the `mara` crate, with the generator. They run the real binary with an empty environment, but for `MARA_NO_DAEMON=1` in direct-mode cases and, in daemon cases, the test's own runtime directory as `XDG_RUNTIME_DIR` on Linux and as `TMPDIR` on macOS.
 - A case is the arguments and the exit status of one invocation. The harness asserts the status before it accepts the counts or the timing. Each operation adds its case to both tests.
 - A case of `mara mcp` is one session of the real server: the `initialize` handshake, `tools/list` and one tool call, whose stats line is that call's. A session without a call does no work.
-- `project convert` has no scaling case. Its counter case runs the real CLI on a small fixed 0.3.0 input, a hand-written fixture of the test and not generator output ([ADR-NO-CONVERTER-SCALING](decisions-runtime.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)).
-- A case of the release-build test starts a daemon with `MARA_TEST_IDLE_SECONDS=1` and opens a session: 3 s later `mara daemon status` still lists that session. The test then stops the daemon and finds no `MARA_TEST_IDLE_SECONDS` in the binary's bytes ([DES-IDLE-SESSIONS](daemon.mara.md#01M7CQ57TBWFN78CCMEAY6XFTF)).
+- `project convert` has no scaling case. Its counter case runs the real CLI on a small fixed 0.3.0 input, a hand-written fixture of the test and not generator output ([ADR-NO-CONVERTER-SCALING](decisions.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)).
+- A case of the release-build test starts a daemon with `MARA_TEST_IDLE_SECONDS=1` and opens a session: 3 s later `mara daemon status` still lists that session. The test then stops the daemon and finds no `MARA_TEST_IDLE_SECONDS` in the binary's bytes ([DES-IDLE-SESSIONS](daemon/index.mara.md#01M7CQ57TBWFN78CCMEAY6XFTF)).
 - Two cases without an operation pin today's behaviour and stay: `mara --debug-stats` exits 0, and `mara --debug-stats --no-such-option` exits 2 after a diagnostic. Neither does work, and the first does not grow. Changing either behaviour changes its case.
 - Engine code that runs inside operations, such as the document parser, adds no case: it counts its own work, and the cases of the operations that run it assert and time that work.
 - Input tracking and the snapshot build also have cases below the CLI, in the same target: exact counts of a cold build and of later builds in the same process (nothing changed, one document edited, undeclared files changed) at every size, and the growth of a cold build's time.
@@ -124,7 +124,7 @@ Tests:
 - It is not defined for a machine whose memory bandwidth other processes saturate, where unchanged code exceeded the limit beside 8 processes writing 64 MiB buffers. A failure there is rerun without that load.
 - The 64× run (`--ignored`) asserts counts only. The growth limit applies from 1× to 16×.
 - A case that writes starts each run from the same files: before the run, outside the timed span, the test restores what the previous run wrote.
-- Both tests also run `project validate`, `relation list`, `item rename` and `item move` of the hub item, and `project fix` after the hub item is moved to another directory by hand, on a hub project: 1000 × size items that link to one item whose `Type` and `ID` rows follow 1000 × size other rows, so late metadata meets many incoming edges. The other rows' keys alternate between `Tags` and `No`, as long as `Type` and `ID`, so a scan of the hub's rows for either compares every other key in full. The hub project also holds the Rust files of [VER-CODE-WORK-COUNTERS](verification-code-use.mara.md#01M7JKT47QNN11F4ZG7SG03CG8).
+- Both tests also run `project validate`, `relation list`, `item rename` and `item move` of the hub item, and `project fix` after the hub item is moved to another directory by hand, on a hub project: 1000 × size items that link to one item whose `Type` and `ID` rows follow 1000 × size other rows, so late metadata meets many incoming edges. The other rows' keys alternate between `Tags` and `No`, as long as `Type` and `ID`, so a scan of the hub's rows for either compares every other key in full. The hub project also holds the Rust files of [VER-CODE-WORK-COUNTERS](code/verification.mara.md#01M7JKT47QNN11F4ZG7SG03CG8).
 - Check steps do not count work per row, per holder of a shared key or per finding; scaling cases gate it, each on a project of one shape: an item with 1000 × size repeated `ID`, `Type` or `Status` rows, other values of a single-valued enum field, relation rows to one target or to as many targets, or undeclared keys; 500 × size items that share one ID or one MID; 1000 × size broken links on one line.
 
 ---

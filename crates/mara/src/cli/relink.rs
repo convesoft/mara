@@ -1,6 +1,6 @@
 //! `item move` and `item rename` (REQ-MOVE-ITEM, REQ-RENAME-ID and DES-MOVE-AND-RENAME in
-//! `docs/authoring.mara.md`): the edit that `mara_engine::relink` computes, read back and put on
-//! disk by the write procedure (DES-WRITE-PROCEDURE in `docs/writes.mara.md`).
+//! `docs/authoring/index.mara.md`): the edit that `mara_engine::relink` computes, read back and put on
+//! disk by the write procedure (DES-WRITE-PROCEDURE in `docs/authoring/writes.mara.md`).
 
 use std::fmt::Write as _;
 

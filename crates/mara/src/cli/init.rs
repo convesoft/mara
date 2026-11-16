@@ -1,5 +1,5 @@
 //! `project init`: REQ-PROJECT-INIT in `docs/project.mara.md` and DES-PROJECT-INIT in
-//! `docs/init.mara.md`.
+//! `docs/project.mara.md`.
 //!
 //! The templates are embedded in the binary. Their files are written through the write
 //! procedure (DES-WRITE-PROCEDURE) as files that must not exist, the configuration last.

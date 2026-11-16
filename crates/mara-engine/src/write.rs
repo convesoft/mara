@@ -1,7 +1,7 @@
 //! The item writer: every MID anchor, heading, metadata table, relation link and item separator
-//! that Mara writes (DES-ITEM-WRITER in `docs/authoring.mara.md`). It returns text, or splices at
+//! that Mara writes (DES-ITEM-WRITER in `docs/authoring/index.mara.md`). It returns text, or splices at
 //! the parser's offsets, so that a write changes only the bytes it must (REQ-MINIMAL-REWRITE in
-//! `docs/writes.mara.md`). [`ReadBack::edit`] applies the splices of one document and reads the
+//! `docs/authoring/writes.mara.md`). [`ReadBack::edit`] applies the splices of one document and reads the
 //! result back before the host puts it on disk.
 
 mod read_back;

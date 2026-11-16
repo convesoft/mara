@@ -1,5 +1,5 @@
 //! The facts and supplied inputs that a program reads (VER-FACT-ROWS and VER-REQUEST-INPUTS in
-//! docs/verification-rules.mara.md). VER-FACT-ROWS runs through a configured query and
+//! docs/rules/verification.mara.md). VER-FACT-ROWS runs through a configured query and
 //! `query execute` (`rows.rs`). The checks of supplied inputs run below the CLI (`inputs.rs`):
 //! the snapshot comes from the host's inputs, the files from `mara::rules`, and the wrapper and
 //! the `souffle` invocation are this test's, as DES-RULE-EXECUTION describes them; their CLI,

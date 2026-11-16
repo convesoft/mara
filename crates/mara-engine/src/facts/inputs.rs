@@ -1,5 +1,5 @@
 //! The inputs a request supplies, checked before any run (DES-REQUEST-INPUTS in
-//! `docs/rules.mara.md`).
+//! `docs/rules/index.mara.md`).
 
 use std::fmt;
 

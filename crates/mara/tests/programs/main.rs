@@ -1,5 +1,5 @@
 //! Programs evaluated by the real `mara` binary, on disposable projects (Verification items in
-//! `docs/verification-rules.mara.md` and `docs/verification-programs.mara.md`): the invariant
+//! `docs/rules/verification.mara.md` and `docs/rules/verification.mara.md`): the invariant
 //! side and the query, view and gate cases of VER-PROGRAM-CONSUMERS, VER-REQUEST-INPUTS through
 //! the CLI, VER-PROGRAM-FAULTS, VER-EVALUATION-TIME-LIMIT and VER-PROGRAM-REACH-CASES for
 //! validation, `query execute` and `query gate`, and VER-ADMITTED-LANGUAGE's compile check of

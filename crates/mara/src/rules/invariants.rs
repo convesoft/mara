@@ -1,6 +1,6 @@
 //! Invariants in validation: every program evaluated once, and the rows of its invariants as
-//! diagnostics (DES-RULE-CONSUMERS in `docs/rules.mara.md`, DES-RULE-EXECUTION in
-//! `docs/rules-evaluation.mara.md`).
+//! diagnostics (DES-RULE-CONSUMERS in `docs/rules/index.mara.md`, DES-RULE-EXECUTION in
+//! `docs/rules/evaluation.mara.md`).
 
 use mara_engine::config::EntryKind;
 use mara_engine::diagnostic::Diagnostic;

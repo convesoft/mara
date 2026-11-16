@@ -1,6 +1,6 @@
 //! Search and `item list`, and the filters they share (REQ-SEARCH-ITEMS-AND-NARRATIVE,
 //! REQ-SEARCH-RANKING, REQ-TYPO-TOLERANT-SEARCH and REQ-LIST-ITEMS in
-//! `docs/retrieval.mara.md`).
+//! `docs/retrieval/index.mara.md`).
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};

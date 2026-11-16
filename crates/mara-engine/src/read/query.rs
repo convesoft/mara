@@ -1,4 +1,4 @@
-//! The results of the `query` operations, in pages (DES-QUERY-RESULTS in `docs/rules.mara.md`):
+//! The results of the `query` operations, in pages (DES-QUERY-RESULTS in `docs/rules/index.mara.md`):
 //! the entries `query list` shows, the rows of `query execute` and `query view`, and the items
 //! a gate judges.
 

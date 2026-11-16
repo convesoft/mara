@@ -1,7 +1,7 @@
 //! `project convert` through the real CLI on disposable copies of this repository's 0.3.0 project
 //! (`docs/` and `.mara/` at tag `v0.3.0`) and of fixtures: VER-CONVERSION in
-//! `docs/verification-hosts.mara.md`, and the `project convert` cases of VER-PRESERVED-BYTES,
-//! VER-REFUSED-EDITS and VER-INTERRUPTED-EDITS in `docs/verification-writes.mara.md`.
+//! `docs/verification.mara.md`, and the `project convert` cases of VER-PRESERVED-BYTES,
+//! VER-REFUSED-EDITS and VER-INTERRUPTED-EDITS in `docs/authoring/verification.mara.md`.
 
 #![cfg(unix)]
 

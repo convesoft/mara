@@ -1,4 +1,4 @@
-//! The daemon process (DES-DAEMON-LIFECYCLE in `docs/daemon.mara.md`).
+//! The daemon process (DES-DAEMON-LIFECYCLE in `docs/daemon/index.mara.md`).
 //!
 //! `daemon start` forks it while holding the build's lock, which the daemon keeps until it
 //! exits. It leaves the caller's session and standard streams, binds the build's socket and

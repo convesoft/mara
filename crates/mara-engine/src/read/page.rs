@@ -1,5 +1,5 @@
 //! List pages and the JSON form of read results (REQ-BOUNDED-PAGES and DES-PAGING in
-//! `docs/retrieval.mara.md`, DES-READ-RESULTS in `docs/retrieval-requests.mara.md`).
+//! `docs/retrieval/index.mara.md`, DES-READ-RESULTS in `docs/retrieval/index.mara.md`).
 
 use crate::diagnostic::Diagnostic;
 use crate::hash::Hash;

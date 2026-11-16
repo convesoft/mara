@@ -1,4 +1,4 @@
-//! The rows of an invariant as diagnostics (DES-RULE-CONSUMERS in `docs/rules.mara.md`).
+//! The rows of an invariant as diagnostics (DES-RULE-CONSUMERS in `docs/rules/index.mara.md`).
 
 use crate::config::{CONFIG_PATH, Consumer, Entry};
 use crate::diagnostic::{Diagnostic, intern};

@@ -1,4 +1,4 @@
-//! The daemons of a test, as VER-DAEMON-START (`docs/verification-daemon.mara.md`) identifies
+//! The daemons of a test, as VER-DAEMON-START (`docs/daemon/verification.mara.md`) identifies
 //! them: processes of a binary under test whose environment holds the test's runtime directory
 //! as `XDG_RUNTIME_DIR`. Dropping [`Daemons`] kills those that still run, and only those, also
 //! when the test panics. Linux only: it reads `/proc`.

@@ -1,7 +1,7 @@
 //! The single-file authoring operations through the real `mara` binary, on disposable projects
 //! in the temporary directory: `item create`, `item update`, `item delete`, `relation add` and
-//! `relation remove` (docs/verification-authoring.mara.md), with their cases of
-//! docs/verification-writes.mara.md and the alpha.2 rows of docs/verification-documents.mara.md.
+//! `relation remove` (docs/authoring/verification.mara.md), with their cases of
+//! docs/authoring/verification.mara.md and the alpha.2 rows of docs/verification.mara.md.
 
 #![cfg(unix)]
 

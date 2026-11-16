@@ -30,7 +30,7 @@ check_linkage() {
 }
 
 # Mara's invocation, with no compiler, mcpp or libfunctors reachable, on JSON
-# facts and outputs (DES-RULE-EXECUTION in docs/rules-evaluation.mara.md).
+# facts and outputs (DES-RULE-EXECUTION in docs/rules/evaluation.mara.md).
 smoke() {
     local dir
     mkdir -p "$out"

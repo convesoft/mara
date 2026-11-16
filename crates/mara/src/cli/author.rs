@@ -1,6 +1,6 @@
 //! `item create`, `item update`, `item delete`, `relation add` and `relation remove`
-//! (`docs/authoring.mara.md` and DES-AUTHORING-REQUESTS in `docs/authoring-requests.mara.md`),
-//! each put on disk by the write procedure (DES-WRITE-PROCEDURE in `docs/writes.mara.md`).
+//! (`docs/authoring/index.mara.md` and DES-AUTHORING-REQUESTS in `docs/authoring/index.mara.md`),
+//! each put on disk by the write procedure (DES-WRITE-PROCEDURE in `docs/authoring/writes.mara.md`).
 
 use mara::inputs::{CodeReads, Inputs};
 use mara::write::{self, Basis, FileWrite, WriteLock};

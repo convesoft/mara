@@ -1,6 +1,6 @@
 //! The programs a configuration declares and their consumers: `[rules]`, `[queries.<name>]`,
 //! `[views.<name>]`, `[invariants.<name>]` and `[gates.<name>]` (DES-RULE-CONSUMERS in
-//! `docs/rules.mara.md`).
+//! `docs/rules/index.mara.md`).
 
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -26,7 +26,7 @@ pub(super) const ROOT_KEYS: &[&str] = &[
 ];
 
 /// The time limit of an evaluation when `[rules]` sets none (REQ-EVALUATION-TIME-LIMIT in
-/// `docs/rules-evaluation.mara.md`).
+/// `docs/rules/evaluation.mara.md`).
 pub const DEFAULT_TIME_LIMIT_SECONDS: u32 = 10;
 
 /// The longest time limit a configuration may set: an hour.
@@ -454,10 +454,10 @@ mod tests {
         diagnostics.iter().map(|d| (d.line - 5, d.code)).collect()
     }
 
-    /// The example of DES-RULE-CONSUMERS in `docs/rules.mara.md` loads as written.
+    /// The example of DES-RULE-CONSUMERS in `docs/rules/index.mara.md` loads as written.
     #[test]
     fn loads_the_example_of_the_design() {
-        let page = include_str!("../../../../docs/rules.mara.md");
+        let page = include_str!("../../../../docs/rules/index.mara.md");
         let start = page.find("```toml\n[rules]").expect("the example") + "```toml\n".len();
         let example = &page[start..start + page[start..].find("```").unwrap()];
         let (rules, diagnostics) = parse(example);

@@ -11,18 +11,25 @@ use mara_engine::work::WorkCounts;
 #[test]
 fn every_anchor_in_docs_is_an_item_with_any_line_ending() {
     let docs = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs");
-    let mut paths: Vec<_> = fs::read_dir(&docs)
-        .expect("list docs/")
-        .map(|entry| entry.expect("read docs/").path())
-        .filter(|path| path.to_string_lossy().ends_with(".mara.md"))
-        .collect();
+    let mut paths = Vec::new();
+    let mut dirs = vec![docs.clone()];
+    while let Some(dir) = dirs.pop() {
+        for entry in fs::read_dir(&dir).expect("list docs/") {
+            let path = entry.expect("read docs/").path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.to_string_lossy().ends_with(".mara.md") {
+                paths.push(path);
+            }
+        }
+    }
     paths.sort();
     assert!(!paths.is_empty(), "no documents in {}", docs.display());
 
     let mut work = WorkCounts::default();
     for path in &paths {
         let bytes = fs::read(path).expect("read a document");
-        let name = format!("docs/{}", path.file_name().unwrap().to_string_lossy());
+        let name = format!("docs/{}", path.strip_prefix(&docs).unwrap().display());
         let parsed = document::parse(&bytes, &mut work);
         // Every anchor line outside code is an item, so nothing is silently left out.
         let anchors = anchor_lines(&String::from_utf8_lossy(&bytes));

@@ -1,8 +1,8 @@
 #![cfg(unix)]
 
 //! `project init` through the real `mara` binary in disposable directories: VER-PROJECT-INIT in
-//! `docs/verification-hosts.mara.md` and the `project init` cases of VER-REFUSED-EDITS in
-//! `docs/verification-writes.mara.md`.
+//! `docs/verification.mara.md` and the `project init` cases of VER-REFUSED-EDITS in
+//! `docs/authoring/verification.mara.md`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -502,7 +502,7 @@ fn paused(dir: &Dir, mut at: impl FnMut(&str, usize)) -> (Run, Vec<String>) {
 /// The declarations of DES-ENGINEERING-VOCABULARY, read from its page, as `schema get` returns
 /// them.
 fn vocabulary() -> Vec<Value> {
-    const PAGE: &str = include_str!("../../../docs/vocabulary.mara.md");
+    const PAGE: &str = include_str!("../../../docs/template/vocabulary.mara.md");
     let name = |label: &str| label.to_lowercase().replace(' ', "_");
     let names = |labels: &str| -> Vec<String> { labels.split(", ").map(name).collect() };
     let statuses: Vec<String> = PAGE

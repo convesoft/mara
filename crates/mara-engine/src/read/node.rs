@@ -1,5 +1,5 @@
 //! Nodes: how a request names one, what a result says of one, and `get` (REQ-READ-NODE,
-//! DES-NARRATIVE-UNITS and DES-PAGING in `docs/retrieval.mara.md`).
+//! DES-NARRATIVE-UNITS and DES-PAGING in `docs/retrieval/index.mara.md`).
 
 use std::ops::Range;
 

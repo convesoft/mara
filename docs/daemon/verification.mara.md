@@ -11,11 +11,11 @@
 | ID | VER-DAEMON-START |
 | Status | Accepted |
 | Methods | Test |
-| Verifies | [REQ-FIRST-CALL-IN-PROCESS](daemon.mara.md#01M7BF6GQK5GM340Z7CP4C83B8) |
+| Verifies | [REQ-FIRST-CALL-IN-PROCESS](index.mara.md#01M7BF6GQK5GM340Z7CP4C83B8) |
 
-Rust integration tests run the real CLI and `mara mcp` in a runtime directory of their own: a new directory of the test, mode 0700, set as `XDG_RUNTIME_DIR` on Linux and as `TMPDIR` on macOS for every client and every copy of the binary ([DES-DAEMON-LIFECYCLE](daemon.mara.md#01M7BF6GR80WA207P4BBFWW671)). Every other test that runs `mara` does the same or runs in direct mode, so no test reaches a daemon it did not start. A daemon of the test is a process of a binary under test whose environment holds that directory (`/proc/<pid>/environ` on Linux, `sysctl` `KERN_PROCARGS2` on macOS); tests identify and stop only those. The project's files last changed at least 2 s before its first call.
+Rust integration tests run the real CLI and `mara mcp` in a runtime directory of their own: a new directory of the test, mode 0700, set as `XDG_RUNTIME_DIR` on Linux and as `TMPDIR` on macOS for every client and every copy of the binary ([DES-DAEMON-LIFECYCLE](index.mara.md#01M7BF6GR80WA207P4BBFWW671)). Every other test that runs `mara` does the same or runs in direct mode, so no test reaches a daemon it did not start. A daemon of the test is a process of a binary under test whose environment holds that directory (`/proc/<pid>/environ` on Linux, `sysctl` `KERN_PROCARGS2` on macOS); tests identify and stop only those. The project's files last changed at least 2 s before its first call.
 
-A call is served in-process when its stats line holds the counts of a cold request and no daemon of the test can have answered it: none runs or can start; or the only one runs a session of the project that answered a request sent at least 2 s after the last change, and would report nothing; or the first call that a daemon of the test answers afterwards reports the counts of a cold request too. A daemon reports the opening of a session with its first response for it ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)), so it had answered nothing before. A call is served by the daemon when it repeats a request sent at least 2 s after the last change and its stats line holds those of the same request again ([VER-WORK-COUNTERS](verification.mara.md#01M7BF6HGG6ET88HS641Y5676G)). A wait for a daemon polls `mara daemon status` for at most 10 s. From 0.4.0-alpha.6 the Node client of the setup of [VER-HOST-COMPARISON](verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9) is a client too, with the stats that [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) gives it.
+A call is served in-process when its stats line holds the counts of a cold request and no daemon of the test can have answered it: none runs or can start; or the only one runs a session of the project that answered a request sent at least 2 s after the last change, and would report nothing; or the first call that a daemon of the test answers afterwards reports the counts of a cold request too. A daemon reports the opening of a session with its first response for it ([DES-PERFORMANCE-HARNESS](../performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)), so it had answered nothing before. A call is served by the daemon when it repeats a request sent at least 2 s after the last change and its stats line holds those of the same request again ([VER-WORK-COUNTERS](../verification.mara.md#01M7BF6HGG6ET88HS641Y5676G)). A wait for a daemon polls `mara daemon status` for at most 10 s. From 0.4.0-alpha.6 the Node client of the setup of [VER-HOST-COMPARISON](../verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9) is a client too, with the stats that [DES-PERFORMANCE-HARNESS](../performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) gives it.
 
 | Case | Expectation |
 | --- | --- |
@@ -48,7 +48,7 @@ A call is served in-process when its stats line holds the counts of a cold reque
 | Status | Accepted |
 | Methods | Test |
 | Methods | Inspection |
-| Verifies | [REQ-NEVER-STALE](daemon.mara.md#01M7BF6GQSA67MYWBHWA6VYA3E) |
+| Verifies | [REQ-NEVER-STALE](index.mara.md#01M7BF6GQSA67MYWBHWA6VYA3E) |
 
 Rust integration tests start a daemon with its own runtime directory ([VER-DAEMON-START](#01M7JKW7JWB2RANYKNE6BHYM26)), send requests to it through the real CLI with `--format json`, and compare each result with that of the same request in CLI direct mode on the same files. In the first four cases the test makes each change with its own file operations and sends the requests at once, without waiting for the watcher, and in a second run 2 s later. That every request checks the inputs on disk whether or not the watcher reported a change is also inspected when mara-xqcnqw is reviewed: the cases below do not keep the watcher from seeing their changes.
 
@@ -59,9 +59,9 @@ Rust integration tests start a daemon with its own runtime directory ([VER-DAEMO
 | The documents' directory replaced by another, as a branch checkout replaces many files at once: documents changed, added and removed | The same |
 | A program file edited | `project validate`, and `query execute` of a query of that program, return the results of direct mode |
 | On the project of [VER-READS-DURING-VALIDATION](#01M7JKWYP3YSJGNEJJQ43RB13C) with a time limit of 5 s: a validation V1; once its `souffle` process runs, the long program replaced by a fast one with the same relations, and a validation V2 sent and answered while V1's process still runs; after V1 answers, a validation V3 | V1 returns the result of direct mode for the files before the replacement, with the time-limit fault; V2 and V3 return the result for the files after it, with neither V1's result nor its fault |
-| A daemon started with `MARA_TEST_IDLE_SECONDS=4` ([DES-IDLE-SESSIONS](daemon.mara.md#01M7CQ57TBWFN78CCMEAY6XFTF)), with sessions of projects A and B and a `mara mcp` server of the test connected; a request to A every second for 8 s and none to B; then B's next request; then no request | After the 8 s, `mara daemon status` lists A's session and not B's; B's request returns the result of direct mode with the counts of a cold request; within 10 s of the last request no daemon of the test runs, and the server's next call is served in-process |
+| A daemon started with `MARA_TEST_IDLE_SECONDS=4` ([DES-IDLE-SESSIONS](index.mara.md#01M7CQ57TBWFN78CCMEAY6XFTF)), with sessions of projects A and B and a `mara mcp` server of the test connected; a request to A every second for 8 s and none to B; then B's next request; then no request | After the 8 s, `mara daemon status` lists A's session and not B's; B's request returns the result of direct mode with the counts of a cold request; within 10 s of the last request no daemon of the test runs, and the server's next call is served in-process |
 | Two copies of one project, as two Git worktrees are, with the same relative paths and other contents; requests alternating between them | Each result is that of direct mode for its own copy |
-| A read while an `item move` of a daemon started with `MARA_TEST_PAUSE` waits in step 3 of its second file ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) | The result of direct mode for the files as they are then, the destination already written |
+| A read while an `item move` of a daemon started with `MARA_TEST_PAUSE` waits in step 3 of its second file ([DES-WRITE-PROCEDURE](../authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) | The result of direct mode for the files as they are then, the destination already written |
 
 ---
 
@@ -74,15 +74,15 @@ Rust integration tests start a daemon with its own runtime directory ([VER-DAEMO
 | ID | VER-READS-DURING-VALIDATION |
 | Status | Accepted |
 | Methods | Test |
-| Verifies | [REQ-READS-DURING-VALIDATION](performance.mara.md#01M7BF6H3T3589901T1AE0ADHM) |
+| Verifies | [REQ-READS-DURING-VALIDATION](../performance.mara.md#01M7BF6H3T3589901T1AE0ADHM) |
 
-Rust integration tests start a daemon with its own runtime directory ([VER-DAEMON-START](#01M7JKW7JWB2RANYKNE6BHYM26)) and a `TMPDIR` under the test's temporary directory, which on macOS is that runtime directory, on a project whose invariant uses the long program of [VER-EVALUATION-TIME-LIMIT](verification-programs.mara.md#01M7HZYKBNDY3ZA77JMB0VD06H) with a time limit of 60 s set in the configuration. A validation runs once a `souffle` process with its working directory under that `TMPDIR` exists; the test then sends the reads, and stops the daemon at the end. The warm budget is checked nightly by [VER-TIME-BUDGETS](verification.mara.md#01M7BF6HH06WEJ67P04H22BM66), Draft with [REQ-TIME-BUDGETS](performance.mara.md#01M7BF6H47MJ8H16R3B4S7750T).
+Rust integration tests start a daemon with its own runtime directory ([VER-DAEMON-START](#01M7JKW7JWB2RANYKNE6BHYM26)) and a `TMPDIR` under the test's temporary directory, which on macOS is that runtime directory, on a project whose invariant uses the long program of [VER-EVALUATION-TIME-LIMIT](../rules/verification.mara.md#01M7HZYKBNDY3ZA77JMB0VD06H) with a time limit of 60 s set in the configuration. A validation runs once a `souffle` process with its working directory under that `TMPDIR` exists; the test then sends the reads, and stops the daemon at the end. The warm budget is checked nightly by [VER-TIME-BUDGETS](../verification.mara.md#01M7BF6HH06WEJ67P04H22BM66), Draft with [REQ-TIME-BUDGETS](../performance.mara.md#01M7BF6H47MJ8H16R3B4S7750T).
 
 | Case | Expectation |
 | --- | --- |
 | `project validate` through the CLI; while it runs, `item list`, `get` of an item and `search` through other CLI calls | Each read returns the result of CLI direct mode while that `souffle` process still runs and before the validation answers |
 | One `mara mcp` session that sends a `project_validate` call, then those reads as calls while it runs | The same |
-| `item list` while an `item create` of a daemon started with `MARA_TEST_PAUSE` waits before step 2 ([DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) | Returns the result of direct mode for the files before the create, while the create still waits |
+| `item list` while an `item create` of a daemon started with `MARA_TEST_PAUSE` waits before step 2 ([DES-WRITE-PROCEDURE](../authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)) | Returns the result of direct mode for the files before the create, while the create still waits |
 
 ---
 
@@ -95,11 +95,11 @@ Rust integration tests start a daemon with its own runtime directory ([VER-DAEMO
 | ID | VER-DAEMON-WRITES |
 | Status | Accepted |
 | Methods | Test |
-| Verifies | [REQ-WRITERS-SERIALIZED](writes.mara.md#01M7CXC2N8EZYVHGY7T2GPPB3X) |
-| Verifies | [REQ-REFUSED-EDIT-CHANGES-NOTHING](writes.mara.md#01M7BF6HHTMM6D6QAF0BHFBCE6) |
-| Verifies | [REQ-INTERRUPTED-EDIT-LOSES-NOTHING](writes.mara.md#01M7BF6HJ3758Y06V61901ZSKK) |
+| Verifies | [REQ-WRITERS-SERIALIZED](../authoring/writes.mara.md#01M7CXC2N8EZYVHGY7T2GPPB3X) |
+| Verifies | [REQ-REFUSED-EDIT-CHANGES-NOTHING](../authoring/writes.mara.md#01M7BF6HHTMM6D6QAF0BHFBCE6) |
+| Verifies | [REQ-INTERRUPTED-EDIT-LOSES-NOTHING](../authoring/writes.mara.md#01M7BF6HJ3758Y06V61901ZSKK) |
 
-Rust integration tests write through the real CLI to a daemon that the test starts with `mara daemon start` and its own runtime directory ([VER-DAEMON-START](#01M7JKW7JWB2RANYKNE6BHYM26)). They set the pause points of [DES-WRITE-PROCEDURE](writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) by starting the daemon with `MARA_TEST_PAUSE`.
+Rust integration tests write through the real CLI to a daemon that the test starts with `mara daemon start` and its own runtime directory ([VER-DAEMON-START](#01M7JKW7JWB2RANYKNE6BHYM26)). They set the pause points of [DES-WRITE-PROCEDURE](../authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17) by starting the daemon with `MARA_TEST_PAUSE`.
 
 | Case | Expectation |
 | --- | --- |
@@ -108,7 +108,7 @@ Rust integration tests write through the real CLI to a daemon that the test star
 | The target of an `item update` changed by the test while the daemon's writer waits before step 2; then the same update sent again | The first fails with `changed-file`, and every file is as the test left it; the second succeeds on the changed contents |
 | `mara daemon stop`, and in a second run SIGTERM to the daemon, while an `item move` waits in step 3 of its first file; then the pauses released | The move's client reports success, and the files are those of the completed move; then the daemon exits |
 | SIGKILL to the daemon while an `item create` waits before step 2 | The client fails with `daemon-lost` and exit status 1 and does not run the create itself: every file is byte-identical |
-| SIGKILL to the daemon while an `item move` waits in step 3 of its second file | The client fails with `daemon-lost`; the files hold an interrupted move as [VER-INTERRUPTED-EDITS](verification-writes.mara.md#01M7F74J3SE8HJ3S6ZNG3G2DYJ) allows it, which the next `project validate`, served in-process, reports |
+| SIGKILL to the daemon while an `item move` waits in step 3 of its second file | The client fails with `daemon-lost`; the files hold an interrupted move as [VER-INTERRUPTED-EDITS](../authoring/verification.mara.md#01M7F74J3SE8HJ3S6ZNG3G2DYJ) allows it, which the next `project validate`, served in-process, reports |
 | From 0.4.0-alpha.6, the two SIGKILL cases with the write sent through the daemon by the Node client | The call fails with `daemon-lost`, and the files are as in those cases: the client does not run the write again in-process |
 
 ---
@@ -123,9 +123,9 @@ Rust integration tests write through the real CLI to a daemon that the test star
 | Status | Accepted |
 | Methods | Test |
 | Methods | Inspection |
-| Verifies | [REQ-BROWSER-ACCESS-AUTHORIZED](daemon.mara.md#01M7BF6GR0N9J4C8Z5QQ4CSCB7) |
+| Verifies | [REQ-BROWSER-ACCESS-AUTHORIZED](index.mara.md#01M7BF6GR0N9J4C8Z5QQ4CSCB7) |
 
-Rust integration tests start each daemon from the test's temporary directory, outside every project, with its own runtime directory ([VER-DAEMON-START](#01M7JKW7JWB2RANYKNE6BHYM26)), and an HTTP client of the test sends HTTP/1.1 requests to `127.0.0.1` at the port that daemon printed. The listening daemon is started with `--http --allow-origin http://127.0.0.1:5173 --allow-origin http://127.0.0.1:5175 --allow-project <A> --allow-project <C>`; B is a third disposable project, and the documents of each project hold a word of their own. An accepted request carries the token, `Origin: http://127.0.0.1:5173` and project A, and is a read or a write; each case changes one part of it. A refusal is a 4xx status whose status and body are those of the same request naming a path where nothing exists, and hold no project's word; to a request whose one `Origin` header is an allowed origin it carries the CORS headers of an accepted response, and to any other request no `Access-Control-*` header. After a refusal, `mara daemon status` lists no session that the daemon did not hold before, and every file of A, B and C is byte-identical ([DES-BROWSER-LISTENER](daemon.mara.md#01M7CQ57TJY788DMPBN4BX1SEM)).
+Rust integration tests start each daemon from the test's temporary directory, outside every project, with its own runtime directory ([VER-DAEMON-START](#01M7JKW7JWB2RANYKNE6BHYM26)), and an HTTP client of the test sends HTTP/1.1 requests to `127.0.0.1` at the port that daemon printed. The listening daemon is started with `--http --allow-origin http://127.0.0.1:5173 --allow-origin http://127.0.0.1:5175 --allow-project <A> --allow-project <C>`; B is a third disposable project, and the documents of each project hold a word of their own. An accepted request carries the token, `Origin: http://127.0.0.1:5173` and project A, and is a read or a write; each case changes one part of it. A refusal is a 4xx status whose status and body are those of the same request naming a path where nothing exists, and hold no project's word; to a request whose one `Origin` header is an allowed origin it carries the CORS headers of an accepted response, and to any other request no `Access-Control-*` header. After a refusal, `mara daemon status` lists no session that the daemon did not hold before, and every file of A, B and C is byte-identical ([DES-BROWSER-LISTENER](index.mara.md#01M7CQ57TJY788DMPBN4BX1SEM)).
 
 | Case | Expectation |
 | --- | --- |
@@ -145,6 +145,6 @@ Rust integration tests start each daemon from the test's temporary directory, ou
 | While a daemon started on demand runs: `mara daemon start` with the listener options | `daemon-running`; that daemon still has no listening socket |
 | The listening daemon started with `MARA_TEST_IDLE_SECONDS=4`; an accepted read, then no request for 10 s, then the read again | After the 10 s it still runs and `status` lists no session; the second read returns the result of CLI direct mode |
 | `mara daemon stop` | Once it returns, a connection to the port is refused; the token is in no file under the runtime directory, the test's `HOME` or its `TMPDIR`; the next daemon started on demand has no listening socket |
-| In the browser setup of [VER-HOST-COMPARISON](verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9), two pages served by the test from two loopback ports, the daemon allowing only the first's origin: the second page, then the first, `fetch` a read of A with the token | The second's `fetch` rejects and `status` lists no session of A; the first gets the result of CLI direct mode |
+| In the browser setup of [VER-HOST-COMPARISON](../verification.mara.md#01M7D3NAQHP8HX0X0GCZMXD1Q9), two pages served by the test from two loopback ports, the daemon allowing only the first's origin: the second page, then the first, `fetch` a read of A with the token | The second's `fetch` rejects and `status` lists no session of A; the first gets the result of CLI direct mode |
 
 Inspection: review of mara-fkkcad finds the token drawn from the operating system's random generator with at least 128 bits, compared in constant time, and the token and the origin checked before the request's path is used. A test observes neither a token's entropy nor the timing of a comparison.

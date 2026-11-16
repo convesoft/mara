@@ -1,5 +1,5 @@
 //! The write procedure below the CLI, on disposable projects in the temporary directory
-//! (DES-WRITE-PROCEDURE in `docs/writes.mara.md`): the lock, the checks before writing, the
+//! (DES-WRITE-PROCEDURE in `docs/authoring/writes.mara.md`): the lock, the checks before writing, the
 //! temporary files and renames, and the work the checks count. The pause points have their own
 //! test binary, `write_pauses`, since they act on the whole process.
 

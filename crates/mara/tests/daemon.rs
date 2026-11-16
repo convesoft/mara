@@ -1,7 +1,7 @@
-//! The cases of VER-DAEMON-START (`docs/verification-daemon.mara.md`) that need no client to
+//! The cases of VER-DAEMON-START (`docs/daemon/verification.mara.md`) that need no client to
 //! start a daemon on demand: `mara daemon status | start | stop`, the runtime directory, the
 //! lock and the build, each through `mara daemon start`; and the daemon's idle exit
-//! (DES-DAEMON-LIFECYCLE, ADR-TEST-IDLE-PERIOD in `docs/daemon.mara.md`).
+//! (DES-DAEMON-LIFECYCLE, ADR-TEST-IDLE-PERIOD in `docs/daemon/index.mara.md`).
 //!
 //! Every test has a runtime directory of its own, set as `XDG_RUNTIME_DIR`. A daemon of the
 //! test is a process of a binary under test whose environment holds that directory; a test
