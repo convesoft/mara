@@ -82,6 +82,7 @@ Counters:
 - The counts of one request are one `WorkCounts` value (`mara-engine`, module `work`). The host creates it and passes it by `&mut` to each engine call that does counted work. The code that does a piece of work counts it.
 - A file read is one read of a file's contents by the host. A stat or a failed read is none.
 - A built-in check step is one item or edge that a built-in check visits.
+- A request that the daemon serves reports the daemon's counts for its project's session: the work done since the session's previous response, the opening of the session and background re-derivation after a watched change included. The client adds none, and starting a daemon is not counted.
 - `--debug-stats` makes the stats line the last line on stderr, after any diagnostic: also when the request fails or its arguments are rejected. Stdout stays the operation's.
 - The stats line is a JSON object of exactly `format_version` (1) and `file_reads`, `hashes`, `parses`, `snapshot_builds`, `code_scans`, `subprocess_spawns`, `check_steps` and `program_runs`. Key order carries no meaning.
 
@@ -103,16 +104,19 @@ Corpus generator:
 
 Tests:
 
-- The counter and scaling tests are the `performance` integration test of the `mara` crate, with the generator. They run the real binary with an empty environment.
+- The counter and scaling tests are the `performance` integration test of the `mara` crate, with the generator. They run the real binary with an empty environment, but for `MARA_NO_DAEMON=1` in direct-mode cases and, in daemon cases, the test's own runtime directory as `XDG_RUNTIME_DIR` on Linux and as `TMPDIR` on macOS.
 - A case is the arguments and the exit status of one invocation. The harness asserts the status before it accepts the counts or the timing. Each operation adds its case to both tests.
 - A case of `mara mcp` is one session of the real server: the `initialize` handshake, `tools/list` and one tool call, whose stats line is that call's. A session without a call does no work.
 - `project convert` has no scaling case. Its counter case runs the real CLI on a small fixed 0.3.0 input, a hand-written fixture of the test and not generator output ([ADR-NO-CONVERTER-SCALING](decisions-runtime.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)).
+- A case of the release-build test starts a daemon with `MARA_TEST_IDLE_SECONDS=1` and opens a session: 3 s later `mara daemon status` still lists that session. The test then stops the daemon and finds no `MARA_TEST_IDLE_SECONDS` in the binary's bytes ([DES-IDLE-SESSIONS](daemon.mara.md#01M7CQ57TBWFN78CCMEAY6XFTF)).
 - Two cases without an operation pin today's behaviour and stay: `mara --debug-stats` exits 0, and `mara --debug-stats --no-such-option` exits 2 after a diagnostic. Neither does work, and the first does not grow. Changing either behaviour changes its case.
 - Engine code that runs inside operations, such as the document parser, adds no case: it counts its own work, and the cases of the operations that run it assert and time that work.
 - Input tracking and the snapshot build also have cases below the CLI, in the same target: exact counts of a cold build and of later builds in the same process (nothing changed, one document edited, undeclared files changed) at every size, and the growth of a cold build's time.
 - The tests check the stats line against their own list of counter names, never against `WorkCounts`.
 - The scaling test runs on a release build only. One warm-up round, then five timed rounds that each run every size once. Growth per doubling between adjacent sizes s₁ < s₂ is (t₂ / t₁)^(1 / log₂(s₂ / s₁)) of their median times.
 - A run's time is CPU time, user plus system, of the test thread and of the `mara` process it waits for, read with `clock_gettime` and `wait4` on Linux and macOS. Time spent waiting for a CPU does not count.
+- A daemon case adds the daemon's CPU time over the run, read from its process CPU clock (`clock_getcpuclockid` and `clock_gettime` on Linux, user plus system time of `proc_pid_rusage` on macOS), which counts its exited threads but not its child processes. The run starts with a reading before the change, taken while the daemon is idle, and ends with one taken once its CPU time has stopped advancing for 100 ms longer than the watcher's debounce after the response. So re-derivation counts in the run of the request that needed it, whether the watcher or the request did it. Before each run, outside the timed span, the test restores the edited document, sends a request and waits for the daemon to be idle.
+- The daemon cases are `search`, `item list` and `project validate`, each repeated on settled inputs, and `search` and `item list` after one document edit. They run no program, whose `souffle` processes the daemon's clock would miss; the direct-mode cases time program runs.
 - After the five rounds, each pair of adjacent sizes is looked at once. A pair whose growth is more than four standard errors below the limit passes there. Every other pair gets 60 timed runs of each of its two sizes, interleaved and with no look in between, and is judged once: it passes when the growth of the medians of all its runs is at most the limit, and fails otherwise.
 - At that look, the standard error of the growth's logarithm is √(π/2) × s × √(2 / 5) / log₂(s₂ / s₁), where s is the standard deviation of the ten runs' logarithms around their size's mean, pooled over the two sizes.
 - The scaling test holds on a machine shared with other builds and tests, or with a CPU-bound process on every hardware thread. Unchanged code passed beside a looping 16-job release build (load 14–31), other projects' tests (load 9–20) and 32 spinning processes on 32 hardware threads (load 50–58).

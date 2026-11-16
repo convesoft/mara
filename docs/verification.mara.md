@@ -41,20 +41,30 @@ Cold rows of the operations that 0.4.0-alpha.3 adds hold in every host and run t
 | `query report` | 1 program run, in provenance mode |
 | `query list`; a request refused for a program the parser refuses or for a missing or wrong input | 0 program runs |
 
-Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANGE](performance.mara.md#01M7BF6H3A6YQ43351V9YSV3SQ)) and run against the daemon from 0.4.0-alpha.4:
+Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANGE](performance.mara.md#01M7BF6H3A6YQ43351V9YSV3SQ)) and run from 0.4.0-alpha.4, at 1×, through the real CLI against a daemon the test starts with its own runtime directory ([VER-DAEMON-START](verification-daemon.mara.md#01M7JKW7JWB2RANYKNE6BHYM26)). Each row is its own test and starts settled: the last change came at least 2 s before the last request, so every input was last hashed by a check at least 2 s after its mtime and ctime ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)). A row's counts are those of its write, or else of the request sent after its situation, background re-derivation included ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)). The rows for one document edited and for the request after a write also run with that request sent 2 s later, after the watcher re-derived, and give the same counts:
 
 | Situation | Expectation |
 | --- | --- |
-| Unchanged warm request, every input last hashed by a check at least 2 s after its mtime and ctime ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)) | 0 hashes, 0 parses, 0 snapshot builds |
-| Unchanged warm request, an input last hashed by a check less than 2 s after its mtime or ctime | That input hashed again; 0 parses, 0 snapshot builds |
-| One document edited | 1 parse, 1 snapshot build, 0 code scans |
+| The same read request again, inputs unchanged | 0 file reads, 0 hashes, 0 parses, 0 snapshot builds, 0 code scans, 0 subprocess spawns, 0 check steps, 0 program runs |
+| Another request, inputs unchanged | 0 file reads, 0 hashes, 0 parses, 0 snapshot builds |
+| A request whose evaluations an earlier request ran with the same keys ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)), such as `query view` after `project validate` | 0 program runs |
+| An input last hashed by a check less than 2 s after its mtime or ctime, unchanged | That input read and hashed again, and no other; 0 parses, 0 snapshot builds |
+| An input touched, its contents unchanged | That input read and hashed again, and no other; 0 parses, 0 snapshot builds, 0 program runs |
+| One document edited in place, or saved by renaming a new file over it | That document read and hashed, and no other input; 1 parse, 1 snapshot build, 0 code scans |
+| A document added; one removed; one renamed | 1 parse, 0 parses and 0 parses; 1 snapshot build each |
+| The schema or the configuration edited, the same files remaining inputs | 0 parses, 1 snapshot build |
 | A write that gives each file it writes contents no file of the session had before | 1 parse per distinct content written, 1 snapshot build; no parse of another file |
 | A write that gives a file the contents of another input, such as `item delete` of the only item that tells two documents apart | No parse for that file |
-| A write that is the host's first request, every file it writes last changed at least 2 s before | The counts of a cold request, no read or hash before the renames, the parses of the two write rows above, made by the read-back before the renames, then their snapshot build |
-| One code file edited | 1 code scan, 0 document parses |
-| Validation or gate with an unchanged evaluation key ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)) | 0 `souffle` runs |
-| Validation or gate after a change | At most 1 `souffle` run per program and set of supplied inputs |
-| Unrelated file, `.git` change, failed request, idle period | No invalidation |
+| A write that is the session's first request, every file it writes last changed at least 2 s before | The counts of a cold request, no read or hash before the renames, the parses of the two write rows above, made by the read-back before the renames, then their snapshot build |
+| The request after a write, its files written less than 2 s before | Those files read and hashed again, and no other input; 0 parses, 0 snapshot builds |
+| One code file edited, then a request that reads code, from 0.4.0-alpha.5 (mara-779tms) | 1 code scan, 0 document parses |
+| One program file edited, then `project validate` | 1 program run, of that program; 0 parses, 0 snapshot builds |
+| `project validate` or `query gate` after a document edit | 1 program run per program it evaluates |
+| `query gate` with other supplied inputs, nothing else changed | 1 program run |
+| A file that is no input changed, in a directory that holds inputs or in ignored build output; a `.git` change; a failed request; 5 s without a request | No invalidation: the next request counts as on unchanged inputs |
+| A second project's session opened and its inputs edited | The first project's next request counts as on unchanged inputs |
+| The project reached through a symbolic link to its root, after requests through its real path | As the same request again: one session per canonical root ([DES-DAEMON-SESSIONS](daemon.mara.md#01M7BF6GRG3NJZTA29TYVRVFT7)) |
+| One `mara mcp` call, after the same request from the CLI | The server's stats line: as the same request again |
 
 ---
 
@@ -69,7 +79,7 @@ Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANG
 | Methods | Test |
 | Verifies | [REQ-NEAR-LINEAR-SCALING](performance.mara.md#01M7BF6H3K1M4HMG6CW2B85VQK) |
 
-On every pull request, Rust integration tests time each operation except `project convert` ([ADR-NO-CONVERTER-SCALING](decisions-runtime.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)) on a release build at each pull-request corpus size (median of runs). They fail when growth per doubling exceeds the limit.
+On every pull request, Rust integration tests time each operation except `project convert` ([ADR-NO-CONVERTER-SCALING](decisions-runtime.mara.md#01M7F9N0JK7BSWE98V9VTCGBV0)) on a release build at each pull-request corpus size (median of runs). They fail when growth per doubling exceeds the limit. From 0.4.0-alpha.4 they also time a daemon the test starts, by the same rule: settled warm requests and requests after one document edit, with the daemon's CPU time measured as [DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA) says.
 
 ---
 
@@ -108,6 +118,8 @@ Rust integration tests run each operation on the same disposable project in CLI 
 | Daemon | 0.4.0-alpha.4 |
 | Node library, embedded and through the daemon | 0.4.0-alpha.6 |
 | Browser, through the daemon and local WASM | 0.4.0-alpha.6 |
+
+The daemon case sends every document operation but `project init` and `project convert`, failing requests and writes included, from the CLI and from `mara mcp` to a daemon the test starts ([VER-DAEMON-START](verification-daemon.mara.md#01M7JKW7JWB2RANYKNE6BHYM26)), after an earlier request opened the session. It pairs generated MIDs as [VER-CLI-MCP-PARITY](verification-hosts.mara.md#01M7F74J5Z4KX9F3HN78T1WB85) does, and requires the same files after each write.
 
 Architecture checks run from 0.4.0-alpha.1. They guard [DES-ENGINE-BOUNDARY](engine.mara.md#01M7BF6GY13YX9PD76M0TQG8YK) and do not establish the requirement without the parity cases:
 

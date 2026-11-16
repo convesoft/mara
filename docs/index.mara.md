@@ -36,6 +36,7 @@
 | [Program safety verification](verification-programs.mara.md) | Checks of program faults, the time limit, the admitted language and reaching outside |
 | [Code link verification](verification-code.mara.md) | Checks of markers at both levels and of grammar downloads |
 | [Code link use verification](verification-code-use.mara.md) | Checks of marker rewrites, code links in programs and the work of reading code |
+| [Daemon verification](verification-daemon.mara.md) | Checks of daemon start, fresh answers, reads during validation and writes through the daemon |
 | [Distribution](distribution.mara.md) | Packages, bundled Soufflé |
 | [Decisions](decisions.mara.md) | Format, authoring, project files, packaging, agent guidance |
 | [Runtime decisions](decisions-runtime.mara.md) | Caching, inputs, daemon, code links, performance tests |

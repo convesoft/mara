@@ -118,6 +118,7 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 | `not-an-input` | A document that an edit would create would be no input of the project ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)) |
 | `duplicate-id`, `wrong-id-prefix`, `missing-row` | A rename would cause that diagnostic, or the item has no `ID` row to rename ([DES-MOVE-AND-RENAME](authoring.mara.md#01M7FWNBFDHGXN2TH1BK08GKCK)) |
 | `not-a-legacy-project` | `project convert` of a project that is not a 0.3.0 project ([DES-CONVERSION-MAPPING](migration.mara.md#01M7CMW71TXDY6VCTJS7XNSQRM)) |
+| `daemon-lost` | The daemon ended before it answered a request sent to it ([DES-DAEMON-LIFECYCLE](daemon.mara.md#01M7BF6GR80WA207P4BBFWW671)); a write may be left interrupted ([REQ-INTERRUPTED-EDIT-LOSES-NOTHING](writes.mara.md#01M7BF6HJ3758Y06V61901ZSKK)) |
 | `stale-cursor` | The cursor belongs to another result |
 | `record-too-large` | A record exceeds a page ([DES-PAGING](retrieval.mara.md#01M7BF6HCCWQH6P13ZR2YHAPS0)) |
 

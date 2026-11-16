@@ -60,12 +60,16 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 | Status | Accepted |
 | Satisfies | [REQ-FIRST-CALL-IN-PROCESS](#01M7BF6GQK5GM340Z7CP4C83B8) |
 
-- Each Mara version has its own lock and socket in the runtime directory (`$XDG_RUNTIME_DIR/mara/`, mode 0700). The lock ensures one instance per version when several clients start it at once; the socket path stays under the 108-byte Unix limit.
-- A client connects only to the daemon of its own version. Daemons of different versions run side by side.
-- A client falls back to direct mode only before it dispatches a request. A dispatched request is never replayed on another backend.
-- The daemon exits when its last session is dropped ([DES-IDLE-SESSIONS](#01M7CQ57TBWFN78CCMEAY6XFTF)), unless it listens for browsers ([DES-BROWSER-LISTENER](#01M7CQ57TJY788DMPBN4BX1SEM)).
-- No client starts a daemon when `CI` is set, `MARA_NO_DAEMON=1` is set or the direct-mode flag is given.
-- `mara daemon status | start | stop` give explicit control.
+- Each Mara build has its own lock and socket in the runtime directory (`mara/`, mode 0700, in `XDG_RUNTIME_DIR`, or `/run/user/<uid>` when it is unset, on Linux; in `TMPDIR` on macOS). A build is its version with the path, size and modification time of its executable ([ADR-DAEMON-PER-VERSION](decisions-runtime.mara.md#01M7CMW6Z9MMB1705N02S9CCYG)). The lock ensures one instance per build when several clients start it at once; the socket path stays under the 108-byte Unix limit.
+- When that base names no directory, or the socket path would pass the limit, every call runs in direct mode.
+- A client connects only to the daemon of its own build. Daemons of different builds run side by side.
+- Clients send every document operation to the daemon except `project init` and `project convert`, which run in the calling process, as `prime` does.
+- A client that finds no daemon of its build starts `mara daemon start`, with its project as `--project`, detached from its standard streams, and serves its request in-process. A daemon opens the session of the project that `--project` names or that holds its working directory, if any, as soon as it starts.
+- A client falls back to direct mode only before it dispatches a request. A dispatched request is never replayed on another backend: when the daemon ends before answering, the request fails with `daemon-lost` ([DES-OPERATIONS](hosts.mara.md#01M7BF6H124JRJAQSYVQ21Q2JS)).
+- The daemon exits when its last session is dropped ([DES-IDLE-SESSIONS](#01M7CQ57TBWFN78CCMEAY6XFTF)), or after the idle period when it opened none, unless it listens for browsers ([DES-BROWSER-LISTENER](#01M7CQ57TJY788DMPBN4BX1SEM)).
+- A client runs in direct mode, neither connecting to a daemon nor starting one, when `CI` is set, `MARA_NO_DAEMON=1` is set or the direct-mode flag is given.
+- `mara daemon status | start | stop` give explicit control. `status` prints whether the daemon of the client's build runs, its process ID and the root of each open session. `start` and `stop` exit 0 also when there is nothing to do; `stop` returns once the daemon has exited.
+- `mara daemon stop` and SIGTERM let the writes the daemon runs finish, end its other requests, and then end the daemon. It takes no new request meanwhile.
 
 ---
 
@@ -101,6 +105,7 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 
 - A session is dropped, with its snapshot and watches, after 30 minutes without a request. The number is provisional.
 - A connected native client does not keep a session or the daemon alive. Its next call starts a daemon again ([REQ-FIRST-CALL-IN-PROCESS](#01M7BF6GQK5GM340Z7CP4C83B8)).
+- A debug build takes the period in seconds from `MARA_TEST_IDLE_SECONDS` when it is set ([ADR-TEST-IDLE-PERIOD](#01M7JN4DSHNXYNDSQB08G5PPBF)). A release build ignores the variable and does not contain it ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)).
 
 ---
 
@@ -118,3 +123,23 @@ The daemon serves browsers over loopback HTTP only, and only requests that carry
 - The command prints the port and a token generated for that daemon run. `mara daemon status` prints them again.
 - Nothing is persisted, and a daemon started on demand never listens on HTTP.
 - A daemon that listens for browsers runs until `mara daemon stop`, because a browser cannot start one. Its idle sessions are still dropped.
+
+---
+
+## Decisions
+
+---
+
+<a id="01M7JN4DSHNXYNDSQB08G5PPBF"></a>
+
+### Shorten the idle period in debug builds only
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-TEST-IDLE-PERIOD |
+| Status | Accepted |
+| Justifies | [DES-IDLE-SESSIONS](#01M7CQ57TBWFN78CCMEAY6XFTF) |
+
+- Chosen by the orchestrator on the maintainer's behalf on 2026-11-16: a debug build reads the idle period from `MARA_TEST_IDLE_SECONDS`, one variable for one period and no general test facility; a release build ignores it and does not contain it. The idle drop has to run in a test, and [ADR-DEBUG-PAUSE-POINT](writes.mara.md#01M7FCGJEWJ4EG946TYEVJAMW1) approved test-only code that exists in debug builds only.
+- Rejected: a `--idle` option of `daemon start`. Users would see a capability made for a test.
+- Rejected: inspection only. No test would exercise the idle drop.

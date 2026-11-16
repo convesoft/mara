@@ -15,3 +15,4 @@ Context: docs/daemon.mara.md (REQ-NEVER-STALE, DES-DAEMON-SESSIONS); REQ-READS-D
 - [ ] One session per canonical project root
 - [ ] Watching with debounce and full rescan on overflow; stat check on every request
 - [ ] Lock-free reads, per-project write queue, cancellable worker threads
+- [ ] Test: VER-NEVER-STALE, its idle-drop case with `MARA_TEST_IDLE_SECONDS` included (ADR-TEST-IDLE-PERIOD), and the release-build case of DES-PERFORMANCE-HARNESS for that variable; the other cases of VER-DAEMON-WRITES (docs/verification-daemon.mara.md)

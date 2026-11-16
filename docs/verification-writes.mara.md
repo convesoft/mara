@@ -103,7 +103,7 @@ Rust integration tests start real Mara writers on one disposable project at the 
 | Ten `item create` processes, with distinct titles, started at once on one document | Every item a process reports as created is in the document; every other process reports a refusal; the project gains no diagnostic |
 | A write started while the test holds the project's write lock as a Mara writer does; the test changes a file the write targets, then releases the lock | No file changes while the lock is held; then the write is applied to the changed contents or refused |
 | A CLI write and an MCP `item_create` call at once | As for two CLI writes |
-| A daemon of another Mara version, from 0.4.0-alpha.4 (mara-0mxw21), and an embedded Node host, from 0.4.0-alpha.6 (mara-xzfeyj), each writing at the same time as the CLI | As for two CLI writes |
+| The daemons of two builds, copies of the binary at two paths ([DES-DAEMON-LIFECYCLE](daemon.mara.md#01M7BF6GR80WA207P4BBFWW671)), from 0.4.0-alpha.4 (mara-0mxw21), and an embedded Node host, from 0.4.0-alpha.6 (mara-xzfeyj), each writing at the same time as the CLI | As for two CLI writes |
 
 ---
 

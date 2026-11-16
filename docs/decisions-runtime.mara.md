@@ -77,6 +77,9 @@
 
 - Chosen: each version has its own lock and socket. Daemons of different versions coexist and exit when idle.
 - Rejected: one daemon per OS user that exits when a client of another version arrives. Projects pinned to different versions would stop each other's daemon on every call and never run warm.
+- Chosen by the orchestrator on the maintainer's behalf on 2026-11-16: a daemon belongs to a build, its version with the path, size and modification time of its executable, so it never answers for another build's code ([REQ-SAME-RESULT-ON-EVERY-HOST](engine.mara.md#01M7BF6GXHZNABX9R7NKPNGJNM), [REQ-NEVER-STALE](daemon.mara.md#01M7BF6GQSA67MYWBHWA6VYA3E)).
+- Rejected: the version alone. Several worktrees of one version run different code every day.
+- Rejected: a hash of the executable's contents. Every call would read the whole binary.
 
 ---
 
@@ -144,6 +147,7 @@
 - Rejected: wall-clock time. It counts waiting for a CPU: under two looping release builds, 11 of 20 runs failed at five rounds against 6 of 20 with CPU time.
 - Rejected: the minimum over rounds. A short run escapes contention more often than a long one, so the minimum inflates growth: 7 to 10 of 10 busy runs failed, against 1 to 3 with the median.
 - Rejected: pinning the run to one CPU, or disabling transparent huge pages or address randomization for it. None narrowed the spread.
+- Decided by the orchestrator on the maintainer's behalf on 2026-11-16: the daemon also has scaling cases, since most requests take that path. Chosen for them: the daemon's process CPU clock, in nanoseconds and with its exited threads. Rejected: `utime` and `stime` of `/proc/<pid>/stat`, in 10 ms ticks, coarser than a warm request.
 - Not covered: CPU time excludes time a process waits on I/O or locks, so a blocking latency that grows faster than the corpus does not fail this test.
 - Rejected by the maintainer: raising the limit to 2.4 so that the test also passes on a machine whose memory bandwidth other processes saturate. Correct code would pass there by only 0.04–0.09, and the weakest planted fault would fail by 0.15 instead of 0.25; the maintainer chose to rerun such a failure without that load instead.
 
