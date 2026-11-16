@@ -71,6 +71,16 @@ pub enum EntryKind {
 }
 
 impl EntryKind {
+    /// Its name in a result and a message: `query`, `view`, `invariant` or `gate`.
+    pub fn name(self) -> &'static str {
+        match self {
+            EntryKind::Query => "query",
+            EntryKind::View => "view",
+            EntryKind::Invariant => "invariant",
+            EntryKind::Gate => "gate",
+        }
+    }
+
     /// The table that holds entries of this kind.
     pub fn table(self) -> &'static str {
         match self {

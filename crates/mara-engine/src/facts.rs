@@ -75,19 +75,7 @@ impl Relation {
             if index > 0 {
                 json.push(',');
             }
-            json.push('[');
-            for (column, value) in row.iter().enumerate() {
-                if column > 0 {
-                    json.push(',');
-                }
-                match value {
-                    Value::Symbol(text) => crate::json::string(&mut json, text),
-                    Value::Number(number) => {
-                        write!(json, "{number}").expect("writing to a String cannot fail")
-                    }
-                }
-            }
-            json.push(']');
+            write_row(&mut json, row);
         }
         json.push(']');
         Relation {
@@ -96,6 +84,23 @@ impl Relation {
             json,
         }
     }
+}
+
+/// Appends `row` as a JSON list of its values: a string for a symbol, a number for a number.
+pub fn write_row(out: &mut String, row: &[Value]) {
+    out.push('[');
+    for (column, value) in row.iter().enumerate() {
+        if column > 0 {
+            out.push(',');
+        }
+        match value {
+            Value::Symbol(text) => crate::json::string(out, text),
+            Value::Number(number) => {
+                write!(out, "{number}").expect("writing to a String cannot fail")
+            }
+        }
+    }
+    out.push(']');
 }
 
 /// The fact relations of one snapshot, [`SNAPSHOT_RELATIONS`] in that order. Derived once per

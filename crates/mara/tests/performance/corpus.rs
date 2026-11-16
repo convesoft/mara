@@ -139,7 +139,15 @@ pub struct Corpus {
     /// The index in `ids` of the first verification of the first cluster that no relation or
     /// mention targets, the same at every size.
     pub untargeted: usize,
+    /// The ID of an accepted requirement of the last cluster, which `query gate` judges.
+    pub gate_requirement: String,
 }
+
+/// The file in the corpus root that the `query gate` case supplies as `verification_result`:
+/// one `pass` row for the candidate [`CANDIDATE`] per `Verifies` edge (DES-PERFORMANCE-HARNESS).
+pub const RESULTS: &str = "results.json";
+/// The candidate the `query gate` case names.
+pub const CANDIDATE: &str = "abc";
 
 impl Corpus {
     /// Generates the corpus of `size` × 200 items for `seed` under `$TMPDIR`.
@@ -173,6 +181,21 @@ impl Corpus {
         let mut rng = Rng::new(seed, u64::MAX);
         write_project_files(root, size, seed, &mut rng, items.len());
         write_git_directory(root, &mut rng, &written);
+        let mut results = Vec::new();
+        for item in &items {
+            for _ in item
+                .relations
+                .iter()
+                .filter(|(name, _)| *name == "Verifies")
+            {
+                results.push(serde_json::json!([item.mid, CANDIDATE, "pass"]));
+            }
+        }
+        write(
+            root,
+            RESULTS,
+            serde_json::Value::Array(results).to_string().as_bytes(),
+        );
         let (max_chain_depth, max_fan_out) = chain_shape(&items);
         let edges = items
             .iter()
@@ -203,6 +226,7 @@ impl Corpus {
                 .map(|item| (item.id.clone(), documents[item.document].path.clone()))
                 .collect(),
             untargeted,
+            gate_requirement: items[(clusters - 1) * CLUSTER_ITEMS + 5].id.clone(),
         }
     }
 

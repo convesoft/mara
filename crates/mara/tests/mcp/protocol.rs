@@ -15,7 +15,7 @@ const NOT_TOOLS: [&str; 5] = [
 ];
 
 /// The document operations of DES-OPERATIONS, as tools.
-const TOOLS: [&str; 19] = [
+const TOOLS: [&str; 23] = [
     "project_init",
     "project_validate",
     "project_fix",
@@ -35,6 +35,10 @@ const TOOLS: [&str; 19] = [
     "relation_list",
     "search",
     "get",
+    "query_list",
+    "query_execute",
+    "query_view",
+    "query_gate",
 ];
 
 #[test]
@@ -187,6 +191,19 @@ fn every_document_operation_is_a_tool_with_its_arguments_and_options() {
         for (option, repeatable) in &usage.options {
             let property = &properties[option];
             assert!(property["description"].is_string(), "{name} {option}");
+            // The inputs of a request: an object from each input's name to one value or to
+            // its rows (DES-MCP-SERVER).
+            if option == "input" {
+                assert!(*repeatable, "{name} {option}");
+                assert_eq!(property["type"], "object", "{name} {option}");
+                let value = &property["additionalProperties"]["anyOf"];
+                assert_eq!(
+                    value,
+                    &json!([{"type": "string"}, {"type": "array", "items": {"type": "array"}}]),
+                    "{name} {option}"
+                );
+                continue;
+            }
             let kind = match *repeatable {
                 true => {
                     assert_eq!(property["type"], "array", "{name} {option}");
@@ -207,6 +224,7 @@ fn every_document_operation_is_a_tool_with_its_arguments_and_options() {
             .collect();
         let expected: Vec<&&str> = match name.as_str() {
             "item_create" => vec![&"title", &"body"],
+            "query_gate" => vec![&"id"],
             _ => Vec::new(),
         };
         assert_eq!(options_required, expected, "{name}");

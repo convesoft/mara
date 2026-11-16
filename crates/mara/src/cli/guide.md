@@ -9,11 +9,12 @@ mcp-unbound: Each tool takes `{{--project}}`, the project root; without it, the 
 
 ## Find and read
 
-- The documents are the files that `include` in `.mara/config.toml` matches, such as `docs/**/*.mara.md`.
+- Documents are the files that `include` in `.mara/config.toml` matches.
 - Start with `{{schema list}}`, the types with their ID prefixes and the relations. `{{schema get <name>}}` gives a type's fields and allowed values, or a relation's targets for each source type.
 - `{{search <query>}}` finds items and narrative by their words; `{{item list}}` lists items. Narrow both with `{{--type}}`, `{{--field}}` `key=value`, `{{--relation}}`, `{{--path}}` and `{{--id}}`.
 - `{{get <node>}}` reads an item with its path, line and MID, a whole document, or narrative. A node is an ID, a MID, a path from the project root, or `<path>:<line>`.
-- `{{relation list <node>}}` lists an item's relations both ways, each with its line.
+- `{{relation list <node>}}` lists an item's relations both ways.
+- `{{query list}}` names the queries, views, invariants and gates; `{{query execute <name>}}`, `{{query view <name>}}` and `{{query gate <name>}}` run one.
 - A result cut short gives a cursor: pass it as `{{--cursor}}` for the next page. `{{--limit}}` sets the page size.
 
 ## Author
@@ -24,7 +25,7 @@ Name an item by its ID, its MID or `<path>:<line>`. Write types, relations, fiel
 - `{{item update <item>}}` changes `{{--title}}` or `{{--body}}`, replaces every value of a field with `{{--field}}`, or removes an optional field with `{{--clear-field}}`.
 - `{{relation add <source> <relation> <target>}}` and `{{relation remove <source> <relation> <target>}}` write or remove one row in the source's table, by the relation's forward name.
 - `{{item move <item> <path>}}` (`{{--line}}` as for create) and `{{item rename <item> <new-id>}}` also rewrite every link to the item.
-- `{{item delete <item>}}` is refused while another item or narrative links to it; its diagnostics give each such link.
+- `{{item delete <item>}}` is refused while another item or narrative links to it; its diagnostics give each link.
 - A refused request changes no file, but a `changed-file` stop may have replaced some. When its message names replaced files, run `{{project fix}}` and `{{project validate}}`, then go on with the item's current ID or its MID; otherwise read again and repeat the request.
 
 ## Repair after hand edits
@@ -52,6 +53,6 @@ Users sign in with a passkey.
 
 ## Validate
 
-- `{{project validate}}` checks the project, or the files and directories given by `{{--path}}`. `{{item validate <item>}}` checks one item and `{{schema validate}}` the schema file. Any error makes the result invalid.
+- `{{project validate}}` checks the project, or what `{{--path}}` names. `{{item validate <item>}}` checks one item and `{{schema validate}}` the schema file. Any error makes the result invalid.
 - After changing documents, run `{{project fix}}`, then `{{project validate}}`, and resolve every error before you finish.
-- `invalid-project` means the configuration or the schema has an error: `{{project validate}}` reports where; fix it by hand.
+- `invalid-project` means the configuration or schema has an error: `{{project validate}}` reports where; fix it by hand.

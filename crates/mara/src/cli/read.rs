@@ -21,7 +21,7 @@ use mara_engine::write::label;
 
 use super::validate::PATH;
 use super::{
-    Args, Argument, CURSOR, Context, Failure, LIMIT, Operation, Opt, Response, Run, SUCCESS,
+    Args, Argument, CURSOR, Context, Failure, Kind, LIMIT, Operation, Opt, Response, Run, SUCCESS,
     project_path,
 };
 
@@ -95,7 +95,7 @@ const TYPE: Opt = Opt {
     help: "Only items of this type.",
     repeatable: true,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |_| Ok(()),
 };
 
@@ -106,7 +106,7 @@ const FIELD: Opt = Opt {
     help: "`<key>=<value>`: only items with this row.",
     repeatable: true,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |value| match value.split_once('=') {
         Some((key, _)) if !key.is_empty() => Ok(()),
         _ => Err(format!("a field filter is `<key>=<value>`, not `{value}`")),
@@ -122,7 +122,7 @@ const RELATION: Opt = Opt {
            name those that arrive.",
     repeatable: true,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |_| Ok(()),
 };
 
@@ -133,7 +133,7 @@ const ID: Opt = Opt {
     help: "Only the items with this ID or MID.",
     repeatable: true,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |_| Ok(()),
 };
 
@@ -191,7 +191,7 @@ fn with_schema(
     read(&layer).map_err(failure)
 }
 
-fn failure(error: ReadError) -> Failure {
+pub(super) fn failure(error: ReadError) -> Failure {
     let diagnostics = match &error {
         ReadError::TooLarge(diagnostic) => vec![(**diagnostic).clone()],
         _ => Vec::new(),
@@ -202,7 +202,7 @@ fn failure(error: ReadError) -> Failure {
     }
 }
 
-fn paging<'c>(args: &Args, cursor: &'c Option<Cursor>) -> Paging<'c> {
+pub(super) fn paging<'c>(args: &Args, cursor: &'c Option<Cursor>) -> Paging<'c> {
     Paging {
         limit: args.limit(),
         cursor: cursor.as_ref(),
@@ -320,15 +320,26 @@ fn schema_get(context: &mut Context, args: &Args) -> Result<Response, Failure> {
 /// A successful read: its JSON form, and its human form of the records that `human` writes,
 /// then the inventory's diagnostics that a page shows and how many others there are, then the
 /// next cursor (DES-READ-RESULTS).
-fn respond(
+pub(super) fn respond(
     json: String,
     human: impl FnOnce(&mut String),
     diagnostics: &[Diagnostic],
     next_cursor: Option<Cursor>,
 ) -> Response {
+    respond_keeping(json, human, diagnostics, 0, next_cursor)
+}
+
+/// [`respond`], showing the first `kept` diagnostics whatever their size.
+pub(super) fn respond_keeping(
+    json: String,
+    human: impl FnOnce(&mut String),
+    diagnostics: &[Diagnostic],
+    kept: usize,
+    next_cursor: Option<Cursor>,
+) -> Response {
     let mut out = String::new();
     human(&mut out);
-    let shown = read::shown_diagnostics(diagnostics);
+    let shown = read::shown_diagnostics(diagnostics, kept);
     for diagnostic in &diagnostics[..shown] {
         let _ = writeln!(out, "{diagnostic}");
     }
@@ -366,7 +377,7 @@ fn node_line(node: &NodeSummary) -> String {
     }
 }
 
-fn item_line(item: &ItemSummary) -> String {
+pub(super) fn item_line(item: &ItemSummary) -> String {
     format!(
         "{}:{}: {} ({}) {}",
         item.path,

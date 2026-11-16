@@ -17,8 +17,8 @@ use mara_engine::work::WorkCounts;
 use mara_engine::write::{ReadBack, UNREADABLE_EDIT};
 
 use super::{
-    Args, Argument, Context, FAILURE, FORMAT_VERSION, Failure, Operation, Opt, REJECTED, Response,
-    Run, SUCCESS, project_path,
+    Args, Argument, Context, FAILURE, FORMAT_VERSION, Failure, Kind, Operation, Opt, REJECTED,
+    Response, Run, SUCCESS, project_path,
 };
 
 pub const ITEM_MOVE: Operation = Operation {
@@ -64,7 +64,7 @@ const LINE: Opt = Opt {
            ends the document.",
     repeatable: false,
     required: false,
-    integer: true,
+    kind: Kind::Integer,
     check: |value| match value.parse::<usize>() {
         Ok(line) if line > 0 => Ok(()),
         _ => Err(format!("a line is a whole number from 1, not `{value}`")),
@@ -315,7 +315,7 @@ fn respond(
             let _ = writeln!(human, "wrote {}", files.join(", "));
         }
     }
-    let shown = read::shown_diagnostics(diagnostics);
+    let shown = read::shown_diagnostics(diagnostics, 0);
     for diagnostic in &diagnostics[..shown] {
         let _ = writeln!(human, "{diagnostic}");
     }

@@ -369,7 +369,7 @@ pub fn get(
         object.key("node").push_str(&node_json);
         object.array("rows", rows.iter().map(String::as_str));
         object.string("content", content);
-        page::diagnostics(&mut object, documents.diagnostics);
+        page::diagnostics(&mut object, documents.diagnostics, 0);
         let cursor = next.map(Cursor::to_string);
         object.optional_string("next_cursor", cursor.as_deref());
         object.end();

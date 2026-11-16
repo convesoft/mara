@@ -12,20 +12,24 @@ use super::{FORMAT_VERSION, Page, Paging, ReadError, TOO_LARGE};
 /// in path and line order, as many as fit (DES-READ-RESULTS).
 pub const DIAGNOSTIC_BYTES: usize = 8_192;
 
-/// How many of `diagnostics`, from the first, a page shows: as many as fit in
-/// [`DIAGNOSTIC_BYTES`].
-pub fn shown_diagnostics(diagnostics: &[Diagnostic]) -> usize {
-    shown(diagnostics).len()
+/// How many of `diagnostics`, from the first, a page shows: the first `kept`, whatever their
+/// size, then as many of the others as fit in [`DIAGNOSTIC_BYTES`].
+pub fn shown_diagnostics(diagnostics: &[Diagnostic], kept: usize) -> usize {
+    shown(diagnostics, kept).len()
 }
 
 /// The JSON forms of the diagnostics that a page shows.
-fn shown(diagnostics: &[Diagnostic]) -> Vec<String> {
+fn shown(diagnostics: &[Diagnostic], kept: usize) -> Vec<String> {
     let mut used = 0;
     let mut shown = Vec::new();
-    for diagnostic in diagnostics {
+    for (index, diagnostic) in diagnostics.iter().enumerate() {
         let mut record = String::new();
         diagnostic.write_json(&mut record);
-        let cost = record.len() + usize::from(!shown.is_empty());
+        if index < kept {
+            shown.push(record);
+            continue;
+        }
+        let cost = record.len() + usize::from(used > 0);
         if used + cost > DIAGNOSTIC_BYTES {
             break;
         }
@@ -35,10 +39,10 @@ fn shown(diagnostics: &[Diagnostic]) -> Vec<String> {
     shown
 }
 
-/// Appends the members `diagnostics`, those of `diagnostics` that a page shows, and
-/// `diagnostics_total`, how many there are.
-pub(crate) fn diagnostics(object: &mut Object<'_>, diagnostics: &[Diagnostic]) {
-    let shown = shown(diagnostics);
+/// Appends the members `diagnostics`, those of `diagnostics` that a page shows, the first
+/// `kept` always, and `diagnostics_total`, how many there are.
+pub(crate) fn diagnostics(object: &mut Object<'_>, diagnostics: &[Diagnostic], kept: usize) {
+    let shown = shown(diagnostics, kept);
     object.array("diagnostics", shown.iter().map(String::as_str));
     object.number("diagnostics_total", diagnostics.len() as u64);
 }
@@ -59,6 +63,9 @@ pub(crate) struct Envelope<'e> {
     /// The name of the records' array.
     pub(crate) records: &'static str,
     pub(crate) diagnostics: &'e [Diagnostic],
+    /// How many of `diagnostics`, from the first, every page shows whatever their size, such as
+    /// the problems that made a gate unavailable; the budget bounds the others.
+    pub(crate) kept: usize,
 }
 
 impl Envelope<'_> {
@@ -71,7 +78,7 @@ impl Envelope<'_> {
             object.key(head.name).push_str(&head.json);
         }
         object.array(self.records, records.iter().map(String::as_str));
-        diagnostics(&mut object, self.diagnostics);
+        diagnostics(&mut object, self.diagnostics, self.kept);
         let cursor = next_cursor.map(Cursor::to_string);
         object.optional_string("next_cursor", cursor.as_deref());
         object.end();

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
+use mara_engine::facts::Supplied;
 use mara_engine::work::WorkCounts;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
@@ -21,8 +22,8 @@ use serde_json::{Value, json};
 
 use super::guide::{self, Surface};
 use super::{
-    Args, Context, FAILURE, Failure, OPERATIONS, Operation, Opt, PROJECT, REJECTED, Response, Run,
-    SUCCESS,
+    Args, Context, FAILURE, Failure, Kind, OPERATIONS, Operation, Opt, PROJECT, REJECTED, Response,
+    Run, SUCCESS,
 };
 
 pub const MCP: Operation = Operation {
@@ -194,8 +195,20 @@ fn tool(operation: &Operation, project: bool) -> Tool {
         required.push(argument.name);
     }
     for option in operation.options {
-        let kind = if option.integer { "integer" } else { "string" };
-        let schema = parameter(kind, option.repeatable, option.help);
+        let schema = match option.kind {
+            Kind::Text => parameter("string", option.repeatable, option.help),
+            Kind::Integer => parameter("integer", option.repeatable, option.help),
+            Kind::Inputs => json!({
+                "type": "object",
+                "additionalProperties": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "array", "items": {"type": "array"}},
+                    ],
+                },
+                "description": option.help,
+            }),
+        };
         properties.insert(option.name.to_owned(), schema);
         if option.required {
             required.push(option.name);
@@ -241,13 +254,16 @@ fn args(
         if let Some(index) = operation.arguments.iter().position(|a| a.name == name) {
             arguments[index] = Some(string(name, value)?);
         } else if let Some(option) = operation.options.iter().find(|o| o.name == name) {
+            if option.kind == Kind::Inputs {
+                args.supplied = inputs(name, value)?;
+                continue;
+            }
             let values = match (option.repeatable, value) {
                 (true, Value::Array(values)) => values.iter().collect(),
                 (true, _) => {
-                    let kind = if option.integer {
-                        "integers"
-                    } else {
-                        "strings"
+                    let kind = match option.kind {
+                        Kind::Integer => "integers",
+                        _ => "strings",
                     };
                     return Err(rejected(format!("`{name}` is an array of {kind}")));
                 }
@@ -287,13 +303,37 @@ fn string(name: &str, value: &Value) -> Result<String, Failure> {
 
 /// One value of `option`, as the CLI would have read it.
 fn scalar(option: &Opt, value: &Value) -> Result<String, Failure> {
-    match (option.integer, value) {
-        (true, Value::Number(number)) if number.is_i64() || number.is_u64() => {
+    match (option.kind, value) {
+        (Kind::Integer, Value::Number(number)) if number.is_i64() || number.is_u64() => {
             Ok(number.to_string())
         }
-        (true, _) => Err(rejected(format!("`{}` is a whole number", option.name))),
-        (false, value) => string(option.name, value),
+        (Kind::Integer, _) => Err(rejected(format!("`{}` is a whole number", option.name))),
+        (_, value) => string(option.name, value),
     }
+}
+
+/// The inputs that the parameter `name` passes: an object from each input's name to one value
+/// as a string, or to a list of rows (DES-REQUEST-INPUTS). A string is always one value: MCP
+/// passes rows, not files. The rows are checked with the request's other inputs.
+fn inputs(name: &str, value: &Value) -> Result<Vec<(String, Supplied)>, Failure> {
+    let refuse = || {
+        rejected(format!(
+            "`{name}` is an object from each input's name to a string or to a list of rows"
+        ))
+    };
+    let Value::Object(map) = value else {
+        return Err(refuse());
+    };
+    let mut supplied = Vec::with_capacity(map.len());
+    for (input, value) in map {
+        let value = match value {
+            Value::String(text) => Supplied::Inline(text.clone()),
+            Value::Array(_) => Supplied::Rows(value.clone()),
+            _ => return Err(refuse()),
+        };
+        supplied.push((input.clone(), value));
+    }
+    Ok(supplied)
 }
 
 /// Rejected arguments: nothing ran.

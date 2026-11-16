@@ -199,6 +199,7 @@ fn pages<'s>(
         head: None,
         records: "declarations",
         diagnostics: &[],
+        kept: 0,
     };
     page::list(
         key,

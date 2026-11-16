@@ -11,13 +11,12 @@ use mara::project::{self, Project};
 use mara::rules::{self, Scope};
 use mara_engine::config::CONFIG_PATH;
 use mara_engine::diagnostic::Diagnostic;
-use mara_engine::document::is_mid;
 use mara_engine::hash::Hash;
 use mara_engine::paging::PAGE_BYTES;
 use mara_engine::validation::{self, PageError, Report, result_key};
 
 use super::{
-    Args, Argument, CURSOR, Context, FAILURE, Failure, LIMIT, Operation, Opt, Response, Run,
+    Args, Argument, CURSOR, Context, FAILURE, Failure, Kind, LIMIT, Operation, Opt, Response, Run,
     SUCCESS, project_path,
 };
 
@@ -61,7 +60,7 @@ pub(super) const PATH: Opt = Opt {
            the project root.",
     repeatable: true,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |path| project_path(path).map(drop),
 };
 
@@ -123,32 +122,7 @@ fn item_validate(context: &mut Context, args: &Args) -> Result<Response, Failure
     let root = context.root()?;
     let generation = Inputs::new(root).snapshot(context.now, context.work);
     let snapshot = &generation.snapshot;
-    let mut items = match is_mid(reference) {
-        true => snapshot.items_with_mid(reference),
-        false => snapshot.items_with_id(reference),
-    }
-    .to_vec();
-    items.dedup();
-    let item = match items[..] {
-        [item] => item,
-        [] => {
-            let message = format!("no item has the ID or MID `{reference}`");
-            return Err(Failure::new("unknown-item", message));
-        }
-        ref several => {
-            let places = several.iter().map(|&item| {
-                let path = &snapshot.documents()[snapshot.items()[item].document].path;
-                format!("`{path}:{}`", snapshot.item(item).line)
-            });
-            let other = if is_mid(reference) { "ID" } else { "MID" };
-            let message = format!(
-                "{} items have `{reference}`, at {}: name one by its {other}",
-                several.len(),
-                validation::list(places, several.len())
-            );
-            return Err(Failure::new("ambiguous-item", message));
-        }
-    };
+    let item = super::resolve_item(snapshot, reference)?;
     let findings = validation::check(snapshot, context.work);
     let mut diagnostics: Vec<Diagnostic> = findings
         .into_iter()

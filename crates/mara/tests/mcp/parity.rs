@@ -40,7 +40,7 @@ impl Parity {
         let run = cli(&self.dir.root(), args);
         let cli_files = self.dir.files();
         self.dir.restore(&before);
-        let (tool, arguments) = mcp_request(&self.usages, &self.tools, args);
+        let (tool, arguments) = mcp_request(&self.usages, &self.tools, args, &self.dir.root());
         let call = self.server.call(&tool, arguments);
         let mut text = call.text.clone();
         let mut mcp_files = self.dir.files();
@@ -439,7 +439,7 @@ fn the_project_of_each_call_or_of_the_server() {
             with.extend(args);
             let run = cli(&elsewhere.root(), &with);
             assert_eq!(run.status, 0, "{with:?}: {run:#?}");
-            let (tool, arguments) = mcp_request(&usages, &tools, args);
+            let (tool, arguments) = mcp_request(&usages, &tools, args, &elsewhere.root());
             let mut arguments = arguments;
             arguments["project"] = json!(project);
             let call = server.call(&tool, arguments);
@@ -562,4 +562,166 @@ fn undeclared_or_malformed_arguments_are_rejected_before_anything_runs() {
     assert!(!call.is_error, "{call:?}");
     assert_eq!(call.json()["items"].as_array().unwrap().len(), 2);
     assert!(server.finish().0.success());
+}
+
+/// The program of [`the_query_operations_through_mcp_as_through_the_cli`]: every item is a
+/// subject; an item fails with a `fail` result, or without one when the results are complete,
+/// and is unavailable without one otherwise.
+const GATE_PROGRAM: &str = r#".include "mara.dl"
+.decl listed(m: Mid, id: Id, status: Status)
+listed(m, i, s) :- item(m, _, i, s, _, _).
+.decl candidate(c: symbol)
+.decl result(m: Mid, outcome: symbol, run: number)
+.decl subject(m: Mid)
+subject(m) :- item(m, _, _, _, _, _), candidate(_).
+.decl has(m: Mid)
+has(m) :- result(m, _, _).
+.decl failed(m: Mid, outcome: symbol)
+failed(m, o) :- subject(m), result(m, o, _), o = "fail".
+failed(m, "missing") :- subject(m), !has(m), source_complete("result").
+.decl missing(m: Mid)
+missing(m) :- subject(m), !has(m), !source_complete("result").
+"#;
+
+const QUERY_ENTRIES: &str = r#"
+[rules]
+programs = [".mara/rules/*.dl"]
+
+[queries.listed]
+program = ".mara/rules/gate.dl"
+relation = "listed"
+description = "Every item with its ID and status"
+
+[views.listed-view]
+program = ".mara/rules/gate.dl"
+relation = "listed"
+description = "The same rows as a table"
+
+[gates.passed]
+program = ".mara/rules/gate.dl"
+description = "Named items pass"
+subjects = ["subject"]
+conditions = ["failed"]
+unavailable = ["missing"]
+inputs = ["candidate", "result"]
+
+[queries.broken]
+program = ".mara/rules/broken.dl"
+relation = "bad"
+description = "A program that does not compile"
+
+[gates.broken-gate]
+program = ".mara/rules/broken.dl"
+description = "A gate over it"
+subjects = ["bad"]
+conditions = ["bad"]
+"#;
+
+/// The `query` operations, failing requests included, with the inputs a file holds on the CLI
+/// and passed as rows through MCP (VER-CLI-MCP-PARITY, VER-REQUEST-INPUTS).
+#[test]
+fn the_query_operations_through_mcp_as_through_the_cli() {
+    let dir = engineering_project();
+    let config = dir.read(".mara/config.toml") + QUERY_ENTRIES;
+    dir.write(".mara/config.toml", &config);
+    dir.write(".mara/rules/gate.dl", GATE_PROGRAM);
+    dir.write(
+        ".mara/rules/broken.dl",
+        ".include \"mara.dl\"\n.decl bad(m: Mid)\nbad(m) :- missing(m).\n",
+    );
+    let need = cli(&dir.root(), &["get", "NEED-FAST-ANSWERS"]).json()["node"]["mid"].clone();
+    let results = json!([[need, "pass", -2147483648_i64]]);
+    dir.write("results.json", &results.to_string());
+    dir.write("wrong.json", &json!([[need, "pass", 1.5]]).to_string());
+    let mut p = Parity::new(dir);
+    let gate = |extra: &[&'static str]| {
+        let mut args = vec![
+            "query",
+            "gate",
+            "passed",
+            "--id",
+            "NEED-FAST-ANSWERS",
+            "--id",
+            "REQ-COLD-READ-TIME",
+            "--input",
+            "candidate=abc",
+            "--input",
+            "result=@results.json",
+        ];
+        args.extend(extra);
+        args
+    };
+
+    let list = p.expect(&["query", "list"], 0);
+    let names: Vec<&str> = (list["entries"].as_array().unwrap().iter())
+        .map(|entry| entry["name"].as_str().unwrap())
+        .collect();
+    // By table, then by name.
+    assert_eq!(
+        names,
+        ["broken", "listed", "listed-view", "broken-gate", "passed"]
+    );
+    let rows = p.expect(&["query", "execute", "listed"], 0)["rows"].clone();
+    assert_eq!(rows.as_array().unwrap().len(), 2);
+    assert_eq!(p.expect(&["query", "view", "listed-view"], 0)["rows"], rows);
+    p.expect(
+        &[
+            "query",
+            "execute",
+            "listed",
+            "--id",
+            "REQ-COLD-READ-TIME",
+            "--limit",
+            "1",
+        ],
+        0,
+    );
+    // The requirement has no result: unavailable, then failed once the results are complete.
+    let unavailable = p.expect(&gate(&[]), 1);
+    assert_eq!(
+        unavailable["gate"]["outcome"], "unavailable",
+        "{unavailable}"
+    );
+    let failed = p.expect(&gate(&["--complete", "result"]), 1);
+    assert_eq!(failed["gate"]["outcome"], "failed", "{failed}");
+    let outcomes: Vec<&Value> = (failed["items"].as_array().unwrap().iter())
+        .map(|item| &item["outcome"])
+        .collect();
+    assert_eq!(outcomes, [&json!("passed"), &json!("failed")]);
+
+    p.refused(&["query", "execute", "nothing"], "unknown-entry");
+    p.refused(&["query", "execute", "listed-view"], "unknown-entry");
+    p.refused(
+        &["query", "execute", "listed", "--id", "REQ-NONE"],
+        "unknown-item",
+    );
+    p.refused(
+        &[
+            "query",
+            "gate",
+            "passed",
+            "--id",
+            "NEED-FAST-ANSWERS",
+            "--input",
+            "candidate=abc",
+        ],
+        "missing-input",
+    );
+    p.refused(&gate(&["--input", "other=1"]), "unlisted-input");
+    p.refused(&gate(&["--complete", "other"]), "unlisted-input");
+    let mut wrong = gate(&[]);
+    *wrong.last_mut().unwrap() = "result=@wrong.json";
+    p.refused(&wrong, "invalid-input");
+    p.refused(&["query", "execute", "broken"], "program-failed");
+    let broken = p.expect(
+        &["query", "gate", "broken-gate", "--id", "NEED-FAST-ANSWERS"],
+        1,
+    );
+    assert_eq!(broken["gate"]["outcome"], "unavailable", "{broken}");
+    assert_eq!(
+        broken["diagnostics"][0]["code"], "program-error",
+        "{broken}"
+    );
+    p.rejected(&["query", "gate", "passed"]);
+    p.finish();
 }

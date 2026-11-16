@@ -149,6 +149,7 @@ pub fn relation_list(
         }),
         records: "connections",
         diagnostics: documents.diagnostics,
+        kept: 0,
     };
     let page = page::list(
         key,

@@ -9,6 +9,7 @@
 mod distance;
 mod node;
 mod page;
+mod query;
 mod relations;
 mod schema_view;
 mod search;
@@ -25,6 +26,9 @@ use crate::snapshot::Snapshot;
 pub use node::{ItemSummary, NodeSummary, Portion, RowPart, get};
 pub(crate) use node::{Named, resolve};
 pub use page::{DIAGNOSTIC_BYTES, shown_diagnostics};
+pub use query::{
+    GateRequest, JudgedItem, QueryRow, RowsRequest, gate_page, query_list, query_rows,
+};
 pub use relations::{
     Connection, ConnectionKind, Direction, Location, Neighbour, RelationPage, relation_list,
 };

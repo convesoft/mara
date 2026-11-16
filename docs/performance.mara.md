@@ -100,7 +100,7 @@ Corpus generator:
 - Accepted items obey the engineering template's acceptance and lifecycle rules, and no built-in check fails.
 - The configuration is the example of [DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27). The schema is the engineering vocabulary, written with only the keys that [DES-SCHEMA-MODEL](project.mara.md#01M7BF6HA0KG3R3AATWM1P2X1G) shows, so each Verification and Validation has one method and each Term one alias.
 - The configuration declares no code language until its syntax exists; the issue that defines it declares them in the generated configuration. From 0.4.0-alpha.3 it declares the `engineering` programs and entries; a program of the test with one invariant, query, view and gate stands in until mara-tx0fcf ships them.
-- `query gate` and `query report` name one requirement of the last cluster. The gate request supplies a candidate and a complete `verification_result` file with one `pass` row per `Verifies` edge; `query report` explains one failing row of that gate.
+- `query gate` and `query report` name one requirement of the last cluster. The gate request supplies a candidate and a complete `verification_result` file with one `pass` row per `Verifies` edge, `results.json` in the corpus root; `query report` explains one failing row of that gate.
 - Each corpus also holds a `.git` directory, a `.gitignore`, ignored build output, an ignored document, a document outside the include patterns and a README.
 
 Tests:

@@ -385,6 +385,7 @@ pub fn search(
         head: None,
         records: "results",
         diagnostics: documents.diagnostics,
+        kept: 0,
     };
     page::list(
         key,
@@ -543,6 +544,7 @@ pub fn item_list(
         head: None,
         records: "items",
         diagnostics: documents.diagnostics,
+        kept: 0,
     };
     page::list(
         key,

@@ -1,11 +1,10 @@
-//! VER-FACT-ROWS: each fact relation copied into a relation that starts with an item's MID,
-//! compared with what `get` and `relation list` give.
+//! VER-FACT-ROWS: each fact relation copied into a relation that starts with an item's MID, the
+//! relation of a configured query, read through `query execute` and compared with what `get`
+//! and `relation list` give.
 
-use mara::rules::supplied_input;
-use mara_engine::facts::{Column, InputDecl, Inputs, check_inputs};
 use serde_json::{Value, json};
 
-use crate::{ECOLE, ODD_VALUE, Outputs, Project, evaluate, mid, sorted};
+use crate::{CONFIG, ECOLE, ODD_VALUE, Outputs, Project, mid, sorted};
 
 const PROGRAM: &str = r#".include "mara.dl"
 .decl note(text: symbol)
@@ -42,23 +41,42 @@ const OUTPUTS: [&str; 8] = [
 
 const NOTE: &str = "line\nbreak\ttab";
 
-fn inputs(complete: &[String]) -> Inputs {
-    let dir = tempfile::Builder::new()
-        .prefix("mara-facts-note-")
-        .tempdir()
-        .unwrap();
-    std::fs::write(dir.path().join("note.json"), json!([[NOTE]]).to_string()).unwrap();
-    let note = supplied_input("note=@note.json", dir.path()).unwrap();
-    let listed = [InputDecl {
-        name: "note".into(),
-        columns: vec![Column::Symbol],
-    }];
-    check_inputs(&listed, vec![note], complete).unwrap()
+/// Runs [`PROGRAM`] as `.mara/rules/facts.dl`, each relation of [`OUTPUTS`] the relation of
+/// a query of its name that lists the input `note`, through `query execute` with
+/// `--input note=@note.json` and `--complete` of each of `complete`. Returns each query's rows.
+fn run(project: &Project, complete: &[&str]) -> Outputs {
+    configure(project, PROGRAM);
+    project.write("note.json", &json!([[NOTE]]).to_string());
+    let mut out = Outputs::new();
+    for relation in OUTPUTS {
+        let mut args = vec!["query", "execute", relation, "--input", "note=@note.json"];
+        args.extend(["--limit", "100"]);
+        for name in complete {
+            args.extend(["--complete", name]);
+        }
+        let result = project.mara(&args);
+        assert_eq!(result["next_cursor"], Value::Null, "{relation}: one page");
+        let rows = (result["rows"].as_array().unwrap().iter())
+            .map(|row| serde_json::from_value(row["values"].clone()).unwrap())
+            .collect();
+        out.insert(relation.to_owned(), rows);
+    }
+    out
 }
 
-fn run(project: &Project, complete: &[String]) -> Outputs {
-    let facts = project.facts();
-    evaluate(&facts, &inputs(complete), PROGRAM, &OUTPUTS).unwrap()
+/// Declares `program` as `.mara/rules/facts.dl` with a query on each relation of
+/// [`OUTPUTS`].
+fn configure(project: &Project, program: &str) {
+    project.write(".mara/rules/facts.dl", program);
+    let mut config = format!("{CONFIG}\n[rules]\nprograms = [\".mara/rules/*.dl\"]\n");
+    for relation in OUTPUTS {
+        config.push_str(&format!(
+            "\n[queries.{relation}]\nprogram = \".mara/rules/facts.dl\"\n\
+             relation = \"{relation}\"\ndescription = \"The rows of {relation}\"\n\
+             inputs = [\"note\"]\n"
+        ));
+    }
+    project.write(".mara/config.toml", &config);
 }
 
 fn s(text: &str) -> Value {
@@ -197,7 +215,7 @@ fn odd_titles_and_values_come_back_as_get_gives_them() {
 fn source_complete_holds_only_what_the_request_marks() {
     let project = Project::new();
     assert_eq!(run(&project, &[])["r_complete"], Vec::<Vec<Value>>::new());
-    let got = run(&project, &["note".into()]);
+    let got = run(&project, &["note"]);
     let expected: Vec<Vec<Value>> = (1..=4).map(|n| vec![s(&mid(n)), s("note")]).collect();
     assert_eq!(sorted(got["r_complete"].clone()), sorted(expected));
 }
@@ -205,9 +223,24 @@ fn source_complete_holds_only_what_the_request_marks() {
 #[test]
 fn a_rule_that_compares_a_mid_with_an_id_does_not_compile() {
     let project = Project::new();
-    let program =
-        ".include \"mara.dl\"\n.decl bad(m: Mid)\nbad(m) :- item(m, _, i, _, _, _), m = i.\n";
-    let inputs = check_inputs(&[], Vec::new(), &[]).unwrap();
-    let error = evaluate(&project.facts(), &inputs, program, &["bad"]).unwrap_err();
-    assert!(error.contains("in file program.dl at line 3"), "{error}");
+    let program = format!("{PROGRAM}r_note(m, i) :- item(m, _, i, _, _, _), m = i.\n");
+    configure(&project, &program);
+    let (status, result) = project.mara_any(&["query", "execute", "r_note", "--input", "note=x"]);
+    assert_eq!(status, 1, "{result}");
+    assert_eq!(result["error"]["code"], "program-failed");
+    let line = program.lines().count();
+    let diagnostic = &result["error"]["diagnostics"][0];
+    assert_eq!(
+        (
+            &diagnostic["code"],
+            &diagnostic["path"],
+            &diagnostic["line"]
+        ),
+        (
+            &json!("program-error"),
+            &json!(".mara/rules/facts.dl"),
+            &json!(line)
+        ),
+        "{result}"
+    );
 }

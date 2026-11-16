@@ -62,7 +62,7 @@ fn check(
 ) -> Result<mara_engine::facts::Inputs, InputError> {
     let supplied = arguments
         .iter()
-        .map(|argument| supplied_input(argument, dir))
+        .map(|argument| supplied_input(argument, dir, &mut Default::default()))
         .collect::<Result<Vec<_>, _>>()?;
     let complete: Vec<String> = complete.iter().map(|name| (*name).to_owned()).collect();
     check_inputs(&listed(), supplied, &complete)

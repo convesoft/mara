@@ -126,6 +126,18 @@ fn check_cold(
             snapshot_builds: 1,
             ..WorkCounts::default()
         },
+        // `query execute`, `query view` and `query gate`: 1 program run, as 1 subprocess, and a
+        // read of each file that `--input` names, which is no input of the project and is not
+        // hashed.
+        Reads::Evaluates { input_files } => WorkCounts {
+            file_reads: read + input_files,
+            hashes: read,
+            parses: documents - 1,
+            snapshot_builds: 1,
+            subprocess_spawns: 1,
+            program_runs: 1,
+            ..WorkCounts::default()
+        },
         // A cold request, then 1 parse per distinct content written, before the renames, and
         // nothing after them (DES-WRITE-PROCEDURE, ADR-READ-BACK-EVERY-EDIT).
         Reads::Writes => WorkCounts {

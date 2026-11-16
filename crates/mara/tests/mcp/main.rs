@@ -320,7 +320,13 @@ pub fn usage() -> Vec<Usage> {
 
 /// The MCP form of the CLI request `args`: its tool and arguments, from the usage of its
 /// operation and the types of the tool's parameters.
-pub fn mcp_request(usages: &[Usage], tools: &[Value], args: &[&str]) -> (String, Value) {
+/// A file that `--input <name>=@<file>` names is read from `cwd`, where the CLI runs.
+pub fn mcp_request(
+    usages: &[Usage],
+    tools: &[Value],
+    args: &[&str],
+    cwd: &Path,
+) -> (String, Value) {
     let usage = usages
         .iter()
         .filter(|usage| {
@@ -352,6 +358,22 @@ pub fn mcp_request(usages: &[Usage], tools: &[Value], args: &[&str]) -> (String,
             ),
         };
         let schema = &properties[&key];
+        // `--input <name>=<value>` or `<name>=@<file>`: MCP passes the value, or the file's
+        // rows, under the input's name (DES-REQUEST-INPUTS).
+        if schema["type"] == "object" {
+            let (input, given) = value.split_once('=').expect("`<name>=<value>`");
+            let given = match given.strip_prefix('@') {
+                Some(file) => {
+                    let path = cwd.join(file);
+                    let text = fs::read(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+                    serde_json::from_slice(&text).expect("a JSON file")
+                }
+                None => json!(given),
+            };
+            let entry = arguments.entry(key).or_insert_with(|| json!({}));
+            entry[input] = given;
+            continue;
+        }
         let kind = match schema["type"].as_str() {
             Some("array") => schema["items"]["type"].as_str(),
             kind => kind,

@@ -9,7 +9,7 @@ use mara_engine::config::{CONFIG_PATH, Root};
 use mara_engine::json::{self, Object};
 
 use super::{
-    Args, Context, FORMAT_VERSION, Failure, Operation, Opt, REJECTED, Response, Run, SUCCESS,
+    Args, Context, FORMAT_VERSION, Failure, Kind, Operation, Opt, REJECTED, Response, Run, SUCCESS,
 };
 
 pub const PROJECT_CONVERT: Operation = Operation {
@@ -28,7 +28,7 @@ const STATUS: Opt = Opt {
     help: "The status of each item that has none.",
     repeatable: false,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |value| match convert::is_name(&convert::name_of(value)) {
         true => Ok(()),
         false => Err(format!(

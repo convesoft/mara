@@ -1,9 +1,9 @@
-//! The invariant cases of VER-EVALUATION-TIME-LIMIT.
+//! VER-EVALUATION-TIME-LIMIT for validation, `query execute` and `query gate`.
 
 use std::fs;
 use std::time::Duration;
 
-use crate::{PROGRAMS_LINE, Sandbox, assert_fault, both_severities, config};
+use crate::{PROGRAMS_LINE, Sandbox, assert_fault, assert_unavailable, both_severities, config};
 
 /// A `count` over the four-fold product of a `range` of 1,000 numbers: hours, little memory,
 /// one output row per item. Soufflé keeps the aggregate's body as a relation of its own, so a
@@ -53,8 +53,13 @@ fn a_configured_limit_stops_the_evaluation() {
         PROGRAMS_LINE,
         &["time limit of 1 s"],
     );
-    assert!(run.elapsed >= Duration::from_secs(1), "{:?}", run.elapsed);
-    assert!(run.elapsed < Duration::from_secs(10), "{:?}", run.elapsed);
+    let parts = ["time limit of 1 s"];
+    let config = ".mara/config.toml";
+    let consumers = assert_unavailable(&sandbox, "program-fault", config, PROGRAMS_LINE, &parts);
+    for run in [&run, &consumers[0], &consumers[1]] {
+        assert!(run.elapsed >= Duration::from_secs(1), "{:?}", run.elapsed);
+        assert!(run.elapsed < Duration::from_secs(10), "{:?}", run.elapsed);
+    }
     assert_no_souffle_left(&sandbox);
     assert_eq!(sandbox.tmp_entries(), before);
 }
@@ -71,8 +76,13 @@ fn the_default_limit_is_10_s() {
         PROGRAMS_LINE,
         &["time limit of 10 s"],
     );
-    assert!(run.elapsed >= Duration::from_secs(10), "{:?}", run.elapsed);
-    assert!(run.elapsed < Duration::from_secs(20), "{:?}", run.elapsed);
+    let parts = ["time limit of 10 s"];
+    let config = ".mara/config.toml";
+    let consumers = assert_unavailable(&sandbox, "program-fault", config, PROGRAMS_LINE, &parts);
+    for run in [&run, &consumers[0], &consumers[1]] {
+        assert!(run.elapsed >= Duration::from_secs(10), "{:?}", run.elapsed);
+        assert!(run.elapsed < Duration::from_secs(20), "{:?}", run.elapsed);
+    }
     assert_no_souffle_left(&sandbox);
 }
 
@@ -102,7 +112,12 @@ fn programs_that_never_end_are_stopped_by_a_limit() {
             PROGRAMS_LINE,
             &["limit"],
         );
-        assert!(run.elapsed < Duration::from_secs(10), "{:?}", run.elapsed);
+        let config = ".mara/config.toml";
+        let consumers =
+            assert_unavailable(&sandbox, "program-fault", config, PROGRAMS_LINE, &["limit"]);
+        for run in [&run, &consumers[0], &consumers[1]] {
+            assert!(run.elapsed < Duration::from_secs(10), "{:?}", run.elapsed);
+        }
         assert_no_souffle_left(&sandbox);
         assert_eq!(sandbox.tmp_entries(), Vec::<String>::new());
     }

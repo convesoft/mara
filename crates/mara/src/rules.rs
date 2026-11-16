@@ -3,6 +3,7 @@
 //! the inputs a command line supplies (DES-REQUEST-INPUTS in `docs/rules.mara.md`), and the
 //! evaluation by the pinned Soufflé (DES-RULE-EXECUTION in `docs/rules-evaluation.mara.md`).
 
+mod consumer;
 mod invariants;
 
 use std::collections::HashMap;
@@ -32,8 +33,12 @@ pub fn write_facts(dir: &Path, facts: &Facts, inputs: &Inputs) -> io::Result<()>
 
 /// The input that one `--input` argument supplies: `<name>=<value>` for one value inline, or
 /// `<name>=@<file>` for a JSON file of rows, relative to `base`, the directory the command runs
-/// in. A file that cannot be read or is not JSON refuses the request.
-pub fn supplied_input(argument: &str, base: &Path) -> Result<(String, Supplied), InputError> {
+/// in. A file that cannot be read or is not JSON refuses the request. Counts a file read.
+pub fn supplied_input(
+    argument: &str,
+    base: &Path,
+    work: &mut WorkCounts,
+) -> Result<(String, Supplied), InputError> {
     let Some((name, value)) = argument
         .split_once('=')
         .filter(|(name, _)| !name.is_empty())
@@ -48,6 +53,7 @@ pub fn supplied_input(argument: &str, base: &Path) -> Result<(String, Supplied),
     let refuse = |problem: String| InputError::Invalid(format!("input `{name}`: {file} {problem}"));
     let bytes =
         fs::read(base.join(file)).map_err(|error| refuse(format!("cannot be read: {error}")))?;
+    work.file_reads += 1;
     let rows =
         serde_json::from_slice(&bytes).map_err(|error| refuse(format!("is not JSON: {error}")))?;
     Ok((name.to_owned(), Supplied::Rows(rows)))
@@ -97,6 +103,7 @@ pub struct Run<'a> {
     pub limits: Limits,
 }
 
+pub use consumer::{Consumed, consume};
 pub use invariants::{Invariants, Scope, invariants};
 
 /// The evaluations of one request by their key ([`evaluation::key`]): every consumer of a

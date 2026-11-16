@@ -12,7 +12,7 @@ use mara_engine::write::{cell, heading, label};
 
 use super::read::open;
 use super::{
-    Args, Argument, Context, Failure, Operation, Opt, Response, Run, SUCCESS, project_path,
+    Args, Argument, Context, Failure, Kind, Operation, Opt, Response, Run, SUCCESS, project_path,
 };
 
 pub const ITEM_CREATE: Operation = Operation {
@@ -108,7 +108,7 @@ const TITLE: Opt = Opt {
     help: "The item's heading text: one line of Markdown.",
     repeatable: false,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |value| {
         heading(1, value)
             .map(drop)
@@ -123,7 +123,7 @@ const ID: Opt = Opt {
     help: "The new item's ID, instead of the one proposed from its title.",
     repeatable: false,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |_| Ok(()),
 };
 
@@ -136,7 +136,7 @@ const FIELD: Opt = Opt {
            its rows.",
     repeatable: true,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: field,
 };
 
@@ -147,7 +147,7 @@ const CLEAR_FIELD: Opt = Opt {
     help: "An optional field whose rows are all removed.",
     repeatable: true,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |name| match label_name(name.trim()).as_str() {
         "" => Err("a field to clear is named by its key".to_owned()),
         "type" | "id" | "status" => Err(format!(
@@ -165,7 +165,7 @@ const BODY: Opt = Opt {
     help: "The item's body: Markdown of any number of lines.",
     repeatable: false,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |_| Ok(()),
 };
 
@@ -176,7 +176,7 @@ const LINE: Opt = Opt {
     help: "The line, from 1, at which the item goes; without it, the item ends the document.",
     repeatable: false,
     required: false,
-    integer: true,
+    kind: Kind::Integer,
     check: |value| match value.parse::<usize>() {
         Ok(line) if line >= 1 => Ok(()),
         _ => Err(format!("a line is a number from 1, not `{value}`")),

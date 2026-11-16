@@ -1,7 +1,9 @@
 //! Programs evaluated by the real `mara` binary, on disposable projects (Verification items in
 //! `docs/verification-rules.mara.md` and `docs/verification-programs.mara.md`): the invariant
-//! side of VER-PROGRAM-CONSUMERS, VER-PROGRAM-FAULTS, VER-EVALUATION-TIME-LIMIT and
-//! VER-PROGRAM-REACH-CASES, and VER-ADMITTED-LANGUAGE's compile check of the fixtures.
+//! side and the query, view and gate cases of VER-PROGRAM-CONSUMERS, VER-REQUEST-INPUTS through
+//! the CLI, VER-PROGRAM-FAULTS, VER-EVALUATION-TIME-LIMIT and VER-PROGRAM-REACH-CASES for
+//! validation, `query execute` and `query gate`, and VER-ADMITTED-LANGUAGE's compile check of
+//! the fixtures.
 //!
 //! The binary runs with an environment of only `HOME` and `TMPDIR`, both inside the test's
 //! temporary directory; it finds the pinned `souffle` beside its own `target/` directory.
@@ -9,7 +11,9 @@
 mod consumers;
 mod faults;
 mod fixtures;
+mod inputs;
 mod interrupt;
+mod queries;
 mod reach;
 mod time_limit;
 
@@ -77,11 +81,24 @@ pub fn invariant(name: &str, program: &str, relation: &str, severity: &str) -> S
     )
 }
 
-/// An error and a warning invariant on `relation` of `program`.
+/// An error and a warning invariant on `relation` of `program`, the query `as-query` on it, and
+/// the gate `as-gate` whose subject and condition it is.
 pub fn both_severities(program: &str, relation: &str) -> String {
     invariant("as-error", program, relation, "error")
         + &invariant("as-warning", program, relation, "warning")
+        + &format!(
+            "\n[queries.as-query]\nprogram = \".mara/rules/{program}\"\nrelation = \"{relation}\"\n\
+             description = \"d\"\n\n[gates.as-gate]\nprogram = \".mara/rules/{program}\"\n\
+             description = \"d\"\nsubjects = [\"{relation}\"]\nconditions = [\"{relation}\"]\n"
+        )
 }
+
+/// `query execute as-query` of [`both_severities`].
+pub const QUERY: [&str; 3] = ["query", "execute", "as-query"];
+/// `query gate as-gate` of [`both_severities`], naming two items.
+pub const GATE: [&str; 7] = [
+    "query", "gate", "as-gate", "--id", "REQ-A", "--id", "NEED-ONE",
+];
 
 /// A sandbox: `home/`, `tmp/` (the binary's `TMPDIR`) and a project in `project/` with three
 /// items in `docs/a.mara.md`: `REQ-A` (MID 1, accepted, owner `abc`), `REQ-B` (MID 2, draft,
@@ -267,12 +284,50 @@ impl Sandbox {
 pub fn assert_fault(run: &Run, code: &str, path: &str, line: u64, parts: &[&str]) {
     assert_eq!(run.status, 1, "{run:#?}");
     assert_eq!(run.json["valid"], false, "{run:#?}");
-    let found = run.with_code(code);
-    let found = found
-        .iter()
-        .find(|d| d["path"] == path && d["line"] == line && d["severity"] == "error");
+    assert_diagnostic(run.diagnostics(), code, path, line, parts);
+}
+
+/// Requires `query execute as-query` to fail and `query gate as-gate` to be unavailable, with
+/// both items, each with the program's fault reported as [`assert_fault`] requires: never a
+/// row, never a passing outcome. Returns the two runs.
+#[track_caller]
+pub fn assert_unavailable(
+    sandbox: &Sandbox,
+    code: &str,
+    path: &str,
+    line: u64,
+    parts: &[&str],
+) -> [Run; 2] {
+    let query = sandbox.mara(&QUERY);
+    assert_eq!(query.status, 1, "{query:#?}");
+    assert_eq!(query.json["error"]["code"], "program-failed", "{query:#?}");
+    let diagnostics = query.json["error"]["diagnostics"].as_array().unwrap();
+    assert_diagnostic(diagnostics, code, path, line, parts);
+    let gate = sandbox.mara(&GATE);
+    assert_eq!(gate.status, 1, "{gate:#?}");
+    assert_eq!(gate.json["gate"]["outcome"], "unavailable", "{gate:#?}");
+    let items = gate.json["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{gate:#?}");
+    for item in items {
+        assert_eq!(item["outcome"], "unavailable", "{gate:#?}");
+        assert_eq!(item["rows"], serde_json::json!([]), "{gate:#?}");
+    }
+    assert_diagnostic(gate.diagnostics(), code, path, line, parts);
+    [query, gate]
+}
+
+/// Requires an error with `code` at `path` and `line`, any line for 0, whose message contains
+/// each of `parts` and never names the private copy.
+#[track_caller]
+pub fn assert_diagnostic(diagnostics: &[Value], code: &str, path: &str, line: u64, parts: &[&str]) {
+    let found = diagnostics.iter().find(|d| {
+        d["code"] == code
+            && d["path"] == path
+            && (line == 0 || d["line"] == line)
+            && d["severity"] == "error"
+    });
     let Some(found) = found else {
-        panic!("no {code} at {path}:{line}: {:#?}", run.diagnostics());
+        panic!("no {code} at {path}:{line}: {diagnostics:#?}");
     };
     let message = found["message"].as_str().unwrap();
     for part in parts {

@@ -15,7 +15,7 @@ use mara_engine::diagnostic::Diagnostic;
 use mara_engine::json::{self, Object};
 use mara_engine::validation;
 
-use super::{Args, Context, FORMAT_VERSION, Failure, Operation, Opt, Response, Run, SUCCESS};
+use super::{Args, Context, FORMAT_VERSION, Failure, Kind, Operation, Opt, Response, Run, SUCCESS};
 
 pub const PROJECT: Operation = Operation {
     words: &["project", "init"],
@@ -33,7 +33,7 @@ const TEMPLATE: Opt = Opt {
     help: "`engineering`, the default, or `empty`, which declares no type and no relation.",
     repeatable: false,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |value| match template(value) {
         Some(_) => Ok(()),
         None => Err(format!(

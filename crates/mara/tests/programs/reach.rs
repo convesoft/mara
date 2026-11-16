@@ -1,5 +1,6 @@
-//! The invariant cases of VER-PROGRAM-REACH-CASES: every way a program reached outside its
-//! evaluation in EVD-SOUFFLE-PROGRAM-REACH, as a declared program consumed by invariants.
+//! VER-PROGRAM-REACH-CASES: every way a program reached outside its evaluation in
+//! EVD-SOUFFLE-PROGRAM-REACH, as a declared program consumed by invariants and a query, run by
+//! `project validate` and `query execute`.
 //!
 //! The sandbox also holds `secret`, a file with a marker line, and a `libfunctors.so` built
 //! with `cc` whose constructor creates a marker file and prints a marker. After every case no
@@ -10,7 +11,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::{Run, Sandbox, both_severities};
+use crate::{QUERY, Run, Sandbox, both_severities};
 
 const SECRET: &str = "SECRET-MARKER-7f3a";
 const LIBRARY: &str = "LIBRARY-MARKER-91c2";
@@ -57,21 +58,26 @@ impl Reach {
     }
 
     /// Validates the project with `program` as `.mara/rules/p.dl`, consumed by an invariant of
-    /// each severity on `bad`, and checks that nothing outside the evaluation was touched.
+    /// each severity and a query on `bad`, then runs the query, and checks that nothing outside
+    /// the evaluation was touched. The query fails with the program's refusal and runs nothing,
+    /// or returns a row for each failure that validation reports. Returns the validation.
     fn validate(&self, program: &str, extra: &[(&str, &Path)]) -> Run {
         let sandbox = &self.sandbox;
         sandbox.program("p.dl", program, &both_severities("p.dl", "bad"));
         let before = sandbox.files();
         let run = sandbox.mara_with(&["project", "validate"], extra);
-        let output = format!("{}{}", run.json, run.stderr);
-        assert!(
-            !output.contains(SECRET),
-            "{program}: the secret was read: {output}"
-        );
-        assert!(
-            !output.contains(LIBRARY),
-            "{program}: the library was loaded"
-        );
+        let query = sandbox.mara_with(&QUERY, extra);
+        for run in [&run, &query] {
+            let output = format!("{}{}", run.json, run.stderr);
+            assert!(
+                !output.contains(SECRET),
+                "{program}: the secret was read: {output}"
+            );
+            assert!(
+                !output.contains(LIBRARY),
+                "{program}: the library was loaded"
+            );
+        }
         assert!(
             !sandbox.root().join("library-loaded").exists(),
             "{program}: library loaded"
@@ -82,6 +88,23 @@ impl Reach {
         };
         assert_eq!(names(&after), names(&before), "{program}: files changed");
         assert!(after == before, "{program}: a file's bytes or time changed");
+        if run.with_code("program-refused").is_empty() {
+            assert_eq!(query.status, 0, "{program}: {query:#?}");
+            let rows = query.json["rows"].as_array().unwrap().len();
+            assert_eq!(
+                rows,
+                run.with_code("as-error").len(),
+                "{program}: {query:#?}"
+            );
+        } else {
+            assert_eq!(query.json["error"]["code"], "program-failed", "{program}");
+            let diagnostics = &query.json["error"]["diagnostics"];
+            assert_eq!(
+                diagnostics[0]["code"], "program-refused",
+                "{program}: {query:#?}"
+            );
+            assert_eq!((query.spawns(), query.runs()), (0, 0), "{program}");
+        }
         run
     }
 

@@ -143,9 +143,37 @@ A gate request names the items to judge; an empty scope is refused. Mara judges 
 | Satisfies | [REQ-EXTERNAL-RECORDS-AS-SUPPLIED](#01M7BF6HDVZSZM8E9BAEF7NNQ0) |
 
 - An input is a relation that a program declares and its consumer lists as an input, such as a candidate or verification results. `mara.dl` declares none ([DES-FACT-BRIDGE](rules-facts.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)).
-- A request supplies each input its consumer lists: one value inline (`--input candidate=abc123`), or a JSON file holding a list of rows in the relation's column order (`--input verification_result=@results.json`). MCP passes the rows.
+- A request supplies each input its consumer lists: one value inline (`--input candidate=abc123`), or a JSON file holding a list of rows in the relation's column order (`--input verification_result=@results.json`). MCP's `input` is an object from each input's name to one value as a string or to its list of rows; a string there is always one value, never a file.
 - An inline value is one row of one column, written as a decimal integer for a number column. A file path is relative to the directory the command runs in.
 - A request that omits a listed input, supplies one its consumer does not list or supplies one twice, or marks one complete that its consumer does not list, is refused and names it.
 - Mara checks every supplied row before the run: the number of columns, a string for a symbol column, and an integer from −2,147,483,648 to 2,147,483,647 for a number column. A wrong row refuses the request and names its row and column, because Soufflé would read it as 0 or an empty string.
 - `--complete <input>` states that the input holds every record of its source; Mara then adds `source_complete("<input>")`. Mara itself adds `source_complete("code")` when it has read all code ([DES-CODE-READERS](code.mara.md#01M7CQ57TTB40GWX8YHKB259DK)).
 - Inputs are never stored. They are part of the evaluation key ([DES-RULE-EXECUTION](rules-evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)).
+
+---
+
+<a id="01M7JT87HXDH2D4V1FNM6VZT7N"></a>
+
+### Query requests and results
+
+| Type | Design |
+| --- | --- |
+| ID | DES-QUERY-RESULTS |
+| Status | Accepted |
+| Satisfies | [REQ-PROJECT-AUTHORED-LOGIC](#01M7BF6HDMR4G13G7VFDA770ZN) |
+| Satisfies | [REQ-CLI-MCP-PARITY](hosts.mara.md#01M7BF6H00N50GBQGCYF4RSR1Z) |
+
+| Operation | Takes | Result |
+| --- | --- | --- |
+| `query list` | `--limit`, `--cursor` | `entries`: `name`, `kind` (`query`, `view`, `invariant`, `gate`), `description`, `inputs` (names), by table, then by name |
+| `query execute <name>`, `query view <name>` | `--id`, `--input`, `--complete`, `--limit`, `--cursor` | `query`: `name`, `kind`, `relation`, `columns` (`name`, `type` `symbol` or `number`); `rows`: `item`, the node of the item whose MID the first column holds or `null`, and `values`, in the order of their values |
+| `query gate <name>` | `--id` at least once, `--input`, `--complete`, `--limit`, `--cursor` | `gate`: `name`, `outcome`; `items`: `item`, `outcome` (`passed`, `failed`, `unavailable`, `not-applicable`), `rows` (`relation`, `role` `subject`, `condition` or `unavailable`, `values`) |
+
+- `--id` takes an ID or MID, repeatable: a query or view returns only the rows about those items, a gate judges each once in the order given. A gate request without `--id` is rejected as `invalid-argument` before anything runs.
+- `query list` reads the configuration and the schema only and runs nothing. The others evaluate the entry's program once with the snapshot's facts; every other entry of that program shapes the same run, and an input that only another entry lists is read empty, as validation reads it.
+- A request is refused before any run for a name that no entry of the operation's kind has (`unknown-entry`, naming the operation that runs it), an unknown or ambiguous `--id`, or an input refusal of [DES-REQUEST-INPUTS](#01M7CT60KMGA2M9WMQ8RRJREPG) (`missing-input`, `unlisted-input`, `repeated-input`, `invalid-input`).
+- A query or view whose program gives no rows, a missing or refused program, an entry that does not fit it, a compile error or a fault, fails with `program-failed`, those problems as its diagnostics. A gate is then `unavailable` with every item, no rows, and those problems first in its `diagnostics`, each on every page whatever its size, before the inventory's, which keep their budget.
+- A project whose configuration or schema has an error refuses every `query` request as `invalid-project` before any outcome, as every operation but validation ([DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27)); `unavailable` is the outcome of a gate whose evaluation failed.
+- Results page as reads do ([DES-READ-RESULTS](retrieval-requests.mara.md#01M7DMT8GAJCAFTW0Y2939JFF1)). The result key covers the evaluation key, the operation, the entry and the named items' MIDs.
+- Both forms of `query execute` and `query view` hold the same JSON; the human form of a view is a Markdown table under the column names, that of a query one line per row. A gate exits with 0 only when it passed.
+- A file that `--input` names counts as a file read, not hashed: it is no input of the project.

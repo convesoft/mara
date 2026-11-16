@@ -4,6 +4,7 @@
 //! diagnostics and output files into rows or a fault. The host writes the files, runs Soufflé
 //! and hands back what it printed and wrote.
 
+mod gate;
 mod invariants;
 mod plan;
 mod souffle;
@@ -18,6 +19,7 @@ use crate::hash::{Hash, KeyHasher};
 use crate::program::{DECLARATIONS, Program};
 use crate::snapshot::SnapshotKey;
 
+pub use gate::{GateOutcome, GateRow, ItemOutcome, Outcome, Role, judge};
 pub use invariants::{InvariantFinding, invariant_findings};
 pub use plan::{Plan, Planned, PlannedEntry, Roots, plan};
 pub use souffle::{Exit, interpret, read_output};
@@ -72,6 +74,26 @@ pub enum Limit {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Rows {
     pub relations: BTreeMap<String, Vec<Vec<Value>>>,
+}
+
+/// The order of rows in a result: by their values, column by column; a symbol by its text, a
+/// number by its value.
+pub fn compare_rows(a: &[Value], b: &[Value]) -> std::cmp::Ordering {
+    let rank = |value: &Value| match value {
+        Value::Symbol(_) => 0,
+        Value::Number(_) => 1,
+    };
+    for (x, y) in a.iter().zip(b) {
+        let order = match (x, y) {
+            (Value::Symbol(x), Value::Symbol(y)) => x.cmp(y),
+            (Value::Number(x), Value::Number(y)) => x.cmp(y),
+            _ => rank(x).cmp(&rank(y)),
+        };
+        if order.is_ne() {
+            return order;
+        }
+    }
+    a.len().cmp(&b.len())
 }
 
 /// A compile diagnostic of Soufflé, at a line of one of the program's files.

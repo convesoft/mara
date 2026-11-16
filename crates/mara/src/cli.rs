@@ -14,6 +14,7 @@ mod fix;
 mod guide;
 mod init;
 mod mcp;
+mod query;
 mod read;
 mod relink;
 mod validate;
@@ -24,8 +25,11 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use mara_engine::diagnostic::Diagnostic;
+use mara_engine::document::is_mid;
+use mara_engine::facts::Supplied;
 use mara_engine::json::Object;
 use mara_engine::paging::{self, Cursor};
+use mara_engine::snapshot::Snapshot;
 use mara_engine::validation;
 use mara_engine::work::WorkCounts;
 
@@ -53,6 +57,10 @@ const OPERATIONS: &[Operation] = &[
     author::ITEM_DELETE,
     author::RELATION_ADD,
     author::RELATION_REMOVE,
+    query::LIST,
+    query::EXECUTE,
+    query::VIEW,
+    query::GATE,
     daemon::STATUS,
     daemon::START,
     daemon::STOP,
@@ -111,10 +119,22 @@ pub struct Opt {
     /// Whether the operation needs it. The operation itself refuses a request without it; MCP
     /// lists it as a required parameter.
     pub required: bool,
-    /// Whether its value is a whole number, which MCP takes as a JSON integer.
-    pub integer: bool,
+    /// What its value is, which sets its MCP parameter's type.
+    pub kind: Kind,
     /// Checks a value before anything runs, with the reason it is rejected.
     pub check: fn(&str) -> Result<(), String>,
+}
+
+/// What an option's value is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// Text: a string in MCP.
+    Text,
+    /// A whole number: a JSON integer in MCP.
+    Integer,
+    /// `<name>=<value>` or `<name>=@<file>`, an input a request supplies: in MCP one object from
+    /// each input's name to one value as a string or to a list of rows (DES-REQUEST-INPUTS).
+    Inputs,
 }
 
 /// `--project <dir>`: the project root, relative to the working directory (DES-PROJECT-CONFIGURATION).
@@ -125,7 +145,7 @@ const PROJECT: Opt = Opt {
            project is found from the working directory upward.",
     repeatable: false,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |_| Ok(()),
 };
 
@@ -136,7 +156,7 @@ const FORMAT: Opt = Opt {
     help: "How results and failures are printed.",
     repeatable: false,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |value| match value {
         "human" | "json" => Ok(()),
         _ => Err(format!("the format is `human` or `json`, not `{value}`")),
@@ -153,7 +173,7 @@ pub const LIMIT: Opt = Opt {
     help: "Records per page, 1 to 100.",
     repeatable: false,
     required: false,
-    integer: true,
+    kind: Kind::Integer,
     check: |value| paging::parse_limit(value).map(drop),
 };
 
@@ -164,7 +184,7 @@ pub const CURSOR: Opt = Opt {
     help: "Where the page starts: the `next_cursor` of the previous page.",
     repeatable: false,
     required: false,
-    integer: false,
+    kind: Kind::Text,
     check: |value| match Cursor::parse(value) {
         Some(_) => Ok(()),
         None => Err(format!(
@@ -199,11 +219,45 @@ pub fn project_path(text: &str) -> Result<String, String> {
     Ok(parts.join("/"))
 }
 
+/// The snapshot index of the one item whose ID or MID is `reference`: `unknown-item` when no
+/// item has it, `ambiguous-item`, with their places, when several have it.
+pub fn resolve_item(snapshot: &Snapshot, reference: &str) -> Result<usize, Failure> {
+    let mut items = match is_mid(reference) {
+        true => snapshot.items_with_mid(reference),
+        false => snapshot.items_with_id(reference),
+    }
+    .to_vec();
+    items.dedup();
+    match items[..] {
+        [item] => Ok(item),
+        [] => {
+            let message = format!("no item has the ID or MID `{reference}`");
+            Err(Failure::new("unknown-item", message))
+        }
+        ref several => {
+            let places = several.iter().map(|&item| {
+                let path = &snapshot.documents()[snapshot.items()[item].document].path;
+                format!("`{path}:{}`", snapshot.item(item).line)
+            });
+            let other = if is_mid(reference) { "ID" } else { "MID" };
+            let message = format!(
+                "{} items have `{reference}`, at {}: name one by its {other}",
+                several.len(),
+                validation::list(places, several.len())
+            );
+            Err(Failure::new("ambiguous-item", message))
+        }
+    }
+}
+
 /// The values of an operation's options and its positional arguments, as checked.
 #[derive(Debug, Default)]
 pub struct Args {
     options: Vec<(&'static str, String)>,
     arguments: Vec<String>,
+    /// The inputs an MCP call passes as values ([`Kind::Inputs`]); the CLI gives them as
+    /// option values.
+    supplied: Vec<(String, Supplied)>,
 }
 
 impl Args {
@@ -232,6 +286,11 @@ impl Args {
             .map_or(paging::DEFAULT_LIMIT, |value| {
                 paging::parse_limit(value).expect("checked before the operation ran")
             })
+    }
+
+    /// The inputs that an MCP call passes as values.
+    pub fn supplied(&self) -> &[(String, Supplied)] {
+        &self.supplied
     }
 
     /// `--cursor`, if given.

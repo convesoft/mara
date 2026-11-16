@@ -1,7 +1,10 @@
-//! The invariant cases of VER-PROGRAM-FAULTS: each faulty program is consumed by an invariant
-//! of each severity, and `project validate` reports the fault and is invalid.
+//! VER-PROGRAM-FAULTS: each faulty program is consumed by an invariant of each severity, a
+//! query and a gate that names two items. `project validate` reports the fault and is invalid,
+//! `query execute` fails with it, and the gate and both items are unavailable.
 
-use crate::{PROGRAMS_LINE, Sandbox, assert_fault, both_severities};
+use crate::{
+    GATE, PROGRAMS_LINE, QUERY, Sandbox, assert_fault, assert_unavailable, both_severities,
+};
 
 /// The compile errors of EVD-SOUFFLE-TRIAL: each program declares `bad(m: Mid)` and has the
 /// error at the given line.
@@ -74,13 +77,10 @@ fn compile_errors_are_reported_at_their_line_with_a_caret() {
         sandbox.program("p.dl", &program, &both_severities("p.dl", "bad"));
         let run = sandbox.validate();
         assert_eq!(run.status, 1, "{case}: {run:#?}");
-        assert_excerpt(
-            &run,
-            ".mara/rules/p.dl",
-            &program,
-            line + u64::from(line > 0),
-        );
+        let line = line + u64::from(line > 0);
+        assert_excerpt(&run, ".mara/rules/p.dl", &program, line);
         assert_eq!(run.with_code("as-warning").len(), 0);
+        assert_unavailable(&sandbox, "program-error", ".mara/rules/p.dl", line, &["^"]);
     }
 }
 
@@ -100,11 +100,14 @@ fn compile_errors_in_an_included_file_are_reported_in_that_file() {
         sandbox.write(".mara/rules/b/q.dl", &included);
         let run = sandbox.validate();
         assert_eq!(run.status, 1, "{case}: {run:#?}");
-        assert_excerpt(
-            &run,
+        let line = line + u64::from(line > 0);
+        assert_excerpt(&run, ".mara/rules/b/q.dl", &included, line);
+        assert_unavailable(
+            &sandbox,
+            "program-error",
             ".mara/rules/b/q.dl",
-            &included,
-            line + u64::from(line > 0),
+            line,
+            &["^"],
         );
         assert!(
             run.with_code("program-error")
@@ -122,6 +125,9 @@ fn a_refused_program_is_reported_where_the_parser_stopped_and_never_runs() {
     let run = sandbox.validate();
     assert_fault(&run, "program-refused", ".mara/rules/p.dl", 3, &["^"]);
     assert_eq!((run.spawns(), run.runs()), (0, 0));
+    for run in assert_unavailable(&sandbox, "program-refused", ".mara/rules/p.dl", 3, &["^"]) {
+        assert_eq!((run.spawns(), run.runs()), (0, 0), "{run:#?}");
+    }
 }
 
 #[test]
@@ -139,6 +145,8 @@ fn to_number_of_text_is_a_runtime_fault_at_its_rule() {
         &["to_number(\"abc\")"],
     );
     assert_eq!(run.with_code("as-error").len(), 0);
+    let parts = ["to_number(\"abc\")"];
+    assert_unavailable(&sandbox, "program-fault", ".mara/rules/p.dl", 3, &parts);
 }
 
 #[test]
@@ -152,6 +160,14 @@ fn a_warning_while_evaluating_is_a_fault_although_soufflé_exits_with_0() {
         &run,
         "program-fault",
         ".mara/config.toml",
+        PROGRAMS_LINE,
+        &["substr"],
+    );
+    let config = ".mara/config.toml";
+    assert_unavailable(
+        &sandbox,
+        "program-fault",
+        config,
         PROGRAMS_LINE,
         &["substr"],
     );
@@ -173,6 +189,8 @@ fn an_output_that_is_not_utf8_is_a_fault() {
         &["UTF-8"],
     );
     assert_eq!(run.with_code("as-error").len(), 0);
+    let config = ".mara/config.toml";
+    assert_unavailable(&sandbox, "program-fault", config, PROGRAMS_LINE, &["UTF-8"]);
 }
 
 #[test]
@@ -187,6 +205,11 @@ fn lenient_text_functions_are_no_fault() {
     assert_eq!(run.with_code("as-error").len(), 2, "{run:#?}");
     assert_eq!(run.with_code("as-warning").len(), 2);
     assert_eq!(run.diagnostics().len(), 4);
+    let query = sandbox.mara(&QUERY);
+    assert_eq!(query.status, 0, "{query:#?}");
+    assert_eq!(query.json["rows"].as_array().unwrap().len(), 2);
+    let gate = sandbox.mara(&GATE);
+    assert_eq!(gate.json["gate"]["outcome"], "failed", "{gate:#?}");
 }
 
 #[test]
@@ -209,6 +232,14 @@ fn an_output_past_the_size_limit_is_a_fault_without_rows() {
         &["output-size limit of 64 MiB"],
     );
     assert_eq!(run.with_code("as-error").len(), 0);
+    let parts = ["output-size limit of 64 MiB"];
+    assert_unavailable(
+        &sandbox,
+        "program-fault",
+        ".mara/config.toml",
+        PROGRAMS_LINE,
+        &parts,
+    );
     assert_eq!(sandbox.tmp_entries(), Vec::<String>::new());
 }
 
@@ -230,6 +261,11 @@ fn a_program_past_the_memory_limit_is_stopped_before_the_time_limit() {
         &["memory limit of 1024 MiB"],
     );
     assert!(run.elapsed.as_secs() < 10, "{:?}", run.elapsed);
+    let parts = ["memory limit of 1024 MiB"];
+    let config = ".mara/config.toml";
+    for run in assert_unavailable(&sandbox, "program-fault", config, PROGRAMS_LINE, &parts) {
+        assert!(run.elapsed.as_secs() < 10, "{:?}", run.elapsed);
+    }
     assert_eq!(sandbox.tmp_entries(), Vec::<String>::new());
 }
 

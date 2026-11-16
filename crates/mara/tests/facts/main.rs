@@ -1,8 +1,9 @@
-//! The facts and supplied inputs that a program reads, read back through the pinned Soufflé
-//! (VER-FACT-ROWS and VER-REQUEST-INPUTS in docs/verification-rules.mara.md), below the CLI:
+//! The facts and supplied inputs that a program reads (VER-FACT-ROWS and VER-REQUEST-INPUTS in
+//! docs/verification-rules.mara.md). VER-FACT-ROWS runs through a configured query and
+//! `query execute` (`rows.rs`). The checks of supplied inputs run below the CLI (`inputs.rs`):
 //! the snapshot comes from the host's inputs, the files from `mara::rules`, and the wrapper and
-//! the `souffle` invocation are this test's, as DES-RULE-EXECUTION describes them. The cases
-//! that need configured consumers and the `query` operations are mara-bx82k0's.
+//! the `souffle` invocation are this test's, as DES-RULE-EXECUTION describes them; their CLI,
+//! gate and MCP cases are in the `programs` and `mcp` tests.
 
 mod inputs;
 mod rows;
@@ -159,17 +160,26 @@ impl Project {
         }
     }
 
-    /// `mara <args> --format json`, run in the project root with an empty environment.
+    /// `mara <args> --format json`, run in the project root with an environment of only
+    /// `TMPDIR`; it must succeed.
     pub fn mara(&self, args: &[&str]) -> Value {
+        let (status, json) = self.mara_any(args);
+        assert_eq!(status, 0, "mara {args:?}: {json}");
+        json
+    }
+
+    /// `mara <args> --format json`, with its exit status.
+    pub fn mara_any(&self, args: &[&str]) -> (i32, Value) {
         let output = Command::new(env!("CARGO_BIN_EXE_mara"))
             .args(args)
             .args(["--format", "json"])
             .current_dir(self.root())
             .env_clear()
+            .env("TMPDIR", std::env::temp_dir())
             .output()
             .expect("start mara");
-        assert!(output.status.success(), "mara {args:?}: {output:?}");
-        serde_json::from_slice(&output.stdout).expect("mara prints JSON")
+        let json = serde_json::from_slice(&output.stdout).expect("mara prints JSON");
+        (output.status.code().unwrap_or(-1), json)
     }
 }
 

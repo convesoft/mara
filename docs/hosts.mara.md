@@ -122,6 +122,9 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 | `unavailable-operation` | The host cannot run the operation, such as `project init` in a browser ([DES-BROWSER-WORKSPACE](#01M7JQJKGBJ7KQFM9PJV8RK8H7)); nothing is written |
 | `daemon-running` | `mara daemon start` asks for another browser listener than the running daemon of the build has ([DES-BROWSER-LISTENER](daemon.mara.md#01M7CQ57TJY788DMPBN4BX1SEM)); nothing changes |
 | `stale-cursor` | The cursor belongs to another result |
+| `unknown-entry` | No entry of the operation's kind has the name given ([DES-QUERY-RESULTS](rules.mara.md#01M7JT87HXDH2D4V1FNM6VZT7N)) |
+| `missing-input`, `unlisted-input`, `repeated-input`, `invalid-input` | The request's inputs do not fit its entry's ([DES-REQUEST-INPUTS](rules.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)) |
+| `program-failed` | The program of a query or view gives no rows: refused, not fitting its entry, not compiling or faulting; `diagnostics` holds why |
 | `record-too-large` | A record exceeds a page ([DES-PAGING](retrieval.mara.md#01M7BF6HCCWQH6P13ZR2YHAPS0)) |
 
 ---
@@ -138,7 +141,7 @@ Every operation is `<group> <verb>`, except `search` and `get`. An MCP tool is n
 
 - `mara mcp` speaks MCP over stdio through `rmcp` ([ADR-RMCP-SERVER](#01M7J0N6M9GKB113E35X5QPTZY)): the 2026-07-28 revision, whose requests carry their version, and the `initialize` handshake of 2024-11-05 to 2025-11-25.
 - `tools/list` returns one tool per document operation of [DES-OPERATIONS](#01M7BF6H124JRJAQSYVQ21Q2JS) on one page. Its description is the operation's summary.
-- A positional argument is a required string parameter. An option is a string parameter, an integer for a whole number (`limit`, `line`), an array of them when it repeats; `title` and `body` of `item create` are required. A parameter set to `null` counts as left out.
+- A positional argument is a required string parameter. An option is a string parameter, an integer for a whole number (`limit`, `line`), an array of them when it repeats; `title` and `body` of `item create` and `id` of `query gate` are required. `input` of the `query` tools is an object ([DES-REQUEST-INPUTS](rules.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)). A parameter set to `null` counts as left out.
 - A server started without `--project` adds a `project` parameter to every tool: the project root, absolute or relative to the server's working directory. Without it, the project is found from the server's working directory upward, as the CLI finds it from its own. A server started with `--project` lists no `project` parameter, and a call that gives one is rejected.
 - A call's result is one text content block holding the JSON object that `--format json` prints, with `isError` true for a failure; there is no structured content. An undeclared, missing or mistyped parameter is rejected with `invalid-argument` before the operation runs, in a message that names the parameter. An unknown tool is a JSON-RPC error.
 - Calls run on the runtime's blocking pool, several at once if the client sends them so. Each is a cold request; writes wait for the write lock ([REQ-WRITERS-SERIALIZED](writes.mara.md#01M7CXC2N8EZYVHGY7T2GPPB3X)). A call that the client cancels still runs to its end; only its response is dropped.

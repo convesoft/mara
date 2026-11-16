@@ -17,6 +17,9 @@ pub enum Roots {
     All,
     /// Only the files that invariants name: what `item validate` runs.
     Invariants,
+    /// Only the file that the entry at this index of [`Rules::entries`] names: what a query,
+    /// view or gate request runs.
+    Entry(usize),
 }
 
 /// The programs to run, and every problem that keeps a program or an entry from running.
@@ -81,7 +84,11 @@ pub fn plan(rules: &Rules, roots: Roots, files: &Files) -> Plan {
             if invariant {
                 by_invariants.insert(path);
             }
-        } else if roots == Roots::All || invariant {
+        } else if match roots {
+            Roots::All => true,
+            Roots::Invariants => invariant,
+            Roots::Entry(entry) => entry == index,
+        } {
             let message = format!("cannot read {path}: no declared program file has this path");
             let line = entry.program.line;
             diagnostics.push(Diagnostic::error("io-error", CONFIG_PATH, line, message));
@@ -91,6 +98,15 @@ pub fn plan(rules: &Rules, roots: Roots, files: &Files) -> Plan {
     let mut admitted: BTreeMap<&str, Result<Program, program::Refusal>> = BTreeMap::new();
     let selected: BTreeSet<&str> = match roots {
         Roots::Invariants => by_invariants,
+        Roots::Entry(entry) => {
+            let path = rules
+                .entries
+                .get(entry)
+                .map(|entry| entry.program.path.as_str());
+            path.filter(|path| files.programs.contains_key(*path))
+                .into_iter()
+                .collect()
+        }
         Roots::All => {
             for path in files.programs.keys() {
                 admitted.insert(path, admit(path));

@@ -9,7 +9,7 @@ use std::thread;
 use mara_engine::work::WorkCounts;
 use serde_json::{Map, Value};
 
-use crate::corpus::Corpus;
+use crate::corpus::{CANDIDATE, Corpus, RESULTS};
 use crate::cpu_time;
 
 /// One invocation of an operation on a corpus: a case of DES-PERFORMANCE-HARNESS.
@@ -31,6 +31,9 @@ pub enum Reads {
     Checked,
     /// The same inputs into a snapshot, without checks or program runs.
     Documents,
+    /// The same inputs into a snapshot, then one run of the corpus's program, and the files its
+    /// `--input` arguments name.
+    Evaluates { input_files: u64 },
     /// The same inputs, then a write: the files it writes are restored after each run
     /// (`restore`).
     Writes,
@@ -49,6 +52,8 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
     let id = |index: usize| corpus.ids[index].0.as_str();
     let path = |index: usize| corpus.ids[index].1.as_str();
     let (second, untargeted) = (25, corpus.untargeted);
+    let candidate = format!("candidate={CANDIDATE}");
+    let results = format!("verification_result=@{RESULTS}");
     vec![
         case(&["project", "validate"], Reads::Checked),
         // The corpus is valid, so fix writes nothing.
@@ -61,6 +66,31 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
         case(&["item", "list"], Reads::Documents),
         case(&["schema", "list"], Reads::Schema),
         case(&["schema", "get", "requirement"], Reads::Schema),
+        case(&["query", "list"], Reads::Schema),
+        case(
+            &["query", "execute", "verified-requirements"],
+            Reads::Evaluates { input_files: 0 },
+        ),
+        case(
+            &["query", "view", "unverified"],
+            Reads::Evaluates { input_files: 0 },
+        ),
+        case(
+            &[
+                "query",
+                "gate",
+                "verified",
+                "--id",
+                &corpus.gate_requirement,
+                "--input",
+                &candidate,
+                "--input",
+                &results,
+                "--complete",
+                "verification_result",
+            ],
+            Reads::Evaluates { input_files: 1 },
+        ),
         case(
             &["item", "move", &corpus.first_id, "docs/moved/first.mara.md"],
             Reads::Writes,
