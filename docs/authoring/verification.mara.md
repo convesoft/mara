@@ -207,6 +207,7 @@ Rust integration tests run `item move`, `item rename`, `project fix` and `projec
 - No temporary file, left or removed, is ever read as an input.
 - A conversion writes its report file first: "Killed" and "Temporary write fails" stop it there with any limit below the report's size.
 - "Rename fails" needs a user without `CAP_DAC_OVERRIDE`; run as root, the test fails and says so.
+- "Killed" and "Temporary write fails" also set the child's soft `RLIMIT_CORE` to 1 byte where the hard limit allows it, so the kill is not recorded as a crash where `core_pattern` pipes to a handler such as systemd-coredump ([DES-RULE-EXECUTION](../rules/evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)).
 
 | Case | Expectation |
 | --- | --- |

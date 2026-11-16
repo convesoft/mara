@@ -77,6 +77,16 @@ fn limited(project: &Project, limit: u64, ignore: bool) -> crate::Run {
             if libc::setrlimit(libc::RLIMIT_FSIZE, &rlimit) != 0 {
                 return Err(io::Error::last_os_error());
             }
+            // A soft core limit of 1 byte where the hard limit allows it: then a piped
+            // `core_pattern` records no crash for SIGXFSZ (DES-RULE-EXECUTION).
+            let mut core = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            if libc::getrlimit(libc::RLIMIT_CORE, &mut core) == 0 && core.rlim_max >= 1 {
+                core.rlim_cur = 1;
+                libc::setrlimit(libc::RLIMIT_CORE, &core);
+            }
             if ignore {
                 libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
             }

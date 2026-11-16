@@ -291,3 +291,50 @@ fn the_caret_is_placed_after_an_include_on_the_same_line() {
         "{message}"
     );
 }
+
+/// An inherited hard core limit of 0, as under a service with `LimitCORE=0`, changes no result:
+/// the host never raises it to give Soufflé its core limit (DES-RULE-EXECUTION).
+#[cfg(target_os = "linux")]
+#[test]
+fn a_hard_core_limit_of_0_changes_no_result() {
+    use std::os::unix::process::CommandExt;
+    let sandbox = Sandbox::new();
+    let program = ".include \"mara.dl\"\n.decl bad(m: Mid)\n\
+                   bad(m) :- item(m, _, _, \"accepted\", _, _).\n";
+    sandbox.program("p.dl", program, &both_severities("p.dl", "bad"));
+    let args = ["project", "validate", "--format", "json"];
+    let normal = sandbox.command(&args).output().expect("start mara");
+    let mut command = sandbox.command(&args);
+    // SAFETY: the closure runs in the child before `exec` and calls only `setrlimit`, which is
+    // async-signal-safe.
+    unsafe {
+        command.pre_exec(|| {
+            let zero = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            if libc::setrlimit(libc::RLIMIT_CORE, &zero) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let limited = command.output().expect("start mara");
+    let json: serde_json::Value = serde_json::from_slice(&limited.stdout).unwrap();
+    let codes: Vec<&str> = json["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|diagnostic| diagnostic["code"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        codes,
+        ["as-error", "as-warning", "as-error", "as-warning"],
+        "{json:#}"
+    );
+    assert_eq!(limited.status.code(), normal.status.code());
+    assert_eq!(
+        String::from_utf8_lossy(&limited.stdout),
+        String::from_utf8_lossy(&normal.stdout)
+    );
+}

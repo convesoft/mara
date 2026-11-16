@@ -123,8 +123,8 @@ fn stopped(operation: &Operation, index: usize, stop: Stop, limit: usize, new: &
             let mut command = project.mara(operation.args, &[]);
             let ignore = stop == Stop::TemporaryFails;
             let limit = limit as libc::rlim_t;
-            // SAFETY: the closure runs in the child before `exec` and calls only `setrlimit` and
-            // `signal`, which are async-signal-safe.
+            // SAFETY: the closure runs in the child before `exec` and calls only
+            // `getrlimit`, `setrlimit` and `signal`, which are async-signal-safe.
             unsafe {
                 command.pre_exec(move || {
                     let size = libc::rlimit {
@@ -133,6 +133,16 @@ fn stopped(operation: &Operation, index: usize, stop: Stop, limit: usize, new: &
                     };
                     if libc::setrlimit(libc::RLIMIT_FSIZE, &size) != 0 {
                         return Err(std::io::Error::last_os_error());
+                    }
+                    // A soft core limit of 1 byte where the hard limit allows it: then a piped
+                    // `core_pattern` records no crash for SIGXFSZ (DES-RULE-EXECUTION).
+                    let mut core = libc::rlimit {
+                        rlim_cur: 0,
+                        rlim_max: 0,
+                    };
+                    if libc::getrlimit(libc::RLIMIT_CORE, &mut core) == 0 && core.rlim_max >= 1 {
+                        core.rlim_cur = 1;
+                        libc::setrlimit(libc::RLIMIT_CORE, &core);
                     }
                     let action = if ignore { libc::SIG_IGN } else { libc::SIG_DFL };
                     libc::signal(libc::SIGXFSZ, action);

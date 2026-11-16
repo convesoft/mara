@@ -240,8 +240,13 @@ fn spawn_and_wait(
     })
 }
 
-/// Bounds the child's address space and the size of each file it writes, and keeps it from
-/// writing a core file. Past the file size it receives `SIGXFSZ`, whose default ends it.
+/// Bounds the child's address space and the size of each file it writes. Past the file size it
+/// receives `SIGXFSZ`, whose default ends it; past the address space Soufflé aborts. A soft core
+/// limit of exactly 1 byte, not 0, keeps either end from being recorded as a crash where
+/// `core_pattern` pipes to a handler such as systemd-coredump or names a file. A crash record
+/// remains where `core_pattern` names a socket (`@@…`), whose handler the kernel starts at any
+/// core limit, and where the inherited hard core limit is 0 and the pattern is a pipe
+/// (ADR-LIMIT-STOPS-NOT-CRASHES in `docs/rules/decisions.mara.md`).
 #[cfg(unix)]
 fn limit(command: &mut Command, limits: Limits) {
     use std::os::unix::process::CommandExt;
@@ -276,7 +281,21 @@ fn limit(command: &mut Command, limits: Limits) {
         let _ = parent;
         set(libc::RLIMIT_AS, limits.memory_bytes)?;
         set(libc::RLIMIT_FSIZE, limits.output_bytes)?;
-        set(libc::RLIMIT_CORE, 0)?;
+        // The soft core limit only, and only where the hard limit allows it: raising a hard
+        // limit of 0 fails without privilege, and the core limit never fails an evaluation.
+        let mut core = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: `getrlimit` writes only the struct it is given; `setrlimit` only reads it.
+        unsafe {
+            if libc::getrlimit(libc::RLIMIT_CORE, &mut core) == 0
+                && core.rlim_max >= CORE_LIMIT_BYTES as libc::rlim_t
+            {
+                core.rlim_cur = CORE_LIMIT_BYTES as libc::rlim_t;
+                libc::setrlimit(libc::RLIMIT_CORE, &core);
+            }
+        }
         // SAFETY: restoring a signal's default action is async-signal-safe.
         unsafe { libc::signal(libc::SIGXFSZ, libc::SIG_DFL) };
         Ok(())
@@ -287,6 +306,12 @@ fn limit(command: &mut Command, limits: Limits) {
 
 #[cfg(not(unix))]
 fn limit(_: &mut Command, _: Limits) {}
+
+/// The child's soft core limit. For a piped `core_pattern` the kernel treats 1 byte as "start no
+/// core handler"; with 0 it still runs the handler, which records the crash without its core. A
+/// file pattern writes nothing below a page. A socket pattern ignores the limit.
+#[cfg(unix)]
+const CORE_LIMIT_BYTES: u64 = 1;
 
 /// SIGINT, SIGTERM and SIGHUP during an evaluation: the evaluation stops, its private directory
 /// is removed, then Mara ends by the signal's default action. At any other time the signal acts
@@ -380,4 +405,43 @@ fn output_limit(status: &std::process::ExitStatus) -> Option<Limit> {
 #[cfg(not(unix))]
 fn output_limit(_: &std::process::ExitStatus) -> Option<Limit> {
     None
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    /// A soft core limit of 0 would still leave a crash record where `core_pattern` is a pipe;
+    /// the hard limit stays as inherited.
+    #[test]
+    fn the_child_gets_a_soft_core_limit_of_one_byte() {
+        let mut command = Command::new("cat");
+        command.arg("/proc/self/limits");
+        limit(&mut command, Limits::with_time(10));
+        let output = command.output().expect("run cat");
+        let limits = String::from_utf8(output.stdout).unwrap();
+        let core = limits
+            .lines()
+            .find(|line| line.starts_with("Max core file size"))
+            .expect("a core limit");
+        let mut inherited = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: `getrlimit` writes only the struct it is given.
+        assert_eq!(
+            unsafe { libc::getrlimit(libc::RLIMIT_CORE, &mut inherited) },
+            0
+        );
+        let hard = match inherited.rlim_max {
+            0 => return,
+            libc::RLIM_INFINITY => "unlimited".to_owned(),
+            bytes => bytes.to_string(),
+        };
+        assert_eq!(
+            core.split_whitespace().skip(4).collect::<Vec<_>>(),
+            ["1", hard.as_str(), "bytes"],
+            "{core}"
+        );
+    }
 }

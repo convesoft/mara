@@ -119,3 +119,24 @@
 - Chosen: programs hold no input or output directive. Mara generates them for the relations a run needs and uses Soufflé's JSON files; a run at 16× takes 18 ms instead of 14 ms ([EVD-SOUFFLE-TRIAL](evaluation.mara.md#01M7BF6HDDJJ0Y0WWT6RK17CDN)).
 - Rejected: Soufflé's default tab-separated files. A tab or a newline in a value reads as a column or row break ([EVD-SOUFFLE-PROGRAM-REACH](evaluation.mara.md#01M7CMW70TAFCJKPAX3VY94QMG)).
 - Rejected: escaping values in tab-separated files. A program can still build such a value, and rules would see the escaped text.
+
+---
+
+<a id="01M7K0ZGQTPCKA5Z5M49NW7C35"></a>
+
+### Stop an evaluation at a limit without a crash record
+
+| Type | Decision |
+| --- | --- |
+| ID | ADR-LIMIT-STOPS-NOT-CRASHES |
+| Status | Accepted |
+| Justifies | [DES-RULE-EXECUTION](evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH) |
+
+- Chosen: `RLIMIT_AS` and `RLIMIT_FSIZE` keep their ends, an abort and `SIGXFSZ`. The child's soft core limit is exactly 1 byte where the inherited hard limit allows it; the host never changes the hard limit, so the core limit never fails an evaluation.
+- Where `core_pattern` pipes to a handler such as systemd-coredump, the kernel starts no handler at a core limit of 1 byte, so neither stop is recorded as a crash (in mainline since 2.6.35; measured on Linux 7.2, mara-2dnzjc). At 0 the handler still records the crash without its core. A pattern that names a file writes nothing at 1 byte.
+- A record remains where `core_pattern` names a socket (`@@…`, systemd's socket handler), which the kernel starts at any core limit, and with a piped handler where the inherited hard core limit is 0. mara-8dtsks holds these cases.
+- Rejected: a cgroup `memory.max` through `systemd-run --user --scope` for each evaluation. It needs a systemd user manager and its bus, adds variables to Soufflé's empty environment and a process start to each evaluation, and tests would use a daemon they did not start.
+- Rejected: a cgroup that Mara creates itself. Its memory controller needs a parent cgroup without processes, which an unprivileged user has only when systemd or an administrator delegates one; Mara cannot rely on either.
+- Rejected: Mara polling the child's memory and killing it before the limit. An allocation that jumps past the limit between two polls still aborts.
+- Rejected: a Soufflé patched to exit on `std::bad_alloc` without aborting. It changes the pinned build, and `abort()` cannot be ignored or blocked from outside.
+- Rejected: `SIGXFSZ` ignored and the output limit read from file sizes. The core limit already covers a piped handler and a file pattern; it is one way to cover the output limit under a socket handler (mara-8dtsks).
