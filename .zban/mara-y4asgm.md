@@ -1,6 +1,6 @@
 ---
 title: "Fact bridge: mara.dl, JSON facts and request inputs"
-status: todo
+status: in-progress
 type: feature
 parent: mara-17tdb3
 created_at: 2026-11-13T22:10:06Z
