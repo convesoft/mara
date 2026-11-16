@@ -15,9 +15,12 @@
 | Satisfies | [REQ-PROJECT-AUTHORED-LOGIC](rules.mara.md#01M7BF6HDMR4G13G7VFDA770ZN) |
 | Satisfies | [REQ-EXTERNAL-RECORDS-AS-SUPPLIED](rules.mara.md#01M7BF6HDVZSZM8E9BAEF7NNQ0) |
 
-Mara ships a versioned declarations file, `mara.dl`, that starts with `.once`; programs include it with `.include "mara.dl"`. It declares only relations that every vocabulary has. Trial version:
+Mara ships a versioned declarations file, `mara.dl`, that starts with `.once`; programs include it with `.include "mara.dl"`. It declares only relations that every vocabulary has. Version 1:
 
 ```souffle
+.once
+// mara.dl format version 1 (DES-FACT-BRIDGE). Mara supplies these relations' facts.
+
 .type Mid <: symbol
 .type Id <: symbol
 .type Type <: symbol
@@ -39,7 +42,11 @@ Mara ships a versioned declarations file, `mara.dl`, that starts with `.once`; p
 - The distinct subtypes `Mid`, `Id` and `Path` make Soufflé reject rules that mix identities.
 - `revision` is the hash of the item's region. `get` returns the same value, so whoever records a result can record the definition it belongs to.
 - `folded` gives the NFC, case-folded form of every title and field value, as search normalizes text. Soufflé has no case folding.
-- `edge` rows carry the location of their metadata row.
+- `item` holds an item's first `Type`, `ID` and `Status` values, an absent one as an empty symbol, and its anchor's line.
+- `field` holds each row whose key the schema declares as a field of the item's type: an enum value as its schema name, a text value as written.
+- `edge` holds the relation rows whose value links to a MID, at the line of that metadata row. Mentions are no edges.
+- `folded` lowercases as search does, then applies NFC.
+- The engine derives the rows and their JSON text once per snapshot and keeps them with it; the host writes that text into each run's private directory, one `<relation>.json` per relation.
 - `source_complete` names a source whose records are all present ([DES-REQUEST-INPUTS](rules.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)).
 - Code links ([DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)) become a further input relation.
 - The file's format version starts at 1 and changes only with a released contract change, never for internal iterations.

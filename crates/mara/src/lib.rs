@@ -4,5 +4,6 @@
 pub mod convert;
 pub mod inputs;
 pub mod project;
+pub mod rules;
 mod tracked;
 pub mod write;

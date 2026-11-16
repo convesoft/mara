@@ -5,7 +5,6 @@ use std::ops::Range;
 
 use crate::diagnostic::Diagnostic;
 use crate::document::{Node, is_mid, label_name};
-use crate::hash::Hash;
 use crate::json::Object;
 use crate::paging::{Cursor, PAGE_BYTES};
 use crate::snapshot::Snapshot;
@@ -309,7 +308,7 @@ pub fn get(
                 .iter()
                 .map(|row| (row.key.as_str(), row.value.as_str(), row.line))
                 .collect();
-            let revision = Hash::of_bytes(contents[parsed.span.clone()].as_bytes()).to_string();
+            let revision = snapshot.revision(item);
             // The text after a merged anchor starts the item's content (DES-NARRATIVE-UNITS).
             let content = match parsed.lead.is_empty() {
                 true => parsed.body.clone(),

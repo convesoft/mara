@@ -17,6 +17,7 @@ use std::sync::{Arc, OnceLock};
 use crate::document::{
     self, Document, DocumentKey, Item, Link, Node, Posting, Unit, Zone, is_mid, label_name,
 };
+use crate::facts::{self, Facts};
 use crate::hash::{Hash, KeyHasher};
 use crate::schema::Schema;
 use crate::work::WorkCounts;
@@ -130,6 +131,7 @@ impl SnapshotInputs {
             incoming: HashMap::new(),
             words: HashMap::new(),
             spellings: [OnceLock::new(), OnceLock::new()],
+            facts: OnceLock::new(),
         };
         for input in documents {
             snapshot.add_document(input);
@@ -160,6 +162,8 @@ pub struct Snapshot {
     words: HashMap<String, Vec<Posting>>,
     /// The vocabulary indexes of one and of two edits ([`Snapshot::spellings`]).
     spellings: [OnceLock<Spellings>; 2],
+    /// The fact relations that programs read ([`Snapshot::facts`]).
+    facts: OnceLock<Facts>,
 }
 
 /// A document of a snapshot.
@@ -356,6 +360,19 @@ impl Snapshot {
             });
             Spellings::new(reachable.map(|(word, _)| word.as_str()), edits)
         })
+    }
+
+    /// The fact relations of the snapshot (DES-FACT-BRIDGE): derived on their first use, then
+    /// kept with the snapshot, so that every run on it reads the same rows.
+    pub fn facts(&self) -> &Facts {
+        self.facts.get_or_init(|| facts::derive(self))
+    }
+
+    /// The revision of the item at `index`: the hash of its region, as `get` returns it and the
+    /// `revision` facts hold it (DES-FACT-BRIDGE).
+    pub fn revision(&self, index: usize) -> String {
+        let contents = &self.documents[self.items[index].document].file.contents;
+        Hash::of_bytes(&contents[self.item(index).span.clone()]).to_string()
     }
 
     fn add_document(&mut self, input: DocumentInput) {
