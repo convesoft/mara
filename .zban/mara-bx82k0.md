@@ -27,3 +27,7 @@ Context: docs/rules.mara.md (REQ-PROJECT-AUTHORED-LOGIC, REQ-EXTERNAL-RECORDS-AS
 - [ ] Tests, faults: an out-of-range `substr` and `to_number` of text that is not a number make the outcome unavailable, natively and in WASM; `to_number("7junk")` is 7 and a negative `substr` length means the rest of the text, on both
 - [ ] Tests, explanations: a row whose value holds a newline, a quote or a negative number, and a proof that ends in an aggregate, are reported as not explainable; constraint leaves are left out
 - [ ] VER-WORK-COUNTERS rows for `souffle` runs pass
+
+Decided by the orchestrator on 2026-11-16 (from mara-t2qrcb, under the maintainer's rule of that day; listed in mara-46j65e): an evaluation gets limits on output size and memory besides time. A finite program wrote 8 MB in 15 ms in a review probe. Rests on REQ-PROGRAMS-ONLY-COMPUTE, RISK-SOUFFLE-REACHES-OUTSIDE and REQ-EVALUATION-TIME-LIMIT. The sandbox half of that question is mara-ptq6xc.
+
+- [ ] Limits on the output size and the memory of an evaluation: exceeding one ends the evaluation and is reported as a fault, never a passing outcome (REQ-PROGRAM-FAULTS-REPORTED). The worker chooses the numbers and the mechanism, records them in DES-RULE-EXECUTION, and removes the limits part of the open question on docs/rules-facts.mara.md

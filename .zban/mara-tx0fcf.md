@@ -18,3 +18,7 @@ Design input, on the maintainer's machine: `~/Work/local/workspace/projects/mara
 - [ ] Programs for the acceptance and lifecycle invariants, the queries, the three gates, the three views and the risk matrix, written in the admitted language (DES-PROGRAM-PROFILE) and installed by `project init`
 - [ ] The cases of VER-TEMPLATE-CASES that need no code links pass. Without code links, `verified` and `release-ready` are tested for what they can show: a known failure fails and everything else is unavailable; mara-yhxq5x makes the remaining cases pass
 - [ ] This repository adopts the invariants, with `requirement-verified` as a warning until the last slice
+
+Decided provisionally by the orchestrator on 2026-11-16 (from mara-b60px3, under the maintainer's rule of that day; listed in mara-46j65e): the four views that the first template leaves out (outcome coverage and validation, engineering basis and rationale, knowledge validity, change impact) are deferred to after 0.4.0; backlog issue mara-7h4z9f.
+
+- [ ] DES-TEMPLATE-VIEWS says in one sentence that the other four designed views are not in the first release
