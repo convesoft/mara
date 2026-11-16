@@ -41,6 +41,12 @@ Cold rows of the operations that 0.4.0-alpha.3 adds hold in every host and run t
 | `query report` | 1 program run, in provenance mode |
 | `query list`; a request refused for a program the parser refuses or for a missing or wrong input | 0 program runs |
 
+Cold rows of the operations that 0.4.0-alpha.4 adds run through the real CLI from 0.4.0-alpha.4, with a runtime directory of the test ([VER-DAEMON-START](verification-daemon.mara.md#01M7JKW7JWB2RANYKNE6BHYM26)):
+
+| Situation | Expectation |
+| --- | --- |
+| `daemon status`, `daemon start`, `daemon stop`, each with and without a daemon running | 0 of every count |
+
 Warm rows need a host that keeps state between requests ([REQ-WORK-FOLLOWS-CHANGE](performance.mara.md#01M7BF6H3A6YQ43351V9YSV3SQ)) and run from 0.4.0-alpha.4, at 1×, through the real CLI against a daemon the test starts with its own runtime directory ([VER-DAEMON-START](verification-daemon.mara.md#01M7JKW7JWB2RANYKNE6BHYM26)). Each row is its own test and starts settled: the last change came at least 2 s before the last request, so every input was last hashed by a check at least 2 s after its mtime and ctime ([DES-INPUTS-AND-KEYS](engine.mara.md#01M7BF6GYCNTZQ0VXCMGJYPZHY)). A row's counts are those of its write, or else of the request sent after its situation, background re-derivation included ([DES-PERFORMANCE-HARNESS](performance.mara.md#01M7BF6H4HKH0B0TXQZM3VXASA)). The rows for one document edited and for the request after a write also run with that request sent 2 s later, after the watcher re-derived, and give the same counts:
 
 | Situation | Expectation |

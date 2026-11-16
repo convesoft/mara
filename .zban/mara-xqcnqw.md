@@ -16,3 +16,7 @@ Context: docs/daemon.mara.md (REQ-NEVER-STALE, DES-DAEMON-SESSIONS); REQ-READS-D
 - [ ] Watching with debounce and full rescan on overflow; stat check on every request
 - [ ] Lock-free reads, per-project write queue, cancellable worker threads
 - [ ] Test: VER-NEVER-STALE, its idle-drop case with `MARA_TEST_IDLE_SECONDS` included (ADR-TEST-IDLE-PERIOD), and the release-build case of DES-PERFORMANCE-HARNESS for that variable; the other cases of VER-DAEMON-WRITES (docs/verification-daemon.mara.md)
+
+## Note from mara-17gykj
+
+The daemon blocks SIGINT, SIGTERM and SIGHUP in every thread and takes them on one thread with `sigwait` (`crates/mara/src/cli/daemon/server.rs`). A child process inherits that mask, also through `std::process::Command`. So when the daemon runs rule evaluations, the function that starts Soufflé must reset the child's signal mask (in its `pre_exec`). Shutdown must also end a running evaluation through the evaluation's own cancellation: the daemon's blocked signals never reach the `signal-hook` handlers of mara-bx82k0 (`crates/mara/src/rules.rs`, `interrupt`).

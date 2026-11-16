@@ -129,11 +129,22 @@ pub struct Run {
 /// user configuration or daemon. Requires exit status `status`, then reads the stats line that
 /// the process writes last on stderr. The process's CPU time counts in [`cpu_time::now`].
 pub fn run(directory: &Path, args: &[impl AsRef<std::ffi::OsStr>], status: i32) -> Run {
+    run_with(directory, args, &[], status)
+}
+
+/// [`run`] with the environment holding only `env`.
+pub fn run_with(
+    directory: &Path,
+    args: &[impl AsRef<std::ffi::OsStr>],
+    env: &[(&str, &Path)],
+    status: i32,
+) -> Run {
     let mut child = Command::new(env!("CARGO_BIN_EXE_mara"))
         .arg("--debug-stats")
         .args(args)
         .current_dir(directory)
         .env_clear()
+        .envs(env.iter().copied())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

@@ -19,8 +19,17 @@ const SECTIONS: [&str; 4] = [
     "## Repair after hand edits",
     "## Validate",
 ];
-/// The operations the full guide leaves to the notes, `prime` itself and the MCP server.
-const NOT_IN_GUIDE: [&str; 4] = ["project init", "project convert", "prime", "mcp"];
+/// The operations the full guide leaves to the notes, `prime` itself, the MCP server and the
+/// daemon's control (DES-AGENT-GUIDE).
+const NOT_IN_GUIDE: [&str; 7] = [
+    "project init",
+    "project convert",
+    "prime",
+    "mcp",
+    "daemon status",
+    "daemon start",
+    "daemon stop",
+];
 
 /// A disposable directory under `$TMPDIR`, removed on drop.
 struct Dir {

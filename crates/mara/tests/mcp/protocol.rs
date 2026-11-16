@@ -4,8 +4,15 @@ use serde_json::json;
 
 use crate::{Dir, Server, usage};
 
-/// The CLI operations that are no tools: the server itself and the agent guide.
-const NOT_TOOLS: [&str; 2] = ["mcp", "prime"];
+/// The CLI operations that are no tools: the daemon's control, the server itself and the agent
+/// guide.
+const NOT_TOOLS: [&str; 5] = [
+    "daemon status",
+    "daemon start",
+    "daemon stop",
+    "mcp",
+    "prime",
+];
 
 /// The document operations of DES-OPERATIONS, as tools.
 const TOOLS: [&str; 19] = [

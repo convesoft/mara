@@ -6,6 +6,14 @@ mod cli;
 mod convert;
 mod corpus;
 mod cpu_time;
+// The daemon's cases find the daemons of a test in `/proc`.
+#[cfg(target_os = "linux")]
+mod daemon;
+#[cfg(target_os = "linux")]
+#[path = "../support/daemons.rs"]
+mod daemons;
+#[cfg(target_os = "linux")]
+mod idle_period;
 mod init;
 mod mcp;
 mod pause_points;

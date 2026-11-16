@@ -22,7 +22,8 @@ tokio = { version = "1.54.1", default-features = false, features = ["rt"] }
 # The private directory of an evaluation (DES-RULE-EXECUTION), removed when it ends.
 tempfile = "3.27"
 
-# The limits of the `souffle` child process (DES-RULE-EXECUTION), and the CPU time of the
+# The limits of the `souffle` child process (DES-RULE-EXECUTION); the daemon's user ID, peer
+# credentials, `fork`, `setsid` and signals (DES-DAEMON-LIFECYCLE); and the CPU time of the
 # scaling test (DES-PERFORMANCE-HARNESS).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.191"

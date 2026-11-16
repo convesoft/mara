@@ -9,6 +9,7 @@
 
 mod author;
 mod convert;
+mod daemon;
 mod fix;
 mod guide;
 mod init;
@@ -52,6 +53,9 @@ const OPERATIONS: &[Operation] = &[
     author::ITEM_DELETE,
     author::RELATION_ADD,
     author::RELATION_REMOVE,
+    daemon::STATUS,
+    daemon::START,
+    daemon::STOP,
     mcp::MCP,
     guide::PRIME,
 ];
