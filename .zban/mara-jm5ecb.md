@@ -1,6 +1,6 @@
 ---
 title: "Explanations: query report"
-status: todo
+status: in-progress
 type: feature
 parent: mara-17tdb3
 blocked_by:

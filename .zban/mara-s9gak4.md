@@ -1,6 +1,6 @@
 ---
 title: Grammar-level endpoints
-status: todo
+status: in-progress
 type: feature
 parent: mara-779tms
 blocked_by:

@@ -25,3 +25,5 @@ One line per decision made on the maintainer's behalf under the rule of 2026-11-
 - 2026-11-16: mara-bx63yb was started before the alpha.3 epic closed, since it writes documents only. Undo: not needed.
 
 - 2026-11-16: mara-17gykj (daemon process, IPC and lifecycle) was started before the alpha.3 epic closed, on a free worker slot: it needs nothing from the rule evaluation. The slices still close and are tagged in order. Undo: not needed.
+
+- 2026-11-16: mara-jkabqy (client routing) was started before the alpha.3 epic closed, as mara-17gykj was; mara-xqcnqw follows it rather than running beside it, because both change the daemon's request handling. Undo: not needed.
