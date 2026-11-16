@@ -1,10 +1,8 @@
 ---
 title: Write the Verification items for the alpha.3 requirements
-status: todo
+status: in-progress
 type: task
 priority: high
-blocked_by:
-  - mara-6k50w0
 created_at: 2026-11-14T10:43:23Z
 ---
 
@@ -15,3 +13,5 @@ Context: AGENTS.md (Mara documents): a requirement is Accepted together with its
 - [ ] List the requirements the slice delivers: those its issues name and those satisfied by the designs they name
 - [ ] One Verification item for each, or one shared by requirements that a single check covers
 - [ ] The test items in those issues point at the Verification items instead of restating them
+
+Started on 2026-11-16 before the alpha.2 epic closed, by the orchestrator's decision under the maintainer's rule of that day: this issue writes documents only and depends on nothing the last two alpha.2 issues build, so starting it now shortens the path to alpha.3. The alpha.3 epic stays blocked by the alpha.2 epic.
