@@ -1,6 +1,6 @@
 ---
 title: Regroup docs into subject folders and drop the page size limit
-status: todo
+status: in-progress
 type: task
 priority: high
 blocked_by:
