@@ -2,6 +2,9 @@
 title: Teach code markers in the agent guide
 status: todo
 type: task
+parent: mara-779tms
+blocked_by:
+  - mara-yhxq5x
 discovered_from: mara-ttvp9z
 created_at: 2026-11-16T16:43:26Z
 ---
