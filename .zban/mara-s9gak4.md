@@ -14,3 +14,4 @@ Context: DES-CODE-MARKERS in docs/code.mara.md.
 - [ ] ABI check on load; fallback to the basic level with a diagnostic
 
 - [ ] VER-GRAMMAR-MARKERS passes, and the grammar-level cases of VER-CODE-FACTS
+- [ ] VER-CODE-EDITS passes with the grammars installed (markers before declarations, marker-like lines in raw strings), and the grammar-level `get` row of VER-CODE-WORK-COUNTERS (1 code scan); mara-yhxq5x ran both at the basic level only

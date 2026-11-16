@@ -24,8 +24,8 @@ const TEST_FILES: usize = 3;
 /// Timestamp part of the first MID, in milliseconds.
 const MID_TIME: u64 = 1_794_000_000_000;
 
-/// The configuration example of DES-PROJECT-CONFIGURATION. It declares no code language, so
-/// code files are not inputs yet, and no program.
+/// The configuration example of DES-PROJECT-CONFIGURATION. It declares no code language and no
+/// program.
 const CONFIG: &str = r#"format_version = 1
 schema = ".mara/schema.toml"
 
@@ -84,6 +84,16 @@ result_unavailable(r) :- not_passed(r, _), !source_complete("verification_result
 "#;
 /// The program files the corpus declares.
 pub const PROGRAMS: u64 = 1;
+/// What the corpus's and the hub's configuration add to [`CONFIG`]: Rust at the basic level, so
+/// that their code files carry links (DES-PERFORMANCE-HARNESS).
+const CODE: &str = r#"
+[code]
+format_version = 1
+
+[code.languages.rust]
+include = ["src/**/*.rs", "tests/**/*.rs"]
+comment_prefixes = ["//"]
+"#;
 /// The engineering vocabulary (DES-ENGINEERING-VOCABULARY): the `engineering` template's schema.
 const SCHEMA: &str = include_str!("../../templates/engineering/schema.toml");
 const GITIGNORE: &str = "/target/\n/docs/generated/\n";
@@ -136,11 +146,15 @@ pub struct Corpus {
     pub max_fan_out: usize,
     /// The ID and the document path of every item, cluster by cluster, each in template order.
     pub ids: Vec<(String, String)>,
-    /// The index in `ids` of the first verification of the first cluster that no relation or
-    /// mention targets, the same at every size.
+    /// The index in `ids` of the first verification of the first cluster that no relation,
+    /// mention or code marker targets, the same at every size.
     pub untargeted: usize,
     /// The ID of an accepted requirement of the last cluster, which `query gate` judges.
     pub gate_requirement: String,
+    /// Declared code files, by path.
+    pub code_files: Vec<String>,
+    /// Distinct contents among them.
+    pub code_contents: usize,
 }
 
 /// The file in the corpus root that the `query gate` case supplies as `verification_result`:
@@ -164,6 +178,8 @@ impl Corpus {
             add_cluster(cluster, seed, &mut items, &mut documents);
         }
         let mut written = Vec::new();
+        let mut code_files = Vec::new();
+        let mut code_contents = std::collections::HashSet::new();
         for (index, document) in documents.iter().enumerate() {
             write(
                 root,
@@ -172,10 +188,25 @@ impl Corpus {
             );
             written.push(document.path.clone());
         }
+        let targeted: std::collections::HashSet<usize> = items
+            .iter()
+            .flat_map(|item| {
+                item.relations
+                    .iter()
+                    .map(|&(_, target)| target)
+                    .chain(item.mentions.iter().copied())
+            })
+            .collect();
+        let untargeted = (20..24)
+            .find(|index| !targeted.contains(index))
+            .expect("a verification of the first cluster that no document targets");
         for cluster in 0..clusters {
-            for (path, contents) in code_files(cluster, seed, &items) {
+            // No marker names it either, so that `item delete` removes it.
+            for (path, contents) in code_files_of(cluster, seed, &items, untargeted) {
                 write(root, &path, contents.as_bytes());
-                written.push(path);
+                written.push(path.clone());
+                code_files.push(path);
+                code_contents.insert(contents);
             }
         }
         let mut rng = Rng::new(seed, u64::MAX);
@@ -201,18 +232,6 @@ impl Corpus {
             .iter()
             .map(|item| item.relations.len() + item.mentions.len())
             .sum();
-        let targeted: std::collections::HashSet<usize> = items
-            .iter()
-            .flat_map(|item| {
-                item.relations
-                    .iter()
-                    .map(|&(_, target)| target)
-                    .chain(item.mentions.iter().copied())
-            })
-            .collect();
-        let untargeted = (20..24)
-            .find(|index| !targeted.contains(index))
-            .expect("a verification of the first cluster that nothing targets");
         Corpus {
             dir,
             items: items.len(),
@@ -227,6 +246,8 @@ impl Corpus {
                 .collect(),
             untargeted,
             gate_requirement: items[(clusters - 1) * CLUSTER_ITEMS + 5].id.clone(),
+            code_contents: code_contents.len(),
+            code_files,
         }
     }
 
@@ -609,12 +630,18 @@ fn link_path(documents: &[Document], from: usize, to: usize) -> String {
 }
 
 /// The Rust files of one cluster: functions and tests carrying `@mara implements` markers.
-fn code_files(cluster: usize, seed: u64, items: &[Item]) -> Vec<(String, String)> {
+fn code_files_of(
+    cluster: usize,
+    seed: u64,
+    items: &[Item],
+    untargeted: usize,
+) -> Vec<(String, String)> {
     let mut rng = Rng::new(seed, (1 << 32) | cluster as u64);
     let base = cluster * CLUSTER_ITEMS;
     let area = cluster / CLUSTERS_PER_AREA;
     let implemented = ids(items, base, &[5, 6, 7, 8, 9, 10, 13, 14, 15, 16]);
-    let verifications = ids(items, base, &[20, 21, 22, 23]);
+    let mut verifications = ids(items, base, &[20, 21, 22, 23]);
+    verifications.retain(|id| *id != items[untargeted].id);
     let mut files = Vec::with_capacity(SOURCE_FILES + TEST_FILES);
     for file in 0..SOURCE_FILES {
         let mut code = format!("//! {}\n", sentence(&mut rng));
@@ -674,7 +701,7 @@ fn write_project_files(root: &Path, size: usize, seed: u64, rng: &mut Rng, items
     write(
         root,
         ".mara/config.toml",
-        format!("{CONFIG}{CORPUS_CONFIG}").as_bytes(),
+        format!("{CONFIG}{CODE}{CORPUS_CONFIG}").as_bytes(),
     );
     write(root, ".mara/rules/harness.dl", PROGRAM.as_bytes());
     write(root, ".mara/schema.toml", SCHEMA.as_bytes());
@@ -885,6 +912,8 @@ pub struct Hub {
     dir: TempDir,
     pub items: usize,
     pub edges: usize,
+    /// Rust files of distinct contents, each with [`Hub::MARKERS`] markers naming the hub.
+    pub code_files: usize,
 }
 
 impl Hub {
@@ -892,9 +921,14 @@ impl Hub {
     const PER_SIZE: usize = 1_000;
     /// Sources per document.
     const PER_DOCUMENT: usize = 100;
+    /// Rust files per unit of size.
+    const CODE_PER_SIZE: usize = 10;
+    /// Markers per Rust file.
+    pub const MARKERS: usize = 100;
 
-    /// The hub of `size` × 1000 sources under `$TMPDIR`. Its schema declares `refines` acyclic,
-    /// so the cycle pass visits every edge too. The project is valid.
+    /// The hub of `size` × 1000 sources and `size` × 10 Rust files of [`Hub::MARKERS`] markers
+    /// each, all naming the hub item, under `$TMPDIR`. Its schema declares `refines` acyclic, so
+    /// the cycle pass visits every edge too. The project is valid.
     pub fn generate(size: usize) -> Hub {
         let dir = tempfile::Builder::new()
             .prefix("mara-hub-")
@@ -903,13 +937,30 @@ impl Hub {
         let root = dir.path();
         let sources = size * Self::PER_SIZE;
         let mid = |number: usize| format!("01M70000{number:018}");
-        write(root, ".mara/config.toml", CONFIG.as_bytes());
+        write(
+            root,
+            ".mara/config.toml",
+            format!("{CONFIG}{CODE}").as_bytes(),
+        );
+        let code_files = size * Self::CODE_PER_SIZE;
+        for file in 0..code_files {
+            let mut code = String::new();
+            for marker in 0..Self::MARKERS {
+                let _ = write!(
+                    code,
+                    "// @mara implements REQ-HUB\nfn f{file}_{marker}() {{}}\n"
+                );
+            }
+            write(root, &format!("src/h{file:05}.rs"), code.as_bytes());
+        }
         let schema = "format_version = 1\nstatuses = [\"draft\"]\n\n\
             [types.requirement]\nid_prefix = \"REQ-\"\ndescription = \"An obligation.\"\n\n\
             [types.requirement.fields.tags]\nkind = \"text\"\nrepeatable = true\n\n\
             [types.requirement.fields.no]\nkind = \"text\"\nrepeatable = true\n\n\
             [relations.refines]\ninverse = \"refined_by\"\ndescription = \"Refines.\"\n\
-            targets = { requirement = [\"requirement\"] }\nacyclic = true\n";
+            targets = { requirement = [\"requirement\"] }\nacyclic = true\n\n\
+            [relations.implements]\ninverse = \"implemented_by\"\ndescription = \"Implements.\"\n\
+            targets = { code = [\"requirement\"] }\n";
         write(root, ".mara/schema.toml", schema.as_bytes());
         let mut hub = format!("# Hub\n\n---\n\n<a id=\"{}\"></a>\n\n### Hub\n\n", mid(0));
         hub.push_str("| Tags | tag-0 |\n| --- | --- |\n");
@@ -937,12 +988,21 @@ impl Hub {
             dir,
             items: sources + 1,
             edges: sources,
+            code_files,
         }
     }
 
     /// The project root.
     pub fn root(&self) -> &Path {
         self.dir.path()
+    }
+
+    /// Adds `src/markers.rs`, which holds one marker naming the hub per source: many markers of
+    /// one item whose `Type` and `ID` rows follow many others.
+    pub fn add_marker_file(&self) {
+        let markers = "// @mara implements REQ-HUB\n".repeat(self.edges);
+        let path = "src/markers.rs";
+        write(self.root(), path, markers.as_bytes());
     }
 
     /// Moves the hub item's document to another directory by hand, which leaves every source's

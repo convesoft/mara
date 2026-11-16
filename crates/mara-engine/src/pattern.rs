@@ -81,6 +81,14 @@ impl Patterns {
         })
     }
 
+    /// The index of the first pattern that matches the path that led to `at`.
+    pub fn first_match(&self, at: &Positions) -> Option<usize> {
+        at.0.iter()
+            .filter(|&&(pattern, index)| index == self.patterns[pattern].len())
+            .map(|&(pattern, _)| pattern)
+            .min()
+    }
+
     /// Whether a pattern can match a path below the one that led to `at`.
     pub fn can_continue(&self, at: &Positions) -> bool {
         at.0.iter()

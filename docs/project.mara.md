@@ -75,7 +75,7 @@ Schema inspection lists the types and relations and returns each one's descripti
 | Satisfies | [REQ-ONE-PROJECT-PER-OPERATION](#01M7BF6H8ND7YSXFMWCM0KXAAY) |
 
 - The configuration is `.mara/config.toml`. The directory that contains `.mara/` is the project root.
-- It declares every input by a path or pattern relative to the project root: document include patterns, the schema, Soufflé programs, and code languages with their extensions, comment prefixes and grammar pin (version and checksum).
+- It declares every input by a path or pattern relative to the project root: document include patterns, the schema, Soufflé programs, and code languages with their include patterns, comment prefixes and grammar pin (version and checksum), in the optional `[code]` that [DES-CODE-MARKERS](code.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1) defines.
 - A directory below the project root whose `.mara/` holds `config.toml` or `project.toml` is the root of another project. Nothing below it is an input, even where a pattern matches. A `config.toml` outside a `.mara/` directory makes no project.
 - `project init` writes a template's configuration, schema and programs ([DES-PROJECT-INIT](init.mara.md#01M7FVWHVXW71CWC0HJ52NTEQJ)).
 - The configuration and the schema are TOML. Each carries its own `format_version`, starting at 1. The configuration also holds the version of the document syntax, `[documents] format_version`.

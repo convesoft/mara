@@ -6,9 +6,10 @@
 
 use std::fmt::Write as _;
 
-use mara::inputs::Inputs;
+use mara::inputs::{CodeReads, Inputs};
 use mara::project::{self, Project};
 use mara::rules::{self, Scope};
+use mara_engine::code::CodeLinks;
 use mara_engine::config::CONFIG_PATH;
 use mara_engine::diagnostic::Diagnostic;
 use mara_engine::hash::Hash;
@@ -80,11 +81,13 @@ fn input_keys(generation: &mara::inputs::Generation, evaluations: &[Hash]) -> Ve
     keys
 }
 
-/// Every problem of the project: configuration, schema, inventory, built-in checks, programs
-/// and invariants.
+/// Every problem of the project: configuration, schema, inventory, built-in checks, code
+/// markers (DES-CODE-READERS), programs and invariants.
 fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let root = context.root()?;
-    let generation = Inputs::new(root).snapshot(context.now, context.work);
+    let generation = Inputs::new(root).generation(context.now, context.work, CodeReads::Scan);
+    let layer = generation.code.clone().expect("code was scanned");
+    let code = CodeLinks::new(&generation.snapshot, layer);
     let findings = validation::check(&generation.snapshot, context.work);
     let invariants = rules::invariants(&generation, Scope::Project, context.work);
     // One key for every spelling of the same paths (DES-DIAGNOSTICS).
@@ -100,11 +103,9 @@ fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Fail
     diagnostics.extend(invariants.diagnostics);
     let mut request = vec!["project validate"];
     request.extend(&paths);
-    let key = result_key(
-        &request,
-        &input_keys(&generation, &invariants.keys),
-        &diagnostics,
-    );
+    let mut keys = input_keys(&generation, &invariants.keys);
+    keys.push(Some(code.key()));
+    let key = result_key(&request, &keys, &diagnostics);
     let primary = findings.into_iter().filter(|finding| finding.primary);
     diagnostics.extend(primary.map(|finding| finding.diagnostic));
     diagnostics.extend(
@@ -113,6 +114,7 @@ fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Fail
             .into_iter()
             .map(|finding| finding.diagnostic),
     );
+    diagnostics.extend(code.problems);
     respond(Report::new(diagnostics, key), &paths, args)
 }
 

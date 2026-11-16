@@ -19,6 +19,10 @@ use mara_engine::work::WorkCounts;
 use crate::project::SYMBOLIC_LINK;
 use crate::tracked::{self, Check, Reads, Tracked};
 
+/// How the name of a temporary file of a write starts. The inventory never takes such a file
+/// for a code file, and its name never ends in `.mara.md`, so it is no input.
+pub const TEMPORARY_PREFIX: &str = ".mara-tmp-";
+
 /// The project's write lock: an exclusive advisory lock on its `.mara` directory, held until it
 /// is dropped. Every Mara writer takes it before it loads what it edits.
 #[derive(Debug)]
@@ -454,7 +458,7 @@ fn temporary_file(directory: &Path) -> Result<(PathBuf, File), Refusal> {
     let process = std::process::id();
     let mut attempt = 0;
     loop {
-        let path = directory.join(format!(".mara-tmp-{process}-{attempt}"));
+        let path = directory.join(format!("{TEMPORARY_PREFIX}{process}-{attempt}"));
         match OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(file) => return Ok((path, file)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists && attempt < 100 => {

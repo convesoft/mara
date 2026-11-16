@@ -4,6 +4,7 @@
 mod rules;
 
 use crate::diagnostic::Diagnostic;
+use crate::schema::is_name;
 use crate::toml_file::{Table, TomlFile, Value};
 
 pub use rules::{Consumer, DEFAULT_TIME_LIMIT_SECONDS, Entry, EntryKind, Named, Rules};
@@ -46,6 +47,19 @@ pub struct Config {
     /// The programs and their consumers (DES-RULE-CONSUMERS in `docs/rules.mara.md`); `None`
     /// without `[rules]`.
     pub rules: Option<Rules>,
+    /// The code languages that `[code]` declares, in the configuration's order, each valid
+    /// one (DES-CODE-MARKERS); none without `[code]`.
+    pub code: Vec<Language>,
+}
+
+/// A code language at the basic level: the files it covers and its comment prefixes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Language {
+    pub name: String,
+    /// Include patterns of its code files; an invalid pattern is left out.
+    pub include: Vec<PathSetting>,
+    /// Comment prefixes, as written.
+    pub prefixes: Vec<String>,
 }
 
 /// A path or pattern relative to the project root, with the configuration line that sets it,
@@ -74,6 +88,11 @@ fn read(file: &mut TomlFile, root: &Table, config: &mut Config) {
     }
     file.unknown_keys(root, rules::ROOT_KEYS, PLACE);
     config.rules = rules::read(file, root);
+    if let Some((key, value)) = root.get_key_value("code")
+        && let Some(code) = file.table("code", value)
+    {
+        config.code = languages(file, key.span(), code);
+    }
     if let Some(value) = file.required(root, "schema", 0..0, PLACE) {
         config.schema = path(file, "schema", value);
     }
@@ -98,6 +117,98 @@ fn read(file: &mut TomlFile, root: &Table, config: &mut Config) {
             .collect();
         config.include = Some(include);
     }
+}
+
+/// The languages of `[code]`, whose header is at `at`, in the file's order: none without
+/// `languages`. A language with an invalid name, prefix list or include list is left out.
+fn languages(file: &mut TomlFile, at: std::ops::Range<usize>, code: &Table) -> Vec<Language> {
+    const CODE: &str = "`[code]`";
+    if !file.format_version(code, at, CODE) {
+        return Vec::new();
+    }
+    file.unknown_keys(code, &["format_version", "languages"], CODE);
+    let Some(value) = code.get("languages") else {
+        return Vec::new();
+    };
+    let Some(table) = file.table("languages", value) else {
+        return Vec::new();
+    };
+    let mut entries: Vec<_> = table.iter().collect();
+    entries.sort_by_key(|(key, _)| key.span().start);
+    let mut languages = Vec::new();
+    for (key, value) in entries {
+        let name = key.get_ref().as_ref();
+        let Some(settings) = file.table(name, value) else {
+            continue;
+        };
+        let place = format!("`[code.languages.{name}]`");
+        let named = is_name(name);
+        if !named {
+            file.error(
+                "invalid-value",
+                key.span(),
+                format!(
+                    "the language name `{name}` must be lowercase ASCII letters and digits in \
+                     parts joined by single `_` or `-`"
+                ),
+            );
+        }
+        file.unknown_keys(settings, &["include", "comment_prefixes"], &place);
+        let include = file
+            .required(settings, "include", key.span(), &place)
+            .and_then(|value| file.array("include", value))
+            .map(|patterns| {
+                patterns
+                    .iter()
+                    .filter_map(|pattern| path(file, "include", pattern))
+                    .collect::<Vec<_>>()
+            });
+        let prefixes = file
+            .required(settings, "comment_prefixes", key.span(), &place)
+            .and_then(|value| prefixes(file, value));
+        if let (true, Some(include), Some(prefixes)) = (named, include, prefixes) {
+            languages.push(Language {
+                name: name.to_owned(),
+                include,
+                prefixes,
+            });
+        }
+    }
+    languages
+}
+
+/// Comment prefixes: at least one, each non-empty without spaces, tabs or line breaks, none
+/// twice. `None` when any is invalid.
+fn prefixes(file: &mut TomlFile, value: &Value) -> Option<Vec<String>> {
+    const KEY: &str = "comment_prefixes";
+    let values = file.array(KEY, value)?;
+    if values.is_empty() {
+        let message = format!("`{KEY}` must list at least one comment prefix");
+        file.error("invalid-value", value.span(), message);
+        return None;
+    }
+    let mut prefixes: Vec<String> = Vec::new();
+    let mut valid = true;
+    for value in values {
+        let Some(prefix) = file.string(KEY, value) else {
+            valid = false;
+            continue;
+        };
+        if prefix.is_empty() || prefix.contains([' ', '\t', '\n', '\r']) {
+            let message = format!(
+                "a comment prefix is not empty and has no space, tab or line break: `{prefix}`"
+            );
+            file.error("invalid-value", value.span(), message);
+            valid = false;
+        } else if prefixes.iter().any(|known| known == prefix) {
+            let message = format!("the comment prefix `{prefix}` is listed twice");
+            file.error("duplicate-name", value.span(), message);
+            valid = false;
+        } else {
+            prefixes.push(prefix.to_owned());
+        }
+    }
+    valid.then_some(prefixes)
 }
 
 fn path(file: &mut TomlFile, key: &str, value: &Value) -> Option<PathSetting> {
@@ -134,7 +245,7 @@ mod tests {
         assert_eq!(diagnostics[0].path, CONFIG_PATH);
         assert_eq!(
             diagnostics[0].to_string(),
-            ".mara/config.toml:3: error[unknown-key]: unknown key `name` in the configuration; the keys are `format_version`, `schema`, `documents`, `rules`, `queries`, `views`, `invariants`, `gates`"
+            ".mara/config.toml:3: error[unknown-key]: unknown key `name` in the configuration; the keys are `format_version`, `schema`, `documents`, `code`, `rules`, `queries`, `views`, `invariants`, `gates`"
         );
         assert_eq!(patterns(&config), ["docs/*.mara.md"]);
         assert_eq!(config.schema.unwrap().path, ".mara/schema.toml");
@@ -224,6 +335,51 @@ mod tests {
         assert_eq!(config, Config::default());
         let (_, diagnostics) = parse_config(b"format_version = 1\nschema = \"\xff\"\n");
         assert_eq!(codes(&diagnostics), [(2, "toml-syntax")]);
+    }
+
+    #[test]
+    fn reads_code_languages_in_their_order_and_leaves_out_invalid_ones() {
+        let base = "format_version = 1\nschema = \"s.toml\"\n[documents]\nformat_version = 1\ninclude = []\n";
+        let code = "[code]\nformat_version = 1\n\
+                    [code.languages.typescript]\ninclude = [\"web/**/*.ts\"]\ncomment_prefixes = [\"//\", \"*\"]\n\
+                    [code.languages.rust]\ninclude = [\"src/**/*.rs\", \"../x.rs\"]\ncomment_prefixes = [\"//\"]\n\
+                    [code.languages.Bad]\ninclude = []\ncomment_prefixes = [\"#\"]\n\
+                    [code.languages.spaced]\ninclude = []\ncomment_prefixes = [\"# x\", \"#\", \"#\"]\n\
+                    [code.languages.empty]\ninclude = []\ncomment_prefixes = []\ngrammar = 1\n\
+                    [code.languages.missing]\n";
+        let (config, diagnostics) = parse_config(format!("{base}{code}").as_bytes());
+        let names: Vec<&str> = config.code.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["typescript", "rust"]);
+        assert_eq!(config.code[0].prefixes, ["//", "*"]);
+        let rust: Vec<&str> = config.code[1]
+            .include
+            .iter()
+            .map(|p| p.path.as_str())
+            .collect();
+        assert_eq!(rust, ["src/**/*.rs"]);
+        assert_eq!(
+            codes(&diagnostics),
+            [
+                (12, "invalid-value"),
+                (14, "invalid-value"),
+                (19, "invalid-value"),
+                (19, "duplicate-name"),
+                (22, "invalid-value"),
+                (23, "unknown-key"),
+                (24, "missing-key"),
+                (24, "missing-key"),
+            ]
+        );
+        // `[code]` without a language declares none, and is no problem.
+        let (config, diagnostics) =
+            parse_config(format!("{base}[code]\nformat_version = 1\n").as_bytes());
+        assert_eq!((config.code.len(), codes(&diagnostics)), (0, vec![]));
+        let (config, diagnostics) =
+            parse_config(format!("{base}[code]\nformat_version = 2\n").as_bytes());
+        assert_eq!(
+            (config.code.len(), codes(&diagnostics)),
+            (0, vec![(7, "unsupported-format-version")])
+        );
     }
 
     #[test]

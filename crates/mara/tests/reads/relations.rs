@@ -1,8 +1,8 @@
-//! VER-ONE-HOP, except its code-link case, which waits for code links (mara-d005q9).
+//! VER-ONE-HOP.
 
 use serde_json::Value;
 
-use crate::{Project, document, item, line_of, link, mid};
+use crate::{CONFIG, Project, SCHEMA, document, item, line_of, link, mid};
 
 /// One connection as `<kind> <relation> <direction> <neighbour> @<source path>:<line>`.
 fn describe(connection: &Value) -> String {
@@ -39,10 +39,21 @@ fn connections(project: &Project, args: &[&str]) -> Vec<String> {
         .collect()
 }
 
-/// A has two outgoing relations, an incoming one from B and mentions to and from it; B has a
-/// relation of its own.
+/// A has two outgoing relations, an incoming one from B, mentions to and from it and a code link;
+/// B has a relation of its own.
 fn example() -> Project {
     let project = Project::new();
+    let code = "\n[code]\nformat_version = 1\n\n[code.languages.rust]\n\
+                include = [\"src/**/*.rs\"]\ncomment_prefixes = [\"//\"]\n";
+    project.write(".mara/config.toml", &format!("{CONFIG}{code}"));
+    let implements = "\n[relations.implements]\ninverse = \"implemented_by\"\n\
+                      description = \"Code realizes the target.\"\n\
+                      targets = { code = [\"requirement\"] }\n";
+    project.write(".mara/schema.toml", &format!("{SCHEMA}{implements}"));
+    project.write(
+        "src/a.rs",
+        "fn a() {}\n// @mara implements REQ-A\nfn b() {}\n",
+    );
     project.write(
         "docs/a.mara.md",
         &document(&[
@@ -122,8 +133,11 @@ fn lists_one_hop_with_source_locations() {
                 "mention - incoming REQ-C @{}",
                 at("docs/b.mara.md", "C mentions")
             ),
+            "relation implemented_by incoming src/a.rs:2 @src/a.rs:2".to_owned(),
         ]
     );
+    // B's other relations are not A's neighbours'.
+    assert_eq!(connections(&project, &["src/a.rs:2"]).len(), 1);
 }
 
 #[test]

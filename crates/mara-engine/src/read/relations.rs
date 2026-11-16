@@ -1,6 +1,9 @@
 //! `relation list`: the connections one hop from a node (REQ-DIRECT-NEIGHBOURS in
 //! `docs/retrieval.mara.md`).
 
+use std::collections::HashMap;
+
+use crate::code::{CodeLink, CodeLinks};
 use crate::diagnostic::Diagnostic;
 use crate::document::{Link, Node, label_name};
 use crate::json::Object;
@@ -80,44 +83,40 @@ pub struct RelationPage {
 /// its inverse name. For a unit, its mentions. For a whole document, every relation and mention
 /// written in it, in source order. A link to a MID that several items have connects to each of
 /// them. With `names`, only the relations of those forward or inverse names.
+///
+/// With `code`, an item's code links follow its incoming links, in path and line order, and
+/// `<path>` or `<path>:<line>` of a code file names its code links, or that line's
+/// (DES-CODE-MARKERS). A marker that names an ID several items have connects to each of them.
 pub fn relation_list(
     documents: &Documents<'_>,
+    code: Option<&CodeLinks>,
     address: &str,
     names: &[String],
     paging: &Paging<'_>,
 ) -> Result<RelationPage, ReadError> {
     let snapshot = documents.snapshot;
-    let named = resolve(snapshot, address)?;
     let mut connections = Vec::new();
-    match named {
-        Named::Document(document) => {
-            let entry = &snapshot.documents()[document];
-            let items = entry.items.clone().flat_map(|item| snapshot.outgoing(item));
-            let mut edges: Vec<&Edge> = items.chain(snapshot.narrative(document)).collect();
-            edges.sort_by_key(|edge| snapshot.link(edge).span.start);
-            for edge in edges {
-                outgoing(snapshot, edge, &mut connections);
+    let summaries = &mut Summaries::default();
+    let found = match code {
+        Some(code) => code_node(code, address)?.map(|node| (code, node)),
+        None => None,
+    };
+    let summary = match found {
+        Some((code, (file, line))) => {
+            for link in code.in_file(file) {
+                if line.is_none_or(|line| line == link.line) {
+                    outgoing_code(snapshot, summaries, code, link, &mut connections);
+                }
             }
+            let path = code.layer.files()[file].path.clone();
+            NodeSummary::Code { path, line }
         }
-        Named::Node(Node::Item(item)) => {
-            for edge in snapshot.outgoing(item) {
-                outgoing(snapshot, edge, &mut connections);
-            }
-            let mut incoming: Vec<&Edge> = snapshot.incoming(&snapshot.item(item).mid).collect();
-            incoming.sort_by_key(|edge| (edge.document, snapshot.link(edge).span.start));
-            for edge in incoming {
-                connections.push(self::incoming(snapshot, edge));
-            }
+        None => {
+            let named = resolve(snapshot, address)?;
+            relations(snapshot, summaries, code, named, &mut connections);
+            NodeSummary::of(snapshot, named)
         }
-        Named::Node(Node::Unit(unit)) => {
-            let entry = snapshot.units()[unit];
-            let document = &snapshot.documents()[entry.document];
-            let parsed = snapshot.unit(unit);
-            for link in &document.file.document.mentions[parsed.mentions.clone()] {
-                targets(snapshot, link, entry.document, None, &mut connections);
-            }
-        }
-    }
+    };
     let mut wanted: Vec<String> = names.iter().map(|name| label_name(name)).collect();
     wanted.sort_unstable();
     wanted.dedup();
@@ -130,15 +129,92 @@ pub fn relation_list(
         });
     }
 
-    let summary = NodeSummary::of(snapshot, named);
     let mut parts = vec![address.to_owned()];
     parts.extend(wanted);
+    let layer = code.map_or(snapshot.key().0, CodeLinks::key);
     let key = result_key(
-        snapshot.key().0,
+        layer,
         "relation list",
         parts.iter().map(String::as_str),
         documents.diagnostics,
     );
+    page_of(summary, connections, key, documents, paging)
+}
+
+/// The code file, by its index in the layer, and the line that `address` names, as
+/// `<path>` or `<path>:<line>`; `None` when it names no code file.
+fn code_node(code: &CodeLinks, address: &str) -> Result<Option<(usize, Option<usize>)>, ReadError> {
+    let layer = &code.layer;
+    if let Some(file) = layer.file(address) {
+        return Ok(Some((file, None)));
+    }
+    let Some((path, line)) = address.rsplit_once(':') else {
+        return Ok(None);
+    };
+    let Some(file) = layer.file(path) else {
+        return Ok(None);
+    };
+    let lines = layer.files()[file].scanned.lines;
+    match line.parse::<usize>() {
+        Ok(number) if (1..=lines).contains(&number) && line.bytes().all(|b| b.is_ascii_digit()) => {
+            Ok(Some((file, Some(number))))
+        }
+        _ => Err(ReadError::UnknownNode(format!("{path} has no line {line}"))),
+    }
+}
+
+/// The connections of the node that `named` names, into `connections`.
+fn relations(
+    snapshot: &Snapshot,
+    summaries: &mut Summaries,
+    code: Option<&CodeLinks>,
+    named: Named,
+    connections: &mut Vec<Connection>,
+) {
+    match named {
+        Named::Document(document) => {
+            let entry = &snapshot.documents()[document];
+            let items = entry.items.clone().flat_map(|item| snapshot.outgoing(item));
+            let mut edges: Vec<&Edge> = items.chain(snapshot.narrative(document)).collect();
+            edges.sort_by_key(|edge| snapshot.link(edge).span.start);
+            for edge in edges {
+                outgoing(snapshot, summaries, edge, connections);
+            }
+        }
+        Named::Node(Node::Item(item)) => {
+            for edge in snapshot.outgoing(item) {
+                outgoing(snapshot, summaries, edge, connections);
+            }
+            let mut incoming: Vec<&Edge> = snapshot.incoming(&snapshot.item(item).mid).collect();
+            incoming.sort_by_key(|edge| (edge.document, snapshot.link(edge).span.start));
+            for edge in incoming {
+                connections.push(self::incoming(snapshot, summaries, edge));
+            }
+            if let Some(code) = code {
+                for link in code.incoming(item) {
+                    connections.push(incoming_code(snapshot, code, link));
+                }
+            }
+        }
+        Named::Node(Node::Unit(unit)) => {
+            let entry = snapshot.units()[unit];
+            let document = &snapshot.documents()[entry.document];
+            let parsed = snapshot.unit(unit);
+            for link in &document.file.document.mentions[parsed.mentions.clone()] {
+                targets(snapshot, summaries, link, entry.document, None, connections);
+            }
+        }
+    }
+}
+
+/// The page that `paging` asks for of `connections`, the connections of `summary`.
+fn page_of(
+    summary: NodeSummary,
+    connections: Vec<Connection>,
+    key: crate::hash::Hash,
+    documents: &Documents<'_>,
+    paging: &Paging<'_>,
+) -> Result<RelationPage, ReadError> {
     let (path, line) = summary.location();
     let envelope = Envelope {
         head: Some(Head {
@@ -210,11 +286,77 @@ impl Connection {
     }
 }
 
+/// The summaries of the items that one request names, each made once: an item's `Type` and `ID`
+/// rows may follow many others, and many links may name one item (DES-PERFORMANCE-HARNESS).
+#[derive(Default)]
+struct Summaries(HashMap<usize, NodeSummary>);
+
+impl Summaries {
+    fn item(&mut self, snapshot: &Snapshot, item: usize) -> NodeSummary {
+        let summary = self.0.entry(item);
+        let summary =
+            summary.or_insert_with(|| NodeSummary::of(snapshot, Named::Node(Node::Item(item))));
+        summary.clone()
+    }
+}
+
+/// The connection of a code link to each item it targets, from the code being read.
+fn outgoing_code(
+    snapshot: &Snapshot,
+    summaries: &mut Summaries,
+    code: &CodeLinks,
+    link: &CodeLink,
+    connections: &mut Vec<Connection>,
+) {
+    let source = Location {
+        path: code.path(link).to_owned(),
+        line: link.line,
+    };
+    for &item in &link.items {
+        connections.push(Connection {
+            kind: ConnectionKind::Relation,
+            relation: Some(link.relation.clone()),
+            direction: Direction::Outgoing,
+            neighbour: Neighbour::Node(summaries.item(snapshot, item)),
+            source: source.clone(),
+        });
+    }
+}
+
+/// The connection of a code link that targets the item being read, from its code location.
+fn incoming_code(snapshot: &Snapshot, code: &CodeLinks, link: &CodeLink) -> Connection {
+    let path = code.path(link).to_owned();
+    let relation = snapshot
+        .schema()
+        .and_then(|schema| schema.relations.get(&link.relation))
+        .and_then(|relation| relation.inverse.clone())
+        .unwrap_or_else(|| link.relation.clone());
+    Connection {
+        kind: ConnectionKind::Relation,
+        relation: Some(relation),
+        direction: Direction::Incoming,
+        neighbour: Neighbour::Node(NodeSummary::Code {
+            path: path.clone(),
+            line: Some(link.line),
+        }),
+        source: Location {
+            path,
+            line: link.line,
+        },
+    }
+}
+
 /// The connections of `edge`, which leaves the node being read.
-fn outgoing(snapshot: &Snapshot, edge: &Edge, connections: &mut Vec<Connection>) {
+fn outgoing(
+    snapshot: &Snapshot,
+    summaries: &mut Summaries,
+    edge: &Edge,
+    connections: &mut Vec<Connection>,
+) {
     let relation = snapshot.relation(edge).map(str::to_owned);
     targets(
         snapshot,
+        summaries,
         snapshot.link(edge),
         edge.document,
         relation,
@@ -226,6 +368,7 @@ fn outgoing(snapshot: &Snapshot, edge: &Edge, connections: &mut Vec<Connection>)
 /// when no item has it.
 fn targets(
     snapshot: &Snapshot,
+    summaries: &mut Summaries,
     link: &Link,
     document: usize,
     relation: Option<String>,
@@ -247,7 +390,7 @@ fn targets(
         }],
         items => items
             .iter()
-            .map(|&item| Neighbour::Node(NodeSummary::of(snapshot, Named::Node(Node::Item(item)))))
+            .map(|&item| Neighbour::Node(summaries.item(snapshot, item)))
             .collect(),
     };
     for neighbour in neighbours {
@@ -262,13 +405,14 @@ fn targets(
 }
 
 /// The connection of `edge`, which targets the node being read, from its item or unit.
-fn incoming(snapshot: &Snapshot, edge: &Edge) -> Connection {
+fn incoming(snapshot: &Snapshot, summaries: &mut Summaries, edge: &Edge) -> Connection {
     let from = match (edge.item, edge.source) {
         (Some(item), _) => Some(Node::Item(item)),
         (None, EdgeSource::Narrative(_)) => snapshot.narrative_unit(edge).map(Node::Unit),
         (None, _) => None,
     };
     let neighbour = match from {
+        Some(Node::Item(item)) => Neighbour::Node(summaries.item(snapshot, item)),
         Some(node) => Neighbour::Node(NodeSummary::of(snapshot, Named::Node(node))),
         None => Neighbour::Node(NodeSummary::of(snapshot, Named::Document(edge.document))),
     };

@@ -2,6 +2,7 @@
 //! `docs/engine.mara.md`).
 
 pub mod authoring;
+pub mod code;
 pub mod config;
 pub mod diagnostic;
 pub mod document;

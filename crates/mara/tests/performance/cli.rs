@@ -19,6 +19,18 @@ pub struct Case {
     pub status: i32,
     /// The inputs it reads, which set its cold work counts.
     pub reads: Reads,
+    /// The code files it reads.
+    pub code: Code,
+}
+
+/// The code files an operation reads (DES-CODE-READERS).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Code {
+    None,
+    /// Every one, each read and hashed once and each distinct content scanned once.
+    All,
+    /// One, read and hashed, not scanned at the basic level: `get` of a code location.
+    One,
 }
 
 /// What an operation reads.
@@ -41,11 +53,13 @@ pub enum Reads {
 
 /// Each operation's case on `corpus`. An operation adds its case here, and both tests run it.
 pub fn cases(corpus: &Corpus) -> Vec<Case> {
-    let case = |args: &[&str], reads| Case {
+    let with_code = |args: &[&str], reads, code| Case {
         args: args.iter().map(|arg| (*arg).to_owned()).collect(),
         status: 0,
         reads,
+        code,
     };
+    let case = |args: &[&str], reads| with_code(args, reads, Code::None);
     let renamed = format!("{}-RENAMED", corpus.first_id);
     // Each single-file write changes a document of the first two clusters, the same at every
     // size, and no two of them the same document.
@@ -54,15 +68,21 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
     let (second, untargeted) = (25, corpus.untargeted);
     let candidate = format!("candidate={CANDIDATE}");
     let results = format!("verification_result=@{RESULTS}");
+    let line = format!("{}:2", corpus.code_files[0]);
     vec![
-        case(&["project", "validate"], Reads::Checked),
+        with_code(&["project", "validate"], Reads::Checked, Code::All),
         // The corpus is valid, so fix writes nothing.
         case(&["project", "fix"], Reads::Documents),
         case(&["item", "validate", &corpus.first_id], Reads::Checked),
         case(&["schema", "validate"], Reads::Schema),
         case(&["search", "cache"], Reads::Documents),
         case(&["get", &corpus.first_id], Reads::Documents),
-        case(&["relation", "list", &corpus.first_id], Reads::Documents),
+        with_code(
+            &["relation", "list", &corpus.first_id],
+            Reads::Documents,
+            Code::All,
+        ),
+        with_code(&["get", &line], Reads::Documents, Code::One),
         case(&["item", "list"], Reads::Documents),
         case(&["schema", "list"], Reads::Schema),
         case(&["schema", "get", "requirement"], Reads::Schema),
@@ -95,9 +115,10 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
             &["item", "move", &corpus.first_id, "docs/moved/first.mara.md"],
             Reads::Writes,
         ),
-        case(
+        with_code(
             &["item", "rename", &corpus.first_id, &renamed],
             Reads::Writes,
+            Code::All,
         ),
         case(
             &[
@@ -118,7 +139,11 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
             &["item", "update", id(0), "--title", "Updated by the harness"],
             Reads::Writes,
         ),
-        case(&["item", "delete", id(untargeted)], Reads::Writes),
+        with_code(
+            &["item", "delete", id(untargeted)],
+            Reads::Writes,
+            Code::All,
+        ),
         case(
             &[
                 "relation",

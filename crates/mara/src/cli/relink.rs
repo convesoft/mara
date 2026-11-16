@@ -4,8 +4,9 @@
 
 use std::fmt::Write as _;
 
-use mara::inputs::{Generation, Inputs};
+use mara::inputs::{CodeReads, Generation, Inputs};
 use mara::write::{self, Basis, FileWrite, WriteLock};
+use mara_engine::code::{self, CodeEdit};
 use mara_engine::diagnostic::Diagnostic;
 use mara_engine::document::{Document, Item, label_name};
 use mara_engine::json::{self, Object};
@@ -103,9 +104,10 @@ struct Session {
 }
 
 impl Session {
-    /// Selects the project, takes its write lock, then reads it; refuses a project whose
-    /// configuration or schema has an error, with those diagnostics.
-    fn open(context: &mut Context) -> Result<Session, Failure> {
+    /// Selects the project, takes its write lock, then reads it, doing with code files what
+    /// `code` says; refuses a project whose configuration or schema has an error, with those
+    /// diagnostics.
+    fn open(context: &mut Context, code: CodeReads) -> Result<Session, Failure> {
         let root = context.root()?;
         let lock = WriteLock::take(&root)?;
         let mut inputs = Inputs::new(root);
@@ -119,7 +121,7 @@ impl Session {
                 ..Failure::new("invalid-project", message)
             });
         }
-        let generation = inputs.snapshot(context.now, context.work);
+        let generation = inputs.generation(context.now, context.work, code);
         Ok(Session {
             lock,
             inputs,
@@ -134,12 +136,35 @@ impl Session {
         edits: Vec<DocumentEdit>,
         work: &mut WorkCounts,
     ) -> Result<Vec<(String, Document)>, Failure> {
+        let steps = edits.into_iter().map(Step::Document).collect();
+        self.write_steps(steps, work)
+    }
+
+    /// [`Session::write`] of document and code edits in their order. A code edit is checked
+    /// when it is computed ([`code::rename`]) and written as it is.
+    fn write_steps(
+        &self,
+        steps: Vec<Step>,
+        work: &mut WorkCounts,
+    ) -> Result<Vec<(String, Document)>, Failure> {
+        let edits = steps;
         let snapshot = &self.generation.snapshot;
         let empty = ParsedFile::default();
         let mut read_back = ReadBack::default();
         let mut files = Vec::with_capacity(edits.len());
         let mut written = Vec::with_capacity(edits.len());
-        for edit in edits {
+        for step in edits {
+            let edit = match step {
+                Step::Document(edit) => edit,
+                Step::Code(edit) => {
+                    files.push(FileWrite {
+                        basis: self.inputs.basis(&edit.path).unwrap_or(Basis::Absent),
+                        path: edit.path,
+                        contents: edit.contents,
+                    });
+                    continue;
+                }
+            };
             let old = match snapshot.document(&edit.path) {
                 Some(index) => &*snapshot.documents()[index].file,
                 None => &empty,
@@ -172,6 +197,21 @@ impl Session {
     }
 }
 
+/// One file of an edit, in write order.
+enum Step {
+    Document(DocumentEdit),
+    Code(CodeEdit),
+}
+
+impl Step {
+    fn path(&self) -> &str {
+        match self {
+            Step::Document(edit) => &edit.path,
+            Step::Code(edit) => &edit.path,
+        }
+    }
+}
+
 fn item_move(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let reference = args.argument(0);
     let destination =
@@ -179,7 +219,7 @@ fn item_move(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let line = args
         .value(LINE.name)
         .map(|value| value.parse().expect("checked before the operation ran"));
-    let session = Session::open(context)?;
+    let session = Session::open(context, CodeReads::None)?;
     let snapshot = &session.generation.snapshot;
     if snapshot.document(&destination).is_none() {
         session
@@ -241,13 +281,38 @@ fn item_rename(context: &mut Context, args: &Args) -> Result<Response, Failure> 
              by `-`, the first starting with a letter, such as `REQ-SIGN-IN`"
         )));
     }
-    let session = Session::open(context)?;
+    let session = Session::open(context, CodeReads::Scan)?;
     let snapshot = &session.generation.snapshot;
     let renamed = relink::rename(snapshot, reference, new_id).map_err(refused)?;
+    let layer = session
+        .generation
+        .code
+        .as_deref()
+        .expect("code was scanned");
+    // A marker in a code file that cannot be read would keep the old ID (DES-CODE-READERS).
+    super::author::incomplete_code(layer, &renamed.old_id)?;
+    let markers = code::rename(layer, &renamed.old_id, new_id).map_err(|path| {
+        let message = format!(
+            "the edit of {path} would not leave each marker it changes naming {new_id}, so \
+             nothing was written"
+        );
+        Failure::new(UNREADABLE_EDIT, message)
+    })?;
     let item = snapshot.item(renamed.item);
     let path = &snapshot.documents()[snapshot.items()[renamed.item].document].path;
-    let files: Vec<String> = renamed.edits.iter().map(|edit| edit.path.clone()).collect();
-    session.write(renamed.edits, context.work)?;
+    // Code markers and mention text first, in path order, then the `ID` row, then relation
+    // link text (DES-WRITE-PROCEDURE).
+    let mut edits = renamed.edits.into_iter();
+    let mut steps: Vec<Step> = edits
+        .by_ref()
+        .take(renamed.before_id_row)
+        .map(Step::Document)
+        .collect();
+    steps.extend(markers.into_iter().map(Step::Code));
+    steps.sort_by(|a, b| a.path().cmp(b.path()));
+    steps.extend(edits.map(Step::Document));
+    let files: Vec<String> = steps.iter().map(|step| step.path().to_owned()).collect();
+    session.write_steps(steps, context.work)?;
     let members = |object: &mut Object<'_>| {
         summary(object.key("item"), path, item.line, item, Some(new_id));
         object.string("old_id", &renamed.old_id);

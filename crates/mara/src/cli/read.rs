@@ -8,15 +8,18 @@
 use std::fmt::Write as _;
 use std::sync::Arc;
 
-use mara::inputs::Inputs;
+use mara::inputs::{CodeReads, Inputs};
 use mara::project::Project;
+use mara_engine::code::CodeLinks;
 use mara_engine::diagnostic::Diagnostic;
+use mara_engine::document::is_mid;
 use mara_engine::paging::Cursor;
 use mara_engine::read::{
     self, Connection, ConnectionKind, Declaration, Direction, Documents, Filters, ItemSummary,
     Neighbour, NodeSummary, Paging, Portion, ReadError, SchemaLayer, SearchHit,
 };
 use mara_engine::schema::FieldKind;
+use mara_engine::validation::is_id;
 use mara_engine::write::label;
 
 use super::validate::PATH;
@@ -84,8 +87,8 @@ pub const SCHEMA_GET: Operation = Operation {
 /// `<node>`: what `get` and `relation list` read.
 const NODE: Argument = Argument {
     name: "node",
-    help: "An item's ID or MID, `<path>:<line>` of an item or narrative unit, or a document's \
-           `<path>`.",
+    help: "An item's ID or MID, `<path>:<line>` of an item, a narrative unit or a line of code, \
+           or the `<path>` of a document or code file.",
 };
 
 /// `--type <name>`: items of this type. Repeatable (DES-SEARCH-REQUESTS).
@@ -267,9 +270,19 @@ fn item_list(context: &mut Context, args: &Args) -> Result<Response, Failure> {
 fn relation_list(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let cursor = args.cursor();
     let names: Vec<String> = args.values(RELATION.name).map(str::to_owned).collect();
-    with_documents(context, |documents| {
-        let page =
-            read::relation_list(documents, args.argument(0), &names, &paging(args, &cursor))?;
+    let (mut inputs, _) = open(context)?;
+    let generation = inputs.generation(context.now, context.work, CodeReads::Scan);
+    let layer = generation.code.clone().expect("code was scanned");
+    let code = CodeLinks::new(&generation.snapshot, layer);
+    let documents = Documents {
+        snapshot: &generation.snapshot,
+        diagnostics: &generation.diagnostics,
+    };
+    let documents = &documents;
+    let listed = (|| {
+        let address = args.argument(0);
+        let paging = paging(args, &cursor);
+        let page = read::relation_list(documents, Some(&code), address, &names, &paging)?;
         let human = |out: &mut String| {
             let _ = writeln!(out, "{}", node_line(&page.node));
             for connection in &page.page.records {
@@ -282,11 +295,72 @@ fn relation_list(context: &mut Context, args: &Args) -> Result<Response, Failure
             documents.diagnostics,
             page.page.next_cursor,
         ))
-    })
+    })();
+    listed.map_err(failure)
+}
+
+/// The path that `address` names when it may name a code file: neither an ID nor a MID, with
+/// or without a line. The inventory tells whether it is one; a name ending in `.mara.md` can be
+/// a code file too.
+fn code_path(address: &str) -> Option<&str> {
+    if is_id(address) || is_mid(address) {
+        return None;
+    }
+    let path = match address.rsplit_once(':') {
+        Some((path, line)) if !line.is_empty() && line.bytes().all(|b| b.is_ascii_digit()) => path,
+        _ => address,
+    };
+    Some(path)
 }
 
 fn get(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let cursor = args.cursor();
+    let address = args.argument(0);
+    if let Some(path) = code_path(address) {
+        let (mut inputs, _) = open(context)?;
+        let generation = inputs.generation(context.now, context.work, CodeReads::List);
+        if generation
+            .code_paths
+            .binary_search_by(|p| p.as_str().cmp(path))
+            .is_ok()
+        {
+            let (hash, contents) =
+                inputs
+                    .read_code(path, context.now, context.work)
+                    .map_err(|diagnostic| Failure {
+                        message: diagnostic.message.clone(),
+                        diagnostics: vec![*diagnostic],
+                        ..Failure::new("io-error", String::new())
+                    })?;
+            let line = match address.len() > path.len() {
+                true => Some(address[path.len() + 1..].parse().unwrap_or(usize::MAX)),
+                false => None,
+            };
+            let node = NodeSummary::Code {
+                path: path.to_owned(),
+                line,
+            };
+            let diagnostics = &generation.diagnostics;
+            let portion = read::get_code(node, hash, &contents, cursor.as_ref(), diagnostics)
+                .map_err(failure)?;
+            let human = |out: &mut String| portion_lines(out, &portion);
+            let next = portion.next_cursor;
+            return Ok(respond(portion.json.clone(), human, diagnostics, next));
+        }
+        let documents = Documents {
+            snapshot: &generation.snapshot,
+            diagnostics: &generation.diagnostics,
+        };
+        let portion = read::get(&documents, address, cursor.as_ref()).map_err(failure)?;
+        let human = |out: &mut String| portion_lines(out, &portion);
+        let next = portion.next_cursor;
+        return Ok(respond(
+            portion.json.clone(),
+            human,
+            documents.diagnostics,
+            next,
+        ));
+    }
     with_documents(context, |documents| {
         let portion = read::get(documents, args.argument(0), cursor.as_ref())?;
         let human = |out: &mut String| portion_lines(out, &portion);
@@ -374,6 +448,11 @@ fn node_line(node: &NodeSummary) -> String {
             heading.as_deref().unwrap_or("(narrative)")
         ),
         NodeSummary::Document { path } => path.clone(),
+        NodeSummary::Code {
+            path,
+            line: Some(line),
+        } => format!("{path}:{line}: (code)"),
+        NodeSummary::Code { path, line: None } => format!("{path} (code)"),
     }
 }
 

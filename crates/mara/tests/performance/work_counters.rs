@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime};
 use mara::inputs::{Generation, Inputs};
 use mara_engine::work::WorkCounts;
 
-use crate::cli::Reads;
+use crate::cli::{Code, Reads};
 use crate::corpus::{Corpus, Hub, PROGRAMS};
 use crate::restore::{self, Written};
 use crate::{NIGHTLY_SIZE, PULL_REQUEST_SIZES, SEED, cli, mcp};
@@ -60,11 +60,29 @@ fn cold_counts_at(size: usize) {
         fs::write(corpus.root().join(path), shared).unwrap();
     }
     let documents = corpus.documents as u64 + 2;
+    // Two code files with the same contents are scanned once.
+    let copied = "fn shared() {}\n// @mara implements REQ-NONE-SUCH\n";
+    let copied = copied.replace("REQ-NONE-SUCH", &corpus.ids[5].0);
+    for path in ["src/a000/shared-1.rs", "src/a000/shared-2.rs"] {
+        fs::write(corpus.root().join(path), &copied).unwrap();
+    }
+    let code = (
+        corpus.code_files.len() as u64 + 2,
+        corpus.code_contents as u64 + 1,
+    );
+    let totals = Totals { documents, code };
     let mut last_write = SystemTime::now();
     for case in cli::cases(&corpus) {
         let name = format!("mara {} at {size}×", case.args.join(" "));
         let run = || cli::run(corpus.root(), &case.args, case.status);
-        check_cold(&corpus, &name, case.reads, documents, &mut last_write, run);
+        check_cold(
+            &corpus,
+            &name,
+            (case.reads, case.code),
+            totals,
+            &mut last_write,
+            run,
+        );
     }
     // `mara mcp`: a session without a call does no work, and a call's counts are those of the
     // same request through the CLI.
@@ -73,21 +91,36 @@ fn cold_counts_at(size: usize) {
     for case in mcp::cases(&corpus) {
         let name = format!("mara mcp {} {} at {size}×", case.tool, case.arguments);
         let run = || mcp::run(corpus.root(), &[(case.tool, &case.arguments)]);
-        check_cold(&corpus, &name, case.reads, documents, &mut last_write, run);
+        check_cold(
+            &corpus,
+            &name,
+            (case.reads, case.code),
+            totals,
+            &mut last_write,
+            run,
+        );
     }
 }
 
-/// Runs a case once and requires the counts of a cold request that reads `reads`, with
-/// `documents` documents in the corpus. A case that writes starts when every file it writes last
+/// The documents of a corpus, and its code files with their distinct contents.
+#[derive(Clone, Copy)]
+struct Totals {
+    documents: u64,
+    code: (u64, u64),
+}
+
+/// Runs a case once and requires the counts of a cold request that reads `reads` and `code`,
+/// with `totals` in the corpus. A case that writes starts when every file it writes last
 /// changed at least 2 s before, and its files are restored after it.
 fn check_cold(
     corpus: &Corpus,
     name: &str,
-    reads: Reads,
-    documents: u64,
+    (reads, code): (Reads, Code),
+    totals: Totals,
     last_write: &mut SystemTime,
     run: impl FnOnce() -> cli::Run,
 ) {
+    let documents = totals.documents;
     let mut written = None;
     let run = match reads {
         Reads::Writes => {
@@ -100,10 +133,10 @@ fn check_cold(
     };
     // The configuration and the schema; for a request that reads documents, also the root
     // `.gitignore`, every document and the program file. `.git`, ignored and undeclared files
-    // are never read. No code is read. Validation runs each declared program once, as one
-    // subprocess, and nothing else runs one.
+    // are never read. Code is read only by the operations that read it (DES-CODE-READERS).
+    // Validation runs each declared program once, as one subprocess, and nothing else runs one.
     let read = documents + 3 + PROGRAMS;
-    let expected = match reads {
+    let mut expected = match reads {
         Reads::Schema => WorkCounts {
             file_reads: 2,
             hashes: 2,
@@ -143,11 +176,19 @@ fn check_cold(
         Reads::Writes => WorkCounts {
             file_reads: read,
             hashes: read,
-            parses: documents - 1 + written.as_ref().map_or(0, Written::distinct),
+            parses: documents - 1 + written.as_ref().map_or(0, Written::distinct_documents),
             snapshot_builds: 1,
             ..WorkCounts::default()
         },
     };
+    let (code_reads, code_scans) = match code {
+        Code::None => (0, 0),
+        Code::All => totals.code,
+        Code::One => (1, 0),
+    };
+    expected.file_reads += code_reads;
+    expected.hashes += code_reads;
+    expected.code_scans = code_scans;
     assert_eq!(run.work, expected, "{name}");
     if let Some(written) = written {
         assert!(!written.contents.is_empty(), "{name} wrote nothing");
@@ -176,33 +217,51 @@ fn hub_counts() {
         let run = cli::run(hub.root(), &["project", "validate"], 0);
         let documents = hub.edges.div_ceil(100) as u64 + 1;
         let (items, edges) = (hub.items as u64, hub.edges as u64);
+        // Every code file is read, hashed and scanned once.
+        let code = hub.code_files as u64;
         let expected = WorkCounts {
-            file_reads: documents + 2,
-            hashes: documents + 2,
+            file_reads: documents + 2 + code,
+            hashes: documents + 2 + code,
             parses: documents,
             snapshot_builds: 1,
+            code_scans: code,
             // The facts and item passes, the edge pass, and the cycle pass over every edge and
             // item of the acyclic `refines`.
             check_steps: 2 * items + edges + (items + edges),
             ..WorkCounts::default()
         };
         assert_eq!(run.work, expected, "hub at {size}×");
-        // A rename and a move of the hub rewrite every edge's link (DES-PERFORMANCE-HARNESS).
+        let run = cli::run(hub.root(), &hub_relations(), 0);
+        let listed = WorkCounts {
+            check_steps: 0,
+            ..expected
+        };
+        assert_eq!(run.work, listed, "relation list of the hub at {size}×");
+        // A rename and a move of the hub rewrite every edge's link, and the rename every marker
+        // (DES-PERFORMANCE-HARNESS).
         let mut last_write = generated;
         for args in hub_writes() {
             restore::settle(last_write);
             let mut run = None;
             let written = Written::learn(hub.root(), || run = Some(cli::run(hub.root(), &args, 0)));
+            // The rename reads and rewrites code; the move reads none. No code is scanned after
+            // the edit.
+            let code = match args[1] {
+                "rename" => code,
+                _ => 0,
+            };
             let expected = WorkCounts {
-                file_reads: documents + 2,
-                hashes: documents + 2,
-                parses: documents + written.distinct(),
+                file_reads: documents + 2 + code,
+                hashes: documents + 2 + code,
+                parses: documents + written.distinct_documents(),
                 snapshot_builds: 1,
+                code_scans: code,
                 ..WorkCounts::default()
             };
+            assert_eq!(written.code_files(), code, "{args:?} at {size}×");
             assert_eq!(
                 written.contents.len() as u64,
-                documents + u64::from(args[1] == "move")
+                documents + u64::from(args[1] == "move") + code
             );
             assert_eq!(
                 run.expect("the case ran").work,
@@ -213,6 +272,11 @@ fn hub_counts() {
             last_write = SystemTime::now();
         }
     }
+}
+
+/// `relation list` of the hub item: every source's relation and every marker.
+pub fn hub_relations() -> [&'static str; 3] {
+    ["relation", "list", "REQ-HUB"]
 }
 
 /// The rename and the move of the hub item.
@@ -251,7 +315,7 @@ fn moved_hub_fix_counts() {
         let written = Written::learn(hub.root(), || run = Some(cli::run(hub.root(), &fix, 0)));
         assert_eq!(written.contents.len() as u64, documents - 1, "at {size}×");
         let expected = WorkCounts {
-            parses: documents + written.distinct(),
+            parses: documents + written.distinct_documents(),
             ..cold
         };
         let run = run.expect("the case ran");

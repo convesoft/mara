@@ -274,7 +274,7 @@ fn reports_problems_of_both_files_by_path_and_line() {
     assert_eq!(
         printed,
         [
-            ".mara/config.toml:3: error[unknown-key]: unknown key `name` in the configuration; the keys are `format_version`, `schema`, `documents`, `rules`, `queries`, `views`, `invariants`, `gates`",
+            ".mara/config.toml:3: error[unknown-key]: unknown key `name` in the configuration; the keys are `format_version`, `schema`, `documents`, `code`, `rules`, `queries`, `views`, `invariants`, `gates`",
             "vocabulary/schema.toml:4: error[reserved-name]: type name `code` is reserved",
         ]
     );
@@ -525,14 +525,46 @@ fn the_documented_examples_load_as_a_project() {
     assert!(supersedes.same_type && supersedes.acyclic);
 }
 
+/// The code language example of DES-CODE-MARKERS, added to the configuration example, loads
+/// without diagnostics.
+#[test]
+fn the_documented_code_example_loads() {
+    const CODE: &str = include_str!("../../../docs/code.mara.md");
+    let dir = TempDir::new();
+    let example = format!(
+        "{}\n{}",
+        documented_example("DES-PROJECT-CONFIGURATION"),
+        example_on(CODE, "DES-CODE-MARKERS")
+    );
+    dir.write("p/.mara/config.toml", &example);
+    dir.write(
+        "p/.mara/schema.toml",
+        documented_example("DES-SCHEMA-MODEL"),
+    );
+    let root = select(&dir.path("p"), None).unwrap();
+    let project = load(root, &mut WorkCounts::default());
+    assert_eq!(project.diagnostics, []);
+    let rust = &project.config.code[0];
+    assert_eq!(
+        (rust.name.as_str(), rust.include[0].path.as_str()),
+        ("rust", "src/**/*.rs")
+    );
+    assert_eq!(rust.prefixes, ["//", "///", "*"]);
+}
+
 /// The first TOML code block of the item with `id` on `docs/project.mara.md`, read at compile
 /// time, before the next item's anchor.
 fn documented_example(id: &str) -> &'static str {
     const PAGE: &str = include_str!("../../../docs/project.mara.md");
-    let start = PAGE
+    example_on(PAGE, id)
+}
+
+/// The first TOML code block of the item with `id` on `page`, before the next item's anchor.
+fn example_on(page: &'static str, id: &str) -> &'static str {
+    let start = page
         .find(&format!("| ID | {id} |"))
-        .unwrap_or_else(|| panic!("docs/project.mara.md has no item {id}"));
-    let item = &PAGE[start..];
+        .unwrap_or_else(|| panic!("the page has no item {id}"));
+    let item = &page[start..];
     let item = &item[..item.find("<a id=").unwrap_or(item.len())];
     let (_, block) = item
         .split_once("```toml\n")

@@ -9,7 +9,7 @@ use std::thread;
 
 use serde_json::{Value, json};
 
-use crate::cli::{Reads, Run, parse};
+use crate::cli::{Code, Reads, Run, parse};
 use crate::corpus::Corpus;
 use crate::cpu_time;
 
@@ -19,6 +19,8 @@ pub struct Case {
     pub arguments: Value,
     /// The inputs it reads, which set its cold work counts.
     pub reads: Reads,
+    /// The code files it reads.
+    pub code: Code,
 }
 
 /// A call of each kind of read, and a write.
@@ -27,9 +29,13 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
         tool,
         arguments,
         reads,
+        code: Code::None,
     };
     vec![
-        case("project_validate", json!({}), Reads::Checked),
+        Case {
+            code: Code::All,
+            ..case("project_validate", json!({}), Reads::Checked)
+        },
         case("item_list", json!({}), Reads::Documents),
         case("schema_get", json!({"name": "requirement"}), Reads::Schema),
         case(

@@ -546,7 +546,7 @@ impl Reader<'_> {
 }
 
 /// Lowercase ASCII letters and digits in parts joined by single `_` or `-`.
-fn is_name(name: &str) -> bool {
+pub(crate) fn is_name(name: &str) -> bool {
     !name.is_empty()
         && name.split(['_', '-']).all(|part| {
             !part.is_empty()

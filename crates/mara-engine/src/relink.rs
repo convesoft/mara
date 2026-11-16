@@ -168,6 +168,9 @@ pub fn move_item(
 #[derive(Debug)]
 pub struct Rename {
     pub edits: Vec<DocumentEdit>,
+    /// How many of `edits` rewrite mention text before the `ID` row: code markers are written
+    /// with them, in path order.
+    pub before_id_row: usize,
     /// The snapshot index of the item.
     pub item: usize,
     pub old_id: String,
@@ -275,9 +278,11 @@ pub fn rename(snapshot: &Snapshot, reference: &str, new_id: &str) -> Result<Rena
             _ => last.push(edit),
         }
     }
+    let before_id_row = first.len();
     let edits = first.into_iter().chain(own).chain(last).collect();
     Ok(Rename {
         edits,
+        before_id_row,
         item,
         old_id: old_id.to_owned(),
     })

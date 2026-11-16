@@ -3,6 +3,10 @@
 //! hashed only when its stat changed, each document parsed only when its contents changed, and
 //! the snapshot rebuilt only when its key changed.
 //!
+//! Code files are inputs too, read only by a request that reads code (DES-CODE-READERS in
+//! `docs/code.mara.md`): each is read and hashed only when its stat changed, and scanned for
+//! markers only when its contents or its language's comment prefixes changed.
+//!
 //! The CLI starts each request with a new [`Inputs`], so it reads everything once. A host that
 //! keeps one between requests does work only for what changed.
 
@@ -16,16 +20,18 @@ use std::time::SystemTime;
 
 use ignore::Match;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
+use mara_engine::code::{CodeFile, CodeLayer, LanguageKey, MarkerKey, ScannedFile};
 use mara_engine::config::Config;
 use mara_engine::diagnostic::Diagnostic;
 use mara_engine::document::DocumentKey;
+use mara_engine::hash::Hash;
 use mara_engine::pattern::{Patterns, Positions};
 use mara_engine::snapshot::{DocumentInput, ParsedFile, Snapshot, SnapshotInputs};
 use mara_engine::work::WorkCounts;
 
 use crate::project::{Project, ProjectFiles, SYMBOLIC_LINK, SelectError, recognize};
 use crate::tracked::{self, Check, Kind, Listing, Reads, Tracked};
-use crate::write::{Basis, Version};
+use crate::write::{Basis, TEMPORARY_PREFIX, Version};
 
 pub use admit::{Inadmissible, NOT_AN_INPUT};
 
@@ -50,6 +56,26 @@ struct State {
     gitignores: HashMap<String, Tracked<Compiled>>,
     documents: HashMap<String, Tracked<Arc<ParsedFile>>>,
     programs: HashMap<String, Tracked<Arc<Vec<u8>>>>,
+    code: HashMap<String, Tracked<Scan>>,
+}
+
+/// The markers of a code file's contents, with their key.
+#[derive(Clone, Debug)]
+struct Scan {
+    key: MarkerKey,
+    file: Arc<ScannedFile>,
+}
+
+/// What a request does with the code files that the configuration declares
+/// (DES-CODE-READERS).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CodeReads {
+    /// Nothing: no directory is listed for code and no code file is read.
+    None,
+    /// Lists them without reading any, so that the request can read one ([`Inputs::read_code`]).
+    List,
+    /// Reads, hashes and scans every one.
+    Scan,
 }
 
 /// A `.gitignore` file compiled by the `ignore` crate, or the line (1 for the whole file) and the
@@ -67,6 +93,10 @@ pub struct Generation {
     /// The contents of every file that a pattern of `[rules] programs` declares, by path
     /// (DES-PROGRAM-PROFILE).
     pub programs: BTreeMap<String, Vec<u8>>,
+    /// Every code file read and scanned, with [`CodeReads::Scan`].
+    pub code: Option<Arc<CodeLayer>>,
+    /// The paths of the code files listed, in path order, with [`CodeReads::List`].
+    pub code_paths: Vec<String>,
 }
 
 impl Inputs {
@@ -107,8 +137,35 @@ impl Inputs {
     /// The basis of the document at `path` for an edit: the contents that the last snapshot
     /// holds, as that request read them. `None` when it holds no document at `path`.
     pub fn basis(&self, path: &str) -> Option<Basis> {
-        let tracked = self.state.documents.get(path)?;
-        Some(Basis::Contents(Version::of(tracked)))
+        let version = match self.state.documents.get(path) {
+            Some(tracked) => Version::of(tracked),
+            None => Version::of(self.state.code.get(path)?),
+        };
+        Some(Basis::Contents(version))
+    }
+
+    /// Reads and hashes the code file at `path`, which the last request listed
+    /// ([`CodeReads::List`]), in the request that began at `now`: its hash and contents, or the
+    /// `io-error` of a file that cannot be read.
+    pub fn read_code(
+        &self,
+        path: &str,
+        now: SystemTime,
+        work: &mut WorkCounts,
+    ) -> Result<(Hash, Vec<u8>), Box<Diagnostic>> {
+        let absolute = self.root.join(path);
+        let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
+            let reads = &mut Reads::default();
+            tracked::check::<()>(&absolute, &metadata, None, now, work, reads, false)
+        });
+        match checked {
+            Ok(Check::Read(read)) => Ok((read.hash, read.contents)),
+            Ok(Check::Kept(_)) => unreachable!("a check without a previous value reads"),
+            Err(error) => {
+                let message = format!("cannot read {path}: {error}");
+                Err(Box::new(Diagnostic::error("io-error", path, 1, message)))
+            }
+        }
     }
 
     /// Lists the inputs in the request that began at `now`, reads and hashes those whose stat
@@ -116,18 +173,35 @@ impl Inputs {
     /// key changed. A project whose configuration or schema has errors still gets a snapshot,
     /// so that validation can report on it.
     pub fn snapshot(&mut self, now: SystemTime, work: &mut WorkCounts) -> Generation {
+        self.generation(now, work, CodeReads::None)
+    }
+
+    /// [`Inputs::snapshot`], doing with code files what `code` says.
+    pub fn generation(
+        &mut self,
+        now: SystemTime,
+        work: &mut WorkCounts,
+        code: CodeReads,
+    ) -> Generation {
         let project = self.project(now, work);
         let previous = std::mem::take(&mut self.state);
         let reads = &mut self.reads;
-        let mut walk = Walk::new(&self.root, &project.config, previous, now, work, reads);
+        let config = &project.config;
+        let mut walk = Walk::new(&self.root, config, code, previous, now, work, reads);
         walk.run();
         let Walk {
-            next,
+            mut next,
+            mut previous,
             documents,
             programs,
             mut diagnostics,
+            code: found,
             ..
         } = walk;
+        if code != CodeReads::Scan {
+            // Code tracked by an earlier request stays for the next one that reads code.
+            next.code = std::mem::take(&mut previous.code);
+        }
         self.state = next;
         self.reads = Reads::default();
         diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
@@ -142,12 +216,73 @@ impl Inputs {
             _ => Arc::new(inputs.build(work)),
         };
         self.snapshot = Some(Arc::clone(&snapshot));
+        let mut code_paths = found.paths;
+        code_paths.sort_unstable();
+        let layer =
+            (code == CodeReads::Scan).then(|| Arc::new(CodeLayer::new(found.files, found.unread)));
         Generation {
             project,
             diagnostics,
             snapshot,
             programs,
+            code: layer,
+            code_paths,
         }
+    }
+}
+
+/// The code languages' include patterns, as a walk matches them, and what it found.
+#[derive(Default)]
+struct Code {
+    reads: Option<CodeReads>,
+    /// Every language's patterns, language by language in the configuration's order.
+    patterns: Patterns,
+    /// The language of each pattern.
+    languages: Vec<usize>,
+    keys: Vec<LanguageKey>,
+    prefixes: Vec<Vec<String>>,
+    /// The scans of the last request and of this one, by key, so that two files with the same
+    /// contents and language are scanned once.
+    scanned: HashMap<MarkerKey, Arc<ScannedFile>>,
+    files: Vec<CodeFile>,
+    paths: Vec<String>,
+    /// Problems that may hide code.
+    unread: Vec<Diagnostic>,
+}
+
+impl Code {
+    fn new(config: &Config, reads: CodeReads, previous: &State) -> Code {
+        if reads == CodeReads::None {
+            return Code::default();
+        }
+        let mut patterns = Vec::new();
+        let mut languages = Vec::new();
+        for (index, language) in config.code.iter().enumerate() {
+            for pattern in &language.include {
+                patterns.push(pattern.path.as_str());
+                languages.push(index);
+            }
+        }
+        let scanned = previous
+            .code
+            .values()
+            .map(|tracked| (tracked.value.key, Arc::clone(&tracked.value.file)))
+            .collect();
+        Code {
+            reads: Some(reads),
+            patterns: Patterns::new(patterns),
+            languages,
+            keys: config.code.iter().map(LanguageKey::new).collect(),
+            prefixes: config.code.iter().map(|l| l.prefixes.clone()).collect(),
+            scanned,
+            ..Code::default()
+        }
+    }
+
+    /// The language of the path that led to `at`: that of the first pattern that matches it.
+    fn language(&self, at: &Positions) -> Option<usize> {
+        self.reads?;
+        Some(self.languages[self.patterns.first_match(at)?])
     }
 }
 
@@ -170,13 +305,16 @@ struct Walk<'w> {
     documents: Vec<DocumentInput>,
     programs: BTreeMap<String, Vec<u8>>,
     diagnostics: Vec<Diagnostic>,
+    code: Code,
 }
 
-/// A directory to list: its path, where the include patterns stand there, and the `.gitignore`
-/// files that apply to it, root first, each with the path of its directory.
+/// A directory to list: its path, where the document and code include patterns stand there,
+/// and the `.gitignore` files that apply to it, root first, each with the path of its
+/// directory.
 struct Directory {
     path: String,
     at: Positions,
+    code_at: Positions,
     ignores: Vec<(String, Arc<Gitignore>)>,
 }
 
@@ -184,6 +322,7 @@ impl<'w> Walk<'w> {
     fn new(
         root: &'w Path,
         config: &Config,
+        code: CodeReads,
         previous: State,
         now: SystemTime,
         work: &'w mut WorkCounts,
@@ -193,6 +332,7 @@ impl<'w> Walk<'w> {
         let programs = config.rules.iter().flat_map(|rules| &rules.programs);
         let document_patterns = documents.clone().count();
         let patterns = documents.chain(programs);
+        let code = Code::new(config, code, &previous);
         let parsed = previous
             .documents
             .values()
@@ -211,18 +351,21 @@ impl<'w> Walk<'w> {
             documents: Vec::new(),
             programs: BTreeMap::new(),
             diagnostics: Vec::new(),
+            code,
         }
     }
 
     /// Lists the project root and every directory below it in which a pattern can match.
     fn run(&mut self) {
         let at = self.patterns.start();
-        if !self.patterns.can_continue(&at) {
+        let code_at = self.code.patterns.start();
+        if !self.patterns.can_continue(&at) && !self.code.patterns.can_continue(&code_at) {
             return;
         }
         let mut pending = vec![Directory {
             path: String::new(),
             at,
+            code_at,
             ignores: Vec::new(),
         }];
         while let Some(directory) = pending.pop() {
@@ -234,8 +377,11 @@ impl<'w> Walk<'w> {
         let Directory {
             path,
             at,
+            code_at,
             mut ignores,
         } = directory;
+        // Whether a problem here may hide a code file.
+        let code_here = self.code.patterns.can_continue(&code_at);
         let absolute = self.root.join(&path);
         let previous = self.previous.directories.remove(&path);
         let listed = fs::symlink_metadata(&absolute)
@@ -245,7 +391,7 @@ impl<'w> Walk<'w> {
             Err(error) => {
                 let shown = if path.is_empty() { "." } else { &path };
                 let message = format!("cannot list {shown}: {error}");
-                return self.problem("io-error", shown.to_owned(), message);
+                return self.hiding(code_here, "io-error", shown.to_owned(), 1, message);
             }
         };
         let entries = Arc::clone(&listing.entries);
@@ -261,18 +407,18 @@ impl<'w> Walk<'w> {
             let consequence =
                 format!("so Mara cannot apply its patterns and reads nothing in {place} or below");
             let gitignore = match entries[index].kind {
-                Kind::File => self.gitignore(&path, &consequence),
+                Kind::File => self.gitignore(&path, &consequence, code_here),
                 Kind::SymbolicLink => {
                     let message = format!(
                         "{file} is a symbolic link, and Mara follows none among a project's \
                          inputs, {consequence}: put the file itself there"
                     );
-                    self.problem(SYMBOLIC_LINK, file, message);
+                    self.hiding(code_here, SYMBOLIC_LINK, file, 1, message);
                     None
                 }
                 Kind::Directory | Kind::Other => {
                     let message = format!("{file} is not a regular file, {consequence}");
-                    self.problem("io-error", file, message);
+                    self.hiding(code_here, "io-error", file, 1, message);
                     None
                 }
             };
@@ -289,18 +435,21 @@ impl<'w> Walk<'w> {
             }
             let child = join(&path, &entry.name);
             let next = self.patterns.advance(&at, &entry.name);
+            let code_next = self.code.patterns.advance(&code_at, &entry.name);
             if entry.kind == Kind::Directory {
-                if !self.patterns.can_continue(&next) || ignored(&ignores, &child, true) {
+                let code = self.code.patterns.can_continue(&code_next);
+                if !(self.patterns.can_continue(&next) || code) || ignored(&ignores, &child, true) {
                     continue;
                 }
                 if !entry.utf8 {
-                    self.unnamed(child);
+                    self.unnamed(child, code);
                     continue;
                 }
                 match recognize(&self.root.join(&child)) {
                     Ok(None) => pending.push(Directory {
                         path: child,
                         at: next,
+                        code_at: code_next,
                         ignores: ignores.clone(),
                     }),
                     // Another project's root: nothing below it is an input.
@@ -311,7 +460,8 @@ impl<'w> Walk<'w> {
                              {child} is another project's root and reads nothing below it: put \
                              the directory itself there"
                         );
-                        self.problem(SYMBOLIC_LINK, format!("{child}/.mara"), message);
+                        let link = format!("{child}/.mara");
+                        self.hiding(code, SYMBOLIC_LINK, link, 1, message);
                     }
                     Err(error) => {
                         let message = format!(
@@ -319,7 +469,7 @@ impl<'w> Walk<'w> {
                              reads nothing below it: {}",
                             self.relative(&error)
                         );
-                        self.problem("io-error", child, message);
+                        self.hiding(code, "io-error", child, 1, message);
                     }
                 }
                 continue;
@@ -329,16 +479,21 @@ impl<'w> Walk<'w> {
                 && self.patterns.is_match_among(&next, documents.clone());
             let programs = self.document_patterns..usize::MAX;
             let program = self.patterns.is_match_among(&next, programs);
-            if !(document || program) || ignored(&ignores, &child, false) {
+            // A temporary file that an interrupted write left is never a code file.
+            let language = match document || program || entry.name.starts_with(TEMPORARY_PREFIX) {
+                true => None,
+                false => self.code.language(&code_next),
+            };
+            if !(document || program || language.is_some()) || ignored(&ignores, &child, false) {
                 continue;
             }
             if !entry.utf8 {
-                self.unnamed(child);
+                self.unnamed(child, language.is_some());
                 continue;
             }
             let role = if document { "document" } else { "program" };
-            match entry.kind {
-                Kind::File => {
+            match (language, entry.kind) {
+                (None, Kind::File) => {
                     if program {
                         self.program(child.clone());
                     }
@@ -346,24 +501,79 @@ impl<'w> Walk<'w> {
                         self.document(child);
                     }
                 }
-                Kind::SymbolicLink => {
+                (None, Kind::SymbolicLink) => {
                     let message = format!(
                         "{child} is a symbolic link, and Mara follows none among a project's \
                          inputs: put the {role} itself there"
                     );
                     self.problem(SYMBOLIC_LINK, child, message);
                 }
-                Kind::Directory | Kind::Other => {
+                (Some(language), Kind::File) => self.code_file(child, language),
+                // A link is no code input, and code files are not checked for links.
+                (Some(_), Kind::SymbolicLink) => {}
+                (language, Kind::Directory | Kind::Other) => {
                     let message = format!("cannot read {child}: it is not a regular file");
-                    self.problem("io-error", child, message);
+                    self.hiding(language.is_some(), "io-error", child, 1, message);
                 }
             }
         }
     }
 
+    /// Adds the code file at `path`, of the language at index `language`: listed, or read when
+    /// its stat changed and scanned when its contents or its language's prefixes changed.
+    fn code_file(&mut self, path: String, language: usize) {
+        if self.code.reads == Some(CodeReads::List) {
+            self.code.paths.push(path);
+            return;
+        }
+        let absolute = self.root.join(&path);
+        let language_key = self.code.keys[language];
+        let previous = self
+            .previous
+            .code
+            .remove(&path)
+            .filter(|tracked| tracked.value.key == MarkerKey::new(language_key, tracked.hash));
+        let checked = fs::symlink_metadata(&absolute).and_then(|metadata| {
+            let (now, work, reads) = (self.now, &mut *self.work, &mut *self.reads);
+            tracked::check(&absolute, &metadata, previous, now, work, reads, false)
+        });
+        let tracked = match checked {
+            Ok(Check::Kept(tracked)) => tracked,
+            Ok(Check::Read(read)) => {
+                let key = MarkerKey::new(language_key, read.hash);
+                let file = match self.code.scanned.get(&key) {
+                    Some(file) => Arc::clone(file),
+                    None => {
+                        let prefixes = &self.code.prefixes[language];
+                        let file = Arc::new(ScannedFile::scan(&read.contents, prefixes, self.work));
+                        self.code.scanned.insert(key, Arc::clone(&file));
+                        file
+                    }
+                };
+                read.with(Scan { key, file })
+            }
+            Err(error) => {
+                let message = format!("cannot read {path}: {error}");
+                return self.hiding(true, "io-error", path, 1, message);
+            }
+        };
+        self.code.files.push(CodeFile {
+            path: path.clone(),
+            key: tracked.value.key,
+            hash: tracked.hash,
+            scanned: Arc::clone(&tracked.value.file),
+        });
+        self.next.code.insert(path, tracked);
+    }
+
     /// The `.gitignore` file of the directory at `directory`, read and compiled only when it
     /// changed. A file that cannot be read or compiled is reported, with `consequence`.
-    fn gitignore(&mut self, directory: &str, consequence: &str) -> Option<Arc<Gitignore>> {
+    fn gitignore(
+        &mut self,
+        directory: &str,
+        consequence: &str,
+        code_here: bool,
+    ) -> Option<Arc<Gitignore>> {
         let path = join(directory, ".gitignore");
         let absolute = self.root.join(&path);
         let previous = self.previous.gitignores.remove(directory);
@@ -379,7 +589,7 @@ impl<'w> Walk<'w> {
             }
             Err(error) => {
                 let message = format!("cannot read {path}, {consequence}: {error}");
-                self.problem("io-error", path, message);
+                self.hiding(code_here, "io-error", path, 1, message);
                 return None;
             }
         };
@@ -389,7 +599,7 @@ impl<'w> Walk<'w> {
             Ok(gitignore) => Some(gitignore),
             Err((line, reason)) => {
                 let message = format!("{reason}, {consequence}");
-                self.problem_at(UNSUPPORTED_GITIGNORE, path, line, message);
+                self.hiding(code_here, UNSUPPORTED_GITIGNORE, path, line, message);
                 None
             }
         }
@@ -457,9 +667,9 @@ impl<'w> Walk<'w> {
     }
 
     /// Reports an entry that may hold or be an input but whose name is not UTF-8.
-    fn unnamed(&mut self, path: String) {
+    fn unnamed(&mut self, path: String, code: bool) {
         let message = format!("the name of {path} is not UTF-8, so Mara cannot read it: rename it");
-        self.problem("io-error", path, message);
+        self.hiding(code, "io-error", path, 1, message);
     }
 
     /// A selection error with its path relative to the project root.
@@ -474,12 +684,17 @@ impl<'w> Walk<'w> {
     }
 
     fn problem(&mut self, code: &'static str, path: String, message: String) {
-        self.problem_at(code, path, 1, message);
+        self.hiding(false, code, path, 1, message);
     }
 
-    fn problem_at(&mut self, code: &'static str, path: String, line: usize, message: String) {
-        self.diagnostics
-            .push(Diagnostic::error(code, path, line, message));
+    /// [`Walk::problem`] at `line`, also of the code layer when `code` says it may hide a code
+    /// file.
+    fn hiding(&mut self, code: bool, kind: &'static str, path: String, line: usize, text: String) {
+        let diagnostic = Diagnostic::error(kind, path, line, text);
+        if code && self.code.reads == Some(CodeReads::Scan) {
+            self.code.unread.push(diagnostic.clone());
+        }
+        self.diagnostics.push(diagnostic);
     }
 }
 

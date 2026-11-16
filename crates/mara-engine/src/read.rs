@@ -23,7 +23,7 @@ use crate::hash::{Hash, KeyHasher};
 use crate::paging::{Cursor, DEFAULT_LIMIT};
 use crate::snapshot::Snapshot;
 
-pub use node::{ItemSummary, NodeSummary, Portion, RowPart, get};
+pub use node::{ItemSummary, NodeSummary, Portion, RowPart, get, get_code};
 pub(crate) use node::{Named, resolve};
 pub use page::{DIAGNOSTIC_BYTES, shown_diagnostics};
 pub use query::{

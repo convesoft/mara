@@ -2,9 +2,10 @@
 //! (`docs/authoring.mara.md` and DES-AUTHORING-REQUESTS in `docs/authoring-requests.mara.md`),
 //! each put on disk by the write procedure (DES-WRITE-PROCEDURE in `docs/writes.mara.md`).
 
-use mara::inputs::Inputs;
+use mara::inputs::{CodeReads, Inputs};
 use mara::write::{self, Basis, FileWrite, WriteLock};
 use mara_engine::authoring::{self, Create, EditError, Update, Written};
+use mara_engine::code::{CodeLayer, CodeLinks};
 use mara_engine::document::label_name;
 use mara_engine::snapshot::Snapshot;
 use mara_engine::work::WorkCounts;
@@ -235,7 +236,7 @@ fn item_create(context: &mut Context, args: &Args) -> Result<Response, Failure> 
         .value(LINE.name)
         .map(|value| value.parse().expect("checked before the operation ran"));
     let fields = fields(args);
-    let written = edit(context, |inputs, snapshot, work| {
+    let written = edit(context, CodeReads::None, |inputs, snapshot, _, work| {
         if snapshot.document(&path).is_none() {
             inputs.admits(&path).map_err(|refusal| EditError {
                 code: refusal.code,
@@ -295,7 +296,7 @@ fn item_update(context: &mut Context, args: &Args) -> Result<Response, Failure> 
         clear: &clear,
         body,
     };
-    let written = edit(context, |_, snapshot, work| {
+    let written = edit(context, CodeReads::None, |_, snapshot, _, work| {
         authoring::update(snapshot, &request, work)
     })?;
     let item = &written.item;
@@ -308,8 +309,8 @@ fn item_update(context: &mut Context, args: &Args) -> Result<Response, Failure> 
 }
 
 fn item_delete(context: &mut Context, args: &Args) -> Result<Response, Failure> {
-    let written = edit(context, |_, snapshot, work| {
-        authoring::delete(snapshot, args.argument(0), work)
+    let written = edit(context, CodeReads::Scan, |_, snapshot, code, work| {
+        authoring::delete(snapshot, code, args.argument(0), work)
     })?;
     let item = &written.item;
     let human = format!("deleted {} from {}:{}\n", name(item), item.path, item.line);
@@ -317,7 +318,7 @@ fn item_delete(context: &mut Context, args: &Args) -> Result<Response, Failure> 
 }
 
 fn relation_add(context: &mut Context, args: &Args) -> Result<Response, Failure> {
-    let written = edit(context, |_, snapshot, work| {
+    let written = edit(context, CodeReads::None, |_, snapshot, _, work| {
         let [source, relation, target] = [0, 1, 2].map(|index| args.argument(index));
         authoring::relation_add(snapshot, source, relation, target, work)
     })?;
@@ -325,7 +326,7 @@ fn relation_add(context: &mut Context, args: &Args) -> Result<Response, Failure>
 }
 
 fn relation_remove(context: &mut Context, args: &Args) -> Result<Response, Failure> {
-    let written = edit(context, |_, snapshot, work| {
+    let written = edit(context, CodeReads::None, |_, snapshot, _, work| {
         let [source, relation, target] = [0, 1, 2].map(|index| args.argument(index));
         authoring::relation_remove(snapshot, source, relation, target, work)
     })?;
@@ -338,17 +339,30 @@ fn relation_remove(context: &mut Context, args: &Args) -> Result<Response, Failu
 /// or built after that (ADR-NO-REDERIVATION-IN-CLI).
 fn edit(
     context: &mut Context,
-    compute: impl FnOnce(&Inputs, &Snapshot, &mut WorkCounts) -> Result<Written, EditError>,
+    code: CodeReads,
+    compute: impl FnOnce(
+        &Inputs,
+        &Snapshot,
+        Option<&CodeLinks>,
+        &mut WorkCounts,
+    ) -> Result<Written, EditError>,
 ) -> Result<Written, Failure> {
     let root = context.root()?;
     let lock = WriteLock::take(&root)?;
     let (mut inputs, _) = open(context)?;
-    let generation = inputs.snapshot(context.now, context.work);
+    let generation = inputs.generation(context.now, context.work, code);
+    let snapshot = &generation.snapshot;
+    let links = (generation.code.clone()).map(|layer| CodeLinks::new(snapshot, layer));
     let written =
-        compute(&inputs, &generation.snapshot, context.work).map_err(|error| Failure {
+        compute(&inputs, snapshot, links.as_ref(), context.work).map_err(|error| Failure {
             diagnostics: error.diagnostics,
             ..Failure::new(error.code, error.message)
         })?;
+    // A marker in code that could not be read may name the item (DES-CODE-READERS).
+    if let Some(layer) = &generation.code {
+        let name = written.item.id.as_deref().unwrap_or(&written.item.mid);
+        incomplete_code(layer, name)?;
+    }
     let files: Vec<FileWrite> = written
         .files
         .iter()
@@ -367,6 +381,24 @@ fn edit(
         write::apply(&lock, &files, context.work)?;
     }
     Ok(written)
+}
+
+/// The `io-error` of an edit that depends on every code marker naming the item `name`, when
+/// `layer` read less than all the code: nothing is written (DES-CODE-READERS).
+pub(super) fn incomplete_code(layer: &CodeLayer, name: &str) -> Result<(), Failure> {
+    if layer.unread.is_empty() {
+        return Ok(());
+    }
+    let places = layer.unread.iter().map(|d| d.path.clone());
+    let message = format!(
+        "Mara cannot read every code file, and a marker there may name {name}, so nothing was \
+         written: {}",
+        mara_engine::validation::list(places, layer.unread.len())
+    );
+    Err(Failure {
+        diagnostics: layer.unread.clone(),
+        ..Failure::new("io-error", message)
+    })
 }
 
 /// A MID that no item of `snapshot` has.

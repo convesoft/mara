@@ -5,6 +5,7 @@ use std::ops::Range;
 
 use crate::diagnostic::Diagnostic;
 use crate::document::{Node, is_mid, label_name};
+use crate::hash::Hash;
 use crate::json::Object;
 use crate::paging::{Cursor, PAGE_BYTES};
 use crate::snapshot::Snapshot;
@@ -45,6 +46,12 @@ pub enum NodeSummary {
     },
     Document {
         path: String,
+    },
+    /// A code location at the basic level, `<path>:<line>`, or a whole code file
+    /// (DES-CODE-MARKERS).
+    Code {
+        path: String,
+        line: Option<usize>,
     },
 }
 
@@ -117,6 +124,15 @@ impl NodeSummary {
                 object.string("kind", "document");
                 object.string("path", path);
             }
+            NodeSummary::Code { path, line } => {
+                object.string("kind", "code");
+                object.string("path", path);
+                match line {
+                    Some(line) => object.number("line", *line as u64),
+                    None => object.key("line").push_str("null"),
+                }
+                object.optional_string("declaration", None);
+            }
         }
         members(&mut object);
         object.end();
@@ -129,6 +145,7 @@ impl NodeSummary {
             NodeSummary::Item(item) => (&item.path, item.line),
             NodeSummary::Unit { path, line, .. } => (path, *line),
             NodeSummary::Document { path } => (path, 1),
+            NodeSummary::Code { path, line } => (path, line.unwrap_or(1)),
         }
     }
 }
@@ -330,8 +347,71 @@ pub fn get(
         }
     };
     let content = &contents[content];
-
     let key = result_key(snapshot.key().0, "get", [address], documents.diagnostics);
+    page_of(
+        node,
+        revision,
+        &rows,
+        content,
+        key,
+        cursor,
+        documents.diagnostics,
+    )
+}
+
+/// `get` of a code location or file at the basic level (DES-CODE-MARKERS): `node` names the
+/// code file whose contents are `contents`, with hash `hash`; the content is the file from the
+/// node's line to its end, in pages as [`get`] gives them.
+pub fn get_code(
+    node: NodeSummary,
+    hash: Hash,
+    contents: &[u8],
+    cursor: Option<&Cursor>,
+    diagnostics: &[Diagnostic],
+) -> Result<Portion, ReadError> {
+    let NodeSummary::Code { path, line } = &node else {
+        unreachable!("get_code takes a code node");
+    };
+    let text = text(contents, path)?;
+    let start = match line {
+        Some(line) => {
+            line_starts(text.as_bytes(), *line).ok_or_else(|| missing_line(path, *line))?
+        }
+        None => 0,
+    };
+    let address = match line {
+        Some(line) => format!("{path}:{line}"),
+        None => path.clone(),
+    };
+    let key = result_key(hash, "get", [address.as_str()], diagnostics);
+    page_of(node, None, &[], &text[start..], key, cursor, diagnostics)
+}
+
+/// The failure of a line that a code file lacks.
+fn missing_line(path: &str, line: usize) -> ReadError {
+    ReadError::UnknownNode(format!("{path} has no line {line}"))
+}
+
+/// Where line `line`, 1-based, of `contents` starts, when it has that line: a line ends at a
+/// line feed, and a last line without one counts.
+fn line_starts(contents: &[u8], line: usize) -> Option<usize> {
+    let mut start = 0;
+    for _ in 1..line.max(1) {
+        start += contents[start..].iter().position(|&b| b == b'\n')? + 1;
+    }
+    (line >= 1 && start < contents.len()).then_some(start)
+}
+
+/// One page, at `cursor`, of a node's `rows` and then its `content`.
+fn page_of(
+    node: NodeSummary,
+    revision: Option<String>,
+    rows: &[(&str, &str, usize)],
+    content: &str,
+    key: Hash,
+    cursor: Option<&Cursor>,
+    diagnostics: &[Diagnostic],
+) -> Result<Portion, ReadError> {
     let start = match cursor {
         Some(cursor) if cursor.key != key => return Err(ReadError::StaleCursor),
         Some(cursor) => cursor.offset,
@@ -369,7 +449,7 @@ pub fn get(
         object.key("node").push_str(&node_json);
         object.array("rows", rows.iter().map(String::as_str));
         object.string("content", content);
-        page::diagnostics(&mut object, documents.diagnostics, 0);
+        page::diagnostics(&mut object, diagnostics, 0);
         let cursor = next.map(Cursor::to_string);
         object.optional_string("next_cursor", cursor.as_deref());
         object.end();

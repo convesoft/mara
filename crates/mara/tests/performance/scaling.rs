@@ -11,7 +11,7 @@ use mara_engine::work::WorkCounts;
 
 use crate::corpus::{Corpus, Hub, Shape, Stress};
 use crate::restore::Written;
-use crate::work_counters::hub_writes;
+use crate::work_counters::{hub_relations, hub_writes};
 use crate::{PULL_REQUEST_SIZES, SEED, cli, cpu_time, mcp};
 
 /// Most growth of time per doubling of corpus size (REQ-NEAR-LINEAR-SCALING).
@@ -87,6 +87,9 @@ fn growth_per_doubling() {
     check_growth(&hubs, "mara project validate on a hub", |_, hub| {
         cli::run(hub.root(), &["project", "validate"], 0);
     });
+    check_growth(&hubs, "mara relation list on a hub", |_, hub| {
+        cli::run(hub.root(), &hub_relations(), 0);
+    });
     for args in hub_writes() {
         let name = format!("mara {} on a hub", args.join(" "));
         let run = |_: usize, hub: &Hub| {
@@ -94,6 +97,22 @@ fn growth_per_doubling() {
         };
         check_writes(&hubs, &name, run, |hub| hub.root());
     }
+    // A code file of as many markers naming the hub as it has sources, listed by the file: the
+    // hub's summary is made once, not once per marker.
+    for (_, hub) in &hubs {
+        hub.add_marker_file();
+    }
+    check_growth(
+        &hubs,
+        "mara relation list of a code file on a hub",
+        |_, hub| {
+            cli::run(
+                hub.root(),
+                &["relation", "list", "src/markers.rs", "--limit", "1"],
+                0,
+            );
+        },
+    );
     // Fix after the hub item is moved by hand: every source's link to it is rewritten.
     let moved: Vec<(usize, Hub)> = PULL_REQUEST_SIZES
         .iter()

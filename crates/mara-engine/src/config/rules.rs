@@ -17,6 +17,7 @@ pub(super) const ROOT_KEYS: &[&str] = &[
     "format_version",
     "schema",
     "documents",
+    "code",
     "rules",
     "queries",
     "views",

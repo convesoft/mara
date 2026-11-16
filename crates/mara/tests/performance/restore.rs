@@ -65,9 +65,21 @@ impl Written {
         }
     }
 
-    /// The number of distinct contents the run wrote.
-    pub fn distinct(&self) -> u64 {
-        self.contents.iter().collect::<BTreeSet<_>>().len() as u64
+    /// The number of distinct contents the run wrote into documents, which it parses.
+    pub fn distinct_documents(&self) -> u64 {
+        let written = self.files.iter().zip(&self.contents);
+        let documents =
+            written.filter(|((path, _), _)| path.to_string_lossy().ends_with(".mara.md"));
+        documents
+            .map(|(_, bytes)| bytes)
+            .collect::<BTreeSet<_>>()
+            .len() as u64
+    }
+
+    /// The number of code files the run wrote.
+    pub fn code_files(&self) -> u64 {
+        let paths = self.files.iter().map(|(path, _)| path.to_string_lossy());
+        paths.filter(|path| path.ends_with(".rs")).count() as u64
     }
 }
 

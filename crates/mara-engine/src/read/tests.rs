@@ -524,7 +524,7 @@ fn relation_list_reads_one_hop() {
             })
             .collect()
     };
-    let alpha = relation_list(&documents, "REQ-ALPHA", &[], &first_page()).unwrap();
+    let alpha = relation_list(&documents, None, "REQ-ALPHA", &[], &first_page()).unwrap();
     assert_eq!(
         describe(&alpha),
         [
@@ -533,13 +533,14 @@ fn relation_list_reads_one_hop() {
             "mention - incoming docs/b.mara.md:14 @14"
         ]
     );
-    let beta = relation_list(&documents, B, &[], &first_page()).unwrap();
+    let beta = relation_list(&documents, None, B, &[], &first_page()).unwrap();
     assert_eq!(
         describe(&beta),
         ["relation satisfied_by incoming REQ-ALPHA @15"]
     );
     let narrowed = relation_list(
         &documents,
+        None,
         "REQ-ALPHA",
         &["Satisfies".into()],
         &first_page(),
@@ -549,10 +550,10 @@ fn relation_list_reads_one_hop() {
         describe(&narrowed),
         ["relation satisfies outgoing REQ-BETA @15"]
     );
-    let unit = relation_list(&documents, "docs/b.mara.md:14", &[], &first_page()).unwrap();
+    let unit = relation_list(&documents, None, "docs/b.mara.md:14", &[], &first_page()).unwrap();
     assert_eq!(describe(&unit), ["mention - outgoing REQ-ALPHA @14"]);
     // A whole document: every relation and mention written in it, in source order.
-    let whole = relation_list(&documents, "docs/a.mara.md", &[], &first_page()).unwrap();
+    let whole = relation_list(&documents, None, "docs/a.mara.md", &[], &first_page()).unwrap();
     assert_eq!(
         describe(&whole),
         [
@@ -560,7 +561,7 @@ fn relation_list_reads_one_hop() {
             "mention - outgoing REQ-ALPHA @36"
         ]
     );
-    let b = relation_list(&documents, "docs/b.mara.md", &[], &first_page()).unwrap();
+    let b = relation_list(&documents, None, "docs/b.mara.md", &[], &first_page()).unwrap();
     assert_eq!(describe(&b), ["mention - outgoing REQ-ALPHA @14"]);
 }
 
@@ -1113,7 +1114,7 @@ fn no_read_panics_on_random_markdown() {
         );
         for node in &nodes {
             let _ = get(&documents, node, None);
-            let _ = relation_list(&documents, node, &[], &first_page());
+            let _ = relation_list(&documents, None, node, &[], &first_page());
         }
         let _ = item_list(&documents, &Filters::default(), &first_page());
     }

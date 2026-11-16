@@ -16,5 +16,5 @@ Split by the orchestrator on 2026-11-16 from mara-yhxq5x, which builds the marke
 Context: DES-CODE-READERS in docs/code.mara.md; DES-INPUTS-AND-KEYS in docs/engine.mara.md; VER-CODE-MARKERS (its daemon cases) in docs/verification-code.mara.md; the warm rows for code inputs in VER-CODE-WORK-COUNTERS (docs/verification-code-use.mara.md) and the "One code file edited" row of VER-WORK-COUNTERS (docs/verification.mara.md); VER-NEVER-STALE in docs/verification-daemon.mara.md.
 
 - [ ] The daemon watches declared code files; a request after a code file changed re-scans that file only
-- [ ] The daemon cases of VER-CODE-MARKERS and the warm code rows of VER-CODE-WORK-COUNTERS and VER-WORK-COUNTERS pass
+- [ ] The daemon cases of VER-CODE-MARKERS and VER-CODE-EDITS (mara-yhxq5x ran them through the CLI and `mara mcp`), and the warm code rows of VER-CODE-WORK-COUNTERS and VER-WORK-COUNTERS pass
 - [ ] The daemon case of VER-HOST-COMPARISON covers the operations that read code
