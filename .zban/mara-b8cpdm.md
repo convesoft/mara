@@ -27,3 +27,6 @@ One line per decision made on the maintainer's behalf under the rule of 2026-11-
 - 2026-11-16: mara-17gykj (daemon process, IPC and lifecycle) was started before the alpha.3 epic closed, on a free worker slot: it needs nothing from the rule evaluation. The slices still close and are tagged in order. Undo: not needed.
 
 - 2026-11-16: mara-jkabqy (client routing) was started before the alpha.3 epic closed, as mara-17gykj was; mara-xqcnqw follows it rather than running beside it, because both change the daemon's request handling. Undo: not needed.
+
+- 2026-11-16, mara-jkabqy (review): a client's wait on a daemon that stopped answering gets its bound in mara-xqcnqw, which rebuilds request handling, not in mara-jkabqy; alpha.4 does not close without it. Rests on REQ-FIRST-CALL-IN-PROCESS and the next issue's scope (worker threads, cancellation). Undo: add a fixed read timeout to the client now.
+- 2026-11-16, mara-jkabqy (review): the local checks of AGENTS.md and the workers' own `mara` calls run in direct mode (`--no-daemon` or `MARA_NO_DAEMON=1`), so that each worktree's build leaves no daemon in the developer's session. Undo: drop the flag from the check line.
