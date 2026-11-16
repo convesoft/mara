@@ -54,6 +54,9 @@
 - CI builds one pinned Soufflé release for each platform: natively with a static C++ runtime and without OpenMP, and with Emscripten for the browser.
 - Soufflé 2.5 needs a one-line patch to build with Emscripten's Clang: in `src/interpreter/Index.h:423`, `data = src.data;` becomes `data = src.data.load();`. Upstream `master` no longer has that line.
 - Soufflé's licence is UPL-1.0.
+- [scripts/build-souffle.sh](../scripts/build-souffle.sh) is the native build for the local platform. It pins the release by tag and the SHA-256 of the downloaded archive, checked before anything is built, and fails when the binary needs a shared C++ runtime or OpenMP or fails a smoke run of `souffle --no-preprocessor -l ""` on JSON facts with no compiler on `PATH`.
+- The binary is `target/souffle-<version>/souffle` under the workspace root, with Soufflé's `LICENSE` beside it; the version is 2.5. A rerun only checks an existing binary. The source and build tree live in `target/souffle-<version>/work/` and are removed after a successful build.
+- A test or packaging step reads the binary from that path. A test that needs it and does not find it fails with a message that names `scripts/build-souffle.sh`.
 
 ---
 
