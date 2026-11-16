@@ -1,6 +1,6 @@
 ---
 title: "Query operations: execute, view, gate and list in CLI and MCP"
-status: todo
+status: in-progress
 type: feature
 parent: mara-17tdb3
 blocked_by:
