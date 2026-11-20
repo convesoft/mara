@@ -37,18 +37,20 @@ In a project that uses the `engineering` template, an accepted item that breaks 
 | Status | Accepted |
 | Satisfies | [REQ-TEMPLATE-ACCEPTANCE-RULES](#01M7CT60KVJ75RV9GPP3SEF0WX) |
 
-Each rule is an invariant of error severity over accepted items.
+Each obligation of a rule is an invariant of error severity over accepted items, with one row per item that breaks it.
 
-| Accepted type | Rule |
-| --- | --- |
-| Requirement | Has an accepted basis: it `Satisfies` a Need, `Decomposes` or `Derives from` a Requirement, or a Decision `Justifies` it. An accepted Verification `Verifies` it |
-| Design | Has an accepted basis: it `Satisfies` a Requirement, `Contributes to` a Goal or `Decomposes` a Design. A justifying Decision is not a basis |
-| Risk | Has exactly one `Likelihood` and one `Consequence`, and `Threatens` an accepted Goal, Need or Requirement |
-| Verification | Has a method and `Verifies` an accepted Requirement |
-| Validation | Has a method and `Validates` an accepted Need or Goal |
-| Term | No title or alias of it equals, after folding ([DES-FACT-BRIDGE](../rules/index.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)), a title or alias of another accepted Term. No alias is empty or equals its own title |
-| Goal, Need, Scenario, Decision, Evidence | None |
+| Accepted type | Rule | Invariants |
+| --- | --- | --- |
+| Requirement | Has an accepted basis: it `Satisfies` a Need, `Decomposes` or `Derives from` a Requirement, or a Decision `Justifies` it. An accepted Verification `Verifies` it | `requirement-has-basis`, `requirement-verified` |
+| Design | Has an accepted basis: it `Satisfies` a Requirement, `Contributes to` a Goal or `Decomposes` a Design. A justifying Decision is not a basis | `design-has-basis` |
+| Risk | Has exactly one `Likelihood` and one `Consequence`, and `Threatens` an accepted Goal, Need or Requirement | `risk-assessed`, `risk-threatens` |
+| Verification | Has a method and `Verifies` an accepted Requirement | `verification-has-method`, `verification-has-target` |
+| Validation | Has a method and `Validates` an accepted Need or Goal | `validation-has-method`, `validation-has-target` |
+| Term | No title or alias of it equals, after folding ([DES-FACT-BRIDGE](../rules/index.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)), a title or alias of another accepted Term. No alias is empty or equals its own title | `term-unique`, `term-aliases` |
+| Goal, Need, Scenario, Decision, Evidence | None | |
 
+- The programs live in `.mara/rules/knowledge.dl` ([DES-TEMPLATE-QUERIES](readiness.mara.md#01M7CT60MW58QYX605NJNARD6H)). Each invariant's message names what makes the item keep the rule.
+- An empty alias is a malformed row, which validation reports before any program runs ([DES-METADATA-TABLE](../format.mara.md#01M7BF6GZNS6VM3T94VS9A5HTD)).
 - No rule demands a chain: a Requirement may be implemented without a Design, and a Design may contribute straight to a Goal.
 - Status records authority only. Implemented, verified, validated, ready and blocked are never a status or a field.
 
@@ -66,13 +68,13 @@ Each rule is an invariant of error severity over accepted items.
 
 Invariants of error severity judge each relation by its class.
 
-| Class | Relations | Rule |
-| --- | --- | --- |
-| Strict | Satisfies, Contributes to, Decomposes, Derives from, Threatens, Mitigates, Accepts, Verifies, Validates, Exercises | From an accepted source, the target is accepted |
-| Developmental | Justifies, Supports | None: the target may be draft, accepted or retired |
-| Replacement | Supersedes | From an accepted or retired source, the target is retired |
+| Class | Relations | Rule | Invariant |
+| --- | --- | --- | --- |
+| Strict | Satisfies, Contributes to, Decomposes, Derives from, Threatens, Mitigates, Accepts, Verifies, Validates, Exercises | From an accepted source, the target is accepted | `links-to-accepted` |
+| Developmental | Justifies, Supports | None: the target may be draft, accepted or retired | |
+| Replacement | Supersedes | From an accepted or retired source, the target is retired | `supersedes-retired` |
 
-`C supersedes B supersedes A` therefore stays valid after B retires.
+`C supersedes B supersedes A` therefore stays valid after B retires. A link to a target that is no item is a broken link ([DES-SCHEMA-CHECKS](../validation.mara.md#01M7BF6HG7AQZ9FM38CMT4BTHR)), not a lifecycle failure.
 
 ---
 
@@ -96,8 +98,8 @@ A risk's level comes from its `Likelihood` (rows) and `Consequence` (columns).
 | Likely | MEDIUM | MEDIUM | HIGH | HIGH | HIGH |
 | Almost-certain | MEDIUM | HIGH | HIGH | HIGH | HIGH |
 
-- The matrix ships as 25 facts in `.mara/rules/risk-matrix.dl`. A project tailors it by editing them.
-- A risk that lacks a field, or whose pair has no cell, has no level. Whatever depends on that level is unavailable, never LOW.
+- The matrix ships as 25 facts `risk_matrix(likelihood, consequence, level)` in `.mara/rules/risk-matrix.dl`, with the levels `low`, `medium` and `high`. A project tailors it by editing them.
+- A risk that lacks a field, has two values of one, or whose pair has no cell, has no level. Whatever depends on that level is unavailable, never LOW.
 - A `Mitigates` link does not lower a level. Only a changed `Likelihood` or `Consequence` does.
 - A risk is relevant to a requirement when it `Threatens` the requirement, one of its ancestors through `Decomposes` and `Derives from`, a Need one of those satisfies, or a Goal such a Need contributes to. Sibling requirements never enter.
 - A blocking risk is an accepted, relevant risk of level HIGH that no accepted Decision `Accepts`.

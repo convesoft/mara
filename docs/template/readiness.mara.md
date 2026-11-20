@@ -44,12 +44,13 @@ A gate of the `engineering` template passes only when every named item is proven
 | `relevant-risks` | Requirement: each relevant risk with its status and the node it threatens |
 | `verification-status` | Requirement: each Verification with its status and its result for the candidate |
 | `validation-status` | Need or Goal: each Validation with its status and its result in its context, and one summary row |
-| `result-stamps` | Verification or Validation: each item it verifies or validates, with the current revision of both; what a recorder copies into its results |
+| `result-stamps` | Verification or Validation: each item it verifies or validates, with the ID and current revision of both; what a recorder copies into its results |
 
 - A query keeps items of every status. Invariants, gates and views decide which statuses count.
 - Invariants, gates and views are written over these relations, so they cannot disagree.
 - A lookup along one relation gets no query; `relation list` answers it.
-- Invariants live in a program without the per-requirement closures (`risk-scope`, `relevant-risks`), so validation never computes them.
+- Invariants live in `.mara/rules/knowledge.dl` with `requirement-basis`, `design-basis`, `term-collisions` and `relation-lifecycle`, without the per-requirement closures (`risk-scope`, `relevant-risks`), so validation never computes them. `.mara/rules/readiness.dl` includes it and the risk matrix, and holds the other queries, the gates and the views.
+- Until code links reach programs (mara-hk2arx), `implemented` has no row and code never counts as read completely, so `verified` and `release-ready` leave unavailable every requirement that does not fail.
 - The template's programs use only constructs that Soufflé can explain ([REQ-EXPLAIN-OUTCOMES](../rules/evaluation.mara.md#01M7BF6HCQX66B3MYRH5BZM6BE)).
 
 ---
@@ -71,11 +72,11 @@ A gate of the `engineering` template passes only when every named item is proven
 | `validation_context` | Validation ID, context; one row for each Validation the request names |
 | `validation_result` | Validation ID, Need or Goal ID, context, revision of each, result |
 
-- A result is `pass`, `fail`, `inconclusive` or `error`. A context is opaque text, such as a deployment or an observation window.
-- A result counts only when its candidate or context is the requested one and both revisions are the items' current revisions ([DES-FACT-BRIDGE](../rules/index.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)).
+- A result is `pass`, `fail`, `inconclusive` or `error`; any other value counts as `error`. A context is opaque text, such as a deployment or an observation window.
+- A result counts only when its candidate or context is the requested one and both revisions are the items' current revisions ([DES-FACT-BRIDGE](../rules/index.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)). With more than one `candidate` row, or more than one context for a Validation, no result for it counts.
 - When several results count, the worst wins: `fail`, `error`, `inconclusive`, `pass`.
 - Without a counting result the status is `pending` when the input is complete and `unavailable` when it is not ([DES-REQUEST-INPUTS](../rules/index.mara.md#01M7CT60KMGA2M9WMQ8RRJREPG)).
-- The summary row of `validation-status` is the worst status of the target's accepted Validations, with `pending` and `unavailable` ranked between `inconclusive` and `pass`. A target without an accepted Validation is not validated.
+- The summary row of `validation-status` is the worst status of the target's accepted Validations, with `pending`, then `unavailable`, ranked between `inconclusive` and `pass`; its Validation, status and context are empty. A target without an accepted Validation is not validated: its summary is `not-validated`.
 
 ---
 
@@ -121,6 +122,9 @@ A gate of the `engineering` template passes only when every named item is proven
 
 - A row stays when a fact is absent, and its cell says so. Missing, unavailable and failed stay distinct.
 - A view defines no meaning of its own: it renders relations that the queries and gates define.
+- An implementation cell is `direct`, `design`, `missing` or `unavailable`; a verification cell the worst result of the accepted Verifications, or `none`; a risks cell `blocking`, `unavailable` or `clear`.
+- `requirement-verification` gives a requirement without a Verification one row with an empty Verification and status `none`. `risk-treatment` has a row for each node through which a risk is relevant and for each accepted Decision that accepts the risk, whose MID it gives; with no such Decision that cell is empty.
+- The four other designed views (outcome coverage and validation, engineering basis and rationale, knowledge validity, change impact) are not in the first release (mara-7h4z9f).
 
 ---
 

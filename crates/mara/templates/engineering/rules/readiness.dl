@@ -1,0 +1,332 @@
+.once
+// The engineering template's readiness: the queries over requirements, risks and results
+// (DES-TEMPLATE-QUERIES), the inputs a request supplies (DES-TEMPLATE-INPUTS), the gates
+// (DES-TEMPLATE-GATES) and the views (DES-TEMPLATE-VIEWS). Gates and views are written over the
+// queries' relations and the invariants of knowledge.dl, so they cannot disagree.
+
+.include "mara.dl"
+.include "knowledge.dl"
+.include "risk-matrix.dl"
+
+// Inputs a request supplies (DES-TEMPLATE-INPUTS).
+.decl candidate(candidate: symbol)
+.decl verification_result(verification: Id, requirement: Id, candidate: symbol, verification_revision: symbol, requirement_revision: symbol, result: symbol)
+.decl validation_context(validation: Id, context: symbol)
+.decl validation_result(validation: Id, target: Id, context: symbol, validation_revision: symbol, target_revision: symbol, result: symbol)
+
+// Results, worst first. `pending` (no counting result in a complete input) and `unavailable`
+// rank between `inconclusive` and `pass`.
+.decl result_rank(result: symbol, rank: number)
+result_rank("fail", 1).
+result_rank("error", 2).
+result_rank("inconclusive", 3).
+result_rank("pending", 4).
+result_rank("unavailable", 5).
+result_rank("pass", 6).
+
+.decl known_result(result: symbol)
+known_result("pass").
+known_result("fail").
+known_result("inconclusive").
+known_result("error").
+
+// A supplied result other than the four counts as `error`.
+.decl result_as(given: symbol, result: symbol)
+result_as(X, X) :- verification_result(_, _, _, _, _, X), known_result(X).
+result_as(X, "error") :- verification_result(_, _, _, _, _, X), !known_result(X).
+result_as(X, X) :- validation_result(_, _, _, _, _, X), known_result(X).
+result_as(X, "error") :- validation_result(_, _, _, _, _, X), !known_result(X).
+
+// The candidate, when the request supplies exactly one.
+.decl ambiguous_candidate(candidate: symbol)
+ambiguous_candidate(C) :- candidate(C), candidate(D), C != D.
+
+.decl the_candidate(candidate: symbol)
+the_candidate(C) :- candidate(C), !ambiguous_candidate(C).
+
+// verification-status: each Verification of a requirement, with its status and its result for
+// the candidate. A result counts for the candidate and the current revisions of both items.
+.decl verification_of(requirement: Mid, verification: Mid, status: Status)
+verification_of(R, V, S) :-
+    edge("verifies", V, R, _, _), item(R, "requirement", _, _, _, _), item(V, "verification", _, S, _, _).
+
+.decl counting_verification(requirement: Mid, verification: Mid, rank: number)
+counting_verification(R, V, K) :-
+    verification_result(VI, RI, C, VH, RH, X), the_candidate(C),
+    item(V, "verification", VI, _, _, _), revision(V, VH),
+    item(R, "requirement", RI, _, _, _), revision(R, RH),
+    verification_of(R, V, _), result_as(X, Y), result_rank(Y, K).
+
+.decl worse_verification(requirement: Mid, verification: Mid, rank: number)
+worse_verification(R, V, K) :- counting_verification(R, V, K), counting_verification(R, V, J), J < K.
+
+.decl has_counting_verification(requirement: Mid, verification: Mid)
+has_counting_verification(R, V) :- counting_verification(R, V, _).
+
+.decl verification_outcome(requirement: Mid, verification: Mid, result: symbol)
+verification_outcome(R, V, X) :-
+    counting_verification(R, V, K), !worse_verification(R, V, K), result_rank(X, K).
+verification_outcome(R, V, "pending") :-
+    verification_of(R, V, _), !has_counting_verification(R, V), source_complete("verification_result").
+verification_outcome(R, V, "unavailable") :-
+    verification_of(R, V, _), !has_counting_verification(R, V), !source_complete("verification_result").
+
+.decl verification_status(requirement: Mid, verification: Mid, status: Status, result: symbol)
+verification_status(R, V, S, X) :- verification_of(R, V, S), verification_outcome(R, V, X).
+
+// validation-status: each Validation of a Need or Goal, with its status and its result in its
+// context, and one summary row with an empty validation. A context counts when the request
+// supplies exactly one for the Validation.
+.decl validation_of(target: Mid, validation: Mid, status: Status)
+validation_of(T, V, S) :-
+    edge("validates", V, T, _, _), item(T, Type, _, _, _, _), validation_target(Type),
+    item(V, "validation", _, S, _, _).
+
+.decl ambiguous_context(validation: Id, context: symbol)
+ambiguous_context(V, C) :- validation_context(V, C), validation_context(V, D), C != D.
+
+.decl the_context(validation: Mid, context: symbol)
+the_context(V, C) :-
+    validation_context(VI, C), !ambiguous_context(VI, C), item(V, "validation", VI, _, _, _).
+
+.decl has_context(validation: Mid)
+has_context(V) :- the_context(V, _).
+
+.decl context_of(validation: Mid, context: symbol)
+context_of(V, C) :- the_context(V, C).
+context_of(V, "") :- item(V, "validation", _, _, _, _), !has_context(V).
+
+.decl counting_validation(target: Mid, validation: Mid, rank: number)
+counting_validation(T, V, K) :-
+    validation_result(VI, TI, C, VH, TH, X), the_context(V, C),
+    item(V, "validation", VI, _, _, _), revision(V, VH),
+    item(T, _, TI, _, _, _), revision(T, TH),
+    validation_of(T, V, _), result_as(X, Y), result_rank(Y, K).
+
+.decl worse_validation(target: Mid, validation: Mid, rank: number)
+worse_validation(T, V, K) :- counting_validation(T, V, K), counting_validation(T, V, J), J < K.
+
+.decl has_counting_validation(target: Mid, validation: Mid)
+has_counting_validation(T, V) :- counting_validation(T, V, _).
+
+.decl validation_outcome(target: Mid, validation: Mid, result: symbol)
+validation_outcome(T, V, X) :-
+    counting_validation(T, V, K), !worse_validation(T, V, K), result_rank(X, K).
+validation_outcome(T, V, "pending") :-
+    validation_of(T, V, _), !has_counting_validation(T, V), source_complete("validation_result").
+validation_outcome(T, V, "unavailable") :-
+    validation_of(T, V, _), !has_counting_validation(T, V), !source_complete("validation_result").
+
+.decl summary_rank(target: Mid, rank: number)
+summary_rank(T, K) :- validation_of(T, V, "accepted"), validation_outcome(T, V, X), result_rank(X, K).
+
+.decl worse_summary(target: Mid, rank: number)
+worse_summary(T, K) :- summary_rank(T, K), summary_rank(T, J), J < K.
+
+.decl has_summary(target: Mid)
+has_summary(T) :- summary_rank(T, _).
+
+.decl validation_status(target: Mid, validation: Mid, status: Status, context: symbol, result: symbol)
+validation_status(T, V, S, C, X) :- validation_of(T, V, S), context_of(V, C), validation_outcome(T, V, X).
+validation_status(T, "", "", "", X) :- summary_rank(T, K), !worse_summary(T, K), result_rank(X, K).
+validation_status(T, "", "", "", "not-validated") :-
+    item(T, Type, _, _, _, _), validation_target(Type), !has_summary(T).
+
+// result-stamps: each item a Verification verifies or a Validation validates, with the IDs and
+// current revisions a recorder copies into a result.
+.decl stamped(relation: Rel, type: Type)
+stamped("verifies", "verification").
+stamped("validates", "validation").
+
+.decl result_stamps(check: Mid, check_id: Id, target_id: Id, check_revision: symbol, target_revision: symbol)
+result_stamps(C, CI, TI, CH, TH) :-
+    stamped(Rel, Type), edge(Rel, C, T, _, _), item(C, Type, CI, _, _, _), item(T, _, TI, _, _, _),
+    revision(C, CH), revision(T, TH).
+
+// implemented: each code link that implements a Requirement, Design or Verification, directly
+// (empty design) or, for a Requirement, through an accepted Design that satisfies it. Code links
+// reach programs with mara-hk2arx (DES-FACT-BRIDGE); until then no code link is known, and
+// `source_complete("code")` is never supplied.
+.decl code_link(target: Mid, path: Path, line: number)
+code_link("", "", 0) :- false.
+
+.decl implementable(type: Type)
+implementable("requirement").
+implementable("design").
+implementable("verification").
+
+.decl implemented(item: Mid, path: Path, line: number, design: symbol)
+implemented(I, P, L, "") :- code_link(I, P, L), item(I, Type, _, _, _, _), implementable(Type).
+implemented(R, P, L, D) :-
+    code_link(D, P, L), item(D, "design", _, "accepted", _, _), edge("satisfies", D, R, _, _),
+    item(R, "requirement", _, _, _, _).
+
+.decl is_implemented(item: Mid)
+is_implemented(I) :- implemented(I, _, _, _).
+
+// risk-level: a risk with exactly one `Likelihood` and one `Consequence` whose pair has a cell.
+.decl single_value(mid: Mid, key: symbol, value: symbol)
+single_value(M, K, X) :- field(M, K, X), !several_values(M, K).
+
+.decl risk_level(risk: Mid, likelihood: symbol, consequence: symbol, level: symbol)
+risk_level(K, L, C, X) :-
+    item(K, "risk", _, _, _, _), single_value(K, "likelihood", L), single_value(K, "consequence", C),
+    risk_matrix(L, C, X).
+
+.decl has_level(risk: Mid)
+has_level(K) :- risk_level(K, _, _, _).
+
+// risk-scope: the requirement, its ancestors through `Decomposes` and `Derives from`, the Needs
+// those satisfy and the Goals such a Need contributes to. Siblings never enter.
+.decl ancestry(relation: Rel)
+ancestry("decomposes").
+ancestry("derives_from").
+
+.decl requirement_up(requirement: Mid, ancestor: Mid)
+requirement_up(R, R) :- item(R, "requirement", _, _, _, _).
+requirement_up(R, A) :-
+    requirement_up(R, X), edge(Rel, X, A, _, _), ancestry(Rel), item(A, "requirement", _, _, _, _).
+
+.decl risk_scope(requirement: Mid, node: Mid, type: Type)
+risk_scope(R, A, "requirement") :- requirement_up(R, A).
+risk_scope(R, N, "need") :- requirement_up(R, A), edge("satisfies", A, N, _, _), item(N, "need", _, _, _, _).
+risk_scope(R, G, "goal") :-
+    risk_scope(R, N, "need"), edge("contributes_to", N, G, _, _), item(G, "goal", _, _, _, _).
+
+// relevant-risks: each risk that threatens a node of a requirement's scope, with its status and
+// that node.
+.decl relevant_risks(requirement: Mid, risk: Mid, status: Status, threatened: Mid)
+relevant_risks(R, K, S, N) :- risk_scope(R, N, _), edge("threatens", K, N, _, _), item(K, "risk", _, S, _, _).
+
+// A risk that an accepted Decision accepts.
+.decl risk_accepted(risk: Mid)
+risk_accepted(K) :- edge("accepts", D, K, _, _), accepted(D, "decision").
+
+// Gate subjects.
+.decl requirement_subject(requirement: Mid)
+requirement_subject(R) :- item(R, "requirement", _, _, _, _).
+
+.decl validation_subject(validation: Mid)
+validation_subject(V) :- item(V, "validation", _, _, _, _).
+
+// Conditions: an item fails when a condition relation has a row for it.
+.decl not_accepted(item: Mid, status: Status)
+not_accepted(M, S) :- item(M, _, _, S, _, _), S != "accepted".
+
+// The relation of each acceptance or lifecycle rule a requirement breaks.
+.decl breaks_rule(requirement: Mid, rule: symbol)
+breaks_rule(R, "requirement_without_basis") :- requirement_without_basis(R).
+breaks_rule(R, "unverified_requirement") :- unverified_requirement(R).
+breaks_rule(R, "link_to_unaccepted") :- requirement_subject(R), link_to_unaccepted(R).
+breaks_rule(R, "unretired_supersession") :- requirement_subject(R), unretired_supersession(R).
+
+// An accepted, relevant risk of level `high` that no accepted Decision accepts.
+.decl blocking_risk(requirement: Mid, risk: Mid)
+blocking_risk(R, K) :- relevant_risks(R, K, "accepted", _), risk_level(K, _, _, "high"), !risk_accepted(K).
+
+.decl not_implemented(requirement: Mid)
+not_implemented(R) :- requirement_subject(R), !is_implemented(R), source_complete("code").
+
+.decl verification_not_passed(requirement: Mid, verification: Mid, result: symbol)
+verification_not_passed(R, V, X) :-
+    verification_status(R, V, "accepted", X), X != "pass", X != "unavailable".
+
+.decl validation_without_context(validation: Mid)
+validation_without_context(V) :- validation_subject(V), !has_context(V).
+
+.decl validation_not_passed(validation: Mid, target: Mid, result: symbol)
+validation_not_passed(V, T, X) :- validation_of(T, V, _), validation_outcome(T, V, X), X != "pass", X != "unavailable".
+
+// Unavailable: without a failure, an item is unavailable when one of these has a row for it.
+.decl risk_level_unavailable(requirement: Mid, risk: Mid)
+risk_level_unavailable(R, K) :- relevant_risks(R, K, "accepted", _), !has_level(K).
+
+.decl code_unavailable(requirement: Mid)
+code_unavailable(R) :- requirement_subject(R), !is_implemented(R), !source_complete("code").
+
+.decl result_unavailable(requirement: Mid, verification: Mid)
+result_unavailable(R, V) :- verification_status(R, V, "accepted", "unavailable").
+
+.decl validation_result_unavailable(validation: Mid, target: Mid)
+validation_result_unavailable(V, T) :- validation_outcome(T, V, "unavailable").
+
+// Views: one row per subject, with a cell for each fact; missing, unavailable and failed stay
+// distinct.
+.decl validity(requirement: Mid, validity: symbol)
+validity(R, "invalid") :- requirement_subject(R), breaks_rule(R, _).
+validity(R, "valid") :- requirement_subject(R), !breaks_rule(R, _).
+
+.decl implementation(requirement: Mid, implementation: symbol)
+implementation(R, "direct") :- requirement_subject(R), implemented(R, _, _, "").
+implementation(R, "design") :- requirement_subject(R), is_implemented(R), !implemented(R, _, _, "").
+implementation(R, "missing") :- not_implemented(R).
+implementation(R, "unavailable") :- code_unavailable(R).
+
+// The worst result of a requirement's accepted Verifications; `none` without one.
+.decl verification_rank(requirement: Mid, rank: number)
+verification_rank(R, K) :- verification_status(R, _, "accepted", X), result_rank(X, K).
+
+.decl worse_verification_rank(requirement: Mid, rank: number)
+worse_verification_rank(R, K) :- verification_rank(R, K), verification_rank(R, J), J < K.
+
+.decl verification_summary(requirement: Mid, result: symbol)
+verification_summary(R, X) :- verification_rank(R, K), !worse_verification_rank(R, K), result_rank(X, K).
+verification_summary(R, "none") :- requirement_subject(R), !verified_by_accepted(R).
+
+.decl risk_summary(requirement: Mid, risks: symbol)
+risk_summary(R, "blocking") :- requirement_subject(R), blocking_risk(R, _).
+risk_summary(R, "unavailable") :-
+    requirement_subject(R), !blocking_risk(R, _), risk_level_unavailable(R, _).
+risk_summary(R, "clear") :-
+    requirement_subject(R), !blocking_risk(R, _), !risk_level_unavailable(R, _).
+
+// delivery-readiness: knowledge validity, implementation, verification for the candidate and
+// blocking risks of each requirement.
+.decl delivery_readiness(requirement: Mid, status: Status, validity: symbol, implementation: symbol, verification: symbol, risks: symbol)
+delivery_readiness(R, S, V, I, X, K) :-
+    item(R, "requirement", _, S, _, _), validity(R, V), implementation(R, I),
+    verification_summary(R, X), risk_summary(R, K).
+
+// requirement-verification: each requirement and Verification, with the implementation path, the
+// number of code links, the Verification's status and its result for the candidate. A
+// requirement without a Verification has one row with an empty verification and status `none`.
+.decl code_links(requirement: Mid, links: number)
+code_links(R, N) :- requirement_subject(R), N = count : { implemented(R, _, _, _) }.
+
+.decl has_verification(requirement: Mid)
+has_verification(R) :- verification_of(R, _, _).
+
+.decl requirement_verification(requirement: Mid, implementation: symbol, code_links: number, verification: symbol, status: symbol, result: symbol)
+requirement_verification(R, I, N, V, S, X) :-
+    implementation(R, I), code_links(R, N), verification_status(R, V, S, X).
+requirement_verification(R, I, N, "", "none", "none") :-
+    implementation(R, I), code_links(R, N), !has_verification(R).
+
+// risk-treatment: each requirement, relevant risk, threatened node and accepted Decision that
+// accepts the risk (empty when none does), with the assessment and level, the number of
+// mitigations, and whether the risk blocks.
+.decl assessment(risk: Mid, key: symbol, value: symbol)
+assessment(K, D, X) :- item(K, "risk", _, _, _, _), risk_dimension(D), single_value(K, D, X).
+assessment(K, D, "missing") :- item(K, "risk", _, _, _, _), risk_dimension(D), !field(K, D, _).
+assessment(K, D, "several") :- item(K, "risk", _, _, _, _), risk_dimension(D), several_values(K, D).
+
+.decl level_of(risk: Mid, level: symbol)
+level_of(K, X) :- risk_level(K, _, _, X).
+level_of(K, "unavailable") :- item(K, "risk", _, _, _, _), !has_level(K).
+
+.decl mitigations(risk: Mid, mitigations: number)
+mitigations(K, N) :- item(K, "risk", _, _, _, _), N = count : { edge("mitigates", _, K, _, _) }.
+
+.decl accepted_by(risk: Mid, decision: symbol)
+accepted_by(K, D) :- edge("accepts", D, K, _, _), accepted(D, "decision"), item(K, "risk", _, _, _, _).
+accepted_by(K, "") :- item(K, "risk", _, _, _, _), !risk_accepted(K).
+
+.decl blocking(requirement: Mid, risk: Mid, blocking: symbol)
+blocking(R, K, "blocking") :- blocking_risk(R, K).
+blocking(R, K, "unavailable") :- risk_level_unavailable(R, K).
+blocking(R, K, "no") :- relevant_risks(R, K, _, _), !blocking_risk(R, K), !risk_level_unavailable(R, K).
+
+.decl risk_treatment(requirement: Mid, risk: Mid, status: Status, threatened: Mid, likelihood: symbol, consequence: symbol, level: symbol, mitigations: number, accepted_by: symbol, blocking: symbol)
+risk_treatment(R, K, S, T, L, C, X, M, A, B) :-
+    relevant_risks(R, K, S, T), assessment(K, "likelihood", L), assessment(K, "consequence", C),
+    level_of(K, X), mitigations(K, M), accepted_by(K, A), blocking(R, K, B).

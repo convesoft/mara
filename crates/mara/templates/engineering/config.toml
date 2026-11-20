@@ -1,0 +1,184 @@
+format_version = 1
+schema = ".mara/schema.toml"
+
+[documents]
+format_version = 1
+include = ["docs/**/*.mara.md"]
+
+[rules]
+programs = [".mara/rules/*.dl"]
+
+[queries.requirement-basis]
+program = ".mara/rules/knowledge.dl"
+relation = "requirement_basis"
+description = "Each basis candidate of a requirement, with its type, relation and status"
+
+[queries.design-basis]
+program = ".mara/rules/knowledge.dl"
+relation = "design_basis"
+description = "Each basis candidate of a design, with its relation and status"
+
+[queries.term-collisions]
+program = ".mara/rules/knowledge.dl"
+relation = "term_collisions"
+description = "Each other term that shares a title or alias with a term, ignoring case, with its status, the value and the kind of match"
+
+[queries.relation-lifecycle]
+program = ".mara/rules/knowledge.dl"
+relation = "relation_lifecycle"
+description = "Each link of an item, with the target, both statuses and the relation's lifecycle class"
+
+[queries.implemented]
+program = ".mara/rules/readiness.dl"
+relation = "implemented"
+description = "Each code link that implements a requirement, design or verification, directly or through an accepted design that satisfies the requirement"
+
+[queries.risk-level]
+program = ".mara/rules/readiness.dl"
+relation = "risk_level"
+description = "A risk's likelihood, consequence and level from the risk matrix"
+
+[queries.risk-scope]
+program = ".mara/rules/readiness.dl"
+relation = "risk_scope"
+description = "Every node through which a risk can be relevant to a requirement: itself, its ancestors, their needs and those needs' goals"
+
+[queries.relevant-risks]
+program = ".mara/rules/readiness.dl"
+relation = "relevant_risks"
+description = "Each risk relevant to a requirement, with its status and the node it threatens"
+
+[queries.verification-status]
+program = ".mara/rules/readiness.dl"
+relation = "verification_status"
+description = "Each verification of a requirement, with its status and its result for the candidate"
+inputs = ["candidate", "verification_result"]
+
+[queries.validation-status]
+program = ".mara/rules/readiness.dl"
+relation = "validation_status"
+description = "Each validation of a need or goal, with its status and its result in its context, and a summary row"
+inputs = ["validation_context", "validation_result"]
+
+[queries.result-stamps]
+program = ".mara/rules/readiness.dl"
+relation = "result_stamps"
+description = "Each item a verification verifies or a validation validates, with the IDs and current revisions a result records"
+
+[views.delivery-readiness]
+program = ".mara/rules/readiness.dl"
+relation = "delivery_readiness"
+description = "Each requirement's knowledge validity, implementation, verification for the candidate and blocking risks"
+inputs = ["candidate", "verification_result"]
+
+[views.requirement-verification]
+program = ".mara/rules/readiness.dl"
+relation = "requirement_verification"
+description = "Each requirement and verification, with the implementation, the code links, the verification's status and its result for the candidate"
+inputs = ["candidate", "verification_result"]
+
+[views.risk-treatment]
+program = ".mara/rules/readiness.dl"
+relation = "risk_treatment"
+description = "Each requirement and relevant risk, with the threatened node, assessment, level, mitigations, each accepted decision that accepts it, and whether it blocks"
+
+[invariants.requirement-has-basis]
+program = ".mara/rules/knowledge.dl"
+relation = "requirement_without_basis"
+severity = "error"
+message = "Accepted requirement has no accepted basis: link it with `Satisfies` to an accepted Need or with `Decomposes` or `Derives from` to an accepted Requirement, justify it with an accepted Decision, or make it Draft"
+
+[invariants.requirement-verified]
+program = ".mara/rules/knowledge.dl"
+relation = "unverified_requirement"
+severity = "error"
+message = "Accepted requirement has no accepted verification: add an accepted Verification that `Verifies` it, or make the requirement Draft"
+
+[invariants.design-has-basis]
+program = ".mara/rules/knowledge.dl"
+relation = "design_without_basis"
+severity = "error"
+message = "Accepted design has no accepted basis: link it with `Satisfies` to an accepted Requirement, `Contributes to` to an accepted Goal or `Decomposes` to an accepted Design, or make it Draft; a justifying Decision is no basis"
+
+[invariants.risk-assessed]
+program = ".mara/rules/knowledge.dl"
+relation = "unassessed_risk"
+severity = "error"
+message = "Accepted risk needs exactly one `Likelihood` and one `Consequence`: set each once, or make the risk Draft"
+
+[invariants.risk-threatens]
+program = ".mara/rules/knowledge.dl"
+relation = "risk_without_target"
+severity = "error"
+message = "Accepted risk threatens no accepted Goal, Need or Requirement: add `Threatens` to one, or make the risk Draft"
+
+[invariants.verification-has-method]
+program = ".mara/rules/knowledge.dl"
+relation = "verification_without_method"
+severity = "error"
+message = "Accepted verification has no `Methods` row: name its method, or make the verification Draft"
+
+[invariants.verification-has-target]
+program = ".mara/rules/knowledge.dl"
+relation = "verification_without_target"
+severity = "error"
+message = "Accepted verification verifies no accepted Requirement: add `Verifies` to one, or make the verification Draft"
+
+[invariants.validation-has-method]
+program = ".mara/rules/knowledge.dl"
+relation = "validation_without_method"
+severity = "error"
+message = "Accepted validation has no `Methods` row: name its method, or make the validation Draft"
+
+[invariants.validation-has-target]
+program = ".mara/rules/knowledge.dl"
+relation = "validation_without_target"
+severity = "error"
+message = "Accepted validation validates no accepted Need or Goal: add `Validates` to one, or make the validation Draft"
+
+[invariants.term-unique]
+program = ".mara/rules/knowledge.dl"
+relation = "colliding_term"
+severity = "error"
+message = "Accepted term shares a title or alias, ignoring case, with another accepted term: rename one of them; `mara query execute term-collisions --id <ID>` names the other"
+
+[invariants.term-aliases]
+program = ".mara/rules/knowledge.dl"
+relation = "invalid_term_alias"
+severity = "error"
+message = "Accepted term has an alias equal to its own title, ignoring case: remove that alias"
+
+[invariants.links-to-accepted]
+program = ".mara/rules/knowledge.dl"
+relation = "link_to_unaccepted"
+severity = "error"
+message = "Accepted item links through `Satisfies`, `Contributes to`, `Decomposes`, `Derives from`, `Threatens`, `Mitigates`, `Accepts`, `Verifies`, `Validates` or `Exercises` to an item that is not accepted: accept the target, remove the link, or make this item Draft; `mara query execute relation-lifecycle --id <ID>` lists its links"
+
+[invariants.supersedes-retired]
+program = ".mara/rules/knowledge.dl"
+relation = "unretired_supersession"
+severity = "error"
+message = "Accepted or retired item supersedes an item that is not retired: retire the superseded item, or remove the `Supersedes` link"
+
+[gates.implementation-ready]
+program = ".mara/rules/readiness.dl"
+description = "Named requirements are accepted, keep every acceptance and lifecycle rule, and no blocking risk is relevant to them"
+subjects = ["requirement_subject"]
+conditions = ["not_accepted", "breaks_rule", "blocking_risk"]
+unavailable = ["risk_level_unavailable"]
+
+[gates.verified]
+program = ".mara/rules/readiness.dl"
+description = "Named requirements are accepted, implemented, and pass every accepted verification for the candidate"
+subjects = ["requirement_subject"]
+conditions = ["not_accepted", "unverified_requirement", "not_implemented", "verification_not_passed"]
+unavailable = ["code_unavailable", "result_unavailable"]
+inputs = ["candidate", "verification_result"]
+
+[gates.release-ready]
+program = ".mara/rules/readiness.dl"
+description = "Named requirements are implementation-ready and verified, and named validations pass for every need or goal they validate in their context"
+subjects = ["requirement_subject", "validation_subject"]
+conditions = ["not_accepted", "breaks_rule", "blocking_risk", "unverified_requirement", "not_implemented", "verification_not_passed", "validation_without_target", "validation_without_context", "validation_not_passed"]
+unavailable = ["risk_level_unavailable", "code_unavailable", "result_unavailable", "validation_result_unavailable"]
+inputs = ["candidate", "verification_result", "validation_context", "validation_result"]

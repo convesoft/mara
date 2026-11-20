@@ -33,57 +33,31 @@ schema = ".mara/schema.toml"
 format_version = 1
 include = ["docs/**/*.mara.md"]
 "#;
-/// The corpus's configuration: [`CONFIG`], and [`PROGRAM`] with one invariant, query, view and
-/// gate, which stand in for the `engineering` programs until mara-tx0fcf ships them.
-const CORPUS_CONFIG: &str = r#"
-[rules]
-programs = [".mara/rules/*.dl"]
-
-[invariants.requirement-verified]
-program = ".mara/rules/harness.dl"
-relation = "unverified"
-severity = "error"
-message = "Accepted requirement has no accepted verification"
-
-[queries.verified-requirements]
-program = ".mara/rules/harness.dl"
-relation = "verified"
-description = "Requirements with an accepted verification"
-
-[views.unverified]
-program = ".mara/rules/harness.dl"
-relation = "unverified"
-description = "Accepted requirements without an accepted verification"
-
-[gates.verified]
-program = ".mara/rules/harness.dl"
-description = "Named requirements pass every accepted verification"
-subjects = ["requirement"]
-conditions = ["not_passed"]
-unavailable = ["result_unavailable"]
-inputs = ["candidate", "verification_result"]
-"#;
-/// The program of [`CORPUS_CONFIG`]: joins of items and edges, and negation.
-const PROGRAM: &str = r#".include "mara.dl"
-.decl accepted(m: Mid, type: Type)
-accepted(m, t) :- item(m, t, _, "accepted", _, _).
-.decl verified(r: Mid)
-verified(r) :- edge("verifies", v, r, _, _), accepted(v, "verification").
-.decl unverified(r: Mid)
-unverified(r) :- accepted(r, "requirement"), !verified(r).
-.decl requirement(r: Mid)
-requirement(r) :- item(r, "requirement", _, _, _, _).
-.decl candidate(c: symbol)
-.decl verification_result(v: Mid, c: symbol, result: symbol)
-.decl not_passed(r: Mid, v: Mid)
-not_passed(r, v) :-
-    edge("verifies", v, r, _, _), accepted(v, "verification"), candidate(c),
-    !verification_result(v, c, "pass").
-.decl result_unavailable(r: Mid)
-result_unavailable(r) :- not_passed(r, _), !source_complete("verification_result").
-"#;
+/// The `engineering` template's configuration, which starts with [`CONFIG`] and adds its
+/// programs and entries.
+const TEMPLATE_CONFIG: &str = include_str!("../../templates/engineering/config.toml");
+/// The `engineering` template's programs, written below `.mara/rules/`.
+const TEMPLATE_PROGRAMS: [(&str, &str); 3] = [
+    (
+        "knowledge.dl",
+        include_str!("../../templates/engineering/rules/knowledge.dl"),
+    ),
+    (
+        "readiness.dl",
+        include_str!("../../templates/engineering/rules/readiness.dl"),
+    ),
+    (
+        "risk-matrix.dl",
+        include_str!("../../templates/engineering/rules/risk-matrix.dl"),
+    ),
+];
 /// The program files the corpus declares.
-pub const PROGRAMS: u64 = 1;
+pub const PROGRAMS: u64 = 3;
+/// The programs `project validate` runs: `knowledge.dl`, with the snapshot's facts, and
+/// `readiness.dl`, which includes the risk matrix (DES-RULE-EXECUTION).
+pub const VALIDATION_RUNS: u64 = 2;
+/// The programs `item validate` runs: `knowledge.dl`, which holds the invariants.
+pub const ITEM_VALIDATION_RUNS: u64 = 1;
 /// What the corpus's and the hub's configuration add to [`CONFIG`]: Rust at the basic level, so
 /// that their code files carry links (DES-PERFORMANCE-HARNESS).
 const CODE: &str = r#"
@@ -158,7 +132,8 @@ pub struct Corpus {
 }
 
 /// The file in the corpus root that the `query gate` case supplies as `verification_result`:
-/// one `pass` row for the candidate [`CANDIDATE`] per `Verifies` edge (DES-PERFORMANCE-HARNESS).
+/// one `pass` row for the candidate [`CANDIDATE`] and the current revisions per `Verifies` edge
+/// (DES-PERFORMANCE-HARNESS, DES-TEMPLATE-INPUTS).
 pub const RESULTS: &str = "results.json";
 /// The candidate the `query gate` case names.
 pub const CANDIDATE: &str = "abc";
@@ -212,14 +187,32 @@ impl Corpus {
         let mut rng = Rng::new(seed, u64::MAX);
         write_project_files(root, size, seed, &mut rng, items.len());
         write_git_directory(root, &mut rng, &written);
+        // The current revision of each item: the hash of its region (DES-FACT-BRIDGE).
+        let mut revisions = std::collections::HashMap::new();
+        for document in &documents {
+            let bytes = fs::read(root.join(&document.path)).expect("read a generated document");
+            let mut work = mara_engine::work::WorkCounts::default();
+            for parsed in mara_engine::document::parse(&bytes, &mut work).items {
+                let revision = mara_engine::hash::Hash::of_bytes(&bytes[parsed.span.clone()]);
+                revisions.insert(parsed.mid, revision.to_string());
+            }
+        }
         let mut results = Vec::new();
         for item in &items {
-            for _ in item
+            for &(_, target) in item
                 .relations
                 .iter()
                 .filter(|(name, _)| *name == "Verifies")
             {
-                results.push(serde_json::json!([item.mid, CANDIDATE, "pass"]));
+                let requirement = &items[target];
+                results.push(serde_json::json!([
+                    item.id,
+                    requirement.id,
+                    CANDIDATE,
+                    revisions[&item.mid],
+                    revisions[&requirement.mid],
+                    "pass"
+                ]));
             }
         }
         write(
@@ -698,12 +691,17 @@ fn ids<'a>(items: &'a [Item], base: usize, locals: &[usize]) -> Vec<&'a str> {
 /// Configuration, schema, `.gitignore`, and files that are not inputs: a README, a document
 /// outside the include patterns, a document that `.gitignore` excludes, and build output.
 fn write_project_files(root: &Path, size: usize, seed: u64, rng: &mut Rng, items: usize) {
+    let entries = TEMPLATE_CONFIG
+        .strip_prefix(CONFIG)
+        .expect("the template's configuration starts with the documented example");
     write(
         root,
         ".mara/config.toml",
-        format!("{CONFIG}{CODE}{CORPUS_CONFIG}").as_bytes(),
+        format!("{CONFIG}{CODE}{entries}").as_bytes(),
     );
-    write(root, ".mara/rules/harness.dl", PROGRAM.as_bytes());
+    for (name, program) in TEMPLATE_PROGRAMS {
+        write(root, &format!(".mara/rules/{name}"), program.as_bytes());
+    }
     write(root, ".mara/schema.toml", SCHEMA.as_bytes());
     write(root, ".gitignore", GITIGNORE.as_bytes());
     let readme = format!("# Generated corpus\n\nSize {size}×, seed {seed}.\n");

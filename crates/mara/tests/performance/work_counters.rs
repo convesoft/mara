@@ -132,9 +132,9 @@ fn check_cold(
         _ => run(),
     };
     // The configuration and the schema; for a request that reads documents, also the root
-    // `.gitignore`, every document and the program file. `.git`, ignored and undeclared files
+    // `.gitignore`, every document and every program file. `.git`, ignored and undeclared files
     // are never read. Code is read only by the operations that read it (DES-CODE-READERS).
-    // Validation runs each declared program once, as one subprocess, and nothing else runs one.
+    // Validation runs the programs DES-RULE-EXECUTION selects, each once, as one subprocess.
     let read = documents + 3 + PROGRAMS;
     let mut expected = match reads {
         Reads::Schema => WorkCounts {
@@ -142,14 +142,14 @@ fn check_cold(
             hashes: 2,
             ..WorkCounts::default()
         },
-        Reads::Checked => WorkCounts {
+        Reads::Checked { runs } => WorkCounts {
             file_reads: read,
             hashes: read,
             parses: documents - 1,
             snapshot_builds: 1,
             check_steps: run.work.check_steps,
-            subprocess_spawns: PROGRAMS,
-            program_runs: PROGRAMS,
+            subprocess_spawns: runs,
+            program_runs: runs,
             ..WorkCounts::default()
         },
         Reads::Documents => WorkCounts {
@@ -197,7 +197,7 @@ fn check_cold(
     }
     // Built-in checks visit each item twice and each edge once, and the items and edges of
     // acyclic relations once more (REQ-NEAR-LINEAR-SCALING).
-    if reads == Reads::Checked {
+    if matches!(reads, Reads::Checked { .. }) {
         let steps = run.work.check_steps;
         let (items, edges) = (corpus.items as u64, corpus.edges as u64);
         assert!(
@@ -359,8 +359,8 @@ fn snapshot_counts_at(size: usize) {
         (inputs.snapshot(last, &mut work), work)
     };
 
-    // Cold: the configuration, the schema, the root `.gitignore`, each declared document and the
-    // program file are read and hashed once; `.git`, ignored and undeclared files never.
+    // Cold: the configuration, the schema, the root `.gitignore`, each declared document and
+    // each program file are read and hashed once; `.git`, ignored and undeclared files never.
     let documents = corpus.documents as u64;
     let (cold, work) = request(&mut inputs);
     let read = documents + 3 + PROGRAMS;

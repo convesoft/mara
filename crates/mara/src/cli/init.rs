@@ -19,8 +19,8 @@ use super::{Args, Context, FORMAT_VERSION, Failure, Kind, Operation, Opt, Respon
 
 pub const PROJECT: Operation = Operation {
     words: &["project", "init"],
-    summary: "Makes the directory a project: writes `.mara/config.toml` and `.mara/schema.toml` \
-              of a template, and overwrites no file.",
+    summary: "Makes the directory a project: writes `.mara/config.toml`, `.mara/schema.toml` and \
+              the programs of a template, and overwrites no file.",
     arguments: &[],
     options: &[TEMPLATE],
     run: Run::Document(project_init),
@@ -42,25 +42,54 @@ const TEMPLATE: Opt = Opt {
     },
 };
 
-/// The configuration of every template: the example of DES-PROJECT-CONFIGURATION.
-const CONFIG: &str = include_str!("../../templates/config.toml");
+/// The files of the `engineering` template: the vocabulary of DES-ENGINEERING-VOCABULARY, the
+/// programs of the template's knowledge rules and readiness, and the example configuration of
+/// DES-PROJECT-CONFIGURATION with their entries.
+const ENGINEERING: &[(&str, &str)] = &[
+    (
+        ".mara/schema.toml",
+        include_str!("../../templates/engineering/schema.toml"),
+    ),
+    (
+        ".mara/rules/knowledge.dl",
+        include_str!("../../templates/engineering/rules/knowledge.dl"),
+    ),
+    (
+        ".mara/rules/readiness.dl",
+        include_str!("../../templates/engineering/rules/readiness.dl"),
+    ),
+    (
+        ".mara/rules/risk-matrix.dl",
+        include_str!("../../templates/engineering/rules/risk-matrix.dl"),
+    ),
+    (
+        CONFIG_PATH,
+        include_str!("../../templates/engineering/config.toml"),
+    ),
+];
 
-/// The schema of the `engineering` template: DES-ENGINEERING-VOCABULARY.
-const ENGINEERING_SCHEMA: &str = include_str!("../../templates/engineering/schema.toml");
-
-/// The schema of the `empty` template: the statuses and no type or relation.
-const EMPTY_SCHEMA: &str = include_str!("../../templates/empty/schema.toml");
+/// The files of the `empty` template: the statuses and no type or relation, and the example
+/// configuration of DES-PROJECT-CONFIGURATION.
+const EMPTY: &[(&str, &str)] = &[
+    (
+        ".mara/schema.toml",
+        include_str!("../../templates/empty/schema.toml"),
+    ),
+    (
+        CONFIG_PATH,
+        include_str!("../../templates/empty/config.toml"),
+    ),
+];
 
 /// The files of the template `name`, relative to the project root, in the order they are
 /// written: the configuration last, so that no operation selects a project that is half
 /// written.
-fn template(name: &str) -> Option<[(&'static str, &'static str); 2]> {
-    let schema = match name {
-        "engineering" => ENGINEERING_SCHEMA,
-        "empty" => EMPTY_SCHEMA,
-        _ => return None,
-    };
-    Some([(".mara/schema.toml", schema), (CONFIG_PATH, CONFIG)])
+fn template(name: &str) -> Option<&'static [(&'static str, &'static str)]> {
+    match name {
+        "engineering" => Some(ENGINEERING),
+        "empty" => Some(EMPTY),
+        _ => None,
+    }
 }
 
 /// Writes the template's files into the working directory or the one `--project` names,
@@ -77,7 +106,7 @@ fn project_init(context: &mut Context, args: &Args) -> Result<Response, Failure>
     let mut created = Vec::new();
     let result = (|| {
         let root = root(&directory, &mut created)?;
-        refuse_existing(&root, &files)?;
+        refuse_existing(&root, files)?;
         // The write lock is on `.mara`, which a new project does not have yet.
         let mara = root.join(".mara");
         let made = match fs::create_dir(&mara) {

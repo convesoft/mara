@@ -210,10 +210,10 @@ acyclic = true
 
 | Template | Files |
 | --- | --- |
-| `engineering` | `.mara/schema.toml`, the vocabulary of [DES-ENGINEERING-VOCABULARY](template/vocabulary.mara.md#01M7BF6HH8CA2B9TQJ9DT32WDG) as the same text as this repository's `.mara/schema.toml`; programs under `.mara/rules/` from 0.4.0-alpha.3 (mara-tx0fcf); `.mara/config.toml` |
+| `engineering` | `.mara/schema.toml`, the vocabulary of [DES-ENGINEERING-VOCABULARY](template/vocabulary.mara.md#01M7BF6HH8CA2B9TQJ9DT32WDG) as the same text as this repository's `.mara/schema.toml`; `.mara/rules/knowledge.dl`, `.mara/rules/readiness.dl` and `.mara/rules/risk-matrix.dl`, the template's programs ([DES-TEMPLATE-QUERIES](template/readiness.mara.md#01M7CT60MW58QYX605NJNARD6H)), as the same text as this repository's; `.mara/config.toml` |
 | `empty` | `.mara/schema.toml`, with the statuses `draft`, `accepted` and `retired` and no type or relation; `.mara/config.toml` |
 
-- The configuration is the example of [DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27). It comes last: until it exists, no operation selects the directory as a project.
+- The configuration is the example of [DES-PROJECT-CONFIGURATION](project.mara.md#01M7BF6H9RDYSET9QTAKJWTX27). That of `engineering` adds `[rules]` with `programs = [".mara/rules/*.dl"]` and an entry for each of the template's queries, views, invariants and gates, every invariant of error severity. It comes last: until it exists, no operation selects the directory as a project.
 - Before it creates anything, `project init` refuses a 0.3.0 project with `legacy-project`, a `.mara` that is a symbolic link with `symbolic-link`, and a file it would write that exists, whatever it is, or a `.mara` that is no directory, with `existing-file` ([DES-OPERATIONS](hosts/index.mara.md#01M7BF6H124JRJAQSYVQ21Q2JS)). The message and a diagnostic at line 1 name each such file.
 - The write procedure writes the files as files the edit creates ([DES-WRITE-PROCEDURE](authoring/writes.mara.md#01M7BF6HJA1E3SE8WJH77FGP17)). A new project has no `.mara` to lock: `project init` creates `.mara` just before step 1, then takes the lock on it.
 - A failure before the first rename removes each directory that `project init` created and that is empty again, the last created first. A directory that holds another program's file stays.

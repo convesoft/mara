@@ -622,8 +622,10 @@ conditions = ["bad"]
 #[test]
 fn the_query_operations_through_mcp_as_through_the_cli() {
     let dir = engineering_project();
-    let config = dir.read(".mara/config.toml") + QUERY_ENTRIES;
-    dir.write(".mara/config.toml", &config);
+    // The template's configuration without its own entries, then these.
+    let template = dir.read(".mara/config.toml");
+    let example = &template[..template.find("\n[rules]\n").expect("the template's rules") + 1];
+    dir.write(".mara/config.toml", &(example.to_owned() + QUERY_ENTRIES));
     dir.write(".mara/rules/gate.dl", GATE_PROGRAM);
     dir.write(
         ".mara/rules/broken.dl",

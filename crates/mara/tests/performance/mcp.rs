@@ -10,7 +10,7 @@ use std::thread;
 use serde_json::{Value, json};
 
 use crate::cli::{Code, Reads, Run, parse};
-use crate::corpus::Corpus;
+use crate::corpus::{Corpus, VALIDATION_RUNS};
 use crate::cpu_time;
 
 /// One tool call through `mara mcp`.
@@ -34,7 +34,13 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
     vec![
         Case {
             code: Code::All,
-            ..case("project_validate", json!({}), Reads::Checked)
+            ..case(
+                "project_validate",
+                json!({}),
+                Reads::Checked {
+                    runs: VALIDATION_RUNS,
+                },
+            )
         },
         case("item_list", json!({}), Reads::Documents),
         case("schema_get", json!({"name": "requirement"}), Reads::Schema),

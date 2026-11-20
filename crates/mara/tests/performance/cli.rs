@@ -9,7 +9,7 @@ use std::thread;
 use mara_engine::work::WorkCounts;
 use serde_json::{Map, Value};
 
-use crate::corpus::{CANDIDATE, Corpus, RESULTS};
+use crate::corpus::{CANDIDATE, Corpus, ITEM_VALIDATION_RUNS, RESULTS, VALIDATION_RUNS};
 use crate::cpu_time;
 
 /// One invocation of an operation on a corpus: a case of DES-PERFORMANCE-HARNESS.
@@ -39,12 +39,12 @@ pub enum Reads {
     /// The configuration and the schema.
     Schema,
     /// The configuration, the schema, the `.gitignore` files, every document and every program,
-    /// which it parses into a snapshot and checks, and evaluates every program once.
-    Checked,
+    /// which it parses into a snapshot and checks, and `runs` program runs.
+    Checked { runs: u64 },
     /// The same inputs into a snapshot, without checks or program runs.
     Documents,
-    /// The same inputs into a snapshot, then one run of the corpus's program, and the files its
-    /// `--input` arguments name.
+    /// The same inputs into a snapshot, then one run of a program of the corpus, and the files
+    /// its `--input` arguments name.
     Evaluates { input_files: u64 },
     /// The same inputs, then a write: the files it writes are restored after each run
     /// (`restore`).
@@ -70,10 +70,21 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
     let results = format!("verification_result=@{RESULTS}");
     let line = format!("{}:2", corpus.code_files[0]);
     vec![
-        with_code(&["project", "validate"], Reads::Checked, Code::All),
+        with_code(
+            &["project", "validate"],
+            Reads::Checked {
+                runs: VALIDATION_RUNS,
+            },
+            Code::All,
+        ),
         // The corpus is valid, so fix writes nothing.
         case(&["project", "fix"], Reads::Documents),
-        case(&["item", "validate", &corpus.first_id], Reads::Checked),
+        case(
+            &["item", "validate", &corpus.first_id],
+            Reads::Checked {
+                runs: ITEM_VALIDATION_RUNS,
+            },
+        ),
         case(&["schema", "validate"], Reads::Schema),
         case(&["search", "cache"], Reads::Documents),
         case(&["get", &corpus.first_id], Reads::Documents),
@@ -88,29 +99,33 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
         case(&["schema", "get", "requirement"], Reads::Schema),
         case(&["query", "list"], Reads::Schema),
         case(
-            &["query", "execute", "verified-requirements"],
+            &["query", "execute", "relevant-risks"],
             Reads::Evaluates { input_files: 0 },
         ),
         case(
-            &["query", "view", "unverified"],
+            &["query", "view", "risk-treatment"],
             Reads::Evaluates { input_files: 0 },
         ),
-        case(
-            &[
-                "query",
-                "gate",
-                "verified",
-                "--id",
-                &corpus.gate_requirement,
-                "--input",
-                &candidate,
-                "--input",
-                &results,
-                "--complete",
-                "verification_result",
-            ],
-            Reads::Evaluates { input_files: 1 },
-        ),
+        // Unavailable, exit status 1: no code link reaches programs yet (DES-TEMPLATE-QUERIES).
+        Case {
+            status: 1,
+            ..case(
+                &[
+                    "query",
+                    "gate",
+                    "verified",
+                    "--id",
+                    &corpus.gate_requirement,
+                    "--input",
+                    &candidate,
+                    "--input",
+                    &results,
+                    "--complete",
+                    "verification_result",
+                ],
+                Reads::Evaluates { input_files: 1 },
+            )
+        },
         case(
             &["item", "move", &corpus.first_id, "docs/moved/first.mara.md"],
             Reads::Writes,

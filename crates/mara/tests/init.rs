@@ -12,8 +12,21 @@ use std::time::SystemTime;
 
 use serde_json::{Map, Value, json};
 
-/// The files `project init` writes, in the order it writes them.
-const FILES: [&str; 2] = [".mara/schema.toml", ".mara/config.toml"];
+/// The schema and the configuration of every template.
+const SCHEMA: &str = ".mara/schema.toml";
+const CONFIG: &str = ".mara/config.toml";
+
+/// The files `project init` writes for the `engineering` template, in the order it writes them.
+const FILES: [&str; 5] = [
+    SCHEMA,
+    ".mara/rules/knowledge.dl",
+    ".mara/rules/readiness.dl",
+    ".mara/rules/risk-matrix.dl",
+    CONFIG,
+];
+
+/// The files of the `empty` template, in the order they are written.
+const EMPTY: [&str; 2] = [SCHEMA, CONFIG];
 
 /// A disposable directory under `$TMPDIR`, removed on drop.
 struct Dir {
@@ -137,7 +150,6 @@ fn changed(before: &Tree, after: &Tree) -> Vec<String> {
 #[test]
 fn writes_the_engineering_template_into_the_working_or_a_named_directory() {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let schema = fs::read_to_string(repository.join(".mara/schema.toml")).unwrap();
     for named in [None, Some("existing"), Some("new/project")] {
         let dir = Dir::new();
         if named == Some("existing") {
@@ -159,14 +171,22 @@ fn writes_the_engineering_template_into_the_working_or_a_named_directory() {
             _ => Vec::new(),
         };
         expected.push(format!("{target}.mara"));
+        expected.push(format!("{target}.mara/rules"));
         expected.extend(FILES.iter().map(|file| format!("{target}{file}")));
         expected.sort();
         assert_eq!(changed(&before, &tree(&dir.root)), expected, "{named:?}");
-        // The schema is this repository's, the configuration the documented example.
-        assert_eq!(dir.read(&format!("{target}.mara/schema.toml")), schema);
-        assert_eq!(
-            dir.read(&format!("{target}{}", FILES[1])),
-            documented_example("DES-PROJECT-CONFIGURATION")
+        // The schema and the programs are this repository's; the configuration starts with
+        // the documented example.
+        for file in &FILES[..4] {
+            let ours = fs::read_to_string(repository.join(file)).unwrap();
+            assert_eq!(dir.read(&format!("{target}{file}")), ours, "{file}");
+        }
+        let config = dir.read(&format!("{target}{CONFIG}"));
+        let example = documented_example("DES-PROJECT-CONFIGURATION");
+        assert!(config.starts_with(example), "{config}");
+        assert!(
+            config[example.len()..].starts_with("\n[rules]\n"),
+            "{config}"
         );
         let mut validate = vec!["project", "validate", "--format", "json"];
         validate.extend(named.iter().flat_map(|named| ["--project", *named]));
@@ -176,11 +196,77 @@ fn writes_the_engineering_template_into_the_working_or_a_named_directory() {
     // The human form lists the same files.
     let dir = Dir::new();
     let run = dir.run(&["project", "init"]).status(0);
-    assert_eq!(
-        run.stdout,
-        "created .mara/schema.toml\ncreated .mara/config.toml\n"
-    );
+    let lines: String = FILES
+        .iter()
+        .map(|file| format!("created {file}\n"))
+        .collect();
+    assert_eq!(run.stdout, lines);
     assert_eq!(run.stderr, "");
+}
+
+/// The programs row of VER-PROJECT-INIT: `project validate` compiles the programs, with the
+/// facts of a document for the invariants' program, and `query list` lists the template's
+/// invariants, queries, gates and three views.
+#[test]
+fn the_engineering_programs_compile_and_are_listed() {
+    let dir = Dir::new();
+    dir.run(&["project", "init"]).status(0);
+    dir.write(
+        "docs/a.mara.md",
+        "<a id=\"01M7D8DZ2663WP3A0300000001\"></a>\n\n### Need\n\n| Type | Need |\n\
+         | --- | --- |\n| ID | NEED-ONE |\n| Status | Accepted |\n\nA need.\n",
+    );
+    let run = dir
+        .run(&["project", "validate", "--format", "json", "--debug-stats"])
+        .status(0);
+    assert_eq!(run.json()["diagnostics"], json!([]));
+    // `knowledge.dl` with the facts, `readiness.dl`, which includes the matrix, without.
+    let stats: Value = serde_json::from_str(run.stderr.lines().last().unwrap()).unwrap();
+    assert_eq!(stats["program_runs"], 2, "{stats}");
+    let listed = dir
+        .run(&["query", "list", "--limit", "100", "--format", "json"])
+        .status(0)
+        .json();
+    assert_eq!(listed["next_cursor"], Value::Null);
+    let mut entries: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for entry in listed["entries"].as_array().unwrap() {
+        let kind = entry["kind"].as_str().unwrap();
+        entries
+            .entry(kind)
+            .or_default()
+            .insert(entry["name"].as_str().unwrap());
+    }
+    let set = |names: &[&'static str]| names.iter().copied().collect::<BTreeSet<_>>();
+    assert_eq!(
+        entries["query"],
+        set(&[
+            "requirement-basis",
+            "design-basis",
+            "term-collisions",
+            "relation-lifecycle",
+            "implemented",
+            "risk-level",
+            "risk-scope",
+            "relevant-risks",
+            "verification-status",
+            "validation-status",
+            "result-stamps",
+        ])
+    );
+    assert_eq!(
+        entries["view"],
+        set(&[
+            "delivery-readiness",
+            "requirement-verification",
+            "risk-treatment"
+        ])
+    );
+    assert_eq!(
+        entries["gate"],
+        set(&["implementation-ready", "verified", "release-ready"])
+    );
+    assert_eq!(entries["invariant"].len(), 13, "{entries:?}");
+    assert_eq!(entries.len(), 4, "{entries:?}");
 }
 
 #[test]
@@ -254,9 +340,9 @@ fn writes_the_empty_template() {
     let run = dir
         .run(&["project", "init", "--template", "empty", "--format", "json"])
         .status(0);
-    assert_eq!(run.json(), json!({"format_version": 1, "created": FILES}));
+    assert_eq!(run.json(), json!({"format_version": 1, "created": EMPTY}));
     let entries: Vec<String> = tree(&dir.root).into_keys().collect();
-    assert_eq!(entries, [".mara", FILES[1], FILES[0]]);
+    assert_eq!(entries, [".mara", CONFIG, SCHEMA]);
     let listed = dir
         .run(&["schema", "list", "--format", "json"])
         .status(0)
@@ -267,7 +353,7 @@ fn writes_the_empty_template() {
         .status(0);
     assert_eq!(run.json()["diagnostics"], json!([]));
     assert_eq!(
-        dir.read(FILES[1]),
+        dir.read(CONFIG),
         documented_example("DES-PROJECT-CONFIGURATION")
     );
 }
@@ -278,19 +364,20 @@ type Setup = (&'static str, fn(&Dir));
 #[test]
 fn refuses_to_overwrite_and_changes_nothing() {
     let setups: [Setup; 9] = [
-        ("configuration", |dir| dir.write(FILES[1], "mine\n")),
-        ("schema", |dir| dir.write(FILES[0], "mine\n")),
-        ("both", |dir| {
-            dir.write(FILES[0], "mine\n");
-            dir.write(FILES[1], "mine\n");
+        ("configuration", |dir| dir.write(CONFIG, "mine\n")),
+        ("schema", |dir| dir.write(SCHEMA, "mine\n")),
+        ("all", |dir| {
+            for file in FILES {
+                dir.write(file, "mine\n");
+            }
         }),
         (".mara is a file", |dir| dir.write(".mara", "mine\n")),
         ("a dangling link", |dir| {
             fs::create_dir(dir.root.join(".mara")).unwrap();
-            std::os::unix::fs::symlink("missing", dir.root.join(FILES[1])).unwrap();
+            std::os::unix::fs::symlink("missing", dir.root.join(CONFIG)).unwrap();
         }),
         ("a directory", |dir| {
-            fs::create_dir_all(dir.root.join(FILES[0])).unwrap()
+            fs::create_dir_all(dir.root.join(SCHEMA)).unwrap()
         }),
         ("a named directory", |dir| {
             dir.write("named/.mara/config.toml", "mine\n")
@@ -320,13 +407,13 @@ fn refuses_to_overwrite_and_changes_nothing() {
         let error = run.json()["error"].clone();
         let (code, named): (&str, &[&str]) = match case {
             "configuration" | "a dangling link" | "a named directory" => {
-                ("existing-file", &FILES[1..])
+                ("existing-file", &[CONFIG])
             }
-            "schema" | "a directory" => ("existing-file", &FILES[..1]),
-            "both" => ("existing-file", &FILES),
+            "schema" | "a directory" => ("existing-file", &[SCHEMA]),
+            "all" => ("existing-file", &FILES),
             ".mara is a file" => ("existing-file", &[".mara"]),
             "0.3.0" => ("legacy-project", &[]),
-            _ => ("symbolic-link", &[FILES[1]]),
+            _ => ("symbolic-link", &[CONFIG]),
         };
         assert_eq!(error["code"], code, "{case}: {error}");
         let message = error["message"].as_str().unwrap();
@@ -387,7 +474,9 @@ fn refuses_a_file_created_while_it_waits_and_leaves_nothing_behind() {
     let dir = Dir::new();
     let (run, seen) = paused(&dir, |_, _| {});
     run.status(0);
-    assert_eq!(seen, ["", FILES[0], FILES[1]]);
+    let mut order = vec![""];
+    order.extend(FILES);
+    assert_eq!(seen, order);
 
     for with_mara in [false, true] {
         // Step 2: the first or the later file created before writing began.
@@ -407,6 +496,9 @@ fn refuses_a_file_created_while_it_waits_and_leaves_nothing_behind() {
             assert_eq!(error["diagnostics"][0]["path"], file, "{error}");
             assert_eq!(seen, [""]);
             let mut expected = vec![file.to_owned()];
+            if file.starts_with(".mara/rules/") {
+                expected.insert(0, ".mara/rules".into());
+            }
             if !with_mara {
                 expected.insert(0, ".mara".into());
             }
@@ -419,8 +511,8 @@ fn refuses_a_file_created_while_it_waits_and_leaves_nothing_behind() {
         }
         let before = tree(&dir.root);
         let (run, seen) = paused(&dir, |paused, _| {
-            if paused == FILES[0] {
-                other(&dir, FILES[0]);
+            if paused == SCHEMA {
+                other(&dir, SCHEMA);
             }
         });
         let error = run.status(1).json()["error"].clone();
@@ -432,9 +524,9 @@ fn refuses_a_file_created_while_it_waits_and_leaves_nothing_behind() {
                 .contains("nothing was written"),
             "{error}"
         );
-        assert_eq!(seen, ["", FILES[0]]);
-        assert_eq!(dir.read(FILES[0]), "the other program's contents");
-        let mut expected = vec![FILES[0].to_owned()];
+        assert_eq!(seen, ["", SCHEMA]);
+        assert_eq!(dir.read(SCHEMA), "the other program's contents");
+        let mut expected = vec![SCHEMA.to_owned()];
         if !with_mara {
             expected.insert(0, ".mara".into());
         }

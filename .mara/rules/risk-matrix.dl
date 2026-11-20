@@ -1,0 +1,37 @@
+.once
+// The engineering template's risk matrix (DES-TEMPLATE-RISK-LEVEL): the level of each pair of
+// a risk's `Likelihood` and `Consequence`, informed by NASA/SP-2011-3422 §4.3.2.6
+// (ADR-NASA-INFORMED-RISK-MATRIX). Tailor it by editing the facts; a pair without a fact gives
+// a risk no level, and whatever depends on that level is unavailable.
+
+.decl risk_matrix(likelihood: symbol, consequence: symbol, level: symbol)
+
+risk_matrix("rare", "minimal", "low").
+risk_matrix("rare", "minor", "low").
+risk_matrix("rare", "moderate", "low").
+risk_matrix("rare", "major", "medium").
+risk_matrix("rare", "severe", "medium").
+
+risk_matrix("unlikely", "minimal", "low").
+risk_matrix("unlikely", "minor", "low").
+risk_matrix("unlikely", "moderate", "medium").
+risk_matrix("unlikely", "major", "medium").
+risk_matrix("unlikely", "severe", "high").
+
+risk_matrix("possible", "minimal", "low").
+risk_matrix("possible", "minor", "medium").
+risk_matrix("possible", "moderate", "medium").
+risk_matrix("possible", "major", "high").
+risk_matrix("possible", "severe", "high").
+
+risk_matrix("likely", "minimal", "medium").
+risk_matrix("likely", "minor", "medium").
+risk_matrix("likely", "moderate", "high").
+risk_matrix("likely", "major", "high").
+risk_matrix("likely", "severe", "high").
+
+risk_matrix("almost-certain", "minimal", "medium").
+risk_matrix("almost-certain", "minor", "high").
+risk_matrix("almost-certain", "moderate", "high").
+risk_matrix("almost-certain", "major", "high").
+risk_matrix("almost-certain", "severe", "high").

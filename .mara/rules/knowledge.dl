@@ -1,0 +1,157 @@
+.once
+// The engineering template's knowledge rules: the invariants of DES-TEMPLATE-ACCEPTANCE and
+// DES-TEMPLATE-RELATION-LIFECYCLE, and the queries they are written over (DES-TEMPLATE-QUERIES).
+// Validation evaluates this program, so it holds no closure over requirements. Each invariant
+// relation has one row per item that breaks its rule; queries keep items of every status.
+
+.include "mara.dl"
+
+.decl accepted(mid: Mid, type: Type)
+accepted(M, T) :- item(M, T, _, "accepted", _, _).
+
+// requirement-basis: each basis candidate of a requirement, with its type, relation and status.
+.decl requirement_basis_kind(relation: Rel, type: Type)
+requirement_basis_kind("satisfies", "need").
+requirement_basis_kind("decomposes", "requirement").
+requirement_basis_kind("derives_from", "requirement").
+
+.decl requirement_basis(requirement: Mid, basis: Mid, type: Type, relation: Rel, status: Status)
+requirement_basis(R, B, T, Rel, S) :-
+    item(R, "requirement", _, _, _, _), edge(Rel, R, B, _, _), requirement_basis_kind(Rel, T),
+    item(B, T, _, S, _, _).
+requirement_basis(R, D, "decision", "justifies", S) :-
+    item(R, "requirement", _, _, _, _), edge("justifies", D, R, _, _),
+    item(D, "decision", _, S, _, _).
+
+// design-basis: each basis candidate of a design, with its relation and status. A justifying
+// Decision is no basis.
+.decl design_basis_kind(relation: Rel, type: Type)
+design_basis_kind("satisfies", "requirement").
+design_basis_kind("contributes_to", "goal").
+design_basis_kind("decomposes", "design").
+
+.decl design_basis(design: Mid, basis: Mid, relation: Rel, status: Status)
+design_basis(D, B, Rel, S) :-
+    item(D, "design", _, _, _, _), edge(Rel, D, B, _, _), design_basis_kind(Rel, T),
+    item(B, T, _, S, _, _).
+
+// term-collisions: each other Term that shares a folded title or alias with a Term, with its
+// status, the folded value and the kind of match (`title/alias`: this term's title, the other
+// term's alias).
+.decl term_name(term: Mid, kind: symbol, folded: symbol)
+term_name(T, "title", F) :- item(T, "term", _, _, _, _), title(T, X), folded(X, F).
+term_name(T, "alias", F) :- item(T, "term", _, _, _, _), field(T, "aliases", X), folded(X, F).
+
+.decl term_collisions(term: Mid, other: Mid, status: Status, value: symbol, kind: symbol)
+term_collisions(T, O, S, F, cat(K, cat("/", L))) :-
+    term_name(T, K, F), term_name(O, L, F), T != O, item(O, _, _, S, _, _).
+
+// relation-lifecycle: each link of a classified relation, with both statuses and the class.
+.decl relation_class(relation: Rel, class: symbol)
+relation_class("satisfies", "strict").
+relation_class("contributes_to", "strict").
+relation_class("decomposes", "strict").
+relation_class("derives_from", "strict").
+relation_class("threatens", "strict").
+relation_class("mitigates", "strict").
+relation_class("accepts", "strict").
+relation_class("verifies", "strict").
+relation_class("validates", "strict").
+relation_class("exercises", "strict").
+relation_class("justifies", "developmental").
+relation_class("supports", "developmental").
+relation_class("supersedes", "replacement").
+
+.decl relation_lifecycle(source: Mid, relation: Rel, target: Mid, source_status: Status, target_status: Status, class: symbol)
+relation_lifecycle(S, Rel, T, SS, TS, C) :-
+    edge(Rel, S, T, _, _), relation_class(Rel, C), item(S, _, _, SS, _, _), item(T, _, _, TS, _, _).
+
+// Invariant requirement-has-basis.
+.decl has_accepted_requirement_basis(requirement: Mid)
+has_accepted_requirement_basis(R) :- requirement_basis(R, _, _, _, "accepted").
+
+.decl requirement_without_basis(requirement: Mid)
+requirement_without_basis(R) :- accepted(R, "requirement"), !has_accepted_requirement_basis(R).
+
+// Invariant requirement-verified.
+.decl verified_by_accepted(requirement: Mid)
+verified_by_accepted(R) :- edge("verifies", V, R, _, _), accepted(V, "verification").
+
+.decl unverified_requirement(requirement: Mid)
+unverified_requirement(R) :- accepted(R, "requirement"), !verified_by_accepted(R).
+
+// Invariant design-has-basis.
+.decl has_accepted_design_basis(design: Mid)
+has_accepted_design_basis(D) :- design_basis(D, _, _, "accepted").
+
+.decl design_without_basis(design: Mid)
+design_without_basis(D) :- accepted(D, "design"), !has_accepted_design_basis(D).
+
+// Invariant risk-assessed: exactly one `Likelihood` and one `Consequence`. Equal rows are one
+// fact; the schema reports a repeated field.
+.decl risk_dimension(key: symbol)
+risk_dimension("likelihood").
+risk_dimension("consequence").
+
+.decl several_values(mid: Mid, key: symbol)
+several_values(M, K) :- field(M, K, A), field(M, K, B), A != B.
+
+.decl unassessed_risk(risk: Mid)
+unassessed_risk(K) :- accepted(K, "risk"), risk_dimension(D), !field(K, D, _).
+unassessed_risk(K) :- accepted(K, "risk"), risk_dimension(D), several_values(K, D).
+
+// Invariant risk-threatens.
+.decl threat_target(type: Type)
+threat_target("goal").
+threat_target("need").
+threat_target("requirement").
+
+.decl threatens_accepted(risk: Mid)
+threatens_accepted(K) :- edge("threatens", K, T, _, _), accepted(T, Type), threat_target(Type).
+
+.decl risk_without_target(risk: Mid)
+risk_without_target(K) :- accepted(K, "risk"), !threatens_accepted(K).
+
+// Invariants verification-has-method and verification-has-target.
+.decl verification_without_method(verification: Mid)
+verification_without_method(V) :- accepted(V, "verification"), !field(V, "methods", _).
+
+.decl verifies_accepted(verification: Mid)
+verifies_accepted(V) :- edge("verifies", V, R, _, _), accepted(R, "requirement").
+
+.decl verification_without_target(verification: Mid)
+verification_without_target(V) :- accepted(V, "verification"), !verifies_accepted(V).
+
+// Invariants validation-has-method and validation-has-target.
+.decl validation_without_method(validation: Mid)
+validation_without_method(V) :- accepted(V, "validation"), !field(V, "methods", _).
+
+.decl validation_target(type: Type)
+validation_target("need").
+validation_target("goal").
+
+.decl validates_accepted(validation: Mid)
+validates_accepted(V) :- edge("validates", V, T, _, _), accepted(T, Type), validation_target(Type).
+
+.decl validation_without_target(validation: Mid)
+validation_without_target(V) :- accepted(V, "validation"), !validates_accepted(V).
+
+// Invariant term-unique: no folded title or alias equals one of another accepted Term.
+.decl colliding_term(term: Mid)
+colliding_term(T) :- accepted(T, "term"), term_name(T, _, F), term_name(O, _, F), T != O, accepted(O, "term").
+
+// Invariant term-aliases: no alias equals, folded, the term's own title. An empty alias is a
+// malformed row, which validation reports before any program runs.
+.decl invalid_term_alias(term: Mid)
+invalid_term_alias(T) :- accepted(T, "term"), term_name(T, "alias", F), term_name(T, "title", F).
+
+// Invariant links-to-accepted: from an accepted source, the target of a strict relation is
+// accepted.
+.decl link_to_unaccepted(source: Mid)
+link_to_unaccepted(S) :- relation_lifecycle(S, _, _, "accepted", TS, "strict"), TS != "accepted".
+
+// Invariant supersedes-retired: from an accepted or retired source, the target of `Supersedes`
+// is retired.
+.decl unretired_supersession(source: Mid)
+unretired_supersession(S) :- relation_lifecycle(S, _, _, "accepted", TS, "replacement"), TS != "retired".
+unretired_supersession(S) :- relation_lifecycle(S, _, _, "retired", TS, "replacement"), TS != "retired".

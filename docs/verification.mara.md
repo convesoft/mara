@@ -36,7 +36,7 @@ Cold rows of the operations that 0.4.0-alpha.3 adds hold in every host and run t
 
 | Situation | Expectation |
 | --- | --- |
-| `project validate` of a project that declares programs | 1 program run per declared program, whether an invariant uses it or not |
+| `project validate` of a project that declares programs | 1 program run per declared program that an entry names or that no other declared file includes ([DES-RULE-EXECUTION](rules/evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)), whether an invariant uses it or not |
 | `query execute`, `query view`, `query gate` | 1 program run |
 | `query report` | 1 program run, in provenance mode |
 | `query list`; a request refused for a program the parser refuses or for a missing or wrong input | 0 program runs |
@@ -321,12 +321,12 @@ Rust integration tests run `project init` with the real CLI in disposable direct
 
 | Case | Expectation |
 | --- | --- |
-| No template named, in the working directory and in a named one | `.mara/config.toml` and `.mara/schema.toml` are written there; the output lists exactly the files created; `project validate` reports no diagnostic |
+| No template named, in the working directory and in a named one | The template's files are written there; the output lists exactly the files created; `project validate` reports no diagnostic |
 | `schema list` and `schema get` of that project | Every type and relation of [DES-ENGINEERING-VOCABULARY](template/vocabulary.mara.md#01M7BF6HH8CA2B9TQJ9DT32WDG), with its ID prefix, description, fields, allowed values, target types and constraints, and nothing else |
 | Items of that project with each of the statuses `Draft`, `Accepted` and `Retired`, and with another status | Valid; invalid |
 | `empty` named | A configuration and a schema that declares no type and no relation; `project validate` reports no diagnostic |
 | A directory in which one of the files to write exists | Refused, naming that file; no file or directory is created |
-| The programs of `engineering`, from 0.4.0-alpha.3 (mara-tx0fcf) | Written under `.mara/rules/` and listed; `project validate` compiles them without a diagnostic; `query list` lists the template's invariants, queries, gates and three views ([DES-TEMPLATE-VIEWS](template/readiness.mara.md#01M7CT60NHPG3GY0V1F0MZ5QF0)) |
+| The programs of `engineering` | Written under `.mara/rules/` and listed; `project validate` compiles them without a diagnostic; `query list` lists the template's invariants, queries, gates and three views ([DES-TEMPLATE-VIEWS](template/readiness.mara.md#01M7CT60NHPG3GY0V1F0MZ5QF0)) |
 
 ---
 
