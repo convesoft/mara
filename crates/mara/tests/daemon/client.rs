@@ -13,8 +13,6 @@ use crate::{Run, Test, copy_binary, finish, hold_lock, mara, private_directory, 
 
 /// A read whose JSON result and stats line the tests compare.
 const READ: &[&str] = &["--debug-stats", "--format", "json", "item", "list"];
-/// A read in the human form.
-const SEARCH: &[&str] = &["--debug-stats", "search", "Two"];
 /// How long a first call may take, both its pipes ended, while the daemon it starts waits for
 /// the lock: far below the 10 s that `daemon start` waits, and far above the milliseconds a
 /// read of the test's project takes on a loaded machine.
@@ -25,6 +23,18 @@ const FIRST_CALL: Duration = Duration::from_secs(3);
 fn assert_direct(run: &Run, direct: &Run) {
     assert!(direct.status.success(), "{direct:?}");
     assert_eq!(run, direct);
+}
+
+/// The run printed what direct mode prints but for the counts of its stats line, which a
+/// daemon's session reports for its own work.
+#[track_caller]
+pub(crate) fn assert_direct_but_counts(run: &Run, direct: &Run) {
+    let without_stats = |run: &Run| {
+        let mut lines: Vec<&str> = run.stderr.lines().collect();
+        lines.pop();
+        (run.status, run.stdout.clone(), lines.join("\n"))
+    };
+    assert_eq!(without_stats(run), without_stats(direct), "{run:?}");
 }
 
 #[test]
@@ -38,11 +48,17 @@ fn the_first_read_runs_in_process_and_starts_a_daemon_that_serves_the_next() {
     assert!(started.elapsed() < FIRST_CALL, "{:?}", started.elapsed());
     assert_direct(&first, &direct);
     let pid = test.wait_for_daemon();
-    // Until sessions (mara-xqcnqw), `status` lists none; the project's session is theirs.
-    for args in [READ, SEARCH] {
-        let served = test.served_by(pid, &project, args);
-        assert_direct(&served, &test.direct(&project, args));
-    }
+    test.wait_for_session(&project);
+    assert_eq!(test.sessions(), std::slice::from_ref(&project));
+    // The daemon reports the opening of the session with its first response, a cold request:
+    // it had answered nothing before, so the first call ran in-process.
+    thread::sleep(Duration::from_secs(2));
+    assert_direct(&test.run_in(&project, READ, &[]), &direct);
+    // The same request again on unchanged files: only the session could do no work for it.
+    thread::sleep(Duration::from_secs(2));
+    let served = test.run_in(&project, READ, &[]);
+    assert_direct_but_counts(&served, &direct);
+    assert!(crate::nothing(&crate::stats(&served)), "{served:?}");
     assert_eq!(test.daemons(), [pid], "another daemon started");
 }
 
@@ -79,8 +95,9 @@ fn ten_reads_at_once_leave_one_daemon() {
     let project = test.project();
     let direct = test.direct(&project, READ);
     let children: Vec<_> = (0..10).map(|_| test.spawn_in(&project, READ)).collect();
+    // A read that a daemon one of them started served in its session may report less work.
     for child in children {
-        assert_direct(&finish(child), &direct);
+        assert_direct_but_counts(&finish(child), &direct);
     }
     test.wait_for_daemon();
 }
@@ -246,7 +263,7 @@ fn the_daemon_resolves_paths_from_the_clients_directory() {
     fs::write(client.join("note.json"), r#"[["from the client"]]"#).unwrap();
     // The daemon starts elsewhere, and works in `/`.
     let (_, pid) = test.start();
-    for args in [
+    for (index, args) in [
         &[
             "--debug-stats",
             "--format",
@@ -305,10 +322,17 @@ fn the_daemon_resolves_paths_from_the_clients_directory() {
             "--input",
             "note=@missing.json",
         ],
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let direct = test.direct(&client, args);
         let served = test.served_by(pid, &client, args);
-        assert_eq!(served, direct, "{args:?}");
+        // The first request opens the session, a cold request; the others find it warm.
+        match index {
+            0 => assert_eq!(served, direct, "{args:?}"),
+            _ => assert_direct_but_counts(&served, &direct),
+        }
     }
     let run = test.direct(
         &client,
@@ -429,18 +453,20 @@ fn a_query_over_code_links_gives_the_rows_of_direct_mode_after_a_marker_changes(
         let leaf = leaf.unwrap_or_else(|| panic!("no code_link leaf: {json}"));
         (leaf["path"].clone(), leaf["line"].clone())
     };
+    // The first request opens the session, a cold request; the others find it warm and may
+    // report less work for the same output.
     let served = test.served_by(pid, &project, &args);
     assert_direct(&served, &test.direct(&project, &args));
     assert_eq!(ids(&served), [("REQ-ONE".to_owned(), 2)]);
     let served = test.served_by(pid, &project, &report);
-    assert_eq!(served, test.direct(&project, &report));
+    assert_direct_but_counts(&served, &test.direct(&project, &report));
     assert_eq!(served.json()["report"]["outcome"], "passed", "{served:?}");
     fs::write(&code, "fn two() {}\n\n// @mara implements REQ-TWO\n").unwrap();
     let served = test.served_by(pid, &project, &args);
-    assert_direct(&served, &test.direct(&project, &args));
+    assert_direct_but_counts(&served, &test.direct(&project, &args));
     assert_eq!(ids(&served), [("REQ-TWO".to_owned(), 3)]);
     let served = test.served_by(pid, &project, &report);
-    assert_direct(&served, &test.direct(&project, &report));
+    assert_direct_but_counts(&served, &test.direct(&project, &report));
     assert_eq!(leaf(&served), (json!("src/lib.rs"), json!(3)));
 }
 
@@ -539,12 +565,16 @@ fn code_operations_through_the_daemon_match_direct_mode() {
         &["--debug-stats", "--format", "json", "project", "validate"],
         &["--debug-stats", "get", "src/lib.rs:2"],
     ];
-    for args in cases {
+    for (index, args) in cases.into_iter().enumerate() {
         let env = [("MARA_NO_DAEMON", "1"), ("HOME", home)];
         let direct = test.run_in(&project, args, &env).succeeded();
         let client = test.command_in(&project, &mara(), args, &[("HOME", home)]);
         let served = crate::served_by(pid, client);
-        assert_eq!(served, direct, "{args:?}");
+        // The first request opens the session, a cold request; the others find it warm.
+        match index {
+            0 => assert_eq!(served, direct, "{args:?}"),
+            _ => assert_direct_but_counts(&served, &direct),
+        }
     }
     let got = test.run_in(
         &project,
@@ -552,4 +582,124 @@ fn code_operations_through_the_daemon_match_direct_mode() {
         &[("HOME", home)],
     );
     assert_eq!(got.json()["node"]["declaration"], "one", "{got:?}");
+}
+
+/// A project with an invariant over code links and the Rust grammar of VER-GRAMMAR-MARKERS,
+/// pinned and in the per-user cache of `home/` in the test's directory: its root and `HOME`.
+fn grammar_project(test: &Test) -> (std::path::PathBuf, String) {
+    let project = test.project();
+    let schema = format!(
+        "{}\n[relations.implements]\ninverse = \"implemented_by\"\n\
+         description = \"The code realizes the target.\"\n\
+         targets = {{ code = [\"requirement\"] }}\n",
+        crate::SCHEMA
+    );
+    fs::write(project.join(".mara/schema.toml"), schema).unwrap();
+    let home = test.path().join("home");
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/grammars/rust");
+    let wasm = fs::read(fixtures.join("tree-sitter-rust.wasm")).unwrap();
+    let tags = fs::read(fixtures.join("tags.scm")).unwrap();
+    let checksum = mara::grammar::checksum(&wasm, &tags);
+    let cache = home
+        .join(".cache/mara/grammars/rust/0.24.2")
+        .join(checksum.to_string());
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(cache.join(mara::grammar::WASM_FILE), wasm).unwrap();
+    fs::write(cache.join(mara::grammar::TAGS_FILE), tags).unwrap();
+    fs::create_dir_all(project.join(".mara/rules")).unwrap();
+    fs::write(
+        project.join(".mara/rules/code.dl"),
+        ".include \"mara.dl\"\n.decl linked(dst: Mid)\nlinked(d) :- code_link(_, d, _, _, _, _).\n",
+    )
+    .unwrap();
+    let config = format!(
+        "{}\n[rules]\nprograms = [\".mara/rules/*.dl\"]\n\n[invariants.implemented]\n\
+         program = \".mara/rules/code.dl\"\nrelation = \"linked\"\nseverity = \"warning\"\n\
+         message = \"Code implements this requirement\"\n\n[code]\nformat_version = 1\n\n\
+         [code.languages.rust]\ninclude = [\"src/**/*.rs\"]\ncomment_prefixes = [\"//\"]\n\
+         grammar = {{ version = \"0.24.2\", checksum = \"blake3:{checksum}\" }}\n",
+        crate::CONFIG
+    );
+    fs::write(project.join(".mara/config.toml"), config).unwrap();
+    fs::create_dir(project.join("src")).unwrap();
+    fs::write(
+        project.join("src/lib.rs"),
+        "// @mara implements REQ-ONE\npub fn one() {}\n",
+    )
+    .unwrap();
+    (project, home.to_str().unwrap().to_owned())
+}
+
+/// How long the grammar may take on the file that stalls it: the length of the scan.
+const STALLED_SCAN: Duration = Duration::from_secs(10);
+
+/// While a request over code links scans a file that keeps the grammar busy, a read of the
+/// same project that needs no code is answered: the scan holds none of the session's inputs
+/// (DES-DAEMON-SESSIONS, REQ-READS-DURING-VALIDATION). By order: the read returns while the
+/// scanning request still runs, long before the grammar's time is up.
+fn a_read_is_answered_while_a_code_scan_runs(scanning: &[&str]) {
+    let test = Test::new();
+    let (project, home) = grammar_project(&test);
+    let budget = STALLED_SCAN.as_millis().to_string();
+    let env = [
+        ("HOME", home.as_str()),
+        ("MARA_TEST_GRAMMAR_STALL", "stall here"),
+        ("MARA_TEST_GRAMMAR_BUDGET_MS", budget.as_str()),
+    ];
+    let pid = test.start_in(&project, &env);
+    test.wait_for_session(&project);
+    let read = ["--format", "json", "item", "list"];
+    let direct = test.direct(&project, &read);
+    assert_direct(&test.run_in(&project, &read, &[]), &direct);
+    fs::write(project.join("src/stall.rs"), "// stall here\nfn z() {}\n").unwrap();
+    let mut scanning = test.spawn_in(&project, scanning);
+    // The grammar's thread exists once the scan has begun to use it.
+    let deadline = Instant::now() + crate::WAIT;
+    while !grammar_thread(pid) {
+        assert!(
+            Instant::now() < deadline,
+            "the scan never loaded the grammar"
+        );
+        assert!(
+            scanning.try_wait().unwrap().is_none(),
+            "the scan ended early"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    let started = Instant::now();
+    let answered = test.run_in(&project, &read, &[]);
+    let waited = started.elapsed();
+    assert!(
+        scanning.try_wait().unwrap().is_none(),
+        "the read was answered only after the scan ended ({waited:?})"
+    );
+    assert!(waited < STALLED_SCAN / 2, "the read waited {waited:?}");
+    assert_direct_but_counts(&answered, &direct);
+    let scanned = finish(scanning);
+    assert!(
+        scanned.stderr.contains("unavailable-grammar")
+            || scanned.stdout.contains("unavailable-grammar"),
+        "{scanned:?}"
+    );
+}
+
+/// Whether the daemon `pid` runs a grammar's thread.
+fn grammar_thread(pid: u32) -> bool {
+    let Ok(tasks) = fs::read_dir(format!("/proc/{pid}/task")) else {
+        return false;
+    };
+    tasks.flatten().any(|task| {
+        fs::read_to_string(task.path().join("comm"))
+            .is_ok_and(|name| name.starts_with("mara-grammar"))
+    })
+}
+
+#[test]
+fn a_read_is_answered_while_a_program_scans_code() {
+    a_read_is_answered_while_a_code_scan_runs(&["item", "validate", "REQ-ONE"]);
+}
+
+#[test]
+fn a_read_is_answered_while_project_validate_scans_code() {
+    a_read_is_answered_while_a_code_scan_runs(&["project", "validate"]);
 }

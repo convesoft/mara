@@ -88,6 +88,12 @@ pub(crate) struct Read {
 }
 
 impl<T> Tracked<T> {
+    /// Whether the file at `path` still has the stat it had when these contents were read: a
+    /// result derived from them may be kept for the next check, which compares that stat.
+    pub(crate) fn still_as_read(&self, path: &Path) -> bool {
+        fs::symlink_metadata(path).is_ok_and(|metadata| Stat::of(&metadata) == self.stat)
+    }
+
     /// The same check of the same contents, with another value.
     pub(crate) fn with_value<U>(&self, value: U) -> Tracked<U> {
         Tracked {

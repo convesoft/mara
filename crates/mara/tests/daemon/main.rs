@@ -1,19 +1,20 @@
-//! VER-DAEMON-START and the SIGKILL cases of VER-DAEMON-WRITES (`docs/daemon/verification.mara.md`):
-//! here `mara daemon status | start | stop`, the runtime directory, the lock and the build, each
+//! The daemon's tests (`docs/daemon/verification.mara.md`): here the cases of VER-DAEMON-START
+//! for `mara daemon status | start | stop`, the runtime directory, the lock and the build, each
 //! through `mara daemon start`, and the daemon's idle exit (DES-DAEMON-LIFECYCLE,
 //! ADR-TEST-IDLE-PERIOD in `docs/daemon/index.mara.md`); the CLI and MCP clients in [`client`]
-//! and [`mcp`], and writes through the daemon in [`writes`].
+//! and [`mcp`]; VER-NEVER-STALE in [`fresh`]; VER-DAEMON-WRITES in [`writes`]; the client's deadlines in
+//! [`deadlines`].
 //!
 //! Every test has a runtime directory of its own, set as `XDG_RUNTIME_DIR`. A daemon of the
 //! test is a process of a binary under test whose environment holds that directory; a test
 //! stops only those, and kills any left when it ends, also when it fails. Only Linux runs
 //! these tests: they find processes in `/proc`.
 //!
-//! Until the daemon keeps sessions (mara-xqcnqw), it reports the counts of a cold request for
-//! every request, so the counts cannot tell who served a call. A test shows that the daemon
-//! served a call by stopping the daemon with SIGSTOP: the call waits until the daemon goes on
-//! ([`Test::served_by`]); and that a call was served in-process when it ends while the only
-//! daemon is stopped ([`Test::in_process`]).
+//! A test's project files last changed at least 2 s before its first call ([`Test::project`]),
+//! so that a daemon's session reports a cold request for its opening and nothing for a request
+//! repeated on unchanged files (VER-DAEMON-START). Where the counts cannot tell who served a
+//! call, a test stops the daemon with SIGSTOP: a call served by it waits until it goes on
+//! ([`Test::served_by`]), and a call served in-process ends meanwhile ([`Test::in_process`]).
 
 #![cfg(target_os = "linux")]
 
@@ -33,7 +34,10 @@ mod support;
 
 mod caller;
 mod client;
+mod deadlines;
+mod fresh;
 mod mcp;
+mod watches;
 mod writes;
 
 use support::Daemons;
@@ -70,11 +74,19 @@ impl Run {
 
 /// A test's temporary directory and runtime directory, and the daemons it starts.
 struct Test {
-    /// Kills the daemons of the test that still run when it ends, before its directory goes.
-    daemons: Daemons,
     dir: tempfile::TempDir,
+    /// Kills the daemons of the test that still run when it ends: before its directory goes
+    /// ([`Test::drop`]), and again after, for a `daemon start` that a client of the test
+    /// launched and that was not yet to be seen.
+    daemons: Daemons,
     /// `XDG_RUNTIME_DIR` of every run.
     base: PathBuf,
+}
+
+impl Drop for Test {
+    fn drop(&mut self) {
+        self.daemons.kill();
+    }
 }
 
 impl Test {
@@ -206,7 +218,8 @@ impl Test {
         self.project_in("project")
     }
 
-    /// [`Test::project`] in `name/` of the test's directory.
+    /// [`Test::project`] in `name/` of the test's directory, its files last changed at least
+    /// 2 s before this returns ([`settle`]).
     fn project_in(&self, name: &str) -> PathBuf {
         let root = self.path().join(name);
         fs::create_dir_all(root.join(".mara")).unwrap();
@@ -227,7 +240,36 @@ impl Test {
             ];
             self.direct(&root, &args).succeeded();
         }
-        root
+        settle();
+        fs::canonicalize(root).unwrap()
+    }
+
+    /// Starts the daemon with `env` in `directory`, which opens the session of the project
+    /// that holds it: its process ID, which must be new.
+    fn start_in(&self, directory: &Path, env: &[(&str, &str)]) -> u32 {
+        let json = self
+            .run_in(directory, &["--format", "json", "daemon", "start"], env)
+            .succeeded()
+            .json();
+        assert_eq!(json["started"], true, "{json}");
+        u32::try_from(json["pid"].as_u64().unwrap()).unwrap()
+    }
+
+    /// The roots of the daemon's sessions, as `mara daemon status` lists them.
+    fn sessions(&self) -> Vec<PathBuf> {
+        let status = self.status();
+        (status["sessions"].as_array().into_iter().flatten())
+            .map(|root| PathBuf::from(root.as_str().unwrap()))
+            .collect()
+    }
+
+    /// Waits until `mara daemon status` lists the session of `root`.
+    fn wait_for_session(&self, root: &Path) {
+        let deadline = Instant::now() + WAIT;
+        while !self.sessions().iter().any(|session| session == root) {
+            assert!(Instant::now() < deadline, "no session of {root:?}");
+            thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Runs `mara <args>` in `directory` with `env`.
@@ -293,6 +335,23 @@ impl Test {
         signal(pid, libc::SIGCONT);
         run.unwrap_or_else(|_| panic!("mara {args:?} waited for the stopped daemon"))
     }
+}
+
+/// Waits until files changed now count as settled: a check 2 s after their last change reads
+/// them for good (DES-INPUTS-AND-KEYS).
+fn settle() {
+    thread::sleep(Duration::from_millis(2100));
+}
+
+/// The counts of a run's stats line, its last line on stderr.
+fn stats(run: &Run) -> Value {
+    let line = run.stderr.lines().last().expect("a stats line");
+    serde_json::from_str(line).unwrap_or_else(|error| panic!("{error}: {run:?}"))
+}
+
+/// Whether `stats` counts no work at all.
+fn nothing(stats: &Value) -> bool {
+    (stats.as_object().unwrap().iter()).all(|(name, value)| name == "format_version" || value == 0)
 }
 
 /// The arguments and environment that put a client in direct mode.
@@ -880,4 +939,62 @@ fn a_failed_test_ends_its_daemons_and_only_those() {
         "the daemon {pid} runs"
     );
     assert_eq!(other.daemons(), [kept]);
+}
+
+/// The build key of the binary under test, which a request to its daemon carries.
+fn build_key() -> String {
+    let executable = fs::canonicalize(mara()).unwrap();
+    let metadata = fs::metadata(&executable).unwrap();
+    mara::daemon::Build {
+        version: env!("CARGO_PKG_VERSION"),
+        executable,
+        size: metadata.size(),
+        modified: (metadata.mtime(), metadata.mtime_nsec()),
+    }
+    .key()
+}
+
+/// The daemon answers `stop` before it exits, so its client never finds the connection closed
+/// first: 50 starts and stops through the socket itself.
+#[test]
+fn the_daemon_answers_stop_before_it_exits() {
+    use mara::daemon::{PROTOCOL_VERSION, read_frame, write_frame};
+    let test = Test::new();
+    let request = serde_json::json!({
+        "version": PROTOCOL_VERSION,
+        "build": build_key(),
+        "request": "stop",
+    })
+    .to_string();
+    let (socket, _) = test.paths_of(&mara());
+    for round in 0..50 {
+        let (started, pid) = test.start();
+        assert!(started, "round {round}");
+        let mut stream = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+        write_frame(&mut stream, request.as_bytes()).unwrap();
+        let answer = read_frame(&mut stream)
+            .unwrap_or_else(|error| panic!("round {round}: {error}"))
+            .unwrap_or_else(|| panic!("round {round}: the daemon exited before it answered"));
+        let answer: Value = serde_json::from_slice(&answer).unwrap();
+        assert_eq!(answer["stopping"], true, "round {round}: {answer}");
+        assert_eq!(answer["pid"], pid);
+        assert!(matches!(read_frame(&mut stream), Ok(None) | Err(_)));
+        test.wait_for_no_daemon(&[]);
+    }
+}
+
+/// A daemon that ends after `stop` was sent and before it answered has stopped: `stop` says so,
+/// with its process ID.
+#[test]
+fn stop_reports_a_daemon_that_ends_before_it_answers() {
+    let test = Test::new();
+    let (_, pid) = test.start();
+    signal(pid, libc::SIGSTOP);
+    let stopping = test.spawn(&mara(), &["--format", "json", "daemon", "stop"], &[]);
+    thread::sleep(STOPPED);
+    signal(pid, libc::SIGKILL);
+    let json = finish(stopping).succeeded().json();
+    assert_eq!(json["stopped"], true, "{json}");
+    assert_eq!(json["pid"], pid);
+    test.wait_for_no_daemon(&[]);
 }

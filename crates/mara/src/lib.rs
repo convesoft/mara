@@ -8,5 +8,7 @@ pub mod grammar;
 pub mod inputs;
 pub mod project;
 pub mod rules;
+pub mod session;
 mod tracked;
+pub mod watch;
 pub mod write;

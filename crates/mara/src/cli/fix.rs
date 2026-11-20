@@ -6,7 +6,6 @@
 
 use std::fmt::Write as _;
 
-use mara::inputs::Inputs;
 use mara::write::{self, FileWrite, WriteLock};
 use mara_engine::fix::{self, Repair};
 use mara_engine::write::ReadBack;
@@ -27,7 +26,7 @@ pub const PROJECT: Operation = Operation {
 fn project_fix(context: &mut Context, _: &super::Args) -> Result<Response, Failure> {
     let root = context.root()?;
     let lock = WriteLock::take(&root)?;
-    let mut inputs = Inputs::new(root);
+    let mut inputs = context.inputs(root);
     let project = inputs.project(context.now, context.work);
     if project.has_errors() {
         let message = "the project's configuration or schema has errors, so Mara reads none of \

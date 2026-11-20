@@ -203,3 +203,57 @@ fn an_evaluation_through_the_daemon_uses_the_clients_temporary_directory_and_uma
     assert!(run.stderr.contains("program-failed"), "{run:?}");
     assert_eq!(fs::read_dir(&client_tmp).unwrap().count(), 0, "left behind");
 }
+
+/// `mara daemon stop` while the daemon runs an evaluation for a read, `args`: the evaluation
+/// ends through its own cancellation, its sandboxed Soufflé killed and its directory removed,
+/// and the daemon exits long before the time limit; the client reports `daemon-lost`
+/// (DES-DAEMON-LIFECYCLE).
+fn stop_ends_a_running_evaluation(args: &[&str]) {
+    let test = Test::new();
+    let project = test.project();
+    programs(&project);
+    let config = project.join(".mara/config.toml");
+    let text = fs::read_to_string(&config).unwrap();
+    let text = text.replace("time_limit_seconds = 3", "time_limit_seconds = 60")
+        + "\n[invariants.slow-check]\nprogram = \".mara/rules/slow.dl\"\nrelation = \"bad\"\n\
+           severity = \"error\"\nmessage = \"Never ends in time\"\n";
+    fs::write(&config, text).unwrap();
+    let client_tmp = test.path().join("client-tmp");
+    crate::private_directory(&client_tmp);
+    start_daemon(&test, 0o022, &[]);
+    let client = [("TMPDIR", client_tmp.to_str().unwrap())];
+    let command = test.command_in(&project, &mara(), args, &client);
+    let child = spawn(&mut with_umask(command, 0o022));
+    let (evaluation, souffle) = running_evaluation(&client_tmp);
+    let started = Instant::now();
+    let stopped = test.run(&["daemon", "stop"]).succeeded();
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(
+        stopped.stdout.starts_with("Stopped the daemon"),
+        "{stopped:?}"
+    );
+    assert!(test.daemons().is_empty(), "the daemon outlived `stop`");
+    assert!(
+        !Path::new(&format!("/proc/{souffle}")).exists(),
+        "Soufflé outlived the daemon"
+    );
+    assert!(!evaluation.exists(), "the evaluation's directory is left");
+    let run = finish(child);
+    assert_eq!(run.status.code(), Some(1), "{run:?}");
+    assert!(run.stderr.contains("daemon-lost"), "{run:?}");
+}
+
+#[test]
+fn stop_ends_a_running_evaluation_and_leaves_no_souffle() {
+    stop_ends_a_running_evaluation(&["query", "execute", "slow"]);
+}
+
+/// The provenance run of `query report` ends the same way.
+#[test]
+fn stop_ends_a_running_report_and_leaves_no_souffle() {
+    stop_ends_a_running_evaluation(&["query", "report", "slow-check", "--id", "REQ-ONE"]);
+}

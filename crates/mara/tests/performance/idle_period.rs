@@ -1,6 +1,7 @@
-//! The case of ADR-TEST-IDLE-PERIOD (`docs/daemon/index.mara.md`) that finds no trace of the test
-//! idle period in a release build: a daemon started with the variable set outlives it, and the
-//! binary does not hold the variable's name.
+//! The case of DES-PERFORMANCE-HARNESS and ADR-TEST-IDLE-PERIOD (`docs/daemon/index.mara.md`)
+//! that finds no trace of the test idle period in a release build: a daemon started with the
+//! variable set keeps the session it opened past that period, and the binary does not hold the
+//! variable's name.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -43,19 +44,31 @@ fn a_release_build_has_no_test_idle_period() {
     // Kills the daemon of the test, also when the test fails.
     let daemons = Daemons::new(runtime.path(), None);
     let runtime = runtime.path();
+    // A project, whose session the daemon opens as it starts.
+    let project = runtime.join("p");
+    std::fs::create_dir_all(project.join(".mara")).unwrap();
+    std::fs::write(
+        project.join(".mara/config.toml"),
+        "format_version = 1\n\n[documents]\nformat_version = 1\ninclude = [\"**/*.mara.md\"]\n",
+    )
+    .unwrap();
+    let project = std::fs::canonicalize(project).unwrap();
     let started = mara(
         runtime,
-        &["daemon", "start"],
+        &["--project", "p", "daemon", "start"],
         &[("MARA_TEST_IDLE_SECONDS", "1")],
     );
     assert!(started.starts_with("Started the daemon"), "{started}");
     std::thread::sleep(Duration::from_secs(3));
     let status = mara(runtime, &["daemon", "status"], &[]);
     assert!(
-        status.starts_with("The daemon of this build runs"),
+        status.starts_with("The daemon of this build runs")
+            && status.contains(&format!("  {}\n", project.display())),
         "the release daemon took the test idle period: {status}"
     );
     assert_eq!(daemons.running().len(), 1);
+    mara(runtime, &["daemon", "stop"], &[]);
+    assert!(daemons.running().is_empty(), "the daemon outlived `stop`");
     let binary = std::fs::read(env!("CARGO_BIN_EXE_mara")).expect("read the mara binary");
     let variable = b"MARA_TEST_IDLE_SECONDS";
     assert!(

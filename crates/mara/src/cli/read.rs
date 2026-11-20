@@ -142,7 +142,7 @@ const ID: Opt = Opt {
 
 /// Selects and loads the project, refusing one whose configuration or schema has an error.
 pub(super) fn open(context: &mut Context) -> Result<(Inputs, Arc<Project>), Failure> {
-    let mut inputs = Inputs::new(context.root()?);
+    let mut inputs = context.inputs(context.root()?);
     let project = inputs.project(context.now, context.work);
     if project.has_errors() {
         let message = "the project's configuration or schema has errors, so Mara reads none of \

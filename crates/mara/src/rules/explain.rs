@@ -45,6 +45,9 @@ pub fn explain(
     select: &mut dyn FnMut(&Rows) -> Vec<Target>,
     work: &mut WorkCounts,
 ) -> Result<Explained, Fault> {
+    // Counts the evaluation until its directory is removed and its child has ended, so that a
+    // stopping daemon waits for both (DES-DAEMON-LIFECYCLE).
+    let _running = super::cancel::Running::begin();
     let _interrupts = interrupt::Deferred::begin();
     let dir = private_dir(run)?;
     let read = evaluation::read_relations(run.program, run.relations);

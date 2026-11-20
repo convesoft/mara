@@ -140,6 +140,8 @@ impl Evaluations {
 /// the limits (DES-RULE-EXECUTION). Returns the rows of every output relation, or the fault
 /// that makes the outcome unavailable. Counts one subprocess spawn and one program run.
 pub fn evaluate(run: &Run, work: &mut WorkCounts) -> Result<Rows, Fault> {
+    // Counts the evaluation until its directory is removed and its child has ended.
+    let _running = cancel::Running::begin();
     // Declared before the directory, so it ends Mara for a deferred signal only after the
     // directory is removed.
     let _interrupts = interrupt::Deferred::begin();
@@ -236,6 +238,9 @@ fn spawn_and_wait(
     console: Option<&mut dyn explain::Console>,
     work: &mut WorkCounts,
 ) -> io::Result<Exit> {
+    if cancel::cancelled() {
+        return Err(cancel::error());
+    }
     let mut command = Command::new(souffle);
     command.args(["--no-preprocessor", "-l", ""]);
     if console.is_some() {
@@ -281,6 +286,11 @@ fn spawn_and_wait(
                 io::ErrorKind::Interrupted,
                 "Mara was interrupted",
             ));
+        }
+        if cancel::cancelled() {
+            child.kill()?;
+            child.wait()?;
+            return Err(cancel::error());
         }
         if started.elapsed() >= deadline {
             child.kill()?;
@@ -391,6 +401,51 @@ fn limit(_: &mut Command, _: Limits) {}
 /// file pattern writes nothing below a page. A socket pattern ignores the limit.
 #[cfg(unix)]
 const CORE_LIMIT_BYTES: u64 = 1;
+
+/// Ending the evaluations of a daemon that stops (DES-DAEMON-LIFECYCLE): the daemon blocks the
+/// signals that [`interrupt`] takes, so it ends them through this flag instead.
+pub mod cancel {
+    use std::io;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    static CANCELLED: AtomicBool = AtomicBool::new(false);
+    static RUNNING: AtomicUsize = AtomicUsize::new(0);
+
+    /// Ends every evaluation of this process that runs, and every later one, each with its
+    /// child process killed and its private directory removed.
+    pub fn all() {
+        CANCELLED.store(true, Ordering::SeqCst);
+    }
+
+    /// How many evaluations have not yet ended: an evaluation counts until its child has ended
+    /// and its private directory is removed.
+    pub fn running() -> usize {
+        RUNNING.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn cancelled() -> bool {
+        CANCELLED.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn error() -> io::Error {
+        io::Error::new(io::ErrorKind::Interrupted, "the daemon stops")
+    }
+
+    pub(super) struct Running;
+
+    impl Running {
+        pub(super) fn begin() -> Running {
+            RUNNING.fetch_add(1, Ordering::SeqCst);
+            Running
+        }
+    }
+
+    impl Drop for Running {
+        fn drop(&mut self) {
+            RUNNING.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+}
 
 /// SIGINT, SIGTERM and SIGHUP during an evaluation: the evaluation stops, its private directory
 /// is removed, then Mara ends by the signal's default action. At any other time the signal acts

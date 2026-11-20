@@ -57,13 +57,24 @@ impl Daemons {
         found
     }
 
-    /// Kills those that run with SIGKILL and waits up to 10 s until none runs.
+    /// Kills those that run with SIGKILL, until none has run for 500 ms, at most for 10 s: a
+    /// `daemon start` that a client of the test launched may show only after a first look.
     pub fn kill(&self) {
         let deadline = Instant::now() + Duration::from_secs(10);
+        let mut quiet_since: Option<Instant> = None;
         loop {
             let running = self.running();
-            if running.is_empty() || Instant::now() >= deadline {
+            let now = Instant::now();
+            if now >= deadline {
                 return;
+            }
+            if running.is_empty() {
+                let since = *quiet_since.get_or_insert(now);
+                if now - since >= Duration::from_millis(500) {
+                    return;
+                }
+            } else {
+                quiet_since = None;
             }
             for pid in running {
                 // SAFETY: kill takes no pointer.

@@ -10,14 +10,18 @@
 //! ([`crate::grammar`]).
 //!
 //! The CLI starts each request with a new [`Inputs`], so it reads everything once. A host that
-//! keeps one between requests does work only for what changed.
+//! keeps one between requests does work only for what changed. The daemon keeps one per session
+//! and gives each request a view of it ([`Inputs::shared`]): the view checks and derives on the
+//! session's inputs, holding them only for that, and keeps what that check found for the rest
+//! of the request, so that an edit is computed and checked against the same contents.
 
 mod admit;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::SystemTime;
 
 use ignore::Match;
@@ -43,16 +47,22 @@ pub use admit::{Inadmissible, NOT_AN_INPUT};
 pub struct Inputs {
     root: PathBuf,
     files: ProjectFiles,
-    /// The project as loaded by the request that began at the given time.
-    project: Option<(SystemTime, Arc<Project>)>,
+    /// The request this value or view serves ([`next_request`]): the calls of one request load
+    /// the project once.
+    request: u64,
+    /// The project as loaded by the request of the given number.
+    project: Option<(u64, Arc<Project>)>,
     /// The project files that request read, for their other roles in it.
     reads: Reads,
-    state: State,
+    /// Shared with the views that a request keeps after its check ([`Inputs::shared`]).
+    state: Arc<State>,
     snapshot: Option<Arc<Snapshot>>,
+    /// The inputs that a view checks and derives on: those of a daemon's session.
+    shared: Option<Arc<Mutex<Inputs>>>,
 }
 
 /// What the inventory found, by path relative to the project root.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 struct State {
     directories: HashMap<String, Listing>,
     /// By the path of the directory that holds the file.
@@ -113,10 +123,25 @@ impl Inputs {
         Inputs {
             root: fs::canonicalize(&root).unwrap_or(root),
             files: ProjectFiles::default(),
+            request: next_request(),
             project: None,
             reads: Reads::default(),
-            state: State::default(),
+            state: Arc::default(),
             snapshot: None,
+            shared: None,
+        }
+    }
+
+    /// A view of `shared`, the inputs a daemon's session keeps: [`Inputs::project`] and
+    /// [`Inputs::generation`] check and derive on them, holding their lock only meanwhile, so a
+    /// request never repeats work that another did and waits only for a check in progress. The
+    /// view then answers [`Inputs::basis`] and [`Inputs::admits`] from what its own check found,
+    /// whatever later requests find.
+    pub fn shared(shared: Arc<Mutex<Inputs>>) -> Inputs {
+        let root = lock(&shared).root.clone();
+        Inputs {
+            shared: Some(shared),
+            ..Inputs::new(root)
         }
     }
 
@@ -124,12 +149,50 @@ impl Inputs {
         &self.root
     }
 
+    /// The directories that the last request listed, relative to the root (`""` for the root):
+    /// those that may hold inputs, which a daemon watches (DES-DAEMON-SESSIONS).
+    pub fn directories(&self) -> Vec<String> {
+        self.state.directories.keys().cloned().collect()
+    }
+
+    /// The schema's path as the last loaded configuration names it.
+    pub fn schema_path(&self) -> Option<String> {
+        let (_, project) = self.project.as_ref()?;
+        Some(project.config.schema.as_ref()?.path.clone())
+    }
+
+    /// Takes on what the shared inputs found in the check that just ended.
+    fn adopt(&mut self, shared: &Inputs) {
+        self.project.clone_from(&shared.project);
+        self.state = Arc::clone(&shared.state);
+        self.snapshot.clone_from(&shared.snapshot);
+    }
+
     /// Loads the configuration and the schema ([`crate::project::load`]) in the request that
     /// began at `now`, reading only the files whose stat changed since the last request. A
-    /// second call with the same `now` returns the same project and does no work.
+    /// second call of the same request returns the same project and does no work. A request is
+    /// a view ([`Inputs::shared`]), or the calls on a value up to and including its next
+    /// [`Inputs::generation`]. Requests are told apart by their number, never by `now`: a clock
+    /// that stands still or steps back makes no file look checked.
     pub fn project(&mut self, now: SystemTime, work: &mut WorkCounts) -> Arc<Project> {
+        if let Some(shared) = self.shared.clone() {
+            let mut shared = lock(&shared);
+            let project = shared.project_for(self.request, now, work);
+            self.adopt(&shared);
+            return project;
+        }
+        self.project_for(self.request, now, work)
+    }
+
+    /// [`Inputs::project`] for the request numbered `request`.
+    fn project_for(
+        &mut self,
+        request: u64,
+        now: SystemTime,
+        work: &mut WorkCounts,
+    ) -> Arc<Project> {
         if let Some((loaded, project)) = &self.project
-            && *loaded == now
+            && *loaded == request
         {
             return Arc::clone(project);
         }
@@ -138,7 +201,7 @@ impl Inputs {
             .files
             .load(self.root.clone(), now, work, &mut self.reads);
         let project = Arc::new(project);
-        self.project = Some((now, Arc::clone(&project)));
+        self.project = Some((request, Arc::clone(&project)));
         project
     }
 
@@ -233,36 +296,35 @@ impl Inputs {
     /// is dropped meanwhile scanned at the basic level. Returns the layer, whose problems are the
     /// listing's that may hide code and each code file that cannot be read, and the diagnostics
     /// of the scan: those of the layer's own problems, `unavailable-grammar` and fallbacks.
+    ///
+    /// A view scans without holding the session's inputs ([`Inputs::shared`]): it copies the
+    /// session's record of the code files under its lock, reads, loads grammars and parses
+    /// without it, and gives back under the lock again only the results whose file still has
+    /// the stat it was read with. So no request waits for another's scan, and a scan that a
+    /// change overtook is not kept. The view keeps its own results, which an edit is checked
+    /// against.
     pub fn scan_listed(
         &mut self,
         generation: &Generation,
         now: SystemTime,
         work: &mut WorkCounts,
     ) -> (Arc<CodeLayer>, Vec<Diagnostic>) {
-        let config = &generation.project.config;
-        let previous = State {
-            code: std::mem::take(&mut self.state.code),
-            ..State::default()
+        let Some(shared) = self.shared.clone() else {
+            // Copied only while a view of an earlier check still holds it.
+            let mut state = Arc::unwrap_or_clone(std::mem::take(&mut self.state));
+            let previous = std::mem::take(&mut state.code);
+            let (code, layer, diagnostics) = scan(&self.root, generation, previous, now, work);
+            state.code = code;
+            self.state = Arc::new(state);
+            return (layer, diagnostics);
         };
-        let mut grammar_problems = Vec::new();
-        let code = Code::new(config, CodeReads::Scan, &previous, &mut grammar_problems);
-        let mut reads = Reads::default();
-        let mut walk = Walk::new(&self.root, config, code, previous, now, work, &mut reads);
-        walk.diagnostics.extend(grammar_problems);
-        for (path, language) in &generation.code_paths {
-            walk.code_file(path.clone(), *language);
-        }
-        let Walk {
-            next,
-            mut diagnostics,
-            code: found,
-            ..
-        } = walk;
-        self.state.code = next.code;
-        let mut unread = generation.listed_unread.clone();
-        unread.extend(found.unread);
-        diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
-        (Arc::new(CodeLayer::new(found.files, unread)), diagnostics)
+        let previous = lock(&shared).state.code.clone();
+        let (code, layer, diagnostics) = scan(&self.root, generation, previous, now, work);
+        give_back(&shared, &self.root, &code);
+        let mut state = Arc::unwrap_or_clone(std::mem::take(&mut self.state));
+        state.code = code;
+        self.state = Arc::new(state);
+        (layer, diagnostics)
     }
 
     /// Lists the inputs in the request that began at `now`, reads and hashes those whose stat
@@ -273,15 +335,53 @@ impl Inputs {
         self.generation(now, work, CodeReads::None)
     }
 
-    /// [`Inputs::snapshot`], doing with code files what `code` says.
+    /// [`Inputs::snapshot`], doing with code files what `code` says. [`CodeReads::Scan`] lists
+    /// the code files with the inputs, then scans them ([`Inputs::scan_listed`]), so that a
+    /// view holds the session's inputs only for the listing.
     pub fn generation(
         &mut self,
         now: SystemTime,
         work: &mut WorkCounts,
         code: CodeReads,
     ) -> Generation {
-        let project = self.project(now, work);
-        let previous = std::mem::take(&mut self.state);
+        let listing = match code {
+            CodeReads::Scan => CodeReads::List,
+            other => other,
+        };
+        let mut generation = match self.shared.clone() {
+            Some(shared) => {
+                let mut shared = lock(&shared);
+                let generation = shared.generation_for(self.request, now, work, listing);
+                self.adopt(&shared);
+                generation
+            }
+            None => {
+                let generation = self.generation_for(self.request, now, work, listing);
+                // A generation ends its request: the next call on this value begins another.
+                self.request = next_request();
+                generation
+            }
+        };
+        if code == CodeReads::Scan {
+            let (layer, diagnostics) = self.scan_listed(&generation, now, work);
+            generation.code = Some(layer);
+            generation.diagnostics.extend(diagnostics);
+            (generation.diagnostics).sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+        }
+        generation
+    }
+
+    /// [`Inputs::generation`] for the request numbered `request`.
+    fn generation_for(
+        &mut self,
+        request: u64,
+        now: SystemTime,
+        work: &mut WorkCounts,
+        code: CodeReads,
+    ) -> Generation {
+        let project = self.project_for(request, now, work);
+        // Copied only while a view of an earlier check still holds it.
+        let previous = Arc::unwrap_or_clone(std::mem::take(&mut self.state));
         let reads = &mut self.reads;
         let config = &project.config;
         let mut grammar_problems = Vec::new();
@@ -302,7 +402,7 @@ impl Inputs {
             // Code tracked by an earlier request stays for the next one that reads code.
             next.code = std::mem::take(&mut previous.code);
         }
-        self.state = next;
+        self.state = Arc::new(next);
         self.reads = Reads::default();
         diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
         let inputs = SnapshotInputs::new(
@@ -335,6 +435,71 @@ impl Inputs {
             listed_unread,
         }
     }
+}
+
+/// Reads, hashes and scans the code files that `generation` listed, against `previous`, the
+/// code files as last read: the record of the code files after the scan, the layer and the
+/// scan's diagnostics ([`Inputs::scan_listed`]).
+fn scan(
+    root: &Path,
+    generation: &Generation,
+    previous: HashMap<String, Tracked<Scan>>,
+    now: SystemTime,
+    work: &mut WorkCounts,
+) -> (
+    HashMap<String, Tracked<Scan>>,
+    Arc<CodeLayer>,
+    Vec<Diagnostic>,
+) {
+    let config = &generation.project.config;
+    let previous = State {
+        code: previous,
+        ..State::default()
+    };
+    let mut grammar_problems = Vec::new();
+    let code = Code::new(config, CodeReads::Scan, &previous, &mut grammar_problems);
+    let mut reads = Reads::default();
+    let mut walk = Walk::new(root, config, code, previous, now, work, &mut reads);
+    walk.diagnostics.extend(grammar_problems);
+    for (path, language) in &generation.code_paths {
+        walk.code_file(path.clone(), *language);
+    }
+    let Walk {
+        next,
+        mut diagnostics,
+        code: found,
+        ..
+    } = walk;
+    let mut unread = generation.listed_unread.clone();
+    unread.extend(found.unread);
+    diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+    let layer = Arc::new(CodeLayer::new(found.files, unread));
+    (next.code, layer, diagnostics)
+}
+
+/// Gives the session `shared` the results of a scan, `code`, made without its lock: only those
+/// whose file still has the stat it was read with, so that a scan a change overtook is not
+/// kept. The next check reads such a file again.
+fn give_back(shared: &Mutex<Inputs>, root: &Path, code: &HashMap<String, Tracked<Scan>>) {
+    let current: Vec<(String, Tracked<Scan>)> = (code.iter())
+        .filter(|(path, tracked)| tracked.still_as_read(&root.join(path)))
+        .map(|(path, tracked)| (path.clone(), tracked.clone()))
+        .collect();
+    let mut shared = lock(shared);
+    Arc::make_mut(&mut shared.state).code.extend(current);
+}
+
+/// A number that no other request of this process has: what tells the calls of one request
+/// from those of another.
+fn next_request() -> u64 {
+    static REQUESTS: AtomicU64 = AtomicU64::new(0);
+    REQUESTS.fetch_add(1, Ordering::Relaxed)
+}
+
+/// The shared inputs, also after a request that held them panicked: what it left is checked
+/// again by the next request like anything else.
+fn lock(shared: &Mutex<Inputs>) -> std::sync::MutexGuard<'_, Inputs> {
+    shared.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// The code languages' include patterns, as a walk matches them, and what it found.
@@ -983,4 +1148,91 @@ pub(crate) fn compile_gitignore(contents: &[u8]) -> Result<Gitignore, (usize, St
             format!("Mara cannot compile the patterns of this file ({error})"),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    const CONFIG: &str = "format_version = 1\n\n[documents]\nformat_version = 1\ninclude = [\"docs/**/*.mara.md\"]\n";
+
+    /// A scan made without the session's lock gives back only what is still on disk: a file
+    /// changed after the scan read it is not kept, and the next request reads it again.
+    #[test]
+    fn a_scan_that_a_change_overtook_is_not_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".mara")).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let config = format!(
+            "{CONFIG}\n[code]\nformat_version = 1\n\n[code.languages.rust]\n\
+             include = [\"src/**/*.rs\"]\ncomment_prefixes = [\"//\"]\n"
+        );
+        fs::write(root.join(".mara/config.toml"), config).unwrap();
+        let lib = root.join("src/lib.rs");
+        fs::write(&lib, "// @mara implements REQ-A\n").unwrap();
+        let session = Arc::new(Mutex::new(Inputs::new(root.to_owned())));
+        let root = lock(&session).root.clone();
+        let mut work = WorkCounts::default();
+        let now = SystemTime::now();
+        let hash = |session: &Mutex<Inputs>| lock(session).state.code["src/lib.rs"].hash;
+        let first =
+            Inputs::shared(Arc::clone(&session)).generation(now, &mut work, CodeReads::Scan);
+        let read_a = hash(&session);
+        // A request scans B without the lock; B is replaced by C before it gives back.
+        fs::write(&lib, "// @mara implements REQ-B\n").unwrap();
+        let mut view = Inputs::shared(Arc::clone(&session));
+        let listed = view.generation(now, &mut work, CodeReads::List);
+        let previous = lock(&session).state.code.clone();
+        let (code, _, _) = scan(&root, &listed, previous, now, &mut work);
+        assert_ne!(code["src/lib.rs"].hash, read_a, "the scan read B");
+        fs::write(&lib, "// @mara implements REQ-CC\n").unwrap();
+        give_back(&session, &root, &code);
+        assert_eq!(hash(&session), read_a, "the overtaken scan of B was kept");
+        // The next request reads C.
+        let next = Inputs::shared(Arc::clone(&session)).generation(now, &mut work, CodeReads::Scan);
+        let markers = |generation: &Generation| format!("{:?}", generation.code.as_ref().unwrap());
+        assert!(markers(&next).contains("REQ-CC"), "{}", markers(&next));
+        assert!(markers(&first).contains("REQ-A"));
+    }
+
+    /// Requests of a session whose clock stands still, then steps back: each checks the
+    /// configuration again, so none is answered from one that changed.
+    #[test]
+    fn requests_with_the_same_time_each_check_the_configuration() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join(".mara")).unwrap();
+        fs::create_dir_all(root.join("docs")).unwrap();
+        fs::write(root.join(".mara/config.toml"), CONFIG).unwrap();
+        fs::write(root.join("docs/a.mara.md"), "Text.\n").unwrap();
+        let session = Arc::new(Mutex::new(Inputs::new(root.to_owned())));
+        let mut work = WorkCounts::default();
+        let mut documents = |now: SystemTime| {
+            let generation = Inputs::shared(Arc::clone(&session)).snapshot(now, &mut work);
+            generation.snapshot.documents().len()
+        };
+        let now = SystemTime::now();
+        assert_eq!(documents(now), 1);
+        let other = CONFIG.replace("docs/**", "other/**");
+        fs::write(root.join(".mara/config.toml"), other).unwrap();
+        assert_eq!(documents(now), 0, "answered from the old configuration");
+        fs::write(root.join(".mara/config.toml"), CONFIG).unwrap();
+        assert_eq!(documents(now - Duration::from_secs(3600)), 1);
+
+        // A value a host keeps between requests, as the inventory's own tests do.
+        let mut kept = Inputs::new(root.to_owned());
+        let mut work = WorkCounts::default();
+        assert_eq!(kept.snapshot(now, &mut work).snapshot.documents().len(), 1);
+        let other = CONFIG.replace("docs/**", "other/**");
+        fs::write(root.join(".mara/config.toml"), other).unwrap();
+        let generation = kept.snapshot(now, &mut work);
+        assert_eq!(
+            generation.snapshot.documents().len(),
+            0,
+            "answered from the old one"
+        );
+    }
 }

@@ -160,6 +160,7 @@ impl ServerHandler for Server {
                 cwd: working_directory(),
                 direct,
                 caller,
+                session: None,
             };
             let reply = client::request(operation, run, &mut context, &args, true);
             add(

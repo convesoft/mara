@@ -6,7 +6,7 @@
 
 use std::fmt::Write as _;
 
-use mara::inputs::{CodeReads, Inputs};
+use mara::inputs::CodeReads;
 use mara::project::{self, Project};
 use mara::rules::{self, Scope};
 use mara_engine::code::CodeLinks;
@@ -86,7 +86,9 @@ fn input_keys(generation: &mara::inputs::Generation, evaluations: &[Hash]) -> Ve
 /// markers (DES-CODE-READERS), programs and invariants.
 fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let root = context.root()?;
-    let generation = Inputs::new(root).generation(context.now, context.work, CodeReads::Scan);
+    let generation = context
+        .inputs(root)
+        .generation(context.now, context.work, CodeReads::Scan);
     let layer = generation.code.clone().expect("code was scanned");
     let code = CodeLinks::new(&generation.snapshot, layer);
     let findings = validation::check(&generation.snapshot, context.work);
@@ -126,7 +128,7 @@ fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Fail
 fn item_validate(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let reference = args.argument(0);
     let root = context.root()?;
-    let mut inputs = Inputs::new(root);
+    let mut inputs = context.inputs(root);
     let now = context.now;
     let generation = inputs.generation(now, context.work, CodeReads::List);
     let snapshot = &generation.snapshot;

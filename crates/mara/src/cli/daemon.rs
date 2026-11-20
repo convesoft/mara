@@ -209,9 +209,12 @@ fn status(_: &mut Context, _: &Args) -> Result<Response, Failure> {
 }
 
 /// Starts the daemon unless one of this build runs. When another process holds the lock, as a
-/// daemon does while it starts, waits until a daemon answers.
-fn start(_: &mut Context, _: &Args) -> Result<Response, Failure> {
+/// daemon does while it starts, waits until a daemon answers. The daemon opens the session of
+/// the project that `--project` names or that holds the working directory, if any.
+fn start(context: &mut Context, _: &Args) -> Result<Response, Failure> {
     let (build, runtime) = target()?;
+    // Before the fork: the daemon runs in `/`.
+    let project = context.root().ok();
     let runtime = runtime.map_err(|Unavailable(reason)| {
         Failure::new(
             "io-error",
@@ -226,7 +229,7 @@ fn start(_: &mut Context, _: &Args) -> Result<Response, Failure> {
             break (false, running.pid);
         }
         if daemon::try_lock(&lock).map_err(io_failure)? {
-            let pid = server::launch(&runtime, &build, lock)
+            let pid = server::launch(&runtime, &build, lock, project.clone())
                 .map_err(|message| Failure::new("io-error", message))?;
             break (true, u64::from(pid));
         }
@@ -270,19 +273,20 @@ fn start(_: &mut Context, _: &Args) -> Result<Response, Failure> {
 /// only when the process ends.
 fn stop(_: &mut Context, _: &Args) -> Result<Response, Failure> {
     let (build, runtime) = target()?;
-    let pid = match &runtime {
+    let stopped = match &runtime {
         Ok(runtime) => stop_daemon(runtime, &build).map_err(io_failure)?,
         Err(_) => None,
     };
-    let human = match pid {
-        Some(pid) => format!("Stopped the daemon of this build (process {pid}).\n"),
+    let human = match stopped {
+        Some(Some(pid)) => format!("Stopped the daemon of this build (process {pid}).\n"),
+        Some(None) => "Stopped the daemon of this build.\n".to_owned(),
         None => "No daemon of this build runs.\n".to_owned(),
     };
     let mut json = String::new();
     let mut object = Object::new(&mut json);
     object.number("format_version", FORMAT_VERSION);
-    object.bool("stopped", pid.is_some());
-    null_or_number(&mut object, "pid", pid);
+    object.bool("stopped", stopped.is_some());
+    null_or_number(&mut object, "pid", stopped.flatten());
     object.end();
     Ok(Response {
         json,
@@ -291,16 +295,20 @@ fn stop(_: &mut Context, _: &Args) -> Result<Response, Failure> {
     })
 }
 
-/// The process ID of the daemon that stopped, once it has exited; `None` when none ran.
-fn stop_daemon(runtime: &Runtime, build: &Build) -> io::Result<Option<u64>> {
+/// The daemon that stopped, once it has exited, with its process ID if known; `None` when none
+/// ran.
+fn stop_daemon(runtime: &Runtime, build: &Build) -> io::Result<Option<Option<u64>>> {
     let Some(mut stream) = runtime.connect()? else {
         return Ok(None);
     };
     stream.set_read_timeout(Some(ANSWER_TIMEOUT))?;
     stream.set_write_timeout(Some(ANSWER_TIMEOUT))?;
+    // Read before asking: a daemon that ends before it answers, for this request or another
+    // reason, has stopped all the same.
+    let holder = runtime.lock_holder().map(u64::from);
     let answer = match ask(&mut stream, build, "stop") {
         Ok(answer) => answer,
-        Err(error) if ended(&error) => return Ok(None),
+        Err(error) if ended(&error) => return Ok(Some(holder)),
         Err(error) => return Err(error),
     };
     // A daemon that already stops refuses the request, and ends all the same.
@@ -317,5 +325,5 @@ fn stop_daemon(runtime: &Runtime, build: &Build) -> io::Result<Option<u64>> {
             Err(error) => return Err(error),
         }
     }
-    Ok(answer["pid"].as_u64())
+    Ok(Some(answer["pid"].as_u64()))
 }

@@ -1,12 +1,19 @@
-//! The daemon process (DES-DAEMON-LIFECYCLE in `docs/daemon/index.mara.md`).
+//! The daemon process (DES-DAEMON-LIFECYCLE and DES-DAEMON-SESSIONS in
+//! `docs/daemon/index.mara.md`).
 //!
 //! `daemon start` forks it while holding the build's lock, which the daemon keeps until it
 //! exits. It leaves the caller's session, standard streams and working directory, binds the
-//! build's socket and answers each connection on a thread of its own ([`Daemon::answer`]): an
-//! `operation` request runs a document operation for a client ([`client::answer`]). It ends on a `stop`
-//! request, on SIGTERM, SIGINT or SIGHUP, and after the idle period without a request when it
-//! has no session ([`idle_period`]); then it removes its socket, lets the requests it runs
-//! finish and exits.
+//! build's socket, opens the session of the project it was started in, and answers each
+//! connection on a thread of its own ([`Daemon::answer`]): an `operation` request runs a document
+//! operation for a client in its project's session ([`client::answer`]), on a worker thread,
+//! while the connection's thread tells the client every [`daemon::HEARTBEAT`] that it still runs.
+//! A watcher re-derives a session in the background after its inputs changed ([`Watcher`]).
+//!
+//! A session is dropped after the idle period without a request ([`idle_period`]), and the
+//! daemon exits with its last session, or after the idle period when it opened none. It also
+//! ends on a `stop` request and on SIGTERM, SIGINT or SIGHUP: it takes no new request, removes
+//! its socket, ends its rule evaluations, lets its writes finish and exits, which ends its
+//! other requests.
 
 use std::fs::{self, File};
 use std::io::{self, PipeWriter, Read, Write};
@@ -14,16 +21,21 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::path::PathBuf;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use mara::daemon::{self, Build, PROTOCOL_VERSION, Runtime};
+use mara::rules;
+use mara::session::Sessions;
+use mara::watch::Watcher;
 use serde_json::{Value, json};
 
 use crate::cli::client;
 
-/// How long the daemon runs without a request while it has no session (DES-IDLE-SESSIONS).
+/// How long a session lasts without a request, and the daemon without a request while it opened
+/// no session (DES-IDLE-SESSIONS).
 const IDLE_PERIOD: Duration = Duration::from_secs(30 * 60);
 /// How long the daemon waits for a client to take an answer.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -43,9 +55,15 @@ fn idle_period() -> Duration {
     IDLE_PERIOD
 }
 
-/// Forks the daemon, which inherits `lock`, already taken, and returns its process ID once it
-/// listens, or why it could not start. The calling process must run no other thread.
-pub(super) fn launch(runtime: &Runtime, build: &Build, lock: File) -> Result<u32, String> {
+/// Forks the daemon, which inherits `lock`, already taken, and opens the session of the project
+/// at the canonical root `project`, if any. Returns its process ID once it listens, or why it
+/// could not start. The calling process must run no other thread.
+pub(super) fn launch(
+    runtime: &Runtime,
+    build: &Build,
+    lock: File,
+    project: Option<PathBuf>,
+) -> Result<u32, String> {
     let idle = idle_period();
     let (mut reader, writer) =
         io::pipe().map_err(|error| format!("cannot start the daemon: {error}"))?;
@@ -57,7 +75,7 @@ pub(super) fn launch(runtime: &Runtime, build: &Build, lock: File) -> Result<u32
         )),
         0 => {
             drop(reader);
-            child(runtime, build, &lock, writer, idle)
+            child(runtime, build, &lock, writer, idle, project)
         }
         pid => {
             drop(writer);
@@ -80,12 +98,13 @@ fn child(
     lock: &File,
     mut ready: PipeWriter,
     idle: Duration,
+    project: Option<PathBuf>,
 ) -> ! {
     match listen(runtime, lock, ready.as_raw_fd()) {
         Ok((listener, signals)) => {
             let _ = ready.write_all(b"ready");
             drop(ready);
-            serve(listener, runtime, build, signals, idle)
+            serve(listener, runtime, build, signals, idle, project)
         }
         Err(message) => {
             let _ = ready.write_all(format!("error: {message}").as_bytes());
@@ -204,6 +223,9 @@ struct Daemon {
     idle: Duration,
     state: Mutex<State>,
     changed: Condvar,
+    sessions: Sessions,
+    /// `None` where the system offers no watching: requests check the inputs all the same.
+    watcher: Option<Watcher>,
 }
 
 struct State {
@@ -211,6 +233,8 @@ struct State {
     stopping: bool,
     /// Requests being answered.
     active: usize,
+    /// Write requests being answered, which the daemon lets finish when it stops.
+    writes: usize,
     /// When the last request that counts as activity arrived, or when the daemon started.
     /// `status` and `stop` do not count, so that a client watching the daemon does not keep
     /// it alive.
@@ -247,18 +271,22 @@ impl Daemon {
             return self.refuse("other-build", "this daemon serves another build of Mara");
         }
         match request["request"].as_str() {
-            Some("status") => json!({
-                "version": PROTOCOL_VERSION,
-                "pid": self.pid,
-                "sessions": Vec::<String>::new(),
-            }),
-            Some("stop") => {
-                self.stop();
-                json!({"version": PROTOCOL_VERSION, "pid": self.pid, "stopping": true})
+            Some("status") => {
+                let sessions: Vec<String> = (self.sessions.roots().iter())
+                    .map(|root| root.to_string_lossy().into_owned())
+                    .collect();
+                json!({
+                    "version": PROTOCOL_VERSION,
+                    "pid": self.pid,
+                    "sessions": sessions,
+                })
             }
+            // The daemon stops once this answer is sent ([`connection`]), so the client gets it
+            // before the process can exit.
+            Some("stop") => json!({"version": PROTOCOL_VERSION, "pid": self.pid, "stopping": true}),
             Some("operation") => {
                 self.touch();
-                let answer = client::answer(&request);
+                let answer = client::answer(&request, &self.sessions, self.watcher.as_ref());
                 self.touch();
                 match answer {
                     Ok(mut answer) => {
@@ -290,6 +318,7 @@ fn serve(
     build: &Build,
     signals: Signals,
     idle: Duration,
+    project: Option<PathBuf>,
 ) -> ! {
     let socket = fs::symlink_metadata(&runtime.socket)
         .map(|metadata| (metadata.dev(), metadata.ino()))
@@ -301,10 +330,21 @@ fn serve(
         state: Mutex::new(State {
             stopping: false,
             active: 0,
+            writes: 0,
             last_request: Instant::now(),
         }),
         changed: Condvar::new(),
+        sessions: Sessions::default(),
+        watcher: Watcher::start(),
     });
+    // The project the daemon was started for is warm before its first request.
+    if let Some(root) = project {
+        let (session, _) = daemon.sessions.open(&root);
+        match &daemon.watcher {
+            Some(watcher) => watcher.derive(&session),
+            None => session.derive_in_background(|_| {}),
+        }
+    }
     let on_signal = Arc::clone(&daemon);
     let spawned = thread::Builder::new()
         .name("mara-signals".to_owned())
@@ -329,40 +369,62 @@ fn serve(
     if current.is_some() && current == socket {
         let _ = fs::remove_file(&runtime.socket);
     }
+    // Reads end with the process; rule evaluations end first, each killing its child and
+    // removing its directory; writes run to their end.
+    rules::cancel::all();
     let mut state = daemon.state();
-    while state.active > 0 {
+    while state.writes > 0 || rules::cancel::running() > 0 {
         state = daemon
             .changed
-            .wait(state)
-            .unwrap_or_else(PoisonError::into_inner);
+            .wait_timeout(state, Duration::from_millis(10))
+            .unwrap_or_else(PoisonError::into_inner)
+            .0;
     }
     std::process::exit(0)
 }
 
-/// Returns once the daemon stops: by request, by signal or after the idle period.
+/// Returns once the daemon stops: by request, by signal, when its last session is dropped, or
+/// after the idle period when it opened none. Drops each session idle for the idle period.
 fn wait_until_stopping(daemon: &Daemon) {
     let mut state = daemon.state();
     loop {
         if state.stopping {
             return;
         }
-        let deadline = state.last_request + daemon.idle;
         let now = Instant::now();
-        state = if now < deadline {
-            let (state, _) = daemon
-                .changed
-                .wait_timeout(state, deadline - now)
-                .unwrap_or_else(PoisonError::into_inner);
-            state
-        } else if state.active == 0 {
-            state.stopping = true;
-            return;
+        let (dropped, next) = daemon.sessions.drop_idle(daemon.idle, now);
+        if let Some(watcher) = &daemon.watcher {
+            for session in &dropped {
+                watcher.forget(session);
+            }
+        }
+        let deadline = if daemon.sessions.opened() {
+            match next {
+                Some(next) => next,
+                None if state.active == 0 => {
+                    state.stopping = true;
+                    return;
+                }
+                // A request that opens a session runs: its end wakes this thread.
+                None => now + daemon.idle,
+            }
         } else {
-            daemon
-                .changed
-                .wait(state)
-                .unwrap_or_else(PoisonError::into_inner)
+            let deadline = state.last_request + daemon.idle;
+            match deadline <= now {
+                true if state.active == 0 => {
+                    state.stopping = true;
+                    return;
+                }
+                // A request runs: its end wakes this thread.
+                true => now + daemon.idle,
+                false => deadline,
+            }
         };
+        let (next_state, _) = daemon
+            .changed
+            .wait_timeout(state, deadline.saturating_duration_since(now))
+            .unwrap_or_else(PoisonError::into_inner);
+        state = next_state;
     }
 }
 
@@ -384,14 +446,21 @@ fn accept(daemon: &Arc<Daemon>, listener: &UnixListener) {
     }
 }
 
-/// Answers the requests of one connection in order. After `stop`, keeps the connection open
-/// until the process exits, which tells the client that the daemon has ended.
+/// Answers the requests of one connection in order. After `stop`, whose answer it sends before
+/// the daemon stops, keeps the connection open until the process exits, which tells the client
+/// that the daemon has ended.
 fn connection(daemon: &Daemon, mut stream: UnixStream) {
     let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
     while let Ok(Some(frame)) = daemon::read_frame(&mut stream) {
+        let request: Value = serde_json::from_slice(&frame).unwrap_or(Value::Null);
+        let operation = request["request"] == "operation";
+        let write = operation && client::writes(&request);
         let taken = {
             let mut state = daemon.state();
-            state.active += usize::from(!state.stopping);
+            if !state.stopping {
+                state.active += 1;
+                state.writes += usize::from(write);
+            }
             !state.stopping
         };
         if !taken {
@@ -403,17 +472,30 @@ fn connection(daemon: &Daemon, mut stream: UnixStream) {
         }
         // A panic is a defect: the connection closes without an answer, and the client reports
         // `daemon-lost`, but the daemon still counts the request as finished.
-        let answer = panic::catch_unwind(AssertUnwindSafe(|| daemon.answer(&frame)));
+        let answer = match operation {
+            true => answer_working(daemon, &frame, &stream),
+            false => panic::catch_unwind(AssertUnwindSafe(|| daemon.answer(&frame))),
+        };
+        // A stopping daemon ends its reads: one that ends meanwhile, its evaluation cancelled
+        // perhaps, is not answered, and its client reports `daemon-lost`. Writes run to their
+        // end and are answered.
+        let ended = operation && !write && daemon.state().stopping;
         let written = match &answer {
+            Ok(_) if ended => Err(io::ErrorKind::Interrupted.into()),
             Ok(answer) => daemon::write_frame(&mut stream, answer.to_string().as_bytes()),
             Err(_) => Err(io::ErrorKind::Other.into()),
         };
-        daemon.state().active -= 1;
+        {
+            let mut state = daemon.state();
+            state.active -= 1;
+            state.writes -= usize::from(write);
+        }
         daemon.changed.notify_all();
         let Ok(answer) = answer else {
             return;
         };
         if answer["stopping"] == true {
+            daemon.stop();
             loop {
                 thread::park();
             }
@@ -422,4 +504,37 @@ fn connection(daemon: &Daemon, mut stream: UnixStream) {
             return;
         }
     }
+}
+
+/// Answers an operation request on a worker thread, so that this thread can tell the client
+/// every [`daemon::HEARTBEAT`] that it still runs: a client takes silence for a daemon that
+/// stopped or hangs. A panic of the worker is returned as such.
+fn answer_working(daemon: &Daemon, frame: &[u8], stream: &UnixStream) -> thread::Result<Value> {
+    thread::scope(|scope| {
+        let (done, finished) = mpsc::channel::<()>();
+        let work = move || {
+            let answer = daemon.answer(frame);
+            let _ = done.send(());
+            answer
+        };
+        let worker = match thread::Builder::new()
+            .name("mara-request".to_owned())
+            .spawn_scoped(scope, work)
+        {
+            Ok(worker) => worker,
+            // No thread to spare: the request runs here, without heartbeats.
+            Err(_) => return panic::catch_unwind(AssertUnwindSafe(|| daemon.answer(frame))),
+        };
+        let heartbeat = json!({"version": PROTOCOL_VERSION, "pid": daemon.pid, "working": true});
+        let heartbeat = heartbeat.to_string();
+        let mut beating = true;
+        // Ends when the worker has answered, or has panicked and dropped `done`.
+        while let Err(mpsc::RecvTimeoutError::Timeout) = finished.recv_timeout(daemon::HEARTBEAT) {
+            if beating {
+                let mut writer = stream;
+                beating = daemon::write_frame(&mut writer, heartbeat.as_bytes()).is_ok();
+            }
+        }
+        worker.join()
+    })
 }

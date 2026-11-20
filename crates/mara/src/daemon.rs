@@ -12,6 +12,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use mara_engine::hash::Hash;
 
@@ -26,6 +27,13 @@ const NAME_DIGITS: usize = 16;
 
 /// The largest frame either side accepts.
 pub const MAX_FRAME: usize = 64 << 20;
+
+/// How long a client tries to connect while the daemon's queue of connections is full: past it,
+/// the client serves its request in-process.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// How often the daemon tells a client that its request still runs, while it runs.
+pub const HEARTBEAT: Duration = Duration::from_secs(1);
 
 /// The version of the frames' JSON messages. Only one build talks to its own daemon, so a
 /// change needs no compatibility; the field marks the format.
@@ -255,7 +263,7 @@ impl Runtime {
             Err(error) if not_found(&error) => return Ok(None),
             Err(error) => return Err(annotate(error, "cannot examine", &self.socket)),
         }
-        match UnixStream::connect(&self.socket) {
+        match connect_within(&self.socket, CONNECT_TIMEOUT) {
             Ok(stream) => {
                 if peer_user(&stream)? != user() {
                     return Err(io::Error::other(format!(
@@ -273,6 +281,107 @@ impl Runtime {
     }
 }
 
+/// Connects to the socket at `path`, trying again while the queue of connections the listener
+/// has not accepted is full, for at most `timeout`: a blocking connection would wait for as long
+/// as the listener does not accept. Fails with `TimedOut` then.
+fn connect_within(path: &Path, timeout: Duration) -> io::Result<UnixStream> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::os::unix::ffi::OsStrExt;
+
+    let deadline = Instant::now() + timeout;
+    // SAFETY: an all-zero sockaddr_un is valid.
+    let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    address.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    let bytes = path.as_os_str().as_bytes();
+    if bytes.len() >= address.sun_path.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the socket path is too long",
+        ));
+    }
+    for (slot, byte) in address.sun_path.iter_mut().zip(bytes) {
+        *slot = *byte as libc::c_char;
+    }
+    let length = (std::mem::size_of::<libc::sa_family_t>() + bytes.len() + 1) as libc::socklen_t;
+    loop {
+        // SAFETY: socket takes no pointer.
+        let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: the descriptor was just opened and nothing else owns it.
+        let socket = unsafe { OwnedFd::from_raw_fd(fd) };
+        // SAFETY: fcntl on an open descriptor.
+        unsafe {
+            libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
+            let flags = libc::fcntl(fd, libc::F_GETFL);
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+        // SAFETY: the address is initialized and `length` does not pass it.
+        let connected = unsafe { libc::connect(fd, (&raw const address).cast(), length) };
+        let error = io::Error::last_os_error();
+        let pending = connected != 0 && error.raw_os_error() == Some(libc::EINPROGRESS);
+        if connected == 0 || pending {
+            if pending {
+                wait_writable(fd, deadline)?;
+            }
+            // SAFETY: fcntl on an open descriptor.
+            unsafe {
+                let flags = libc::fcntl(fd, libc::F_GETFL);
+                libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK);
+            }
+            return Ok(UnixStream::from(socket));
+        }
+        if error.raw_os_error() != Some(libc::EAGAIN) {
+            return Err(error);
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "the daemon accepted no connection within {} s",
+                    timeout.as_secs()
+                ),
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Waits until a connection in progress on `fd` is made, at most until `deadline`.
+fn wait_writable(fd: std::os::fd::RawFd, deadline: Instant) -> io::Result<()> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    let mut poll = libc::pollfd {
+        fd,
+        events: libc::POLLOUT,
+        revents: 0,
+    };
+    let millis = i32::try_from(left.as_millis()).unwrap_or(i32::MAX);
+    // SAFETY: one pollfd that lives across the call.
+    if unsafe { libc::poll(&mut poll, 1, millis) } <= 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "the daemon accepted no connection in time",
+        ));
+    }
+    let mut status: libc::c_int = 0;
+    let mut size = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    // SAFETY: getsockopt writes at most `size` bytes into `status`.
+    unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_ERROR,
+            (&raw mut status).cast(),
+            &mut size,
+        );
+    }
+    match status {
+        0 => Ok(()),
+        error => Err(io::Error::from_raw_os_error(error)),
+    }
+}
+
 /// Takes the lock without waiting: `false` when another process holds it.
 pub fn try_lock(file: &File) -> io::Result<bool> {
     match file.try_lock() {
@@ -284,6 +393,12 @@ pub fn try_lock(file: &File) -> io::Result<bool> {
 
 /// Writes one frame: the payload's length as 4 bytes, big-endian, then the payload.
 pub fn write_frame(stream: &mut impl Write, payload: &[u8]) -> io::Result<()> {
+    stream.write_all(&frame(payload)?)?;
+    stream.flush()
+}
+
+/// The bytes of one frame of `payload`.
+pub fn frame(payload: &[u8]) -> io::Result<Vec<u8>> {
     if payload.len() > MAX_FRAME {
         return Err(io::Error::other("the message is too large for the daemon"));
     }
@@ -291,8 +406,7 @@ pub fn write_frame(stream: &mut impl Write, payload: &[u8]) -> io::Result<()> {
     let mut frame = Vec::with_capacity(4 + payload.len());
     frame.extend_from_slice(&length.to_be_bytes());
     frame.extend_from_slice(payload);
-    stream.write_all(&frame)?;
-    stream.flush()
+    Ok(frame)
 }
 
 /// Reads one frame: `None` when the stream ends before it starts.

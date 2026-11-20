@@ -11,18 +11,25 @@
 //! The request carries what the operation needs from the client's side: the operation's words,
 //! its checked arguments, the inputs an MCP call passes, `--project`, the form of the reply, and
 //! the client's working directory, umask and temporary directory ([`Caller`]). The daemon runs the
-//! same function in a [`Context`] with that directory, inside [`caller::serve`] with the other two,
-//! and answers with the reply and the work counts of the request ([`answer`]).
+//! same function in a [`Context`] with that directory and its project's session, inside
+//! [`caller::serve`] with the other two, and answers with the reply and the work counts of the
+//! session since its previous response ([`answer`]). Until it answers, it sends a heartbeat every
+//! [`daemon::HEARTBEAT`]; a client that hears nothing for [`SILENCE`] gives up with
+//! `daemon-lost`.
 
-use std::io;
+use std::io::{self, Write};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::{Duration, SystemTime};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime};
 
 use mara::caller::{self, Caller};
 use mara::daemon::{self, Build, PROTOCOL_VERSION, Runtime};
+use mara::project;
+use mara::session::Sessions;
+use mara::watch::Watcher;
 use mara_engine::facts::Supplied;
 use mara_engine::work::WorkCounts;
 use serde_json::{Value, json};
@@ -33,9 +40,27 @@ use super::{Args, Context, FORMAT, Failure, OPERATIONS, Operation, PROJECT, Repl
 /// project, as `prime` reads one (DES-DAEMON-LIFECYCLE).
 const IN_PROCESS: &[&[&str]] = &[&["project", "init"], &["project", "convert"]];
 
-/// How long a client waits to hand a request to the daemon. A request that is not written in
-/// full by then runs in-process.
+/// The document operations that write: a daemon that stops lets them finish
+/// (DES-DAEMON-LIFECYCLE).
+const WRITES: &[&[&str]] = &[
+    &["item", "create"],
+    &["item", "update"],
+    &["item", "delete"],
+    &["item", "move"],
+    &["item", "rename"],
+    &["relation", "add"],
+    &["relation", "remove"],
+    &["project", "fix"],
+];
+
+/// How long a client waits to hand a request to the daemon, in all. A request that is not
+/// written in full by then runs in-process.
 const SEND_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a client waits for a frame of the daemon once its request is dispatched. The daemon
+/// sends one every [`daemon::HEARTBEAT`] while the request runs, so only a daemon that stopped
+/// or hangs stays silent this long; the request then fails with `daemon-lost`.
+pub const SILENCE: Duration = Duration::from_secs(15);
 
 /// A document operation's function.
 type Document = fn(&mut Context, &Args) -> Result<super::Response, Failure>;
@@ -110,19 +135,35 @@ fn dispatch(operation: &Operation, context: &Context, args: &Args, json: bool) -
         // Not written in full: the daemon cannot have read the request, so it ran nothing.
         return not;
     }
-    // Dispatched. A long validation may take any time, as it would in-process.
-    let answer = stream
-        .set_read_timeout(None)
-        .and_then(|()| daemon::read_frame(&mut stream));
-    let frame = match answer {
-        Ok(Some(frame)) => frame,
-        Ok(None) => {
-            let why = "it closed the connection before it answered".to_owned();
-            return Sent::Lost { pid, why };
-        }
-        Err(error) => {
-            let why = format!("its answer could not be read: {error}");
-            return Sent::Lost { pid, why };
+    // Dispatched. A long validation may take any time, as it would in-process, while the
+    // daemon says that it still runs; silence past `SILENCE` ends the wait.
+    let frame = loop {
+        let answer = stream
+            .set_read_timeout(Some(SILENCE))
+            .and_then(|()| daemon::read_frame(&mut stream));
+        match answer {
+            Ok(Some(frame)) if is_heartbeat(&frame) => {}
+            Ok(Some(frame)) => break frame,
+            Ok(None) => {
+                let why = "it closed the connection before it answered".to_owned();
+                return Sent::Lost { pid, why };
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
+            {
+                let why = format!(
+                    "it sent nothing for {} s, so it has stopped or hangs",
+                    SILENCE.as_secs()
+                );
+                return Sent::Lost { pid, why };
+            }
+            Err(error) => {
+                let why = format!("its answer could not be read: {error}");
+                return Sent::Lost { pid, why };
+            }
         }
     };
     let answer: Value = match serde_json::from_slice(&frame) {
@@ -191,10 +232,30 @@ fn message(
     }))
 }
 
-/// Writes the request's frame in full, or fails.
+/// Writes the request's frame in full within [`SEND_TIMEOUT`], or fails.
 fn send(stream: &mut UnixStream, message: &Value) -> io::Result<()> {
-    stream.set_write_timeout(Some(SEND_TIMEOUT))?;
-    daemon::write_frame(stream, message.to_string().as_bytes())
+    let frame = daemon::frame(message.to_string().as_bytes())?;
+    let deadline = Instant::now() + SEND_TIMEOUT;
+    let mut written = 0;
+    while written < frame.len() {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        stream.set_write_timeout(Some(left))?;
+        match stream.write(&frame[written..]) {
+            Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+            Ok(count) => written += count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+/// Whether `frame` only says that the daemon still runs the request.
+fn is_heartbeat(frame: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(frame).is_ok_and(|message| message["working"] == true)
 }
 
 /// The reply and work counts of an answer.
@@ -221,7 +282,7 @@ fn reply(answer: &Value) -> Option<Sent> {
     Some(Sent::Answered(reply, work))
 }
 
-/// `daemon-lost`: the daemon ended before it answered a dispatched request.
+/// `daemon-lost`: the daemon ended, stopped or hung before it answered a dispatched request.
 fn lost(operation: &Operation, pid: Option<u32>, why: &str) -> Failure {
     let daemon = match pid {
         Some(pid) => format!("the daemon (process {pid})"),
@@ -231,8 +292,8 @@ fn lost(operation: &Operation, pid: Option<u32>, why: &str) -> Failure {
     Failure::new(
         "daemon-lost",
         format!(
-            "{daemon} ended before it answered `{words}`: {why}. The request was not run again; \
-             a write may be left interrupted, which `mara project validate` reports"
+            "{daemon} gave no answer to `{words}`: {why}. The request was not run again; a \
+             write may be left interrupted, which `mara project validate` reports"
         ),
     )
 }
@@ -275,12 +336,18 @@ pub fn add(total: &mut WorkCounts, call: &WorkCounts) {
     total.program_runs += call.program_runs;
 }
 
-/// The daemon's answer to an operation request: the reply and the request's work counts, or a
-/// refusal, which runs nothing, when the request names no operation the daemon serves or
-/// carries arguments that the operation does not take. The daemon keeps nothing between
-/// requests: each one reads the files as they are. A session of the project replaces the
-/// [`WorkCounts`] and [`Context`] built here (mara-xqcnqw).
-pub fn answer(request: &Value) -> Result<Value, String> {
+/// The daemon's answer to an operation request: the reply and the work counts of the request's
+/// session since its previous response, or a refusal, which runs nothing, when the request
+/// names no operation the daemon serves or carries arguments that the operation does not take.
+///
+/// The request runs in the session of its project, opened unless it is open
+/// (DES-DAEMON-SESSIONS); a request that selects no project runs without one and reports its own
+/// counts. Every request checks the project's inputs on disk (REQ-NEVER-STALE).
+pub fn answer(
+    request: &Value,
+    sessions: &Sessions,
+    watcher: Option<&Watcher>,
+) -> Result<Value, String> {
     let (operation, run) = served(request)?;
     let args = args(operation, request)?;
     let cwd = request["cwd"]
@@ -303,17 +370,32 @@ pub fn answer(request: &Value) -> Result<Value, String> {
                 .ok_or("the request names no temporary directory")?,
         ),
     };
+    let cwd = PathBuf::from(cwd);
+    let entered =
+        (project::select(&cwd, project.as_deref()).ok()).map(|root| sessions.enter(&root));
     let mut work = WorkCounts::default();
     let mut context = Context {
         work: &mut work,
         now: SystemTime::now(),
         project,
-        cwd: Ok(PathBuf::from(cwd)),
+        cwd: Ok(cwd),
         direct: true,
         caller: caller.clone(),
+        session: entered.as_ref().map(|(session, _)| Arc::clone(session)),
     };
     // Files and directories get the client's modes, and evaluations its temporary directory.
     let reply = caller::serve(caller, || Reply::new(run(&mut context, &args), json));
+    let work = match &entered {
+        Some((session, _)) => {
+            session.add(&work);
+            // The directories of its inputs may have changed: they are watched from now on.
+            if let Some(watcher) = watcher {
+                watcher.sync(session);
+            }
+            session.take_work()
+        }
+        None => work,
+    };
     let counts: serde_json::Map<String, Value> = (work.fields().into_iter())
         .map(|(name, value)| (name.to_owned(), Value::from(value)))
         .collect();
@@ -323,6 +405,14 @@ pub fn answer(request: &Value) -> Result<Value, String> {
         "status": reply.status,
         "work": counts,
     }))
+}
+
+/// Whether the operation request `request` names an operation that writes.
+pub fn writes(request: &Value) -> bool {
+    let words: Vec<&str> = (request["words"].as_array().into_iter().flatten())
+        .filter_map(Value::as_str)
+        .collect();
+    WRITES.contains(&words.as_slice())
 }
 
 /// The operation a request names, if the daemon serves it.

@@ -25,6 +25,7 @@ mod validate;
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use mara_engine::diagnostic::Diagnostic;
@@ -37,7 +38,9 @@ use mara_engine::validation;
 use mara_engine::work::WorkCounts;
 
 use mara::caller::Caller;
+use mara::inputs::Inputs;
 use mara::project::{self, SelectError};
+use mara::session::Session;
 use mara::write::WriteError;
 
 /// Every operation, in the order the usage lists them.
@@ -323,12 +326,24 @@ pub struct Context<'w> {
     direct: bool,
     /// The client's umask and temporary directory, which a request to the daemon carries.
     caller: Caller,
+    /// The session of the request's project, when the daemon serves it (DES-DAEMON-SESSIONS).
+    session: Option<Arc<Session>>,
 }
 
 impl Context<'_> {
     /// The root of the project the request runs against (REQ-ONE-PROJECT-PER-OPERATION).
     pub fn root(&self) -> Result<PathBuf, Failure> {
         project::select(self.cwd()?, self.project.as_deref()).map_err(Failure::from)
+    }
+
+    /// The inputs of the project at `root`, the canonical root that [`Context::root`] returns:
+    /// a view of its session's when the daemon serves the request in that session, otherwise
+    /// new ones, which read everything once.
+    pub fn inputs(&self, root: PathBuf) -> Inputs {
+        match &self.session {
+            Some(session) if session.root() == root => session.inputs(),
+            _ => Inputs::new(root),
+        }
     }
 
     /// The client's working directory.
@@ -495,6 +510,7 @@ pub fn run(arguments: &[OsString], work: &mut WorkCounts) -> u8 {
                     arguments.iter().any(|argument| argument == "--no-daemon"),
                 ),
                 caller,
+                session: None,
             };
             match operation.run {
                 Run::Document(run) => client::request(operation, run, &mut context, &args, json),

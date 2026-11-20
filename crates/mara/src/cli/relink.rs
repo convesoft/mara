@@ -110,7 +110,7 @@ impl Session {
     fn open(context: &mut Context, code: CodeReads) -> Result<Session, Failure> {
         let root = context.root()?;
         let lock = WriteLock::take(&root)?;
-        let mut inputs = Inputs::new(root);
+        let mut inputs = context.inputs(root);
         let project = inputs.project(context.now, context.work);
         if project.has_errors() {
             let message = "the project's configuration or schema has errors, so Mara edits none \

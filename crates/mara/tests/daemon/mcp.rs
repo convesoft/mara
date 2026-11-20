@@ -16,8 +16,8 @@ const CLI_READ: &[&str] = &["--debug-stats", "--format", "json", "item", "list"]
 const TOOL: &str = "item_list";
 
 /// A `mara --debug-stats mcp` session of the test.
-struct Server {
-    child: Child,
+pub(crate) struct Server {
+    pub(crate) child: Child,
     stdin: Option<ChildStdin>,
     /// Lines of stdout, read on a thread of their own, so that a test can see that a call has
     /// not been answered yet.
@@ -27,7 +27,12 @@ struct Server {
 
 impl Server {
     /// Starts the server in `directory` with `options`, and initializes the session.
-    fn start(test: &Test, directory: &Path, options: &[&str], env: &[(&str, &str)]) -> Server {
+    pub(crate) fn start(
+        test: &Test,
+        directory: &Path,
+        options: &[&str],
+        env: &[(&str, &str)],
+    ) -> Server {
         let args: Vec<&str> = ["--debug-stats", "mcp"]
             .iter()
             .chain(options)
@@ -86,20 +91,20 @@ impl Server {
     }
 
     /// Sends the read as a tool call.
-    fn call(&mut self) {
+    pub(crate) fn call(&mut self) {
         self.send("tools/call", json!({"name": TOOL, "arguments": {}}));
     }
 
     /// The text of the call's result, which must succeed.
-    fn result(&self, wait: Duration) -> Option<String> {
+    pub(crate) fn result(&self, wait: Duration) -> Option<String> {
         let response = self.receive(wait)?;
         let result = &response["result"];
         assert_eq!(result["isError"], false, "{response}");
         Some(result["content"][0]["text"].as_str().unwrap().to_owned())
     }
 
-    /// A call while no daemon serves it: answered at once.
-    fn call_in_process(&mut self) -> String {
+    /// A call and its result, which comes within [`crate::RUN_WAIT`].
+    pub(crate) fn call_and_wait(&mut self) -> String {
         self.call();
         self.result(crate::RUN_WAIT).expect("an answer")
     }
@@ -115,7 +120,7 @@ impl Server {
     }
 
     /// Closes the session: its stats line, the sum of its calls' counts.
-    fn finish(mut self) -> Value {
+    pub(crate) fn finish(mut self) -> Value {
         drop(self.stdin.take());
         let output = self.child.wait_with_output().unwrap();
         assert!(output.status.success(), "{output:?}");
@@ -152,10 +157,13 @@ fn a_server_sends_calls_to_the_daemon_that_the_cli_started() {
     let pid = test.wait_for_daemon();
     let mut server = Server::start(&test, &project, &[], &[]);
     assert_eq!(server.call_served_by(pid), text);
-    // Until sessions (mara-xqcnqw), the daemon reports a cold request for every request.
+    // The daemon's first response reports the opening of the session: a cold request.
     assert_eq!(server.finish(), stats);
 }
 
+/// The four calls of VER-DAEMON-START: a call served in-process reports a cold request, and so
+/// does the first response of the daemon it started, for the opening of its session. Had a call
+/// served in-process been answered by a daemon, the call after it would report nothing.
 #[test]
 fn a_server_serves_in_process_until_a_daemon_runs_and_then_through_it() {
     let test = Test::new();
@@ -163,15 +171,19 @@ fn a_server_serves_in_process_until_a_daemon_runs_and_then_through_it() {
     let (text, stats) = direct(&test, &project);
     let mut server = Server::start(&test, &project, &[], &[]);
     let process = server.child.id();
-    assert_eq!(server.call_in_process(), text);
+    assert_eq!(server.call_and_wait(), text);
     let first = test.wait_for_daemon_beside(&[process]);
-    assert_eq!(server.call_served_by(first), text);
+    test.wait_for_session(&project);
+    thread::sleep(Duration::from_secs(2));
+    assert_eq!(server.call_and_wait(), text);
     test.run(&["daemon", "stop"]).succeeded();
     assert_eq!(test.daemons(), [process]);
-    assert_eq!(server.call_in_process(), text);
+    assert_eq!(server.call_and_wait(), text);
     let second = test.wait_for_daemon_beside(&[process]);
     assert_ne!(first, second);
-    assert_eq!(server.call_served_by(second), text);
+    test.wait_for_session(&project);
+    thread::sleep(Duration::from_secs(2));
+    assert_eq!(server.call_and_wait(), text);
     assert_eq!(server.finish(), times(&stats, 4));
 }
 
@@ -187,7 +199,7 @@ fn a_server_in_direct_mode_reaches_and_starts_no_daemon() {
     ];
     for (options, env) in modes {
         let mut server = Server::start(&test, &project, options, env);
-        assert_eq!(server.call_in_process(), text);
+        assert_eq!(server.call_and_wait(), text);
         assert_eq!(test.daemons(), [server.child.id()], "{options:?} {env:?}");
         assert_eq!(server.finish(), stats);
         assert!(test.daemons().is_empty(), "{options:?} {env:?}");
