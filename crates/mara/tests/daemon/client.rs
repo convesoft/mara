@@ -7,7 +7,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::{Run, Test, copy_binary, finish, hold_lock, mara, private_directory, signal};
 
@@ -350,6 +350,98 @@ fn the_daemon_resolves_paths_from_the_clients_directory() {
         serde_json::json!({"input": "note", "values": ["from the client"]}),
         "{report}"
     );
+}
+
+/// A query whose program uses code links gives, through the daemon, the rows of direct mode,
+/// and after a marker moves to another item the rows of the code as it is then
+/// (DES-CODE-READERS); so does `query report` of an invariant over code links, whose proof
+/// places the code link at its marker.
+#[test]
+fn a_query_over_code_links_gives_the_rows_of_direct_mode_after_a_marker_changes() {
+    let test = Test::new();
+    let project = test.project();
+    let schema = format!(
+        "{}\n[relations.implements]\ninverse = \"implemented_by\"\n\
+         description = \"The code realizes the target.\"\n\
+         targets = {{ code = [\"requirement\"] }}\n",
+        crate::SCHEMA
+    );
+    fs::write(project.join(".mara/schema.toml"), schema).unwrap();
+    fs::create_dir_all(project.join(".mara/rules")).unwrap();
+    fs::write(
+        project.join(".mara/rules/code.dl"),
+        ".include \"mara.dl\"\n.decl linked(dst: Mid, id: Id, path: Path, line: number)\n\
+         linked(d, i, p, l) :- code_link(_, d, p, l, _, _), item(d, _, i, _, _, _).\n",
+    )
+    .unwrap();
+    let config = format!(
+        "{}\n[rules]\nprograms = [\".mara/rules/*.dl\"]\n\n[queries.linked]\n\
+         program = \".mara/rules/code.dl\"\nrelation = \"linked\"\n\
+         description = \"The code links\"\n\n[invariants.implemented]\n\
+         program = \".mara/rules/code.dl\"\nrelation = \"linked\"\nseverity = \"warning\"\n\
+         message = \"Code implements this requirement\"\n\n[code]\nformat_version = 1\n\n\
+         [code.languages.rust]\ninclude = [\"src/**/*.rs\"]\ncomment_prefixes = [\"//\"]\n",
+        crate::CONFIG
+    );
+    fs::write(project.join(".mara/config.toml"), config).unwrap();
+    fs::create_dir_all(project.join("src")).unwrap();
+    let code = project.join("src/lib.rs");
+    fs::write(&code, "fn one() {}\n// @mara implements REQ-ONE\n").unwrap();
+    let args = [
+        "--debug-stats",
+        "--format",
+        "json",
+        "query",
+        "execute",
+        "linked",
+    ];
+    let (_, pid) = test.start();
+    let ids = |run: &Run| -> Vec<(String, u64)> {
+        let rows = run.json()["rows"].as_array().unwrap().clone();
+        rows.iter()
+            .map(|row| {
+                let values = &row["values"];
+                (
+                    values[1].as_str().unwrap().to_owned(),
+                    values[3].as_u64().unwrap(),
+                )
+            })
+            .collect()
+    };
+    let report = [
+        "--debug-stats",
+        "--format",
+        "json",
+        "query",
+        "report",
+        "implemented",
+        "--id",
+        "REQ-TWO",
+    ];
+    // The code link leaf of the report's one row, as (path, line).
+    let leaf = |run: &Run| {
+        let json = run.json();
+        let children = json["rows"][0]["proof"]["children"].as_array().cloned();
+        let children = children.unwrap_or_else(|| panic!("no proof: {json}"));
+        let leaf = children
+            .iter()
+            .find(|child| child["relation"] == "code_link");
+        let leaf = leaf.unwrap_or_else(|| panic!("no code_link leaf: {json}"));
+        (leaf["path"].clone(), leaf["line"].clone())
+    };
+    let served = test.served_by(pid, &project, &args);
+    assert_direct(&served, &test.direct(&project, &args));
+    assert_eq!(ids(&served), [("REQ-ONE".to_owned(), 2)]);
+    let served = test.served_by(pid, &project, &report);
+    assert_eq!(served, test.direct(&project, &report));
+    assert_eq!(served.json()["report"]["outcome"], "passed", "{served:?}");
+    fs::write(&code, "fn two() {}\n\n// @mara implements REQ-TWO\n").unwrap();
+    let served = test.served_by(pid, &project, &args);
+    assert_direct(&served, &test.direct(&project, &args));
+    assert_eq!(ids(&served), [("REQ-TWO".to_owned(), 3)]);
+    let served = test.served_by(pid, &project, &report);
+    assert_direct(&served, &test.direct(&project, &report));
+    assert_eq!(leaf(&served), (json!("src/lib.rs"), json!(3)));
 }
 
 /// A read dispatched to a daemon that is killed before it answers fails with `daemon-lost`

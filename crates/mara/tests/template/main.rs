@@ -1,15 +1,15 @@
 #![cfg(unix)]
 
 //! The `engineering` template's programs through the real `mara` binary, on disposable projects
-//! that `project init` creates: VER-TEMPLATE-CASES in `docs/template/index.mara.md`. The cases
-//! that need code links wait for mara-hk2arx. Each failing row of an invariant, and each row
-//! that makes a gate's item failed or unavailable, is also given to `query report`, which must
-//! explain it.
+//! that `project init` creates: VER-TEMPLATE-CASES in `docs/template/index.mara.md`. Each
+//! failing row of an invariant, and each row that makes a gate's item failed or unavailable, is
+//! also given to `query report`, which must explain it.
 //!
 //! The binary runs in direct mode (`MARA_NO_DAEMON=1`) with an environment of only `HOME` and
 //! `TMPDIR`, both inside the test's temporary directory; it finds the pinned `souffle` beside its
 //! own `target/` directory.
 
+mod code;
 mod invariants;
 mod readiness;
 
@@ -20,6 +20,10 @@ use std::process::Command;
 
 use serde_json::Value;
 use tempfile::TempDir;
+
+/// Rust at the basic level (DES-CODE-MARKERS).
+const RUST: &str = "\n[code]\nformat_version = 1\n\n[code.languages.rust]\n\
+                    include = [\"src/**/*.rs\"]\ncomment_prefixes = [\"//\"]\n";
 
 /// One item of a test document, its type given by its ID's prefix.
 #[derive(Clone, Debug)]
@@ -177,6 +181,21 @@ impl Project {
             status: output.status.code().unwrap_or(-1),
             json: serde_json::from_slice(&output.stdout).unwrap_or(Value::Null),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        }
+    }
+
+    /// Declares Rust at the basic level in `src/**/*.rs`, once, and writes `files` below the
+    /// project root.
+    pub fn code(&self, files: &[(&str, String)]) {
+        let path = self.path().join(".mara/config.toml");
+        let config = fs::read_to_string(&path).unwrap();
+        if !config.contains("[code]") {
+            fs::write(&path, format!("{config}{RUST}")).unwrap();
+        }
+        for (relative, contents) in files {
+            let file = self.path().join(relative);
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, contents).unwrap();
         }
     }
 

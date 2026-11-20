@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::{CONFIG_PATH, EntryKind, Named, Rules};
 use crate::diagnostic::Diagnostic;
-use crate::facts::{Column, InputDecl};
+use crate::facts::{CODE_LINK, Column, InputDecl};
 use crate::program::{self, BoundaryError, ColumnKind, DECLARATIONS, Files, Program};
 
 /// Which declared files run as programs.
@@ -55,6 +55,12 @@ pub struct PlannedEntry {
 }
 
 impl Planned {
+    /// Whether its run reads code links: a clause of the program names `code_link`, or one of
+    /// its entries consumes it (DES-CODE-READERS).
+    pub fn uses_code(&self) -> bool {
+        self.program.names(CODE_LINK) || self.outputs.iter().any(|output| output == CODE_LINK)
+    }
+
     /// Every input that one of its entries lists, each once.
     pub fn inputs(&self) -> Vec<&InputDecl> {
         let mut inputs: Vec<&InputDecl> = Vec::new();

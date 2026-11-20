@@ -9,12 +9,13 @@
 
 use std::fmt::Write as _;
 
-use mara::inputs::Generation;
+use mara::inputs::{CodeReads, Generation, Inputs};
 use mara::rules::{self, Consumed, Evaluations};
+use mara_engine::code::CodeLinks;
 use mara_engine::config::{Consumer, Entry, EntryKind};
 use mara_engine::evaluation::explain::{Node, Target};
 use mara_engine::evaluation::{self, Outcome, Rows, compare_rows};
-use mara_engine::facts::{InputError, Supplied, Value};
+use mara_engine::facts::{CodeFacts, InputError, Supplied, Value};
 use mara_engine::read::{
     self as engine_read, Documents, ExplainedRow, GateRequest, QueryRow, ReportRequest,
     RowsRequest, gate_page, query_list, query_rows, report_page,
@@ -177,6 +178,7 @@ fn view(context: &mut Context, args: &Args) -> Result<Response, Failure> {
 
 /// What a request evaluates: the project's inputs, its entry and the items it names.
 struct Request {
+    inputs: Inputs,
     generation: Generation,
     entry: usize,
     items: Vec<usize>,
@@ -197,7 +199,8 @@ impl Request {
 }
 
 /// Reads the project and finds the entry of one of `kinds` that the request names and the items
-/// it names, each once in the order given. Runs nothing.
+/// it names, each once in the order given. Lists the code files without reading any. Runs
+/// nothing.
 fn prepare(context: &mut Context, args: &Args, kinds: &[EntryKind]) -> Result<Request, Failure> {
     let (mut inputs, project) = open(context)?;
     let name = args.argument(0);
@@ -235,7 +238,7 @@ fn prepare(context: &mut Context, args: &Args, kinds: &[EntryKind]) -> Result<Re
         );
         return Err(Failure::new("unknown-entry", message));
     }
-    let generation = inputs.snapshot(context.now, context.work);
+    let generation = inputs.generation(context.now, context.work, CodeReads::List);
     let mut items = Vec::new();
     for reference in args.values(ID.name) {
         let item = resolve_item(&generation.snapshot, reference)?;
@@ -244,6 +247,7 @@ fn prepare(context: &mut Context, args: &Args, kinds: &[EntryKind]) -> Result<Re
         }
     }
     Ok(Request {
+        inputs,
         generation,
         entry,
         items,
@@ -256,9 +260,9 @@ fn refuse(error: InputError) -> Failure {
 }
 
 /// The inputs the request supplies, and those it marks complete.
-type Inputs = (Vec<(String, Supplied)>, Vec<String>);
+type Supplying = (Vec<(String, Supplied)>, Vec<String>);
 
-fn supplied(context: &mut Context, args: &Args) -> Result<Inputs, Failure> {
+fn supplied(context: &mut Context, args: &Args) -> Result<Supplying, Failure> {
     // The client's directory: a file an argument names is the client's (DES-DAEMON-LIFECYCLE).
     let base = context.cwd()?.to_owned();
     let mut supplied: Vec<(String, Supplied)> = Vec::new();
@@ -270,26 +274,72 @@ fn supplied(context: &mut Context, args: &Args) -> Result<Inputs, Failure> {
     Ok((supplied, complete))
 }
 
-/// The inputs the request supplies, then the entry evaluated with them.
-fn evaluate(context: &mut Context, args: &Args, request: &Request) -> Result<Consumed, Failure> {
+/// The inputs the request supplies, then the entry evaluated with them. The code files are read
+/// only when the entry's program uses code links (DES-CODE-READERS); a code file that cannot be
+/// read then joins the request's diagnostics.
+fn evaluate(
+    context: &mut Context,
+    args: &Args,
+    request: &mut Request,
+) -> Result<Consumed, Failure> {
     let (supplied, complete) = supplied(context, args)?;
     let mut evaluations = Evaluations::default();
-    rules::consume(
-        &request.generation,
-        request.entry,
+    let Request {
+        inputs,
+        generation,
+        entry,
+        ..
+    } = request;
+    let now = context.now;
+    let mut unread = Vec::new();
+    let mut code = |work: &mut _| read_code(inputs, generation, now, &mut unread, work);
+    let consumed = rules::consume(
+        generation,
+        *entry,
         supplied,
         &complete,
+        &mut code,
         &mut evaluations,
         context.work,
     )
-    .map_err(refuse)
+    .map_err(refuse)?;
+    add_unread(generation, unread);
+    Ok(consumed)
+}
+
+/// The code facts of the code files that `generation`, of the request that began at `now`,
+/// listed, read through `inputs` (DES-CODE-READERS). The scan's diagnostics, such as a code
+/// file that cannot be read or `unavailable-grammar`, go to `unread`.
+fn read_code(
+    inputs: &mut Inputs,
+    generation: &Generation,
+    now: std::time::SystemTime,
+    unread: &mut Vec<mara_engine::diagnostic::Diagnostic>,
+    work: &mut mara_engine::work::WorkCounts,
+) -> CodeFacts {
+    let (layer, diagnostics) = inputs.scan_listed(generation, now, work);
+    *unread = diagnostics;
+    let links = CodeLinks::new(&generation.snapshot, layer);
+    CodeFacts::new(&links, &generation.snapshot)
+}
+
+/// Adds to the request's diagnostics each of `unread`, the diagnostics of reading code, that the
+/// listing did not report.
+fn add_unread(generation: &mut Generation, unread: Vec<mara_engine::diagnostic::Diagnostic>) {
+    let diagnostics = &mut generation.diagnostics;
+    for diagnostic in unread {
+        if !diagnostics.contains(&diagnostic) {
+            diagnostics.push(diagnostic);
+        }
+    }
+    diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
 }
 
 /// `query execute` and `query view`: the rows of the entry's relation. A program that cannot
 /// give them fails the request with its problems.
 fn rows(context: &mut Context, args: &Args, kind: EntryKind) -> Result<Response, Failure> {
-    let request = prepare(context, args, &[kind])?;
-    let consumed = evaluate(context, args, &request)?;
+    let mut request = prepare(context, args, &[kind])?;
+    let consumed = evaluate(context, args, &mut request)?;
     let entry = request.entry();
     let Consumer::Rows { relation } = &entry.consumer else {
         unreachable!("a query or view reads the rows of one relation");
@@ -351,8 +401,8 @@ fn gate(context: &mut Context, args: &Args) -> Result<Response, Failure> {
             "`query gate` needs `--id <id-or-mid>`: the items to judge".to_owned(),
         ));
     }
-    let request = prepare(context, args, &[EntryKind::Gate])?;
-    let consumed = evaluate(context, args, &request)?;
+    let mut request = prepare(context, args, &[EntryKind::Gate])?;
+    let consumed = evaluate(context, args, &mut request)?;
     let entry = request.entry();
     let snapshot = &request.generation.snapshot;
     let (rows, problems) = match &consumed.outcome {
@@ -414,21 +464,37 @@ fn report(context: &mut Context, args: &Args) -> Result<Response, Failure> {
             "`query report` needs `--id <id-or-mid>`: the item whose outcome to explain".to_owned(),
         ));
     }
-    let request = prepare(context, args, &[EntryKind::Invariant, EntryKind::Gate])?;
+    let mut request = prepare(context, args, &[EntryKind::Invariant, EntryKind::Gate])?;
     let (supplied, complete) = supplied(context, args)?;
+    let now = context.now;
+    let mut unread = Vec::new();
+    let consumed = {
+        let Request {
+            inputs,
+            generation,
+            entry: index,
+            items,
+        } = &mut request;
+        let rules = generation.project.config.rules.as_ref();
+        let entry = &rules.expect("the entry is the configuration's").entries[*index];
+        let (item, snapshot) = (items[0], &generation.snapshot);
+        let mut select = |rows: &Rows| caused(entry, rows, item, snapshot).0;
+        let mut code = |work: &mut _| read_code(inputs, generation, now, &mut unread, work);
+        rules::consume_explained(
+            generation,
+            *index,
+            supplied,
+            &complete,
+            &mut code,
+            &mut select,
+            context.work,
+        )
+        .map_err(refuse)?
+    };
+    add_unread(&mut request.generation, unread);
     let entry = request.entry();
     let item = request.items[0];
     let snapshot = &request.generation.snapshot;
-    let mut select = |rows: &Rows| caused(entry, rows, item, snapshot).0;
-    let consumed = rules::consume_explained(
-        &request.generation,
-        request.entry,
-        supplied,
-        &complete,
-        &mut select,
-        context.work,
-    )
-    .map_err(refuse)?;
     let (outcome, rows, problems) = match consumed.outcome {
         Ok(explained) => {
             let (targets, roles, outcome) = caused(entry, &explained.rows, item, snapshot);

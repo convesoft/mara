@@ -126,6 +126,52 @@ fn grammar_get_counts() {
     assert!(result["node"]["declaration"].is_string(), "{result}");
 }
 
+/// The `query` operations with the corpus's Rust grammar pinned and cached: the counts of the
+/// same requests at the basic level, so each code file is read and hashed once and each
+/// distinct content scanned once by a program that uses code links, and no code is read by one
+/// that does not (VER-CODE-WORK-COUNTERS).
+#[test]
+fn grammar_query_counts() {
+    let corpus = Corpus::generate(1, SEED);
+    let cases: [&[&str]; 4] = [
+        &["query", "execute", "relevant-risks"],
+        &["query", "execute", "requirement-basis"],
+        &[
+            "query",
+            "report",
+            "implementation-ready",
+            "--id",
+            &corpus.retired_requirement,
+        ],
+        &[
+            "query",
+            "report",
+            "requirement-has-basis",
+            "--id",
+            &corpus.retired_requirement,
+        ],
+    ];
+    let basic: Vec<_> = cases
+        .iter()
+        .map(|args| cli::run(corpus.root(), args, 0).work)
+        .collect();
+    assert!(
+        basic[0].code_scans > 0 && basic[2].code_scans > 0,
+        "{basic:?}"
+    );
+    assert_eq!(
+        (basic[1].code_scans, basic[3].code_scans),
+        (0, 0),
+        "{basic:?}"
+    );
+    let home = install_rust_grammar(corpus.root());
+    let env = [("HOME", home.path())];
+    for (args, basic) in cases.iter().zip(basic) {
+        let grammar = cli::run_with(corpus.root(), args, &env, 0);
+        assert_eq!(grammar.work, basic, "{args:?} at the grammar level");
+    }
+}
+
 /// Installs the fixture grammar of Rust (VER-GRAMMAR-MARKERS) in the per-user cache of a new
 /// `HOME`, which it returns, and pins it in the `[code.languages.rust]` of the project at
 /// `root`.

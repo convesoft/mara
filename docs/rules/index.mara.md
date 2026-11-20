@@ -219,6 +219,7 @@ Mara ships a versioned declarations file, `mara.dl`, that starts with `.once`; p
 .decl field(mid: Mid, key: symbol, value: symbol)
 .decl folded(text: symbol, folded: symbol)
 .decl edge(rel: Rel, src: Mid, dst: Mid, path: Path, line: number)
+.decl code_link(rel: Rel, dst: Mid, path: Path, line: number, marker_line: number, declaration: symbol)
 .decl source_complete(source: symbol)
 ```
 
@@ -233,7 +234,8 @@ Mara ships a versioned declarations file, `mara.dl`, that starts with `.once`; p
 - `folded` lowercases as search does, then applies NFC.
 - The engine derives the rows and their JSON text once per snapshot and keeps them with it; the host writes that text into each run's private directory, one `<relation>.json` per relation.
 - `source_complete` names a source whose records are all present ([DES-REQUEST-INPUTS](#01M7CT60KMGA2M9WMQ8RRJREPG)).
-- Code links ([DES-CODE-MARKERS](../code/index.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)) become a further input relation.
+- `code_link` holds a row for each code link ([DES-CODE-MARKERS](../code/index.mara.md#01M7BF6GQ1G370S0G7HPN4HGY1)) and each item whose ID its marker names: the marker's relation, the item's MID, the code location's path and line, the marker's line, and the owning declaration's name. At the basic level the location's line is the marker's and the name is empty, so the grammar level changes values, never columns.
+- A marker that is invalid or names no item gives no row; one whose relation does not lead from `code` to the item's type gives one. `code_link` is empty in a run of a request that reads no code ([DES-CODE-READERS](../code/index.mara.md#01M7CQ57TTB40GWX8YHKB259DK)).
 - The file's format version starts at 1 and changes only with a released contract change, never for internal iterations.
 
 ---

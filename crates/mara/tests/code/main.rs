@@ -1,11 +1,12 @@
 //! Code markers through the real `mara` binary and `mara mcp`, on disposable projects
-//! initialized from `engineering`: VER-CODE-MARKERS, VER-GRAMMAR-MARKERS and VER-CODE-EDITS in
-//! `docs/code/verification.mara.md`, and the code rows of VER-DELETE-ITEM and
+//! initialized from `engineering`: VER-CODE-MARKERS, VER-GRAMMAR-MARKERS, VER-CODE-EDITS and
+//! VER-CODE-FACTS in `docs/code/verification.mara.md`, and the code rows of VER-DELETE-ITEM and
 //! VER-INTERRUPTED-EDITS.
 
 #![cfg(unix)]
 
 mod edits;
+mod facts;
 mod grammar;
 mod markers;
 
@@ -170,14 +171,16 @@ impl Project {
         fs::read(self.path(relative)).unwrap()
     }
 
-    /// Runs `mara <args>` in the project root with an empty environment and `env`.
+    /// Runs `mara <args>` in the project root with an environment of only `MARA_NO_DAEMON`, the
+    /// test's `TMPDIR`, which receives the private directories of program runs, and `env`.
     pub fn mara(&self, args: &[&str], env: &[(&str, &Path)]) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_mara"));
         command
             .args(args)
             .current_dir(self.root())
             .env_clear()
-            .env("MARA_NO_DAEMON", "1");
+            .env("MARA_NO_DAEMON", "1")
+            .env("TMPDIR", std::env::temp_dir());
         if let Some(home) = &self.home {
             command.env("HOME", home.path());
         }

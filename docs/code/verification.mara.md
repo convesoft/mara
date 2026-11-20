@@ -141,7 +141,9 @@ In the setup of [VER-PROGRAM-CONSUMERS](../rules/verification.mara.md#01M7HZYK9D
 | Case | Expectation |
 | --- | --- |
 | Markers for two items at each level, one of them whose relation does not lead from `code` to its target's type | One row per marker with the values `relation list` gives: relation, target MID, the location's path and line, the marker's line, and at the grammar level the declaration name |
-| An unresolved marker and an invalid one | No row |
+| An unresolved marker and an invalid one; at the grammar level, a marker-like line in a string | No row |
+| At the grammar level, a grammar that is missing from the cache, and one dropped while the request scans a later file | Basic-level rows for every file of its language, as `relation list` gives them in the same conditions; `unavailable-grammar` among the request's diagnostics |
+| `query report` of an invariant row that rests on a code link, at each level | A `code_link` leaf at the code file and the marker's line ([DES-RULE-EXECUTION](../rules/evaluation.mara.md#01M7BF6HD6K4B2K5Q7FJVGCDNH)) |
 | Every code file read, at either level, also with a grammar that fell back to the basic level; a project that declares no code language | `source_complete("code")` ([DES-CODE-READERS](index.mara.md#01M7CQ57TTB40GWX8YHKB259DK)) |
 | A code file without read permission, the test running as a user without `CAP_DAC_OVERRIDE` | No `source_complete("code")`; the readable files' rows |
 | A program that does not name the code-link relation, run by `query execute` | Its rows as without the code files, and no code file read ([VER-CODE-WORK-COUNTERS](#01M7JKT47QNN11F4ZG7SG03CG8)); `project validate` still scans code and reports marker diagnostics |
@@ -170,6 +172,7 @@ Cold rows, in CLI direct mode:
 | `item rename` that rewrites markers, every file it writes last changed at least 2 s before | The counts of the row above and of the write row of [VER-WORK-COUNTERS](../verification.mara.md#01M7BF6HGG6ET88HS641Y5676G); no code scan of the new contents |
 | `get` of a code location | 1 read and 1 hash of that code file and of no other; 1 code scan at the grammar level, 0 at the basic level |
 | Every other operation, `search` included, and the `query` operations of a program that does not use code links | As without code |
+| The `query` operations above with the corpus's Rust grammar pinned and cached | The counts at the basic level: grammar files are not counted, and a program that does not use code links loads no grammar |
 | Any operation in a project that declares no code language | 0 code scans |
 | `code add` from the loopback repository of [VER-CODE-ADD](#01M7JKT47QF8VK4K8SZ5GP5EV3) | 0 parses, 0 code scans, 0 snapshot builds |
 

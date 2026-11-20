@@ -5,7 +5,7 @@
 //! instance, a relation or type name against the instance first, then the instances around it,
 //! then the program; a type parameter only in its own component's body.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use super::syntax::{
     self, Aggregator, Clause, Component, Expr, Functor, Item, QualifiedName, Term,
@@ -252,9 +252,14 @@ pub(super) fn resolve(root: &str, files: &Files) -> Result<Program, Refusal> {
             }
         }
     }
+    let mut atoms = BTreeSet::new();
+    for source in sources.iter().filter(|source| source.path != DECLARATIONS) {
+        atom_names(&source.file.items, &mut atoms);
+    }
     Ok(Program {
         files: sources.iter().map(|source| source.path.clone()).collect(),
         relations,
+        atoms,
         includes,
         facts,
         texts: sources
@@ -1220,5 +1225,61 @@ fn numeric(expr: &Expr, vars: &HashSet<&str>) -> bool {
             matches!(aggregator, Aggregator::Count | Aggregator::Sum)
         }
         Expr::Str | Expr::Wildcard | Expr::Nil | Expr::Record(_) => false,
+    }
+}
+
+/// Adds the name of every atom of `items`, as written, to `names`: in the heads and bodies of
+/// clauses, aggregates and component bodies included.
+fn atom_names(items: &[Item], names: &mut BTreeSet<String>) {
+    fn terms(list: &[Term], names: &mut BTreeSet<String>) {
+        for term in list {
+            match term {
+                Term::Atom(atom) => atom_and_args(atom, names),
+                Term::Negation(term) => terms(std::slice::from_ref(&**term), names),
+                Term::Group(body) => body.0.iter().for_each(|list| terms(list, names)),
+                Term::Compare(a, b, _) | Term::Contains(a, b) => {
+                    expr(a, names);
+                    expr(b, names);
+                }
+                Term::Boolean => {}
+            }
+        }
+    }
+    fn atom_and_args(atom: &syntax::Atom, names: &mut BTreeSet<String>) {
+        names.insert(atom.name.text());
+        atom.args.iter().for_each(|arg| expr(arg, names));
+    }
+    fn expr(expr_: &Expr, names: &mut BTreeSet<String>) {
+        match expr_ {
+            Expr::Record(items) | Expr::Arithmetic(items) | Expr::Call(_, items) => {
+                items.iter().for_each(|item| expr(item, names))
+            }
+            Expr::Plus(a, b) => {
+                expr(a, names);
+                expr(b, names);
+            }
+            Expr::Aggregate { target, body, .. } => {
+                if let Some(target) = target {
+                    expr(target, names);
+                }
+                terms(body, names);
+            }
+            Expr::Number(_) | Expr::Str | Expr::Var(_) | Expr::Wildcard | Expr::Nil => {}
+        }
+    }
+    for item in items {
+        match item {
+            Item::Clause(clause) => {
+                clause
+                    .heads
+                    .iter()
+                    .for_each(|atom| atom_and_args(atom, names));
+                if let Some(body) = &clause.body {
+                    body.0.iter().for_each(|list| terms(list, names));
+                }
+            }
+            Item::Component(component) => atom_names(&component.body, names),
+            _ => {}
+        }
     }
 }

@@ -45,6 +45,9 @@ pub struct Program {
     /// Every fact the program states, a clause without a body, with components' facts under
     /// their qualified relation names.
     pub facts: Vec<Fact>,
+    /// The name of every atom in its files other than Mara's declarations, as written: the
+    /// relations its clauses name.
+    atoms: BTreeSet<String>,
     /// The text of each file and the offsets where its lines start.
     texts: Vec<(String, Vec<usize>)>,
 }
@@ -161,6 +164,12 @@ pub enum BoundaryError {
 }
 
 impl Program {
+    /// Whether a clause of one of its files, other than Mara's declarations, names the relation
+    /// `relation` unqualified: in a head, a body, an aggregate or a component's body.
+    pub fn names(&self, relation: &str) -> bool {
+        self.atoms.contains(relation)
+    }
+
     /// The text of the file at `file`, an index into `files`.
     pub fn text(&self, file: usize) -> &str {
         &self.texts[file].0

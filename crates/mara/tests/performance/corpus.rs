@@ -642,6 +642,11 @@ fn code_files_of(
     let mut files = Vec::with_capacity(SOURCE_FILES + TEST_FILES);
     for file in 0..SOURCE_FILES {
         let mut code = format!("//! {}\n", sentence(&mut rng));
+        // The requirement that `query gate` judges is implemented in every cluster, whatever
+        // the seed picks below (DES-PERFORMANCE-HARNESS).
+        if file == 0 {
+            let _ = writeln!(code, "// @mara implements {}", implemented[0]);
+        }
         for function in 0..rng.between(3, 8) {
             let _ = write!(code, "\n/// {}\n", sentence(&mut rng));
             if rng.percent(50) {

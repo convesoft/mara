@@ -98,41 +98,60 @@ pub fn cases(corpus: &Corpus) -> Vec<Case> {
         case(&["schema", "list"], Reads::Schema),
         case(&["schema", "get", "requirement"], Reads::Schema),
         case(&["query", "list"], Reads::Schema),
-        case(
+        // `readiness.dl` uses code links and `knowledge.dl` does not (DES-TEMPLATE-QUERIES), so
+        // only the first reads code (DES-CODE-READERS).
+        with_code(
             &["query", "execute", "relevant-risks"],
             Reads::Evaluates { input_files: 0 },
+            Code::All,
         ),
         case(
-            &["query", "view", "risk-treatment"],
+            &["query", "execute", "requirement-basis"],
             Reads::Evaluates { input_files: 0 },
         ),
-        // Unavailable, exit status 1: no code link reaches programs yet (DES-TEMPLATE-QUERIES).
-        Case {
-            status: 1,
-            ..case(
-                &[
-                    "query",
-                    "gate",
-                    "verified",
-                    "--id",
-                    &corpus.gate_requirement,
-                    "--input",
-                    &candidate,
-                    "--input",
-                    &results,
-                    "--complete",
-                    "verification_result",
-                ],
-                Reads::Evaluates { input_files: 1 },
-            )
-        },
+        with_code(
+            &["query", "view", "risk-treatment"],
+            Reads::Evaluates { input_files: 0 },
+            Code::All,
+        ),
+        // Passes: the requirement is implemented and its verification passes.
+        with_code(
+            &[
+                "query",
+                "gate",
+                "verified",
+                "--id",
+                &corpus.gate_requirement,
+                "--input",
+                &candidate,
+                "--input",
+                &results,
+                "--complete",
+                "verification_result",
+            ],
+            Reads::Evaluates { input_files: 1 },
+            Code::All,
+        ),
         // Explains the failing row of a retired requirement, `not_accepted`: 1 run, in
-        // provenance mode.
-        case(
+        // provenance mode. `readiness.dl` uses code links, so the report reads code.
+        with_code(
             &[
                 "query",
                 "report",
                 "implementation-ready",
+                "--id",
+                &corpus.retired_requirement,
+            ],
+            Reads::Evaluates { input_files: 0 },
+            Code::All,
+        ),
+        // An invariant of `knowledge.dl`, which uses no code link: the retired requirement passes
+        // it, so the report explains no row, reads no code and exits 0.
+        case(
+            &[
+                "query",
+                "report",
+                "requirement-has-basis",
                 "--id",
                 &corpus.retired_requirement,
             ],

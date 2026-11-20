@@ -15,7 +15,9 @@ use std::process::Command;
 use std::time::SystemTime;
 
 use mara::rules::write_facts;
-use mara_engine::facts::{Facts, Inputs, SNAPSHOT_RELATIONS, SOURCE_COMPLETE, file_name};
+use mara_engine::facts::{
+    CODE_LINK, Facts, Inputs, SNAPSHOT_RELATIONS, SOURCE_COMPLETE, file_name,
+};
 use mara_engine::work::WorkCounts;
 use serde_json::Value;
 use tempfile::TempDir;
@@ -214,7 +216,8 @@ pub fn evaluate(
     write_facts(dir.path(), facts, inputs).unwrap();
     fs::write(dir.path().join("program.dl"), program).unwrap();
     let mut wrapper = String::from(".include \"program.dl\"\n");
-    let read = SNAPSHOT_RELATIONS.iter().copied().chain([SOURCE_COMPLETE]);
+    let read = SNAPSHOT_RELATIONS.iter().copied();
+    let read = read.chain([SOURCE_COMPLETE, CODE_LINK]);
     for relation in read.chain(inputs.relations.iter().map(|r| r.name.as_str())) {
         wrapper.push_str(&directive("input", relation));
     }

@@ -50,7 +50,7 @@ A gate of the `engineering` template passes only when every named item is proven
 - Invariants, gates and views are written over these relations, so they cannot disagree.
 - A lookup along one relation gets no query; `relation list` answers it.
 - Invariants live in `.mara/rules/knowledge.dl` with `requirement-basis`, `design-basis`, `term-collisions` and `relation-lifecycle`, without the per-requirement closures (`risk-scope`, `relevant-risks`), so validation never computes them. `.mara/rules/readiness.dl` includes it and the risk matrix, and holds the other queries, the gates and the views.
-- Until code links reach programs (mara-hk2arx), `implemented` has no row and code never counts as read completely, so `verified` and `release-ready` leave unavailable every requirement that does not fail.
+- `implemented` reads the `implements` rows of `code_link` ([DES-FACT-BRIDGE](../rules/index.mara.md#01M7BF6HEHHJ7XZM8HDFXK115J)), so `readiness.dl` uses code links and its requests read code ([DES-CODE-READERS](../code/index.mara.md#01M7CQ57TTB40GWX8YHKB259DK)); `knowledge.dl` does not.
 - The template's programs use only constructs that Soufflé can explain ([REQ-EXPLAIN-OUTCOMES](../rules/evaluation.mara.md#01M7BF6HCQX66B3MYRH5BZM6BE)).
 
 ---

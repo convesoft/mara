@@ -5,7 +5,7 @@
 use mara_engine::config::EntryKind;
 use mara_engine::diagnostic::Diagnostic;
 use mara_engine::evaluation::{self, Fault, InvariantFinding, Limits, Roots};
-use mara_engine::facts::{MARA_DL, Relation, SNAPSHOT_RELATIONS, SOURCE_COMPLETE};
+use mara_engine::facts::{CodeFacts, MARA_DL, Relation, SNAPSHOT_RELATIONS, SOURCE_COMPLETE};
 use mara_engine::hash::Hash;
 use mara_engine::program::Files;
 use mara_engine::work::WorkCounts;
@@ -36,8 +36,16 @@ pub struct Invariants {
 
 /// Evaluates the programs of `scope` in `generation`, each once with the facts of its snapshot
 /// when an invariant consumes it, else against empty facts, which compiles it. Validation
-/// supplies no input: each input that an entry lists is empty, and no source is complete.
-pub fn invariants(generation: &Generation, scope: Scope, work: &mut WorkCounts) -> Invariants {
+/// supplies no input: each input that an entry lists is empty, and no source is complete but
+/// code. A program that an invariant consumes and that uses code links reads those that `code`
+/// gives, called at most once, and `source_complete("code")` when all code was read
+/// (DES-CODE-READERS).
+pub fn invariants(
+    generation: &Generation,
+    scope: Scope,
+    code: &mut dyn FnMut(&mut WorkCounts) -> CodeFacts,
+    work: &mut WorkCounts,
+) -> Invariants {
     let mut outcome = Invariants::default();
     let Some(rules) = &generation.project.config.rules else {
         return outcome;
@@ -60,6 +68,7 @@ pub fn invariants(generation: &Generation, scope: Scope, work: &mut WorkCounts) 
         .collect();
     let mut evaluations = Evaluations::default();
     let souffle = super::souffle();
+    let mut code_facts: Option<CodeFacts> = None;
     for planned in &plan.programs {
         let souffle = match &souffle {
             Ok(souffle) => souffle.as_path(),
@@ -81,7 +90,13 @@ pub fn invariants(generation: &Generation, scope: Scope, work: &mut WorkCounts) 
             true => &snapshot.facts().relations,
             false => &empty_facts,
         };
-        let mut supplied = vec![Relation::new(SOURCE_COMPLETE, Vec::new())];
+        let none_complete = Relation::new(SOURCE_COMPLETE, Vec::new());
+        let unread = CodeFacts::unread();
+        let code = match with_facts && planned.uses_code() {
+            true => &*code_facts.get_or_insert_with(|| code(work)),
+            false => &unread,
+        };
+        let mut supplied = vec![code.source_complete(&none_complete), code.links.clone()];
         supplied.extend(
             planned
                 .inputs()

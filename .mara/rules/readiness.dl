@@ -143,23 +143,21 @@ result_stamps(C, CI, TI, CH, TH) :-
     stamped(Rel, Type), edge(Rel, C, T, _, _), item(C, Type, CI, _, _, _), item(T, _, TI, _, _, _),
     revision(C, CH), revision(T, TH).
 
-// implemented: each code link that implements a Requirement, Design or Verification, directly
-// (empty design) or, for a Requirement, through an accepted Design that satisfies it. Code links
-// reach programs with mara-hk2arx (DES-FACT-BRIDGE); until then no code link is known, and
-// `source_complete("code")` is never supplied.
-.decl code_link(target: Mid, path: Path, line: number)
-code_link("", "", 0) :- false.
-
+// implemented: each code location that an `implements` code link (DES-FACT-BRIDGE) ties to a
+// Requirement, Design or Verification, directly (empty design) or, for a Requirement, through an
+// accepted Design that satisfies it. Mara supplies `source_complete("code")` when it read all
+// code (DES-CODE-READERS).
 .decl implementable(type: Type)
 implementable("requirement").
 implementable("design").
 implementable("verification").
 
 .decl implemented(item: Mid, path: Path, line: number, design: symbol)
-implemented(I, P, L, "") :- code_link(I, P, L), item(I, Type, _, _, _, _), implementable(Type).
+implemented(I, P, L, "") :-
+    code_link("implements", I, P, L, _, _), item(I, Type, _, _, _, _), implementable(Type).
 implemented(R, P, L, D) :-
-    code_link(D, P, L), item(D, "design", _, "accepted", _, _), edge("satisfies", D, R, _, _),
-    item(R, "requirement", _, _, _, _).
+    code_link("implements", D, P, L, _, _), item(D, "design", _, "accepted", _, _),
+    edge("satisfies", D, R, _, _), item(R, "requirement", _, _, _, _).
 
 .decl is_implemented(item: Mid)
 is_implemented(I) :- implemented(I, _, _, _).

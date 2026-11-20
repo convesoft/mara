@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use mara_engine::config::CONFIG_PATH;
 use mara_engine::diagnostic::Diagnostic;
 use mara_engine::evaluation::{self, Fault, Limits, Roots, Rows};
-use mara_engine::facts::{InputError, MARA_DL, Relation, Supplied, check_inputs};
+use mara_engine::facts::{CodeFacts, InputError, MARA_DL, Relation, Supplied, check_inputs};
 use mara_engine::hash::Hash;
 use mara_engine::program::{Column, Files};
 use mara_engine::work::WorkCounts;
@@ -38,32 +38,38 @@ pub struct Consumed<T = Rows> {
 /// refusal names the input. Every other entry of the program shapes the same run: an input
 /// that only another entry lists is read empty, as validation reads it. Nothing supplied is
 /// stored.
+///
+/// A program that uses code links (DES-CODE-READERS) reads the code links that `code` gives,
+/// called once after the inputs were checked, and `source_complete("code")` when all code was
+/// read; `code` is not called for any other program.
 pub fn consume(
     generation: &Generation,
     entry: usize,
     supplied: Vec<(String, Supplied)>,
     complete: &[String],
+    code: &mut dyn FnMut(&mut WorkCounts) -> CodeFacts,
     evaluations: &mut Evaluations,
     work: &mut WorkCounts,
 ) -> Result<Consumed, InputError> {
     let evaluate =
         |run: &Run, key, work: &mut WorkCounts| evaluations.evaluate(key, run, work).clone();
-    consume_with(generation, entry, supplied, complete, work, evaluate)
+    consume_with(generation, entry, supplied, complete, code, work, evaluate)
 }
 
-/// The entry evaluated as [`consume`] does, but in one run in provenance mode, which also
-/// explains the rows that `select` chooses from its outputs ([`super::explain`]). It is no
-/// evaluation that another consumer reads.
+/// The entry evaluated as [`consume`] does, code links included, but in one run in provenance
+/// mode, which also explains the rows that `select` chooses from its outputs
+/// ([`super::explain`]). It is no evaluation that another consumer reads.
 pub fn consume_explained(
     generation: &Generation,
     entry: usize,
     supplied: Vec<(String, Supplied)>,
     complete: &[String],
+    code: &mut dyn FnMut(&mut WorkCounts) -> CodeFacts,
     select: &mut dyn FnMut(&Rows) -> Vec<Target>,
     work: &mut WorkCounts,
 ) -> Result<Consumed<Explained>, InputError> {
     let explain = |run: &Run, _, work: &mut WorkCounts| super::explain(run, select, work);
-    consume_with(generation, entry, supplied, complete, work, explain)
+    consume_with(generation, entry, supplied, complete, code, work, explain)
 }
 
 /// The entry's program planned and its inputs checked as [`consume`] says, then run by `run`
@@ -73,6 +79,7 @@ fn consume_with<T>(
     entry: usize,
     supplied: Vec<(String, Supplied)>,
     complete: &[String],
+    code: &mut dyn FnMut(&mut WorkCounts) -> CodeFacts,
     work: &mut WorkCounts,
     run: impl FnOnce(&Run, Hash, &mut WorkCounts) -> Result<T, Fault>,
 ) -> Result<Consumed<T>, InputError> {
@@ -103,7 +110,11 @@ fn consume_with<T>(
             Some((named.name.clone(), relation.columns.clone()))
         })
         .collect();
-    let mut inputs = vec![checked.source_complete];
+    let code = match planned.uses_code() {
+        true => code(work),
+        false => CodeFacts::unread(),
+    };
+    let mut inputs = vec![code.source_complete(&checked.source_complete), code.links];
     for input in planned.inputs() {
         let given = checked
             .relations

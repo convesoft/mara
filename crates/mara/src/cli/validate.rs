@@ -12,6 +12,7 @@ use mara::rules::{self, Scope};
 use mara_engine::code::CodeLinks;
 use mara_engine::config::CONFIG_PATH;
 use mara_engine::diagnostic::Diagnostic;
+use mara_engine::facts::CodeFacts;
 use mara_engine::hash::Hash;
 use mara_engine::paging::PAGE_BYTES;
 use mara_engine::validation::{self, PageError, Report, result_key};
@@ -89,7 +90,8 @@ fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Fail
     let layer = generation.code.clone().expect("code was scanned");
     let code = CodeLinks::new(&generation.snapshot, layer);
     let findings = validation::check(&generation.snapshot, context.work);
-    let invariants = rules::invariants(&generation, Scope::Project, context.work);
+    let mut facts = |_: &mut _| CodeFacts::new(&code, &generation.snapshot);
+    let invariants = rules::invariants(&generation, Scope::Project, &mut facts, context.work);
     // One key for every spelling of the same paths (DES-DIAGNOSTICS).
     let mut paths: Vec<String> = args
         .values(PATH.name)
@@ -118,11 +120,15 @@ fn project_validate(context: &mut Context, args: &Args) -> Result<Response, Fail
     respond(Report::new(diagnostics, key), &paths, args)
 }
 
-/// The problems of one item, named by its ID or MID, checked against the whole project.
+/// The problems of one item, named by its ID or MID, checked against the whole project. Code
+/// is listed, and read only when an invariant's program uses code links (DES-CODE-READERS); the
+/// problems of reading it are then the item's too.
 fn item_validate(context: &mut Context, args: &Args) -> Result<Response, Failure> {
     let reference = args.argument(0);
     let root = context.root()?;
-    let generation = Inputs::new(root).snapshot(context.now, context.work);
+    let mut inputs = Inputs::new(root);
+    let now = context.now;
+    let generation = inputs.generation(now, context.work, CodeReads::List);
     let snapshot = &generation.snapshot;
     let item = super::resolve_item(snapshot, reference)?;
     let findings = validation::check(snapshot, context.work);
@@ -134,7 +140,23 @@ fn item_validate(context: &mut Context, args: &Args) -> Result<Response, Failure
     // A configuration problem may drop an entry that would judge the item, and a program that
     // cannot be evaluated leaves the item's invariants unknown, so their problems are the
     // item's too.
-    let invariants = rules::invariants(&generation, Scope::Item, context.work);
+    let mut scanned = None;
+    let mut code_problems: Vec<Diagnostic> = Vec::new();
+    let mut code = |work: &mut _| {
+        let (layer, read) = inputs.scan_listed(&generation, now, work);
+        // What changed the code links an invariant read: `unavailable-grammar`, a file that fell
+        // back, and every problem that leaves code incomplete.
+        code_problems = read;
+        for problem in &layer.unread {
+            if !code_problems.contains(problem) {
+                code_problems.push(problem.clone());
+            }
+        }
+        let links = CodeLinks::new(snapshot, layer);
+        scanned = Some(links.key());
+        CodeFacts::new(&links, snapshot)
+    };
+    let invariants = rules::invariants(&generation, Scope::Item, &mut code, context.work);
     let mut shared: Vec<Diagnostic> = generation
         .project
         .diagnostics
@@ -143,11 +165,10 @@ fn item_validate(context: &mut Context, args: &Args) -> Result<Response, Failure
         .cloned()
         .collect();
     shared.extend(invariants.diagnostics);
-    let key = result_key(
-        &["item validate", reference],
-        &input_keys(&generation, &invariants.keys),
-        &shared,
-    );
+    shared.extend(code_problems);
+    let mut keys = input_keys(&generation, &invariants.keys);
+    keys.push(scanned);
+    let key = result_key(&["item validate", reference], &keys, &shared);
     diagnostics.extend(shared);
     let rows = invariants.findings.into_iter();
     diagnostics.extend(

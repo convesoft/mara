@@ -75,7 +75,8 @@ struct Scan {
 pub enum CodeReads {
     /// Nothing: no directory is listed for code and no code file is read.
     None,
-    /// Lists them without reading any, so that the request can read one ([`Inputs::read_code`]).
+    /// Lists them without reading any, so that the request can read one ([`Inputs::read_code`])
+    /// or, once it knows it needs them, all ([`Inputs::scan_listed`]).
     List,
     /// Reads, hashes and scans every one.
     Scan,
@@ -101,6 +102,9 @@ pub struct Generation {
     /// The paths of the code files listed, in path order, each with the index of its language
     /// in the configuration, with [`CodeReads::List`].
     pub code_paths: Vec<(String, usize)>,
+    /// With [`CodeReads::List`], the listing's problems that may hide code, for
+    /// [`Inputs::scan_listed`].
+    listed_unread: Vec<Diagnostic>,
 }
 
 impl Inputs {
@@ -222,6 +226,45 @@ impl Inputs {
         (Some((key, scanned)), diagnostics)
     }
 
+    /// Reads, hashes and scans every code file that `generation`, of the request that began at
+    /// `now` with [`CodeReads::List`], listed, as [`CodeReads::Scan`] would have, through the
+    /// same scan: each read only when its stat changed, scanned only when its contents, its
+    /// language's prefixes or its grammar changed, and every file of a language whose grammar
+    /// is dropped meanwhile scanned at the basic level. Returns the layer, whose problems are the
+    /// listing's that may hide code and each code file that cannot be read, and the diagnostics
+    /// of the scan: those of the layer's own problems, `unavailable-grammar` and fallbacks.
+    pub fn scan_listed(
+        &mut self,
+        generation: &Generation,
+        now: SystemTime,
+        work: &mut WorkCounts,
+    ) -> (Arc<CodeLayer>, Vec<Diagnostic>) {
+        let config = &generation.project.config;
+        let previous = State {
+            code: std::mem::take(&mut self.state.code),
+            ..State::default()
+        };
+        let mut grammar_problems = Vec::new();
+        let code = Code::new(config, CodeReads::Scan, &previous, &mut grammar_problems);
+        let mut reads = Reads::default();
+        let mut walk = Walk::new(&self.root, config, code, previous, now, work, &mut reads);
+        walk.diagnostics.extend(grammar_problems);
+        for (path, language) in &generation.code_paths {
+            walk.code_file(path.clone(), *language);
+        }
+        let Walk {
+            next,
+            mut diagnostics,
+            code: found,
+            ..
+        } = walk;
+        self.state.code = next.code;
+        let mut unread = generation.listed_unread.clone();
+        unread.extend(found.unread);
+        diagnostics.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+        (Arc::new(CodeLayer::new(found.files, unread)), diagnostics)
+    }
+
     /// Lists the inputs in the request that began at `now`, reads and hashes those whose stat
     /// changed, parses the documents whose contents changed, and builds the snapshot when its
     /// key changed. A project whose configuration or schema has errors still gets a snapshot,
@@ -275,8 +318,13 @@ impl Inputs {
         self.snapshot = Some(Arc::clone(&snapshot));
         let mut code_paths = found.paths;
         code_paths.sort_unstable();
-        let layer = (found.reads == Some(CodeReads::Scan))
-            .then(|| Arc::new(CodeLayer::new(found.files, found.unread)));
+        let (layer, listed_unread) = match found.reads {
+            Some(CodeReads::Scan) => (
+                Some(Arc::new(CodeLayer::new(found.files, found.unread))),
+                Vec::new(),
+            ),
+            _ => (None, found.unread),
+        };
         Generation {
             project,
             diagnostics,
@@ -284,6 +332,7 @@ impl Inputs {
             programs,
             code: layer,
             code_paths,
+            listed_unread,
         }
     }
 }
@@ -855,7 +904,7 @@ impl<'w> Walk<'w> {
     /// file.
     fn hiding(&mut self, code: bool, kind: &'static str, path: String, line: usize, text: String) {
         let diagnostic = Diagnostic::error(kind, path, line, text);
-        if code && self.code.reads == Some(CodeReads::Scan) {
+        if code && self.code.reads.is_some() {
             self.code.unread.push(diagnostic.clone());
         }
         self.diagnostics.push(diagnostic);

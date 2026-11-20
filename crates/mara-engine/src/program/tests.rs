@@ -821,3 +821,51 @@ fn facts_and_string_constants_are_read_as_written() {
         assert!(constants.contains(constant), "{constant}: {constants:?}");
     }
 }
+
+/// A program uses code links when a clause of a file of its own names `code_link` unqualified
+/// (DES-CODE-READERS); Mara's declarations, which declare it, do not count.
+#[test]
+fn names_finds_code_link_wherever_a_clause_of_the_program_names_it() {
+    let admit_with_mara = |files: &[(&str, &str)]| {
+        let programs: BTreeMap<String, Vec<u8>> = files
+            .iter()
+            .map(|(path, text)| ((*path).to_owned(), text.as_bytes().to_vec()))
+            .collect();
+        let files = Files {
+            declarations: crate::facts::MARA_DL.as_bytes(),
+            programs: &programs,
+        };
+        admit("p.dl", &files).unwrap_or_else(|refusal| panic!("{refusal:?}"))
+    };
+    let head = ".include \"mara.dl\"\n.decl r(m: Mid)\n";
+    let uses = [
+        "r(m) :- code_link(_, m, _, _, _, _).\n",
+        "r(m) :- item(m, _, _, _, _, _), !code_link(_, m, _, _, _, _).\n",
+        "r(m) :- item(m, _, _, _, _, _), 0 < count : { code_link(_, m, _, _, _, _) }.\n",
+        "r(m) :- item(m, _, _, _, _, _), (code_link(_, m, _, _, _, _) ; edge(_, m, _, _, _)).\n",
+        "code_link(\"implements\", \"m\", \"p\", 1, 1, \"\").\nr(m) :- item(m, _, _, _, _, _).\n",
+        ".comp C {\n  .decl s(m: Mid)\n  s(m) :- code_link(_, m, _, _, _, _).\n}\n.init c = C\n\
+         r(m) :- c.s(m).\n",
+    ];
+    for body in uses {
+        let program = admit_with_mara(&[("p.dl", &format!("{head}{body}"))]);
+        assert!(program.names("code_link"), "{body}");
+    }
+    let included = admit_with_mara(&[
+        (
+            "p.dl",
+            ".include \"q.dl\"\n.decl r(m: Mid)\nr(m) :- s(m).\n",
+        ),
+        (
+            "q.dl",
+            ".once\n.include \"mara.dl\"\n.decl s(m: Mid)\ns(m) :- code_link(_, m, _, _, _, _).\n",
+        ),
+    ]);
+    assert!(included.names("code_link"));
+    // Declared by `mara.dl` and named only in a comment or a string: not used.
+    let unused = admit_with_mara(&[(
+        "p.dl",
+        &format!("{head}// code_link\nr(m) :- item(m, _, _, _, _, _), m != \"code_link\".\n"),
+    )]);
+    assert!(!unused.names("code_link"));
+}

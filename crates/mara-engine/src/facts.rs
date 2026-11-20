@@ -12,6 +12,7 @@ use std::fmt::Write as _;
 
 use unicode_normalization::UnicodeNormalization;
 
+use crate::code::CodeLinks;
 use crate::document::label_name;
 use crate::schema::FieldKind;
 use crate::snapshot::{EdgeSource, Snapshot};
@@ -38,6 +39,7 @@ pub const MARA_DL: &str = r#".once
 .decl field(mid: Mid, key: symbol, value: symbol)
 .decl folded(text: symbol, folded: symbol)
 .decl edge(rel: Rel, src: Mid, dst: Mid, path: Path, line: number)
+.decl code_link(rel: Rel, dst: Mid, path: Path, line: number, marker_line: number, declaration: symbol)
 .decl source_complete(source: symbol)
 "#;
 
@@ -46,6 +48,12 @@ pub const SNAPSHOT_RELATIONS: [&str; 6] = ["item", "title", "revision", "field",
 
 /// The relation of the sources whose records are all present; its rows come with a request.
 pub const SOURCE_COMPLETE: &str = "source_complete";
+
+/// The relation of code links (DES-FACT-BRIDGE); its rows come with a request that reads code.
+pub const CODE_LINK: &str = "code_link";
+
+/// The source that `source_complete` names when a request read all code (DES-CODE-READERS).
+pub const CODE_SOURCE: &str = "code";
 
 /// The file that holds the facts of `relation`, in the evaluation's private directory.
 pub fn file_name(relation: &str) -> String {
@@ -199,4 +207,63 @@ pub(crate) fn derive(snapshot: &Snapshot) -> Facts {
         .map(|(name, rows)| Relation::new(name, rows))
         .collect();
     Facts { relations }
+}
+
+/// What a request that reads code gives a program: a `code_link` row per code link and target
+/// item, and whether all code was read (DES-CODE-READERS).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CodeFacts {
+    pub links: Relation,
+    /// Every configured code file was read and scanned, and nothing that may hide one failed:
+    /// the request adds `source_complete("code")`.
+    pub complete: bool,
+}
+
+impl CodeFacts {
+    /// The facts of `links`, resolved against `snapshot`: one row per marker and item whose ID it
+    /// names, in path and line order, its relation as the marker names it, with its code
+    /// location as `relation list` gives it: at the basic level the marker's line and no
+    /// declaration name, at the grammar level the owning declaration's first line and name, or
+    /// line 1 and no name for the file.
+    pub fn new(links: &CodeLinks, snapshot: &Snapshot) -> CodeFacts {
+        let mut rows = Vec::new();
+        for link in &links.links {
+            let path = links.path(link);
+            let location = links.location(link);
+            let declaration = location.declaration.unwrap_or_default();
+            for &item in &link.items {
+                rows.push(vec![
+                    Value::Symbol(link.relation.clone()),
+                    Value::Symbol(snapshot.item(item).mid.clone()),
+                    Value::Symbol(path.to_owned()),
+                    line(location.line),
+                    line(link.line),
+                    Value::Symbol(declaration.to_owned()),
+                ]);
+            }
+        }
+        CodeFacts {
+            links: Relation::new(CODE_LINK, rows),
+            complete: links.layer.unread.is_empty(),
+        }
+    }
+
+    /// The facts of a request that read no code: no code link, and code not complete. Every
+    /// run reads `code_link`, which `mara.dl` declares, so that Soufflé finds it defined.
+    pub fn unread() -> CodeFacts {
+        CodeFacts {
+            links: Relation::new(CODE_LINK, Vec::new()),
+            complete: false,
+        }
+    }
+
+    /// `source_complete` with `complete` and, when all code was read, `code`.
+    pub fn source_complete(&self, complete: &Relation) -> Relation {
+        let mut rows = complete.rows.clone();
+        let code = vec![Value::Symbol(CODE_SOURCE.to_owned())];
+        if self.complete && !rows.contains(&code) {
+            rows.push(code);
+        }
+        Relation::new(SOURCE_COMPLETE, rows)
+    }
 }

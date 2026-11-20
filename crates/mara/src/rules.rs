@@ -17,20 +17,24 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use mara_engine::evaluation::{self, Exit, Fault, Limit, Limits, Rows};
-use mara_engine::facts::{Facts, InputError, Inputs, MARA_DL, Relation, Supplied, file_name};
+use mara_engine::facts::{
+    CodeFacts, Facts, InputError, Inputs, MARA_DL, Relation, Supplied, file_name,
+};
 use mara_engine::hash::Hash;
 use mara_engine::program::Program;
 use mara_engine::work::WorkCounts;
 
 use crate::caller;
 
-/// Writes `mara.dl`, every fact relation of `facts` and every relation of `inputs` into `dir`,
-/// the evaluation's private directory, each relation to the file [`file_name`] names. The JSON
-/// text was rendered once with the snapshot's facts and is written as is.
+/// Writes `mara.dl`, every fact relation of `facts`, every relation of `inputs` and an empty
+/// `code_link` into `dir`, the evaluation's private directory, each relation to the file
+/// [`file_name`] names. The JSON text was rendered once with the snapshot's facts and is written
+/// as is.
 pub fn write_facts(dir: &Path, facts: &Facts, inputs: &Inputs) -> io::Result<()> {
     caller::write(&dir.join("mara.dl"), MARA_DL)?;
     let relations = facts.relations.iter().chain(&inputs.relations);
-    for relation in relations.chain([&inputs.source_complete]) {
+    let no_code = CodeFacts::unread().links;
+    for relation in relations.chain([&inputs.source_complete, &no_code]) {
         caller::write(&dir.join(file_name(&relation.name)), &relation.json)?;
     }
     Ok(())

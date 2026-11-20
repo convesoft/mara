@@ -1,8 +1,7 @@
 //! The queries, gates and views of DES-TEMPLATE-QUERIES, DES-TEMPLATE-GATES and
-//! DES-TEMPLATE-VIEWS with the inputs of DES-TEMPLATE-INPUTS. Without code links (mara-hk2arx)
-//! no requirement is implemented and code is never read completely, so `verified` and
-//! `release-ready` fail an item with a known failure and leave every other requirement
-//! unavailable.
+//! DES-TEMPLATE-VIEWS with the inputs of DES-TEMPLATE-INPUTS. An `implements` marker implements
+//! every requirement of the fixture but REQ-NONE, so the results decide `verified` and
+//! `release-ready`; the code cases are in `code.rs`.
 
 use std::collections::BTreeMap;
 
@@ -12,7 +11,7 @@ use crate::{Item, Project, accepted, draft, rows};
 
 /// Requirements with their verifications, risks around a decomposed requirement, and
 /// validations, all valid unless their name says otherwise.
-fn fixture() -> Vec<Item> {
+pub fn fixture() -> Vec<Item> {
     let requirement = |id: &str| accepted(id).link("Satisfies", "NEED-N");
     let verification = |id: &str, requirement: &str| {
         accepted(id)
@@ -82,16 +81,36 @@ fn fixture() -> Vec<Item> {
     ]
 }
 
+/// The requirements of a fixture that no marker implements.
+const UNIMPLEMENTED: [&str; 1] = ["REQ-NONE"];
+
 /// The fixture in a new project, with the current revisions of results' items.
-struct Readiness {
-    project: Project,
+pub struct Readiness {
+    pub project: Project,
     /// (check ID, target ID) → (check revision, target revision).
     stamps: BTreeMap<(String, String), (String, String)>,
 }
 
 impl Readiness {
+    /// `items` with Rust declared and, in `src/lib.rs`, an `implements` marker for each
+    /// requirement but those of [`UNIMPLEMENTED`].
     fn new(items: &[Item]) -> Readiness {
+        let implemented = items
+            .iter()
+            .filter(|item| item.id.starts_with("REQ-") && !UNIMPLEMENTED.contains(&&*item.id));
+        let markers = implemented
+            .map(|item| format!("// @mara implements {}\n", item.id))
+            .collect();
+        Readiness::with_code(items, Some(&[("src/lib.rs", markers)]))
+    }
+
+    /// `items`, with Rust declared and `code` written when it is given, and no code language
+    /// otherwise.
+    pub fn with_code(items: &[Item], code: Option<&[(&str, String)]>) -> Readiness {
         let mut project = Project::new();
+        if let Some(files) = code {
+            project.code(files);
+        }
         project.write(items);
         let stamps = project
             .rows("execute", "result-stamps", &[])
@@ -108,7 +127,7 @@ impl Readiness {
 
     /// A result row of `check` for `target` in `candidate` or context, with the current
     /// revisions.
-    fn result(&self, check: &str, target: &str, candidate: &str, result: &str) -> Value {
+    pub fn result(&self, check: &str, target: &str, candidate: &str, result: &str) -> Value {
         let (check_revision, target_revision) =
             &self.stamps[&(check.to_owned(), target.to_owned())];
         json!([
@@ -123,7 +142,7 @@ impl Readiness {
 
     /// The arguments that supply `candidate` `c1`, `verification` results and, when
     /// `complete`, mark them complete.
-    fn verification(&self, results: &[Value], complete: bool) -> Vec<String> {
+    pub fn verification(&self, results: &[Value], complete: bool) -> Vec<String> {
         let mut args = vec![
             "--input".to_owned(),
             "candidate=c1".to_owned(),
@@ -139,7 +158,12 @@ impl Readiness {
 
     /// The arguments that supply validation `contexts` and `results` and, when `complete`, mark
     /// the results complete.
-    fn validation(&self, contexts: &[[&str; 2]], results: &[Value], complete: bool) -> Vec<String> {
+    pub fn validation(
+        &self,
+        contexts: &[[&str; 2]],
+        results: &[Value],
+        complete: bool,
+    ) -> Vec<String> {
         let mut args = vec![
             "--input".to_owned(),
             self.project.input("validation_context", &json!(contexts)),
@@ -154,7 +178,7 @@ impl Readiness {
     }
 
     /// [`Readiness::verification`] and [`Readiness::validation`], for `release-ready`.
-    fn release(
+    pub fn release(
         &self,
         verification: &[Value],
         contexts: &[[&str; 2]],
@@ -166,13 +190,19 @@ impl Readiness {
         args
     }
 
-    fn gate(&self, name: &str, ids: &[&str], args: &[String]) -> crate::Gate {
+    pub fn gate(&self, name: &str, ids: &[&str], args: &[String]) -> crate::Gate {
         let mut all: Vec<&str> = ids.iter().flat_map(|id| ["--id", *id]).collect();
         all.extend(args.iter().map(String::as_str));
         self.project.gate(name, &all)
     }
 
-    fn rows(&self, operation: &str, name: &str, ids: &[&str], args: &[String]) -> Vec<Vec<String>> {
+    pub fn rows(
+        &self,
+        operation: &str,
+        name: &str,
+        ids: &[&str],
+        args: &[String],
+    ) -> Vec<Vec<String>> {
         let mut all: Vec<&str> = ids.iter().flat_map(|id| ["--id", *id]).collect();
         all.extend(args.iter().map(String::as_str));
         self.project
@@ -183,7 +213,7 @@ impl Readiness {
 }
 
 /// The set of rows of a gate item, for comparing.
-fn set(rows: &[&str]) -> std::collections::BTreeSet<String> {
+pub fn set(rows: &[&str]) -> std::collections::BTreeSet<String> {
     rows.iter().map(|row| (*row).to_owned()).collect()
 }
 
@@ -192,7 +222,7 @@ fn every_verification_must_pass() {
     let r = Readiness::new(&fixture());
     let pass = r.result("VER-TWO-A", "REQ-TWO", "c1", "pass");
     let fail = r.result("VER-TWO-B", "REQ-TWO", "c1", "fail");
-    // One passing and one failing verification: failed, although code is unavailable.
+    // One passing and one failing verification: failed.
     let gate = r.gate(
         "verified",
         &["REQ-TWO"],
@@ -223,15 +253,12 @@ fn every_verification_must_pass() {
     assert_eq!(gate.outcome, "unavailable");
     assert_eq!(
         gate.only().rows,
-        set(&[
-            "unavailable code_unavailable(REQ-TWO)",
-            "unavailable result_unavailable(REQ-TWO, VER-TWO-B)",
-        ])
+        set(&["unavailable result_unavailable(REQ-TWO, VER-TWO-B)"])
     );
 }
 
 #[test]
-fn without_code_links_a_passing_requirement_is_unavailable() {
+fn an_implemented_requirement_with_passing_results_passes() {
     let r = Readiness::new(&fixture());
     let pass = r.result("VER-PASS", "REQ-PASS", "c1", "pass");
     let gate = r.gate(
@@ -239,20 +266,10 @@ fn without_code_links_a_passing_requirement_is_unavailable() {
         &["REQ-PASS"],
         &r.verification(std::slice::from_ref(&pass), true),
     );
-    assert_eq!(gate.outcome, "unavailable");
-    assert_eq!(
-        gate.only().rows,
-        set(&["unavailable code_unavailable(REQ-PASS)"])
-    );
+    assert_eq!(gate.outcome, "passed", "{gate:#?}");
     let args = r.release(&[pass], &[], &[], true);
     let gate = r.gate("release-ready", &["REQ-PASS"], &args);
-    assert_eq!(gate.outcome, "unavailable");
-    assert_eq!(
-        gate.only().rows,
-        set(&["unavailable code_unavailable(REQ-PASS)"])
-    );
-    // `implemented` has no row; the query runs.
-    assert!(r.rows("execute", "implemented", &[], &[]).is_empty());
+    assert_eq!(gate.outcome, "passed", "{gate:#?}");
 }
 
 #[test]
@@ -281,6 +298,11 @@ fn verified_fails_without_an_accepted_verification_or_when_not_accepted() {
         gate.items[0]
             .rows
             .contains("condition unverified_requirement(REQ-NONE)")
+    );
+    assert!(
+        gate.items[0]
+            .rows
+            .contains("condition not_implemented(REQ-NONE)")
     );
     assert!(
         gate.items[1]
@@ -482,7 +504,7 @@ fn release_ready_judges_only_the_named_validations() {
     let pass = r.result("VER-PASS", "REQ-PASS", "c1", "pass");
     let args = r.release(&[pass], &contexts, &[pass_one, other_fails], true);
     let gate = r.gate("release-ready", &["REQ-PASS"], &args);
-    assert_eq!(gate.outcome, "unavailable");
+    assert_eq!(gate.outcome, "passed");
     assert!(
         gate.only().rows.iter().all(|row| !row.contains("VAL-")),
         "{gate:#?}"
@@ -709,29 +731,17 @@ fn views_keep_missing_unavailable_and_failed_apart_and_agree_with_gates() {
         r.rows("view", "delivery-readiness", &ids, &args),
         rows(&[
             [
-                "REQ-NONE",
-                "accepted",
-                "invalid",
-                "unavailable",
-                "none",
-                "clear"
+                "REQ-NONE", "accepted", "invalid", "missing", "none", "clear"
             ],
             [
                 "REQ-PASS",
                 "accepted",
                 "valid",
-                "unavailable",
+                "direct",
                 "unavailable",
                 "clear"
             ],
-            [
-                "REQ-TWO",
-                "accepted",
-                "valid",
-                "unavailable",
-                "fail",
-                "clear"
-            ],
+            ["REQ-TWO", "accepted", "valid", "direct", "fail", "clear"],
         ])
         .into_iter()
         .collect::<Vec<_>>()
@@ -739,31 +749,17 @@ fn views_keep_missing_unavailable_and_failed_apart_and_agree_with_gates() {
     assert_eq!(
         r.rows("view", "requirement-verification", &ids, &args),
         rows(&[
-            ["REQ-NONE", "unavailable", "0", "", "none", "none"],
+            ["REQ-NONE", "missing", "0", "", "none", "none"],
             [
                 "REQ-PASS",
-                "unavailable",
-                "0",
+                "direct",
+                "1",
                 "VER-PASS",
                 "accepted",
                 "unavailable"
             ],
-            [
-                "REQ-TWO",
-                "unavailable",
-                "0",
-                "VER-TWO-A",
-                "accepted",
-                "pass"
-            ],
-            [
-                "REQ-TWO",
-                "unavailable",
-                "0",
-                "VER-TWO-B",
-                "accepted",
-                "fail"
-            ],
+            ["REQ-TWO", "direct", "1", "VER-TWO-A", "accepted", "pass"],
+            ["REQ-TWO", "direct", "1", "VER-TWO-B", "accepted", "fail"],
         ])
         .into_iter()
         .collect::<Vec<_>>()
@@ -780,6 +776,11 @@ fn views_keep_missing_unavailable_and_failed_apart_and_agree_with_gates() {
         gate.items[0]
             .rows
             .contains("condition unverified_requirement(REQ-NONE)")
+    );
+    assert!(
+        gate.items[0]
+            .rows
+            .contains("condition not_implemented(REQ-NONE)")
     );
     assert!(
         gate.items[1]
@@ -893,7 +894,7 @@ fn a_counting_result_decides_whatever_the_completeness() {
     let r = Readiness::new(&fixture());
     let pass = r.result("VER-PASS", "REQ-PASS", "c1", "pass");
     for complete in [false, true] {
-        // A counting pass: the verification passes, and only code is unavailable.
+        // A counting pass: the verification passes, and so does the implemented requirement.
         let args = r.verification(std::slice::from_ref(&pass), complete);
         assert_eq!(
             r.rows("execute", "verification-status", &["REQ-PASS"], &args),
@@ -901,11 +902,7 @@ fn a_counting_result_decides_whatever_the_completeness() {
             "complete: {complete}"
         );
         let gate = r.gate("verified", &["REQ-PASS"], &args);
-        assert_eq!(gate.outcome, "unavailable", "complete: {complete}");
-        assert_eq!(
-            gate.only().rows,
-            set(&["unavailable code_unavailable(REQ-PASS)"])
-        );
+        assert_eq!(gate.outcome, "passed", "complete: {complete}: {gate:#?}");
         // No counting result: unavailable when incomplete, failed when complete.
         let gate = r.gate("verified", &["REQ-PASS"], &r.verification(&[], complete));
         let (outcome, row) = match complete {

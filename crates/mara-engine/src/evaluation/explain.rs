@@ -10,7 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::facts::{Relation, SNAPSHOT_RELATIONS, Value, write_row};
+use crate::facts::{CODE_LINK, Relation, SNAPSHOT_RELATIONS, Value, write_row};
 use crate::json::Object;
 use crate::program::Program;
 
@@ -48,7 +48,8 @@ pub enum Node {
         rule: String,
         children: Vec<Node>,
     },
-    /// A row of a fact relation, at the path and line of its item or relation row.
+    /// A row of a fact relation, at the path and line of its item or relation row; a code link
+    /// at its code file and the marker's line.
     Fact {
         relation: String,
         values: Vec<Value>,
@@ -581,7 +582,7 @@ impl<'a> Leaves<'a> {
                 "a leaf of Soufflé's proof, `{text}`, could be several rows of `{name}`"
             ));
         }
-        if !SNAPSHOT_RELATIONS.contains(&name) {
+        if !SNAPSHOT_RELATIONS.contains(&name) && name != CODE_LINK {
             return Ok(Node::Input {
                 name: name.to_owned(),
                 values: values.clone(),
@@ -596,7 +597,8 @@ impl<'a> Leaves<'a> {
         })
     }
 
-    /// The path and line of a fact: its own for an item or an edge; the item's for its title,
+    /// The path and line of a fact: its own for an item or an edge; the code file and the
+    /// marker's line for a code link; the item's for its title,
     /// revision or field; and for a folded text the first item, in snapshot order, whose title
     /// or field value it is. A place found through a MID that several items have is no one
     /// place, and the leaf `text` cannot be placed.
@@ -614,12 +616,16 @@ impl<'a> Leaves<'a> {
             _ => None,
         };
         match name {
-            "item" | "edge" => {
+            "item" | "edge" | CODE_LINK => {
                 let relation = self.relations[name];
                 let row = (relation.rows.iter())
                     .find(|row| row.as_slice() == values)
                     .ok_or_else(unplaced)?;
-                let (path, line) = if name == "item" { (4, 5) } else { (3, 4) };
+                let (path, line) = match name {
+                    "item" => (4, 5),
+                    "edge" => (3, 4),
+                    _ => (2, 4),
+                };
                 at(row.get(path), row.get(line)).ok_or_else(unplaced)
             }
             "folded" => {
